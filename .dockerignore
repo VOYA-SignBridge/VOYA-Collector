@@ -1,0 +1,94 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Cache
+.cache/
+temp/
+
+# Documentation
+docs/
+README.md
+*.md
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE config
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Example/example files
+example_*
+*.example
+
+# Dataset (generated data)
+dataset/
+raw_videos/
+features/
+models/
+runs/
+backups/
+
+# Video and model files
+*.mp4
+*.npz
+*.npy
+*.mov
+*.avi
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+
+# Python build/dist
+build/
+dist/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Ignore dataset artifacts just in case
+*.npz
+*.npy
+
+# Docker-related
+Dockerfile
+docker-compose.override.yml
