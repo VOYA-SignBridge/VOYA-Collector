@@ -7,7 +7,7 @@ Sign language data collection and processing system for Vietnamese Sign Language
 ## Architecture Diagram
 
 ### System Overview
-![System Architecture](assets/system_architecture.jpg)
+<img src="assets/system_architecture.jpg" alt="System Architecture" width="500" height="auto"/>
 
 ### Processing Pipeline (Inside Celery Worker)
 
