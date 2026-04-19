@@ -1,0 +1,41 @@
+name: Rebuild Backend Docker Image on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/**'
+
+jobs:
+  rebuild-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push backend Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/voya_backend:latest
+          ${{ secrets.DOCKER_USERNAME }}/voya_backend:${{ github.sha }}
+
+    - name: Trigger docker-compose update
+      run: |
+        echo "Backend image rebuilt and pushed successfully"
+        echo "Tag: ${{ secrets.DOCKER_USERNAME }}/voya_backend:${{ github.sha }}"
