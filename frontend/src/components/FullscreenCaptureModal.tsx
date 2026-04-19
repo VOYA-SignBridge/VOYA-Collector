@@ -8,6 +8,7 @@ import type { MediaPipeLandmark, CameraInfo, QualityInfo } from "../types";
 import { OneEuroFilter } from "../utils/oneEuro";
 import { TARGET_FRAMES, CAPTURE_COUNT, FRAME_INTERVAL_MS } from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
+import AddDialectModal from "./AddDialectModal";
 
 // Use module-scope fixed constants so they are stable across renders and
 // won't need to be added to hook dependency arrays.
@@ -74,13 +75,15 @@ export default function FullscreenCaptureModal({
   // New state for capture management
   const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
   const [completedCaptures, setCompletedCaptures] = useState(0);
-  const [showTips, setShowTips] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
-  // Small mode state for HUD and behavior introspection
-  const [mode, setMode] = useState<'IDLE' | 'COUNTDOWN' | 'RECORD'>('IDLE');
-  // Track whether hands are currently visible to gate frame capture
-  const [handsVisible, setHandsVisible] = useState(false);
-  // Quick suggestions for signer name (shared across pages via localStorage)
+   const [showTips, setShowTips] = useState(false);
+   const [showGuide, setShowGuide] = useState(false);
+   // Small mode for HUD and behavior introspection
+   const [mode, setMode] = useState<'IDLE' | 'COUNTDOWN' | 'RECORD'>('IDLE');
+   // Track whether hands are currently visible to gate frame capture
+   const [handsVisible, setHandsVisible] = useState(false);
+   // Add dialect modal state
+   const [showAddDialectModal, setShowAddDialectModal] = useState(false);
+   // Quick suggestions for signer name (shared across pages via localStorage)
   const [recentUsers, setRecentUsers] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem('recentSigners');
@@ -1369,41 +1372,46 @@ export default function FullscreenCaptureModal({
                       ))}
                     </div>
                   )}
-                </div>
+                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
-                  <select
-                    value={dialect}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === 'Khác') {
-                        const name = window.prompt('Nhập tên bộ mới:');
-                        if (name && name.trim()) {
-                          const updated = Array.from(new Set([...dialectList, name.trim()]));
-                          setDialectList(updated);
-                          setDialect(name.trim());
-                          localStorage.setItem('dialectList', JSON.stringify(updated));
-                          localStorage.setItem('dialectSelected', name.trim());
-                        }
-                      } else {
-                        setDialect(v);
-                        localStorage.setItem('dialectSelected', v);
-                      }
-                    }}
-                    className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                    disabled={recording || countdown > 0}
-                  >
-                    {dialectList.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                    <option value="Khác">Khác (thêm mới)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
+                 <div>
+                   <label className="block text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
+                   <select
+                     value={dialect}
+                     onChange={(e) => {
+                       const v = e.target.value;
+                       if (v === 'Khác') {
+                         setShowAddDialectModal(true);
+                       } else {
+                         setDialect(v);
+                         localStorage.setItem('dialectSelected', v);
+                       }
+                     }}
+                     className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                     disabled={recording || countdown > 0}
+                   >
+                     {dialectList.map((d) => (
+                       <option key={d} value={d}>{d}</option>
+                     ))}
+                     <option value="Khác">Khác (thêm mới)</option>
+                   </select>
+                 </div>
+               </div>
+             </div>
 
-            {/* Quick labels removed for public-facing modal to simplify UX */}
+             <AddDialectModal
+               isOpen={showAddDialectModal}
+               onClose={() => setShowAddDialectModal(false)}
+               onAdd={(name) => {
+                 const updated = Array.from(new Set([...dialectList, name]));
+                 setDialectList(updated);
+                 setDialect(name);
+                 localStorage.setItem('dialectList', JSON.stringify(updated));
+                 localStorage.setItem('dialectSelected', name);
+               }}
+             />
+
+             {/* Quick labels removed for public-facing modal to simplify UX */}
 
             {/* Recording Stats */}
             <div className="bg-gray-800 rounded-lg p-4 hidden sm:block">

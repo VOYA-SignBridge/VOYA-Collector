@@ -3,6 +3,7 @@ import { uploadVideo } from "../api/upload";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import SpeechInputButton from "./SpeechInputButton";
+import AddDialectModal from "./AddDialectModal";
 
 // ============================================================================
 // TYPES
@@ -66,23 +67,24 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
   const [uploadingAll, setUploadingAll] = useState(false);
   const [concurrency, setConcurrency] = useState(3);
   const [dragActive, setDragActive] = useState(false);
-  const [showBulkEdit, setShowBulkEdit] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [recentUsers, setRecentUsers] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem('recentSigners');
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        return parsed.filter((x) => typeof x === 'string').slice(0, 5);
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+   const [showBulkEdit, setShowBulkEdit] = useState(false);
+   const [showAdvanced, setShowAdvanced] = useState(false);
+   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+   const [recentUsers, setRecentUsers] = useState<string[]>(() => {
+     try {
+       const raw = localStorage.getItem('recentSigners');
+       const parsed = raw ? JSON.parse(raw) : [];
+       if (Array.isArray(parsed)) {
+         return parsed.filter((x) => typeof x === 'string').slice(0, 5);
+       }
+     } catch {
+       // ignore
+     }
+     return [];
+   });
+   
+   const [showAddDialectModal, setShowAddDialectModal] = useState(false);
+   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   
   // ========== VALIDATION ==========
@@ -593,13 +595,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                 onChange={(e) => {
                   const v = e.target.value;
                   if (v === '__add_new__') {
-                    const name = window.prompt('Nhập tên bộ ngôn ngữ mới:');
-                    if (name && name.trim()) {
-                      const updated = Array.from(new Set([...dialectList, name.trim()]));
-                      setDialectList(updated);
-                      setDefaultDialect(name.trim());
-                      localStorage.setItem('dialectList', JSON.stringify(updated));
-                    }
+                    setShowAddDialectModal(true);
                   } else {
                     setDefaultDialect(v);
                   }
@@ -612,6 +608,17 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
             </div>
           </div>
         </div>
+
+        <AddDialectModal
+          isOpen={showAddDialectModal}
+          onClose={() => setShowAddDialectModal(false)}
+          onAdd={(name) => {
+            const updated = Array.from(new Set([...dialectList, name]));
+            setDialectList(updated);
+            setDefaultDialect(name);
+            localStorage.setItem('dialectList', JSON.stringify(updated));
+          }}
+        />
         
         {/* Upload Area */}
         <div

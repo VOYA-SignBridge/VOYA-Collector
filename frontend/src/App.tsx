@@ -2,7 +2,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Layout from "./components/Layout";
 import { Suspense, lazy } from "react";
 
-const DashboardPage = lazy(() => import("./components/dashboard/AnalyticsOverview"));
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
 
@@ -12,7 +11,6 @@ function App() {
         <Layout>
           <Suspense fallback={<div className="p-6">Loading...</div>}>
             <Routes>
-              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/labels" element={<LabelsPage />} />
               <Route path="/upload" element={<UploadPage />} />
 
