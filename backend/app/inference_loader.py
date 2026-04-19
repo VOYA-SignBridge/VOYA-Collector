@@ -1,6 +1,3 @@
-"""inference_loader.py
-Load classes for realtime inference filtered by (language, dialect) including common and global_common groups.
-"""
 from __future__ import annotations
 
 from typing import List, Dict

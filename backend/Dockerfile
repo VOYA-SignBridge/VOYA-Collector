@@ -1,36 +1,48 @@
-# Build stage: compile dependencies
+# Build stage
 FROM python:3.10-slim AS builder
 
 WORKDIR /build
 
-# Install build dependencies only in builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Runtime stage: minimal deps only
+# Runtime stage
 FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install only runtime dependencies (no build-essential)
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install only runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    libgomp1 \
     ffmpeg \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pre-compiled Python packages from builder
-COPY --from=builder /root/.local /root/.local
+# Copy Python packages from builder
+COPY --from=builder /root/.local /home/appuser/.local
 
-# Set PATH to use local pip packages
-ENV PATH=/root/.local/bin:$PATH \
-    PYTHONUNBUFFERED=1
+# Create user
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /dataset/raw_videos /dataset/features && \
+    chown -R appuser:appuser /dataset
 
-COPY . .
+# Copy app
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser requirements.txt .
+
+ENV PATH=/home/appuser/.local/bin:$PATH
+
+USER appuser
 
 EXPOSE 8000
 

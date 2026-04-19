@@ -1,20 +1,3 @@
-"""dialect_reclassifier.py (scan & auto-move)
-Scan feature hierarchy, compare folder dialect vs metadata.json dialect field,
-and produce a move plan. Optionally execute moves.
-
-Expected structure examples:
-    dataset/features/<language>/common/<class_uid>_<slug>
-    dataset/features/<language>/<dialect>/<class_uid>_<slug>
-
-Decision rules:
-    Folder in 'common' but metadata.dialect != 'common'  -> move to that dialect.
-    Folder in dialect folder but metadata.dialect == 'common' -> move to 'common'.
-    Folder dialect != metadata.dialect and metadata.dialect not in {common, folder} -> move to metadata.dialect.
-
-Usage:
-    python -m app.dialect_reclassifier --root D:/path/to/dataset/features --dry-run
-    python -m app.dialect_reclassifier --root D:/path/to/dataset/features --apply
-"""
 from __future__ import annotations
 import argparse, json, shutil
 from pathlib import Path

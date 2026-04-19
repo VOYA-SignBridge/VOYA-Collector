@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-from typing import Optional
 from app.worker import celery_app
 from app.api_validation import validate_job_id
 

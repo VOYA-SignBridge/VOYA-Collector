@@ -1,8 +1,5 @@
-from typing import Optional, Dict, Any
-import os
-import urllib.parse
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from typing import Dict, Any
 from app.config import settings
 
 

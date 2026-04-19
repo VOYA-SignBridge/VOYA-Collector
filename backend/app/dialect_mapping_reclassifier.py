@@ -1,24 +1,3 @@
-"""dialect_mapping_reclassifier.py
-CSV-driven dialect reassignment for existing classes.
-
-Mapping CSV columns (required header):
-  label_original,dialect
-Optional columns: language (defaults 'vn'), slug
-
-Dry run example:
-  python -m app.dialect_mapping_reclassifier --mapping dialect_mapping.csv --dry-run
-
-Apply example (move files & update CSVs):
-  python -m app.dialect_mapping_reclassifier --mapping dialect_mapping.csv --apply --remove-old
-
-Notes:
- - Skips rows without label_original or dialect.
- - Ignores rows where target dialect equals current dialect.
- - Does not assign 'common' targets via this script (skip).
- - Moves all samples of a class; does not split.
- - Updates samples.csv (class_uid, dialect, file_path) atomically.
- - Regenerates label indexes after modification.
-"""
 from __future__ import annotations
 
 import csv

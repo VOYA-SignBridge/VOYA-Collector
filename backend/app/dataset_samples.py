@@ -1,25 +1,16 @@
-"""dataset_samples.py
-Unified sample metadata storage for multilingual/multi-dialect dataset.
-
-Fields stored (samples.csv):
- sample_uid,class_uid,slug,label_original,language,dialect,source_type,user_id,session_id,
- fps_original,fps_processed,seq_len,augment_id,completeness,file_path,created_at
-"""
-
 from __future__ import annotations
 
-import csv
 import os
+import csv
 import uuid
-import json
 import tempfile
-from pathlib import Path
+import logging
 from typing import Dict, Any, List
 from filelock import FileLock
 from datetime import datetime
 from app.config import settings
-import logging
 from app.processing.utils import atomic_write_json
+
 
 DATASET_ROOT = settings.dataset_root
 SAMPLES_DIR = DATASET_ROOT / "samples"

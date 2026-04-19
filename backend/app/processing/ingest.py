@@ -1,6 +1,5 @@
 import cv2, os, subprocess, shutil, tempfile, logging
 from typing import Generator, Tuple
-from app.processing.utils import ensure_dir
 from app.config import settings
 
 logger = logging.getLogger(__name__)

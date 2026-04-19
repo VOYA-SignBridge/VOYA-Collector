@@ -1,6 +1,3 @@
-"""logging_config.py
-Central logging configuration honoring settings.debug_logging.
-"""
 import logging
 from app.config import settings
 

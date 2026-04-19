@@ -1,13 +1,7 @@
-"""
-Refactored keypoints extraction from collect_dataset.py
-- Extract Mediapipe Hands landmarks only
-- Flatten into fixed-length vector
-"""
-
-from typing import List, Tuple, Generator
+import cv2
 import numpy as np
 import mediapipe as mp
-import cv2
+from typing import List, Tuple, Generator
 from app.config import settings
 from app.processing.utils import canonicalize_vector_126
 

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Body
 from typing import Optional
-from app.dataset_manager import get_or_register_class, list_classes, regenerate_label_indexes
+from fastapi import APIRouter, Body
+from app.dataset_manager import get_or_register_class, list_classes
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.dataset_manager import normalize_dialect

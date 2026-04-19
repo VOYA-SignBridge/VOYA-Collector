@@ -1,13 +1,6 @@
-"""global_common_promoter.py
-Identify gestures appearing across multiple languages and optionally promote them
-into a single global_common class. Copies sequences into global_common directory.
-Existing language-specific classes remain (backward compatibility) unless --prune specified.
-"""
 from __future__ import annotations
 
 import argparse, shutil
-from pathlib import Path
-import numpy as np
 from collections import defaultdict
 
 from app.dataset_manager import load_labels, register_class, ClassMetadata

@@ -1,17 +1,6 @@
-"""feature_structure_audit.py
-Report non-conforming directories under dataset/features.
-
-Conforming roots:
-  global_common/
-  <language>/common/
-  <language>/<dialect>/
-
-Legacy pattern: class_XXXX_slug
-"""
 from __future__ import annotations
-import os
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict
 
 def resolve_root(custom_root: str | None) -> Path:
     if custom_root:

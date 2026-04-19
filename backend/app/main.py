@@ -1,6 +1,8 @@
+import logging
+
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-import logging
+
 from app.config import settings
 from app.routers import dataset, upload, jobs, classes, inference
 from app.logging_config import configure_logging

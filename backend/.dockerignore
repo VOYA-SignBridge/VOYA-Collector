@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Project-specific data
+dataset/
+raw_videos/
+features/
+models/
+runs/
+output/
+logs/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.webp
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.md
+
+# Archives and compressed files
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.rar
+*.7z
+
+# Data files
+*.npz
+*.npy
+*.h5
+*.pkl
+*.pickle
+*.csv
+*.parquet
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Docker files
+.dockerignore
+Dockerfile
+docker-compose.*
+
+# Environment files (keep .env if needed, but generally exclude)
+.env.local
+.env.*.local
+
+# Temporary
+tmp/
+temp/
+*.tmp
+*.log

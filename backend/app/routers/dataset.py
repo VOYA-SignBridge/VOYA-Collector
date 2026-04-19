@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from pathlib import Path
 import numpy as np
 

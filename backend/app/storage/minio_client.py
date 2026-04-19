@@ -1,5 +1,5 @@
-from io import BytesIO
 import logging
+from io import BytesIO
 from minio import Minio
 from minio.errors import S3Error
 

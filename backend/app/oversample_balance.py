@@ -1,10 +1,5 @@
-"""oversample_balance.py
-Execute augmentation plan produced by balancer.
-For each target class, randomly sample existing sequences and generate extra augmentations until deficit closed.
-"""
 from __future__ import annotations
 
-import random
 import numpy as np
 from pathlib import Path
 from typing import List

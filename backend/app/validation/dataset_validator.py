@@ -1,26 +1,10 @@
-"""dataset_validator.py
-Validate multilingual hierarchical dataset integrity.
-
-Checks:
- - Counts per class vs files present
- - Sequence shape consistency (expected seq_len x feature_dim)
- - Completeness metadata distribution
- - Missing or malformed metadata fields
- - Duplicate sample detection (same augment_id + start_frame + end_frame + class_uid)
-
-Run examples:
-  python -m app.validation.dataset_validator --language vn --dialect common
-  python -m app.validation.dataset_validator --all
-"""
 from __future__ import annotations
 
 import argparse
-import os
-from pathlib import Path
 import numpy as np
-from collections import defaultdict, Counter
+from collections import defaultdict
 
-from app.dataset_manager import FEATURES_ROOT, load_labels, ClassMetadata
+from app.dataset_manager import load_labels, ClassMetadata
 from app.config import settings
 
 SEQ_LEN = int(getattr(settings, 'seq_len', 60))

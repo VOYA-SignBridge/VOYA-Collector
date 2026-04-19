@@ -1,5 +1,4 @@
 import os
-import sys
 from typing import List
 from pydantic import BaseSettings, validator
 from pathlib import Path

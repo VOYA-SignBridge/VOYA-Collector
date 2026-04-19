@@ -1,9 +1,6 @@
-"""balancer.py
-Compute dataset balance statistics and produce augmentation/oversampling plan.
-"""
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict
 from collections import defaultdict
 from app.dataset_samples import list_samples
 from app.dataset_manager import load_labels, ClassMetadata

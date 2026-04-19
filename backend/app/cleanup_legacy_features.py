@@ -1,7 +1,3 @@
-"""cleanup_legacy_features.py
-Optionally remove or relocate legacy flat feature folders (class_XXXX_slug) after migration.
-By default lists candidates; use --delete to remove.
-"""
 from __future__ import annotations
 import argparse, shutil
 from pathlib import Path

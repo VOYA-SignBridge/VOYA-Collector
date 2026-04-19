@@ -1,44 +1,19 @@
-"""dataset_manager.py
-Multilingual / multi-dialect dataset registry and path management.
-
-Responsible for:
- - Assigning stable class_uid (uuid4) per (language, dialect, slug)
- - Distinguishing common (global / language) and dialect-specific classes
- - Providing atomic append to labels_master.csv
- - Computing folder hierarchy according to new spec
-
-Hierarchy:
-dataset/
-  features/
-    global_common/<class_uid>_<slug>/
-    <language>/
-      common/<class_uid>_<slug>/
-      <dialect>/<class_uid>_<slug>/
-  labels/
-    labels_master.csv
-  samples/
-    samples.csv  (future usage for unified sample metadata)
-
-Backward compatibility:
-Existing flat folders remain untouched; migration script will populate new hierarchy.
-"""
-
 from __future__ import annotations
 
 import os
+import re
 import csv
 import uuid
-import json
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
-from dataclasses import dataclass, asdict
-from filelock import FileLock
-import unicodedata
-import re
 import logging
-from app.config import settings
+import unicodedata
+from pathlib import Path
 from datetime import datetime
+from filelock import FileLock
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
 from app.processing.utils import atomic_write_json
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 

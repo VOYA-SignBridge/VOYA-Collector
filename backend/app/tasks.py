@@ -1,6 +1,6 @@
+import logging
 from app.worker import celery_app
 from app.processing.pipeline import process_video_job
-import logging
 
 @celery_app.task(bind=True)
 def enqueue_process_video(self, video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
