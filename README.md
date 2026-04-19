@@ -7,7 +7,7 @@ Sign language data collection and processing system for Vietnamese Sign Language
 ## Architecture Diagram
 
 ### System Overview
-<img src="assets/system_architecture.jpg" alt="System Architecture" width="500" height="auto"/>
+<img src="assets/system_architecture.jpg" alt="System Architecture" width="500" height="700"/>
 
 ### Processing Pipeline (Inside Celery Worker)
 
@@ -142,12 +142,12 @@ MINIO_BUCKET=sign-dataset
 
 ```
 VOYA-Collector/
-├── voya-frontend/          # React frontend
+├── frontend/          # React frontend
 │   └── src/
 │       ├── api/           # API layer
 │       ├── components/    # React components
 │       └── pages/         # Page components
-├── voya-backend/backend/  # FastAPI backend
+├── backend/  # FastAPI backend
 │   ├── app/
 │   │   ├── routers/       # API endpoints
 │   │   ├── processing/    # Image processing
