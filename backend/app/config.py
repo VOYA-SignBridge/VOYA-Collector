@@ -14,17 +14,14 @@ def _default_dataset_root() -> Path:
 
 
 class Settings(BaseSettings):
-    class Config:
-        env_prefix = "CELERY_"
-
     # Postgres/PostgreSQL configuration
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://user:password@localhost:5432/signdb"
     )
 
     # Redis configuration
-    broker_url: str = os.getenv("BROKER_URL", "redis://redis:6379/0")
-    result_backend: str = os.getenv("RESULT_BACKEND", "redis://redis:6379/0")
+    broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+    result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
     # MinIO (S3-compatible) configuration
     minio_endpoint: str = os.getenv("MINIO_ENDPOINT")
