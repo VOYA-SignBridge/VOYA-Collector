@@ -1,7 +1,7 @@
 import logging
 from io import BytesIO
 from minio import Minio
-from minio.errors import S3Error
+from minio.error import S3Error
 
 from app.config import settings
 

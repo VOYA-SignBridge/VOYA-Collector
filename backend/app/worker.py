@@ -4,8 +4,8 @@ from app.config import settings
 # dùng Redis làm broker & backend từ environment variables
 celery_app = Celery(
     "sign_dataset",
-    broker=settings.broker_url or "redis://redis:6379/0",
-    backend=settings.result_backend or "redis://redis:6379/0",
+    broker=settings.broker_url,
+    backend=settings.result_backend,
 )
 
 celery_app.conf.update(

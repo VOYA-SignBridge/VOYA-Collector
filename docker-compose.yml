@@ -1,10 +1,12 @@
 services:
   frontend:
-    build: ./voya-frontend
-    image: tamb2203579/voya_frontend:latest
+    image: voya_frontend:latest
+    # build: ./frontend
     container_name: voya_frontend
     expose:
       - "80"
+    env_file:
+      - .env
     restart: unless-stopped
     networks:
       voya_network:
@@ -13,16 +15,17 @@ services:
           - frontend
 
   backend:
-    build: ./voya-backend/backend
-    image: tamb2203579/voya_backend:latest
+    build: ./backend
+    image: voya_backend:latest
     container_name: voya_backend
     expose:
       - "8000"
     volumes:
-      - voya_dataset:/dataset
+      - ../dataset:/dataset
     env_file:
       - .env
     depends_on:
+      - postgres
       - redis
       - minio
     restart: unless-stopped
@@ -33,21 +36,18 @@ services:
           - backend
 
   worker:
-    build: ./voya-backend/backend
-    image: tamb2203579/voya_backend:latest
+    image: voya_backend:latest
     container_name: voya_worker
     env_file:
       - .env
     volumes:
-      - voya_dataset:/dataset
+      - ../dataset:/dataset
     command: celery -A app.worker.celery_app worker --loglevel=info
     depends_on:
-      redis:
-        condition: service_started
-      backend:
-        condition: service_healthy
-      minio:
-        condition: service_started
+      - redis
+      - postgres
+      - backend
+      - minio
     restart: unless-stopped
     networks:
       - voya_network
@@ -58,6 +58,21 @@ services:
     restart: unless-stopped
     networks:
       - voya_network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: voya_postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: signdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      voya_network:
+        aliases:
+          - postgres
 
   minio:
     image: minio/minio:latest
@@ -78,19 +93,37 @@ services:
           - minio
           - voya_minio
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: voya_pgadmin
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      voya_network:
+        aliases:
+          - pgadmin
+          - voya_pgadmin
+
   nginx:
     image: nginx:alpine
     container_name: voya_nginx
     ports:
       - "80:80"
+      - "8000:8000"
       - "8001:8001"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      frontend:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
+      - frontend
+      - backend
     restart: unless-stopped
     networks:
       voya_network:
@@ -99,8 +132,9 @@ services:
           - voya_nginx
 
 volumes:
-  voya_dataset:
   voya_minio:
+  postgres_data:
+  pgadmin_data:
 
 networks:
   voya_network:

@@ -23,13 +23,14 @@ LABELS_MASTER_CSV = DATASET_ROOT / "labels.csv"
 # ---- Utils ----
 def slugify(text: str, maxlen: int = 30) -> str:
     """Convert text (possibly with diacritics) to safe ASCII slug."""
+    text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
     text = text.lower()
-    text = re.sub(r"[^a-z0-9\s_-]", "", text)
-    text = re.sub(r"[\s-]+", "_", text).strip("_")
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s-]+", "-", text).strip("-")
     if len(text) > maxlen:
-        text = text[:maxlen].rstrip("_")
+        text = text[:maxlen].rstrip("-")
     return text if text else "unknown"
 
 

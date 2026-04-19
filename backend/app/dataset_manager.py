@@ -23,10 +23,6 @@ LABELS_DIR = DATASET_ROOT / "labels"
 MASTER_LABELS = DATASET_ROOT / "labels.csv"
 LANGUAGE_LABELS = LABELS_DIR / "labels_language.csv"
 DIALECT_LABELS = LABELS_DIR / "labels_dialect.csv"
-# Root-level compatibility files used by older/external tooling
-# Note: some tools expect plural 'labels_master.csv' at dataset root; others expect singular 'label_master.csv'
-ROOT_LABELS_MASTER = DATASET_ROOT / "labels.csv"
-LEGACY_MASTER_LABELS = DATASET_ROOT / "labels.csv"
 
 # Field order for labels_master.csv (extended to include class_idx, folder_name, timestamps)
 LABEL_FIELDS = [
@@ -45,6 +41,7 @@ LABEL_FIELDS = [
 
 
 def slugify(text: str, maxlen: int = 40) -> str:
+    text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
     text = text.lower()
@@ -136,7 +133,9 @@ class ClassMetadata:
     def folder_name(self) -> str:
         if self.folder_override:
             return self.folder_override
-        return f"{self.class_uid}_{self.slug}"
+        # Generate folder_name from slug (hyphenated) keeping hyphens for folder naming
+        short_uid = self.class_uid[:8] if self.class_uid else "unknown"
+        return f"class_{self.slug}_{short_uid}"
 
     def hierarchy_path(self) -> Path:
         if self.is_common_global:
@@ -351,22 +350,9 @@ def register_class(
         )
         return meta
 
-    # allocate new class_idx and legacy-style folder_name
-    # Determine next class_idx by scanning all known label files (new + root-level)
+    # allocate new class_idx and folder_name
+    # Determine next class_idx by scanning all known label files
     rows_main = load_labels()
-    rows_root_plural: List[Dict[str, str]] = []
-    rows_root_legacy: List[Dict[str, str]] = []
-    for path in (ROOT_LABELS_MASTER, LEGACY_MASTER_LABELS):
-        try:
-            if path.exists():
-                with open(path, newline="", encoding="utf-8") as f:
-                    rows = list(csv.DictReader(f))
-                    if path == ROOT_LABELS_MASTER:
-                        rows_root_plural = rows
-                    else:
-                        rows_root_legacy = rows
-        except Exception:
-            pass
 
     def _collect_indices(rows: List[Dict[str, str]]) -> List[int]:
         out = []
@@ -379,16 +365,14 @@ def register_class(
                     pass
         return out
 
-    existing_indices = (
-        _collect_indices(rows_main)
-        + _collect_indices(rows_root_plural)
-        + _collect_indices(rows_root_legacy)
-    )
-    next_idx = (max(existing_indices) + 1) if existing_indices else 1
-    folder_name = f"class_{next_idx:04d}_{slug}"
+    next_idx = (max(_collect_indices(rows_main)) + 1) if _collect_indices(rows_main) else 1
 
     # create new
     class_uid = str(uuid.uuid4())
+    # Generate folder_name from slug + first 8 chars of UUID (uses hyphens from slugify)
+    short_uid = class_uid[:8]
+    folder_name = f"class_{slug}_{short_uid}"
+    
     meta = ClassMetadata(
         class_uid=class_uid,
         class_idx=next_idx,

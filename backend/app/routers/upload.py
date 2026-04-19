@@ -112,38 +112,49 @@ async def upload_video(
     )
 
     save_name = f"{label}_{uuid.uuid4().hex[:8]}_{file.filename}"
-    file_path = os.path.join(UPLOAD_DIR, save_name)
+    
+    # Read video bytes from memory
+    video_data = file.file.read()
     max_mb = int(os.getenv("MAX_UPLOAD_MB", "1024"))
     max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
-    written, _ = save_upload_with_limit(file.file, Path(file_path), max_bytes=max_bytes)
-    log.info("[UPLOAD][video] bytes_written=%s max_bytes=%s", written, max_bytes)
-    # Log the resolved save path and dataset root for debugging
-    log.info(
-        "[UPLOAD][video] saved path=%s dataset_root=%s",
-        file_path,
-        settings.dataset_root,
-    )
-
-    # Upload to MinIO if configured
+    written = len(video_data)
+    log.info("[UPLOAD][video] bytes_read=%s max_bytes=%s", written, max_bytes)
+    
+    # Upload directly to MinIO if configured
+    minio_url = None
     if settings.use_minio:
         try:
-            from app.storage.minio_client import _get_minio_client, _upload_to_minio
+            from app.storage.minio_client import _get_minio_client, upload_file
 
-            minio_client = _get_minio_client()
-            if minio_client:
-                minio_key = f"raw_videos/{save_name}"
-                minio_url = _upload_to_minio(minio_client, file_path, minio_key)
-                if minio_url:
-                    log.info("[UPLOAD][video] uploaded to MinIO: %s", minio_url)
-                else:
-                    log.warning("[UPLOAD][video] MinIO upload failed: no URL returned")
+            log.info("[UPLOAD][video] Uploading to MinIO")
+            minio_key = f"raw_videos/{save_name}"
+            minio_url = upload_file(video_data, minio_key)
+            if minio_url:
+                log.info("[UPLOAD][video] uploaded to MinIO: %s", minio_url)
+                # Use MinIO URL as the source for Celery processing
+                file_path_for_processing = minio_url
+            else:
+                log.warning("[UPLOAD][video] MinIO upload failed: no URL returned")
+                file_path_for_processing = None
         except Exception as e:
             log.warning("[UPLOAD][video] MinIO upload failed: %s", e)
+            file_path_for_processing = None
+    else:
+        # Fallback to local save if MinIO not enabled
+        file_path = os.path.join(UPLOAD_DIR, save_name)
+        import io
+        with open(file_path, "wb") as f:
+            f.write(video_data)
+        log.info("[UPLOAD][video] saved path=%s", file_path)
+        file_path_for_processing = file_path
 
     # Gửi task tới Celery
+    if not file_path_for_processing:
+        return {"success": False, "message": "Upload to MinIO failed"}
+    
     try:
         job = enqueue_process_video.delay(
-            video_path=file_path,
+            video_path=file_path_for_processing,
             user=user,
             label=label,
             session_id=session_id,
@@ -160,6 +171,7 @@ async def upload_video(
             "id": job.id,
             "session_id": session_id,
             "message": "queued",
+            "minio_url": minio_url,
         }
     except Exception as e:
         log.error("[UPLOAD][video][ERROR] queue failed: %s", e)

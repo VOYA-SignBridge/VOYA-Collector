@@ -40,7 +40,9 @@ RUN useradd -m -u 1000 appuser && \
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser requirements.txt .
 
-ENV PATH=/home/appuser/.local/bin:$PATH
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    FONTCONFIG_PATH=/tmp/fontconfig
 
 USER appuser
 

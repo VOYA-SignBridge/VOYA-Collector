@@ -15,8 +15,6 @@ from app.processing.utils import atomic_write_json
 DATASET_ROOT = settings.dataset_root
 SAMPLES_DIR = DATASET_ROOT / "samples"
 SAMPLES_CSV = SAMPLES_DIR / "samples.csv"
-# Legacy compatibility: root-level samples CSV expected by older tooling
-LEGACY_SAMPLES_CSV = DATASET_ROOT / "samples.csv"
 
 SAMPLE_FIELDS = [
     "sample_uid",
@@ -34,7 +32,6 @@ SAMPLE_FIELDS = [
     "augment_id",
     "completeness",
     "file_path",
-    # Optional MinIO object storage fields (kept empty when USE_MINIO=0)
     "storage_key",
     "storage_url",
     "checksum",
@@ -56,71 +53,6 @@ def _ensure_samples_file():
                     writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
                     writer.writeheader()
     else:
-        # Header upgrade for backward compatibility: if old samples.csv exists without
-        # the MinIO columns, rewrite it atomically under the lock.
-        lock = FileLock(str(SAMPLES_CSV) + ".lock")
-        with lock:
-            try:
-                with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
-                    reader = csv.reader(f)
-                    header = next(reader, [])
-                header_set = set(header or [])
-                missing = [c for c in SAMPLE_FIELDS if c not in header_set]
-                if missing:
-                    # Load existing rows using DictReader with old header
-                    with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
-                        existing_rows = list(csv.DictReader(f))
-                    # Normalize rows to new schema
-                    upgraded = []
-                    for r in existing_rows:
-                        row = {k: (r.get(k) or "") for k in SAMPLE_FIELDS}
-                        upgraded.append(row)
-
-                    dirn = str(SAMPLES_CSV.parent)
-                    fd, tmp_path = tempfile.mkstemp(
-                        prefix="csvtmp_", suffix=".csv", dir=dirn
-                    )
-                    os.close(fd)
-                    try:
-                        with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-                            writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
-                            writer.writeheader()
-                            writer.writerows(upgraded)
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.replace(tmp_path, SAMPLES_CSV)
-                    finally:
-                        if os.path.exists(tmp_path):
-                            try:
-                                os.remove(tmp_path)
-                            except Exception:
-                                pass
-            except Exception:
-                # Best-effort: leave file as-is if we cannot upgrade
-                pass
-    # Ensure legacy root-level samples CSV exists
-    if not LEGACY_SAMPLES_CSV.exists():
-        lock = FileLock(str(LEGACY_SAMPLES_CSV) + ".lock")
-        with lock:
-            if not LEGACY_SAMPLES_CSV.exists():
-                with open(LEGACY_SAMPLES_CSV, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(
-                        f,
-                        fieldnames=[
-                            "sample_id",
-                            "class_idx",
-                            "folder_name",
-                            "file",
-                            "user",
-                            "session_id",
-                            "frames",
-                            "duration",
-                            "source",
-                            "dialect",
-                            "created_at",
-                        ],
-                    )
-                    writer.writeheader()
 
 
 def append_sample_row(row: Dict[str, Any]):
@@ -210,8 +142,9 @@ def save_sequence_npz(
 
         # Try using upload_file wrapper first
         try:
-            # Build S3 key: features/{lang}/{dialect}/{class_uid}/{filename}
-            storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{class_meta.class_uid}/{fname}"
+            # Build MinIO key: features/{lang}/{dialect}/{folder_name}/{filename}
+            folder_name = class_meta.folder_name()
+            storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
             log.info("[SAVE_SEQUENCE] Uploading to MinIO")
             minio_url = upload_file(buffer, storage_key)
             if minio_url:
@@ -327,55 +260,5 @@ def save_sequence_npz(
     except Exception as e:
         if getattr(settings, "debug_logging", False):
             logging.getLogger(__name__).debug("[DB] insert_sample failed: %s", e)
-
-    # Append legacy-format sample record to root-level CSV
-    try:
-        from app.processing.storage_utils import (
-            append_csv_row,
-            SAMPLES_CSV as LEGACY_SAMPLES_CSV,
-        )
-        from filelock import FileLock
-
-        lock_legacy = FileLock(str(LEGACY_SAMPLES_CSV) + ".lock")
-        with lock_legacy:
-            file_exists = LEGACY_SAMPLES_CSV.exists()
-            with open(LEGACY_SAMPLES_CSV, "a", newline="", encoding="utf-8") as f:
-                fields = [
-                    "sample_id",
-                    "class_idx",
-                    "folder_name",
-                    "file",
-                    "user",
-                    "session_id",
-                    "frames",
-                    "duration",
-                    "source",
-                    "dialect",
-                    "created_at",
-                ]
-                writer = csv.DictWriter(f, fieldnames=fields)
-                if not file_exists or os.path.getsize(LEGACY_SAMPLES_CSV) == 0:
-                    writer.writeheader()
-                writer.writerow(
-                    {
-                        "sample_id": sample_uid,
-                        "class_idx": str(class_meta.class_idx or ""),
-                        "folder_name": class_meta.folder_name()
-                        if hasattr(class_meta, "folder_name")
-                        else "",
-                        "file": fname,
-                        "user": meta.get("user", ""),
-                        "session_id": meta.get("session_id", ""),
-                        "frames": str(sequence.shape[0]),
-                        "duration": "",
-                        "source": source_type,
-                        "dialect": class_meta.dialect,
-                        "created_at": created_at,
-                    }
-                )
-                f.flush()
-                os.fsync(f.fileno())
-    except Exception:
-        pass
 
     return result_path
