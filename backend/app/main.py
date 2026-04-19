@@ -46,3 +46,5 @@ api_v1.include_router(jobs.router)
 api_v1.include_router(classes.router)
 api_v1.include_router(inference.router)
 app.include_router(api_v1)
+
+# test
