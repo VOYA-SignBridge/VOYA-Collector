@@ -61,33 +61,33 @@ def _upload_to_minio(client, file_data, key: str, content_type: str = "applicati
     bucket = settings.minio_bucket
 
     try:
-        if isinstance(file_data, (str, BytesIO)):
-            if isinstance(file_data, str):
-                import os
-                file_path = file_data
-                if not os.path.exists(file_path):
-                    logger.error("[MINIO] File not found: %s", file_path)
-                    return None
-                with open(file_path, "rb") as f:
-                    file_data = BytesIO(f.read())
-            
-            if isinstance(file_data, BytesIO):
-                file_data.seek(0, 2)
-                file_size = file_data.tell()
-                file_data.seek(0)
-            else:
-                file_size = 0
-
-            client.put_object(
-                bucket,
-                key,
-                file_data,
-                length=file_size,
-                content_type=content_type,
-            )
+        if isinstance(file_data, str):
+            import os
+            file_path = file_data
+            if not os.path.exists(file_path):
+                logger.error("[MINIO] File not found: %s", file_path)
+                return None
+            with open(file_path, "rb") as f:
+                file_data = BytesIO(f.read())
+        
+        if isinstance(file_data, BytesIO):
+            file_data.seek(0, 2)
+            file_size = file_data.tell()
+            file_data.seek(0)
+        elif isinstance(file_data, bytes):
+            file_size = len(file_data)
+            file_data = BytesIO(file_data)
         else:
             logger.error("[MINIO] Unsupported file_data type: %s", type(file_data))
             return None
+
+        client.put_object(
+            bucket,
+            key,
+            file_data,
+            length=file_size,
+            content_type=content_type,
+        )
 
         minio_url = f"s3://{bucket}/{key}"
         logger.info("[MINIO] Uploaded to: %s", minio_url)

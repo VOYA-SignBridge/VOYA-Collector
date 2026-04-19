@@ -53,6 +53,7 @@ def _ensure_samples_file():
                     writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
                     writer.writeheader()
     else:
+        pass
 
 
 def append_sample_row(row: Dict[str, Any]):
