@@ -21,7 +21,7 @@ services:
     expose:
       - "8000"
     volumes:
-      - ../dataset:/dataset
+      - ./dataset:/dataset
     env_file:
       - .env
     depends_on:
@@ -41,7 +41,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ../dataset:/dataset
+      - ./dataset:/dataset
     command: celery -A app.worker.celery_app worker --loglevel=info
     depends_on:
       - redis
@@ -53,7 +53,7 @@ services:
       - voya_network
 
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     container_name: voya_redis
     restart: unless-stopped
     networks:
@@ -79,7 +79,7 @@ services:
           - voya_minio
 
   postgres:
-    image: postgres:latest
+    image: postgres:17
     container_name: voya_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
