@@ -3,6 +3,34 @@ import { validateUploadResult } from "./validators";
 import type { Result } from "./validators";
 import type { UploadResult, CameraUploadPayload } from "../types";
 
+const extractErrorMessage = (err: unknown, fallback = "Upload failed"): string => {
+  type AxiosLikeError = {
+    response?: { status?: number; data?: unknown };
+    request?: unknown;
+    message?: string;
+  };
+
+  const axiosErr = err as AxiosLikeError;
+  if (axiosErr?.response) {
+    const { status, data } = axiosErr.response;
+    if (data && typeof data === "object") {
+      const detail = (data as { detail?: unknown; message?: unknown }).detail
+        ?? (data as { detail?: unknown; message?: unknown }).message;
+      if (typeof detail === "string" && detail.trim()) {
+        return `HTTP ${status} - ${detail}`;
+      }
+    }
+    return `HTTP ${status} - ${JSON.stringify(data)}`;
+  }
+  if (axiosErr?.request) {
+    return "No response received (request sent)";
+  }
+  if (axiosErr?.message) {
+    return axiosErr.message;
+  }
+  return fallback;
+};
+
 export const uploadVideo = async (file: File, user: string, label: string, dialect?: string): Promise<Result<UploadResult>> => {
   const formData = new FormData();
   formData.append("file", file);
@@ -39,22 +67,7 @@ export const uploadVideo = async (file: File, user: string, label: string, diale
     } catch (err: unknown) {
       // If this is the last attempt, return a helpful error message
       if (attempt === maxAttempts) {
-        // Try to extract axios-like error details for easier debugging
-        type AxiosLikeError = {
-          response?: { status?: number; data?: unknown };
-          request?: unknown;
-          message?: string;
-        };
-        const axiosErr = err as AxiosLikeError;
-        let msg = "Upload failed";
-        if (axiosErr?.response) {
-          msg = `HTTP ${axiosErr.response.status} - ${JSON.stringify(axiosErr.response.data)}`;
-        } else if (axiosErr?.request) {
-          msg = `No response received (request sent)`;
-        } else if (axiosErr?.message) {
-          msg = axiosErr.message;
-        }
-        return { ok: false, error: msg };
+        return { ok: false, error: extractErrorMessage(err) };
       }
       // exponential backoff with jitter
       const jitter = Math.random() * 100;
@@ -75,8 +88,7 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
       return validateUploadResult(res.data);
     } catch (err: unknown) {
       if (attempt === maxAttempts) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: msg || "Upload failed" };
+        return { ok: false, error: extractErrorMessage(err) };
       }
       const jitter = Math.random() * 100;
       const delay = baseDelay * 2 ** (attempt - 1) + jitter;

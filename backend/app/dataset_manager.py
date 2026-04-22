@@ -118,6 +118,49 @@ DIALECT_MAPPING = {
 }
 
 
+def normalize_dialect(dialect: Optional[str]) -> str:
+    """ASCII-safe normalization for dialect values received from the API."""
+    if not dialect:
+        return ""
+
+    raw = str(dialect).strip()
+    if not raw:
+        return ""
+
+    lowered = raw.lower().replace("\u0111", "d")
+    ascii_base = unicodedata.normalize("NFKD", lowered)
+    ascii_base = "".join(c for c in ascii_base if not unicodedata.combining(c))
+    ascii_base = re.sub(r"[^a-z0-9]+", " ", ascii_base).strip()
+    compact = re.sub(r"\s+", " ", ascii_base)
+    slug = compact.replace(" ", "-")
+
+    robust_mapping = {
+        "bac": "bac",
+        "mien bac": "bac",
+        "trung": "trung",
+        "mien trung": "trung",
+        "nam": "nam",
+        "mien nam": "nam",
+        "north": "bac",
+        "central": "trung",
+        "south": "nam",
+        "hoa de": "hoa-de",
+        "hoade": "hoa-de",
+        "hoa-de": "hoa-de",
+        "can tho": "can-tho",
+        "cantho": "can-tho",
+        "can-tho": "can-tho",
+        "chung": "common",
+        "common": "common",
+    }
+
+    for candidate in (compact, slug):
+        if candidate in robust_mapping:
+            return robust_mapping[candidate]
+
+    return slug
+
+
 @dataclass
 class ClassMetadata:
     class_uid: str
