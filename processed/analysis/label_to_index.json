@@ -1,0 +1,23 @@
+{
+  "vn/hoa-de/rang-muoi": 0,
+  "vn/hoa-de/boc-vo-tom": 1,
+  "vn/common/xin-chao": 2,
+  "vn/bac/cam-on": 3,
+  "vn/common/xe-ap": 4,
+  "vn/common/ban-hieu-ngon-ngu-ki": 5,
+  "vn/common/con-nguoi": 6,
+  "vn/common/toi-i-sieu-thi": 7,
+  "vn/hoa-de/cat-au-ca": 8,
+  "vn/hoa-de/cat-ki": 9,
+  "vn/hoa-de/lot-da-ca": 10,
+  "vn/hoa-de/anh-vay-ca": 11,
+  "vn/hoa-de/tom": 12,
+  "vn/nam/ban-ten-gi": 13,
+  "vn/common/nhan-vien": 14,
+  "vn/cần thơ/chao-co": 15,
+  "vn/common/tiep-tan": 16,
+  "vn/nam/ia-chi": 17,
+  "vn/trung/ia-chi": 18,
+  "vn/bac/ia-chi": 19,
+  "vn/common/tinh": 20
+}

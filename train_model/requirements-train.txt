@@ -1,0 +1,8 @@
+# Train-only dependencies (features already extracted by the app)
+# Recommended Python: 3.10+ (matches backend wheel ecosystem)
+
+numpy==1.26.2
+
+# Optional: only needed for plotting metrics/figures
+matplotlib==3.8.4
+seaborn==0.13.2

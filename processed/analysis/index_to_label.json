@@ -1,0 +1,212 @@
+{
+  "0": {
+    "slug": "rang-muoi",
+    "label_original": "rang muối",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 1,
+    "class_uid": "a92adf74-43f8-4021-bf57-5e47b61991c5",
+    "folder_name": "class_0001_rang-muoi",
+    "label_key": "vn/hoa-de/rang-muoi"
+  },
+  "1": {
+    "slug": "boc-vo-tom",
+    "label_original": "bóc vỏ tôm",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 2,
+    "class_uid": "b4ed3327-5414-4a87-875a-a3f594e716f3",
+    "folder_name": "class_0002_boc-vo-tom",
+    "label_key": "vn/hoa-de/boc-vo-tom"
+  },
+  "2": {
+    "slug": "xin-chao",
+    "label_original": "xin chào",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 3,
+    "class_uid": "e386a9ed-e339-48b0-8885-d96bcae17b12",
+    "folder_name": "class_0003_xin-chao",
+    "label_key": "vn/common/xin-chao"
+  },
+  "3": {
+    "slug": "cam-on",
+    "label_original": "cảm ơn",
+    "language": "vn",
+    "dialect": "bac",
+    "class_idx": 4,
+    "class_uid": "354acd45-ea64-4e34-84be-5b279c4ab7e0",
+    "folder_name": "class_0004_cam-on",
+    "label_key": "vn/bac/cam-on"
+  },
+  "4": {
+    "slug": "xe-ap",
+    "label_original": "xe đạp",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 5,
+    "class_uid": "2584ca0a-842e-4535-87fd-faba008714c4",
+    "folder_name": "class_0005_xe-ap",
+    "label_key": "vn/common/xe-ap"
+  },
+  "5": {
+    "slug": "ban-hieu-ngon-ngu-ki",
+    "label_original": "Bạn hiểu ngôn ngữ kí hiệu không?",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 6,
+    "class_uid": "434e3faf-0ef6-42b3-b56b-cf16fa7c3c52",
+    "folder_name": "class_0006_ban-hieu-ngon-ngu-ki",
+    "label_key": "vn/common/ban-hieu-ngon-ngu-ki"
+  },
+  "6": {
+    "slug": "con-nguoi",
+    "label_original": "con người",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 7,
+    "class_uid": "a85139d8-7769-49d3-a968-8f23dbefb90d",
+    "folder_name": "class_0007_con-nguoi",
+    "label_key": "vn/common/con-nguoi"
+  },
+  "7": {
+    "slug": "toi-i-sieu-thi",
+    "label_original": "Tôi đi siêu thị",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 8,
+    "class_uid": "f8fb8f00-50ef-4cf6-a416-4d81cb2ec2fa",
+    "folder_name": "class_0008_toi-i-sieu-thi",
+    "label_key": "vn/common/toi-i-sieu-thi"
+  },
+  "8": {
+    "slug": "cat-au-ca",
+    "label_original": "cắt đầu cá",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 9,
+    "class_uid": "933081e4-8f1d-412c-bd86-81783aaf48a9",
+    "folder_name": "class_0009_cat-au-ca",
+    "label_key": "vn/hoa-de/cat-au-ca"
+  },
+  "9": {
+    "slug": "cat-ki",
+    "label_original": "cắt kì",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 10,
+    "class_uid": "6f28c921-abe8-4621-8541-72655afbb2c4",
+    "folder_name": "class_0010_cat-ki",
+    "label_key": "vn/hoa-de/cat-ki"
+  },
+  "10": {
+    "slug": "lot-da-ca",
+    "label_original": "lột da cá",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 11,
+    "class_uid": "498bf479-42c0-4f0a-8e08-88e3516239f3",
+    "folder_name": "class_0011_lot-da-ca",
+    "label_key": "vn/hoa-de/lot-da-ca"
+  },
+  "11": {
+    "slug": "anh-vay-ca",
+    "label_original": "đánh vẩy cá",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 12,
+    "class_uid": "60d91466-e1d3-422c-af06-8c9ea6ccd742",
+    "folder_name": "class_0012_anh-vay-ca",
+    "label_key": "vn/hoa-de/anh-vay-ca"
+  },
+  "12": {
+    "slug": "tom",
+    "label_original": "tôm",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 13,
+    "class_uid": "1ddff8cb-08a0-49a1-9d27-c0399650e499",
+    "folder_name": "class_0013_tom",
+    "label_key": "vn/hoa-de/tom"
+  },
+  "13": {
+    "slug": "ban-ten-gi",
+    "label_original": "Bạn tên gì?",
+    "language": "vn",
+    "dialect": "nam",
+    "class_idx": 14,
+    "class_uid": "1ada493c-5063-4f8c-964c-37c547a81893",
+    "folder_name": "class_0014_ban-ten-gi",
+    "label_key": "vn/nam/ban-ten-gi"
+  },
+  "14": {
+    "slug": "nhan-vien",
+    "label_original": "nhân viên",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 15,
+    "class_uid": "f4d9add9-9be8-48fb-a5a2-2ee254047d15",
+    "folder_name": "class_0015_nhan-vien",
+    "label_key": "vn/common/nhan-vien"
+  },
+  "15": {
+    "slug": "chao-co",
+    "label_original": "chào cờ",
+    "language": "vn",
+    "dialect": "cần thơ",
+    "class_idx": 16,
+    "class_uid": "3a9d805b-19e0-4590-98c3-849020119c24",
+    "folder_name": "class_0016_chao-co",
+    "label_key": "vn/cần thơ/chao-co"
+  },
+  "16": {
+    "slug": "tiep-tan",
+    "label_original": "tiếp tân",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 17,
+    "class_uid": "5b31df32-14d8-4fc8-a913-0cb51fc46a36",
+    "folder_name": "class_0017_tiep-tan",
+    "label_key": "vn/common/tiep-tan"
+  },
+  "17": {
+    "slug": "ia-chi",
+    "label_original": "địa chỉ",
+    "language": "vn",
+    "dialect": "nam",
+    "class_idx": 18,
+    "class_uid": "e5752545-8cf4-4756-ba08-d9e463476ffb",
+    "folder_name": "class_0018_ia-chi",
+    "label_key": "vn/nam/ia-chi"
+  },
+  "18": {
+    "slug": "ia-chi",
+    "label_original": "địa chỉ",
+    "language": "vn",
+    "dialect": "trung",
+    "class_idx": 19,
+    "class_uid": "089e3553-2902-489f-80b5-221a0bd4f43c",
+    "folder_name": "class_0019_ia-chi",
+    "label_key": "vn/trung/ia-chi"
+  },
+  "19": {
+    "slug": "ia-chi",
+    "label_original": "địa chỉ",
+    "language": "vn",
+    "dialect": "bac",
+    "class_idx": 20,
+    "class_uid": "47e1c414-bffa-4763-8df8-566472ee01fc",
+    "folder_name": "class_0020_ia-chi",
+    "label_key": "vn/bac/ia-chi"
+  },
+  "20": {
+    "slug": "tinh",
+    "label_original": "tỉnh",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 21,
+    "class_uid": "7b96db6b-2f05-4006-b0cd-8e49b7393575",
+    "folder_name": "class_0021_tinh",
+    "label_key": "vn/common/tinh"
+  }
+}
