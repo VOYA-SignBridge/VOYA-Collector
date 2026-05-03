@@ -3,13 +3,12 @@ from __future__ import annotations
 import os
 import csv
 import uuid
-import tempfile
 import logging
 from typing import Dict, Any, List
 from filelock import FileLock
 from datetime import datetime
 from app.config import settings
-from app.processing.utils import atomic_write_json
+from app.storage.artifact_store import store_training_artifact_minio
 
 
 DATASET_ROOT = settings.dataset_root
@@ -100,15 +99,12 @@ def count_samples_for_class(class_uid: str) -> int:
 def save_sequence_npz(
     class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str
 ) -> str:
-    """Save a (T,D) sequence directly to AWS S3 (bypasses local disk).
-    Returns S3 URL if successful, local path as fallback.
-    """
+    """Save a (T,D) sequence to the local dataset tree and mirror to MinIO when enabled."""
     import numpy as np
     import io
 
     sample_uid = uuid.uuid4().hex[:10]
     created_at = (meta or {}).get("created_at") or now_str()
-    fname = f"sample_{sample_uid}.npz"
 
     metadata = {
         "class_uid": class_meta.class_uid,
@@ -121,77 +117,29 @@ def save_sequence_npz(
         **meta,
     }
 
-    # Create in-memory buffer for npz
-    import numpy as np
+    metadata_for_storage = dict(metadata)
+    metadata_for_storage["storage_provider"] = "local+minio" if bool(getattr(settings, "use_minio", False)) else "local"
 
     buffer = io.BytesIO()
-    np.savez_compressed(buffer, sequence=sequence.astype("float32"), meta=metadata)
+    np.savez_compressed(buffer, sequence=sequence.astype("float32"), meta=metadata_for_storage)
     buffer.seek(0)
 
-    # Upload directly to MinIO if configured
-    storage_url = None
-    storage_key = None
-    if settings.use_minio:
-        from app.storage.minio_client import (
-            _get_minio_client,
-            _upload_to_minio,
-            upload_file,
-        )
-
-        log = logging.getLogger(__name__)
-        log.info("[SAVE_SEQUENCE] Attempting MinIO upload")
-
-        # Try using upload_file wrapper first
-        try:
-            # Build MinIO key: features/{lang}/{dialect}/{folder_name}/{filename}
-            folder_name = class_meta.folder_name()
-            storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-            log.info("[SAVE_SEQUENCE] Uploading to MinIO")
-            minio_url = upload_file(buffer, storage_key)
-            if minio_url:
-                log.info("[SAVE_SEQUENCE] MinIO upload successful: %s", minio_url)
-                storage_url = minio_url
-                metadata["storage_url"] = storage_url
-                metadata["storage_key"] = storage_key
-            else:
-                log.warning("[SAVE_SEQUENCE] MinIO upload returned None")
-        except Exception as e:
-            log.error("[SAVE_SEQUENCE] MinIO upload failed: %s", e)
-    else:
-        log.info("[SAVE_SEQUENCE] USE_MINIO not enabled")
-
-    # If S3 failed, fallback to local disk
-    if not storage_url:
-        class_dir = class_meta.hierarchy_path()
-        class_dir.mkdir(parents=True, exist_ok=True)
-        fpath = class_dir / fname
-        sidecar = class_dir / f"sample_{sample_uid}.json"
-
-        fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=str(class_dir))
-        os.close(fd)
-        try:
-            with open(tmp, "wb") as f:
-                np.savez_compressed(
-                    f, sequence=sequence.astype("float32"), meta=metadata
-                )
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, fpath)
-        finally:
-            if os.path.exists(tmp):
-                try:
-                    os.remove(tmp)
-                except:
-                    pass
-
-        try:
-            atomic_write_json(sidecar, metadata, indent=2)
-        except Exception as e:
-            logging.getLogger(__name__).warning("[SIDECAR] write failed: %s", e)
-
-        result_path = str(fpath)
-    else:
-        result_path = storage_url
+    log = logging.getLogger(__name__)
+    log.info("[SAVE_SEQUENCE] Writing training artifact locally and mirroring to MinIO when enabled")
+    storage_info = store_training_artifact_minio(
+        buffer,
+        class_meta,
+        sample_uid=sample_uid,
+        augment_id=augment_id,
+        metadata=metadata_for_storage,
+    )
+    local_path = storage_info["local_path"]
+    storage_url = storage_info.get("minio_url") or storage_info.get("storage_url")
+    storage_key = storage_info["storage_key"]
+    metadata["storage_provider"] = storage_info.get("storage_provider", "local")
+    metadata["storage_url"] = storage_url
+    metadata["storage_key"] = storage_key
+    result_path = local_path
 
     # Append sample record
     try:
@@ -224,8 +172,8 @@ def save_sequence_npz(
             "augment_id": str(augment_id),
             "completeness": str(meta.get("completeness", "")),
             "file_path": result_path,
-            "storage_key": storage_key if storage_url else "",
-            "storage_url": storage_url or "",
+            "storage_key": storage_key,
+            "storage_url": storage_url,
             "checksum": metadata.get("checksum", ""),
             "created_at": created_at,
         }

@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List
 from pydantic import BaseSettings, validator
 from pathlib import Path
@@ -14,6 +15,8 @@ def _default_dataset_root() -> Path:
 
 
 class Settings(BaseSettings):
+    app_env: str = os.getenv("APP_ENV", "development")
+
     # Postgres/PostgreSQL configuration
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://user:password@localhost:5432/signdb"
@@ -28,6 +31,19 @@ class Settings(BaseSettings):
     minio_access_key: str = os.getenv("MINIO_ACCESS_KEY")
     minio_secret_key: str = os.getenv("MINIO_SECRET_KEY")
     minio_bucket: str = os.getenv("MINIO_BUCKET", "sign-dataset")
+
+    # Cloudinary (optional) configuration
+    cloudinary_enabled: bool = bool(int(os.getenv("CLOUDINARY_ENABLED", "0")))
+    cloudinary_cloud_name: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    cloudinary_api_key: str = os.getenv("CLOUDINARY_API_KEY", "")
+    cloudinary_api_secret: str = os.getenv("CLOUDINARY_API_SECRET", "")
+    cloudinary_upload_preset: str = os.getenv("CLOUDINARY_UPLOAD_PRESET", "")
+    cloudinary_timeout_seconds: int = int(os.getenv("CLOUDINARY_TIMEOUT_SECONDS", "60"))
+    cloudinary_debug_responses: bool = bool(int(os.getenv("CLOUDINARY_DEBUG_RESPONSES", "0")))
+
+    # Parallel download tuning for batch export / training materialization
+    storage_download_workers: int = int(os.getenv("STORAGE_DOWNLOAD_WORKERS", "4"))
+    storage_download_timeout_seconds: int = int(os.getenv("STORAGE_DOWNLOAD_TIMEOUT_SECONDS", "120"))
 
     # Optional object storage upload toggle (filesystem remains source-of-truth)
     use_minio: bool = bool(int(os.getenv("USE_MINIO", "0")))
@@ -92,6 +108,30 @@ class Settings(BaseSettings):
             self.dataset_root = _default_dataset_root()
 
         # speed_variants is computed by validator; no assignment needed here
+
+    class Config:
+        @classmethod
+        def parse_env_var(cls, field_name, raw_value):
+            if field_name == "speed_variants":
+                text = str(raw_value).strip()
+                if not text:
+                    return [1.0]
+
+                if text.startswith("["):
+                    try:
+                        parsed = json.loads(text)
+                        if isinstance(parsed, list):
+                            return [float(item) for item in parsed]
+                    except Exception:
+                        pass
+
+                parts = [part.strip() for part in text.split(",") if part.strip()]
+                try:
+                    return [float(part) for part in parts] if parts else [1.0]
+                except Exception:
+                    return [1.0]
+
+            return super().parse_env_var(field_name, raw_value)
 
 
 settings = Settings()

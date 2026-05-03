@@ -68,16 +68,225 @@ Update samples.csv + PostgreSQL
 - Docker & Docker Compose
 - Node.js 20+ (for frontend dev)
 
-### Docker Deployment
-```bash
-# Start all services
-docker-compose up --build -d
+### Docker Deployment (Recommended)
 
-# View logs
-docker-compose logs -f backend worker
+#### On Windows (PowerShell)
+```powershell
+# Copy template configuration
+Copy-Item .env.example .env
+
+# Edit .env with your settings (see Configuration section)
+notepad .env
+
+# Run setup script
+.\scripts\init.ps1
+
+# Or rebuild from scratch
+.\scripts\init.ps1 -Command rebuild
+
+# Stop services
+docker compose down
 ```
 
-### Frontend Development
+#### On macOS / Linux / Windows (WSL)
+```bash
+# Copy template configuration
+cp .env.example .env
+
+# Edit .env with your settings
+nano .env  # or vim, or your favorite editor
+
+# Run setup script
+chmod +x scripts/init.sh
+./scripts/init.sh
+
+# Or rebuild from scratch
+./scripts/init.sh rebuild
+
+# Stop services
+docker compose down
+```
+
+#### What the Setup Script Does
+1. ✅ Validates Docker and Docker Compose installation
+2. ✅ Checks configuration file (.env)
+3. ✅ Builds Docker images
+4. ✅ Starts all services (PostgreSQL, Redis, MinIO, Backend, Worker, Frontend, Nginx)
+5. ✅ Waits for services to be healthy
+6. ✅ Verifies database connectivity
+7. ✅ Initializes database tables
+8. ✅ Runs health checks
+9. ✅ Displays service URLs
+
+#### Accessing Services After Startup
+- **Frontend**: http://localhost:8080
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
+- **PgAdmin**: http://localhost:5050
+- **MinIO Console**: http://localhost:9001
+
+#### Useful Docker Commands
+```bash
+# View all running services
+docker compose ps
+
+# View logs for specific service
+docker compose logs backend
+docker compose logs -f worker
+
+# Access backend shell
+docker compose exec backend bash
+
+# Run database migrations (if needed)
+docker compose exec backend python -m alembic upgrade head
+
+# Stop all services
+docker compose down
+
+# Remove all data and restart fresh
+docker compose down -v  # -v removes volumes
+docker compose up -d
+```
+
+### Frontend Development (Local)
+
+```bash
+cd frontend
+npm install
+npm run dev    # http://localhost:5173
+```
+
+### Backend Development (Local)
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload  # http://localhost:8000
+```
+
+---
+
+## Troubleshooting
+
+### Camera Not Opening
+**Error**: "Camera bị từ chối" (Camera permission denied)
+
+**Solutions**:
+1. Check browser camera permissions:
+   - Chrome/Edge: Settings → Privacy → Camera → Allow for this site
+   - Firefox: Privacy & Security → Permissions → Camera → Allow
+   - Safari: System Preferences → Security & Privacy → Camera
+
+2. Ensure camera is not in use:
+   - Close other video apps (Zoom, Meet, Teams, etc.)
+   - Check if another process is using the camera
+   
+3. Try a different browser if the camera still doesn't work
+
+4. On Windows, check Settings → Privacy & Security → Camera → ensure app permission is granted
+
+### Connection Issues Between Frontend and Backend
+**Error**: "GET http://localhost:8000/upload: Failed to fetch"
+
+**Solutions**:
+1. Verify backend is running:
+   ```bash
+   docker compose ps backend
+   curl http://localhost:8000/health
+   ```
+
+2. Check frontend configuration - ensure `.env` has:
+   ```
+   VITE_API_URL=http://localhost:8000
+   ```
+
+3. Verify Nginx is routing correctly:
+   ```bash
+   docker compose logs nginx
+   ```
+
+4. If using Docker, make sure services can communicate:
+   ```bash
+   docker compose exec backend curl http://localhost:8000/health
+   ```
+
+### Database Connection Errors
+**Error**: "password authentication failed for user 'signuser'"
+
+**Solution**: Ensure `.env` has matching credentials:
+```
+POSTGRES_USER=signuser
+POSTGRES_PASSWORD=signpass
+POSTGRES_DB=signdb
+DATABASE_URL=postgresql://signuser:signpass@postgres:5432/signdb
+```
+
+Then restart the services:
+```bash
+docker compose down
+docker compose up -d
+```
+
+### Services Not Starting
+**Symptom**: Some services remain in "restarting" state
+
+**Solution**: Check service logs for errors:
+```bash
+# Check all services
+docker compose logs
+
+# Check specific service
+docker compose logs postgres
+docker compose logs backend
+
+# Check health endpoints
+docker compose exec backend curl http://localhost:8000/health/ready
+```
+
+### Fresh Deployment on New Machine
+To deploy on a machine without prior setup:
+
+```bash
+# 1. Clone repository
+git clone <repo-url>
+cd VOYA-Collector
+
+# 2. Copy template configuration
+cp .env.example .env
+
+# 3. Edit configuration (CRITICAL)
+# - Set POSTGRES_PASSWORD to a secure value
+# - Check other settings match your environment
+nano .env
+
+# 4. Run setup script
+./scripts/init.sh
+
+# 5. Verify everything works
+curl http://localhost:8000/health
+curl http://localhost:8080/  # Should see frontend
+```
+
+### Resetting Database
+To clear all data and restart fresh:
+
+```bash
+# Stop services and remove all volumes
+docker compose down -v
+
+# Rebuild and restart
+docker compose up -d
+
+# Or use setup script
+./scripts/init.sh clean
+```
+
+---
+
+## Frontend Development
 ```bash
 cd voya-frontend
 npm install
@@ -134,7 +343,29 @@ MAX_SAMPLES_PER_CLASS=2000
 USE_MINIO=1
 MINIO_ENDPOINT=minio:9000
 MINIO_BUCKET=sign-dataset
+
+# Optional hybrid media storage
+CLOUDINARY_ENABLED=1
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+CLOUDINARY_UPLOAD_PRESET=optional_unsigned_preset
+CLOUDINARY_DEBUG_RESPONSES=0
+STORAGE_DOWNLOAD_WORKERS=4
 ```
+
+### Storage Policy
+
+- Raw video uploads go to Cloudinary only.
+- Training artifacts (`.npz`) go to MinIO only.
+- All stored assets follow deterministic paths based on `language/dialect/class_folder`, so downloads, reprocessing, and training exports can resolve files without guessing.
+- Batch export and training materialization download remote files in parallel into a local cache before validation and memmap merge.
+
+Recommended setup for this project:
+- Use Cloudinary for public-facing raw media and short-lived video previews.
+- Use MinIO for training artifacts, `.npz` samples, and bulk dataset export.
+- Keep Cloudinary credentials configured in `.env` before enabling raw-video uploads.
+- Set `CLOUDINARY_DEBUG_RESPONSES=1` in development if you want `/upload/video` to write the Cloudinary payload or structured error details to the backend log only.
 
 ---
 

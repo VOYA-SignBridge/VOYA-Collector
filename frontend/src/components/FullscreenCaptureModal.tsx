@@ -32,6 +32,41 @@ const SWAP_HANDEDNESS = parseBoolEnv(import.meta.env.VITE_SWAP_HANDEDNESS, false
 // Keep CDN asset version aligned with pinned npm dependency.
 const MP_HANDS_VERSION = "0.4.1675469240";
 
+/**
+ * Convert camera errors into user-friendly Vietnamese messages
+ */
+function getCameraErrorMessage(error: unknown): string {
+  const err = error as any;
+  const errorName = err?.name || 'Unknown';
+  const errorMessage = err?.message || String(error);
+  
+  console.warn(`Camera error [${errorName}]: ${errorMessage}`);
+  
+  if (errorName === 'NotAllowedError' || errorName === 'PermissionDenied') {
+    return 'Camera bị từ chối. Vui lòng cấp quyền truy cập camera trong cài đặt trình duyệt.';
+  }
+  if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+    return 'Không tìm thấy camera. Vui lòng kiểm tra xem camera có được kết nối và không bị sử dụng bởi ứng dụng khác.';
+  }
+  if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
+    return 'Không thể khởi động camera. Camera có thể bị sử dụng bởi ứng dụng khác hoặc bị hỏng.';
+  }
+  if (errorName === 'OverconstrainedError' || errorName === 'ConstraintError') {
+    return 'Không thể đạt được cấu hình camera yêu cầu. Vui lòng thử lại hoặc sử dụng trình duyệt khác.';
+  }
+  if (errorName === 'TypeError' && errorMessage.includes('Invalid constraint')) {
+    return 'Cấu hình camera không hợp lệ. Vui lòng làm mới trang.';
+  }
+  if (errorName === 'SecurityError') {
+    return 'Lỗi bảo mật khi truy cập camera. Trang phải được cấp quyền HTTPS.';
+  }
+  if (errorMessage.toLowerCase().includes('no video input device')) {
+    return 'Không có thiết bị camera nào được tìm thấy. Vui lòng kiểm tra kết nối phần cứng.';
+  }
+  
+  return `Lỗi camera: ${errorMessage}`;
+}
+
 interface FullscreenCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -71,6 +106,7 @@ export default function FullscreenCaptureModal({
   const [countdown, setCountdown] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   
   // New state for capture management
   const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
@@ -392,6 +428,7 @@ export default function FullscreenCaptureModal({
     setIsReady(false);
     setCurrentCaptureIndex(0);
     setCompletedCaptures(0);
+    setCameraError(null);
     
     // Exit browser fullscreen if active
     try {
@@ -889,13 +926,18 @@ export default function FullscreenCaptureModal({
               srcObject: !!videoRef.current?.srcObject
             });
             setIsReady(true);
+            setCameraError(null);
           }).catch((error) => {
             console.error('Camera start failed:', error);
+            const errorMsg = getCameraErrorMessage(error);
+            setCameraError(errorMsg);
             setIsReady(false);
           });
         })
         .catch((error) => {
           console.error('Camera permission denied or not available:', error);
+          const errorMsg = getCameraErrorMessage(error);
+          setCameraError(errorMsg);
           setIsReady(false);
         });
 
@@ -1054,6 +1096,41 @@ export default function FullscreenCaptureModal({
 
   return (
     <div ref={rootRef} className="fixed inset-0 z-[9999] bg-black">
+      {/* Error Display */}
+      {cameraError && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-red-900/80 backdrop-blur-md border-2 border-red-500 rounded-xl p-8 max-w-md mx-4 text-center">
+            <div className="text-red-200 mb-4">
+              <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4v.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="text-xl font-bold text-white mb-3">Lỗi Camera</h3>
+            <p className="text-red-100 mb-6 leading-relaxed">{cameraError}</p>
+            <div className="flex gap-3 flex-col sm:flex-row">
+              <button
+                onClick={() => {
+                  setCameraError(null);
+                  window.location.reload();
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+              >
+                Làm mới Trang
+              </button>
+              <button
+                onClick={handleClose}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+              >
+                Thoát
+              </button>
+            </div>
+            <p className="text-xs text-red-200/70 mt-4">
+              Nếu vấn đề tiếp tục, vui lòng kiểm tra quyền truy cập camera trong cài đặt trình duyệt.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Bar */}
       <div className="absolute top-0 left-0 right-0 z-10 bg-black/80 backdrop-blur-sm border-b border-gray-700 hidden sm:block">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4">

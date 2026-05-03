@@ -10,6 +10,7 @@ import numpy as np
 from app.config import settings
 from app.dataset_manager import load_labels, ClassMetadata
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
+from app.storage.artifact_store import materialize_sample_artifacts
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -144,12 +145,12 @@ def list_samples():
         except Exception:
             class_idx = 0
         folder_name = label_row.get("folder_name") or ""
-        file_path = s.get("file_path") or ""
+        source_hint = s.get("storage_key") or s.get("file_path") or ""
         out.append({
             "sample_id": s.get("sample_uid") or "",
             "class_idx": class_idx,
             "folder_name": folder_name,
-            "file": Path(file_path).name if file_path else "",
+            "file": Path(source_hint).name if source_hint else "",
             "user": s.get("user_id") or "",
             "session_id": s.get("session_id") or "",
             "frames": str(s.get("seq_len") or ""),
@@ -168,10 +169,15 @@ def get_sample_data(sample_id: str):
     match = next((s for s in samples if (s.get("sample_uid") == sample_id)), None)
     if not match:
         raise HTTPException(status_code=404, detail="Sample not found")
-    file_path = match.get("file_path")
-    if not file_path or not Path(file_path).exists():
+    file_path = match.get("file_path") or ""
+    if file_path and Path(file_path).exists():
+        return FileResponse(file_path, media_type="application/octet-stream")
+
+    cache_dir = Path(settings.dataset_root) / "cache" / "sample_downloads"
+    resolved = materialize_sample_artifacts([match], cache_dir)
+    if not resolved:
         raise HTTPException(status_code=404, detail="Sample file missing on disk")
-    return FileResponse(file_path, media_type="application/octet-stream")
+    return FileResponse(str(resolved[0]), media_type="application/octet-stream")
 
 @router.post("/samples/add")
 def add_sample(

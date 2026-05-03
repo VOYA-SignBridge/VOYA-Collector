@@ -170,6 +170,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                     window_meta = {
                         "user": user,
                         "session_id": session_id,
+                        "source_uri": video_path,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,
                         "speed_factor": float(speed_factor),

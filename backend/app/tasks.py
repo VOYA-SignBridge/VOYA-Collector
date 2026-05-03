@@ -3,37 +3,22 @@ import os
 import tempfile
 from app.worker import celery_app
 from app.processing.pipeline import process_video_job
+from app.storage.artifact_store import download_artifact_to_tempfile
 
-def _download_from_minio(minio_url: str) -> str:
-    """Download file from MinIO to temp location and return local path."""
-    from app.config import settings
-    from app.storage.minio_client import _get_minio_client
-    
-    if not minio_url.startswith("s3://"):
-        return minio_url  # Not a MinIO URL, return as-is
-    
+def _download_from_storage(source_uri: str) -> str:
+    """Download remote storage objects to a temp local path and return it."""
+    if not source_uri:
+        return source_uri
+
+    if not source_uri.startswith(("s3://", "http://", "https://")):
+        return source_uri
+
     try:
-        minio_client = _get_minio_client()
-        if not minio_client:
-            raise Exception("Cannot get MinIO client")
-        
-        # Parse s3://bucket/key
-        parts = minio_url.replace("s3://", "").split("/")
-        bucket = parts[0]
-        key = "/".join(parts[1:])
-        
-        # Create temp file
-        _, ext = os.path.splitext(key)
-        fd, temp_path = tempfile.mkstemp(suffix=ext)
-        os.close(fd)
-        
-        # Download
-        minio_client.fget_object(bucket, key, temp_path)
-        logging.getLogger(__name__).info("[MINIO_DOWNLOAD] Downloaded from %s to %s", minio_url, temp_path)
-        
+        temp_path = download_artifact_to_tempfile(source_uri)
+        logging.getLogger(__name__).info("[STORAGE_DOWNLOAD] Downloaded from %s to %s", source_uri, temp_path)
         return temp_path
     except Exception as e:
-        logging.getLogger(__name__).error("[MINIO_DOWNLOAD] Failed: %s", e)
+        logging.getLogger(__name__).error("[STORAGE_DOWNLOAD] Failed: %s", e)
         raise
 
 @celery_app.task(bind=True)
@@ -46,8 +31,8 @@ def enqueue_process_video(self, video_path: str, user: str, label: str, session_
     temp_files_to_clean = []
     
     try:
-        if video_path.startswith("s3://"):
-            local_video_path = _download_from_minio(video_path)
+        if video_path.startswith(("s3://", "http://", "https://")):
+            local_video_path = _download_from_storage(video_path)
             temp_files_to_clean.append(local_video_path)
         
         result = process_video_job(local_video_path, user, label, session_id, dialect=dialect, language=language)

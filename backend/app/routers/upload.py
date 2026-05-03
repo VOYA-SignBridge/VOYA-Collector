@@ -5,20 +5,24 @@ import logging
 import numpy as np
 
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, Body
+from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
 
 from app.processing import storage_utils as su  # legacy for timestamp helper
 from app.dataset_manager import get_or_register_class, normalize_dialect
 from app.dataset_samples import save_sequence_npz
 from app.tasks import enqueue_process_video
 from app.config import settings
+from app.storage.artifact_store import store_raw_video
 from app.processing.utils import canonicalize_vector_126
+from app.logging_utils import get_logger as get_structured_logger
 from app.api_validation import (
     validate_label,
     validate_language,
     validate_dialect,
     save_upload_with_limit,
 )
+
+slog = get_structured_logger("upload.operations")
 
 
 # ============================================================================
@@ -53,11 +57,6 @@ async def options_camera():
     return {"success": True}
 
 
-# Align raw video storage with DATASET_ROOT so it matches features path
-UPLOAD_DIR = str(settings.dataset_root / "raw_videos")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-
 @router.post("/video")
 async def upload_video(
     file: UploadFile = File(...),
@@ -66,6 +65,7 @@ async def upload_video(
     language: str = Form("vn"),
     dialect: str = Form("common"),
     session_id: str = Form(None),
+    debug: bool = Form(False),
 ):
     start = time.time()
     log = logging.getLogger("upload.video")
@@ -111,47 +111,28 @@ async def upload_video(
         label_original=label, language=language, dialect=dialect or ""
     )
 
-    save_name = f"{label}_{uuid.uuid4().hex[:8]}_{file.filename}"
-    
     # Read video bytes from memory
     video_data = file.file.read()
     max_mb = int(os.getenv("MAX_UPLOAD_MB", "1024"))
     max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
     written = len(video_data)
     log.info("[UPLOAD][video] bytes_read=%s max_bytes=%s", written, max_bytes)
-    
-    # Upload directly to MinIO if configured
-    minio_url = None
-    if settings.use_minio:
-        try:
-            from app.storage.minio_client import _get_minio_client, upload_file
 
-            log.info("[UPLOAD][video] Uploading to MinIO")
-            minio_key = f"raw_videos/{save_name}"
-            minio_url = upload_file(video_data, minio_key)
-            if minio_url:
-                log.info("[UPLOAD][video] uploaded to MinIO: %s", minio_url)
-                # Use MinIO URL as the source for Celery processing
-                file_path_for_processing = minio_url
-            else:
-                log.warning("[UPLOAD][video] MinIO upload failed: no URL returned")
-                file_path_for_processing = None
-        except Exception as e:
-            log.warning("[UPLOAD][video] MinIO upload failed: %s", e)
-            file_path_for_processing = None
-    else:
-        # Fallback to local save if MinIO not enabled
-        file_path = os.path.join(UPLOAD_DIR, save_name)
-        import io
-        with open(file_path, "wb") as f:
-            f.write(video_data)
-        log.info("[UPLOAD][video] saved path=%s", file_path)
-        file_path_for_processing = file_path
+    # Store raw video using the hybrid policy.
+    include_debug = bool(debug or getattr(settings, "cloudinary_debug_responses", False))
 
-    # Gửi task tới Celery
+    storage_info = store_raw_video(
+        video_data,
+        class_meta,
+        session_id=session_id,
+        original_filename=getattr(file, "filename", "upload.mp4") or "upload.mp4",
+        include_debug=include_debug,
+    )
+
+    file_path_for_processing = storage_info.get("local_path") or storage_info.get("storage_url") or ""
     if not file_path_for_processing:
-        return {"success": False, "message": "Upload to MinIO failed"}
-    
+        return {"success": False, "message": "Upload failed"}
+
     try:
         job = enqueue_process_video.delay(
             video_path=file_path_for_processing,
@@ -161,6 +142,18 @@ async def upload_video(
             dialect=dialect,
             language=language,
         )
+        response_message = "Upload accepted and queued for processing"
+        
+        # Log upload success with structured logger
+        slog.log_upload(
+            endpoint="video",
+            success=True,
+            session_id=session_id,
+            job_id=job.id,
+            duration_ms=time.time() - start,
+            file_size_bytes=len(video_data),
+        )
+        
         log.info(
             "[UPLOAD][video] queued job=%s elapsed=%.3fs",
             getattr(job, "id", "unknown"),
@@ -170,10 +163,18 @@ async def upload_video(
             "success": True,
             "id": job.id,
             "session_id": session_id,
-            "message": "queued",
-            "minio_url": minio_url,
+            "message": response_message,
         }
     except Exception as e:
+        # Log upload failure with structured logger
+        slog.log_upload(
+            endpoint="video",
+            success=False,
+            session_id=session_id,
+            duration_ms=time.time() - start,
+            file_size_bytes=len(video_data),
+            error_message=str(e),
+        )
         log.error("[UPLOAD][video][ERROR] queue failed: %s", e)
         return {"success": False, "message": f"queue failed: {e}"}
 
@@ -184,6 +185,7 @@ async def upload_camera(payload: dict = Body(...)):
     Accept frames (array of arrays) and metadata, save as npz via storage_utils.save_sample
     Payload example: { user: str, label: str, session_id: str, dialect: str, frames: [{timestamp, landmarks}, ...] }
     """
+    start = time.time()
     user = payload.get("user", "")
     label = validate_label(payload.get("label"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "common")))
@@ -371,13 +373,32 @@ async def upload_camera(payload: dict = Body(...)):
         )
         saved_paths.append(path)
 
-    # Return multiple saved paths
+    # Log camera capture completion (all details backend-only)
+    elapsed_ms = (time.time() - start) * 1000
+    log.info(
+        "[UPLOAD][camera] completed session=%s aug_count=%s elapsed=%.3fs",
+        session_id,
+        len(saved_paths),
+        elapsed_ms / 1000,
+    )
+    # Log saved paths as backend-only debug info
+    for path in saved_paths:
+        log.debug("[UPLOAD][camera] saved_path=%s", path)
+    
+    # Log camera upload success with structured logger
+    response_message = "Camera capture processed and queued for training"
+    slog.log_upload(
+        endpoint="camera",
+        success=True,
+        session_id=session_id,
+        job_id=session_id,  # Use session_id as job identifier for camera
+        duration_ms=elapsed_ms,
+    )
+    
+    # Return standardized response (minimal, frontend-safe)
     return {
         "success": True,
         "id": session_id,
-        "paths": saved_paths,
-        "total_samples": len(saved_paths),
-        "message": f"saved {len(saved_paths)} augmented samples",
-        "language": language,
-        "dialect": dialect,
+        "session_id": session_id,
+        "message": response_message,
     }
