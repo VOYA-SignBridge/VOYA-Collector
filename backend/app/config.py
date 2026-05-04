@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     cloudinary_upload_preset: str = os.getenv("CLOUDINARY_UPLOAD_PRESET", "")
     cloudinary_timeout_seconds: int = int(os.getenv("CLOUDINARY_TIMEOUT_SECONDS", "60"))
     cloudinary_debug_responses: bool = bool(int(os.getenv("CLOUDINARY_DEBUG_RESPONSES", "0")))
+    enable_cloudinary_mirror: bool = bool(int(os.getenv("ENABLE_CLOUDINARY_MIRROR", "1")))
 
     # Parallel download tuning for batch export / training materialization
     storage_download_workers: int = int(os.getenv("STORAGE_DOWNLOAD_WORKERS", "4"))

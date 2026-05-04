@@ -40,9 +40,9 @@ def get_features_dir(data_root: Optional[Path] = None) -> Path:
 def get_analysis_dir(code_root: Optional[Path] = None) -> Path:
     # Training utilities write derived artifacts here
     root = (code_root or get_code_root()).resolve()
-    return root / "processed" / "analysis"
+    return get_repo_root(root) / "processed" / "analysis"
 
 
 def get_splits_dir(code_root: Optional[Path] = None) -> Path:
     root = (code_root or get_code_root()).resolve()
-    return root / "processed" / "splits"
+    return get_repo_root(root) / "processed" / "splits"

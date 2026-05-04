@@ -154,6 +154,8 @@ def _atomic_write_bytes(path: Path, content: bytes) -> Path:
 def _cloudinary_ready() -> bool:
     if not bool(getattr(settings, "cloudinary_enabled", False)):
         return False
+    if not bool(getattr(settings, "enable_cloudinary_mirror", True)):
+        return False
     if not getattr(settings, "cloudinary_cloud_name", ""):
         return False
     if getattr(settings, "cloudinary_upload_preset", ""):
@@ -220,7 +222,11 @@ def _multipart_encode(
 
 def _cloudinary_signature(params: Dict[str, str]) -> str:
     secret = getattr(settings, "cloudinary_api_secret", "") or ""
-    signing_parts = [f"{key}={value}" for key, value in sorted(params.items()) if value not in (None, "") and key != "file"]
+    signing_parts = [
+        f"{key}={value}"
+        for key, value in sorted(params.items())
+        if value not in (None, "") and key not in {"file", "api_key", "signature"}
+    ]
     payload = "&".join(signing_parts)
     return hashlib.sha1((payload + secret).encode("utf-8")).hexdigest()
 
@@ -320,6 +326,64 @@ def _cloudinary_upload_bytes(
         ) from exc
 
 
+def delete_cloudinary_asset(public_id: str, *, resource_type: str = "video") -> bool:
+    if not _cloudinary_ready():
+        logger.info("[CLOUDINARY] not configured, skipping delete for public_id=%s", public_id)
+        return True
+
+    cloud_name = getattr(settings, "cloudinary_cloud_name", "") or ""
+    api_key = getattr(settings, "cloudinary_api_key", "") or ""
+    api_secret = getattr(settings, "cloudinary_api_secret", "") or ""
+    if not cloud_name or not api_key or not api_secret:
+        logger.warning("[CLOUDINARY] delete skipped because signed credentials are incomplete")
+        return False
+
+    fields = {
+        "public_id": public_id,
+        "timestamp": str(int(time.time())),
+        "invalidate": "true",
+        "api_key": api_key,
+    }
+    fields["signature"] = _cloudinary_signature(fields)
+
+    destroy_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/{resource_type}/destroy"
+    body = urllib.parse.urlencode(fields).encode("utf-8")
+    request = urllib.request.Request(
+        destroy_url,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response_body = response.read().decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(response_body)
+        except Exception:
+            payload = {"raw": response_body}
+        result = str(payload.get("result", "")).lower()
+        ok = result in {"ok", "not found"}
+        if ok:
+            logger.info("[CLOUDINARY] Deleted asset public_id=%s resource_type=%s", public_id, resource_type)
+        else:
+            logger.warning("[CLOUDINARY] Delete returned result=%s public_id=%s payload=%s", result, public_id, payload)
+        return ok
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        logger.error(
+            "[CLOUDINARY] Delete failed public_id=%s resource_type=%s status=%s body=%s",
+            public_id,
+            resource_type,
+            getattr(exc, "code", None),
+            error_body,
+        )
+        return False
+    except Exception as exc:
+        logger.error("[CLOUDINARY] Delete error public_id=%s resource_type=%s: %s", public_id, resource_type, exc)
+        return False
+
+
 def store_raw_video(
     video_data: Any,
     class_meta: ClassMetadata,
@@ -338,6 +402,7 @@ def store_raw_video(
     logger.info("[STORAGE] raw video stored locally: %s", local_path)
 
     storage_info: Dict[str, Any] = {
+        "upload_uid": upload_uid,
         "storage_provider": "local",
         "storage_key": local_key,
         "storage_url": str(local_path),

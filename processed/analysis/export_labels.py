@@ -12,7 +12,7 @@ except Exception:
 
 ROOT = get_code_root() if get_code_root else Path(__file__).resolve().parents[2]
 DATA_ROOT = get_data_root() if get_data_root else ROOT
-LABELS = get_labels_csv(DATA_ROOT) if get_labels_csv else DATA_ROOT / 'labels.csv'
+LABELS = get_labels_csv(DATA_ROOT) if get_labels_csv else DATA_ROOT / 'dataset' /'labels.csv'
 OUT = get_analysis_dir() if get_analysis_dir else ROOT / 'processed' / 'analysis'
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -26,7 +26,7 @@ slug_to_indices = defaultdict(list)
 with LABELS.open('r', encoding='utf-8') as f:
     reader = csv.DictReader(f)
     for row in reader:
-        idx = int(row['class_idx']) - 1  # Convert to 0-based index
+        idx = int(row['class_idx'])  # Convert to 0-based index
         slug = row['slug']
         orig = row['label_original']
 

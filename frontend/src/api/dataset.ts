@@ -22,6 +22,26 @@ export const updateLabel = async (class_idx: number, label: string): Promise<Res
   return validateLabel(res.data);
 };
 
+export const updateClass = async (
+  classRef: string | number,
+  payload: {
+    label_original?: string;
+    label?: string;
+    language?: string;
+    dialect?: string;
+    is_common_global?: boolean;
+    is_common_language?: boolean;
+  },
+): Promise<Result<ClassRow>> => {
+  const res = await axiosClient.put(`/classes/${classRef}`, payload);
+  return { ok: true, data: res.data as ClassRow };
+};
+
+export const deleteClass = async (classRef: string | number): Promise<Result<null>> => {
+  const res = await axiosClient.delete(`/classes/${classRef}`);
+  return { ok: res.status >= 200 && res.status < 300, data: null, error: res.statusText } as Result<null>;
+};
+
 export const deleteLabel = async (class_idx: number): Promise<Result<null>> => {
   const res = await axiosClient.delete(`/dataset/labels/${class_idx}`);
   // Backend may return simple status object; we'll coerce to Result<null>

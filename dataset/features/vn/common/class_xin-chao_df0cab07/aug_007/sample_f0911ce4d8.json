@@ -1,0 +1,15 @@
+{
+  "class_uid": "df0cab07-2631-409f-b08a-8cd81166f62d",
+  "slug": "xin-chao",
+  "label_original": "xin chào",
+  "language": "vn",
+  "dialect": "common",
+  "augment_id": 7,
+  "created_at": "2026-05-04T09:07:37.763404Z",
+  "user": "Trân",
+  "session_id": "1777885146491",
+  "fps_original": null,
+  "fps_processed": null,
+  "completeness": null,
+  "storage_provider": "local+minio"
+}

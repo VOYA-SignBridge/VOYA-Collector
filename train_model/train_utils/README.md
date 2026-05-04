@@ -4,7 +4,7 @@ This folder contains helpers to load the dataset and a ready-to-run TCN trainer.
 
 ## Files
 - `dataset_loader.py`: Loads `.npz` feature sequences with metadata and provides a padding collate.
-- `run_loader_sanity.py`: Prints a few samples from `train_model/processed/splits/train.csv` to verify shapes.
+- `run_loader_sanity.py`: Prints a few samples from `processed/splits/train.csv` to verify shapes.
 - `train_tcn.py`: Trains a Temporal Convolutional Network (TCN) classifier on the splits.
 
 ## Prerequisites
@@ -28,13 +28,14 @@ py -3.10 -m venv .venv-train
 python -m pip install --upgrade pip
 ```
 
-Cài dependency train (không gồm torch):
+Cài dependency train:
 
 ```powershell
 pip install -r train_model/requirements-train.txt
 ```
 
-Cài torch:
+Nếu cần cài riêng PyTorch CPU:
+
 - CPU (an toàn/dễ nhất):
 
 ```powershell

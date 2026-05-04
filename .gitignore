@@ -19,9 +19,7 @@ build/
 *.swo
 *~
 
-# Log files
-*.log
-logs/
+# Log fileslog
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -44,10 +42,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Documentation (keep root README.md)
-*.md
-!README.md
-
 # Database files
 *.db
 *.sqlite
@@ -57,9 +51,6 @@ Thumbs.db
 temp/
 tmp/
 *.tmp
-
-# Dataset
-dataset/
 
 # Video and model files
 *.mp4

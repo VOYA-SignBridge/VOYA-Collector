@@ -1,61 +1,14 @@
 {
-  "rang-muoi": [
+  "cam-on": [
     0
   ],
-  "boc-vo-tom": [
+  "xin-chao": [
     1
   ],
-  "xin-chao": [
+  "rang-muoi": [
     2
   ],
-  "cam-on": [
-    3
-  ],
-  "xe-ap": [
-    4
-  ],
-  "ban-hieu-ngon-ngu-ki": [
-    5
-  ],
-  "con-nguoi": [
-    6
-  ],
-  "toi-i-sieu-thi": [
-    7
-  ],
-  "cat-au-ca": [
-    8
-  ],
-  "cat-ki": [
-    9
-  ],
-  "lot-da-ca": [
-    10
-  ],
-  "anh-vay-ca": [
-    11
-  ],
   "tom": [
-    12
-  ],
-  "ban-ten-gi": [
-    13
-  ],
-  "nhan-vien": [
-    14
-  ],
-  "chao-co": [
-    15
-  ],
-  "tiep-tan": [
-    16
-  ],
-  "ia-chi": [
-    17,
-    18,
-    19
-  ],
-  "tinh": [
-    20
+    3
   ]
 }

@@ -109,3 +109,24 @@ def upload_file(file_data, key: str) -> str | None:
     if client:
         return _upload_to_minio(client, file_data, key)
     return None
+
+
+def delete_file(key: str) -> bool:
+    if not settings.use_minio:
+        logger.info("[MINIO] USE_MINIO not enabled, skipping delete for key=%s", key)
+        return True
+
+    client = _get_minio_client()
+    if not client:
+        return False
+
+    if not _ensure_bucket_exists(client):
+        return False
+
+    try:
+        client.remove_object(settings.minio_bucket, key)
+        logger.info("[MINIO] Deleted object: s3://%s/%s", settings.minio_bucket, key)
+        return True
+    except Exception as e:
+        logger.error("[MINIO] Delete failed for key=%s: %s", key, e)
+        return False

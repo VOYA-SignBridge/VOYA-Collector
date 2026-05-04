@@ -23,13 +23,13 @@ else:
     # Backward-compat: older layout used <data_root>/samples.csv
     # Current app layout uses <data_root>/samples/samples.csv
     cand = DATA_ROOT / 'samples' / 'samples.csv'
-    SAMPLES_CSV = cand if cand.exists() else (DATA_ROOT / 'samples.csv')
+    SAMPLES_CSV = cand if cand.exists() else (DATA_ROOT / 'dataset' / 'samples' / 'samples.csv')
 OUT_DIR = get_splits_dir() if get_splits_dir else ROOT / 'processed' / 'splits'
 if get_labels_csv:
     LABELS_CSV = get_labels_csv(DATA_ROOT)
 else:
     # Backward-compat: older layout used <data_root>/labels.csv
-    LABELS_CSV = DATA_ROOT / 'labels.csv'
+    LABELS_CSV = DATA_ROOT / 'dataset' / 'labels.csv'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 RANDOM_SEED = 42

@@ -11,6 +11,7 @@ from app.config import settings
 from app.dataset_manager import load_labels, ClassMetadata
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.artifact_store import materialize_sample_artifacts
+from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_delete_sample, sync_update_class
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -132,6 +133,24 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
     raise HTTPException(status_code=400, detail="/dataset/labels/merge is deprecated; use new hierarchy tools")
 
 
+@router.put("/labels/{class_ref}")
+def update_label(class_ref: str, label: str = Form(...)):
+    try:
+        result = sync_update_class(class_ref, {"label_original": label})
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.delete("/labels/{class_ref}")
+def delete_label(class_ref: str):
+    try:
+        result = sync_delete_class(class_ref)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @router.get("/samples", response_model=List[SampleOut])
 def list_samples():
     samples = list_samples_v2()
@@ -178,6 +197,15 @@ def get_sample_data(sample_id: str):
     if not resolved:
         raise HTTPException(status_code=404, detail="Sample file missing on disk")
     return FileResponse(str(resolved[0]), media_type="application/octet-stream")
+
+
+@router.delete("/samples/{sample_id}")
+def delete_sample(sample_id: str):
+    try:
+        result = sync_delete_sample(sample_id)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 @router.post("/samples/add")
 def add_sample(

@@ -200,9 +200,23 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         return (default_language, '')
 
     def _resolve_feature_path(self, row: Dict[str, str]) -> Path:
+        file_path = (row.get('file_path') or '').strip()
+        if file_path:
+            candidate = Path(file_path)
+            if candidate.exists():
+                return candidate
+            if file_path.startswith('/dataset/'):
+                repo_root = Path(__file__).resolve().parents[2]
+                mapped = repo_root / file_path.lstrip('/')
+                if mapped.exists():
+                    return mapped
+            # Some rows may store absolute paths from a different environment; keep legacy fallback below.
+
         folder_name = (row.get('folder_name') or '').strip()
         file_name = (row.get('file') or '').strip()
         if not folder_name or not file_name:
+            if file_path:
+                raise FileNotFoundError(f"Feature file not found at file_path '{file_path}'.")
             raise FileNotFoundError("Row is missing folder_name or file; cannot resolve feature path.")
 
         language = (row.get('language') or 'vn').strip() or 'vn'

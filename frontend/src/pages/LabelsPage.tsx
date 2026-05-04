@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { getLabels, getClassesList, getClassesStats } from "../api/dataset";
+import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass } from "../api/dataset";
 import type { Label, ClassRow } from "../types";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
@@ -7,6 +7,7 @@ import Button from "../components/ui/Button";
 import EmptyState from "../components/ui/EmptyState";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import Badge from "../components/ui/Badge";
+import Modal from "../components/ui/Modal";
 
 export default function LabelsPage() {
   const [labels, setLabels] = useState<Label[]>([]);
@@ -16,8 +17,16 @@ export default function LabelsPage() {
   const [dialect, setDialect] = useState<string>(''); // Empty = all dialects
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [search, setSearch] = useState<string>("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [editTarget, setEditTarget] = useState<RenderItem | null>(null);
+  const [editValue, setEditValue] = useState<string>("");
+  const [editLanguage, setEditLanguage] = useState<string>("vn");
+  const [editDialect, setEditDialect] = useState<string>("common");
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<RenderItem | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
 
   // Dialect normalization helper: map various forms to canonical slugs used by BE
   const normalizeDialect = (d?: string) => {
@@ -48,6 +57,7 @@ export default function LabelsPage() {
     class_idx: number;
     slug: string;
     label_original: string;
+    language?: string;
     created_at?: string;
     dialect?: string;
     folder_name?: string;
@@ -55,6 +65,8 @@ export default function LabelsPage() {
     is_common_language?: boolean;
     is_common_global?: boolean;
   };
+
+  const getClassRef = (item: { class_uid?: string; class_idx: string | number }) => item.class_uid || String(item.class_idx);
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const q = search.trim().toLowerCase();
@@ -71,6 +83,7 @@ export default function LabelsPage() {
           class_idx: typeof c.class_idx === 'string' ? parseInt(c.class_idx, 10) : Number(c.class_idx),
           slug: c.slug,
           label_original: c.label_original,
+          language: c.language,
           created_at: c.created_at,
           dialect: cDialect || c.dialect,
           folder_name: c.folder_name,
@@ -85,6 +98,7 @@ export default function LabelsPage() {
           class_idx: l.class_idx,
           slug: l.slug,
           label_original: l.label_original,
+          language,
           created_at: undefined,
           samples_count: 0,
         });
@@ -99,7 +113,7 @@ export default function LabelsPage() {
         (r.slug || '').toLowerCase().includes(q)
       );
     });
-  }, [classes, labels, search, sampleCounts, dialect]);
+  }, [classes, labels, search, sampleCounts, dialect, language]);
 
   useEffect(() => {
     let mounted = true;
@@ -195,6 +209,108 @@ export default function LabelsPage() {
     URL.revokeObjectURL(url);
   };
 
+  const openEdit = (item: RenderItem) => {
+    setStatusMessage(null);
+    setError(null);
+    setEditTarget(item);
+    setEditValue(item.label_original || "");
+    setEditLanguage(item.language || language || "vn");
+    setEditDialect(item.dialect || dialect || "common");
+  };
+
+  const openDelete = (item: RenderItem) => {
+    setStatusMessage(null);
+    setError(null);
+    setDeleteTarget(item);
+  };
+
+  const applyLabelUpdate = (classRef: string, nextLabel: string, nextSlug?: string, nextLanguage?: string, nextDialect?: string) => {
+    setClasses((prev) => prev ? prev.map((item) => {
+      if (getClassRef(item) !== classRef) return item;
+      return {
+        ...item,
+        label_original: nextLabel,
+        slug: nextSlug ?? item.slug,
+        language: nextLanguage ?? item.language,
+        dialect: nextDialect ?? item.dialect,
+      };
+    }) : prev);
+    const numericRef = Number(classRef);
+    setLabels((prev) => prev.map((item) => item.class_idx === numericRef ? { ...item, label_original: nextLabel, slug: nextSlug ?? item.slug } : item));
+  };
+
+  const applyLabelDelete = (classRef: string) => {
+    setClasses((prev) => prev ? prev.filter((item) => {
+      return getClassRef(item) !== classRef;
+    }) : prev);
+    const numericRef = Number(classRef);
+    setLabels((prev) => prev.filter((item) => item.class_idx !== numericRef));
+  };
+
+  const saveEdit = async () => {
+    if (!editTarget) return;
+    const nextLabel = editValue.trim();
+    if (!nextLabel) {
+      setError("Label không được để trống.");
+      return;
+    }
+
+    setEditSaving(true);
+    setError(null);
+    try {
+      const classRef = getClassRef(editTarget);
+      const result = await updateClass(classRef, {
+        label_original: nextLabel,
+        language: editLanguage,
+        dialect: editDialect,
+        is_common_language: editDialect === "common",
+      });
+      if (!result.ok) {
+        setError(result.error || "Không thể cập nhật nhãn.");
+        return;
+      }
+
+      const updated = result.data;
+      applyLabelUpdate(
+        classRef,
+        updated.label_original || nextLabel,
+        updated.slug,
+        updated.language || editLanguage,
+        updated.dialect || editDialect,
+      );
+      setStatusMessage(`Đã cập nhật nhãn #${editTarget.class_idx} thành ${updated.label_original || nextLabel}.`);
+      setEditTarget(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Không thể cập nhật nhãn.");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteSaving(true);
+    setError(null);
+    try {
+      const classRef = getClassRef(deleteTarget);
+      const result = await deleteClass(classRef);
+      if (!result.ok) {
+        setError(result.error || "Không thể xóa nhãn.");
+        return;
+      }
+
+      applyLabelDelete(classRef);
+      setStatusMessage(`Đã xóa nhãn #${deleteTarget.class_idx} và đồng bộ dữ liệu liên quan.`);
+      setDeleteTarget(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Không thể xóa nhãn.");
+    } finally {
+      setDeleteSaving(false);
+    }
+  };
+
 
 
   return (
@@ -212,6 +328,12 @@ export default function LabelsPage() {
           type="error"
           autoClose={false}
         />
+      )}
+
+      {statusMessage && !error && (
+        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          {statusMessage}
+        </div>
       )}
 
       {/* Stats Overview */}
@@ -451,12 +573,129 @@ export default function LabelsPage() {
                       </div>
                     </div>
                   )}
+
+                  <div className={`mt-5 flex flex-wrap gap-2 ${viewMode === 'list' ? 'justify-end' : ''}`}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openEdit(item)}
+                    >
+                      Chỉnh sửa
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => openDelete(item)}
+                    >
+                      Xóa
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={Boolean(editTarget)}
+        onClose={() => !editSaving && setEditTarget(null)}
+        title={editTarget ? `Chỉnh sửa nhãn #${editTarget.class_idx}` : "Chỉnh sửa nhãn"}
+      >
+        {editTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-800">
+              Thay đổi này sẽ được đồng bộ xuống CSV, Postgres và các mirror storage liên quan.
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">Tên nhãn</label>
+              <input
+                className="input w-full"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                placeholder="Nhập tên nhãn mới"
+                disabled={editSaving}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">Ngôn ngữ</label>
+                <select
+                  className="input w-full"
+                  value={editLanguage}
+                  onChange={(e) => setEditLanguage(e.target.value)}
+                  disabled={editSaving}
+                >
+                  <option value="vn">🇻🇳 Tiếng Việt</option>
+                  <option value="en">🇬🇧 English</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">Phương ngữ</label>
+                <select
+                  className="input w-full"
+                  value={editDialect}
+                  onChange={(e) => setEditDialect(e.target.value)}
+                  disabled={editSaving}
+                >
+                  <option value="common">Chung</option>
+                  <option value="bac">Miền Bắc</option>
+                  <option value="nam">Miền Nam</option>
+                  <option value="trung">Miền Trung</option>
+                  <option value="can-tho">Cần Thơ</option>
+                  <option value="hoa-de">Hòa Đê</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 text-sm text-gray-600 sm:grid-cols-2">
+              <div className="rounded-lg bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-wide text-gray-400">Slug hiện tại</div>
+                <div className="mt-1 font-mono text-gray-800">{editTarget.slug}</div>
+              </div>
+              <div className="rounded-lg bg-gray-50 p-3">
+                <div className="text-xs uppercase tracking-wide text-gray-400">Số mẫu</div>
+                <div className="mt-1 font-mono text-gray-800">{editTarget.samples_count ?? 0}</div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="ghost" onClick={() => setEditTarget(null)} disabled={editSaving}>
+                Hủy
+              </Button>
+              <Button variant="primary" onClick={saveEdit} loading={editSaving}>
+                Lưu thay đổi
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => !deleteSaving && setDeleteTarget(null)}
+        title={deleteTarget ? `Xóa nhãn #${deleteTarget.class_idx}` : "Xóa nhãn"}
+        size="sm"
+      >
+        {deleteTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              Xóa nhãn này sẽ xóa luôn các mẫu liên quan và cập nhật lại các mirror storage đã đồng bộ.
+            </div>
+            <div className="space-y-2 text-sm text-gray-700">
+              <div><span className="font-medium">Nhãn:</span> {deleteTarget.label_original}</div>
+              <div><span className="font-medium">Slug:</span> {deleteTarget.slug}</div>
+              <div><span className="font-medium">Số mẫu:</span> {deleteTarget.samples_count ?? 0}</div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteSaving}>
+                Hủy
+              </Button>
+              <Button variant="danger" onClick={confirmDelete} loading={deleteSaving}>
+                Xác nhận xóa
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

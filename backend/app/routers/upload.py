@@ -10,11 +10,13 @@ from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
 from app.processing import storage_utils as su  # legacy for timestamp helper
 from app.dataset_manager import get_or_register_class, normalize_dialect
 from app.dataset_samples import save_sequence_npz
+from app.raw_uploads import append_raw_upload_row, now_str as raw_now_str
 from app.tasks import enqueue_process_video
 from app.config import settings
 from app.storage.artifact_store import store_raw_video
 from app.processing.utils import canonicalize_vector_126
 from app.logging_utils import get_logger as get_structured_logger
+from app.storage.metadata_db import upsert_raw_upload
 from app.api_validation import (
     validate_label,
     validate_language,
@@ -128,6 +130,31 @@ async def upload_video(
         original_filename=getattr(file, "filename", "upload.mp4") or "upload.mp4",
         include_debug=include_debug,
     )
+
+    try:
+        raw_row = {
+            "upload_uid": storage_info.get("upload_uid") or uuid.uuid4().hex[:8],
+            "class_uid": class_meta.class_uid,
+            "slug": class_meta.slug,
+            "label_original": class_meta.label_original,
+            "language": class_meta.language,
+            "dialect": class_meta.dialect,
+            "source_type": "video",
+            "user_id": user,
+            "session_id": session_id,
+            "original_filename": getattr(file, "filename", "upload.mp4") or "upload.mp4",
+            "local_path": storage_info.get("local_path") or storage_info.get("storage_url") or "",
+            "storage_key": storage_info.get("storage_key") or "",
+            "storage_url": storage_info.get("storage_url") or storage_info.get("local_path") or "",
+            "cloudinary_public_id": storage_info.get("cloudinary_public_id") or "",
+            "cloudinary_url": storage_info.get("cloudinary_url") or "",
+            "created_at": raw_now_str(),
+            "updated_at": raw_now_str(),
+        }
+        append_raw_upload_row(raw_row)
+        upsert_raw_upload(raw_row)
+    except Exception as e:
+        log.warning("[UPLOAD][video] raw upload index mirror failed: %s", e)
 
     file_path_for_processing = storage_info.get("local_path") or storage_info.get("storage_url") or ""
     if not file_path_for_processing:

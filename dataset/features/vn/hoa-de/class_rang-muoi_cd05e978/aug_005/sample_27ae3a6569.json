@@ -1,0 +1,15 @@
+{
+  "class_uid": "cd05e978-1468-48b0-89e3-6aa70a09c3cf",
+  "slug": "rang-muoi",
+  "label_original": "rang muối",
+  "language": "vn",
+  "dialect": "hoa-de",
+  "augment_id": 5,
+  "created_at": "2026-05-04T09:46:34.881302Z",
+  "user": "Trân",
+  "session_id": "1777887821857",
+  "fps_original": null,
+  "fps_processed": null,
+  "completeness": null,
+  "storage_provider": "local+minio"
+}
