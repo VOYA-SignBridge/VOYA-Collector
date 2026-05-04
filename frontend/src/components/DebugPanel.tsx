@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axiosClient from '../api/axiosClient';
 import './DebugPanel.css';
 
 export interface DebugOperation {
@@ -76,19 +77,19 @@ const DebugPanel: React.FC = () => {
 
   const checkBackendConnectivity = async () => {
     try {
-      const response = await fetch('/health', { method: 'GET' });
+      const response = await axiosClient.get('/health');
       setDebugState((prev) => ({
         ...prev,
         lastBackendPing: Date.now(),
-        backendConnected: response.ok,
+        backendConnected: response.status >= 200 && response.status < 300,
       }));
 
       // Log connectivity check
       (window as any).__voyadebug?.log({
         timestamp: Date.now(),
         operation: 'CONNECTIVITY',
-        status: response.ok ? 'SUCCESS' : 'FAILURE',
-        message: `Backend: ${response.ok ? 'Connected' : 'Disconnected'}`,
+        status: response.status >= 200 && response.status < 300 ? 'SUCCESS' : 'FAILURE',
+        message: `Backend: ${response.status >= 200 && response.status < 300 ? 'Connected' : 'Disconnected'}`,
       });
     } catch (error) {
       setDebugState((prev) => ({

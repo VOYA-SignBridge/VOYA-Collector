@@ -27,6 +27,7 @@ def _check_postgres() -> None:
         conn.close()
 
 
+@router.get("", tags=["health"])
 @router.get("/", tags=["health"])
 async def health_check() -> Dict[str, Any]:
     """

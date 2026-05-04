@@ -13,19 +13,12 @@ const getApiBaseURL = (): string => {
     return envUrl;
   }
 
-  // Fallback: Use relative path (assumes API is on same host/port)
-  // This works well when frontend and backend are both behind nginx
+  // Fallback: this deployment serves the frontend on :8080 and the backend on :8000.
+  // Use the backend port explicitly so browser requests do not fall back to the frontend nginx.
   if (typeof window !== "undefined" && window.location) {
-    // In development on localhost, backend might be on different port
-    const isDev = import.meta.env.DEV;
-    if (isDev && window.location.hostname === "localhost") {
-      return "http://localhost:8000";
-    }
-    
-    // Production: Use same host as frontend
     const protocol = window.location.protocol;
-    const host = window.location.host;
-    return `${protocol}//${host}`;
+    const hostname = window.location.hostname;
+    return `${protocol}//${hostname}:8000`;
   }
 
   // Final fallback

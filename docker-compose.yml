@@ -161,7 +161,10 @@ services:
 
   # Frontend
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     image: voya_frontend:latest
     container_name: voya_frontend
     env_file:
