@@ -10,6 +10,7 @@ import { TARGET_FRAMES, CAPTURE_COUNT, FRAME_INTERVAL_MS } from "../config/captu
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
 
+
 // Use module-scope fixed constants so they are stable across renders and
 // won't need to be added to hook dependency arrays.
 const FIXED_TARGET_FRAMES = TARGET_FRAMES;
@@ -36,9 +37,9 @@ const MP_HANDS_VERSION = "0.4.1675469240";
  * Convert camera errors into user-friendly Vietnamese messages
  */
 function getCameraErrorMessage(error: unknown): string {
-  const err = error as any;
+  const err = error as Record<string, unknown> | null;
   const errorName = err?.name || 'Unknown';
-  const errorMessage = err?.message || String(error);
+  const errorMessage = String(err?.message || error);
   
   console.warn(`Camera error [${errorName}]: ${errorMessage}`);
   
@@ -363,7 +364,7 @@ export default function FullscreenCaptureModal({
         `HANDS: ${((data.leftHandLandmarks?.length ?? 0) > 0 ? 1 : 0) + ((data.rightHandLandmarks?.length ?? 0) > 0 ? 1 : 0)}`,
         `FRAMES: ${framesRef.current.length}/${targetFramesRef.current}`,
         `VIS: L=${vis.left ? 'ON' : 'OFF'} R=${vis.right ? 'ON' : 'OFF'}`,
-        `FLAGS: MIRROR=${MIRROR_PREVIEW ? 'ON' : 'OFF'} SWAP=${SWAP_HANDEDNESS ? 'ON' : 'OFF'}`
+          `FLAGS: MIRROR=${MIRROR_PREVIEW ? 'ON' : 'OFF'} SWAP=${SWAP_HANDEDNESS ? 'ON' : 'OFF'}`
       ];
       ctx.save();
       ctx.font = '14px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial';
