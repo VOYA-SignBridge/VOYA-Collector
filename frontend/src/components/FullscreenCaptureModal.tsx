@@ -158,8 +158,6 @@ export default function FullscreenCaptureModal({
   
   // Add frame interval control for better training data. Use centralized config.
   const lastFrameTimeRef = useRef(0);
-  // Default sampling rate is defined in `src/config/capture.ts` as SAMPLE_FPS
-  // FRAME_INTERVAL_MS is computed there (Math.round(1000 / SAMPLE_FPS)).
   const frameIntervalMs = useRef(FRAME_INTERVAL_MS);
 
   // Helper to compute lightweight quality metrics for a captured frameset
@@ -181,7 +179,6 @@ export default function FullscreenCaptureModal({
       const hasHands = handCount > 0;
       if (hasHands) framesWithHands++;
 
-      // approximate confidence if landmark has visibility field
       const landmarks = [...(f.left_hand || []), ...(f.right_hand || [])];
       let frameConfSum = 0;
       let frameConfCnt = 0;
@@ -196,21 +193,18 @@ export default function FullscreenCaptureModal({
         confidenceCount += frameConfCnt;
       }
 
-      // Acceptance: require at least one hand landmark
       if (handCount > 0) framesAccepted++;
     }
 
     const quality: QualityInfo = {
       framesCollected: capturedFrames.length,
       framesAccepted,
-  avgPoseLandmarksPerFrame: capturedFrames.length ? totalHandLandmarks / capturedFrames.length : 0,
+      avgPoseLandmarksPerFrame: capturedFrames.length ? totalHandLandmarks / capturedFrames.length : 0,
       percentFramesWithHands: capturedFrames.length ? (framesWithHands / capturedFrames.length) * 100 : 0,
       confidenceSummary: confidenceCount ? { avg: confidenceSum / confidenceCount } : undefined,
     };
 
     return quality;
-  // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants; disable exhaustive-deps warning
-  // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are module-level constants and do not change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -231,16 +225,18 @@ export default function FullscreenCaptureModal({
   // Filters for smoothing landmarks (keyed by group.index.coord)
   const filtersRef = useRef<Record<string, OneEuroFilter>>({});
 
-  // Fixed filter parameters for simplified public uploader
-  const filterMinCutoff = 1.0; // higher = more responsive, less smoothing
-  const filterBeta = 0.01; // higher = more adaptive to speed
-  // Render smoothing (lerp) - higher = more immediate (0.0 very smooth, 1.0 raw)
-  const renderAlpha = 0.85;
+  // FIX: Prioritise low latency over heavy smoothing.
+  // Higher minCutoff = less smoothing = less lag on fast motion.
+  // Higher beta = filter adapts faster to sudden velocity bursts.
+  const filterMinCutoff = 1.5; // was 0.4 — reduced lag
+  const filterBeta = 0.5;      // was 0.15 — faster velocity adaptation
+  // renderAlpha = 1.0 means: use the raw filtered value every frame with zero lerp delay.
+  const renderAlpha = 1.0;     // was 0.7 — eliminated per-frame lerp lag
 
   const getFilter = useCallback((key: string) => {
     if (!filtersRef.current[key]) {
-      // create using live params
-      filtersRef.current[key] = new OneEuroFilter(30, filterMinCutoff, filterBeta, 1.0);
+      const freq = Math.max(1, Math.round(1000 / (frameIntervalMs.current || 33)));
+      filtersRef.current[key] = new OneEuroFilter(freq, filterMinCutoff, filterBeta, 1.0);
     }
     return filtersRef.current[key];
   }, []);
@@ -261,9 +257,7 @@ export default function FullscreenCaptureModal({
     });
   }, [getFilter]);
 
-  // Filters use fixed parameters in this simplified modal; no dynamic clearing required
-
-  // Low-latency render state (lerp towards raw each frame) to reduce perceived lag
+  // Low-latency render state
   const renderPrevRef = useRef<Record<string, MediaPipeLandmark>>({});
 
   // Simple temporal smoothing for hand presence and preview stability
@@ -280,6 +274,10 @@ export default function FullscreenCaptureModal({
     if (!raw) return [] as MediaPipeLandmark[];
     const prev = renderPrevRef.current;
     const alpha = Math.max(0, Math.min(1, renderAlpha));
+    // FIX: raised from 0.12 to 1.0 — the old clamp throttled fast hand movement,
+    // causing the skeleton to visibly lag behind. With renderAlpha=1.0 and no clamp
+    // the rendered landmarks track the raw detection output with zero added delay.
+    const maxChange = 1.0;
     return raw.map((lm, idx) => {
       const key = `${group}.${idx}`;
       const prevLm = prev[key];
@@ -292,8 +290,12 @@ export default function FullscreenCaptureModal({
         prev[key] = newLm;
         return newLm;
       }
-      const nx = lerp(prevLm.x ?? tx, tx, alpha);
-      const ny = lerp(prevLm.y ?? ty, ty, alpha);
+      let nx = lerp(prevLm.x ?? tx, tx, alpha);
+      let ny = lerp(prevLm.y ?? ty, ty, alpha);
+      const dx = Math.abs((prevLm.x ?? tx) - tx);
+      const dy = Math.abs((prevLm.y ?? ty) - ty);
+      if (dx > maxChange) nx = (prevLm.x ?? tx) + Math.sign(tx - (prevLm.x ?? tx)) * maxChange;
+      if (dy > maxChange) ny = (prevLm.y ?? ty) + Math.sign(ty - (prevLm.y ?? ty)) * maxChange;
       const nz = lerp(prevLm.z ?? tz, tz, alpha);
       const nv = typeof tv === 'number' ? lerp((prevLm.visibility as number) ?? tv, tv, alpha) : (prevLm.visibility as number | undefined);
       const out: MediaPipeLandmark = { ...lm, x: nx, y: ny, z: nz, visibility: typeof nv === 'number' ? nv : undefined };
@@ -310,10 +312,9 @@ export default function FullscreenCaptureModal({
     
     if (!canvas || !data) return;
     
-    const ctx = canvas.getContext("2d", { alpha: false }); // Disable alpha for performance
+    const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
 
-    // Clear and draw video
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
@@ -328,7 +329,6 @@ export default function FullscreenCaptureModal({
       ctx.drawImage(data.image, 0, 0, canvas.width, canvas.height);
     }
 
-    // Draw landmarks with simplified styling for better performance
     if (data.leftHandLandmarks) {
       // @ts-expect-error - HAND_CONNECTIONS types from mediapipe are not available in this project
       drawing.drawConnectors(ctx, data.leftHandLandmarks, HAND_CONNECTIONS, {
@@ -355,7 +355,7 @@ export default function FullscreenCaptureModal({
 
     ctx.restore();
 
-    // Draw HUD (MODE / HANDS / FRAMES / VISIBILITY / FLAGS) top-left
+    // Draw HUD
     try {
       const hudPadding = 8;
       const vis = visibilityStateRef.current;
@@ -364,7 +364,7 @@ export default function FullscreenCaptureModal({
         `HANDS: ${((data.leftHandLandmarks?.length ?? 0) > 0 ? 1 : 0) + ((data.rightHandLandmarks?.length ?? 0) > 0 ? 1 : 0)}`,
         `FRAMES: ${framesRef.current.length}/${targetFramesRef.current}`,
         `VIS: L=${vis.left ? 'ON' : 'OFF'} R=${vis.right ? 'ON' : 'OFF'}`,
-          `FLAGS: MIRROR=${MIRROR_PREVIEW ? 'ON' : 'OFF'} SWAP=${SWAP_HANDEDNESS ? 'ON' : 'OFF'}`
+        `FLAGS: MIRROR=${MIRROR_PREVIEW ? 'ON' : 'OFF'} SWAP=${SWAP_HANDEDNESS ? 'ON' : 'OFF'}`
       ];
       ctx.save();
       ctx.font = '14px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial';
@@ -377,11 +377,9 @@ export default function FullscreenCaptureModal({
       const boxW = Math.ceil(maxW + hudPadding * 2);
       const boxH = Math.ceil(lines.length * 18 + hudPadding * 2);
 
-      // background
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       const rx = 12, ry = 12;
       const x = 12, y = 12;
-      // Rounded rect
       ctx.beginPath();
       ctx.moveTo(x + rx, y);
       ctx.arcTo(x + boxW, y, x + boxW, y + boxH, ry);
@@ -391,20 +389,18 @@ export default function FullscreenCaptureModal({
       ctx.closePath();
       ctx.fill();
 
-      // text
       ctx.fillStyle = '#fff';
       for (let i = 0; i < lines.length; i++) {
         ctx.fillText(lines[i], x + hudPadding, y + hudPadding + i * 18);
       }
       ctx.restore();
     } catch (e) {
-      // guard - HUD drawing must not break main render
-      // eslint-disable-next-line no-console
       console.warn('HUD draw failed', e);
     }
     
     pendingRenderRef.current = false;
   }, []);
+
   const labelRef = useRef(label);
   const userRef = useRef(user);
   const dialectRef = useRef(dialect);
@@ -415,15 +411,14 @@ export default function FullscreenCaptureModal({
   const completedCapturesRef = useRef(0);
 
   const handleClose = useCallback(() => {
-    // If recording or there are partial frames, confirm before closing
     const partialFrames = framesRef.current?.length || 0;
     if (recordingRef.current || (partialFrames > 0 && partialFrames < targetFramesRef.current)) {
       const ok = window.confirm(`Capture chưa hoàn tất (${partialFrames}/${targetFramesRef.current}) — bạn có muốn thoát và bỏ dữ liệu này không?`);
       if (!ok) return;
     }
 
-  setRecording(false);
-  setMode('IDLE');
+    setRecording(false);
+    setMode('IDLE');
     setFrames([]);
     setCountdown(0);
     setIsReady(false);
@@ -431,23 +426,19 @@ export default function FullscreenCaptureModal({
     setCompletedCaptures(0);
     setCameraError(null);
     
-    // Exit browser fullscreen if active
     try {
       if (document.fullscreenElement) {
-        // Requesting exit may return a promise
         document.exitFullscreen?.();
       }
     } catch (e) {
       // ignore fullscreen exit errors
     }
 
-    // Stop camera and close video stream
     if (cameraRef.current) {
       cameraRef.current.stop();
       cameraRef.current = null;
     }
     
-    // Stop video tracks
     if (videoRef.current && videoRef.current.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
@@ -463,12 +454,10 @@ export default function FullscreenCaptureModal({
     const root = rootRef.current;
     if (!root) return;
 
-    // Try to enter browser fullscreen for the modal container
     try {
-      // Vendor-prefixed fullscreen methods may exist on HTMLElement in some browsers
-  type Fn = (...args: unknown[]) => unknown;
-  const el = root as HTMLElement & Partial<Record<'webkitRequestFullscreen' | 'mozRequestFullScreen' | 'msRequestFullscreen' | 'requestFullscreen', Fn>>;
-  const request = (el.requestFullscreen as Fn | undefined) ?? el.webkitRequestFullscreen ?? el.mozRequestFullScreen ?? el.msRequestFullscreen;
+      type Fn = (...args: unknown[]) => unknown;
+      const el = root as HTMLElement & Partial<Record<'webkitRequestFullscreen' | 'mozRequestFullScreen' | 'msRequestFullscreen' | 'requestFullscreen', Fn>>;
+      const request = (el.requestFullscreen as Fn | undefined) ?? el.webkitRequestFullscreen ?? el.mozRequestFullScreen ?? el.msRequestFullscreen;
       if (request) {
         const maybe = request.call(el);
         if (maybe && typeof (maybe as Promise<unknown>).catch === 'function') {
@@ -481,7 +470,6 @@ export default function FullscreenCaptureModal({
       // ignore
     }
 
-    // When modal closes, ensure we exit fullscreen in cleanup
     return () => {
       try {
         if (document.fullscreenElement) {
@@ -493,63 +481,36 @@ export default function FullscreenCaptureModal({
     };
   }, [isOpen]);
   
-  // Update refs when state changes
-  useEffect(() => {
-    recordingRef.current = recording;
-  }, [recording]);
-  
-  useEffect(() => {
-    pausedRef.current = paused;
-  }, [paused]);
-  
-  useEffect(() => {
-    framesRef.current = frames;
-  }, [frames]);
-
-  useEffect(() => {
-    labelRef.current = label;
-  }, [label]);
-
-  useEffect(() => {
-    dialectRef.current = dialect;
-  }, [dialect]);
-
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
+  useEffect(() => { recordingRef.current = recording; }, [recording]);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { framesRef.current = frames; }, [frames]);
+  useEffect(() => { labelRef.current = label; }, [label]);
+  useEffect(() => { dialectRef.current = dialect; }, [dialect]);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   useEffect(() => {
     console.log('Component mounted with props:', { targetFrames, captureCount, initialLabel, initialUser });
-    console.log('Initial targetFramesRef.current:', targetFramesRef.current);
   }, [targetFrames, captureCount, initialLabel, initialUser]);
 
   useEffect(() => {
-    // Enforce fixed target frames for simplified UI
     targetFramesRef.current = FIXED_TARGET_FRAMES;
-    console.log('targetFramesRef enforced to fixed value:', targetFramesRef.current);
   }, [targetFrames]);
 
   useEffect(() => {
-    // Enforce fixed capture count for simplified UI
     captureCountRef.current = FIXED_CAPTURE_COUNT;
-    console.log('captureCountRef enforced to fixed value:', captureCountRef.current);
   }, [captureCount]);
 
-  useEffect(() => {
-    onSampleCaptureRef.current = onSampleCapture;
-  }, [onSampleCapture]);
+  useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
 
   // Load persisted dialects & selection
   useEffect(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('dialectList') || 'null');
       if (Array.isArray(stored) && stored.length > 0) {
-        // Auto-merge Cần Thơ if not present
         const merged = Array.from(new Set([...stored, 'Cần Thơ']));
         setDialectList(merged);
         localStorage.setItem('dialectList', JSON.stringify(merged));
       } else {
-        // Set default and save
         const defaultList = ["Bắc", "Trung", "Nam", "Cần Thơ"];
         setDialectList(defaultList);
         localStorage.setItem('dialectList', JSON.stringify(defaultList));
@@ -561,67 +522,49 @@ export default function FullscreenCaptureModal({
     }
   }, []);
 
-  useEffect(() => {
-    handleCloseRef.current = handleClose;
-  }, [handleClose]);
+  useEffect(() => { handleCloseRef.current = handleClose; }, [handleClose]);
 
   useEffect(() => {
     completedCapturesRef.current = completedCaptures;
-    console.log('completedCapturesRef updated to:', completedCaptures);
   }, [completedCaptures]);
-
-  // Quick labels for fast selection
-  // quickLabels removed for simplified public uploader
 
   // Handlers
   const handleQuickCapture = useCallback(() => {
     if (!labelRef.current || !userRef.current) return;
-    // Reset capture state
     setFrames([]);
     framesRef.current = [];
     setCurrentCaptureIndex(0);
     setCompletedCaptures(0);
     completedCapturesRef.current = 0;
-    
-    // Reset frame timing
     lastFrameTimeRef.current = 0;
-    
-  setCountdown(3);
-  setMode('COUNTDOWN');
-    
-  console.log(`Starting capture sequence: ${FIXED_CAPTURE_COUNT} captures of ${FIXED_TARGET_FRAMES} frames each`);
+    setCountdown(3);
+    setMode('COUNTDOWN');
     
     setTimeout(() => {
       setRecording(true);
       recordingRef.current = true;
       setMode('RECORD');
-      lastFrameTimeRef.current = Date.now(); // Start timing from recording start
+      lastFrameTimeRef.current = Date.now();
     }, 3000);
-  // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants and
-  // intentionally omitted from dependencies to avoid unnecessary re-creations.
   }, []);
 
   const handlePause = useCallback(() => {
     setPaused(true);
     pausedRef.current = true;
-    console.log('Recording paused at', framesRef.current.length, 'frames');
   }, []);
 
   const handleResume = useCallback(() => {
     setPaused(false);
     pausedRef.current = false;
-    lastFrameTimeRef.current = Date.now(); // reset timing to avoid skip
-    console.log('Recording resumed from', framesRef.current.length, 'frames');
+    lastFrameTimeRef.current = Date.now();
   }, []);
 
   const handleRestart = useCallback(() => {
-    // Discard current frames and restart from zero
     setFrames([]);
     framesRef.current = [];
     setPaused(false);
     pausedRef.current = false;
     lastFrameTimeRef.current = Date.now();
-    console.log('Recording restarted from beginning');
   }, []);
 
   const handleStop = useCallback(() => {
@@ -629,7 +572,6 @@ export default function FullscreenCaptureModal({
     const required = targetFramesRef.current || 0;
 
     if (collected < required) {
-      // Block stopping early — inform the user to continue until enough frames
       window.alert(`Bạn chưa thu đủ khung hình: ${collected}/${required}. Vui lòng tiếp tục quay cho đến khi đủ.`);
       return;
     }
@@ -639,7 +581,7 @@ export default function FullscreenCaptureModal({
     setPaused(false);
     pausedRef.current = false;
 
-      if (framesRef.current.length > 0) {
+    if (framesRef.current.length > 0) {
       const quality = computeQuality(framesRef.current);
       onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
       setFrames([]);
@@ -649,8 +591,6 @@ export default function FullscreenCaptureModal({
 
   useEffect(() => {
     if (!isOpen) return;
-
-    console.log('Setting up camera and MediaPipe Hands...');
 
     const hands = new Hands({
       locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
@@ -664,41 +604,48 @@ export default function FullscreenCaptureModal({
       minTrackingConfidence: 0.7,
     });
 
-    console.log('MediaPipe Hands initialized');
-
     hands.onResults((results: unknown) => {
-      const r = results as { multiHandLandmarks?: MediaPipeLandmark[][]; multiHandedness?: Array<{ label?: string; score?: number }>; image?: HTMLImageElement | HTMLVideoElement };
+      const r = results as {
+        multiHandLandmarks?: MediaPipeLandmark[][];
+        multiHandedness?: Array<{ label?: string; score?: number }>;
+        image?: HTMLImageElement | HTMLVideoElement;
+      };
 
+      const detected = r.multiHandLandmarks || [];
+      const handednessData = r.multiHandedness || [];
+
+      // FIX: Use MediaPipe's native handedness labels instead of fragile
+      // spatial/position-based guessing.
+      //
+      // MediaPipe Hands is trained assuming a mirrored (front-facing selfie)
+      // camera, so its labels already reflect the *person's* perspective:
+      //   label "Left"  → person's actual left hand
+      //   label "Right" → person's actual right hand
+      //
+      // This holds true regardless of MIRROR_PREVIEW because detection always
+      // runs on the raw (unflipped) video frames. SWAP_HANDEDNESS can invert
+      // the mapping if the physical setup produces consistently swapped results.
       let leftHandLandmarks: MediaPipeLandmark[] | undefined;
       let rightHandLandmarks: MediaPipeLandmark[] | undefined;
-      // Simple per-frame mapping: use MediaPipe handedness labels with
-      // optional global swap, without extra positional locking.
-      if (r.multiHandLandmarks && r.multiHandedness && r.multiHandLandmarks.length === r.multiHandedness.length) {
-        for (let i = 0; i < r.multiHandLandmarks.length; i++) {
-          const lm = r.multiHandLandmarks[i] as MediaPipeLandmark[];
-          const h = r.multiHandedness[i] as { label?: string };
-          const rawLabel = h.label;
-          const effectiveLabel = SWAP_HANDEDNESS
-            ? rawLabel === 'Left'
-              ? 'Right'
-              : rawLabel === 'Right'
-              ? 'Left'
-              : rawLabel
-            : rawLabel;
 
-          if (effectiveLabel === 'Left' && !leftHandLandmarks) {
-            leftHandLandmarks = lm;
-          } else if (effectiveLabel === 'Right' && !rightHandLandmarks) {
-            rightHandLandmarks = lm;
-          }
+      detected.forEach((landmarks, i) => {
+        const rawLabel = handednessData[i]?.label; // "Left" or "Right"
+        // Optionally swap if VITE_SWAP_HANDEDNESS=1
+        const effectiveLabel = SWAP_HANDEDNESS
+          ? rawLabel === 'Left' ? 'Right' : 'Left'
+          : rawLabel;
+
+        if (effectiveLabel === 'Left') {
+          leftHandLandmarks = landmarks;
+        } else if (effectiveLabel === 'Right') {
+          rightHandLandmarks = landmarks;
         }
-      }
+      });
 
       // --- Temporal smoothing for presence & preview ---
       const leftDetectedNow = !!(leftHandLandmarks && leftHandLandmarks.length > 0);
       const rightDetectedNow = !!(rightHandLandmarks && rightHandLandmarks.length > 0);
 
-      // Update presence history (ring buffer style)
       leftPresenceHistoryRef.current.push(leftDetectedNow);
       if (leftPresenceHistoryRef.current.length > PRESENCE_HISTORY_SIZE) {
         leftPresenceHistoryRef.current.shift();
@@ -718,7 +665,6 @@ export default function FullscreenCaptureModal({
         right: rightSmoothedVisible,
       };
 
-      // Compute render landmarks with fallback to last non-empty frame
       let renderLeft: MediaPipeLandmark[] = [];
       let renderRight: MediaPipeLandmark[] = [];
 
@@ -740,6 +686,15 @@ export default function FullscreenCaptureModal({
         lastRenderedRightRef.current = undefined;
       }
 
+      if (leftDetectedNow && !rightDetectedNow) {
+        lastRenderedRightRef.current = undefined;
+        rightPresenceHistoryRef.current = [];
+      }
+      if (rightDetectedNow && !leftDetectedNow) {
+        lastRenderedLeftRef.current = undefined;
+        leftPresenceHistoryRef.current = [];
+      }
+
       renderDataRef.current = {
         leftHandLandmarks: renderLeft,
         rightHandLandmarks: renderRight,
@@ -751,14 +706,12 @@ export default function FullscreenCaptureModal({
         requestAnimationFrame(renderLandmarks);
       }
 
-      // Capture logic (hands-only)
+      // Capture logic
       if (recordingRef.current && !pausedRef.current) {
         const currentTime = Date.now();
         if (currentTime - lastFrameTimeRef.current < frameIntervalMs.current) return;
         lastFrameTimeRef.current = currentTime;
 
-        // Prefer current detection; if temporarily lost but smoothed presence is ON,
-        // fall back to the last rendered landmarks to avoid empty frames.
         let captureLeft = leftHandLandmarks;
         let captureRight = rightHandLandmarks;
 
@@ -780,25 +733,29 @@ export default function FullscreenCaptureModal({
         const anyHands = leftHas || rightHas;
         const anyVisible = leftVisible || rightVisible;
 
-        // UI hint uses smoothed presence to reduce flicker
         setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || anyHands || anyVisible);
 
         if (!(anyVisible || anyHands)) {
           console.log('Skipping frame: no hands detected');
         } else {
-          const landmarks = {
-            left_hand: filterLandmarks(captureLeft, 'leftHand') || [],
-            right_hand: filterLandmarks(captureRight, 'rightHand') || [],
-          };
+          // Filter and canonicalize landmarks.
+          // If MIRROR_PREVIEW is on we flip x so stored data is always in
+          // canonical (non-mirrored) image space, stable for training.
+          const leftFiltered = filterLandmarks(captureLeft, 'leftHand') || [];
+          const rightFiltered = filterLandmarks(captureRight, 'rightHand') || [];
 
+          if (MIRROR_PREVIEW) {
+            for (const lm of leftFiltered) { lm.x = typeof lm.x === 'number' ? 1 - lm.x : lm.x; }
+            for (const lm of rightFiltered) { lm.x = typeof lm.x === 'number' ? 1 - lm.x : lm.x; }
+          }
+
+          const landmarks = { left_hand: leftFiltered, right_hand: rightFiltered };
           framesRef.current.push(landmarks);
         }
 
         setFrames([...framesRef.current]);
-        console.log(`Recording progress: ${framesRef.current.length}/${targetFramesRef.current} frames`);
 
         if (framesRef.current.length >= FIXED_TARGET_FRAMES) {
-          console.log('Target frames reached, stopping recording');
           recordingRef.current = false;
           setRecording(false);
           setMode('IDLE');
@@ -807,7 +764,6 @@ export default function FullscreenCaptureModal({
           const quality = computeQuality(capturedFrames);
           const newCompleted = completedCapturesRef.current + 1;
 
-          console.log(`Capture ${newCompleted} completed with ${capturedFrames.length} frames`);
           onSampleCaptureRef.current(capturedFrames, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
 
           completedCapturesRef.current = newCompleted;
@@ -815,7 +771,6 @@ export default function FullscreenCaptureModal({
           setCurrentCaptureIndex(newCompleted);
 
           if (newCompleted < FIXED_CAPTURE_COUNT) {
-            console.log(`Preparing capture ${newCompleted + 1} of ${FIXED_CAPTURE_COUNT}`);
             setFrames([]);
             framesRef.current = [];
             lastFrameTimeRef.current = 0;
@@ -830,26 +785,16 @@ export default function FullscreenCaptureModal({
               }, 3000);
             }, 2000);
           } else {
-            // Final capture completed. Keep the modal open, clear frames and
-            // reset only the action label so the user can start a new capture
-            // while preserving the same user ID.
             setTimeout(() => {
-              // clear captured frames and reset timing
               setFrames([]);
               framesRef.current = [];
               lastFrameTimeRef.current = 0;
-
-              // reset capture counters so UI shows ready state
               completedCapturesRef.current = 0;
               setCompletedCaptures(0);
               setCurrentCaptureIndex(0);
-
-              // stop recording and set idle mode
               recordingRef.current = false;
               setRecording(false);
               setMode('IDLE');
-
-              // clear the action label but keep the user id
               setLabel('');
             }, 1000);
           }
@@ -858,55 +803,35 @@ export default function FullscreenCaptureModal({
     });
 
     if (videoRef.current) {
-      console.log('Video element found, setting up camera...');
-      
-      // Setup canvas size once
       const canvas = canvasRef.current;
       if (canvas) {
         canvas.width = 1280;
         canvas.height = 720;
-        console.log('Canvas initialized to 1280x720');
       }
       
-      // Add video event listeners for debugging
       const video = videoRef.current;
       
       const onLoadedMetadata = () => {
-        console.log('Video metadata loaded:', {
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-          readyState: video.readyState
-        });
+        console.log('Video metadata loaded:', { videoWidth: video.videoWidth, videoHeight: video.videoHeight });
       };
-      
       const onCanPlay = () => {
-        console.log('Video can play:', {
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-          readyState: video.readyState
-        });
+        console.log('Video can play');
       };
 
       video.addEventListener('loadedmetadata', onLoadedMetadata);
       video.addEventListener('canplay', onCanPlay);
 
-      console.log('Creating camera instance...');
-      
-      // Check camera permissions first
       navigator.mediaDevices.getUserMedia({ 
         video: { 
           width: 1280, 
           height: 720,
-          frameRate: { ideal: 30, max: 60 } // Optimize camera FPS
+          frameRate: { ideal: 30, max: 60 }
         } 
       })
         .then((stream) => {
-          console.log('Camera permission granted, stream:', stream);
-          // Stop the test stream
           stream.getTracks().forEach(track => track.stop());
           
-          // Now create the MediaPipe camera
-      const camera = new Camera(videoRef.current!, {
+          const camera = new Camera(videoRef.current!, {
             onFrame: async () => {
               if (videoRef.current) {
                 await hands.send({ image: videoRef.current });
@@ -914,35 +839,25 @@ export default function FullscreenCaptureModal({
             },
             width: 1280,
             height: 720,
-            facingMode: 'user' // Ensure front camera for better performance
+            facingMode: 'user'
           });
           
           cameraRef.current = camera;
-          console.log('Starting camera...');
           camera.start().then(() => {
-            console.log('Camera started successfully! Video element:', {
-              videoWidth: videoRef.current?.videoWidth,
-              videoHeight: videoRef.current?.videoHeight,
-              readyState: videoRef.current?.readyState,
-              srcObject: !!videoRef.current?.srcObject
-            });
             setIsReady(true);
             setCameraError(null);
           }).catch((error) => {
-            console.error('Camera start failed:', error);
             const errorMsg = getCameraErrorMessage(error);
             setCameraError(errorMsg);
             setIsReady(false);
           });
         })
         .catch((error) => {
-          console.error('Camera permission denied or not available:', error);
           const errorMsg = getCameraErrorMessage(error);
           setCameraError(errorMsg);
           setIsReady(false);
         });
 
-      // Cleanup listeners
       return () => {
         video.removeEventListener('loadedmetadata', onLoadedMetadata);
         video.removeEventListener('canplay', onCanPlay);
@@ -961,23 +876,14 @@ export default function FullscreenCaptureModal({
         cameraRef.current = null;
       }
     };
-  // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants and
-  // intentionally omitted from dependencies.
-  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks]); // Include renderLandmarks, computeQuality, filterLandmarks and getRenderLandmarks
+  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks]);
 
   // Countdown effect
   useEffect(() => {
-    console.log('Countdown effect triggered:', countdown, 'recording:', recording);
     if (countdown > 0) {
-      console.log(`Countdown: ${countdown}`);
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
     } else if (countdown === 0 && recording) {
-      console.log('Countdown finished, recording started');
-      // Remove auto-timeout - let frame completion logic handle stopping
-      console.log('Recording started, waiting for frame completion...');
-      
-      // Backup timeout only if frame completion fails (much longer)
       const backupTimer = setTimeout(() => {
         console.warn('BACKUP TIMEOUT: Frame completion failed after 30 seconds');
         handleStop();
@@ -992,10 +898,7 @@ export default function FullscreenCaptureModal({
     const currentVideo = videoRef.current;
     
     return () => {
-      // Cleanup when component unmounts
-      if (currentCamera) {
-        currentCamera.stop();
-      }
+      if (currentCamera) currentCamera.stop();
       if (currentVideo && currentVideo.srcObject) {
         const stream = currentVideo.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
@@ -1008,19 +911,14 @@ export default function FullscreenCaptureModal({
     if (!isOpen) return;
 
     const handleKeyPress = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts when user is typing in an input/textarea or editable element
       const active = document.activeElement as HTMLElement | null;
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
         return;
       }
 
-      console.log('Key pressed:', e.code);
-
       if (e.code === 'Enter') {
         e.preventDefault();
-        console.log('Enter pressed - recording:', recordingRef.current, 'label:', labelRef.current, 'user:', userRef.current);
         if (!recordingRef.current && labelRef.current && userRef.current) {
-          // Inline quick capture logic
           setFrames([]);
           framesRef.current = [];
           setCurrentCaptureIndex(0);
@@ -1028,16 +926,12 @@ export default function FullscreenCaptureModal({
           completedCapturesRef.current = 0;
           setCountdown(3);
           setMode('COUNTDOWN');
-          
-          console.log(`Starting capture sequence: ${captureCountRef.current} captures of ${targetFramesRef.current} frames each`);
-          
           setTimeout(() => {
             setRecording(true);
             recordingRef.current = true;
             setMode('RECORD');
           }, 3000);
         } else if (recordingRef.current) {
-          // Inline stop logic — enforce target frames before allowing stop
           const collected = framesRef.current.length || 0;
           const required = targetFramesRef.current || 0;
           if (collected < required) {
@@ -1045,7 +939,6 @@ export default function FullscreenCaptureModal({
           } else {
             setRecording(false);
             recordingRef.current = false;
-
             if (framesRef.current.length > 0) {
               const quality = computeQuality(framesRef.current);
               onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
@@ -1055,26 +948,18 @@ export default function FullscreenCaptureModal({
           }
         }
       } else if (e.code === 'Escape') {
-        console.log('Escape pressed - closing modal');
         handleCloseRef.current?.();
       } else if (e.code === 'Space') {
-        // toggle pause/resume when recording
         e.preventDefault();
         if (recordingRef.current) {
-          if (pausedRef.current) {
-            handleResume();
-          } else {
-            handlePause();
-          }
+          if (pausedRef.current) handleResume();
+          else handlePause();
         }
       } else if (e.code === 'KeyS') {
-        // toggle guide
         setShowGuide((s) => !s);
       } else if (e.code === 'KeyD') {
-        // toggle tips
         setShowTips((s) => !s);
       } else if (e.code === 'KeyA') {
-        // abort/stop current recording and discard partial frames
         if (recordingRef.current) {
           recordingRef.current = false;
           setRecording(false);
@@ -1093,8 +978,6 @@ export default function FullscreenCaptureModal({
 
   if (!isOpen) return null;
 
-  console.log('FullscreenCaptureModal rendered, isReady:', isReady, 'recording:', recording, 'countdown:', countdown);
-
   return (
     <div ref={rootRef} className="fixed inset-0 z-[9999] bg-black">
       {/* Error Display */}
@@ -1110,10 +993,7 @@ export default function FullscreenCaptureModal({
             <p className="text-red-100 mb-6 leading-relaxed">{cameraError}</p>
             <div className="flex gap-3 flex-col sm:flex-row">
               <button
-                onClick={() => {
-                  setCameraError(null);
-                  window.location.reload();
-                }}
+                onClick={() => { setCameraError(null); window.location.reload(); }}
                 className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
               >
                 Làm mới Trang
@@ -1156,10 +1036,7 @@ export default function FullscreenCaptureModal({
               <span>{showGuide ? '🙈' : '👁️'}</span>
               <span>{showGuide ? 'Ẩn hướng dẫn' : 'Hiển thị hướng dẫn'}</span>
             </button>
-            <button
-              onClick={handleClose}
-              className="text-white hover:text-gray-300 p-2"
-            >
+            <button onClick={handleClose} className="text-white hover:text-gray-300 p-2">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -1179,7 +1056,6 @@ export default function FullscreenCaptureModal({
             height={720} 
             className="w-full h-full max-w-full max-h-full object-contain border border-gray-600 rounded-lg"
             style={{ minHeight: '200px', backgroundColor: '#1a1a1a' }}
-            onLoad={() => console.log('Canvas loaded')}
           />
 
           {/* Hint overlay when hands are not visible during recording */}
@@ -1192,7 +1068,7 @@ export default function FullscreenCaptureModal({
             </div>
           )}
 
-          {/* Mobile-only exit button (header is hidden on mobile) */}
+          {/* Mobile-only exit button */}
           <button
             onClick={handleClose}
             className="sm:hidden absolute top-3 right-3 z-20 bg-black/60 hover:bg-black/70 text-white rounded-full p-2"
@@ -1203,25 +1079,19 @@ export default function FullscreenCaptureModal({
             </svg>
           </button>
           
-          {/* Toggle Guide Overlay - Only show when enabled and not recording/countdown */}
+          {/* Guide Overlay */}
           {showGuide && !recording && countdown === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative">
-                {/* Compact guide frame - just corner markers */}
                 <div className="w-80 h-80 relative">
-                  {/* Corner markers only */}
                   <div className="absolute top-0 left-0 w-8 h-8 border-l-4 border-t-4 border-green-400/80 rounded-tl-xl"></div>
                   <div className="absolute top-0 right-0 w-8 h-8 border-r-4 border-t-4 border-green-400/80 rounded-tr-xl"></div>
                   <div className="absolute bottom-0 left-0 w-8 h-8 border-l-4 border-b-4 border-green-400/80 rounded-bl-xl"></div>
                   <div className="absolute bottom-0 right-0 w-8 h-8 border-r-4 border-b-4 border-green-400/80 rounded-br-xl"></div>
-                  
-                  {/* Center crosshair */}
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="w-1 h-8 bg-green-400/60 rounded-full"></div>
                     <div className="absolute w-8 h-1 bg-green-400/60 rounded-full"></div>
                   </div>
-                  
-                  {/* Hand position indicators - small and subtle */}
                   <div className="absolute top-16 -left-6 w-8 h-8 border border-orange-400/60 rounded-full bg-orange-400/10 flex items-center justify-center">
                     <span className="text-orange-400 text-xs">L</span>
                   </div>
@@ -1229,13 +1099,9 @@ export default function FullscreenCaptureModal({
                     <span className="text-teal-400 text-xs">R</span>
                   </div>
                 </div>
-                
-                {/* Minimal instruction */}
                 <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium">
                   🎯 Đặt vị trí vào khung
                 </div>
-                
-                {/* Quality tip */}
                 <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-xs">
                   Thấy phần trên cơ thể và hai tay
                 </div>
@@ -1267,7 +1133,6 @@ export default function FullscreenCaptureModal({
                   <div className="text-6xl mb-4">⏸️</div>
                   <h3 className="text-3xl font-bold text-white mb-2">Đã tạm dừng</h3>
                   <p className="text-gray-300 mb-6">Bạn muốn làm gì với dữ liệu hiện tại?</p>
-                  
                   <div className="bg-gray-800 rounded-lg p-4 mb-6">
                     <div className="flex justify-between text-sm mb-2">
                       <span className="text-gray-400">Tiến độ:</span>
@@ -1280,7 +1145,6 @@ export default function FullscreenCaptureModal({
                       />
                     </div>
                   </div>
-
                   <div className="space-y-3">
                     <button
                       onClick={handleResume}
@@ -1292,7 +1156,6 @@ export default function FullscreenCaptureModal({
                       </svg>
                       <span>Tiếp tục thu (giữ {frames.length} khung)</span>
                     </button>
-                    
                     <button
                       onClick={handleRestart}
                       className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
@@ -1302,14 +1165,9 @@ export default function FullscreenCaptureModal({
                       </svg>
                       <span>Bắt đầu lại từ đầu (xóa dữ liệu)</span>
                     </button>
-
                     {frames.length >= FIXED_TARGET_FRAMES && (
                       <button
-                        onClick={() => {
-                          setPaused(false);
-                          pausedRef.current = false;
-                          handleStop();
-                        }}
+                        onClick={() => { setPaused(false); pausedRef.current = false; handleStop(); }}
                         className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1331,9 +1189,7 @@ export default function FullscreenCaptureModal({
                 <div className="text-4xl mb-4">🎉</div>
                 <div className="text-2xl font-bold mb-2 text-green-400">Đã chụp {completedCaptures} mẫu!</div>
                 <div className="text-xl mb-4">Chuẩn bị chụp tiếp...</div>
-                <div className="text-lg text-gray-300">
-                  Tiến độ: {completedCaptures} / {FIXED_CAPTURE_COUNT}
-                </div>
+                <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {FIXED_CAPTURE_COUNT}</div>
                 <div className="w-64 bg-gray-700 rounded-full h-3 mt-4 mx-auto">
                   <div 
                     className="bg-green-500 h-3 rounded-full transition-all duration-500"
@@ -1370,9 +1226,7 @@ export default function FullscreenCaptureModal({
           {/* Recording Progress */}
           {recording && (
             <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-6 py-2">
-              <div className="text-white text-sm">
-                📊 {frames.length} khung đã chụp
-              </div>
+              <div className="text-white text-sm">📊 {frames.length} khung đã chụp</div>
             </div>
           )}
         </div>
@@ -1380,7 +1234,6 @@ export default function FullscreenCaptureModal({
         {/* Control Panel */}
         <div className="w-full lg:w-96 bg-gray-900 border-l border-gray-700 flex flex-col max-h-[calc(100vh-8rem)] lg:max-h-none">
           <div className="flex-1 p-6 space-y-6 overflow-y-auto">
-            {/* Enhanced Form Fields with validation */}
             <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-5 border border-blue-500/20">
               <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
                 <span className="w-3 h-3 bg-blue-400 rounded-full mr-3"></span>
@@ -1450,52 +1303,49 @@ export default function FullscreenCaptureModal({
                       ))}
                     </div>
                   )}
-                 </div>
+                </div>
 
-                 <div>
-                   <label className="block text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
-                   <select
-                     value={dialect}
-                     onChange={(e) => {
-                       const v = e.target.value;
-                       if (v === 'Khác') {
-                         setShowAddDialectModal(true);
-                       } else {
-                         setDialect(v);
-                         localStorage.setItem('dialectSelected', v);
-                       }
-                     }}
-                     className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                     disabled={recording || countdown > 0}
-                   >
-                     {dialectList.map((d) => (
-                       <option key={d} value={d}>{d}</option>
-                     ))}
-                     <option value="Khác">Khác (thêm mới)</option>
-                   </select>
-                 </div>
-               </div>
-             </div>
+                <div>
+                  <label className="block text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
+                  <select
+                    value={dialect}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === 'Khác') {
+                        setShowAddDialectModal(true);
+                      } else {
+                        setDialect(v);
+                        localStorage.setItem('dialectSelected', v);
+                      }
+                    }}
+                    className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                    disabled={recording || countdown > 0}
+                  >
+                    {dialectList.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                    <option value="Khác">Khác (thêm mới)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
 
-             <AddDialectModal
-               isOpen={showAddDialectModal}
-               onClose={() => setShowAddDialectModal(false)}
-               onAdd={(name) => {
-                 const updated = Array.from(new Set([...dialectList, name]));
-                 setDialectList(updated);
-                 setDialect(name);
-                 localStorage.setItem('dialectList', JSON.stringify(updated));
-                 localStorage.setItem('dialectSelected', name);
-               }}
-             />
-
-             {/* Quick labels removed for public-facing modal to simplify UX */}
+            <AddDialectModal
+              isOpen={showAddDialectModal}
+              onClose={() => setShowAddDialectModal(false)}
+              onAdd={(name) => {
+                const updated = Array.from(new Set([...dialectList, name]));
+                setDialectList(updated);
+                setDialect(name);
+                localStorage.setItem('dialectList', JSON.stringify(updated));
+                localStorage.setItem('dialectSelected', name);
+              }}
+            />
 
             {/* Recording Stats */}
             <div className="bg-gray-800 rounded-lg p-4 hidden sm:block">
               <h4 className="text-sm font-medium text-gray-300 mb-3">📊 Cài đặt & Tiến độ chụp</h4>
               <div className="space-y-2 text-sm">
-                {/* Capture settings removed for simplified public uploader; defaults are enforced. */}
                 <div className="flex justify-between text-gray-400">
                   <span>Tổng số lần chụp:</span>
                   <span className="text-white">{FIXED_CAPTURE_COUNT}</span>
@@ -1581,11 +1431,7 @@ export default function FullscreenCaptureModal({
               </>
             )}
             
-            <Button
-              onClick={handleClose}
-              className="w-full"
-              variant="secondary"
-            >
+            <Button onClick={handleClose} className="w-full" variant="secondary">
               Thoát toàn màn hình
             </Button>
           </div>
