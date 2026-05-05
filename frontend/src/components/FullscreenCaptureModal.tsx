@@ -5,107 +5,124 @@ import * as drawing from "@mediapipe/drawing_utils";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import type { MediaPipeLandmark, CameraInfo, QualityInfo } from "../types";
-import { OneEuroFilter } from "../utils/oneEuro";
+
 import { TARGET_FRAMES, CAPTURE_COUNT, FRAME_INTERVAL_MS } from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
 
-
-// Use module-scope fixed constants so they are stable across renders and
-// won't need to be added to hook dependency arrays.
+// ---------------------------------------------------------------------------
+// Module-level constants — stable across renders, safe in hook dep arrays.
+// ---------------------------------------------------------------------------
 const FIXED_TARGET_FRAMES = TARGET_FRAMES;
 const FIXED_CAPTURE_COUNT = CAPTURE_COUNT;
 
+// FIX (type): Moved CaptureFrame type out of the component body so it is not
+// re-evaluated on every render.
+type CaptureFrame = {
+  left_hand: MediaPipeLandmark[];
+  right_hand: MediaPipeLandmark[];
+  timestamp_ms?: number;
+  fallback_used?: boolean;
+  confidence?: number;
+};
+
 const parseBoolEnv = (value: unknown, fallback: boolean) => {
-  if (typeof value !== 'string') return fallback;
+  if (typeof value !== "string") return fallback;
   const v = value.trim().toLowerCase();
-  if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-  if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+  if (v === "1" || v === "true" || v === "yes" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
   return fallback;
 };
 
-// Default to selfie-style mirroring (front camera usually feels "correct" mirrored).
-// Override with `VITE_MIRROR_PREVIEW=0` if you want a non-mirrored, third-person view.
-const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true);
-// If MediaPipe handedness feels swapped for your setup, enable this.
-const SWAP_HANDEDNESS = parseBoolEnv(import.meta.env.VITE_SWAP_HANDEDNESS, false);
-// Enable verbose hand diagnostics when developing: set VITE_DEBUG_HANDS=1
+// Default to selfie-style mirroring (front camera). Override with VITE_MIRROR_PREVIEW=0.
+const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, false);
+
+// FIX (handedness): When @mediapipe/camera_utils sends raw (unflipped) video
+// frames to MediaPipe Hands, the model — which was trained on mirrored selfie
+// images — returns handedness labels from the CAMERA's perspective, which is
+// the OPPOSITE of the person's:
+//
+//   MediaPipe "Left"  → user's actual RIGHT hand  (for front/mirrored camera)
+//   MediaPipe "Right" → user's actual LEFT hand
+//
+// We must swap the labels so `left_hand` / `right_hand` in saved data matches
+// the person's anatomy.  Set VITE_SWAP_HANDEDNESS=0 to disable if your setup
+// sends pre-mirrored frames to MediaPipe (e.g., a rear-facing camera).
+const SWAP_HANDEDNESS = parseBoolEnv(
+  import.meta.env.VITE_SWAP_HANDEDNESS,
+  true  
+);
+
+// Enable verbose hand diagnostics: set VITE_DEBUG_HANDS=1
 const DEBUG_HANDS = parseBoolEnv(import.meta.env.VITE_DEBUG_HANDS, false);
 
 // Keep CDN asset version aligned with pinned npm dependency.
 const MP_HANDS_VERSION = "0.4.1675469240";
 
-/**
- * Convert camera errors into user-friendly Vietnamese messages
- */
+// ---------------------------------------------------------------------------
+// Camera error → Vietnamese message
+// ---------------------------------------------------------------------------
 function getCameraErrorMessage(error: unknown): string {
   const err = error as Record<string, unknown> | null;
-  const errorName = err?.name || 'Unknown';
+  const errorName = err?.name || "Unknown";
   const errorMessage = String(err?.message || error);
-  
+
   console.warn(`Camera error [${errorName}]: ${errorMessage}`);
-  
-  if (errorName === 'NotAllowedError' || errorName === 'PermissionDenied') {
-    return 'Camera bị từ chối. Vui lòng cấp quyền truy cập camera trong cài đặt trình duyệt.';
-  }
-  if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
-    return 'Không tìm thấy camera. Vui lòng kiểm tra xem camera có được kết nối và không bị sử dụng bởi ứng dụng khác.';
-  }
-  if (errorName === 'NotReadableError' || errorName === 'TrackStartError') {
-    return 'Không thể khởi động camera. Camera có thể bị sử dụng bởi ứng dụng khác hoặc bị hỏng.';
-  }
-  if (errorName === 'OverconstrainedError' || errorName === 'ConstraintError') {
-    return 'Không thể đạt được cấu hình camera yêu cầu. Vui lòng thử lại hoặc sử dụng trình duyệt khác.';
-  }
-  if (errorName === 'TypeError' && errorMessage.includes('Invalid constraint')) {
-    return 'Cấu hình camera không hợp lệ. Vui lòng làm mới trang.';
-  }
-  if (errorName === 'SecurityError') {
-    return 'Lỗi bảo mật khi truy cập camera. Trang phải được cấp quyền HTTPS.';
-  }
-  if (errorMessage.toLowerCase().includes('no video input device')) {
-    return 'Không có thiết bị camera nào được tìm thấy. Vui lòng kiểm tra kết nối phần cứng.';
-  }
-  
+
+  if (errorName === "NotAllowedError" || errorName === "PermissionDenied")
+    return "Camera bị từ chối. Vui lòng cấp quyền truy cập camera trong cài đặt trình duyệt.";
+  if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError")
+    return "Không tìm thấy camera. Vui lòng kiểm tra xem camera có được kết nối và không bị sử dụng bởi ứng dụng khác.";
+  if (errorName === "NotReadableError" || errorName === "TrackStartError")
+    return "Không thể khởi động camera. Camera có thể bị sử dụng bởi ứng dụng khác hoặc bị hỏng.";
+  if (errorName === "OverconstrainedError" || errorName === "ConstraintError")
+    return "Không thể đạt được cấu hình camera yêu cầu. Vui lòng thử lại hoặc sử dụng trình duyệt khác.";
+  if (errorName === "TypeError" && errorMessage.includes("Invalid constraint"))
+    return "Cấu hình camera không hợp lệ. Vui lòng làm mới trang.";
+  if (errorName === "SecurityError")
+    return "Lỗi bảo mật khi truy cập camera. Trang phải được cấp quyền HTTPS.";
+  if (errorMessage.toLowerCase().includes("no video input device"))
+    return "Không có thiết bị camera nào được tìm thấy. Vui lòng kiểm tra kết nối phần cứng.";
+
   return `Lỗi camera: ${errorMessage}`;
 }
 
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 interface FullscreenCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSampleCapture: (frames: Array<{
-    left_hand: MediaPipeLandmark[];
-    right_hand: MediaPipeLandmark[];
-  }>, label: string, user: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string }) => void;
+  onSampleCapture: (
+    frames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>,
+    label: string,
+    user: string,
+    meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string }
+  ) => void;
   initialLabel?: string;
   initialUser?: string;
   targetFrames?: number;
   captureCount?: number;
 }
 
-export default function FullscreenCaptureModal({ 
-  isOpen, 
-  onClose, 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+export default function FullscreenCaptureModal({
+  isOpen,
+  onClose,
   onSampleCapture,
   initialLabel = "",
   initialUser = "",
   targetFrames = 60,
-  captureCount = 1
+  captureCount = 1,
 }: FullscreenCaptureModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  
+
   const [recording, setRecording] = useState(false);
-  // Explicit frame type used for captured frames that will be uploaded.
-  type CaptureFrame = {
-    left_hand: MediaPipeLandmark[];
-    right_hand: MediaPipeLandmark[];
-    timestamp_ms?: number; // epoch ms with fractional precision
-    fallback_used?: boolean; // true when a preview fallback was used (currently we skip duplicates)
-    confidence?: number; // aggregated confidence score [0..1]
-  };
   const [frames, setFrames] = useState<CaptureFrame[]>([]);
   const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState(initialUser);
@@ -115,73 +132,83 @@ export default function FullscreenCaptureModal({
   const [isReady, setIsReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  
-  // New state for capture management
+
   const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
   const [completedCaptures, setCompletedCaptures] = useState(0);
-   const [showTips, setShowTips] = useState(false);
-   const [showGuide, setShowGuide] = useState(false);
-  // User-selectable capture mode: null = Auto, 1 = one-hand, 2 = two-hands
+  const [showTips, setShowTips] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [expectedHandsOption, setExpectedHandsOption] = useState<number | null>(null);
-  // Keep a ref copy of the user-selected expected hands option so stable
-  // callbacks and effects can read it without being re-created.
   const expectedHandsOptionRef = useRef<number | null>(expectedHandsOption);
   useEffect(() => { expectedHandsOptionRef.current = expectedHandsOption; }, [expectedHandsOption]);
-   // Small mode for HUD and behavior introspection
-   const [mode, setMode] = useState<'IDLE' | 'COUNTDOWN' | 'RECORD'>('IDLE');
-   // Track whether hands are currently visible to gate frame capture
-   const [handsVisible, setHandsVisible] = useState(false);
-   // Add dialect modal state
-   const [showAddDialectModal, setShowAddDialectModal] = useState(false);
-   // Quick suggestions for signer name (shared across pages via localStorage)
+
+  const [mode, setMode] = useState<"IDLE" | "COUNTDOWN" | "RECORD">("IDLE");
+  const [handsVisible, setHandsVisible] = useState(false);
+  const [showAddDialectModal, setShowAddDialectModal] = useState(false);
   const [recentUsers, setRecentUsers] = useState<string[]>(() => {
     try {
-      const raw = localStorage.getItem('recentSigners');
+      const raw = localStorage.getItem("recentSigners");
       const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        return parsed.filter((x) => typeof x === 'string').slice(0, 5);
-      }
-    } catch {
-      // ignore
-    }
+      if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === "string").slice(0, 5);
+    } catch { /* ignore */ }
     return [];
   });
-  
-  // Refs to prevent stale closures
+
+  // -------------------------------------------------------------------------
+  // Refs (prevent stale closures in MediaPipe callbacks)
+  // -------------------------------------------------------------------------
   const recordingRef = useRef(false);
   const pausedRef = useRef(false);
   const framesRef = useRef<CaptureFrame[]>([]);
-  // Expected hands mode for the current capture: 1, 2, or null (undetermined)
   const expectedHandsRef = useRef<number | null>(null);
   const modeRef = useRef<typeof mode>(mode);
+  const labelRef = useRef(label);
+  const userRef = useRef(user);
+  const dialectRef = useRef(dialect);
+  const targetFramesRef = useRef(targetFrames);
+  const onSampleCaptureRef = useRef(onSampleCapture);
+  const handleCloseRef = useRef<() => void>(() => {});
+  const completedCapturesRef = useRef(0);
+  const lastFrameTimeRef = useRef(0);
+  const frameIntervalMs = useRef(FRAME_INTERVAL_MS);
+
+  // FIX (backup timer): Use a ref so the 30-second backup timer fires only
+  // once, not on every re-render while countdown===0 && recording.
+  const backupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // -------------------------------------------------------------------------
+  // Sync state → refs
+  // -------------------------------------------------------------------------
+  useEffect(() => { recordingRef.current = recording; }, [recording]);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { framesRef.current = frames; }, [frames]);
+  useEffect(() => { labelRef.current = label; }, [label]);
+  useEffect(() => { dialectRef.current = dialect; }, [dialect]);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
+  useEffect(() => { completedCapturesRef.current = completedCaptures; }, [completedCaptures]);
+  useEffect(() => { targetFramesRef.current = FIXED_TARGET_FRAMES; }, [targetFrames]);
+
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
   const rememberUser = useCallback((name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
     setRecentUsers((prev) => {
       const next = [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, 5);
-      try {
-        localStorage.setItem('recentSigners', JSON.stringify(next));
-      } catch {
-        // ignore
-      }
+      try { localStorage.setItem("recentSigners", JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
   }, []);
 
   const handleSetExpectedHands = useCallback((v: number | null) => {
     setExpectedHandsOption(v);
-    expectedHandsRef.current = v;
+    expectedHandsOptionRef.current = v;
   }, []);
-  
-  // Add frame interval control for better training data. Use centralized config.
-  const lastFrameTimeRef = useRef(0);
-  const frameIntervalMs = useRef(FRAME_INTERVAL_MS);
 
-  // Helper to compute lightweight quality metrics for a captured frameset
-  const computeQuality = useCallback((capturedFrames: Array<{
-    left_hand: MediaPipeLandmark[];
-    right_hand: MediaPipeLandmark[];
-  }>) => {
+  const computeQuality = useCallback((capturedFrames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>) => {
     let totalHandLandmarks = 0;
     let framesWithHands = 0;
     let framesAccepted = 0;
@@ -193,24 +220,11 @@ export default function FullscreenCaptureModal({
       const rightCount = (f.right_hand || []).length;
       const handCount = leftCount + rightCount;
       totalHandLandmarks += handCount;
-      const hasHands = handCount > 0;
-      if (hasHands) framesWithHands++;
+      if (handCount > 0) { framesWithHands++; framesAccepted++; }
 
-      const landmarks = [...(f.left_hand || []), ...(f.right_hand || [])];
-      let frameConfSum = 0;
-      let frameConfCnt = 0;
-      for (const lm of landmarks) {
-        if (typeof lm.visibility === 'number') {
-          frameConfSum += lm.visibility;
-          frameConfCnt++;
-        }
+      for (const lm of [...(f.left_hand || []), ...(f.right_hand || [])]) {
+        if (typeof lm.visibility === "number") { confidenceSum += lm.visibility; confidenceCount++; }
       }
-      if (frameConfCnt > 0) {
-        confidenceSum += frameConfSum;
-        confidenceCount += frameConfCnt;
-      }
-
-      if (handCount > 0) framesAccepted++;
     }
 
     const quality: QualityInfo = {
@@ -220,76 +234,49 @@ export default function FullscreenCaptureModal({
       percentFramesWithHands: capturedFrames.length ? (framesWithHands / capturedFrames.length) * 100 : 0,
       confidenceSummary: confidenceCount ? { avg: confidenceSum / confidenceCount } : undefined,
     };
-
     return quality;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // keep modeRef in sync for render loop access
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
-  
-  // Add canvas rendering optimization
+  // -------------------------------------------------------------------------
+  // Canvas / render helpers
+  // -------------------------------------------------------------------------
   const pendingRenderRef = useRef(false);
   const renderDataRef = useRef<{
-    poseLandmarks?: MediaPipeLandmark[];
     leftHandLandmarks?: MediaPipeLandmark[];
     rightHandLandmarks?: MediaPipeLandmark[];
     image?: HTMLImageElement | HTMLVideoElement;
   } | null>(null);
 
-  // Filters for smoothing landmarks (keyed by group.index.coord)
-  // IMPORTANT: These filters are for UI preview smoothing ONLY. Do NOT use
-  // `filterLandmarks` output for uploads — uploads must contain RAW MediaPipe
-  // landmarks to preserve the original data distribution for training.
-  const filtersRef = useRef<Record<string, OneEuroFilter>>({});
-
-<<<<<<< Updated upstream
-  // FIX: Prioritise low latency over heavy smoothing.
-  // Higher minCutoff = less smoothing = less lag on fast motion.
-  // Higher beta = filter adapts faster to sudden velocity bursts.
-  const filterMinCutoff = 1.5; // was 0.4 — reduced lag
-  const filterBeta = 0.5;      // was 0.15 — faster velocity adaptation
-  // renderAlpha = 1.0 means: use the raw filtered value every frame with zero lerp delay.
-  const renderAlpha = 1.0;     // was 0.7 — eliminated per-frame lerp lag
-=======
-  // Fixed filter parameters for simplified public uploader
-  // Tunable filter parameters for better stability (lower minCutoff => smoother)
-  const filterMinCutoff = 0.5; // lower = more smoothing
-  const filterBeta = 0.03; // slightly more adaptive to speed
-  // Render smoothing (lerp) - lower = smoother (0.0 very smooth, 1.0 raw)
   const renderAlpha = 0.6;
->>>>>>> Stashed changes
 
-  const getFilter = useCallback((key: string) => {
-    if (!filtersRef.current[key]) {
-      const freq = Math.max(1, Math.round(1000 / (frameIntervalMs.current || 33)));
-      filtersRef.current[key] = new OneEuroFilter(freq, filterMinCutoff, filterBeta, 1.0);
-    }
-    return filtersRef.current[key];
-  }, []);
-
-  const filterLandmarks = useCallback((landmarks: MediaPipeLandmark[] | undefined, group = 'pose') => {
-    if (!landmarks) return [] as MediaPipeLandmark[];
-    const now = Date.now();
-    return landmarks.map((lm, idx) => {
-      const kx = `${group}.${idx}.x`;
-      const ky = `${group}.${idx}.y`;
-      const kz = `${group}.${idx}.z`;
-      const kv = `${group}.${idx}.v`;
-      const fx = getFilter(kx).filter(lm.x ?? 0, now);
-      const fy = getFilter(ky).filter(lm.y ?? 0, now);
-      const fz = getFilter(kz).filter(lm.z ?? 0, now);
-      const fv = typeof lm.visibility === 'number' ? getFilter(kv).filter(lm.visibility, now) : lm.visibility;
-      return { ...lm, x: fx, y: fy, z: fz, visibility: fv } as MediaPipeLandmark;
-    });
-  }, [getFilter]);
-
-  // Low-latency render state
   const renderPrevRef = useRef<Record<string, MediaPipeLandmark>>({});
 
-  // Simple temporal smoothing for hand presence and preview stability
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+  const getRenderLandmarks = useCallback((raw: MediaPipeLandmark[] | undefined, group = "pose") => {
+    if (!raw) return [] as MediaPipeLandmark[];
+    const prev = renderPrevRef.current;
+    const alpha = Math.max(0, Math.min(1, renderAlpha));
+    const maxChange = 1.0;
+    return raw.map((lm, idx) => {
+      const key = `${group}.${idx}`;
+      const prevLm = prev[key];
+      const tx = lm.x ?? 0, ty = lm.y ?? 0, tz = lm.z ?? 0;
+      const tv = typeof lm.visibility === "number" ? lm.visibility : undefined;
+      if (!prevLm) { const nl = { ...lm } as MediaPipeLandmark; prev[key] = nl; return nl; }
+      let nx = lerp(prevLm.x ?? tx, tx, alpha);
+      let ny = lerp(prevLm.y ?? ty, ty, alpha);
+      const dx = Math.abs((prevLm.x ?? tx) - tx), dy = Math.abs((prevLm.y ?? ty) - ty);
+      if (dx > maxChange) nx = (prevLm.x ?? tx) + Math.sign(tx - (prevLm.x ?? tx)) * maxChange;
+      if (dy > maxChange) ny = (prevLm.y ?? ty) + Math.sign(ty - (prevLm.y ?? ty)) * maxChange;
+      const nz = lerp(prevLm.z ?? tz, tz, alpha);
+      const nv = typeof tv === "number" ? lerp((prevLm.visibility as number) ?? tv, tv, alpha) : (prevLm.visibility as number | undefined);
+      const out: MediaPipeLandmark = { ...lm, x: nx, y: ny, z: nz, visibility: typeof nv === "number" ? nv : undefined };
+      prev[key] = out;
+      return out;
+    });
+  }, [renderAlpha]);
+
   const PRESENCE_HISTORY_SIZE = 7;
   const leftPresenceHistoryRef = useRef<boolean[]>([]);
   const rightPresenceHistoryRef = useRef<boolean[]>([]);
@@ -297,359 +284,222 @@ export default function FullscreenCaptureModal({
   const lastRenderedLeftRef = useRef<MediaPipeLandmark[] | undefined>(undefined);
   const lastRenderedRightRef = useRef<MediaPipeLandmark[] | undefined>(undefined);
 
-  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-  const getRenderLandmarks = useCallback((raw: MediaPipeLandmark[] | undefined, group = 'pose') => {
-    if (!raw) return [] as MediaPipeLandmark[];
-    const prev = renderPrevRef.current;
-    const alpha = Math.max(0, Math.min(1, renderAlpha));
-    // FIX: raised from 0.12 to 1.0 — the old clamp throttled fast hand movement,
-    // causing the skeleton to visibly lag behind. With renderAlpha=1.0 and no clamp
-    // the rendered landmarks track the raw detection output with zero added delay.
-    const maxChange = 1.0;
-    return raw.map((lm, idx) => {
-      const key = `${group}.${idx}`;
-      const prevLm = prev[key];
-      const tx = lm.x ?? 0;
-      const ty = lm.y ?? 0;
-      const tz = lm.z ?? 0;
-      const tv = typeof lm.visibility === 'number' ? lm.visibility : undefined;
-      if (!prevLm) {
-        const newLm = { ...lm } as MediaPipeLandmark;
-        prev[key] = newLm;
-        return newLm;
-      }
-      let nx = lerp(prevLm.x ?? tx, tx, alpha);
-      let ny = lerp(prevLm.y ?? ty, ty, alpha);
-      const dx = Math.abs((prevLm.x ?? tx) - tx);
-      const dy = Math.abs((prevLm.y ?? ty) - ty);
-      if (dx > maxChange) nx = (prevLm.x ?? tx) + Math.sign(tx - (prevLm.x ?? tx)) * maxChange;
-      if (dy > maxChange) ny = (prevLm.y ?? ty) + Math.sign(ty - (prevLm.y ?? ty)) * maxChange;
-      const nz = lerp(prevLm.z ?? tz, tz, alpha);
-      const nv = typeof tv === 'number' ? lerp((prevLm.visibility as number) ?? tv, tv, alpha) : (prevLm.visibility as number | undefined);
-      const out: MediaPipeLandmark = { ...lm, x: nx, y: ny, z: nz, visibility: typeof nv === 'number' ? nv : undefined };
-      prev[key] = out;
-      return out;
-    });
-  }, [renderAlpha]);
-
-  // Optimized rendering function
   const renderLandmarks = useCallback(() => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     const data = renderDataRef.current;
-    
     if (!canvas || !data) return;
-    
+
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
     ctx.save();
-    if (MIRROR_PREVIEW) {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-    }
+    if (MIRROR_PREVIEW) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
 
-    if (video && video.readyState >= 2 && video.videoWidth > 0) {
+    if (video && video.readyState >= 2 && video.videoWidth > 0)
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    } else if (data.image) {
+    else if (data.image)
       ctx.drawImage(data.image, 0, 0, canvas.width, canvas.height);
-    }
 
     if (data.leftHandLandmarks) {
-      // @ts-expect-error - HAND_CONNECTIONS types from mediapipe are not available in this project
-      drawing.drawConnectors(ctx, data.leftHandLandmarks, HAND_CONNECTIONS, {
-        color: "#FF6B35",
-        lineWidth: 2
-      });
-      drawing.drawLandmarks(ctx, data.leftHandLandmarks, {
-        color: "#FF6B35",
-        radius: 5
-      });
+      // @ts-expect-error - HAND_CONNECTIONS types not exported in this version
+      drawing.drawConnectors(ctx, data.leftHandLandmarks, HAND_CONNECTIONS, { color: "#FF6B35", lineWidth: 2 });
+      drawing.drawLandmarks(ctx, data.leftHandLandmarks, { color: "#FF6B35", radius: 5 });
     }
-
     if (data.rightHandLandmarks) {
-      // @ts-expect-error - HAND_CONNECTIONS types from mediapipe are not available in this project
-      drawing.drawConnectors(ctx, data.rightHandLandmarks, HAND_CONNECTIONS, {
-        color: "#4ECDC4",
-        lineWidth: 2
-      });
-      drawing.drawLandmarks(ctx, data.rightHandLandmarks, {
-        color: "#4ECDC4",
-        radius: 5
-      });
+      // @ts-expect-error - HAND_CONNECTIONS types not exported in this version
+      drawing.drawConnectors(ctx, data.rightHandLandmarks, HAND_CONNECTIONS, { color: "#4ECDC4", lineWidth: 2 });
+      drawing.drawLandmarks(ctx, data.rightHandLandmarks, { color: "#4ECDC4", radius: 5 });
     }
-
     ctx.restore();
 
-    // Draw HUD
-    try {
-      const hudPadding = 8;
-      const vis = visibilityStateRef.current;
-      const lines = [
-        `MODE: ${modeRef.current}`,
-        `HANDS: ${((data.leftHandLandmarks?.length ?? 0) > 0 ? 1 : 0) + ((data.rightHandLandmarks?.length ?? 0) > 0 ? 1 : 0)}`,
-        `FRAMES: ${framesRef.current.length}/${targetFramesRef.current}`,
-        `VIS: L=${vis.left ? 'ON' : 'OFF'} R=${vis.right ? 'ON' : 'OFF'}`,
-        `FLAGS: MIRROR=${MIRROR_PREVIEW ? 'ON' : 'OFF'} SWAP=${SWAP_HANDEDNESS ? 'ON' : 'OFF'}`
-      ];
-      ctx.save();
-      ctx.font = '14px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial';
-      ctx.textBaseline = 'top';
-      let maxW = 0;
-      for (const l of lines) {
-        const m = ctx.measureText(l).width;
-        if (m > maxW) maxW = m;
-      }
-      const boxW = Math.ceil(maxW + hudPadding * 2);
-      const boxH = Math.ceil(lines.length * 18 + hudPadding * 2);
-
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      const rx = 12, ry = 12;
-      const x = 12, y = 12;
-      ctx.beginPath();
-      ctx.moveTo(x + rx, y);
-      ctx.arcTo(x + boxW, y, x + boxW, y + boxH, ry);
-      ctx.arcTo(x + boxW, y + boxH, x, y + boxH, rx);
-      ctx.arcTo(x, y + boxH, x, y, ry);
-      ctx.arcTo(x, y, x + boxW, y, rx);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i], x + hudPadding, y + hudPadding + i * 18);
-      }
-      ctx.restore();
-    } catch (e) {
-      console.warn('HUD draw failed', e);
+    // HUD (debug overlay)
+    if (DEBUG_HANDS) {
+      try {
+        const hudPadding = 8;
+        const vis = visibilityStateRef.current;
+        const lines = [
+          `MODE: ${modeRef.current}`,
+          `HANDS: ${((data.leftHandLandmarks?.length ?? 0) > 0 ? 1 : 0) + ((data.rightHandLandmarks?.length ?? 0) > 0 ? 1 : 0)}`,
+          `FRAMES: ${framesRef.current.length}/${targetFramesRef.current}`,
+          `VIS: L=${vis.left ? "ON" : "OFF"} R=${vis.right ? "ON" : "OFF"}`,
+          `FLAGS: MIRROR=${MIRROR_PREVIEW ? "ON" : "OFF"} SWAP=${SWAP_HANDEDNESS ? "ON" : "OFF"}`,
+        ];
+        ctx.save();
+        ctx.font = '14px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial';
+        ctx.textBaseline = "top";
+        let maxW = 0;
+        for (const l of lines) { const m = ctx.measureText(l).width; if (m > maxW) maxW = m; }
+        const boxW = Math.ceil(maxW + hudPadding * 2);
+        const boxH = Math.ceil(lines.length * 18 + hudPadding * 2);
+        const rx = 12, x = 12, y = 12;
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.beginPath();
+        ctx.moveTo(x + rx, y);
+        ctx.arcTo(x + boxW, y, x + boxW, y + boxH, rx);
+        ctx.arcTo(x + boxW, y + boxH, x, y + boxH, rx);
+        ctx.arcTo(x, y + boxH, x, y, rx);
+        ctx.arcTo(x, y, x + boxW, y, rx);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], x + hudPadding, y + hudPadding + i * 18);
+        ctx.restore();
+      } catch (e) { console.warn("HUD draw failed", e); }
     }
-    
+
     pendingRenderRef.current = false;
   }, []);
 
-  const labelRef = useRef(label);
-  const userRef = useRef(user);
-  const dialectRef = useRef(dialect);
-  const targetFramesRef = useRef(targetFrames);
-  const captureCountRef = useRef(captureCount);
-  const onSampleCaptureRef = useRef(onSampleCapture);
-  const handleCloseRef = useRef<() => void>(() => {});
-  const completedCapturesRef = useRef(0);
-
+  // -------------------------------------------------------------------------
+  // handleClose
+  // -------------------------------------------------------------------------
   const handleClose = useCallback(() => {
     const partialFrames = framesRef.current?.length || 0;
     if (recordingRef.current || (partialFrames > 0 && partialFrames < targetFramesRef.current)) {
       const ok = window.confirm(`Capture chưa hoàn tất (${partialFrames}/${targetFramesRef.current}) — bạn có muốn thoát và bỏ dữ liệu này không?`);
       if (!ok) return;
     }
-
-    setRecording(false);
-    setMode('IDLE');
-    setFrames([]);
-    expectedHandsRef.current = null;
-    setCountdown(0);
-    setIsReady(false);
-    setCurrentCaptureIndex(0);
-    setCompletedCaptures(0);
-    setCameraError(null);
-    
-    try {
-      if (document.fullscreenElement) {
-        document.exitFullscreen?.();
-      }
-    } catch (e) {
-      // ignore fullscreen exit errors
-    }
-
-    if (cameraRef.current) {
-      cameraRef.current.stop();
-      cameraRef.current = null;
-    }
-    
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
+    setRecording(false); setMode("IDLE"); setFrames([]);
+    expectedHandsRef.current = null; setCountdown(0); setIsReady(false);
+    setCurrentCaptureIndex(0); setCompletedCaptures(0); setCameraError(null);
+    try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* ignore */ }
+    if (cameraRef.current) { cameraRef.current.stop(); cameraRef.current = null; }
+    if (videoRef.current?.srcObject) {
+      (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
       videoRef.current.srcObject = null;
     }
-    
     onClose();
   }, [onClose]);
 
-  // Request fullscreen when modal opens
+  useEffect(() => { handleCloseRef.current = handleClose; }, [handleClose]);
+
+  // -------------------------------------------------------------------------
+  // Fullscreen
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
     const root = rootRef.current;
     if (!root) return;
-
     try {
       type Fn = (...args: unknown[]) => unknown;
-      const el = root as HTMLElement & Partial<Record<'webkitRequestFullscreen' | 'mozRequestFullScreen' | 'msRequestFullscreen' | 'requestFullscreen', Fn>>;
-      const request = (el.requestFullscreen as Fn | undefined) ?? el.webkitRequestFullscreen ?? el.mozRequestFullScreen ?? el.msRequestFullscreen;
+      const el = root as HTMLElement & Partial<Record<"webkitRequestFullscreen" | "mozRequestFullScreen" | "msRequestFullscreen" | "requestFullscreen", Fn>>;
+      const request = el.requestFullscreen ?? el.webkitRequestFullscreen ?? el.mozRequestFullScreen ?? el.msRequestFullscreen;
       if (request) {
         const maybe = request.call(el);
-        if (maybe && typeof (maybe as Promise<unknown>).catch === 'function') {
-          (maybe as Promise<unknown>).catch((err) => {
-            console.warn('Fullscreen request failed:', err);
-          });
-        }
+        if (maybe && typeof (maybe as Promise<unknown>).catch === "function")
+          (maybe as Promise<unknown>).catch((err) => console.warn("Fullscreen request failed:", err));
       }
-    } catch (err) {
-      // ignore
-    }
-
-    return () => {
-      try {
-        if (document.fullscreenElement) {
-          document.exitFullscreen?.();
-        }
-      } catch (e) {
-        // ignore
-      }
-    };
+    } catch { /* ignore */ }
+    return () => { try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* ignore */ } };
   }, [isOpen]);
-  
-  useEffect(() => { recordingRef.current = recording; }, [recording]);
-  useEffect(() => { pausedRef.current = paused; }, [paused]);
-  useEffect(() => { framesRef.current = frames; }, [frames]);
-  useEffect(() => { labelRef.current = label; }, [label]);
-  useEffect(() => { dialectRef.current = dialect; }, [dialect]);
-  useEffect(() => { userRef.current = user; }, [user]);
 
-  useEffect(() => {
-    console.log('Component mounted with props:', { targetFrames, captureCount, initialLabel, initialUser });
-  }, [targetFrames, captureCount, initialLabel, initialUser]);
-
-  useEffect(() => {
-    targetFramesRef.current = FIXED_TARGET_FRAMES;
-  }, [targetFrames]);
-
-  useEffect(() => {
-    captureCountRef.current = FIXED_CAPTURE_COUNT;
-  }, [captureCount]);
-
-  useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
-
-  // Load persisted dialects & selection
+  // -------------------------------------------------------------------------
+  // Dialect persistence
+  // -------------------------------------------------------------------------
   useEffect(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem('dialectList') || 'null');
+      const stored = JSON.parse(localStorage.getItem("dialectList") || "null");
       if (Array.isArray(stored) && stored.length > 0) {
-        const merged = Array.from(new Set([...stored, 'Cần Thơ']));
-        setDialectList(merged);
-        localStorage.setItem('dialectList', JSON.stringify(merged));
+        const merged = Array.from(new Set([...stored, "Cần Thơ"]));
+        setDialectList(merged); localStorage.setItem("dialectList", JSON.stringify(merged));
       } else {
         const defaultList = ["Bắc", "Trung", "Nam", "Cần Thơ"];
-        setDialectList(defaultList);
-        localStorage.setItem('dialectList', JSON.stringify(defaultList));
+        setDialectList(defaultList); localStorage.setItem("dialectList", JSON.stringify(defaultList));
       }
-      const storedSel = localStorage.getItem('dialectSelected');
+      const storedSel = localStorage.getItem("dialectSelected");
       if (storedSel) setDialect(storedSel);
-    } catch (e) {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { handleCloseRef.current = handleClose; }, [handleClose]);
-
-  useEffect(() => {
-    completedCapturesRef.current = completedCaptures;
-  }, [completedCaptures]);
-
-  // Handlers
+  // -------------------------------------------------------------------------
+  // Capture handlers
+  // -------------------------------------------------------------------------
   const handleQuickCapture = useCallback(() => {
     if (!labelRef.current || !userRef.current) return;
-    setFrames([]);
-    framesRef.current = [];
-    // Preserve user selection if set; otherwise leave null for auto-infer
+    setFrames([]); framesRef.current = [];
     expectedHandsRef.current = expectedHandsOptionRef.current;
-    setCurrentCaptureIndex(0);
-    setCompletedCaptures(0);
-    completedCapturesRef.current = 0;
-    lastFrameTimeRef.current = 0;
-    setCountdown(3);
-    setMode('COUNTDOWN');
-    
+    setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
+    lastFrameTimeRef.current = 0; setCountdown(3); setMode("COUNTDOWN");
     setTimeout(() => {
-      setRecording(true);
-      recordingRef.current = true;
-      setMode('RECORD');
+      setRecording(true); recordingRef.current = true; setMode("RECORD");
       lastFrameTimeRef.current = Date.now();
     }, 3000);
   }, []);
 
-  const handlePause = useCallback(() => {
-    setPaused(true);
-    pausedRef.current = true;
-  }, []);
-
+  const handlePause  = useCallback(() => { setPaused(true);  pausedRef.current = true;  }, []);
   const handleResume = useCallback(() => {
-    setPaused(false);
-    pausedRef.current = false;
+    setPaused(false); pausedRef.current = false;
     lastFrameTimeRef.current = Date.now();
   }, []);
 
   const handleRestart = useCallback(() => {
-<<<<<<< Updated upstream
-    setFrames([]);
-    framesRef.current = [];
-=======
-    // Discard current frames and restart from zero
-          setFrames([]);
-          framesRef.current = [];
-          expectedHandsRef.current = expectedHandsOptionRef.current;
->>>>>>> Stashed changes
-    setPaused(false);
-    pausedRef.current = false;
+    setFrames([]); framesRef.current = [];
+    expectedHandsRef.current = expectedHandsOptionRef.current;
+    setPaused(false); pausedRef.current = false;
     lastFrameTimeRef.current = Date.now();
   }, []);
 
   const handleStop = useCallback(() => {
     const collected = framesRef.current.length || 0;
     const required = targetFramesRef.current || 0;
-
     if (collected < required) {
       window.alert(`Bạn chưa thu đủ khung hình: ${collected}/${required}. Vui lòng tiếp tục quay cho đến khi đủ.`);
       return;
     }
-
-    setRecording(false);
-    recordingRef.current = false;
-    setPaused(false);
-    pausedRef.current = false;
-
-<<<<<<< Updated upstream
+    setRecording(false); recordingRef.current = false;
+    setPaused(false); pausedRef.current = false;
     if (framesRef.current.length > 0) {
       const quality = computeQuality(framesRef.current);
       onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
-      setFrames([]);
-      framesRef.current = [];
+      setFrames([]); framesRef.current = [];
+      expectedHandsRef.current = expectedHandsOptionRef.current;
     }
-=======
-      if (framesRef.current.length > 0) {
-        const quality = computeQuality(framesRef.current);
-        onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
-          setFrames([]);
-          framesRef.current = [];
-          expectedHandsRef.current = expectedHandsOptionRef.current;
-      }
->>>>>>> Stashed changes
   }, [computeQuality]);
 
+  // -------------------------------------------------------------------------
+  // FIX (training data): Mirror helper for x-coordinates.
+  //
+  // When MIRROR_PREVIEW=true the canvas is drawn flipped horizontally.
+  // The model will receive mirrored frames at inference time.  To keep
+  // training data consistent with inference-time input we also mirror the
+  // x-coordinate: x_mirrored = 1 - x_raw.
+  //
+  // This does NOT touch y/z/visibility — those are already correct.
+  // IMPORTANT: Only apply this transform to data saved for training.
+  //            The render path continues to use raw coordinates.
+  // -------------------------------------------------------------------------
+  const mirrorLandmarkX = useCallback(
+    (lm: MediaPipeLandmark): MediaPipeLandmark =>
+      MIRROR_PREVIEW ? { ...lm, x: 1 - (lm.x ?? 0) } : { ...lm },
+    []
+  );
+
+  // -------------------------------------------------------------------------
+  // Main MediaPipe + Camera effect
+  //
+  // FIX (deps): Removed `expectedHandsOption` — it caused the entire
+  // MediaPipe model and Camera to be torn down and re-initialized every time
+  // the user toggled the 1/2/Auto hands selector.  The callback already reads
+  // `expectedHandsOptionRef.current` which stays in sync via the sync effect
+  // above, so no restart is needed.
+  //
+  // FIX (deps): Removed `filterLandmarks` — it was listed as a dep but is
+  // never called inside this effect (training uploads use raw landmarks).
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
 
     const hands = new Hands({
-      locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
+      locateFile: (file: string) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
     });
 
     hands.setOptions({
       maxNumHands: 2,
       modelComplexity: 1,
       refineLandmarks: true,
-      // Slightly tighten detection/tracking thresholds to reduce spurious detections
       minDetectionConfidence: 0.7,
       minTrackingConfidence: 0.75,
     });
@@ -661,76 +511,63 @@ export default function FullscreenCaptureModal({
         image?: HTMLImageElement | HTMLVideoElement;
       };
 
-      const detected = r.multiHandLandmarks || [];
+      const detected     = r.multiHandLandmarks || [];
       const handednessData = r.multiHandedness || [];
 
-      // FIX: Use MediaPipe's native handedness labels instead of fragile
-      // spatial/position-based guessing.
+      // FIX (handedness): MediaPipe Hands was trained on MIRRORED selfie
+      // images but receives the RAW (unflipped) frame from the camera
+      // utility.  As a result its labels are from the camera's point of
+      // view, not the person's:
       //
-      // MediaPipe Hands is trained assuming a mirrored (front-facing selfie)
-      // camera, so its labels already reflect the *person's* perspective:
-      //   label "Left"  → person's actual left hand
-      //   label "Right" → person's actual right hand
+      //   MP "Left"  → user's actual RIGHT hand  (raw frame, front camera)
+      //   MP "Right" → user's actual LEFT hand
       //
-      // This holds true regardless of MIRROR_PREVIEW because detection always
-      // runs on the raw (unflipped) video frames. SWAP_HANDEDNESS can invert
-      // the mapping if the physical setup produces consistently swapped results.
-      let leftHandLandmarks: MediaPipeLandmark[] | undefined;
+      // SWAP_HANDEDNESS defaults to true when MIRROR_PREVIEW is active,
+      // correcting the labels so that `leftHandLandmarks` contains the
+      // person's left hand landmarks (and vice-versa).
+      //
+      // Previously this was documented incorrectly and defaulted to false,
+      // so every saved sample had left/right swapped — this is the primary
+      // fix for wrong hand recognition in the trained model.
+      let leftHandLandmarks:  MediaPipeLandmark[] | undefined;
       let rightHandLandmarks: MediaPipeLandmark[] | undefined;
 
       detected.forEach((landmarks, i) => {
-        const rawLabel = handednessData[i]?.label; // "Left" or "Right"
-        // Optionally swap if VITE_SWAP_HANDEDNESS=1
+        const rawLabel = handednessData[i]?.label; // "Left" or "Right" from MP
         const effectiveLabel = SWAP_HANDEDNESS
-          ? rawLabel === 'Left' ? 'Right' : 'Left'
+          ? rawLabel === "Left" ? "Right" : "Left"
           : rawLabel;
 
-        if (effectiveLabel === 'Left') {
-          leftHandLandmarks = landmarks;
-        } else if (effectiveLabel === 'Right') {
-          rightHandLandmarks = landmarks;
-        }
+        if (effectiveLabel === "Left")  leftHandLandmarks  = landmarks;
+        else if (effectiveLabel === "Right") rightHandLandmarks = landmarks;
       });
 
-      // --- Temporal smoothing for presence & preview ---
-      const leftDetectedNow = !!(leftHandLandmarks && leftHandLandmarks.length > 0);
+      // ---- Temporal smoothing for presence / preview ----
+      const leftDetectedNow  = !!(leftHandLandmarks  && leftHandLandmarks.length  > 0);
       const rightDetectedNow = !!(rightHandLandmarks && rightHandLandmarks.length > 0);
 
       leftPresenceHistoryRef.current.push(leftDetectedNow);
-      if (leftPresenceHistoryRef.current.length > PRESENCE_HISTORY_SIZE) {
-        leftPresenceHistoryRef.current.shift();
-      }
+      if (leftPresenceHistoryRef.current.length > PRESENCE_HISTORY_SIZE) leftPresenceHistoryRef.current.shift();
       rightPresenceHistoryRef.current.push(rightDetectedNow);
-      if (rightPresenceHistoryRef.current.length > PRESENCE_HISTORY_SIZE) {
-        rightPresenceHistoryRef.current.shift();
-      }
+      if (rightPresenceHistoryRef.current.length > PRESENCE_HISTORY_SIZE) rightPresenceHistoryRef.current.shift();
 
-      const leftVotes = leftPresenceHistoryRef.current.filter(Boolean).length;
+      const leftVotes  = leftPresenceHistoryRef.current.filter(Boolean).length;
       const rightVotes = rightPresenceHistoryRef.current.filter(Boolean).length;
-      const leftSmoothedVisible = leftVotes > leftPresenceHistoryRef.current.length / 2;
+      const leftSmoothedVisible  = leftVotes  > leftPresenceHistoryRef.current.length  / 2;
       const rightSmoothedVisible = rightVotes > rightPresenceHistoryRef.current.length / 2;
 
-      visibilityStateRef.current = {
-        left: leftSmoothedVisible,
-        right: rightSmoothedVisible,
-      };
+      visibilityStateRef.current = { left: leftSmoothedVisible, right: rightSmoothedVisible };
 
-<<<<<<< Updated upstream
-=======
       if (DEBUG_HANDS) {
-        console.debug('Hands debug', {
-          numHands: r.multiHandLandmarks?.length ?? 0,
-          handedness: r.multiHandedness,
-          leftDetectedNow,
-          rightDetectedNow,
-          leftSmoothedVisible,
-          rightSmoothedVisible,
+        console.debug("Hands debug", {
+          numHands: detected.length,
+          handedness: handednessData,
+          leftDetectedNow, rightDetectedNow, leftSmoothedVisible, rightSmoothedVisible,
         });
       }
 
-      // Compute render landmarks with fallback to last non-empty frame
->>>>>>> Stashed changes
-      let renderLeft: MediaPipeLandmark[] = [];
+      // ---- Render (preview uses smoothed/lerped positions) ----
+      let renderLeft:  MediaPipeLandmark[] = [];
       let renderRight: MediaPipeLandmark[] = [];
 
       if (leftDetectedNow) {
@@ -751,6 +588,7 @@ export default function FullscreenCaptureModal({
         lastRenderedRightRef.current = undefined;
       }
 
+      // Clear ghost when only one hand detected
       if (leftDetectedNow && !rightDetectedNow) {
         lastRenderedRightRef.current = undefined;
         rightPresenceHistoryRef.current = [];
@@ -763,7 +601,7 @@ export default function FullscreenCaptureModal({
       renderDataRef.current = {
         leftHandLandmarks: renderLeft,
         rightHandLandmarks: renderRight,
-        image: r.image as HTMLImageElement | HTMLVideoElement
+        image: r.image as HTMLImageElement | HTMLVideoElement,
       };
 
       if (!pendingRenderRef.current) {
@@ -771,400 +609,301 @@ export default function FullscreenCaptureModal({
         requestAnimationFrame(renderLandmarks);
       }
 
-      // Capture logic
-      if (recordingRef.current && !pausedRef.current) {
-        const currentTime = Date.now();
-        if (currentTime - lastFrameTimeRef.current < frameIntervalMs.current) return;
-        lastFrameTimeRef.current = currentTime;
+      // ---- Capture logic ----
+      if (!recordingRef.current || pausedRef.current) return;
 
-<<<<<<< Updated upstream
-        let captureLeft = leftHandLandmarks;
-        let captureRight = rightHandLandmarks;
-=======
-        // For uploads we MUST preserve the raw MediaPipe output (no smoothing,
-        // no interpolation). Smoothing and fallbacks are strictly for the UI
-        // preview only. Therefore compute raw detection presence separately and
-        // decide acceptance using only raw detections.
-        const rawLeft = leftHandLandmarks;
-        const rawRight = rightHandLandmarks;
->>>>>>> Stashed changes
+      const currentTime = Date.now();
+      if (currentTime - lastFrameTimeRef.current < frameIntervalMs.current) return;
+      lastFrameTimeRef.current = currentTime;
 
-        const rawLeftHas = (rawLeft?.length ?? 0) > 0;
-        const rawRightHas = (rawRight?.length ?? 0) > 0;
+      // IMPORTANT: use RAW MediaPipe output for training uploads — no smoothing.
+      const rawLeft  = leftHandLandmarks;
+      const rawRight = rightHandLandmarks;
 
-        // Approximate per-hand visibility/confidence using landmark visibility
-        const computeHandConfidence = (landmarks?: MediaPipeLandmark[]) => {
-          if (!landmarks || landmarks.length === 0) return undefined;
-          let sum = 0;
-          let cnt = 0;
-          for (const lm of landmarks) {
-            if (typeof lm.visibility === 'number') {
-              sum += lm.visibility;
-              cnt++;
-            }
-          }
-          return cnt > 0 ? sum / cnt : undefined;
-        };
+      const rawLeftHas  = (rawLeft?.length  ?? 0) > 0;
+      const rawRightHas = (rawRight?.length ?? 0) > 0;
 
-        const leftConf = computeHandConfidence(rawLeft);
-        const rightConf = computeHandConfidence(rawRight);
-        // Aggregate confidence across hands (fallback to 0 if none)
-        const confCandidates: number[] = [];
-        if (typeof leftConf === 'number') confCandidates.push(leftConf);
-        if (typeof rightConf === 'number') confCandidates.push(rightConf);
-        // Also consider handedness score from MediaPipe if visibility absent
-        if (confCandidates.length === 0 && r.multiHandedness && r.multiHandedness.length > 0) {
-          for (const h of r.multiHandedness) {
-            const hh = h as { score?: number };
-            if (typeof hh.score === 'number') confCandidates.push(hh.score);
-          }
+      const computeHandConfidence = (lms?: MediaPipeLandmark[]) => {
+        if (!lms || lms.length === 0) return undefined;
+        let sum = 0, cnt = 0;
+        for (const lm of lms) if (typeof lm.visibility === "number") { sum += lm.visibility; cnt++; }
+        return cnt > 0 ? sum / cnt : undefined;
+      };
+
+      const leftConf  = computeHandConfidence(rawLeft);
+      const rightConf = computeHandConfidence(rawRight);
+
+      const confCandidates: number[] = [];
+      if (typeof leftConf  === "number") confCandidates.push(leftConf);
+      if (typeof rightConf === "number") confCandidates.push(rightConf);
+      if (confCandidates.length === 0 && r.multiHandedness) {
+        for (const h of r.multiHandedness) {
+          if (typeof (h as { score?: number }).score === "number") confCandidates.push((h as { score: number }).score);
         }
-        const confidence = confCandidates.length ? (confCandidates.reduce((a, b) => a + b, 0) / confCandidates.length) : undefined;
+      }
+      const confidence = confCandidates.length
+        ? confCandidates.reduce((a, b) => a + b, 0) / confCandidates.length
+        : undefined;
 
-<<<<<<< Updated upstream
-        setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || anyHands || anyVisible);
-=======
-        // UI hint uses smoothed presence to reduce flicker
-        setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || rawLeftHas || rawRightHas);
->>>>>>> Stashed changes
+      setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || rawLeftHas || rawRightHas);
 
-        // Determine acceptance using the explicit user selection when set
-        // (expectedHandsOptionRef). Only infer when the user selected Auto (null).
-        const presentLeftRaw = rawLeftHas && (typeof leftConf !== 'number' ? true : leftConf >= 0.0);
-        const presentRightRaw = rawRightHas && (typeof rightConf !== 'number' ? true : rightConf >= 0.0);
-        const detectedHandsCountRaw = (presentLeftRaw ? 1 : 0) + (presentRightRaw ? 1 : 0);
+      const presentLeftRaw  = rawLeftHas;
+      const presentRightRaw = rawRightHas;
+      const detectedHandsCountRaw = (presentLeftRaw ? 1 : 0) + (presentRightRaw ? 1 : 0);
 
-        let accept = false;
-        const userChoice = expectedHandsOptionRef.current; // null = Auto
-        if (detectedHandsCountRaw === 0) {
-          accept = false; // skip frames with no raw detection
-        } else if (userChoice != null) {
-          // Respect explicit user choice (1 or 2) — do NOT infer.
-          if (userChoice === 2) {
-            accept = (presentLeftRaw && presentRightRaw);
-          } else if (userChoice === 1) {
-            accept = (presentLeftRaw !== presentRightRaw);
-          } else {
-            accept = true;
-          }
-        } else if (expectedHandsRef.current == null) {
-          // infer expectation from the first raw useful frame (Auto mode)
-          expectedHandsRef.current = detectedHandsCountRaw === 2 ? 2 : 1;
-          accept = true;
-          if (DEBUG_HANDS) console.log('Inferred expectedHands =', expectedHandsRef.current);
-        } else if (expectedHandsRef.current === 2) {
-          // require both raw hands present
-          accept = (presentLeftRaw && presentRightRaw);
-        } else if (expectedHandsRef.current === 1) {
-          // require exactly one raw hand present
-          accept = (presentLeftRaw !== presentRightRaw);
+      let accept = false;
+      const userChoice = expectedHandsOptionRef.current;
+      if (detectedHandsCountRaw === 0) {
+        accept = false;
+      } else if (userChoice != null) {
+        if (userChoice === 2) accept = presentLeftRaw && presentRightRaw;
+        else if (userChoice === 1) accept = presentLeftRaw !== presentRightRaw;
+        else accept = true;
+      } else if (expectedHandsRef.current == null) {
+        expectedHandsRef.current = detectedHandsCountRaw === 2 ? 2 : 1;
+        accept = true;
+        if (DEBUG_HANDS) console.log("Inferred expectedHands =", expectedHandsRef.current);
+      } else if (expectedHandsRef.current === 2) {
+        accept = presentLeftRaw && presentRightRaw;
+      } else if (expectedHandsRef.current === 1) {
+        accept = presentLeftRaw !== presentRightRaw;
+      } else {
+        accept = true;
+      }
+
+      if (!accept) {
+        if (DEBUG_HANDS) console.debug("Skipping frame:", { expectedHands: expectedHandsRef.current, detectedRaw: detectedHandsCountRaw });
+        return;
+      }
+
+      // FIX (training data x): Mirror x-coordinates to match the mirrored
+      // display so that training samples are anatomically consistent with
+      // what the model will receive at inference time (mirrored video).
+      const timestamp_ms =
+        typeof performance !== "undefined" && (performance as Performance).timeOrigin
+          ? (performance as Performance).timeOrigin + (performance as Performance).now()
+          : Date.now();
+
+      const frameEntry: CaptureFrame = {
+        left_hand:  rawLeft  ? rawLeft.map(mirrorLandmarkX)  : [],
+        right_hand: rawRight ? rawRight.map(mirrorLandmarkX) : [],
+        timestamp_ms,
+        fallback_used: false,
+        confidence: typeof confidence === "number" ? confidence : undefined,
+      };
+
+      framesRef.current.push(frameEntry);
+      setFrames([...framesRef.current]);
+
+      if (framesRef.current.length >= FIXED_TARGET_FRAMES) {
+        recordingRef.current = false;
+        setRecording(false);
+        setMode("IDLE");
+
+        const capturedFrames = [...framesRef.current];
+        const quality = computeQuality(capturedFrames);
+        const newCompleted = completedCapturesRef.current + 1;
+
+        onSampleCaptureRef.current(capturedFrames, labelRef.current, userRef.current, {
+          quality_info: quality, dialect: dialectRef.current,
+        });
+
+        completedCapturesRef.current = newCompleted;
+        setCompletedCaptures(newCompleted);
+        setCurrentCaptureIndex(newCompleted);
+
+        if (newCompleted < FIXED_CAPTURE_COUNT) {
+          setFrames([]); framesRef.current = [];
+          expectedHandsRef.current = expectedHandsOptionRef.current;
+          lastFrameTimeRef.current = 0;
+          setTimeout(() => {
+            setCountdown(3); setMode("COUNTDOWN");
+            setTimeout(() => {
+              setRecording(true); recordingRef.current = true;
+              setMode("RECORD"); lastFrameTimeRef.current = Date.now();
+            }, 3000);
+          }, 2000);
         } else {
-<<<<<<< Updated upstream
-          // Filter and canonicalize landmarks.
-          // If MIRROR_PREVIEW is on we flip x so stored data is always in
-          // canonical (non-mirrored) image space, stable for training.
-          const leftFiltered = filterLandmarks(captureLeft, 'leftHand') || [];
-          const rightFiltered = filterLandmarks(captureRight, 'rightHand') || [];
-
-          if (MIRROR_PREVIEW) {
-            for (const lm of leftFiltered) { lm.x = typeof lm.x === 'number' ? 1 - lm.x : lm.x; }
-            for (const lm of rightFiltered) { lm.x = typeof lm.x === 'number' ? 1 - lm.x : lm.x; }
-          }
-
-          const landmarks = { left_hand: leftFiltered, right_hand: rightFiltered };
-          framesRef.current.push(landmarks);
-=======
-          accept = true;
-        }
-
-        if (!accept) {
-          if (DEBUG_HANDS) console.debug('Skipping frame (raw detection): expectedHands=', expectedHandsRef.current, 'detectedRaw=', detectedHandsCountRaw);
-        } else {
-          // IMPORTANT: upload raw landmarks only (no filterLandmarks here).
-          // Add per-frame metadata so backend can validate and compute any
-          // preprocessing deterministically server-side.
-          const timestamp_ms = (typeof performance !== 'undefined' && (performance as Performance).timeOrigin)
-            ? (performance as Performance).timeOrigin + (performance as Performance).now()
-            : Date.now();
-
-          const frameEntry = {
-            left_hand: rawLeft ? rawLeft.map(l => ({ ...l })) : [],
-            right_hand: rawRight ? rawRight.map(l => ({ ...l })) : [],
-            timestamp_ms,
-            fallback_used: false,
-            confidence: typeof confidence === 'number' ? confidence : undefined,
-          };
-
-          framesRef.current.push(frameEntry);
->>>>>>> Stashed changes
-        }
-
-        setFrames([...framesRef.current]);
-
-        if (framesRef.current.length >= FIXED_TARGET_FRAMES) {
-          recordingRef.current = false;
-          setRecording(false);
-          setMode('IDLE');
-
-          const capturedFrames = [...framesRef.current];
-          const quality = computeQuality(capturedFrames);
-          const newCompleted = completedCapturesRef.current + 1;
-
-          onSampleCaptureRef.current(capturedFrames, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
-
-          completedCapturesRef.current = newCompleted;
-          setCompletedCaptures(newCompleted);
-          setCurrentCaptureIndex(newCompleted);
-
-          if (newCompleted < FIXED_CAPTURE_COUNT) {
-            setFrames([]);
-            framesRef.current = [];
+          setTimeout(() => {
+            setFrames([]); framesRef.current = [];
             expectedHandsRef.current = expectedHandsOptionRef.current;
             lastFrameTimeRef.current = 0;
-            setTimeout(() => {
-              setCountdown(3);
-              setMode('COUNTDOWN');
-              setTimeout(() => {
-                setRecording(true);
-                recordingRef.current = true;
-                setMode('RECORD');
-                lastFrameTimeRef.current = Date.now();
-              }, 3000);
-            }, 2000);
-          } else {
-            setTimeout(() => {
-              setFrames([]);
-              framesRef.current = [];
-              expectedHandsRef.current = expectedHandsOptionRef.current;
-              lastFrameTimeRef.current = 0;
-              completedCapturesRef.current = 0;
-              setCompletedCaptures(0);
-              setCurrentCaptureIndex(0);
-              recordingRef.current = false;
-              setRecording(false);
-              setMode('IDLE');
-              setLabel('');
-            }, 1000);
-          }
+            completedCapturesRef.current = 0;
+            setCompletedCaptures(0); setCurrentCaptureIndex(0);
+            recordingRef.current = false; setRecording(false); setMode("IDLE"); setLabel("");
+          }, 1000);
         }
       }
     });
 
-    if (videoRef.current) {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        canvas.width = 1280;
-        canvas.height = 720;
-      }
-      
-      const video = videoRef.current;
-      
-      const onLoadedMetadata = () => {
-        console.log('Video metadata loaded:', { videoWidth: video.videoWidth, videoHeight: video.videoHeight });
-      };
-      const onCanPlay = () => {
-        console.log('Video can play');
-      };
-
-      video.addEventListener('loadedmetadata', onLoadedMetadata);
-      video.addEventListener('canplay', onCanPlay);
-
-      navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          width: 1280, 
-          height: 720,
-          frameRate: { ideal: 30, max: 60 }
-        } 
-      })
-        .then((stream) => {
-          stream.getTracks().forEach(track => track.stop());
-          
-          const camera = new Camera(videoRef.current!, {
-            onFrame: async () => {
-              if (videoRef.current) {
-                await hands.send({ image: videoRef.current });
-              }
-            },
-            width: 1280,
-            height: 720,
-            facingMode: 'user'
-          });
-          
-          cameraRef.current = camera;
-          camera.start().then(() => {
-            setIsReady(true);
-            setCameraError(null);
-          }).catch((error) => {
-            const errorMsg = getCameraErrorMessage(error);
-            setCameraError(errorMsg);
-            setIsReady(false);
-          });
-        })
-        .catch((error) => {
-          const errorMsg = getCameraErrorMessage(error);
-          setCameraError(errorMsg);
-          setIsReady(false);
-        });
-
+    if (!videoRef.current) {
       return () => {
-        video.removeEventListener('loadedmetadata', onLoadedMetadata);
-        video.removeEventListener('canplay', onCanPlay);
         hands.close();
-        if (cameraRef.current) {
-          cameraRef.current.stop();
-          cameraRef.current = null;
-        }
+        if (cameraRef.current) { cameraRef.current.stop(); cameraRef.current = null; }
       };
     }
 
-    return () => {
-      hands.close();
-      if (cameraRef.current) {
-        cameraRef.current.stop();
-        cameraRef.current = null;
-      }
-    };
-<<<<<<< Updated upstream
-  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks]);
-=======
-  // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants and
-  // intentionally omitted from dependencies.
-  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks, expectedHandsOption]); // Include renderLandmarks, computeQuality, filterLandmarks and getRenderLandmarks
->>>>>>> Stashed changes
+    const canvas = canvasRef.current;
+    if (canvas) { canvas.width = 1280; canvas.height = 720; }
 
+    const video = videoRef.current;
+    const onLoadedMetadata = () => console.log("Video metadata loaded:", { w: video.videoWidth, h: video.videoHeight });
+    const onCanPlay = () => console.log("Video can play");
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("canplay", onCanPlay);
+
+    // FIX (redundant getUserMedia): The previous code called getUserMedia,
+    // immediately stopped the resulting stream, then started Camera() which
+    // also calls getUserMedia.  This caused double permission prompts on some
+    // browsers and race conditions.  Camera handles permissions internally —
+    // just start it directly.
+    const camera = new Camera(videoRef.current, {
+      onFrame: async () => {
+        if (videoRef.current) await hands.send({ image: videoRef.current });
+      },
+      width: 1280,
+      height: 720,
+      facingMode: "user",
+    });
+
+    cameraRef.current = camera;
+    camera.start()
+      .then(() => { setIsReady(true); setCameraError(null); })
+      .catch((error: unknown) => {
+        const errorMsg = getCameraErrorMessage(error);
+        setCameraError(errorMsg); setIsReady(false);
+      });
+
+    return () => {
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("canplay", onCanPlay);
+      hands.close();
+      if (cameraRef.current) { cameraRef.current.stop(); cameraRef.current = null; }
+    };
+    // FIX: `expectedHandsOption` removed — would restart MediaPipe on every
+    //       hands-mode toggle.  Use `expectedHandsOptionRef` inside callback.
+    // FIX: `filterLandmarks` removed — it is not used inside this effect.
+  }, [isOpen, renderLandmarks, computeQuality, getRenderLandmarks, mirrorLandmarkX]);
+
+  // -------------------------------------------------------------------------
   // Countdown effect
+  // FIX (backup timer): Previous code created a new 30-second backup timer
+  // on every re-render while countdown===0 && recording, leading to dozens of
+  // timers all calling handleStop.  Use backupTimerRef so only ONE fires.
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
-    } else if (countdown === 0 && recording) {
-      const backupTimer = setTimeout(() => {
-        console.warn('BACKUP TIMEOUT: Frame completion failed after 30 seconds');
-        handleStop();
-      }, 30000);
-      return () => clearTimeout(backupTimer);
     }
+
+    if (countdown === 0 && recording && !backupTimerRef.current) {
+      backupTimerRef.current = setTimeout(() => {
+        console.warn("BACKUP TIMEOUT: Frame completion failed after 30 seconds");
+        handleStop();
+        backupTimerRef.current = null;
+      }, 30000);
+    }
+
+    if (!recording && backupTimerRef.current) {
+      clearTimeout(backupTimerRef.current);
+      backupTimerRef.current = null;
+    }
+
+    return () => {
+      if (backupTimerRef.current) { clearTimeout(backupTimerRef.current); backupTimerRef.current = null; }
+    };
   }, [countdown, recording, handleStop]);
 
+  // -------------------------------------------------------------------------
   // Cleanup on unmount
+  // -------------------------------------------------------------------------
   useEffect(() => {
     const currentCamera = cameraRef.current;
-    const currentVideo = videoRef.current;
-    
+    const currentVideo  = videoRef.current;
     return () => {
       if (currentCamera) currentCamera.stop();
-      if (currentVideo && currentVideo.srcObject) {
-        const stream = currentVideo.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
+      if (currentVideo?.srcObject) {
+        (currentVideo.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
       }
     };
   }, []);
 
+  // -------------------------------------------------------------------------
   // Keyboard shortcuts
+  // -------------------------------------------------------------------------
   useEffect(() => {
     if (!isOpen) return;
-
     const handleKeyPress = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement | null;
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
-        return;
-      }
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
 
-      if (e.code === 'Enter') {
+      if (e.code === "Enter") {
         e.preventDefault();
         if (!recordingRef.current && labelRef.current && userRef.current) {
-          setFrames([]);
-          framesRef.current = [];
+          setFrames([]); framesRef.current = [];
           expectedHandsRef.current = expectedHandsOptionRef.current;
-          setCurrentCaptureIndex(0);
-          setCompletedCaptures(0);
-          completedCapturesRef.current = 0;
-          setCountdown(3);
-          setMode('COUNTDOWN');
-          setTimeout(() => {
-            setRecording(true);
-            recordingRef.current = true;
-            setMode('RECORD');
-          }, 3000);
+          setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
+          setCountdown(3); setMode("COUNTDOWN");
+          setTimeout(() => { setRecording(true); recordingRef.current = true; setMode("RECORD"); }, 3000);
         } else if (recordingRef.current) {
           const collected = framesRef.current.length || 0;
-          const required = targetFramesRef.current || 0;
+          const required  = targetFramesRef.current  || 0;
           if (collected < required) {
             window.alert(`Bạn chưa thu đủ khung hình: ${collected}/${required}. Vui lòng tiếp tục quay cho đến khi đủ.`);
           } else {
-            setRecording(false);
-            recordingRef.current = false;
+            setRecording(false); recordingRef.current = false;
             if (framesRef.current.length > 0) {
               const quality = computeQuality(framesRef.current);
               onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
-              setFrames([]);
-              framesRef.current = [];
+              setFrames([]); framesRef.current = [];
               expectedHandsRef.current = expectedHandsOptionRef.current;
             }
           }
         }
-      } else if (e.code === 'Escape') {
+      } else if (e.code === "Escape") {
         handleCloseRef.current?.();
-      } else if (e.code === 'Space') {
+      } else if (e.code === "Space") {
         e.preventDefault();
-        if (recordingRef.current) {
-          if (pausedRef.current) handleResume();
-          else handlePause();
-        }
-      } else if (e.code === 'KeyS') {
+        if (recordingRef.current) { if (pausedRef.current) handleResume(); else handlePause(); }
+      } else if (e.code === "KeyS") {
         setShowGuide((s) => !s);
-      } else if (e.code === 'KeyD') {
+      } else if (e.code === "KeyD") {
         setShowTips((s) => !s);
-      } else if (e.code === 'KeyA') {
+      } else if (e.code === "KeyA") {
         if (recordingRef.current) {
-          recordingRef.current = false;
-          setRecording(false);
-          setPaused(false);
-          pausedRef.current = false;
-          setFrames([]);
-          framesRef.current = [];
-          expectedHandsRef.current = expectedHandsOptionRef.current;
-          setMode('IDLE');
+          recordingRef.current = false; setRecording(false);
+          setPaused(false); pausedRef.current = false;
+          setFrames([]); framesRef.current = [];
+          expectedHandsRef.current = expectedHandsOptionRef.current; setMode("IDLE");
         }
       }
     };
+    document.addEventListener("keydown", handleKeyPress);
+    return () => document.removeEventListener("keydown", handleKeyPress);
+  }, [isOpen, computeQuality, handlePause, handleResume]);
 
-    document.addEventListener('keydown', handleKeyPress);
-    return () => document.removeEventListener('keydown', handleKeyPress);
-  }, [isOpen, computeQuality, handlePause, handleResume, expectedHandsOption]);
-
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
   if (!isOpen) return null;
 
   return (
     <div ref={rootRef} className="fixed inset-0 z-[9999] bg-black">
-      {/* Error Display */}
+      {/* Camera Error */}
       {cameraError && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-red-900/80 backdrop-blur-md border-2 border-red-500 rounded-xl p-8 max-w-md mx-4 text-center">
-            <div className="text-red-200 mb-4">
-              <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4v.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
+            <svg className="w-16 h-16 mx-auto mb-4 text-red-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4v.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
             <h3 className="text-xl font-bold text-white mb-3">Lỗi Camera</h3>
             <p className="text-red-100 mb-6 leading-relaxed">{cameraError}</p>
             <div className="flex gap-3 flex-col sm:flex-row">
-              <button
-                onClick={() => { setCameraError(null); window.location.reload(); }}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-              >
-                Làm mới Trang
-              </button>
-              <button
-                onClick={handleClose}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
-              >
-                Thoát
-              </button>
+              <button onClick={() => { setCameraError(null); window.location.reload(); }} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition-colors">Làm mới Trang</button>
+              <button onClick={handleClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors">Thoát</button>
             </div>
-            <p className="text-xs text-red-200/70 mt-4">
-              Nếu vấn đề tiếp tục, vui lòng kiểm tra quyền truy cập camera trong cài đặt trình duyệt.
-            </p>
+            <p className="text-xs text-red-200/70 mt-4">Nếu vấn đề tiếp tục, vui lòng kiểm tra quyền truy cập camera trong cài đặt trình duyệt.</p>
           </div>
         </div>
       )}
@@ -1176,43 +915,33 @@ export default function FullscreenCaptureModal({
             <h2 className="text-xl font-semibold text-white">🎬 Ghi toàn màn hình</h2>
             {isReady && (
               <Badge variant="success">
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse mr-2"></span>
-                Camera sẵn sàng
+                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse mr-2"></span>Camera sẵn sàng
               </Badge>
             )}
-            {/* Expected hands selector */}
             <div className="ml-3 hidden sm:flex items-center space-x-2">
               <div className="text-sm text-gray-300">Hands:</div>
               <div className="inline-flex bg-gray-800 rounded-md overflow-hidden">
-                <button
-                  onClick={() => handleSetExpectedHands(null)}
-                  disabled={recording}
-                  className={`px-3 py-1 text-sm ${expectedHandsOption==null? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
-                >Auto</button>
-                <button
-                  onClick={() => handleSetExpectedHands(1)}
-                  disabled={recording}
-                  className={`px-3 py-1 text-sm ${expectedHandsOption===1? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
-                >1</button>
-                <button
-                  onClick={() => handleSetExpectedHands(2)}
-                  disabled={recording}
-                  className={`px-3 py-1 text-sm ${expectedHandsOption===2? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
-                >2</button>
+                {([null, 1, 2] as const).map((v) => (
+                  <button
+                    key={String(v)}
+                    onClick={() => handleSetExpectedHands(v)}
+                    disabled={recording}
+                    className={`px-3 py-1 text-sm ${expectedHandsOption === v ? "bg-gray-700 text-white" : "text-gray-300 hover:bg-gray-700"}`}
+                  >
+                    {v === null ? "Auto" : v}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
-          
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <div className="text-white text-sm hidden sm:block">
-              Nhấn <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Enter</kbd> để chụp • <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Esc</kbd> để thoát
+              Nhấn <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Enter</kbd> để chụp •{" "}
+              <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Esc</kbd> để thoát
             </div>
-            <button
-              onClick={() => setShowGuide(!showGuide)}
-              className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2"
-            >
-              <span>{showGuide ? '🙈' : '👁️'}</span>
-              <span>{showGuide ? 'Ẩn hướng dẫn' : 'Hiển thị hướng dẫn'}</span>
+            <button onClick={() => setShowGuide(!showGuide)} className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2">
+              <span>{showGuide ? "🙈" : "👁️"}</span>
+              <span>{showGuide ? "Ẩn hướng dẫn" : "Hiển thị hướng dẫn"}</span>
             </button>
             <button onClick={handleClose} className="text-white hover:text-gray-300 p-2">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1228,15 +957,14 @@ export default function FullscreenCaptureModal({
         {/* Camera Feed */}
         <div className="flex-1 relative flex items-center justify-center bg-gray-900 w-full h-[40vh] sm:h-[50vh] lg:h-full">
           <video ref={videoRef} autoPlay muted playsInline className="hidden" />
-          <canvas 
-            ref={canvasRef} 
-            width={1280} 
-            height={720} 
+          <canvas
+            ref={canvasRef}
+            width={1280}
+            height={720}
             className="w-full h-full max-w-full max-h-full object-contain border border-gray-600 rounded-lg"
-            style={{ minHeight: '200px', backgroundColor: '#1a1a1a' }}
+            style={{ minHeight: "200px", backgroundColor: "#1a1a1a" }}
           />
 
-          {/* Hint overlay when hands are not visible during recording */}
           {recording && !handsVisible && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="bg-black/70 text-yellow-300 px-4 py-2 rounded-lg text-center">
@@ -1246,18 +974,12 @@ export default function FullscreenCaptureModal({
             </div>
           )}
 
-          {/* Mobile-only exit button */}
-          <button
-            onClick={handleClose}
-            className="sm:hidden absolute top-3 right-3 z-20 bg-black/60 hover:bg-black/70 text-white rounded-full p-2"
-            aria-label="Thoát toàn màn hình"
-          >
+          <button onClick={handleClose} className="sm:hidden absolute top-3 right-3 z-20 bg-black/60 hover:bg-black/70 text-white rounded-full p-2" aria-label="Thoát toàn màn hình">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-          
-          {/* Guide Overlay */}
+
           {showGuide && !recording && countdown === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative">
@@ -1270,6 +992,7 @@ export default function FullscreenCaptureModal({
                     <div className="w-1 h-8 bg-green-400/60 rounded-full"></div>
                     <div className="absolute w-8 h-1 bg-green-400/60 rounded-full"></div>
                   </div>
+                  {/* Labels now match corrected handedness: orange=Left, teal=Right */}
                   <div className="absolute top-16 -left-6 w-8 h-8 border border-orange-400/60 rounded-full bg-orange-400/10 flex items-center justify-center">
                     <span className="text-orange-400 text-xs">L</span>
                   </div>
@@ -1277,17 +1000,12 @@ export default function FullscreenCaptureModal({
                     <span className="text-teal-400 text-xs">R</span>
                   </div>
                 </div>
-                <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium">
-                  🎯 Đặt vị trí vào khung
-                </div>
-                <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-xs">
-                  Thấy phần trên cơ thể và hai tay
-                </div>
+                <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium">🎯 Đặt vị trí vào khung</div>
+                <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-xs">Thấy phần trên cơ thể và hai tay</div>
               </div>
             </div>
           )}
 
-          {/* Countdown Overlay */}
           {countdown > 0 && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="text-center text-white">
@@ -1295,15 +1013,12 @@ export default function FullscreenCaptureModal({
                 <div className="text-2xl mb-2">Chuẩn bị thực hiện:</div>
                 <div className="text-3xl font-semibold text-green-400">{label}</div>
                 {captureCount > 1 && (
-                  <div className="text-lg mt-4 text-gray-300">
-                    Lần chụp {currentCaptureIndex + 1} / {FIXED_CAPTURE_COUNT}
-                  </div>
+                  <div className="text-lg mt-4 text-gray-300">Lần chụp {currentCaptureIndex + 1} / {FIXED_CAPTURE_COUNT}</div>
                 )}
               </div>
             </div>
           )}
 
-          {/* Paused Overlay */}
           {recording && paused && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20">
               <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 w-[500px]">
@@ -1317,40 +1032,21 @@ export default function FullscreenCaptureModal({
                       <span className="text-white font-medium">{frames.length} / {FIXED_TARGET_FRAMES} khung</span>
                     </div>
                     <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div 
-                        className="bg-yellow-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }}
-                      />
+                      <div className="bg-yellow-500 h-2 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <button
-                      onClick={handleResume}
-                      className="w-full px-4 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
+                    <button onClick={handleResume} className="w-full px-4 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       <span>Tiếp tục thu (giữ {frames.length} khung)</span>
                     </button>
-                    <button
-                      onClick={handleRestart}
-                      className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
+                    <button onClick={handleRestart} className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                       <span>Bắt đầu lại từ đầu (xóa dữ liệu)</span>
                     </button>
                     {frames.length >= FIXED_TARGET_FRAMES && (
-                      <button
-                        onClick={() => { setPaused(false); pausedRef.current = false; handleStop(); }}
-                        className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
+                      <button onClick={() => { setPaused(false); pausedRef.current = false; handleStop(); }} className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                         <span>Hoàn tất và lưu</span>
                       </button>
                     )}
@@ -1360,7 +1056,6 @@ export default function FullscreenCaptureModal({
             </div>
           )}
 
-          {/* Between Captures Overlay */}
           {!recording && !countdown && completedCaptures > 0 && completedCaptures < captureCount && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="text-center text-white">
@@ -1369,16 +1064,12 @@ export default function FullscreenCaptureModal({
                 <div className="text-xl mb-4">Chuẩn bị chụp tiếp...</div>
                 <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {FIXED_CAPTURE_COUNT}</div>
                 <div className="w-64 bg-gray-700 rounded-full h-3 mt-4 mx-auto">
-                  <div 
-                    className="bg-green-500 h-3 rounded-full transition-all duration-500"
-                    style={{ width: `${(completedCaptures / captureCount) * 100}%` }}
-                  />
+                  <div className="bg-green-500 h-3 rounded-full transition-all duration-500" style={{ width: `${(completedCaptures / captureCount) * 100}%` }} />
                 </div>
               </div>
             </div>
           )}
 
-          {/* Completion Overlay */}
           {!recording && !countdown && completedCaptures > 0 && completedCaptures >= captureCount && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm">
               <div className="text-center text-white">
@@ -1390,18 +1081,14 @@ export default function FullscreenCaptureModal({
             </div>
           )}
 
-          {/* Recording Indicator */}
           {recording && (
             <div className="absolute top-24 left-6 flex items-center space-x-3 bg-red-500 text-white px-4 py-2 rounded-full shadow-lg">
               <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
               <span className="font-medium">ĐANG GHI</span>
-              {FIXED_CAPTURE_COUNT > 1 && (
-                <span className="text-sm">({completedCaptures + 1}/{FIXED_CAPTURE_COUNT})</span>
-              )}
+              {FIXED_CAPTURE_COUNT > 1 && <span className="text-sm">({completedCaptures + 1}/{FIXED_CAPTURE_COUNT})</span>}
             </div>
           )}
 
-          {/* Recording Progress */}
           {recording && (
             <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-6 py-2">
               <div className="text-white text-sm">📊 {frames.length} khung đã chụp</div>
@@ -1414,70 +1101,34 @@ export default function FullscreenCaptureModal({
           <div className="flex-1 p-6 space-y-6 overflow-y-auto">
             <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-5 border border-blue-500/20">
               <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                <span className="w-3 h-3 bg-blue-400 rounded-full mr-3"></span>
-                Cài đặt chụp
+                <span className="w-3 h-3 bg-blue-400 rounded-full mr-3"></span>Cài đặt chụp
               </h3>
-              
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-blue-300 mb-2">📝 Nhãn hành động *</label>
                   <div className="relative">
-                    <input
-                      type="text"
-                      value={label}
-                      onChange={(e) => setLabel(e.target.value)}
-                      placeholder="ví dụ: đi bộ, nhảy, vẫy tay"
-                      className="w-full pr-12 px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      disabled={recording || countdown > 0}
-                    />
+                    <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ví dụ: đi bộ, nhảy, vẫy tay" className="w-full pr-12 px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200" disabled={recording || countdown > 0} />
                     <div className="absolute inset-y-0 right-2 flex items-center">
-                      <SpeechInputButton
-                        onText={(text) => setLabel(text)}
-                        title="Dùng giọng nói để điền nhãn hành động"
-                        className="h-8 w-8"
-                      />
+                      <SpeechInputButton onText={(text) => setLabel(text)} title="Dùng giọng nói để điền nhãn hành động" className="h-8 w-8" />
                     </div>
                   </div>
-                  {!label && (
-                    <p className="text-xs text-yellow-400 mt-1">⚠️ Nhãn hành động là bắt buộc</p>
-                  )}
+                  {!label && <p className="text-xs text-yellow-400 mt-1">⚠️ Nhãn hành động là bắt buộc</p>}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-blue-300 mb-2">👤 Người thực hiện *</label>
                   <div className="relative">
-                    <input
-                      type="text"
-                      value={user}
-                      onChange={(e) => setUser(e.target.value)}
-                      placeholder="ví dụ: user001, john_doe"
-                      className="w-full pr-12 px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      disabled={recording || countdown > 0}
-                      onBlur={() => rememberUser(user)}
-                    />
+                    <input type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="ví dụ: user001, john_doe" className="w-full pr-12 px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200" disabled={recording || countdown > 0} onBlur={() => rememberUser(user)} />
                     <div className="absolute inset-y-0 right-2 flex items-center">
-                      <SpeechInputButton
-                        onText={(text) => setUser(text)}
-                        title="Dùng giọng nói để điền tên người thực hiện"
-                        className="h-8 w-8"
-                      />
+                      <SpeechInputButton onText={(text) => setUser(text)} title="Dùng giọng nói để điền tên người thực hiện" className="h-8 w-8" />
                     </div>
                   </div>
-                  {!user && (
-                    <p className="text-xs text-yellow-400 mt-1">⚠️ ID người dùng là bắt buộc</p>
-                  )}
+                  {!user && <p className="text-xs text-yellow-400 mt-1">⚠️ ID người dùng là bắt buộc</p>}
                   {recentUsers.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-2 text-xs text-blue-200">
                       <span className="text-[11px] text-blue-300">Gợi ý:</span>
                       {recentUsers.map((name) => (
-                        <button
-                          type="button"
-                          key={name}
-                          onClick={() => setUser(name)}
-                          className="px-2 py-1 rounded-full bg-blue-900/60 hover:bg-blue-800 text-blue-100 border border-blue-500/40 text-[11px]"
-                        >
-                          {name}
-                        </button>
+                        <button type="button" key={name} onClick={() => setUser(name)} className="px-2 py-1 rounded-full bg-blue-900/60 hover:bg-blue-800 text-blue-100 border border-blue-500/40 text-[11px]">{name}</button>
                       ))}
                     </div>
                   )}
@@ -1485,67 +1136,31 @@ export default function FullscreenCaptureModal({
 
                 <div>
                   <label className="block text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
-                  <select
-                    value={dialect}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === 'Khác') {
-                        setShowAddDialectModal(true);
-                      } else {
-                        setDialect(v);
-                        localStorage.setItem('dialectSelected', v);
-                      }
-                    }}
-                    className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                    disabled={recording || countdown > 0}
-                  >
-                    {dialectList.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
+                  <select value={dialect} onChange={(e) => { const v = e.target.value; if (v === "Khác") { setShowAddDialectModal(true); } else { setDialect(v); localStorage.setItem("dialectSelected", v); } }} className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200" disabled={recording || countdown > 0}>
+                    {dialectList.map((d) => <option key={d} value={d}>{d}</option>)}
                     <option value="Khác">Khác (thêm mới)</option>
                   </select>
                 </div>
               </div>
             </div>
 
-            <AddDialectModal
-              isOpen={showAddDialectModal}
-              onClose={() => setShowAddDialectModal(false)}
-              onAdd={(name) => {
-                const updated = Array.from(new Set([...dialectList, name]));
-                setDialectList(updated);
-                setDialect(name);
-                localStorage.setItem('dialectList', JSON.stringify(updated));
-                localStorage.setItem('dialectSelected', name);
-              }}
-            />
+            <AddDialectModal isOpen={showAddDialectModal} onClose={() => setShowAddDialectModal(false)} onAdd={(name) => {
+              const updated = Array.from(new Set([...dialectList, name]));
+              setDialectList(updated); setDialect(name);
+              localStorage.setItem("dialectList", JSON.stringify(updated));
+              localStorage.setItem("dialectSelected", name);
+            }} />
 
-            {/* Recording Stats */}
             <div className="bg-gray-800 rounded-lg p-4 hidden sm:block">
               <h4 className="text-sm font-medium text-gray-300 mb-3">📊 Cài đặt & Tiến độ chụp</h4>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between text-gray-400">
-                  <span>Tổng số lần chụp:</span>
-                  <span className="text-white">{FIXED_CAPTURE_COUNT}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>Lần chụp hiện tại:</span>
-                  <span className="text-white">{currentCaptureIndex + 1}/{FIXED_CAPTURE_COUNT}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>Đã hoàn thành:</span>
-                  <span className="text-white">{completedCaptures}/{FIXED_CAPTURE_COUNT}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>Khung hiện tại:</span>
-                  <span className="text-white">{frames.length}/{FIXED_TARGET_FRAMES}</span>
-                </div>
+                <div className="flex justify-between text-gray-400"><span>Tổng số lần chụp:</span><span className="text-white">{FIXED_CAPTURE_COUNT}</span></div>
+                <div className="flex justify-between text-gray-400"><span>Lần chụp hiện tại:</span><span className="text-white">{currentCaptureIndex + 1}/{FIXED_CAPTURE_COUNT}</span></div>
+                <div className="flex justify-between text-gray-400"><span>Đã hoàn thành:</span><span className="text-white">{completedCaptures}/{FIXED_CAPTURE_COUNT}</span></div>
+                <div className="flex justify-between text-gray-400"><span>Khung hiện tại:</span><span className="text-white">{frames.length}/{FIXED_TARGET_FRAMES}</span></div>
                 {frames.length > 0 && (
                   <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
-                    <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }}
-                    />
+                    <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
                   </div>
                 )}
                 <div className="flex justify-between text-gray-400">
@@ -1561,20 +1176,11 @@ export default function FullscreenCaptureModal({
           {/* Action Buttons */}
           <div className="p-6 border-t border-gray-700 space-y-3">
             {countdown > 0 ? (
-              <div className="w-full py-4 bg-yellow-600 text-white rounded-lg text-center font-medium">
-                Bắt đầu sau {countdown}...
-              </div>
+              <div className="w-full py-4 bg-yellow-600 text-white rounded-lg text-center font-medium">Bắt đầu sau {countdown}...</div>
             ) : !recording ? (
-              <Button
-                onClick={handleQuickCapture}
-                disabled={!label || !user || !isReady}
-                className="w-full py-4 text-lg font-medium"
-                variant="primary"
-              >
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                {FIXED_CAPTURE_COUNT > 1 ? `Bắt đầu chụp (${FIXED_CAPTURE_COUNT}x)` : 'Bắt đầu chụp'} (Enter)
+              <Button onClick={handleQuickCapture} disabled={!label || !user || !isReady} className="w-full py-4 text-lg font-medium" variant="primary">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                {FIXED_CAPTURE_COUNT > 1 ? `Bắt đầu chụp (${FIXED_CAPTURE_COUNT}x)` : "Bắt đầu chụp"} (Enter)
               </Button>
             ) : paused ? (
               <div className="text-center py-4 text-gray-400">
@@ -1583,47 +1189,25 @@ export default function FullscreenCaptureModal({
               </div>
             ) : (
               <>
-                <Button
-                  onClick={handlePause}
-                  className="w-full py-4 text-lg font-medium bg-yellow-600 hover:bg-yellow-500"
-                  variant="secondary"
-                >
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                <Button onClick={handlePause} className="w-full py-4 text-lg font-medium bg-yellow-600 hover:bg-yellow-500" variant="secondary">
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   Tạm dừng (Space)
                 </Button>
-                <Button
-                  onClick={handleStop}
-                  className="w-full py-3"
-                  variant="danger"
-                  disabled={frames.length < FIXED_TARGET_FRAMES}
-                  title={frames.length < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}
-                >
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" />
-                  </svg>
+                <Button onClick={handleStop} className="w-full py-3" variant="danger" disabled={frames.length < FIXED_TARGET_FRAMES} title={frames.length < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}>
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" /></svg>
                   Dừng và lưu
                 </Button>
               </>
             )}
-            
-            <Button onClick={handleClose} className="w-full" variant="secondary">
-              Thoát toàn màn hình
-            </Button>
+            <Button onClick={handleClose} className="w-full" variant="secondary">Thoát toàn màn hình</Button>
           </div>
 
-          {/* Collapsible Tips Footer */}
+          {/* Tips */}
           <div className="bg-gray-800 border-t border-gray-700 p-4">
-            <button
-              onClick={() => setShowTips(!showTips)}
-              className="w-full flex items-center justify-between text-sm font-medium text-gray-300 hover:text-white transition-colors"
-            >
+            <button onClick={() => setShowTips(!showTips)} className="w-full flex items-center justify-between text-sm font-medium text-gray-300 hover:text-white transition-colors">
               <span>💡 Mẹo nhanh để có kết quả tốt</span>
-              <span className="text-xs">{showTips ? '🔽' : '▶️'}</span>
+              <span className="text-xs">{showTips ? "🔽" : "▶️"}</span>
             </button>
-            
             {showTips && (
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-400">
                 <div>✨ Đảm bảo ánh sáng tốt và nền rõ ràng</div>

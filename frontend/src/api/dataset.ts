@@ -2,6 +2,7 @@ import axiosClient from "./axiosClient";
 import { validateLabels, validateSessions, validateLabel } from "./validators";
 import type { Result } from "./validators";
 import type { Label, Session, ClassRow, ClassesListResponse, ClassStatsRow, ClassStatsResponse } from "../types";
+import { validateClass } from "./validators";
 
 export const getLabels = async (): Promise<Result<Label[]>> => {
   const res = await axiosClient.get("/dataset/labels");
@@ -163,3 +164,39 @@ export const getClassesStats = async (language?: string, dialect?: string): Prom
 };
 
 // Keep legacy endpoints as fallback (getLabels/createLabel/updateLabel/deleteLabel remain)
+export const updateClass = async (
+  classRef: string,
+  payload: Record<string, unknown>,
+): Promise<Result<ClassRow>> => {
+  try {
+    const res = await axiosClient.put(`/classes/${classRef}`, payload);
+
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, error: res.statusText };
+    }
+
+    return validateClass(res.data); // ✅ validate runtime
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+};
+
+export const deleteClass = async (classRef: string): Promise<Result<null>> => {
+  try {
+    const res = await axiosClient.delete(`/classes/${classRef}`);
+
+    return {
+      ok: res.status >= 200 && res.status < 300,
+      data: null,
+      error: res.statusText,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+};

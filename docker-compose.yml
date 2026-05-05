@@ -166,6 +166,9 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_MIRROR_PREVIEW: ${VITE_MIRROR_PREVIEW:-1}
+        VITE_SWAP_HANDEDNESS: ${VITE_SWAP_HANDEDNESS:-1}
+        VITE_DEBUG_HANDS: ${VITE_DEBUG_HANDS:-1}
     image: voya_frontend:latest
     container_name: voya_frontend
     env_file:
