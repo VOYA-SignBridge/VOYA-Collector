@@ -128,6 +128,9 @@ async def detailed_status() -> Dict[str, Any]:
         "feature_dim": int(getattr(settings, "feature_dim", 126)),
         "seq_len": int(getattr(settings, "seq_len", 60)),
         "aug_per_seq": int(getattr(settings, "augment_per_seq", 8)),
+        "video_aug_per_seq": int(getattr(settings, "video_augment_per_seq", 0) or 0),
+        "enable_live_aug": bool(getattr(settings, "enable_live_aug", True)),
+        "carry_forward_missing": bool(getattr(settings, "carry_forward_missing", True)),
     }
 
     return status_info

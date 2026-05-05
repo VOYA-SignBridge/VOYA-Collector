@@ -41,4 +41,12 @@ export default [
       // react-refresh typically doesn't export rules, so we skip it.
     },
   },
+  {
+    // In TS/TSX, type names exist only at compile-time.
+    // The base `no-undef` rule can flag type-only DOM globals (e.g. SpeechRecognitionResultList).
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      'no-undef': 'off',
+    },
+  },
 ]

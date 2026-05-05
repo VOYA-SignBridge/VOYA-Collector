@@ -29,6 +29,8 @@ const parseBoolEnv = (value: unknown, fallback: boolean) => {
 const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true);
 // If MediaPipe handedness feels swapped for your setup, enable this.
 const SWAP_HANDEDNESS = parseBoolEnv(import.meta.env.VITE_SWAP_HANDEDNESS, false);
+// Enable verbose hand diagnostics when developing: set VITE_DEBUG_HANDS=1
+const DEBUG_HANDS = parseBoolEnv(import.meta.env.VITE_DEBUG_HANDS, false);
 
 // Keep CDN asset version aligned with pinned npm dependency.
 const MP_HANDS_VERSION = "0.4.1675469240";
@@ -96,10 +98,15 @@ export default function FullscreenCaptureModal({
   const rootRef = useRef<HTMLDivElement | null>(null);
   
   const [recording, setRecording] = useState(false);
-  const [frames, setFrames] = useState<Array<{
+  // Explicit frame type used for captured frames that will be uploaded.
+  type CaptureFrame = {
     left_hand: MediaPipeLandmark[];
     right_hand: MediaPipeLandmark[];
-  }>>([]);
+    timestamp_ms?: number; // epoch ms with fractional precision
+    fallback_used?: boolean; // true when a preview fallback was used (currently we skip duplicates)
+    confidence?: number; // aggregated confidence score [0..1]
+  };
+  const [frames, setFrames] = useState<CaptureFrame[]>([]);
   const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState(initialUser);
   const [dialect, setDialect] = useState<string>("Bắc");
@@ -114,6 +121,12 @@ export default function FullscreenCaptureModal({
   const [completedCaptures, setCompletedCaptures] = useState(0);
    const [showTips, setShowTips] = useState(false);
    const [showGuide, setShowGuide] = useState(false);
+  // User-selectable capture mode: null = Auto, 1 = one-hand, 2 = two-hands
+  const [expectedHandsOption, setExpectedHandsOption] = useState<number | null>(null);
+  // Keep a ref copy of the user-selected expected hands option so stable
+  // callbacks and effects can read it without being re-created.
+  const expectedHandsOptionRef = useRef<number | null>(expectedHandsOption);
+  useEffect(() => { expectedHandsOptionRef.current = expectedHandsOption; }, [expectedHandsOption]);
    // Small mode for HUD and behavior introspection
    const [mode, setMode] = useState<'IDLE' | 'COUNTDOWN' | 'RECORD'>('IDLE');
    // Track whether hands are currently visible to gate frame capture
@@ -137,10 +150,9 @@ export default function FullscreenCaptureModal({
   // Refs to prevent stale closures
   const recordingRef = useRef(false);
   const pausedRef = useRef(false);
-  const framesRef = useRef<Array<{
-    left_hand: MediaPipeLandmark[];
-    right_hand: MediaPipeLandmark[];
-  }>>([]);
+  const framesRef = useRef<CaptureFrame[]>([]);
+  // Expected hands mode for the current capture: 1, 2, or null (undetermined)
+  const expectedHandsRef = useRef<number | null>(null);
   const modeRef = useRef<typeof mode>(mode);
   const rememberUser = useCallback((name: string) => {
     const trimmed = name.trim();
@@ -154,6 +166,11 @@ export default function FullscreenCaptureModal({
       }
       return next;
     });
+  }, []);
+
+  const handleSetExpectedHands = useCallback((v: number | null) => {
+    setExpectedHandsOption(v);
+    expectedHandsRef.current = v;
   }, []);
   
   // Add frame interval control for better training data. Use centralized config.
@@ -223,8 +240,12 @@ export default function FullscreenCaptureModal({
   } | null>(null);
 
   // Filters for smoothing landmarks (keyed by group.index.coord)
+  // IMPORTANT: These filters are for UI preview smoothing ONLY. Do NOT use
+  // `filterLandmarks` output for uploads — uploads must contain RAW MediaPipe
+  // landmarks to preserve the original data distribution for training.
   const filtersRef = useRef<Record<string, OneEuroFilter>>({});
 
+<<<<<<< Updated upstream
   // FIX: Prioritise low latency over heavy smoothing.
   // Higher minCutoff = less smoothing = less lag on fast motion.
   // Higher beta = filter adapts faster to sudden velocity bursts.
@@ -232,6 +253,14 @@ export default function FullscreenCaptureModal({
   const filterBeta = 0.5;      // was 0.15 — faster velocity adaptation
   // renderAlpha = 1.0 means: use the raw filtered value every frame with zero lerp delay.
   const renderAlpha = 1.0;     // was 0.7 — eliminated per-frame lerp lag
+=======
+  // Fixed filter parameters for simplified public uploader
+  // Tunable filter parameters for better stability (lower minCutoff => smoother)
+  const filterMinCutoff = 0.5; // lower = more smoothing
+  const filterBeta = 0.03; // slightly more adaptive to speed
+  // Render smoothing (lerp) - lower = smoother (0.0 very smooth, 1.0 raw)
+  const renderAlpha = 0.6;
+>>>>>>> Stashed changes
 
   const getFilter = useCallback((key: string) => {
     if (!filtersRef.current[key]) {
@@ -261,7 +290,7 @@ export default function FullscreenCaptureModal({
   const renderPrevRef = useRef<Record<string, MediaPipeLandmark>>({});
 
   // Simple temporal smoothing for hand presence and preview stability
-  const PRESENCE_HISTORY_SIZE = 5;
+  const PRESENCE_HISTORY_SIZE = 7;
   const leftPresenceHistoryRef = useRef<boolean[]>([]);
   const rightPresenceHistoryRef = useRef<boolean[]>([]);
   const visibilityStateRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
@@ -420,6 +449,7 @@ export default function FullscreenCaptureModal({
     setRecording(false);
     setMode('IDLE');
     setFrames([]);
+    expectedHandsRef.current = null;
     setCountdown(0);
     setIsReady(false);
     setCurrentCaptureIndex(0);
@@ -533,6 +563,8 @@ export default function FullscreenCaptureModal({
     if (!labelRef.current || !userRef.current) return;
     setFrames([]);
     framesRef.current = [];
+    // Preserve user selection if set; otherwise leave null for auto-infer
+    expectedHandsRef.current = expectedHandsOptionRef.current;
     setCurrentCaptureIndex(0);
     setCompletedCaptures(0);
     completedCapturesRef.current = 0;
@@ -560,8 +592,15 @@ export default function FullscreenCaptureModal({
   }, []);
 
   const handleRestart = useCallback(() => {
+<<<<<<< Updated upstream
     setFrames([]);
     framesRef.current = [];
+=======
+    // Discard current frames and restart from zero
+          setFrames([]);
+          framesRef.current = [];
+          expectedHandsRef.current = expectedHandsOptionRef.current;
+>>>>>>> Stashed changes
     setPaused(false);
     pausedRef.current = false;
     lastFrameTimeRef.current = Date.now();
@@ -581,12 +620,22 @@ export default function FullscreenCaptureModal({
     setPaused(false);
     pausedRef.current = false;
 
+<<<<<<< Updated upstream
     if (framesRef.current.length > 0) {
       const quality = computeQuality(framesRef.current);
       onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
       setFrames([]);
       framesRef.current = [];
     }
+=======
+      if (framesRef.current.length > 0) {
+        const quality = computeQuality(framesRef.current);
+        onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
+          setFrames([]);
+          framesRef.current = [];
+          expectedHandsRef.current = expectedHandsOptionRef.current;
+      }
+>>>>>>> Stashed changes
   }, [computeQuality]);
 
   useEffect(() => {
@@ -600,8 +649,9 @@ export default function FullscreenCaptureModal({
       maxNumHands: 2,
       modelComplexity: 1,
       refineLandmarks: true,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.7,
+      // Slightly tighten detection/tracking thresholds to reduce spurious detections
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.75,
     });
 
     hands.onResults((results: unknown) => {
@@ -665,6 +715,21 @@ export default function FullscreenCaptureModal({
         right: rightSmoothedVisible,
       };
 
+<<<<<<< Updated upstream
+=======
+      if (DEBUG_HANDS) {
+        console.debug('Hands debug', {
+          numHands: r.multiHandLandmarks?.length ?? 0,
+          handedness: r.multiHandedness,
+          leftDetectedNow,
+          rightDetectedNow,
+          leftSmoothedVisible,
+          rightSmoothedVisible,
+        });
+      }
+
+      // Compute render landmarks with fallback to last non-empty frame
+>>>>>>> Stashed changes
       let renderLeft: MediaPipeLandmark[] = [];
       let renderRight: MediaPipeLandmark[] = [];
 
@@ -712,32 +777,89 @@ export default function FullscreenCaptureModal({
         if (currentTime - lastFrameTimeRef.current < frameIntervalMs.current) return;
         lastFrameTimeRef.current = currentTime;
 
+<<<<<<< Updated upstream
         let captureLeft = leftHandLandmarks;
         let captureRight = rightHandLandmarks;
+=======
+        // For uploads we MUST preserve the raw MediaPipe output (no smoothing,
+        // no interpolation). Smoothing and fallbacks are strictly for the UI
+        // preview only. Therefore compute raw detection presence separately and
+        // decide acceptance using only raw detections.
+        const rawLeft = leftHandLandmarks;
+        const rawRight = rightHandLandmarks;
+>>>>>>> Stashed changes
 
-        if (!captureLeft && leftSmoothedVisible && lastRenderedLeftRef.current) {
-          captureLeft = lastRenderedLeftRef.current;
+        const rawLeftHas = (rawLeft?.length ?? 0) > 0;
+        const rawRightHas = (rawRight?.length ?? 0) > 0;
+
+        // Approximate per-hand visibility/confidence using landmark visibility
+        const computeHandConfidence = (landmarks?: MediaPipeLandmark[]) => {
+          if (!landmarks || landmarks.length === 0) return undefined;
+          let sum = 0;
+          let cnt = 0;
+          for (const lm of landmarks) {
+            if (typeof lm.visibility === 'number') {
+              sum += lm.visibility;
+              cnt++;
+            }
+          }
+          return cnt > 0 ? sum / cnt : undefined;
+        };
+
+        const leftConf = computeHandConfidence(rawLeft);
+        const rightConf = computeHandConfidence(rawRight);
+        // Aggregate confidence across hands (fallback to 0 if none)
+        const confCandidates: number[] = [];
+        if (typeof leftConf === 'number') confCandidates.push(leftConf);
+        if (typeof rightConf === 'number') confCandidates.push(rightConf);
+        // Also consider handedness score from MediaPipe if visibility absent
+        if (confCandidates.length === 0 && r.multiHandedness && r.multiHandedness.length > 0) {
+          for (const h of r.multiHandedness) {
+            const hh = h as { score?: number };
+            if (typeof hh.score === 'number') confCandidates.push(hh.score);
+          }
         }
-        if (!captureRight && rightSmoothedVisible && lastRenderedRightRef.current) {
-          captureRight = lastRenderedRightRef.current;
-        }
+        const confidence = confCandidates.length ? (confCandidates.reduce((a, b) => a + b, 0) / confCandidates.length) : undefined;
 
-        const leftHas = (captureLeft?.length ?? 0) > 0;
-        const rightHas = (captureRight?.length ?? 0) > 0;
-
-        let leftVisible = false;
-        let rightVisible = false;
-        if (captureLeft) leftVisible = captureLeft.some(lm => typeof lm.visibility === 'number' ? lm.visibility >= 0.5 : true);
-        if (captureRight) rightVisible = captureRight.some(lm => typeof lm.visibility === 'number' ? lm.visibility >= 0.5 : true);
-
-        const anyHands = leftHas || rightHas;
-        const anyVisible = leftVisible || rightVisible;
-
+<<<<<<< Updated upstream
         setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || anyHands || anyVisible);
+=======
+        // UI hint uses smoothed presence to reduce flicker
+        setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || rawLeftHas || rawRightHas);
+>>>>>>> Stashed changes
 
-        if (!(anyVisible || anyHands)) {
-          console.log('Skipping frame: no hands detected');
+        // Determine acceptance using the explicit user selection when set
+        // (expectedHandsOptionRef). Only infer when the user selected Auto (null).
+        const presentLeftRaw = rawLeftHas && (typeof leftConf !== 'number' ? true : leftConf >= 0.0);
+        const presentRightRaw = rawRightHas && (typeof rightConf !== 'number' ? true : rightConf >= 0.0);
+        const detectedHandsCountRaw = (presentLeftRaw ? 1 : 0) + (presentRightRaw ? 1 : 0);
+
+        let accept = false;
+        const userChoice = expectedHandsOptionRef.current; // null = Auto
+        if (detectedHandsCountRaw === 0) {
+          accept = false; // skip frames with no raw detection
+        } else if (userChoice != null) {
+          // Respect explicit user choice (1 or 2) — do NOT infer.
+          if (userChoice === 2) {
+            accept = (presentLeftRaw && presentRightRaw);
+          } else if (userChoice === 1) {
+            accept = (presentLeftRaw !== presentRightRaw);
+          } else {
+            accept = true;
+          }
+        } else if (expectedHandsRef.current == null) {
+          // infer expectation from the first raw useful frame (Auto mode)
+          expectedHandsRef.current = detectedHandsCountRaw === 2 ? 2 : 1;
+          accept = true;
+          if (DEBUG_HANDS) console.log('Inferred expectedHands =', expectedHandsRef.current);
+        } else if (expectedHandsRef.current === 2) {
+          // require both raw hands present
+          accept = (presentLeftRaw && presentRightRaw);
+        } else if (expectedHandsRef.current === 1) {
+          // require exactly one raw hand present
+          accept = (presentLeftRaw !== presentRightRaw);
         } else {
+<<<<<<< Updated upstream
           // Filter and canonicalize landmarks.
           // If MIRROR_PREVIEW is on we flip x so stored data is always in
           // canonical (non-mirrored) image space, stable for training.
@@ -751,6 +873,30 @@ export default function FullscreenCaptureModal({
 
           const landmarks = { left_hand: leftFiltered, right_hand: rightFiltered };
           framesRef.current.push(landmarks);
+=======
+          accept = true;
+        }
+
+        if (!accept) {
+          if (DEBUG_HANDS) console.debug('Skipping frame (raw detection): expectedHands=', expectedHandsRef.current, 'detectedRaw=', detectedHandsCountRaw);
+        } else {
+          // IMPORTANT: upload raw landmarks only (no filterLandmarks here).
+          // Add per-frame metadata so backend can validate and compute any
+          // preprocessing deterministically server-side.
+          const timestamp_ms = (typeof performance !== 'undefined' && (performance as Performance).timeOrigin)
+            ? (performance as Performance).timeOrigin + (performance as Performance).now()
+            : Date.now();
+
+          const frameEntry = {
+            left_hand: rawLeft ? rawLeft.map(l => ({ ...l })) : [],
+            right_hand: rawRight ? rawRight.map(l => ({ ...l })) : [],
+            timestamp_ms,
+            fallback_used: false,
+            confidence: typeof confidence === 'number' ? confidence : undefined,
+          };
+
+          framesRef.current.push(frameEntry);
+>>>>>>> Stashed changes
         }
 
         setFrames([...framesRef.current]);
@@ -773,6 +919,7 @@ export default function FullscreenCaptureModal({
           if (newCompleted < FIXED_CAPTURE_COUNT) {
             setFrames([]);
             framesRef.current = [];
+            expectedHandsRef.current = expectedHandsOptionRef.current;
             lastFrameTimeRef.current = 0;
             setTimeout(() => {
               setCountdown(3);
@@ -788,6 +935,7 @@ export default function FullscreenCaptureModal({
             setTimeout(() => {
               setFrames([]);
               framesRef.current = [];
+              expectedHandsRef.current = expectedHandsOptionRef.current;
               lastFrameTimeRef.current = 0;
               completedCapturesRef.current = 0;
               setCompletedCaptures(0);
@@ -876,7 +1024,13 @@ export default function FullscreenCaptureModal({
         cameraRef.current = null;
       }
     };
+<<<<<<< Updated upstream
   }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks]);
+=======
+  // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants and
+  // intentionally omitted from dependencies.
+  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks, expectedHandsOption]); // Include renderLandmarks, computeQuality, filterLandmarks and getRenderLandmarks
+>>>>>>> Stashed changes
 
   // Countdown effect
   useEffect(() => {
@@ -921,6 +1075,7 @@ export default function FullscreenCaptureModal({
         if (!recordingRef.current && labelRef.current && userRef.current) {
           setFrames([]);
           framesRef.current = [];
+          expectedHandsRef.current = expectedHandsOptionRef.current;
           setCurrentCaptureIndex(0);
           setCompletedCaptures(0);
           completedCapturesRef.current = 0;
@@ -944,6 +1099,7 @@ export default function FullscreenCaptureModal({
               onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
               setFrames([]);
               framesRef.current = [];
+              expectedHandsRef.current = expectedHandsOptionRef.current;
             }
           }
         }
@@ -967,6 +1123,7 @@ export default function FullscreenCaptureModal({
           pausedRef.current = false;
           setFrames([]);
           framesRef.current = [];
+          expectedHandsRef.current = expectedHandsOptionRef.current;
           setMode('IDLE');
         }
       }
@@ -974,7 +1131,7 @@ export default function FullscreenCaptureModal({
 
     document.addEventListener('keydown', handleKeyPress);
     return () => document.removeEventListener('keydown', handleKeyPress);
-  }, [isOpen, computeQuality, handlePause, handleResume]);
+  }, [isOpen, computeQuality, handlePause, handleResume, expectedHandsOption]);
 
   if (!isOpen) return null;
 
@@ -1023,6 +1180,27 @@ export default function FullscreenCaptureModal({
                 Camera sẵn sàng
               </Badge>
             )}
+            {/* Expected hands selector */}
+            <div className="ml-3 hidden sm:flex items-center space-x-2">
+              <div className="text-sm text-gray-300">Hands:</div>
+              <div className="inline-flex bg-gray-800 rounded-md overflow-hidden">
+                <button
+                  onClick={() => handleSetExpectedHands(null)}
+                  disabled={recording}
+                  className={`px-3 py-1 text-sm ${expectedHandsOption==null? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                >Auto</button>
+                <button
+                  onClick={() => handleSetExpectedHands(1)}
+                  disabled={recording}
+                  className={`px-3 py-1 text-sm ${expectedHandsOption===1? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                >1</button>
+                <button
+                  onClick={() => handleSetExpectedHands(2)}
+                  disabled={recording}
+                  className={`px-3 py-1 text-sm ${expectedHandsOption===2? 'bg-gray-700 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                >2</button>
+              </div>
+            </div>
           </div>
           
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">

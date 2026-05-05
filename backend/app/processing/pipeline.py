@@ -6,6 +6,7 @@ from app.config import settings
 from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
+from app.processing.utils import canonicalize_sequence_126
 from app.dataset_manager import get_or_register_class
 from app.dataset_samples import save_sequence_npz, count_samples_for_class
 
@@ -154,6 +155,12 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                     completeness = float(sum(1 for f in hand_flags if f)) / float(seq_len)
                     # Build window array once (even if rejected) so we can optionally rescue later.
                     seq_arr = np.vstack(list(buffer)).astype(np.float32)
+                    # Apply sequence-level canonicalization for temporal stability (matches live)
+                    if seq_arr.shape[1] == int(getattr(settings, 'feature_dim', 126)):
+                        try:
+                            seq_arr = canonicalize_sequence_126(seq_arr, normalized=bool(getattr(settings, 'normalize_keypoints', False)), mirror_invariant=bool(getattr(settings, 'canonicalize_mirror', True)))
+                        except Exception:
+                            pass
                     # ensure shape is (seq_len, feature_dim)
                     if seq_arr.shape != (seq_len, settings.feature_dim):
                         T, D = seq_arr.shape
@@ -192,6 +199,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                     else:
                         kept += 1
                         augmented_seq_list = generate_augmented_sequences(seq_arr, config={"n": aug_n})
+                        logger.info("[VIDEO_AUG] window start=%s end=%s requested_aug=%s generated=%s", window_meta.get('start_frame'), window_meta.get('end_frame'), aug_n, len(augmented_seq_list))
                         for aug_id, aseq in enumerate(augmented_seq_list):
                             # Re-check global cap (best-effort) before each save.
                             if max_per_class > 0 and count_samples_for_class(class_meta.class_uid) >= max_per_class:

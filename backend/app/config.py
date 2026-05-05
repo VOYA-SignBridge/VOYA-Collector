@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     stride: int = int(os.getenv("STRIDE", 2))  # Default spec stride
     fps_target: int = int(os.getenv("FPS_TARGET", 30))
     augment_per_seq: int = int(os.getenv("AUG_PER_SEQ", 8))
+
+    # Preprocessing policy flags
+    # When enabled, per-frame vectors are wrist-centered and scale-normalized before canonicalization.
+    # This makes mirroring robust even if upstream uses pixel coordinates.
+    normalize_keypoints: bool = bool(int(os.getenv("NORMALIZE_KEYPOINTS", "0")))
+    # Handedness/mirror canonicalization (recommended ON for left/right invariance)
+    canonicalize_hands: bool = bool(int(os.getenv("CANONICALIZE_HANDS", "1")))
+    canonicalize_mirror: bool = bool(int(os.getenv("CANONICALIZE_MIRROR", "1")))
+
+    # Optional: mirror input frames before MediaPipe (video pipeline only)
+    mirror_input: bool = bool(int(os.getenv("MIRROR_INPUT", "0")))
     resize_width: int = int(os.getenv("RESIZE_W", 640))
     resize_height: int = int(os.getenv("RESIZE_H", 480))
     # Live-capture processing flags

@@ -251,27 +251,35 @@ async def upload_camera(payload: dict = Body(...)):
 
             # If dict (MediaPipe style) with keys for hands only
             if isinstance(ld, dict):
+                # IMPORTANT: Always output fixed layout (left 63 + right 63 = 126).
+                # If a hand is missing or has fewer than 21 landmarks, pad with zeros
+                # to avoid shifting the other hand into the wrong block.
                 parts = []
-                # Only process hands (left_hand, right_hand) - no pose, no face
-                for key in ("left_hand", "right_hand"):
-                    elems = ld.get(key, [])
-                    # each elem is expected to be dict with x,y,z (no visibility for hands)
-                    for p in elems:
-                        if p is None:
-                            # missing point -> pad zeros (only x,y,z for hands)
-                            parts.extend([0.0, 0.0, 0.0])
+
+                def _hand_points_to_flat(elems):
+                    elems = elems if isinstance(elems, (list, tuple)) else []
+                    out = []
+                    # MediaPipe Hands has 21 landmarks; preserve ordering by index.
+                    for j in range(21):
+                        p = elems[j] if j < len(elems) else None
+                        if not isinstance(p, dict):
+                            out.extend([0.0, 0.0, 0.0])
                             continue
-                        x = p.get("x") if isinstance(p, dict) else None
-                        y = p.get("y") if isinstance(p, dict) else None
-                        z = p.get("z") if isinstance(p, dict) else None
-                        # Only x,y,z for hands (no visibility)
-                        parts.extend(
+                        x = p.get("x")
+                        y = p.get("y")
+                        z = p.get("z")
+                        out.extend(
                             [
                                 float(x) if x is not None else 0.0,
                                 float(y) if y is not None else 0.0,
                                 float(z) if z is not None else 0.0,
                             ]
                         )
+                    return out
+
+                # Only process hands (left_hand, right_hand) - no pose, no face
+                parts.extend(_hand_points_to_flat(ld.get("left_hand", [])))
+                parts.extend(_hand_points_to_flat(ld.get("right_hand", [])))
                 return np.array(parts, dtype="float32")
 
             # Unknown format -> attempt to coerce
@@ -355,20 +363,42 @@ async def upload_camera(payload: dict = Body(...)):
     else:
         seq_padded = seq_padded.astype(np.float32)
 
-    # Normalize + canonicalize per-frame (identical policy as video pipeline)
+    # Sequence-level canonicalization (deterministic across frames)
     if seq_padded.shape[1] == 126:
-        for t in range(seq_padded.shape[0]):
-            seq_padded[t, :] = canonicalize_vector_126(seq_padded[t, :])
+        try:
+            from app.processing.utils import canonicalize_sequence_126
+
+            seq_padded = canonicalize_sequence_126(
+                seq_padded,
+                normalized=bool(getattr(settings, "normalize_keypoints", False)),
+                mirror_invariant=bool(getattr(settings, "canonicalize_mirror", True)),
+            )
+        except Exception:
+            # fallback to per-frame canonicalize in unlikely failure
+            for t in range(seq_padded.shape[0]):
+                seq_padded[t, :] = canonicalize_vector_126(seq_padded[t, :])
 
     # Generate augmented sequences (default count controlled by AUG_PER_SEQ)
-    aug_n = int(getattr(settings, "augment_per_seq", 8))
-    log.info("[LIVE_CFG] seq_len=%s feature_dim=%s aug_n=%s", target_T, feat, aug_n)
+    live_aug_enabled = bool(getattr(settings, "enable_live_aug", True))
+    aug_n = int(getattr(settings, "augment_per_seq", 8)) if live_aug_enabled else 1
+    log.info(
+        "[LIVE_CFG] seq_len=%s feature_dim=%s live_aug=%s aug_n=%s",
+        target_T,
+        feat,
+        live_aug_enabled,
+        aug_n,
+    )
     log.info(
         "[LIVE_SEQ] shape=%s dtype=%s",
         getattr(seq_padded, "shape", None),
         getattr(seq_padded, "dtype", None),
     )
-    augmented_seq_list = generate_augmented_sequences(seq_padded, config={"n": aug_n})
+    if live_aug_enabled:
+        augmented_seq_list = generate_augmented_sequences(seq_padded, config={"n": aug_n})
+    else:
+        augmented_seq_list = [seq_padded]
+
+    log.info("[LIVE_AUG] generated=%s", len(augmented_seq_list))
 
     saved_paths = []
     for i, aseq in enumerate(augmented_seq_list):

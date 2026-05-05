@@ -77,14 +77,15 @@ services:
           - voya_minio
 
   postgres:
-    image: postgres:latest
+    image: postgres:17
     container_name: voya_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       voya_network:

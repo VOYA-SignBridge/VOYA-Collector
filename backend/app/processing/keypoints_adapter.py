@@ -31,8 +31,8 @@ def extract_sequence_from_frames(frames: List[np.ndarray], config: dict = None):
             results = hands.process(img_rgb)
             kp_dict = extract_keypoints_from_results(results)
             vec = flatten_keypoints(kp_dict)
-            # Normalize + canonicalize using the shared ingestion policy
-            vec = canonicalize_vector_126(vec)
+            # NOTE: do NOT canonicalize per-frame here; sequence-level canonicalization
+            # is applied later in the pipeline to ensure temporal stability.
             seq.append(vec)
     if len(seq) == 0:
         return np.zeros((0, 126), dtype=np.float32)  # 2 hands * 21 * 3 = 126
@@ -57,7 +57,7 @@ def detect_and_vectorize(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
         results = hands.process(img_rgb)
         kp_dict = extract_keypoints_from_results(results)
         vec = flatten_keypoints(kp_dict)
-        vec = canonicalize_vector_126(vec)
+        # Do not canonicalize here; keep raw flattened vector for sequence-level processing
         has_hand = bool(np.any(vec != 0.0))
         return vec.astype(np.float32), has_hand
 
@@ -82,7 +82,7 @@ def extract_sequence_stream(frame_iter: Generator[Tuple[int, float, np.ndarray],
             results = hands.process(img_rgb)
             kp_dict = extract_keypoints_from_results(results)
             vec = flatten_keypoints(kp_dict)
-            vec = canonicalize_vector_126(vec)
+            # Keep raw flattened vector; sequence caller will canonicalize the window
             has_hand = bool(np.any(vec != 0.0))
             yield idx, int(idx), vec.astype(np.float32), has_hand
 
