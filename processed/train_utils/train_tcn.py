@@ -188,7 +188,7 @@ class TrainConfig:
     seed: int = 42
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     num_workers: int = 0
-    out_dir: Path = Path(__file__).resolve().parents[1] / "processed" / "train_utils" / "outputs"
+    out_dir: Path = Path(__file__).resolve().parents[1] / "train_utils" / "outputs"
 
 
 def accuracy(pred: torch.Tensor, target: torch.Tensor) -> float:
@@ -576,7 +576,7 @@ def main() -> None:
         from train_model.dataset_versioning import get_splits_dir
         default_root = get_splits_dir()
     except Exception:
-        default_root = Path(__file__).resolve().parents[1] / "processed" / "splits"
+        default_root = Path(__file__).resolve().parents[1] / "splits"
     parser.add_argument("--train_csv", type=Path, default=default_root / "train.csv")
     parser.add_argument("--val_csv", type=Path, default=default_root / "val.csv")
     parser.add_argument("--test_csv", type=Path, default=default_root / "test.csv")
@@ -627,7 +627,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--out_dir", type=Path, default=Path("processed/train_utils/outputs"))
+    parser.add_argument("--out_dir", type=Path, default=Path("train_utils/outputs"))
     args = parser.parse_args()
 
     cfg = TrainConfig(

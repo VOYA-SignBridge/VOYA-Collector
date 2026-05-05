@@ -73,7 +73,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
                 from train_model.dataset_versioning import get_analysis_dir
                 l2i_path = get_analysis_dir() / 'label_to_index.json'
             except Exception:
-                l2i_path = Path(__file__).resolve().parents[1] / 'processed' / 'analysis' / 'label_to_index.json'
+                l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
         i2l_path = l2i_path.with_name('index_to_label.json')
         try:
             self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))

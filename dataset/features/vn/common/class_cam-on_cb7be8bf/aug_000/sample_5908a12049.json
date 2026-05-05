@@ -1,0 +1,15 @@
+{
+  "class_uid": "cb7be8bf-a01b-404c-acc0-571c41950eab",
+  "slug": "cam-on",
+  "label_original": "Cảm ơn",
+  "language": "vn",
+  "dialect": "common",
+  "augment_id": 0,
+  "created_at": "2026-05-05T06:28:09.814418Z",
+  "user": "Minh",
+  "session_id": "1777958720984",
+  "fps_original": null,
+  "fps_processed": null,
+  "completeness": null,
+  "storage_provider": "local+minio"
+}
