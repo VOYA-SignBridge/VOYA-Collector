@@ -121,7 +121,69 @@ Notes:
 - Default behavior is unchanged when you omit `--dialect`.
 - Subset label maps are written under `train_model/processed/train_utils/outputs/subset_<tag>_<timestamp>/` and the checkpoint stores the path in `label_to_index_json`.
 
+## Train per language (export one model per language)
+If your dataset contains multiple languages, you can filter by `language` (or infer it from `label_key` if needed) and export a model per language.
+
+Example (Vietnamese only):
+
+```powershell
+python train_model/train_utils/train_tcn.py --filter_language vn --epochs 80 --batch_size 32
+```
+
+Notes:
+- This creates a local label mapping for that language subset, so class indices are contiguous.
+- You can combine language + dialect filters if you want an even smaller subset.
+
+## Train all languages (one command)
+To train one model per language automatically, use:
+
+```powershell
+python train_model/train_utils/train_all_languages.py -- --epochs 80 --batch_size 32
+```
+
+## Train all dialects within each language
+If you want *one model per dialect per language* (e.g. `vn/bac`, `vn/nam`, ...), run:
+
+```powershell
+python train_model/train_utils/train_all_languages.py --by_dialect -- --epochs 80 --batch_size 32
+```
+
+Optional filters:
+- Only certain languages:
+
+```powershell
+python train_model/train_utils/train_all_languages.py --by_dialect --languages vn,en -- --epochs 80 --batch_size 32
+```
+
+- Only certain dialect names:
+
+```powershell
+python train_model/train_utils/train_all_languages.py --by_dialect --dialects bac,nam -- --epochs 80 --batch_size 32
+```
+
+Options:
+- Train only specific languages (in order):
+
+```powershell
+python train_model/train_utils/train_all_languages.py --languages vn,en -- --epochs 80 --batch_size 32
+```
+
+- Skip languages that fail (e.g. too few classes):
+
+```powershell
+python train_model/train_utils/train_all_languages.py --skip_failed -- --epochs 80 --batch_size 32
+```
+
 ## Notes
 - The trainer applies masked global average pooling over time to handle variable-length inputs.
 - Early stopping monitors validation macro-F1 with patience 10.
 - Learning rate uses cosine annealing; adjust `--epochs` to change schedule length.
+
+## Check realtime ↔ training feature compatibility
+Training code assumes features are already in the correct format. Realtime extraction currently uses raw MediaPipe landmarks (x/y/z) and concatenates `[left(21x3), right(21x3)]`.
+
+To inspect how your dataset `.npz` features look (ranges, likely left/right ordering, whether x/y are in [0,1]):
+
+```powershell
+python train_model/train_utils/check_preprocess_compat.py --csv train_model/processed/splits/train.csv --n 200
+```

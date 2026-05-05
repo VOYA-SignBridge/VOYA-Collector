@@ -456,6 +456,23 @@ def _filter_rows_by_dialect(rows: List[Dict[str, str]], dialects: Sequence[str])
     return out
 
 
+def _filter_rows_by_language(rows: List[Dict[str, str]], languages: Sequence[str], *, default_language: str = "vn") -> List[Dict[str, str]]:
+    if not languages:
+        return list(rows)
+    wanted = {d.strip() for d in languages if d.strip()}
+
+    out: List[Dict[str, str]] = []
+    for r in rows:
+        row_lang = (r.get("language") or "").strip()
+        if not row_lang:
+            lk = (r.get("label_key") or "").strip()
+            inferred_lang, _ = _infer_language_dialect_from_label_key(lk, default_language=default_language)
+            row_lang = (inferred_lang or default_language).strip()
+        if row_lang in wanted:
+            out.append(r)
+    return out
+
+
 def _row_feature_path_candidates(row: Dict[str, str], *, features_root: Path, default_language: str = "vn") -> List[Path]:
     folder_name = (row.get("folder_name") or "").strip()
     file_name = (row.get("file") or "").strip()
@@ -570,6 +587,12 @@ def main() -> None:
         help="Optional: filter to one or more dialects (can repeat or comma-separate). Example: --dialect bac",
     )
     parser.add_argument(
+        "--filter_language",
+        action="append",
+        default=None,
+        help="Optional: filter to one or more languages (can repeat or comma-separate). Example: --filter_language vn",
+    )
+    parser.add_argument(
         "--language",
         type=str,
         default="vn",
@@ -629,7 +652,8 @@ def main() -> None:
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
     dialects = _parse_multi_values(args.dialect)
-    subset_mode = bool(dialects)
+    languages = _parse_multi_values(args.filter_language)
+    subset_mode = bool(dialects or languages)
 
     # For subset runs, create a filtered copy of split CSVs and a local label mapping.
     # IMPORTANT: default behavior remains unchanged when no subset args are provided.
@@ -649,7 +673,15 @@ def main() -> None:
         if features_root is None or not features_root.exists():
             raise SystemExit("Subset mode requires locating the 'features' folder. Pass split CSVs from this repo layout.")
 
-        subset_tag = _slugify(args.tag) if str(args.tag or "").strip() else _slugify("dialect-" + "+".join(dialects))
+        if str(args.tag or "").strip():
+            subset_tag = _slugify(args.tag)
+        else:
+            parts: List[str] = []
+            if languages:
+                parts.append("lang-" + "+".join(languages))
+            if dialects:
+                parts.append("dialect-" + "+".join(dialects))
+            subset_tag = _slugify("_".join(parts) if parts else "subset")
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         subset_dir = cfg.out_dir / f"subset_{subset_tag}_{stamp}"
         subset_dir.mkdir(parents=True, exist_ok=True)
@@ -668,9 +700,12 @@ def main() -> None:
                         r["language"] = lang
                     if not (r.get("dialect") or "").strip() and dia:
                         r["dialect"] = dia
+            rows = _filter_rows_by_language(rows, languages, default_language=default_lang)
             rows = _filter_rows_by_dialect(rows, dialects)
             if not rows:
-                raise SystemExit(f"Subset '{subset_tag}': {name} split is empty after filtering dialect={dialects}.")
+                raise SystemExit(
+                    f"Subset '{subset_tag}': {name} split is empty after filtering language={languages} dialect={dialects}."
+                )
             fieldnames = _ensure_cols(fieldnames, ["dialect", "language", "label_key", "label_slug", "label_original"])
             # fill language default if missing
             for r in rows:
@@ -840,7 +875,7 @@ def main() -> None:
         "feature_dim": in_dim,
         "num_classes": num_classes,
         "label_map": label_map,
-        "subset": {"dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
+        "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
         "label_to_index_json": str(label_to_index_json) if label_to_index_json else None,
         "metrics": {"test_acc": te_acc, "test_f1": te_f1, "test_scs": te_scs},
     }, out_ckpt)
@@ -852,7 +887,7 @@ def main() -> None:
 
     summary = {
         "timestamp": stamp,
-        "subset": {"dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
+        "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
         "config": cfg_json,
         "in_dim": in_dim,
         "feature_dim": in_dim,

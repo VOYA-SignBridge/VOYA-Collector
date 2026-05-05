@@ -309,6 +309,16 @@ def write_split(name, rows, fieldnames):
     return path
 
 
+def write_split_to_dir(out_dir: Path, name: str, rows, fieldnames):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f'{name}.csv'
+    with path.open('w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
 def summarize(rows, label):
     # count by class_idx (string), then sort stably by numeric value when possible
     c = Counter((r.get('class_idx') or '').strip() for r in rows if (r.get('class_idx') or '').strip() != '')
@@ -325,6 +335,8 @@ def main():
     parser = argparse.ArgumentParser(description='Make dataset splits')
     parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits')
     parser.add_argument('--group_col', type=str, default='user', help='Grouping column to keep disjoint (e.g., user, dialect)')
+    parser.add_argument('--by_language', action='store_true', help='Write separate split CSVs per language under splits/<language>/')
+    parser.add_argument('--languages', type=str, default='', help='Optional comma-separated whitelist of languages when using --by_language')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
 
@@ -359,28 +371,80 @@ def main():
         r['label_key'] = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
         enriched.append(r)
     rows = enriched
-    if args.user_disjoint:
-        # require group_col to exist
-        if args.group_col not in fieldnames:
-            raise SystemExit(f"samples.csv has no '{args.group_col}' column; cannot perform group-disjoint split.")
-        train, val, test = stratified_group_split_by(rows, args.group_col)
-    else:
-        train, val, test = stratified_split(rows)
-    paths = {
-        'train': write_split('train', train, fieldnames),
-        'val': write_split('val', val, fieldnames),
-        'test': write_split('test', test, fieldnames),
+    def _do_split(rows_subset):
+        if args.user_disjoint:
+            if args.group_col not in fieldnames:
+                raise SystemExit(f"samples.csv has no '{args.group_col}' column; cannot perform group-disjoint split.")
+            return stratified_group_split_by(rows_subset, args.group_col)
+        return stratified_split(rows_subset)
+
+    if not args.by_language:
+        train, val, test = _do_split(rows)
+        paths = {
+            'train': write_split('train', train, fieldnames),
+            'val': write_split('val', val, fieldnames),
+            'test': write_split('test', test, fieldnames),
+        }
+        summary = {
+            'train': summarize(train, 'train'),
+            'val': summarize(val, 'val'),
+            'test': summarize(test, 'test'),
+        }
+        print('Split summary:')
+        for k, v in summary.items():
+            print(k, v)
+        for k, p in paths.items():
+            print(f'{k} file -> {p}')
+        return
+
+    # Per-language mode: write splits into OUT_DIR/<language>/*.csv
+    wanted = {x.strip() for x in str(args.languages or '').split(',') if x.strip()}
+    by_lang = defaultdict(list)
+    for r in rows:
+        lang = (r.get('language') or 'vn').strip() or 'vn'
+        if wanted and lang not in wanted:
+            continue
+        by_lang[lang].append(r)
+
+    manifest = {
+        'seed': RANDOM_SEED,
+        'train_ratio': TRAIN_RATIO,
+        'val_ratio': VAL_RATIO,
+        'user_disjoint': bool(args.user_disjoint),
+        'group_col': args.group_col,
+        'languages': {},
     }
-    summary = {
-        'train': summarize(train, 'train'),
-        'val': summarize(val, 'val'),
-        'test': summarize(test, 'test'),
-    }
-    print('Split summary:')
-    for k, v in summary.items():
-        print(k, v)
-    for k, p in paths.items():
-        print(f'{k} file -> {p}')
+
+    for lang, rows_l in sorted(by_lang.items(), key=lambda kv: kv[0]):
+        if not rows_l:
+            continue
+        train, val, test = _do_split(rows_l)
+        out_dir = OUT_DIR / lang
+        paths = {
+            'train': write_split_to_dir(out_dir, 'train', train, fieldnames),
+            'val': write_split_to_dir(out_dir, 'val', val, fieldnames),
+            'test': write_split_to_dir(out_dir, 'test', test, fieldnames),
+        }
+        summary = {
+            'train': summarize(train, 'train'),
+            'val': summarize(val, 'val'),
+            'test': summarize(test, 'test'),
+        }
+        manifest['languages'][lang] = {
+            'total_rows': len(rows_l),
+            'paths': {k: str(p) for k, p in paths.items()},
+            'summary': summary,
+        }
+        print(f'Language={lang} summary:')
+        for k, v in summary.items():
+            print(k, v)
+        for k, p in paths.items():
+            print(f'{k} file -> {p}')
+
+    (OUT_DIR / 'by_language_manifest.json').write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8'
+    )
+    print(f"Wrote manifest -> {OUT_DIR / 'by_language_manifest.json'}")
 
 
 if __name__ == '__main__':
