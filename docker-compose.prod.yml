@@ -19,9 +19,13 @@ services:
     expose:
       - "8000"
     volumes:
-      - ../dataset:/dataset
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive:rw
     env_file:
       - .env
+    environment:
+      - GOOGLE_DRIVE_CREDENTIALS=gdrive/credentials.json
+      - GOOGLE_DRIVE_TOKEN=gdrive/token.pickle
     depends_on:
       - postgres
       - redis
@@ -37,8 +41,12 @@ services:
     container_name: voya_worker
     env_file:
       - .env
+    environment:
+      - GOOGLE_DRIVE_CREDENTIALS=gdrive/credentials.json
+      - GOOGLE_DRIVE_TOKEN=gdrive/token.pickle
     volumes:
-      - ../dataset:/dataset
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive:rw
     command: celery -A app.worker.celery_app worker --loglevel=info
     depends_on:
       - redis
@@ -49,14 +57,14 @@ services:
       - voya_network
 
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     container_name: voya_redis
     restart: unless-stopped
     networks:
       - voya_network
 
   postgres:
-    image: postgres:latest
+    image: postgres:17
     container_name: voya_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -90,9 +98,7 @@ services:
           - voya_nginx
 
 volumes:
-  voya_minio:
   postgres_data:
-  pgadmin_data:
 
 networks:
   voya_network:
