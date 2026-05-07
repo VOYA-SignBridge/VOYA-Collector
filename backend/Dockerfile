@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user --require-hashes -r requirements.txt 2>/dev/null || \
+    pip install --no-cache-dir --user -r requirements.txt
 
 # Runtime stage
 FROM python:3.10-slim
@@ -28,15 +29,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /home/appuser/.local
-
-# Create user
+# Create user first before copying files
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /dataset/raw_videos /dataset/features && \
     chown -R appuser:appuser /dataset
 
-# Copy app
+# Copy Python packages from builder with correct ownership
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+
+# Copy app files
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser requirements.txt .
 

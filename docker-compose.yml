@@ -22,6 +22,7 @@ services:
       - "8000"
     volumes:
       - ./dataset:/dataset
+      - ./gdrive:/gdrive
     env_file:
       - .env
     depends_on:
@@ -41,6 +42,7 @@ services:
       - .env
     volumes:
       - ./dataset:/dataset
+      - ./gdrive:/gdrive
     command: celery -A app.worker.celery_app worker --loglevel=info
     depends_on:
       - redis
@@ -93,7 +95,6 @@ services:
 
 volumes:
   postgres_data:
-  pgadmin_data:
 
 networks:
   voya_network:

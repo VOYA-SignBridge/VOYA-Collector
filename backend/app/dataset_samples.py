@@ -129,9 +129,9 @@ def save_sequence_npz(
     # Upload directly to object storage if configured
     storage_url = None
     storage_key = None
-    use_object_storage = settings.use_object_storage or settings.use_minio  # Support both flags
+    use_google_drive = settings.use_google_drive
     
-    if use_object_storage:
+    if use_google_drive:
         from app.storage.gdrive_client import upload_to_gdrive
 
         log = logging.getLogger(__name__)
