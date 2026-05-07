@@ -39,7 +39,7 @@ Processed data is stored for training sign language recognition models.
 - **Celery** (async task queue)
 - **PostgreSQL** (metadata storage)
 - **Redis** (Celery broker)
-- **MinIO** (S3-compatible object storage)
+- **Google Drive** (when `USE_GOOGLE_DRIVE=1`)
 - **MediaPipe Hands** (landmark extraction)
 
 ---
@@ -131,9 +131,8 @@ SPEED_VARIANTS=1.0
 MAX_SAMPLES_PER_CLASS=2000
 
 # Storage
-USE_MINIO=1
-MINIO_ENDPOINT=minio:9000
-MINIO_BUCKET=sign-dataset
+- **Local filesystem** (default)
+- **Google Drive** (when `USE_GOOGLE_DRIVE=1`)
 ```
 
 ---

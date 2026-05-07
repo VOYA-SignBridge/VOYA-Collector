@@ -5,20 +5,22 @@ from app.processing.pipeline import process_video_job
 
 
 def _download_from_storage(storage_url: str) -> str:
-    """Download file from object storage (MinIO or R2) to temp location."""
-    from app.storage.r2_client import download_from_r2
-    return download_from_r2(storage_url)
+    """Download file from Google Drive to temp location."""
+    if storage_url.startswith(("https://drive.google.com", "gdrive://")):
+        from app.storage.gdrive_client import download_from_gdrive
+        return download_from_gdrive(storage_url)
+    return storage_url
 
 
 @celery_app.task(bind=True)
 def enqueue_process_video(self, video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
-    """Process video from object storage (MinIO or R2)."""
+    """Process video from Google Drive or local filesystem."""
     local_video_path = video_path
     temp_files_to_clean = []
     
     try:
-        # Handle object storage URLs before passing the video to OpenCV.
-        if video_path.startswith(("r2://", "s3://")):
+        # Handle Google Drive URLs before passing the video to OpenCV.
+        if video_path.startswith(("https://drive.google.com", "gdrive://")):
             local_video_path = _download_from_storage(video_path)
             if local_video_path and local_video_path != video_path:
                 temp_files_to_clean.append(local_video_path)
