@@ -132,7 +132,7 @@ def save_sequence_npz(
     use_object_storage = settings.use_object_storage or settings.use_minio  # Support both flags
     
     if use_object_storage:
-        from app.storage.r2_client import upload_to_r2
+        from app.storage.gdrive_client import upload_to_gdrive
 
         log = logging.getLogger(__name__)
         log.info("[SAVE_SEQUENCE] Attempting object storage upload")
@@ -143,17 +143,17 @@ def save_sequence_npz(
             storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
             log.info("[SAVE_SEQUENCE] Uploading to object storage with key: %s", storage_key)
             
-            storage_url = upload_to_r2(buffer, storage_key)
+            storage_url = upload_to_gdrive(buffer, storage_key)
             if storage_url:
-                log.info("[SAVE_SEQUENCE] Object storage upload successful: %s", storage_url)
+                log.info("[SAVE_SEQUENCE] Google Drive upload successful: %s", storage_url)
                 metadata["storage_url"] = storage_url
                 metadata["storage_key"] = storage_key
             else:
-                log.warning("[SAVE_SEQUENCE] Object storage upload returned None")
+                log.warning("[SAVE_SEQUENCE] Google Drive upload returned None")
         except Exception as e:
-            log.error("[SAVE_SEQUENCE] Object storage upload failed: %s", e)
+            log.error("[SAVE_SEQUENCE] Google Drive upload failed: %s", e)
     else:
-        log.info("[SAVE_SEQUENCE] Object storage not enabled")
+        log.info("[SAVE_SEQUENCE] Google Drive not enabled")
 
     # If object storage failed, fallback to local disk
     if not storage_url:

@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, Body
 
-from app.processing import storage_utils as su  # legacy for timestamp helper
+from app.processing import storage_utils as su
 from app.dataset_manager import get_or_register_class, normalize_dialect
 from app.dataset_samples import save_sequence_npz
 from app.tasks import enqueue_process_video
@@ -17,7 +17,6 @@ from app.api_validation import (
     validate_label,
     validate_language,
     validate_dialect,
-    save_upload_with_limit,
 )
 
 
@@ -120,29 +119,27 @@ async def upload_video(
     written = len(video_data)
     log.info("[UPLOAD][video] bytes_read=%s max_bytes=%s", written, max_bytes)
     
-    # Upload directly to Cloudflare R2 if configured
+    # Upload directly to configured cloud storage if enabled.
     storage_url = None
-    if settings.use_object_storage:
+    if settings.use_google_drive:
         try:
-            from app.storage.r2_client import upload_to_r2
+            from app.storage.gdrive_client import upload_to_gdrive
 
-            log.info("[UPLOAD][video] Uploading to object storage")
+            log.info("[UPLOAD][video] Uploading to Google Drive")
             storage_key = f"raw_videos/{save_name}"
-            storage_url = upload_to_r2(video_data, storage_key)
+            storage_url = upload_to_gdrive(video_data, storage_key, "video/mp4")
             if storage_url:
-                log.info("[UPLOAD][video] uploaded to object storage: %s", storage_url)
-                # Use storage URL as the source for Celery processing
+                log.info("[UPLOAD][video] uploaded to Google Drive: %s", storage_url)
                 file_path_for_processing = storage_url
             else:
-                log.warning("[UPLOAD][video] Object storage upload failed: no URL returned")
+                log.warning("[UPLOAD][video] Google Drive upload returned no URL")
                 file_path_for_processing = None
         except Exception as e:
-            log.warning("[UPLOAD][video] Object storage upload failed: %s", e)
+            log.warning("[UPLOAD][video] Google Drive upload failed: %s", e)
             file_path_for_processing = None
     else:
         # Fallback to local save if object storage not enabled
         file_path = os.path.join(UPLOAD_DIR, save_name)
-        import io
         with open(file_path, "wb") as f:
             f.write(video_data)
         log.info("[UPLOAD][video] saved path=%s", file_path)
@@ -150,7 +147,7 @@ async def upload_video(
 
     # Send task to Celery
     if not file_path_for_processing:
-        return {"success": False, "message": "Upload to object storage failed"}
+        return {"success": False, "message": "Upload to cloud storage failed"}
     
     try:
         job = enqueue_process_video.delay(

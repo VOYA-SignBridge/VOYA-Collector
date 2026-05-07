@@ -14,6 +14,7 @@ def _default_dataset_root() -> Path:
 
 
 class Settings(BaseSettings):
+    model_config = {"env_file": ".env", "extra": "ignore"}
     # Postgres/PostgreSQL configuration
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://user:password@localhost:5432/signdb"
@@ -23,26 +24,11 @@ class Settings(BaseSettings):
     broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
     result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
-    # Cloudflare R2 configuration
-    r2_endpoint: str = os.getenv("R2_ENDPOINT")
-    r2_access_key: str = os.getenv("R2_ACCESS_KEY")
-    r2_secret_key: str = os.getenv("R2_SECRET_KEY")
-    r2_bucket: str = os.getenv("R2_BUCKET_NAME")
-    r2_public_url: str = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
-
-    use_object_storage: bool = bool(int(os.getenv("USE_OBJECT_STORAGE", "0")))
-    use_minio: bool = bool(int(os.getenv("USE_MINIO", "0")))
-
-    def get_object_storage_config(self):
-        """Return r2 storage config."""
-        return {
-            "provider": "r2",
-            "endpoint": self.r2_endpoint,
-            "access_key": self.r2_access_key,
-            "secret_key": self.r2_secret_key,
-            "bucket": self.r2_bucket,
-            "public_url": self.r2_public_url,
-        }
+    # Google Drive configuration
+    use_google_drive: bool = bool(int(os.getenv("USE_GOOGLE_DRIVE", "0")))
+    google_drive_credentials: str = os.getenv("GOOGLE_DRIVE_CREDENTIALS", "credentials.json")
+    google_drive_token: str = os.getenv("GOOGLE_DRIVE_TOKEN", "token.pickle")
+    google_drive_root_folder_id: str = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
 
     # Processing constants (align live-capture and video)
     feature_dim: int = int(os.getenv("FEATURE_DIM", 126))
