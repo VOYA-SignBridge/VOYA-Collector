@@ -23,14 +23,26 @@ class Settings(BaseSettings):
     broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
     result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
-    # MinIO (S3-compatible) configuration
-    minio_endpoint: str = os.getenv("MINIO_ENDPOINT")
-    minio_access_key: str = os.getenv("MINIO_ACCESS_KEY")
-    minio_secret_key: str = os.getenv("MINIO_SECRET_KEY")
-    minio_bucket: str = os.getenv("MINIO_BUCKET", "sign-dataset")
+    # Cloudflare R2 configuration
+    r2_endpoint: str = os.getenv("R2_ENDPOINT")
+    r2_access_key: str = os.getenv("R2_ACCESS_KEY")
+    r2_secret_key: str = os.getenv("R2_SECRET_KEY")
+    r2_bucket: str = os.getenv("R2_BUCKET_NAME")
+    r2_public_url: str = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
 
-    # Optional object storage upload toggle (filesystem remains source-of-truth)
+    use_object_storage: bool = bool(int(os.getenv("USE_OBJECT_STORAGE", "0")))
     use_minio: bool = bool(int(os.getenv("USE_MINIO", "0")))
+
+    def get_object_storage_config(self):
+        """Return r2 storage config."""
+        return {
+            "provider": "r2",
+            "endpoint": self.r2_endpoint,
+            "access_key": self.r2_access_key,
+            "secret_key": self.r2_secret_key,
+            "bucket": self.r2_bucket,
+            "public_url": self.r2_public_url,
+        }
 
     # Processing constants (align live-capture and video)
     feature_dim: int = int(os.getenv("FEATURE_DIM", 126))

@@ -120,27 +120,27 @@ async def upload_video(
     written = len(video_data)
     log.info("[UPLOAD][video] bytes_read=%s max_bytes=%s", written, max_bytes)
     
-    # Upload directly to MinIO if configured
-    minio_url = None
-    if settings.use_minio:
+    # Upload directly to Cloudflare R2 if configured
+    storage_url = None
+    if settings.use_object_storage:
         try:
-            from app.storage.minio_client import _get_minio_client, upload_file
+            from app.storage.r2_client import upload_to_r2
 
-            log.info("[UPLOAD][video] Uploading to MinIO")
-            minio_key = f"raw_videos/{save_name}"
-            minio_url = upload_file(video_data, minio_key)
-            if minio_url:
-                log.info("[UPLOAD][video] uploaded to MinIO: %s", minio_url)
-                # Use MinIO URL as the source for Celery processing
-                file_path_for_processing = minio_url
+            log.info("[UPLOAD][video] Uploading to object storage")
+            storage_key = f"raw_videos/{save_name}"
+            storage_url = upload_to_r2(video_data, storage_key)
+            if storage_url:
+                log.info("[UPLOAD][video] uploaded to object storage: %s", storage_url)
+                # Use storage URL as the source for Celery processing
+                file_path_for_processing = storage_url
             else:
-                log.warning("[UPLOAD][video] MinIO upload failed: no URL returned")
+                log.warning("[UPLOAD][video] Object storage upload failed: no URL returned")
                 file_path_for_processing = None
         except Exception as e:
-            log.warning("[UPLOAD][video] MinIO upload failed: %s", e)
+            log.warning("[UPLOAD][video] Object storage upload failed: %s", e)
             file_path_for_processing = None
     else:
-        # Fallback to local save if MinIO not enabled
+        # Fallback to local save if object storage not enabled
         file_path = os.path.join(UPLOAD_DIR, save_name)
         import io
         with open(file_path, "wb") as f:
@@ -148,9 +148,9 @@ async def upload_video(
         log.info("[UPLOAD][video] saved path=%s", file_path)
         file_path_for_processing = file_path
 
-    # Gửi task tới Celery
+    # Send task to Celery
     if not file_path_for_processing:
-        return {"success": False, "message": "Upload to MinIO failed"}
+        return {"success": False, "message": "Upload to object storage failed"}
     
     try:
         job = enqueue_process_video.delay(
@@ -171,7 +171,7 @@ async def upload_video(
             "id": job.id,
             "session_id": session_id,
             "message": "queued",
-            "minio_url": minio_url,
+            "storage_url": storage_url,
         }
     except Exception as e:
         log.error("[UPLOAD][video][ERROR] queue failed: %s", e)
