@@ -100,8 +100,8 @@ def count_samples_for_class(class_uid: str) -> int:
 def save_sequence_npz(
     class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str
 ) -> str:
-    """Save a (T,D) sequence directly to AWS S3 (bypasses local disk).
-    Returns S3 URL if successful, local path as fallback.
+    """Save a (T,D) sequence directly to object storage (Cloudflare R2 or MinIO).
+    Returns storage URL if successful, local path as fallback.
     """
     import numpy as np
     import io
@@ -122,45 +122,40 @@ def save_sequence_npz(
     }
 
     # Create in-memory buffer for npz
-    import numpy as np
-
     buffer = io.BytesIO()
     np.savez_compressed(buffer, sequence=sequence.astype("float32"), meta=metadata)
     buffer.seek(0)
 
-    # Upload directly to MinIO if configured
+    # Upload directly to object storage if configured
     storage_url = None
     storage_key = None
-    if settings.use_minio:
-        from app.storage.minio_client import (
-            _get_minio_client,
-            _upload_to_minio,
-            upload_file,
-        )
+    use_object_storage = settings.use_object_storage or settings.use_minio  # Support both flags
+    
+    if use_object_storage:
+        from app.storage.r2_client import upload_to_r2
 
         log = logging.getLogger(__name__)
-        log.info("[SAVE_SEQUENCE] Attempting MinIO upload")
+        log.info("[SAVE_SEQUENCE] Attempting object storage upload")
 
-        # Try using upload_file wrapper first
         try:
-            # Build MinIO key: features/{lang}/{dialect}/{folder_name}/{filename}
+            # Build storage key: features/{lang}/{dialect}/{folder_name}/{filename}
             folder_name = class_meta.folder_name()
             storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-            log.info("[SAVE_SEQUENCE] Uploading to MinIO")
-            minio_url = upload_file(buffer, storage_key)
-            if minio_url:
-                log.info("[SAVE_SEQUENCE] MinIO upload successful: %s", minio_url)
-                storage_url = minio_url
+            log.info("[SAVE_SEQUENCE] Uploading to object storage with key: %s", storage_key)
+            
+            storage_url = upload_to_r2(buffer, storage_key)
+            if storage_url:
+                log.info("[SAVE_SEQUENCE] Object storage upload successful: %s", storage_url)
                 metadata["storage_url"] = storage_url
                 metadata["storage_key"] = storage_key
             else:
-                log.warning("[SAVE_SEQUENCE] MinIO upload returned None")
+                log.warning("[SAVE_SEQUENCE] Object storage upload returned None")
         except Exception as e:
-            log.error("[SAVE_SEQUENCE] MinIO upload failed: %s", e)
+            log.error("[SAVE_SEQUENCE] Object storage upload failed: %s", e)
     else:
-        log.info("[SAVE_SEQUENCE] USE_MINIO not enabled")
+        log.info("[SAVE_SEQUENCE] Object storage not enabled")
 
-    # If S3 failed, fallback to local disk
+    # If object storage failed, fallback to local disk
     if not storage_url:
         class_dir = class_meta.hierarchy_path()
         class_dir.mkdir(parents=True, exist_ok=True)
@@ -230,8 +225,6 @@ def save_sequence_npz(
             "created_at": created_at,
         }
     )
-
-
 
     # Also persist metadata to Postgres if configured
     try:
