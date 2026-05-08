@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, Body
 
-from app.processing import storage_utils as su  # legacy for timestamp helper
+from app.processing import storage_utils as su
 from app.dataset_manager import get_or_register_class, normalize_dialect
 from app.dataset_samples import save_sequence_npz
 from app.tasks import enqueue_process_video
@@ -17,7 +17,6 @@ from app.api_validation import (
     validate_label,
     validate_language,
     validate_dialect,
-    save_upload_with_limit,
 )
 
 
@@ -120,37 +119,35 @@ async def upload_video(
     written = len(video_data)
     log.info("[UPLOAD][video] bytes_read=%s max_bytes=%s", written, max_bytes)
     
-    # Upload directly to MinIO if configured
-    minio_url = None
-    if settings.use_minio:
+    # Upload directly to configured cloud storage if enabled.
+    storage_url = None
+    if settings.use_google_drive:
         try:
-            from app.storage.minio_client import _get_minio_client, upload_file
+            from app.storage.gdrive_client import upload_to_gdrive
 
-            log.info("[UPLOAD][video] Uploading to MinIO")
-            minio_key = f"raw_videos/{save_name}"
-            minio_url = upload_file(video_data, minio_key)
-            if minio_url:
-                log.info("[UPLOAD][video] uploaded to MinIO: %s", minio_url)
-                # Use MinIO URL as the source for Celery processing
-                file_path_for_processing = minio_url
+            log.info("[UPLOAD][video] Uploading to Google Drive")
+            storage_key = f"raw_videos/{save_name}"
+            storage_url = upload_to_gdrive(video_data, storage_key, "video/mp4")
+            if storage_url:
+                log.info("[UPLOAD][video] uploaded to Google Drive: %s", storage_url)
+                file_path_for_processing = storage_url
             else:
-                log.warning("[UPLOAD][video] MinIO upload failed: no URL returned")
+                log.warning("[UPLOAD][video] Google Drive upload returned no URL")
                 file_path_for_processing = None
         except Exception as e:
-            log.warning("[UPLOAD][video] MinIO upload failed: %s", e)
+            log.warning("[UPLOAD][video] Google Drive upload failed: %s", e)
             file_path_for_processing = None
     else:
-        # Fallback to local save if MinIO not enabled
+        # Fallback to local save if object storage not enabled
         file_path = os.path.join(UPLOAD_DIR, save_name)
-        import io
         with open(file_path, "wb") as f:
             f.write(video_data)
         log.info("[UPLOAD][video] saved path=%s", file_path)
         file_path_for_processing = file_path
 
-    # Gửi task tới Celery
+    # Send task to Celery
     if not file_path_for_processing:
-        return {"success": False, "message": "Upload to MinIO failed"}
+        return {"success": False, "message": "Upload to cloud storage failed"}
     
     try:
         job = enqueue_process_video.delay(
@@ -171,7 +168,7 @@ async def upload_video(
             "id": job.id,
             "session_id": session_id,
             "message": "queued",
-            "minio_url": minio_url,
+            "storage_url": storage_url,
         }
     except Exception as e:
         log.error("[UPLOAD][video][ERROR] queue failed: %s", e)
