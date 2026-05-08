@@ -70,3 +70,6 @@ dataset/
 
 # Git
 .git/
+
+# Google Drive credentials
+gdrive/

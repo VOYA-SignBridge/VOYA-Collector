@@ -44,6 +44,7 @@ def ffmpeg_resample(input_path: str, fps_target: int) -> Tuple[str, float, float
 
     # Create temp output in same directory for atomicity/cleanup
     dir_name = os.path.dirname(input_path) or "."
+    os.makedirs(dir_name, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(prefix="resampled_", suffix=".mp4", dir=dir_name)
     os.close(fd)
     cmd = [
@@ -124,6 +125,7 @@ def temporal_speed_variants(video_path: str, speeds=[1.0, 1.2, 0.8]) -> list:
         return [(1.0, video_path)]
     
     dir_name = os.path.dirname(video_path) or "."
+    os.makedirs(dir_name, exist_ok=True)
     
     for speed in speeds:
         if speed == 1.0:

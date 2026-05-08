@@ -14,6 +14,7 @@ def _default_dataset_root() -> Path:
 
 
 class Settings(BaseSettings):
+    model_config = {"env_file": ".env", "extra": "ignore"}
     # Postgres/PostgreSQL configuration
     database_url: str = os.getenv(
         "DATABASE_URL", "postgresql://user:password@localhost:5432/signdb"
@@ -23,14 +24,11 @@ class Settings(BaseSettings):
     broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
     result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
-    # MinIO (S3-compatible) configuration
-    minio_endpoint: str = os.getenv("MINIO_ENDPOINT")
-    minio_access_key: str = os.getenv("MINIO_ACCESS_KEY")
-    minio_secret_key: str = os.getenv("MINIO_SECRET_KEY")
-    minio_bucket: str = os.getenv("MINIO_BUCKET", "sign-dataset")
-
-    # Optional object storage upload toggle (filesystem remains source-of-truth)
-    use_minio: bool = bool(int(os.getenv("USE_MINIO", "0")))
+    # Google Drive configuration
+    use_google_drive: bool = bool(int(os.getenv("USE_GOOGLE_DRIVE", "0")))
+    google_drive_credentials: str = os.getenv("GOOGLE_DRIVE_CREDENTIALS", "credentials.json")
+    google_drive_token: str = os.getenv("GOOGLE_DRIVE_TOKEN", "token.pickle")
+    google_drive_root_folder_id: str = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
 
     # Processing constants (align live-capture and video)
     feature_dim: int = int(os.getenv("FEATURE_DIM", 126))
