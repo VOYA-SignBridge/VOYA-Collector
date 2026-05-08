@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Google Drive configuration
     use_google_drive: bool = bool(int(os.getenv("USE_GOOGLE_DRIVE", "0")))
     google_drive_credentials: str = os.getenv("GOOGLE_DRIVE_CREDENTIALS", "credentials.json")
-    google_drive_token: str = os.getenv("GOOGLE_DRIVE_TOKEN", "token.pickle")
+    google_drive_token: str = os.getenv("GOOGLE_DRIVE_TOKEN", "token.json")
     google_drive_root_folder_id: str = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
 
     # Processing constants (align live-capture and video)

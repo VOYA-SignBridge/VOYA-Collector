@@ -1,10 +1,11 @@
 import os
 import io
-import pickle
+import json
 import logging
 from pathlib import Path
 from typing import Union, BinaryIO, Optional
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
@@ -32,9 +33,22 @@ class GoogleDriveClient:
         
         # Load existing token
         if os.path.exists(self.token_path):
-            with open(self.token_path, 'rb') as token:
-                creds = pickle.load(token)
-                logger.info("[GDrive] Loaded existing credentials")
+            try:
+                with open(self.token_path, 'r') as token:
+                    creds_data = json.load(token)
+                    if creds_data and 'token' in creds_data:
+                        creds = Credentials(
+                            token=creds_data['token'],
+                            refresh_token=creds_data.get('refresh_token'),
+                            id_token=creds_data.get('id_token'),
+                            token_uri=creds_data.get('token_uri'),
+                            client_id=creds_data.get('client_id'),
+                            client_secret=creds_data.get('client_secret'),
+                            scopes=creds_data.get('scopes', SCOPES)
+                        )
+                        logger.info("[GDrive] Loaded existing credentials from token.json")
+            except Exception as e:
+                logger.warning("[GDrive] Failed to load token: %s, will re-authenticate", e)
         
         # Refresh or create new credentials
         if not creds or not creds.valid:
@@ -48,9 +62,17 @@ class GoogleDriveClient:
                 creds = flow.run_local_server(port=0)
                 logger.info("[GDrive] New authentication successful")
             
-            # Save credentials
-            with open(self.token_path, 'wb') as token:
-                pickle.dump(creds, token)
+            # Save credentials as JSON in Google Drive API format
+            with open(self.token_path, 'w') as token:
+                json.dump({
+                    'token': creds.token,
+                    'refresh_token': creds.refresh_token,
+                    'id_token': creds.id_token,
+                    'token_uri': creds.token_uri,
+                    'client_id': creds.client_id,
+                    'client_secret': getattr(creds, 'client_secret', None),
+                    'scopes': list(creds.scopes) if creds.scopes else SCOPES
+                }, token, indent=2)
         
         self.service = build('drive', 'v3', credentials=creds)
         logger.info("[GDrive] Service initialized")
@@ -286,7 +308,7 @@ def get_gdrive_client() -> GoogleDriveClient:
     global _gdrive_client
     if _gdrive_client is None:
         credentials_path = os.getenv("GOOGLE_DRIVE_CREDENTIALS", "credentials.json")
-        token_path = os.getenv("GOOGLE_DRIVE_TOKEN", "token.pickle")
+        token_path = os.getenv("GOOGLE_DRIVE_TOKEN", "token.json")
         root_folder = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", None)
         
         if not os.path.exists(credentials_path):
