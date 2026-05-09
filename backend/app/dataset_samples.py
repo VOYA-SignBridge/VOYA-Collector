@@ -115,6 +115,7 @@ def save_sequence_npz(
         "augment_id": augment_id,
         "created_at": created_at,
         **meta,
+        "user_id": meta.get("user_id") or meta.get("user") or "",
     }
 
     metadata_for_storage = dict(metadata)
@@ -164,7 +165,7 @@ def save_sequence_npz(
             "language": class_meta.language,
             "dialect": class_meta.dialect,
             "source_type": source_type,
-            "user_id": meta.get("user", ""),
+            "user_id": meta.get("user_id") or meta.get("user", ""),
             "session_id": meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
@@ -193,7 +194,7 @@ def save_sequence_npz(
             "language": class_meta.language,
             "dialect": class_meta.dialect,
             "source_type": source_type,
-            "user_id": meta.get("user", ""),
+            "user_id": meta.get("user_id") or meta.get("user") or None,
             "session_id": meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),

@@ -24,7 +24,7 @@ def _window_activity_mean_abs_diff(seq_arr: np.ndarray) -> float:
     diffs = np.diff(seq_arr.astype(np.float32, copy=False), axis=0)
     return float(np.mean(np.abs(diffs)))
 
-def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
+def process_video_job(video_path: str, user: str, user_id: str, label: str, session_id: str, dialect: str = "common", language: str = "vn" ):
     """
     Synchronous function to process video without Celery decorator.
     This is called by the Celery task in tasks.py
@@ -176,6 +176,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
 
                     window_meta = {
                         "user": user,
+                        "user_id": user_id,
                         "session_id": session_id,
                         "source_uri": video_path,
                         "fps_original": fps_target,
@@ -275,6 +276,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                     if max_per_class > 0 and count_samples_for_class(class_meta.class_uid) >= max_per_class:
                         break
                     meta = dict(best_meta)
+                    meta["user_id"] = user_id
                     meta["rescue_fill"] = True
                     meta["rescue_from_completeness"] = float(round(best_comp, 4))
                     meta["rescue_from_activity"] = float(round(best_act, 6))

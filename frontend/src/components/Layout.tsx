@@ -1,11 +1,29 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { clearAuthToken, loadAuthToken } from "../api/axiosClient";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
+
+const AUTH_EVENT = "voya:auth-change";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const [hasToken, setHasToken] = useState<boolean>(() => !!loadAuthToken());
+
+  useEffect(() => {
+    const syncAuthState = () => {
+      setHasToken(!!loadAuthToken());
+    };
+
+    window.addEventListener(AUTH_EVENT, syncAuthState);
+    window.addEventListener("storage", syncAuthState);
+
+    return () => {
+      window.removeEventListener(AUTH_EVENT, syncAuthState);
+      window.removeEventListener("storage", syncAuthState);
+    };
+  }, []);
 
   const navigation = [
     { name: "Bảng điều khiển", href: "/upload", icon: "📊" },
@@ -14,6 +32,12 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const handleNewSession = useCallback(() => {
     navigate(0);
+  }, [navigate]);
+
+  const handleLogout = useCallback(() => {
+    clearAuthToken();
+    setHasToken(false);
+    navigate("/login");
   }, [navigate]);
 
   const NavItem = ({ item }: { item: typeof navigation[0] }) => (
@@ -103,6 +127,21 @@ export default function Layout({ children }: { children: ReactNode }) {
               <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
               <span className="text-sm text-slate-600">Đã kết nối</span>
             </div>
+
+            {hasToken ? (
+              <Button size="sm" onClick={handleLogout}>
+                Đăng xuất
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => navigate("/login")}>
+                  Đăng nhập
+                </Button>
+                <Button size="sm" onClick={() => navigate("/register")}>
+                  Đăng ký
+                </Button>
+              </div>
+            )}
 
             <Button size="sm" onClick={handleNewSession}>
               Phiên mới

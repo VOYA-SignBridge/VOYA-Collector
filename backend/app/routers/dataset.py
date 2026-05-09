@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
 
@@ -12,6 +12,7 @@ from app.dataset_manager import load_labels, ClassMetadata
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.artifact_store import materialize_sample_artifacts
 from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_delete_sample, sync_update_class
+from app.auth import get_current_user_optional
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -215,7 +216,8 @@ def add_sample(
     frames: int = Form(0),
     duration: float = Form(0.0),
     source: str = Form("video"),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
     idx_to_meta = _class_idx_to_meta()
     meta = idx_to_meta.get(int(class_idx))
@@ -237,6 +239,7 @@ def add_sample(
         seq.astype(np.float32),
         meta={
             "user": user,
+            "user_id": current_user["id"] if current_user else "",
             "session_id": session_id,
             "fps_original": "",
             "fps_processed": "",

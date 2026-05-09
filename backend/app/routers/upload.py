@@ -4,8 +4,9 @@ import time
 import logging
 import numpy as np
 
+from typing import Optional, Dict, Any
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException, Depends
 
 from app.processing import storage_utils as su  # legacy for timestamp helper
 from app.dataset_manager import get_or_register_class, normalize_dialect
@@ -25,6 +26,7 @@ from app.api_validation import (
 )
 
 slog = get_structured_logger("upload.operations")
+from app.auth import get_current_user_optional
 
 
 # ============================================================================
@@ -68,6 +70,7 @@ async def upload_video(
     dialect: str = Form("common"),
     session_id: str = Form(None),
     debug: bool = Form(False),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
     start = time.time()
     log = logging.getLogger("upload.video")
@@ -164,6 +167,7 @@ async def upload_video(
         job = enqueue_process_video.delay(
             video_path=file_path_for_processing,
             user=user,
+            user_id=current_user["id"] if current_user else "",
             label=label,
             session_id=session_id,
             dialect=dialect,
@@ -207,13 +211,16 @@ async def upload_video(
 
 
 @router.post("/camera")
-async def upload_camera(payload: dict = Body(...)):
+async def upload_camera(payload: dict = Body(...),
+                        current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+                        ):
     """
     Accept frames (array of arrays) and metadata, save as npz via storage_utils.save_sample
     Payload example: { user: str, label: str, session_id: str, dialect: str, frames: [{timestamp, landmarks}, ...] }
     """
     start = time.time()
     user = payload.get("user", "")
+    user_id = current_user["id"] if current_user else ""
     label = validate_label(payload.get("label"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "common")))
     language = validate_language(payload.get("language", "vn"))
@@ -419,6 +426,7 @@ async def upload_camera(payload: dict = Body(...)):
 
         meta = {
             "user": user,
+            "user_id": user_id,
             "session_id": session_id,
             "fps_original": None,
             "fps_processed": None,

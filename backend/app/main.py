@@ -5,7 +5,7 @@ from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import dataset, upload, jobs, classes, inference, health
+from app.routers import dataset, upload, jobs, classes, inference, health, auth
 from app.logging_config import configure_logging
 from app.db import init_db
 
@@ -34,6 +34,12 @@ def startup():
         settings.database_url,
     )
     db_ready = init_db()
+    
+    # Bootstrap admin user if configured
+    if db_ready:
+        from app.db import bootstrap_admin_user
+        bootstrap_admin_user()
+    
     logger.info(
         "[STARTUP][DB_INIT] status=%s duration_ms=%.1f",
         "ready" if db_ready else "warning",
@@ -56,6 +62,7 @@ api_v1.include_router(upload.router)
 api_v1.include_router(jobs.router)
 api_v1.include_router(classes.router)
 api_v1.include_router(inference.router)
+api_v1.include_router(auth.router)
 app.include_router(api_v1)
 
 # test

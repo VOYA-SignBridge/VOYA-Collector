@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List
+from typing import List, Optional
 from pydantic import BaseSettings, validator
 from pathlib import Path
 
@@ -100,6 +100,36 @@ class Settings(BaseSettings):
     # Parsed list of speed variants; populated in __init__
     speed_variants: List[float] = [1.0, 1.2, 0.8]
 
+    # ===== AUTH / JWT =====
+    secret_key: str = os.getenv(
+        "SECRET_KEY"
+    )
+
+    algorithm: str = os.getenv(
+        "ALGORITHM"
+    )
+
+    access_token_expire_minutes: int = int(
+        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
+    )
+
+    # Optional auth behavior
+    allow_guest_upload: bool = bool(
+        int(os.getenv("ALLOW_GUEST_UPLOAD"))
+    )
+
+    # Password policy
+    min_password_length: int = int(
+        os.getenv("MIN_PASSWORD_LENGTH")
+    )
+
+    # Admin bootstrap
+    admin_username: str = os.getenv("ADMIN_USERNAME")
+
+    admin_password: str = os.getenv(
+        "ADMIN_PASSWORD",
+    )
+    
     @validator("speed_variants", pre=True, always=True)
     def _parse_speed_variants(cls, v, values):
         raw = values.get("speed_variants_raw")
