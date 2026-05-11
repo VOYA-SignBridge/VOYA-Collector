@@ -9,7 +9,6 @@ import tempfile
 from datetime import datetime
 from filelock import FileLock
 
-
 # ---- Config paths ----
 DATASET_ROOT = "dataset"
 FEATURE_ROOT = os.path.join(DATASET_ROOT, "features")
@@ -107,13 +106,19 @@ def register_label(label_original, notes="", dataset_version="v1"):
 # ---- Sample management ----
 def save_sample(sequence_array, class_idx, folder_name, metadata=None):
     """
-    Save npz to local disk.
+    Save npz + json metadata in the correct folder.
+    Returns file path.
     """
-    import numpy as np
-    
     sample_uuid = uuid.uuid4().hex[:8]
     fname = f"sample_{class_idx:04d}_{sample_uuid}"
-    
+    out_dir = os.path.join(FEATURE_ROOT, folder_name)
+    os.makedirs(out_dir, exist_ok=True)
+    npz_path = os.path.join(out_dir, fname + ".npz")
+    json_path = os.path.join(out_dir, fname + ".json")
+
+    # Save npz atomically (include meta inside npz too) with normalization
+    import numpy as np
+    from app.processing.utils import normalize_sequence
     metadata = metadata or {}
     metadata.update({
         "class_idx": class_idx,
@@ -121,17 +126,14 @@ def save_sample(sequence_array, class_idx, folder_name, metadata=None):
         "sample_uuid": sample_uuid,
         "created_at": now_str(),
     })
-    
-    out_dir = os.path.join(FEATURE_ROOT, folder_name)
-    os.makedirs(out_dir, exist_ok=True)
-    npz_path = os.path.join(out_dir, fname + ".npz")
-    json_path = os.path.join(out_dir, fname + ".json")
-    
+    expected_T = int(getattr(__import__("app.config", fromlist=["settings"]).settings, "seq_len", 60))
+    expected_D = int(getattr(__import__("app.config", fromlist=["settings"]).settings, "feature_dim", 126))
+    seq, info = normalize_sequence(sequence_array, expected_T=expected_T, expected_D=expected_D)
     fd_npz, tmp_npz = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=out_dir)
     os.close(fd_npz)
     try:
         with open(tmp_npz, "wb") as f:
-            np.savez_compressed(f, sequence=sequence_array.astype("float32"), meta=metadata)
+            np.savez_compressed(f, sequence=seq.astype("float32"), meta=metadata)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_npz, npz_path)
@@ -142,6 +144,7 @@ def save_sample(sequence_array, class_idx, folder_name, metadata=None):
             except Exception:
                 pass
 
+    # Save metadata sidecar atomically
     fd_json, tmp_json = tempfile.mkstemp(prefix="jsontmp_", suffix=".json", dir=out_dir)
     os.close(fd_json)
     try:
@@ -157,6 +160,7 @@ def save_sample(sequence_array, class_idx, folder_name, metadata=None):
             except Exception:
                 pass
 
+    # Record in samples.csv
     add_sample_record(fname + ".npz", class_idx, folder_name, metadata)
 
     return npz_path
