@@ -3,8 +3,6 @@ import numpy as np
 import mediapipe as mp
 from typing import List, Tuple, Generator
 from app.config import settings
-from app.processing.utils import canonicalize_vector_126
-
 
 # constants for hands only
 N_HAND = 21
