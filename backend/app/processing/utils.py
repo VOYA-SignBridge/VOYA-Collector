@@ -1,11 +1,16 @@
 import os
 import json
 import tempfile
-import numpy as np
+import logging
 from pathlib import Path
 from typing import Any, Union
-from app.config import settings
 
+import numpy as np
+
+try:
+    from app.config import settings
+except Exception:
+    from backend.app.config import settings
 
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
@@ -41,8 +46,62 @@ def save_json_to_storage(obj, path):
 def save_npz_feature(sequence_array, label_folder, filename, meta=None):
     ensure_dir(label_folder)
     outpath = os.path.join(label_folder, filename)
-    np.savez_compressed(outpath, sequence=sequence_array.astype(np.float32), meta=meta or {})
+    seq, info = normalize_sequence(sequence_array, expected_T=int(getattr(settings, "seq_len", 60)), expected_D=int(getattr(settings, "feature_dim", 126)))
+    # atomic write
+    fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=label_folder)
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as f:
+            np.savez_compressed(f, sequence=seq.astype(np.float32), meta=meta or {})
+            f.flush(); os.fsync(f.fileno())
+        os.replace(tmp, outpath)
+    finally:
+        if os.path.exists(tmp):
+            try: os.remove(tmp)
+            except Exception: pass
     return outpath
+
+
+def normalize_sequence(sequence, expected_T: int = 60, expected_D: int = 126):
+    """Normalize/pad/truncate a sequence to (expected_T, expected_D).
+
+    Returns (sequence_ndarray, info_dict) where info contains 'original_shape' and 'normalized' flag.
+    """
+    seq = np.asarray(sequence)
+    original_shape = tuple(seq.shape)
+    try:
+        # Ensure 2D
+        if seq.ndim == 1:
+            if seq.size == expected_T * expected_D:
+                seq = seq.reshape((expected_T, expected_D))
+            else:
+                if expected_D and seq.size % expected_D == 0:
+                    seq = seq.reshape((-1, expected_D))
+                else:
+                    seq = seq.reshape((seq.shape[0], -1))
+        seq = seq.astype(np.float32)
+        T, D = seq.shape
+        # Adjust feature dim
+        if D != expected_D:
+            if D > expected_D:
+                seq = seq[:, :expected_D]
+            else:
+                pad_cols = expected_D - D
+                seq = np.pad(seq, ((0, 0), (0, pad_cols)), mode="constant", constant_values=0.0)
+        # Adjust temporal length
+        T = seq.shape[0]
+        if T > expected_T: 
+            idx = np.linspace( 0, T - 1, expected_T ).astype(np.int32) 
+            seq = seq[idx]
+        elif T < expected_T:
+            pad_rows = expected_T - T
+            seq = np.pad(seq, ((0, pad_rows), (0, 0)), mode="constant", constant_values=0.0)
+        normalized = tuple(seq.shape) != original_shape
+    except Exception:
+        seq = np.zeros((expected_T, expected_D), dtype=np.float32)
+        normalized = True
+    info = {"original_shape": original_shape, "normalized": bool(normalized)}
+    return seq, info
 
 def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.ndarray:
     """
@@ -56,136 +115,78 @@ def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.nd
         out[t] = alpha * out[t] + (1.0 - alpha) * out[t - 1]
     return out
 
+def normalize_single_hand(hand: np.ndarray) -> np.ndarray:
+    """
+    Normalize ONE hand independently.
+
+    hand shape: (21,3)
+    """
+
+    h = hand.astype(np.float32).copy()
+
+    # empty hand
+    if not np.any(h):
+        return h
+
+    # wrist landmark
+    wrist = h[0, :2].copy()
+
+    # translate
+    h[:, :2] = h[:, :2] - wrist
+
+    # compute scale
+    valid = np.linalg.norm(h[:, :2], axis=1) > 1e-6
+
+    if valid.any():
+
+        pts = h[valid, :2]
+
+        span_x = pts[:,0].max() - pts[:,0].min()
+        span_y = pts[:,1].max() - pts[:,1].min()
+
+        scale = max(span_x, span_y)
+
+        if scale > 1e-6:
+            h[:, :2] = h[:, :2] / scale
+
+    return h
+
 
 def normalize_hands_vector_126(vec: np.ndarray) -> np.ndarray:
-    """Center+scale normalize a single 126-dim hand vector.
 
-    Matches the behavior used in the video pipeline.
-    - Reshapes to (2,21,3)
-    - Uses wrist of first present hand as reference, otherwise mean of non-zero points
-    - Translates and scales by max span of non-zero points
-    """
     if vec is None:
         return vec
+
     v = np.asarray(vec, dtype=np.float32)
+
     if v.size != 126:
         return v
+
     try:
         arr = v.reshape(2, 21, 3).astype(np.float32)
     except Exception:
         return v
 
-    coords = arr.reshape(-1, 3)
-    mask = (coords.sum(axis=1) != 0)
-    if not mask.any():
-        return v
+    # preserve semantic hand identity
+    left = arr[0]
+    right = arr[1]
 
-    coords_nonzero = coords[mask][:, :2]
+    # normalize independently
+    left = normalize_single_hand(left)
+    right = normalize_single_hand(right)
 
-    wrist = None
-    for h in range(2):
-        w = arr[h, 0, :2]
-        if not np.allclose(w, 0.0):
-            wrist = w
-            break
-    if wrist is None:
-        wrist = coords_nonzero.mean(axis=0)
+    out = np.concatenate([
+        left.reshape(-1),
+        right.reshape(-1)
+    ]).astype(np.float32)
 
-    coords[:, :2] = coords[:, :2] - wrist
-
-    xs = coords_nonzero[:, 0] - wrist[0]
-    ys = coords_nonzero[:, 1] - wrist[1]
-    span_x = xs.max() - xs.min() if xs.size else 0.0
-    span_y = ys.max() - ys.min() if ys.size else 0.0
-    scale = max(span_x, span_y)
-    if scale <= 1e-6:
-        scale = 1.0
-    coords[:, :2] = coords[:, :2] / float(scale)
-
-    return coords.reshape(-1).astype(np.float32)
-
-
-def canonicalize_vector_126(vec: np.ndarray) -> np.ndarray:
-    """Apply the same normalization+canonicalization policy for both ingestion pipelines."""
-    v = np.asarray(vec, dtype=np.float32).reshape(-1)
-    # enforce exact dimensionality
-    if v.size < 126:
-        pad = np.zeros((126 - v.size,), dtype=np.float32)
-        v = np.concatenate([v, pad], axis=0)
-    elif v.size > 126:
-        v = v[:126]
-
-    normalized = bool(getattr(settings, "normalize_keypoints", False))
-    if normalized:
-        v = normalize_hands_vector_126(v)
-
-    if bool(getattr(settings, "canonicalize_hands", True)):
-        v = canonicalize_hands_126(
-            v,
-            normalized=normalized,
-            mirror_invariant=bool(getattr(settings, "canonicalize_mirror", True)),
-        )
-    return v.astype(np.float32)
+    return out
 
 
 def _hand_blocks_126(vec: np.ndarray):
     """Split a (126,) vector into (left(21,3), right(21,3))."""
     arr = np.asarray(vec, dtype=np.float32).reshape(2, 21, 3)
     return arr[0].copy(), arr[1].copy()
-
-
-def mirror_and_swap_hands_126(vec: np.ndarray, *, normalized: bool = False) -> np.ndarray:
-    """Mirror a 126-dim (2*21*3) hand vector and swap hands.
-
-    - If not normalized (MediaPipe raw), x is assumed in [0,1] so mirror uses x -> 1 - x.
-    - If normalized/centered, mirror uses x -> -x.
-    """
-    v = np.asarray(vec, dtype=np.float32)
-    if v.size != 126:
-        return v
-    left, right = _hand_blocks_126(v)
-    if normalized:
-        left[:, 0] = -left[:, 0]
-        right[:, 0] = -right[:, 0]
-    else:
-        left[:, 0] = 1.0 - left[:, 0]
-        right[:, 0] = 1.0 - right[:, 0]
-
-    out = np.zeros((126,), dtype=np.float32)
-    out[:63] = right.reshape(63)
-    out[63:] = left.reshape(63)
-    return out
-
-
-def canonicalize_hands_126(vec: np.ndarray, *, normalized: bool = False, mirror_invariant: bool = True) -> np.ndarray:
-    """Make a 126-dim hand vector more invariant to left/right hand and mirroring.
-
-    Steps:
-    1) If only one hand is present (other block all zeros), always place it in the first block.
-    2) Optionally choose canonical orientation between vec and mirror+swap(vec).
-    """
-    v = np.asarray(vec, dtype=np.float32)
-    if v.size != 126:
-        return v
-
-    left = v[:63]
-    right = v[63:]
-    left_present = bool(np.any(left != 0.0))
-    right_present = bool(np.any(right != 0.0))
-
-    # One-hand canonicalization: dominant hand always in first block.
-    if right_present and not left_present:
-        v2 = np.zeros((126,), dtype=np.float32)
-        v2[:63] = right
-        return canonicalize_hands_126(v2, normalized=normalized, mirror_invariant=mirror_invariant)
-
-    if mirror_invariant:
-        m = mirror_and_swap_hands_126(v, normalized=normalized)
-        # Choose deterministic canonical form (bytewise) so vec and its mirror map identically.
-        return v if v.tobytes() <= m.tobytes() else m
-
-    return v
-
 
 def load_npz_features(base_dir: Path):
     """Load all .npz feature files under base_dir.

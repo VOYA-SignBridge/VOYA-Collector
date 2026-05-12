@@ -102,9 +102,21 @@ def validate_samples(base_dir: Path, expected_T: int = None, expected_D: int = N
                     seq2 = np.vstack([seq, pad])
                 else:
                     seq2 = seq[:target_T]
-
-                # overwrite npz (only store sequence in the npz)
-                np.savez_compressed(fpath, sequence=seq2.astype(np.float32))
+                # overwrite npz (only store sequence in the npz) using atomic write
+                from app.processing.utils import normalize_sequence
+                seq_norm, info = normalize_sequence(seq2, expected_T=target_T, expected_D=target_D)
+                # atomic write
+                fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=str(fpath.parent))
+                os.close(fd)
+                try:
+                    with open(tmp, "wb") as f:
+                        np.savez_compressed(f, sequence=seq_norm.astype(np.float32))
+                        f.flush(); os.fsync(f.fileno())
+                    os.replace(tmp, fpath)
+                finally:
+                    if os.path.exists(tmp):
+                        try: os.remove(tmp)
+                        except Exception: pass
                 # update meta frames (external .json)
                 meta_path = fpath.with_suffix('.json')
                 if meta_path.exists():
