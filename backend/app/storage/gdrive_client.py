@@ -1,9 +1,10 @@
-import os
 import io
 import json
 import logging
+import os
+import shutil
 from pathlib import Path
-from typing import Union, BinaryIO, Optional
+from typing import Any, BinaryIO, Dict, Iterable, List, Optional, Union
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -305,11 +306,13 @@ _gdrive_client = None
 
 
 def get_gdrive_client() -> GoogleDriveClient:
+    from app.config import settings
+
     global _gdrive_client
     if _gdrive_client is None:
-        credentials_path = os.getenv("GOOGLE_DRIVE_CREDENTIALS", "credentials.json")
-        token_path = os.getenv("GOOGLE_DRIVE_TOKEN", "token.json")
-        root_folder = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", None)
+        credentials_path = str(settings.google_drive_credentials)
+        token_path = str(settings.google_drive_token)
+        root_folder = settings.google_drive_root_folder_id or None
         
         if not os.path.exists(credentials_path):
             raise FileNotFoundError(
@@ -340,3 +343,42 @@ def download_from_gdrive(gdrive_url: str, local_path: Optional[str] = None) -> s
     
     client = get_gdrive_client()
     return client.download_file(gdrive_url, local_path)
+
+
+def materialize_sample_artifacts(
+    samples: Iterable[Dict[str, Any]],
+    cache_dir: Path,
+    *,
+    default_suffix: str = ".npz",
+) -> List[Path]:
+    """Resolve local or Google Drive-backed sample artifacts into local paths."""
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    resolved: List[Path] = []
+
+    for idx, row in enumerate(samples):
+        sample_uid = str(row.get("sample_uid") or row.get("id") or f"sample_{idx}")
+        file_path = str(row.get("file_path") or "").strip()
+        storage_url = str(row.get("storage_url") or "").strip()
+
+        if file_path and Path(file_path).exists():
+            resolved.append(Path(file_path))
+            continue
+
+        source = storage_url or file_path
+        if not source:
+            continue
+
+        if source.startswith(("gdrive://", "https://drive.google.com")):
+            target = cache_dir / f"{sample_uid}{default_suffix}"
+            resolved.append(Path(download_from_gdrive(source, str(target))))
+            continue
+
+        local_source = Path(source)
+        if local_source.exists():
+            target = cache_dir / local_source.name
+            if local_source.resolve() != target.resolve():
+                shutil.copy2(local_source, target)
+            resolved.append(target)
+
+    return resolved

@@ -2,6 +2,7 @@ import axiosClient from "./axiosClient";
 import { validateLabels, validateSessions, validateLabel } from "./validators";
 import type { Result } from "./validators";
 import type { Label, Session, ClassRow, ClassesListResponse, ClassStatsRow, ClassStatsResponse } from "../types";
+import { validateClass } from "./validators";
 
 export const getLabels = async (): Promise<Result<Label[]>> => {
   const res = await axiosClient.get("/dataset/labels");
@@ -128,24 +129,32 @@ export const getClassesStats = async (language?: string, dialect?: string): Prom
   if (dialect) params.dialect = dialect;
   const res = await axiosClient.get('/classes/stats', { params });
   try {
-    const raw = res.data as any;
+    const raw: unknown = res.data;
     // Expect shape: { total_classes, max_count, distribution: [...] }
     const out: ClassStatsResponse = { total_classes: 0, max_count: 0, distribution: [] };
-    if (raw && typeof raw === 'object') {
-      out.total_classes = Number(raw.total_classes || 0);
-      out.max_count = Number(raw.max_count || 0);
-      if (Array.isArray(raw.distribution)) {
-        out.distribution = raw.distribution.map((d: any) => ({
-          class_uid: String(d.class_uid),
-          class_idx: d.class_idx !== undefined ? Number(d.class_idx) : undefined,
-          slug: d.slug,
-          label_original: d.label_original,
-          count: Number(d.count || 0),
-          samples_count: Number(d.count || 0),
-          language: d.language,
-          dialect: d.dialect,
-          // preserve other fields if present
-        } as ClassStatsRow));
+
+    const isRecord = (v: unknown): v is Record<string, unknown> =>
+      typeof v === 'object' && v !== null && !Array.isArray(v);
+
+    if (isRecord(raw)) {
+      out.total_classes = Number(raw.total_classes ?? 0);
+      out.max_count = Number(raw.max_count ?? 0);
+
+      const dist = raw.distribution;
+      if (Array.isArray(dist)) {
+        out.distribution = dist
+          .filter(isRecord)
+          .map((d): ClassStatsRow => {
+            const count = Number(d.count ?? 0);
+            return {
+              class_uid: String(d.class_uid ?? ''),
+              class_idx: d.class_idx !== undefined && d.class_idx !== null ? Number(d.class_idx) : undefined,
+              slug: typeof d.slug === 'string' ? d.slug : undefined,
+              label_original: typeof d.label_original === 'string' ? d.label_original : undefined,
+              count,
+              samples_count: count,
+            };
+          });
       }
     }
     return { ok: true, data: out };
@@ -155,3 +164,39 @@ export const getClassesStats = async (language?: string, dialect?: string): Prom
 };
 
 // Keep legacy endpoints as fallback (getLabels/createLabel/updateLabel/deleteLabel remain)
+export const updateClass = async (
+  classRef: string,
+  payload: Record<string, unknown>,
+): Promise<Result<ClassRow>> => {
+  try {
+    const res = await axiosClient.put(`/classes/${classRef}`, payload);
+
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, error: res.statusText };
+    }
+
+    return validateClass(res.data); // ✅ validate runtime
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+};
+
+export const deleteClass = async (classRef: string): Promise<Result<null>> => {
+  try {
+    const res = await axiosClient.delete(`/classes/${classRef}`);
+
+    return {
+      ok: res.status >= 200 && res.status < 300,
+      data: null,
+      error: res.statusText,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+};

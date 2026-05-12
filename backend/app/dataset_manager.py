@@ -454,6 +454,7 @@ def list_classes(
         out.append(
             ClassMetadata(
                 class_uid=r["class_uid"],
+                class_idx=int(r.get("class_idx") or 0) if str(r.get("class_idx") or "").strip() else None,
                 slug=r["slug"],
                 label_original=r["label_original"],
                 language=r["language"],

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
 
 from app.config import settings
 from app.dataset_manager import load_labels, ClassMetadata
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
+from app.storage.gdrive_client import materialize_sample_artifacts
+from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_delete_sample, sync_update_class
+from app.auth import get_current_user_optional
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -131,6 +134,24 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
     raise HTTPException(status_code=400, detail="/dataset/labels/merge is deprecated; use new hierarchy tools")
 
 
+@router.put("/labels/{class_ref}")
+def update_label(class_ref: str, label: str = Form(...)):
+    try:
+        result = sync_update_class(class_ref, {"label_original": label})
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.delete("/labels/{class_ref}")
+def delete_label(class_ref: str):
+    try:
+        result = sync_delete_class(class_ref)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @router.get("/samples", response_model=List[SampleOut])
 def list_samples():
     samples = list_samples_v2()
@@ -144,12 +165,12 @@ def list_samples():
         except Exception:
             class_idx = 0
         folder_name = label_row.get("folder_name") or ""
-        file_path = s.get("file_path") or ""
+        source_hint = s.get("storage_key") or s.get("file_path") or ""
         out.append({
             "sample_id": s.get("sample_uid") or "",
             "class_idx": class_idx,
             "folder_name": folder_name,
-            "file": Path(file_path).name if file_path else "",
+            "file": Path(source_hint).name if source_hint else "",
             "user": s.get("user_id") or "",
             "session_id": s.get("session_id") or "",
             "frames": str(s.get("seq_len") or ""),
@@ -168,10 +189,24 @@ def get_sample_data(sample_id: str):
     match = next((s for s in samples if (s.get("sample_uid") == sample_id)), None)
     if not match:
         raise HTTPException(status_code=404, detail="Sample not found")
-    file_path = match.get("file_path")
-    if not file_path or not Path(file_path).exists():
+    file_path = match.get("file_path") or ""
+    if file_path and Path(file_path).exists():
+        return FileResponse(file_path, media_type="application/octet-stream")
+
+    cache_dir = Path(settings.dataset_root) / "cache" / "sample_downloads"
+    resolved = materialize_sample_artifacts([match], cache_dir)
+    if not resolved:
         raise HTTPException(status_code=404, detail="Sample file missing on disk")
-    return FileResponse(file_path, media_type="application/octet-stream")
+    return FileResponse(str(resolved[0]), media_type="application/octet-stream")
+
+
+@router.delete("/samples/{sample_id}")
+def delete_sample(sample_id: str):
+    try:
+        result = sync_delete_sample(sample_id)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 @router.post("/samples/add")
 def add_sample(
@@ -181,7 +216,8 @@ def add_sample(
     frames: int = Form(0),
     duration: float = Form(0.0),
     source: str = Form("video"),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
 ):
     idx_to_meta = _class_idx_to_meta()
     meta = idx_to_meta.get(int(class_idx))
@@ -203,6 +239,7 @@ def add_sample(
         seq.astype(np.float32),
         meta={
             "user": user,
+            "user_id": current_user["id"] if current_user else "",
             "session_id": session_id,
             "fps_original": "",
             "fps_processed": "",

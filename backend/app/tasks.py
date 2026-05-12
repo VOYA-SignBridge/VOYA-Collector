@@ -13,7 +13,16 @@ def _download_from_storage(storage_url: str) -> str:
 
 
 @celery_app.task(bind=True)
-def enqueue_process_video(self, video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
+def enqueue_process_video(
+    self,
+    video_path: str,
+    user: str,
+    label: str,
+    session_id: str,
+    dialect: str = "common",
+    language: str = "vn",
+    user_id: str = "",
+):
     """Process video from Google Drive or local filesystem."""
     local_video_path = video_path
     temp_files_to_clean = []
@@ -25,7 +34,15 @@ def enqueue_process_video(self, video_path: str, user: str, label: str, session_
             if local_video_path and local_video_path != video_path:
                 temp_files_to_clean.append(local_video_path)
         
-        result = process_video_job(local_video_path, user, label, session_id, dialect=dialect, language=language)
+        result = process_video_job(
+            local_video_path,
+            user,
+            user_id=user_id,
+            label=label,
+            session_id=session_id,
+            dialect=dialect,
+            language=language,
+        )
         return {"status": "done", "result": result}
     except Exception as e:
         logging.getLogger(__name__).exception("[CELERY][FAIL] video_path=%s label=%s user=%s session_id=%s", video_path, label, user, session_id)

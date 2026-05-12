@@ -100,7 +100,7 @@ def count_samples_for_class(class_uid: str) -> int:
 def save_sequence_npz(
     class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str
 ) -> str:
-    """Save a (T,D) sequence directly to object storage (Cloudflare R2 or MinIO).
+    """Save a (T,D) sequence to Google Drive when enabled, with local fallback.
     Returns storage URL if successful, local path as fallback.
     """
     import numpy as np
@@ -126,7 +126,7 @@ def save_sequence_npz(
     np.savez_compressed(buffer, sequence=sequence.astype("float32"), meta=metadata)
     buffer.seek(0)
 
-    # Upload directly to object storage if configured
+    # Upload to Google Drive if configured.
     storage_url = None
     storage_key = None
     use_google_drive = settings.use_google_drive
@@ -135,19 +135,20 @@ def save_sequence_npz(
         from app.storage.gdrive_client import upload_to_gdrive
 
         log = logging.getLogger(__name__)
-        log.info("[SAVE_SEQUENCE] Attempting object storage upload")
+        log.info("[SAVE_SEQUENCE] Attempting Google Drive upload")
 
         try:
             # Build storage key: features/{lang}/{dialect}/{folder_name}/{filename}
             folder_name = class_meta.folder_name()
             storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-            log.info("[SAVE_SEQUENCE] Uploading to object storage with key: %s", storage_key)
+            log.info("[SAVE_SEQUENCE] Uploading to Google Drive with key: %s", storage_key)
             
             storage_url = upload_to_gdrive(buffer, storage_key)
             if storage_url:
                 log.info("[SAVE_SEQUENCE] Google Drive upload successful: %s", storage_url)
                 metadata["storage_url"] = storage_url
                 metadata["storage_key"] = storage_key
+                metadata["storage_provider"] = "gdrive"
             else:
                 log.warning("[SAVE_SEQUENCE] Google Drive upload returned None")
         except Exception as e:
@@ -155,7 +156,7 @@ def save_sequence_npz(
     else:
         log.info("[SAVE_SEQUENCE] Google Drive not enabled")
 
-    # If object storage failed, fallback to local disk
+    # If Google Drive failed, fallback to local disk.
     if not storage_url:
         class_dir = class_meta.hierarchy_path()
         class_dir.mkdir(parents=True, exist_ok=True)
@@ -180,6 +181,7 @@ def save_sequence_npz(
                     pass
 
         try:
+            metadata["storage_provider"] = "local"
             atomic_write_json(sidecar, metadata, indent=2)
         except Exception as e:
             logging.getLogger(__name__).warning("[SIDECAR] write failed: %s", e)
@@ -211,7 +213,7 @@ def save_sequence_npz(
             "language": class_meta.language,
             "dialect": class_meta.dialect,
             "source_type": source_type,
-            "user_id": meta.get("user", ""),
+            "user_id": meta.get("user_id") or meta.get("user", ""),
             "session_id": meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
@@ -238,7 +240,7 @@ def save_sequence_npz(
             "language": class_meta.language,
             "dialect": class_meta.dialect,
             "source_type": source_type,
-            "user_id": meta.get("user", ""),
+            "user_id": meta.get("user_id") or meta.get("user", ""),
             "session_id": meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
