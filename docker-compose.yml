@@ -35,22 +35,22 @@ services:
           - voya_backend
           - backend
 
-  worker:
-    image: voya_backend:latest
-    container_name: voya_worker
-    env_file:
-      - .env
-    volumes:
-      - ./dataset:/dataset
-      - ./gdrive:/gdrive
-    command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
-    depends_on:
-      - redis
-      - postgres
-      - backend
-    restart: unless-stopped
-    networks:
-      - voya_network
+  # worker:
+  #   image: voya_backend:latest
+  #   container_name: voya_worker
+  #   env_file:
+  #     - .env
+  #   volumes:
+  #     - ./dataset:/dataset
+  #     - ./gdrive:/gdrive
+  #   command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
+  #   depends_on:
+  #     - redis
+  #     - postgres
+  #     - backend
+  #   restart: unless-stopped
+  #   networks:
+  #     - voya_network
 
   redis:
     image: redis:7-alpine

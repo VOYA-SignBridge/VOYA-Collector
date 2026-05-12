@@ -12,7 +12,6 @@ from app.processing.utils import normalize_hands_vector_126
 from app.processing.utils import normalize_sequence
 from app.dataset_samples import save_sequence_npz
 from app.raw_uploads import append_raw_upload_row, now_str as raw_upload_now_str
-from app.tasks import enqueue_process_video
 from app.config import settings
 from app.api_validation import (
     validate_label,
@@ -144,21 +143,15 @@ async def upload_video(
         if getattr(settings, "debug_logging", False):
             log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
 
-    # Gửi task tới Celery
-    try:
-        job = enqueue_process_video.delay(video_path=storage_url, user=user, label=label, session_id=session_id, dialect=dialect, language=language)
-        log.info("[UPLOAD][video] queued job=%s elapsed=%.3fs", getattr(job, 'id', 'unknown'), time.time() - start)
-        return {
-            "success": True,
-            "id": job.id,
-            "session_id": session_id,
-            "upload_uid": upload_uid,
-            "storage_url": storage_url,
-            "message": "queued",
-        }
-    except Exception as e:
-        log.error("[UPLOAD][video][ERROR] queue failed: %s", e)
-        return {"success": False, "message": f"queue failed: {e}"}
+    log.info("[UPLOAD][video] stored raw video only elapsed=%.3fs", time.time() - start)
+    return {
+        "success": True,
+        "id": upload_uid,
+        "session_id": session_id,
+        "upload_uid": upload_uid,
+        "storage_url": storage_url,
+        "message": "raw video uploaded",
+    }
     
 
 
