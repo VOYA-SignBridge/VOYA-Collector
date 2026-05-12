@@ -7,8 +7,12 @@ from app.processing.pipeline import process_video_job
 def _download_from_storage(storage_url: str) -> str:
     """Download file from Google Drive to temp location."""
     if storage_url.startswith(("https://drive.google.com", "gdrive://")):
+        import tempfile
         from app.storage.gdrive_client import download_from_gdrive
-        return download_from_gdrive(storage_url)
+
+        fd, local_path = tempfile.mkstemp(suffix=".mp4")
+        os.close(fd)
+        return download_from_gdrive(storage_url, local_path)
     return storage_url
 
 

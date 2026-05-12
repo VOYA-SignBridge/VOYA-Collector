@@ -300,6 +300,10 @@ def append_label_row(row: Dict[str, Any]):
     # Regenerate derived language/dialect index files under dataset/labels/
     regenerate_label_indexes()
 
+    from app.storage.catalog_mirror import mirror_csv_to_gdrive
+
+    mirror_csv_to_gdrive(MASTER_LABELS, "labels.csv")
+
 
 def regenerate_label_indexes():
     rows = load_labels()

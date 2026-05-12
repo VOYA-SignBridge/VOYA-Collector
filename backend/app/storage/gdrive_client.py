@@ -136,7 +136,7 @@ class GoogleDriveClient:
 
     def ensure_path(self, path: str) -> str:
         """Create full folder path recursively and return final folder ID."""
-        if not path or path == '/':
+        if not path or path in ('.', '/'):
             return self.root_folder_id or 'root'
         
         # Start from root or configured root folder
