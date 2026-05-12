@@ -21,4 +21,6 @@ dependencies = [
     "redis==4.5.1",
     "sqlalchemy==1.4.50",
     "uvicorn[standard]==0.22.0",
+    "passlib[bcrypt]==1.7.4",
+    "python-jose[cryptography]==3.3.0"
 ]

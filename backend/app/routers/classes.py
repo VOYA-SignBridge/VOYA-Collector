@@ -1,10 +1,11 @@
 from typing import Optional
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 from app.dataset_manager import get_or_register_class, list_classes
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.dataset_manager import normalize_dialect
 from app.api_validation import validate_label, validate_language, validate_dialect
+from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_update_class
 
 router = APIRouter(prefix="/classes", tags=["classes"])
 
@@ -55,3 +56,21 @@ def stats(language: Optional[str] = None, dialect: Optional[str] = None):
 def balance_plan(target: int | None = None):
     plan = build_balance_plan(target=target)
     return plan
+
+
+@router.put("/{class_ref}")
+def update_class(class_ref: str, payload: dict = Body(...)):
+    try:
+        result = sync_update_class(class_ref, payload)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.delete("/{class_ref}")
+def delete_class(class_ref: str):
+    try:
+        result = sync_delete_class(class_ref)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

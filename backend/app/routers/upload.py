@@ -77,7 +77,7 @@ async def upload_video(
 
     save_name = f"{user}_{label}_{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, save_name)
-    max_mb = int(os.getenv("MAX_UPLOAD_MB", "1024"))
+    max_mb = int(getattr(settings, "max_upload_mb", 1024))
     max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
     written, _ = save_upload_with_limit(file.file, Path(file_path), max_bytes=max_bytes)
     log.info("[UPLOAD][video] bytes_written=%s max_bytes=%s", written, max_bytes)
@@ -113,7 +113,7 @@ async def upload_camera(payload: dict = Body(...)):
 
     # Basic payload size guard (prevents accidental huge posts)
     try:
-        max_frames = int(os.getenv("MAX_CAMERA_FRAMES", "600"))
+        max_frames = int(getattr(settings, "max_camera_frames", 600))
         if max_frames > 0 and isinstance(frames, list) and len(frames) > max_frames:
             return {"success": False, "message": f"Too many frames (max {max_frames})"}
     except Exception:

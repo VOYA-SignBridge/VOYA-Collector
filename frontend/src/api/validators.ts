@@ -1,4 +1,4 @@
-import type { Session, Label, UploadResult, JobStatus } from "../types";
+import type { Session, Label, UploadResult, JobStatus, ClassRow } from "../types";
 
 export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -66,6 +66,25 @@ export function validateUploadResult(data: unknown): Result<UploadResult> {
   try {
     if (!isObject(data)) throw new Error("Invalid upload response");
     return { ok: true, data: data as UploadResult };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+export function validateClass(data: unknown): Result<ClassRow> {
+  try {
+    if (!isObject(data)) throw new Error("Invalid class response");
+
+    // check field bắt buộc
+    if (typeof data.class_uid !== "string") {
+      throw new Error("Missing class_uid");
+    }
+
+    // 👇 FIX TYPE CAST CHUẨN
+    const row = data as unknown as ClassRow;
+
+    return { ok: true, data: row };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: msg };

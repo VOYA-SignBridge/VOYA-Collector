@@ -1,16 +1,12 @@
 import os
 import json
 import tempfile
-import logging
+import numpy as np
+import warnings
 from pathlib import Path
 from typing import Any, Union
+from app.config import settings
 
-import numpy as np
-
-try:
-    from app.config import settings
-except Exception:
-    from backend.app.config import settings
 
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
@@ -46,68 +42,83 @@ def save_json_to_storage(obj, path):
 def save_npz_feature(sequence_array, label_folder, filename, meta=None):
     ensure_dir(label_folder)
     outpath = os.path.join(label_folder, filename)
-    seq, info = normalize_sequence(sequence_array, expected_T=int(getattr(settings, "seq_len", 60)), expected_D=int(getattr(settings, "feature_dim", 126)))
-    # atomic write
+    seq, _ = normalize_sequence(
+        sequence_array,
+        expected_T=int(getattr(settings, "seq_len", 60)),
+        expected_D=int(getattr(settings, "feature_dim", 126)),
+    )
     fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=label_folder)
     os.close(fd)
     try:
         with open(tmp, "wb") as f:
             np.savez_compressed(f, sequence=seq.astype(np.float32), meta=meta or {})
-            f.flush(); os.fsync(f.fileno())
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, outpath)
     finally:
         if os.path.exists(tmp):
-            try: os.remove(tmp)
-            except Exception: pass
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
     return outpath
 
 
 def normalize_sequence(sequence, expected_T: int = 60, expected_D: int = 126):
-    """Normalize/pad/truncate a sequence to (expected_T, expected_D).
-
-    Returns (sequence_ndarray, info_dict) where info contains 'original_shape' and 'normalized' flag.
-    """
+    """Normalize/pad/truncate a sequence to (expected_T, expected_D)."""
     seq = np.asarray(sequence)
     original_shape = tuple(seq.shape)
     try:
-        # Ensure 2D
         if seq.ndim == 1:
             if seq.size == expected_T * expected_D:
                 seq = seq.reshape((expected_T, expected_D))
+            elif expected_D and seq.size % expected_D == 0:
+                seq = seq.reshape((-1, expected_D))
             else:
-                if expected_D and seq.size % expected_D == 0:
-                    seq = seq.reshape((-1, expected_D))
-                else:
-                    seq = seq.reshape((seq.shape[0], -1))
+                seq = seq.reshape((seq.shape[0], -1))
+
         seq = seq.astype(np.float32)
-        T, D = seq.shape
-        # Adjust feature dim
+        _, D = seq.shape
         if D != expected_D:
             if D > expected_D:
                 seq = seq[:, :expected_D]
             else:
-                pad_cols = expected_D - D
-                seq = np.pad(seq, ((0, 0), (0, pad_cols)), mode="constant", constant_values=0.0)
-        # Adjust temporal length
+                seq = np.pad(seq, ((0, 0), (0, expected_D - D)), mode="constant", constant_values=0.0)
+
         T = seq.shape[0]
-        if T > expected_T: 
-            idx = np.linspace( 0, T - 1, expected_T ).astype(np.int32) 
+        if T > expected_T:
+            idx = np.linspace(0, T - 1, expected_T).astype(np.int32)
             seq = seq[idx]
         elif T < expected_T:
-            pad_rows = expected_T - T
-            seq = np.pad(seq, ((0, pad_rows), (0, 0)), mode="constant", constant_values=0.0)
+            seq = np.pad(seq, ((0, expected_T - T), (0, 0)), mode="constant", constant_values=0.0)
         normalized = tuple(seq.shape) != original_shape
     except Exception:
         seq = np.zeros((expected_T, expected_D), dtype=np.float32)
         normalized = True
-    info = {"original_shape": original_shape, "normalized": bool(normalized)}
-    return seq, info
+
+    return seq, {"original_shape": original_shape, "normalized": bool(normalized)}
+
+_EMA_SMOOTH_UNSAFE_WARNED = False
 
 def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.ndarray:
     """
     Apply exponential moving average smoothing per time step.
     sequence_array: shape (T, D)
+
+    WARNING: This operation is generally unsafe for training/inference parity.
+    It can introduce distribution shift (train vs. live) and can erase short,
+    discriminative motion cues. Prefer model-side temporal smoothing or
+    explicitly version/lock this behavior in both training and serving.
     """
+    global _EMA_SMOOTH_UNSAFE_WARNED
+    if not _EMA_SMOOTH_UNSAFE_WARNED:
+        warnings.warn(
+            "ema_smooth_sequence() is generally unsafe for training/inference parity; "
+            "use only if it is identically applied in both training and serving.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        _EMA_SMOOTH_UNSAFE_WARNED = True
     if not isinstance(sequence_array, np.ndarray) or sequence_array.ndim != 2:
         return sequence_array
     out = sequence_array.astype(np.float32).copy()
@@ -115,78 +126,355 @@ def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.nd
         out[t] = alpha * out[t] + (1.0 - alpha) * out[t - 1]
     return out
 
-def normalize_single_hand(hand: np.ndarray) -> np.ndarray:
-    """
-    Normalize ONE hand independently.
-
-    hand shape: (21,3)
-    """
-
-    h = hand.astype(np.float32).copy()
-
-    # empty hand
-    if not np.any(h):
-        return h
-
-    # wrist landmark
-    wrist = h[0, :2].copy()
-
-    # translate
-    h[:, :2] = h[:, :2] - wrist
-
-    # compute scale
-    valid = np.linalg.norm(h[:, :2], axis=1) > 1e-6
-
-    if valid.any():
-
-        pts = h[valid, :2]
-
-        span_x = pts[:,0].max() - pts[:,0].min()
-        span_y = pts[:,1].max() - pts[:,1].min()
-
-        scale = max(span_x, span_y)
-
-        if scale > 1e-6:
-            h[:, :2] = h[:, :2] / scale
-
-    return h
-
 
 def normalize_hands_vector_126(vec: np.ndarray) -> np.ndarray:
+    """Center+scale normalize a single 126-dim hand vector.
 
+    Matches the behavior used in the video pipeline.
+    - Reshapes to (2,21,3)
+    - Uses wrist of first present hand as reference, otherwise mean of non-zero points
+    - Translates and scales by max span of non-zero points
+    """
     if vec is None:
         return vec
-
     v = np.asarray(vec, dtype=np.float32)
-
     if v.size != 126:
         return v
-
     try:
         arr = v.reshape(2, 21, 3).astype(np.float32)
     except Exception:
         return v
 
-    # preserve semantic hand identity
-    left = arr[0]
-    right = arr[1]
+    coords = arr.reshape(-1, 3)
+    mask = (coords.sum(axis=1) != 0)
+    if not mask.any():
+        return v
 
-    # normalize independently
-    left = normalize_single_hand(left)
-    right = normalize_single_hand(right)
+    coords_nonzero = coords[mask][:, :2]
 
-    out = np.concatenate([
-        left.reshape(-1),
-        right.reshape(-1)
-    ]).astype(np.float32)
+    wrist = None
+    for h in range(2):
+        w = arr[h, 0, :2]
+        if not np.allclose(w, 0.0):
+            wrist = w
+            break
+    if wrist is None:
+        wrist = coords_nonzero.mean(axis=0)
 
-    return out
+    coords[:, :2] = coords[:, :2] - wrist
+
+    xs = coords_nonzero[:, 0] - wrist[0]
+    ys = coords_nonzero[:, 1] - wrist[1]
+    span_x = xs.max() - xs.min() if xs.size else 0.0
+    span_y = ys.max() - ys.min() if ys.size else 0.0
+    scale = max(span_x, span_y)
+    if scale <= 1e-6:
+        scale = 1.0
+    coords[:, :2] = coords[:, :2] / float(scale)
+
+    return coords.reshape(-1).astype(np.float32)
+
+
+def canonicalize_vector_126(vec: np.ndarray) -> np.ndarray:
+    """Apply the same normalization+canonicalization policy for both ingestion pipelines."""
+    v = np.asarray(vec, dtype=np.float32).reshape(-1)
+    # enforce exact dimensionality
+    if v.size < 126:
+        pad = np.zeros((126 - v.size,), dtype=np.float32)
+        v = np.concatenate([v, pad], axis=0)
+    elif v.size > 126:
+        v = v[:126]
+
+    normalized = bool(getattr(settings, "normalize_keypoints", False))
+    if normalized:
+        v = normalize_hands_vector_126(v)
+
+    if bool(getattr(settings, "canonicalize_hands", True)):
+        v = canonicalize_hands_126(
+            v,
+            normalized=normalized,
+            mirror_invariant=bool(getattr(settings, "canonicalize_mirror", True)),
+        )
+    return v.astype(np.float32)
 
 
 def _hand_blocks_126(vec: np.ndarray):
     """Split a (126,) vector into (left(21,3), right(21,3))."""
     arr = np.asarray(vec, dtype=np.float32).reshape(2, 21, 3)
     return arr[0].copy(), arr[1].copy()
+
+
+def mirror_and_swap_hands_126(vec: np.ndarray, *, normalized: bool = True) -> np.ndarray:
+    """Mirror a 126-dim (2*21*3) hand vector and swap hands.
+
+    Assumes normalized coordinates where x is centered around 0.
+    Consistently mirrors by negating the x-coordinate (x -> -x).
+    """
+    v = np.asarray(vec, dtype=np.float32)
+    if v.size != 126:
+        return v
+    left, right = _hand_blocks_126(v)
+
+    def _mirror_hand_x_inplace(hand_21x3: np.ndarray) -> None:
+        present_mask = (hand_21x3.sum(axis=1) != 0.0)
+        if not bool(np.any(present_mask)):
+            return
+
+        # Consistently use x -> -x on valid layout points
+        hand_21x3[present_mask, 0] = -hand_21x3[present_mask, 0]
+
+    _mirror_hand_x_inplace(left)
+    _mirror_hand_x_inplace(right)
+
+    out = np.zeros((126,), dtype=np.float32)
+    out[:63] = right.reshape(63)
+    out[63:] = left.reshape(63)
+    return out
+
+
+def _hand_chirality_sign_21(hand_21x3: np.ndarray) -> float:
+    """Return a signed area proxy to infer hand orientation/chirality.
+
+    Uses three stable landmarks in MediaPipe Hands ordering:
+    - wrist: 0
+    - index_mcp: 5
+    - pinky_mcp: 17
+
+    The sign is stable under translation/scale; it flips under mirroring.
+    """
+    h = np.asarray(hand_21x3, dtype=np.float32)
+    if h.shape != (21, 3):
+        return 0.0
+    wrist = h[0, :2]
+    index_mcp = h[5, :2]
+    pinky_mcp = h[17, :2]
+    v1 = index_mcp - wrist
+    v2 = pinky_mcp - wrist
+    # 2D cross product (z-component)
+    return float(v1[0] * v2[1] - v1[1] * v2[0])
+
+
+def _mirror_hand_about_wrist_21(hand_21x3: np.ndarray) -> np.ndarray:
+    """Mirror a single hand (21,3) about the wrist x-axis in-place coordinates.
+
+    We mirror around the wrist's x coordinate so it works for both normalized [0,1]
+    and pixel-coordinate inputs.
+    """
+    h = np.asarray(hand_21x3, dtype=np.float32).copy()
+    if h.shape != (21, 3):
+        return h
+    wrist_x = float(h[0, 0])
+    h[:, 0] = (2.0 * wrist_x) - h[:, 0]
+    return h
+
+
+def canonicalize_hands_126(vec: np.ndarray, *, normalized: bool = False, mirror_invariant: bool = True) -> np.ndarray:
+    """Legacy per-frame canonically. Maintained for backwards parity.
+
+    WARNING: For temporal models like TCN, use `canonicalize_sequence_126` instead.
+    Continual per-frame decisions can cause orientation to flip randomly if
+    poses waver along the chirality axis.
+    """
+    v = np.asarray(vec, dtype=np.float32)
+    if v.size != 126:
+        return v
+
+    left_present = bool(np.any(v[:63] != 0.0))
+    right_present = bool(np.any(v[63:] != 0.0))
+
+    if right_present and not left_present:
+        out = np.zeros((126,), dtype=np.float32)
+        out[:63] = v[63:]
+        v = out
+        left_present = True
+        right_present = False
+
+    if not mirror_invariant:
+        return v
+
+    eps = 1e-6
+    if left_present and not right_present:
+        hand = v[:63].reshape(21, 3)
+        s = _hand_chirality_sign_21(hand)
+        if abs(s) <= eps:
+            s = float(np.sum(hand[:, 0]))
+
+        if s >= 0.0:
+            return v
+
+        m = mirror_and_swap_hands_126(v, normalized=normalized)
+        out = np.zeros((126,), dtype=np.float32)
+        out[:63] = m[63:]
+        return out
+
+    if left_present and right_present:
+        left_hand = v[:63].reshape(21, 3)
+        right_hand = v[63:].reshape(21, 3)
+
+        s_left = _hand_chirality_sign_21(left_hand)
+        s_right = _hand_chirality_sign_21(right_hand)
+        a_left = abs(s_left)
+        a_right = abs(s_right)
+
+        if a_left > a_right + eps:
+            s = s_left
+        elif a_right > a_left + eps:
+            s = s_right
+        else:
+            s = s_left - s_right
+            if abs(s) <= eps:
+                if normalized:
+                    s = float(np.sum(left_hand[:, 0]) + np.sum(right_hand[:, 0]))
+                else:
+                    s = float(np.sum(left_hand[:, 0] - 0.5) + np.sum(right_hand[:, 0] - 0.5))
+
+        if s >= 0.0:
+            return v
+        return mirror_and_swap_hands_126(v, normalized=normalized)
+
+    return v
+
+
+def canonicalize_sequence_126(seq_arr: np.ndarray, *, normalized: bool = False, mirror_invariant: bool = True) -> np.ndarray:
+    """
+    Robust sequence-level canonicalization for temporal stability.
+
+    WARNING: Models like TCN require temporal continuity over sequential frames.
+    Per-frame canonicalization (canonicalize_hands_126) fluctuates and causes
+    random horizontal flipping between contiguous boundaries.
+
+        Stability strategy:
+        - Uses the first 3-5 valid frames to vote on (a) single-hand unification
+            (right-only -> left block) and (b) mirror decision.
+        - Mirror voting is sign-based (only the sign of chirality contributes).
+        - If confidence is low (weak margin / too few votes), it will NOT mirror.
+        - Applies the chosen transform uniformly to every frame in the sequence.
+
+    Input: seq_arr shape (T,126)
+    Returns: newly matched sequence shaped (T,126)
+    """
+    a = np.asarray(seq_arr, dtype=np.float32)
+    if a.ndim != 2 or a.shape[1] != 126 or a.shape[0] == 0:
+        return seq_arr
+    
+    T = a.shape[0]
+
+    # Collect up to the first 3-5 valid non-zero frames for robust decisions.
+    N_FRAMES_FOR_DECISION = 5
+    MIN_FRAMES_FOR_DECISION = 3
+    decision_frames: list[np.ndarray] = []
+
+    for i in range(T):
+        if np.any(a[i] != 0.0):
+            decision_frames.append(a[i].copy())
+            if len(decision_frames) >= N_FRAMES_FOR_DECISION:
+                break
+
+    # Safety trap: Entire sequence devoid of hands -> return original sequence unmodified
+    if not decision_frames:
+        return seq_arr
+
+    def _presence(frame: np.ndarray) -> tuple[bool, bool]:
+        return bool(np.any(frame[:63] != 0.0)), bool(np.any(frame[63:] != 0.0))
+
+    def _sign(x: float, *, eps: float = 1e-6) -> int:
+        if x > eps:
+            return 1
+        if x < -eps:
+            return -1
+        return 0
+
+    # Hand unification decision: majority vote across first 3-5 valid frames.
+    left_only = 0
+    right_only = 0
+    for f in decision_frames:
+        l_present, r_present = _presence(f)
+        if l_present and not r_present:
+            left_only += 1
+        elif r_present and not l_present:
+            right_only += 1
+
+    total_single_hand = left_only + right_only
+    unify_right_to_left = False
+    if total_single_hand >= 2:
+        # Confidence gate: require clear majority; ties/weak margins default to no unification.
+        if right_only > left_only:
+            margin = right_only - left_only
+            if margin >= 1 and (margin / float(total_single_hand)) >= 0.6:
+                unify_right_to_left = True
+
+    # Mirror decision: sign-based voting across early frames, with confidence gating.
+    mirror_needed = False
+    if mirror_invariant:
+        pos_votes = 0
+        neg_votes = 0
+        voted = 0
+
+        for f0 in decision_frames:
+            f = f0
+            if unify_right_to_left:
+                l_present, r_present = _presence(f)
+                if r_present and not l_present:
+                    u = np.zeros((126,), dtype=np.float32)
+                    u[:63] = f[63:]
+                    f = u
+
+            l_present, r_present = _presence(f)
+            chir = 0.0
+            if l_present and not r_present:
+                chir = _hand_chirality_sign_21(f[:63].reshape(21, 3))
+            elif l_present and r_present:
+                s_left = _hand_chirality_sign_21(f[:63].reshape(21, 3))
+                s_right = _hand_chirality_sign_21(f[63:].reshape(21, 3))
+                # Prefer the more confident hand; otherwise use a stable tie-breaker.
+                if abs(s_left) > abs(s_right) + 1e-6:
+                    chir = s_left
+                elif abs(s_right) > abs(s_left) + 1e-6:
+                    chir = s_right
+                else:
+                    chir = s_left - s_right
+
+            v = _sign(float(chir))
+            if v == 0:
+                continue
+            voted += 1
+            if v > 0:
+                pos_votes += 1
+            else:
+                neg_votes += 1
+
+        # Confidence gate: if weak/insufficient evidence, do NOT mirror.
+        if voted >= max(2, min(MIN_FRAMES_FOR_DECISION, len(decision_frames))):
+            margin = abs(pos_votes - neg_votes)
+            if margin >= 1 and (margin / float(voted)) >= 0.6:
+                mirror_needed = (neg_votes > pos_votes)
+
+    out = np.zeros_like(a)
+    for i in range(T):
+        f = a[i].copy()
+        
+        # 1) Uniform block unification pass
+        l_p, r_p = _presence(f)
+        if unify_right_to_left and r_p and not l_p:
+            u = np.zeros((126,), dtype=np.float32)
+            u[:63] = f[63:]
+            f = u
+
+        # 2) Constant structure mirror pass
+        if mirror_needed:
+            f = mirror_and_swap_hands_126(f, normalized=normalized)
+
+        # 3) Defensive catch to lock structural offset if it accidentally scattered
+        l_p2, r_p2 = _presence(f)
+        if unify_right_to_left and r_p2 and not l_p2:
+            u2 = np.zeros((126,), dtype=np.float32)
+            u2[:63] = f[63:]
+            f = u2
+
+        out[i] = f
+
+    return out.astype(np.float32)
+
 
 def load_npz_features(base_dir: Path):
     """Load all .npz feature files under base_dir.
