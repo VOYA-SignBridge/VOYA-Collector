@@ -1,0 +1,42 @@
+{
+  "0": {
+    "slug": "cam-on",
+    "label_original": "Cảm ơn",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 0,
+    "class_uid": "cb7be8bf-a01b-404c-acc0-571c41950eab",
+    "folder_name": "class_cam-on_cb7be8bf",
+    "label_key": "vn/common/cam-on"
+  },
+  "1": {
+    "slug": "xin-chao",
+    "label_original": "xin chào",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 1,
+    "class_uid": "df0cab07-2631-409f-b08a-8cd81166f62d",
+    "folder_name": "class_xin-chao_df0cab07",
+    "label_key": "vn/common/xin-chao"
+  },
+  "2": {
+    "slug": "rang-muoi",
+    "label_original": "rang muối",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 2,
+    "class_uid": "cd05e978-1468-48b0-89e3-6aa70a09c3cf",
+    "folder_name": "class_rang-muoi_cd05e978",
+    "label_key": "vn/hoa-de/rang-muoi"
+  },
+  "3": {
+    "slug": "tom",
+    "label_original": "tôm",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 3,
+    "class_uid": "812c0734-3a0e-40f2-a1a8-ce85217045aa",
+    "folder_name": "class_tom_812c0734",
+    "label_key": "vn/hoa-de/tom"
+  }
+}
