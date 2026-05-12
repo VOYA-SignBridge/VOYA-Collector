@@ -91,3 +91,9 @@ node_modules/
 # Docker-related
 Dockerfile
 docker-compose.override.yml
+
+# Training workflows
+/scripts
+/processed
+/train_model
+/train_utils

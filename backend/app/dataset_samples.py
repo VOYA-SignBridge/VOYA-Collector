@@ -69,6 +69,10 @@ def append_sample_row(row: Dict[str, Any]):
             f.flush()
             os.fsync(f.fileno())
 
+    from app.storage.catalog_mirror import mirror_csv_to_gdrive
+
+    mirror_csv_to_gdrive(SAMPLES_CSV, "samples.csv")
+
 
 def list_samples() -> List[Dict[str, str]]:
     _ensure_samples_file()
