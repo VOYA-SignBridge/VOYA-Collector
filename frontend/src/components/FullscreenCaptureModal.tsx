@@ -58,6 +58,8 @@ export default function FullscreenCaptureModal({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const handsRef = useRef<Hands | null>(null);
+  const isOpenRef = useRef<boolean>(isOpen);
   
   const [recording, setRecording] = useState(false);
   const [frames, setFrames] = useState<Array<{
@@ -71,6 +73,7 @@ export default function FullscreenCaptureModal({
   const [countdown, setCountdown] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [frameCount, setFrameCount] = useState(0);
   
   // New state for capture management
   const [currentCaptureIndex, setCurrentCaptureIndex] = useState(0);
@@ -121,6 +124,7 @@ export default function FullscreenCaptureModal({
   
   // Add frame interval control for better training data. Use centralized config.
   const lastFrameTimeRef = useRef(0);
+  const lastUiUpdateRef = useRef(0);
   // Default sampling rate is defined in `src/config/capture.ts` as SAMPLE_FPS
   // FRAME_INTERVAL_MS is computed there (Math.round(1000 / SAMPLE_FPS)).
   const frameIntervalMs = useRef(FRAME_INTERVAL_MS);
@@ -181,6 +185,10 @@ export default function FullscreenCaptureModal({
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
   
   // Add canvas rendering optimization
   const pendingRenderRef = useRef(false);
@@ -190,6 +198,116 @@ export default function FullscreenCaptureModal({
     rightHandLandmarks?: MediaPipeLandmark[];
     image?: HTMLImageElement | HTMLVideoElement;
   } | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+
+  // Track scheduled timeouts so we can reliably cancel them on close/unmount
+  const timeoutsRef = useRef<number[]>([]);
+  const addTimeout = useCallback((fn: () => void, delayMs: number) => {
+    const id = window.setTimeout(fn, delayMs);
+    timeoutsRef.current.push(id);
+    return id;
+  }, []);
+  const clearAllTimeouts = useCallback(() => {
+    for (const id of timeoutsRef.current) {
+      clearTimeout(id);
+    }
+    timeoutsRef.current = [];
+  }, []);
+
+  const stopVideoStream = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const srcObject = video.srcObject;
+    if (srcObject && typeof (srcObject as MediaStream).getTracks === 'function') {
+      try {
+        (srcObject as MediaStream).getTracks().forEach((t) => t.stop());
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      video.srcObject = null;
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  type CleanupOptions = {
+    resetState?: boolean;
+    stopMedia?: boolean;
+    exitFullscreen?: boolean;
+  };
+
+  const cleanupResources = useCallback((opts: CleanupOptions = {}) => {
+    const { resetState = true, stopMedia = true, exitFullscreen = true } = opts;
+
+    clearAllTimeouts();
+
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+    pendingRenderRef.current = false;
+    renderDataRef.current = null;
+
+    if (stopMedia) {
+      try {
+        handsRef.current?.close();
+      } catch {
+        // ignore
+      }
+      handsRef.current = null;
+
+      try {
+        cameraRef.current?.stop();
+      } catch {
+        // ignore
+      }
+      cameraRef.current = null;
+
+      stopVideoStream();
+    }
+
+    if (resetState) {
+      recordingRef.current = false;
+      pausedRef.current = false;
+      framesRef.current = [];
+      lastFrameTimeRef.current = 0;
+      lastUiUpdateRef.current = 0;
+      leftPresenceHistoryRef.current = [];
+      rightPresenceHistoryRef.current = [];
+      visibilityStateRef.current = { left: false, right: false };
+      lastRenderedLeftRef.current = undefined;
+      lastRenderedRightRef.current = undefined;
+
+      setRecording(false);
+      setPaused(false);
+      setMode('IDLE');
+      setFrames([]);
+      setFrameCount(0);
+      setHandsVisible(false);
+      setCountdown(0);
+      setIsReady(false);
+      setCurrentCaptureIndex(0);
+      setCompletedCaptures(0);
+    }
+
+    if (exitFullscreen) {
+      try {
+        if (document.fullscreenElement) {
+          document.exitFullscreen?.();
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [clearAllTimeouts, stopVideoStream]);
+
+  // If parent closes the modal without calling our `handleClose`, still ensure cleanup.
+  useEffect(() => {
+    if (isOpen) return;
+    cleanupResources({ resetState: true, stopMedia: true, exitFullscreen: true });
+  }, [isOpen, cleanupResources]);
 
   // Filters for smoothing landmarks (keyed by group.index.coord)
   const filtersRef = useRef<Record<string, OneEuroFilter>>({});
@@ -385,39 +503,10 @@ export default function FullscreenCaptureModal({
       if (!ok) return;
     }
 
-  setRecording(false);
-  setMode('IDLE');
-    setFrames([]);
-    setCountdown(0);
-    setIsReady(false);
-    setCurrentCaptureIndex(0);
-    setCompletedCaptures(0);
-    
-    // Exit browser fullscreen if active
-    try {
-      if (document.fullscreenElement) {
-        // Requesting exit may return a promise
-        document.exitFullscreen?.();
-      }
-    } catch (e) {
-      // ignore fullscreen exit errors
-    }
-
-    // Stop camera and close video stream
-    if (cameraRef.current) {
-      cameraRef.current.stop();
-      cameraRef.current = null;
-    }
-    
-    // Stop video tracks
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
+    cleanupResources({ resetState: true, stopMedia: true, exitFullscreen: true });
     
     onClose();
-  }, [onClose]);
+  }, [cleanupResources, onClose]);
 
   // Request fullscreen when modal opens
   useEffect(() => {
@@ -553,7 +642,8 @@ export default function FullscreenCaptureModal({
     
   console.log(`Starting capture sequence: ${FIXED_CAPTURE_COUNT} captures of ${FIXED_TARGET_FRAMES} frames each`);
     
-    setTimeout(() => {
+    addTimeout(() => {
+      if (!isOpenRef.current) return;
       setRecording(true);
       recordingRef.current = true;
       setMode('RECORD');
@@ -561,7 +651,7 @@ export default function FullscreenCaptureModal({
     }, 3000);
   // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants and
   // intentionally omitted from dependencies to avoid unnecessary re-creations.
-  }, []);
+  }, [addTimeout]);
 
   const handlePause = useCallback(() => {
     setPaused(true);
@@ -614,9 +704,13 @@ export default function FullscreenCaptureModal({
 
     console.log('Setting up camera and MediaPipe Hands...');
 
+    let cancelled = false;
+
     const hands = new Hands({
       locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
     });
+
+    handsRef.current = hands;
 
     hands.setOptions({
       maxNumHands: 2,
@@ -629,6 +723,7 @@ export default function FullscreenCaptureModal({
     console.log('MediaPipe Hands initialized');
 
     hands.onResults((results: unknown) => {
+      if (cancelled || !isOpenRef.current) return;
       const r = results as { multiHandLandmarks?: MediaPipeLandmark[][]; multiHandedness?: Array<{ label?: string; score?: number }>; image?: HTMLImageElement | HTMLVideoElement };
 
       let leftHandLandmarks: MediaPipeLandmark[] | undefined;
@@ -710,7 +805,7 @@ export default function FullscreenCaptureModal({
 
       if (!pendingRenderRef.current) {
         pendingRenderRef.current = true;
-        requestAnimationFrame(renderLandmarks);
+        rafIdRef.current = requestAnimationFrame(renderLandmarks);
       }
 
       // Capture logic (hands-only)
@@ -756,7 +851,14 @@ export default function FullscreenCaptureModal({
           framesRef.current.push(landmarks);
         }
 
-        setFrames([...framesRef.current]);
+        // Throttle React UI updates
+        if (currentTime - lastUiUpdateRef.current > 200) {
+          lastUiUpdateRef.current = currentTime;
+          // only update lightweight UI state
+          setFrameCount(framesRef.current.length);
+        }
+
+
         console.log(`Recording progress: ${framesRef.current.length}/${targetFramesRef.current} frames`);
 
         if (framesRef.current.length >= FIXED_TARGET_FRAMES) {
@@ -781,10 +883,12 @@ export default function FullscreenCaptureModal({
             setFrames([]);
             framesRef.current = [];
             lastFrameTimeRef.current = 0;
-            setTimeout(() => {
+            addTimeout(() => {
+              if (!isOpenRef.current) return;
               setCountdown(3);
               setMode('COUNTDOWN');
-              setTimeout(() => {
+              addTimeout(() => {
+                if (!isOpenRef.current) return;
                 setRecording(true);
                 recordingRef.current = true;
                 setMode('RECORD');
@@ -795,7 +899,8 @@ export default function FullscreenCaptureModal({
             // Final capture completed. Keep the modal open, clear frames and
             // reset only the action label so the user can start a new capture
             // while preserving the same user ID.
-            setTimeout(() => {
+            addTimeout(() => {
+              if (!isOpenRef.current) return;
               // clear captured frames and reset timing
               setFrames([]);
               framesRef.current = [];
@@ -863,6 +968,10 @@ export default function FullscreenCaptureModal({
         } 
       })
         .then((stream) => {
+          if (cancelled) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
           console.log('Camera permission granted, stream:', stream);
           // Stop the test stream
           stream.getTracks().forEach(track => track.stop());
@@ -870,6 +979,7 @@ export default function FullscreenCaptureModal({
           // Now create the MediaPipe camera
       const camera = new Camera(videoRef.current!, {
             onFrame: async () => {
+              if (cancelled) return;
               if (videoRef.current) {
                 await hands.send({ image: videoRef.current });
               }
@@ -882,6 +992,14 @@ export default function FullscreenCaptureModal({
           cameraRef.current = camera;
           console.log('Starting camera...');
           camera.start().then(() => {
+            if (cancelled) {
+              try {
+                camera.stop();
+              } catch {
+                // ignore
+              }
+              return;
+            }
             console.log('Camera started successfully! Video element:', {
               videoWidth: videoRef.current?.videoWidth,
               videoHeight: videoRef.current?.videoHeight,
@@ -890,44 +1008,64 @@ export default function FullscreenCaptureModal({
             });
             setIsReady(true);
           }).catch((error) => {
+            if (cancelled) return;
             console.error('Camera start failed:', error);
             setIsReady(false);
           });
         })
         .catch((error) => {
+          if (cancelled) return;
           console.error('Camera permission denied or not available:', error);
           setIsReady(false);
         });
 
       // Cleanup listeners
       return () => {
+        cancelled = true;
         video.removeEventListener('loadedmetadata', onLoadedMetadata);
         video.removeEventListener('canplay', onCanPlay);
-        hands.close();
+        try {
+          handsRef.current?.close();
+        } catch {
+          // ignore
+        }
+        handsRef.current = null;
         if (cameraRef.current) {
           cameraRef.current.stop();
           cameraRef.current = null;
         }
+        stopVideoStream();
       };
     }
 
     return () => {
-      hands.close();
+      cancelled = true;
+      try {
+        handsRef.current?.close();
+      } catch {
+        // ignore
+      }
+      handsRef.current = null;
       if (cameraRef.current) {
         cameraRef.current.stop();
         cameraRef.current = null;
       }
+      stopVideoStream();
     };
   // FIXED_CAPTURE_COUNT and FIXED_TARGET_FRAMES are stable module constants and
   // intentionally omitted from dependencies.
-  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks]); // Include renderLandmarks, computeQuality, filterLandmarks and getRenderLandmarks
+  }, [isOpen, renderLandmarks, computeQuality, filterLandmarks, getRenderLandmarks, addTimeout, stopVideoStream]); // Include renderLandmarks, computeQuality, filterLandmarks and getRenderLandmarks
 
   // Countdown effect
   useEffect(() => {
+    if (!isOpen) return;
     console.log('Countdown effect triggered:', countdown, 'recording:', recording);
     if (countdown > 0) {
       console.log(`Countdown: ${countdown}`);
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      const timer = window.setTimeout(() => {
+        if (!isOpenRef.current) return;
+        setCountdown(countdown - 1);
+      }, 1000);
       return () => clearTimeout(timer);
     } else if (countdown === 0 && recording) {
       console.log('Countdown finished, recording started');
@@ -935,30 +1073,21 @@ export default function FullscreenCaptureModal({
       console.log('Recording started, waiting for frame completion...');
       
       // Backup timeout only if frame completion fails (much longer)
-      const backupTimer = setTimeout(() => {
+      const backupTimer = window.setTimeout(() => {
+        if (!isOpenRef.current) return;
         console.warn('BACKUP TIMEOUT: Frame completion failed after 30 seconds');
         handleStop();
       }, 30000);
       return () => clearTimeout(backupTimer);
     }
-  }, [countdown, recording, handleStop]);
+  }, [isOpen, countdown, recording, handleStop]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount (in case parent removes the component entirely)
   useEffect(() => {
-    const currentCamera = cameraRef.current;
-    const currentVideo = videoRef.current;
-    
     return () => {
-      // Cleanup when component unmounts
-      if (currentCamera) {
-        currentCamera.stop();
-      }
-      if (currentVideo && currentVideo.srcObject) {
-        const stream = currentVideo.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-      }
+      cleanupResources({ resetState: false, stopMedia: true, exitFullscreen: true });
     };
-  }, []);
+  }, [cleanupResources]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -988,7 +1117,8 @@ export default function FullscreenCaptureModal({
           
           console.log(`Starting capture sequence: ${captureCountRef.current} captures of ${targetFramesRef.current} frames each`);
           
-          setTimeout(() => {
+          addTimeout(() => {
+            if (!isOpenRef.current) return;
             setRecording(true);
             recordingRef.current = true;
             setMode('RECORD');
@@ -1046,7 +1176,7 @@ export default function FullscreenCaptureModal({
 
     document.addEventListener('keydown', handleKeyPress);
     return () => document.removeEventListener('keydown', handleKeyPress);
-  }, [isOpen, computeQuality, handlePause, handleResume]);
+  }, [isOpen, computeQuality, handlePause, handleResume, addTimeout]);
 
   if (!isOpen) return null;
 
@@ -1193,12 +1323,12 @@ export default function FullscreenCaptureModal({
                   <div className="bg-gray-800 rounded-lg p-4 mb-6">
                     <div className="flex justify-between text-sm mb-2">
                       <span className="text-gray-400">Tiến độ:</span>
-                      <span className="text-white font-medium">{frames.length} / {FIXED_TARGET_FRAMES} khung</span>
+                      <span className="text-white font-medium">{frameCount} / {FIXED_TARGET_FRAMES} khung</span>
                     </div>
                     <div className="w-full bg-gray-700 rounded-full h-2">
                       <div 
                         className="bg-yellow-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }}
+                        style={{ width: `${Math.min((frameCount / FIXED_TARGET_FRAMES) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
@@ -1212,7 +1342,7 @@ export default function FullscreenCaptureModal({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <span>Tiếp tục thu (giữ {frames.length} khung)</span>
+                      <span>Tiếp tục thu (giữ {frameCount} khung)</span>
                     </button>
                     
                     <button
@@ -1225,7 +1355,7 @@ export default function FullscreenCaptureModal({
                       <span>Bắt đầu lại từ đầu (xóa dữ liệu)</span>
                     </button>
 
-                    {frames.length >= FIXED_TARGET_FRAMES && (
+                    {frameCount >= FIXED_TARGET_FRAMES && (
                       <button
                         onClick={() => {
                           setPaused(false);
@@ -1293,7 +1423,7 @@ export default function FullscreenCaptureModal({
           {recording && (
             <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-6 py-2">
               <div className="text-white text-sm">
-                📊 {frames.length} khung đã chụp
+                📊 {frameCount} khung đã chụp
               </div>
             </div>
           )}
@@ -1432,13 +1562,13 @@ export default function FullscreenCaptureModal({
                 </div>
                 <div className="flex justify-between text-gray-400">
                   <span>Khung hiện tại:</span>
-                  <span className="text-white">{frames.length}/{FIXED_TARGET_FRAMES}</span>
+                  <span className="text-white">{frameCount}/{FIXED_TARGET_FRAMES}</span>
                 </div>
-                {frames.length > 0 && (
+                {frameCount > 0 && (
                   <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
                     <div 
                       className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }}
+                      style={{ width: `${Math.min((frameCount / FIXED_TARGET_FRAMES) * 100, 100)}%` }}
                     />
                   </div>
                 )}
@@ -1491,8 +1621,8 @@ export default function FullscreenCaptureModal({
                   onClick={handleStop}
                   className="w-full py-3"
                   variant="danger"
-                  disabled={frames.length < FIXED_TARGET_FRAMES}
-                  title={frames.length < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}
+                  disabled={frameCount < FIXED_TARGET_FRAMES}
+                  title={frameCount < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}
                 >
                   <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
