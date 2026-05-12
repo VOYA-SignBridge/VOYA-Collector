@@ -1,14 +1,6 @@
 services:
   frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
-        VITE_MIRROR_PREVIEW: ${VITE_MIRROR_PREVIEW:-0}
-        VITE_SWAP_HANDEDNESS: ${VITE_SWAP_HANDEDNESS:-1}
-        VITE_DEBUG_HANDS: ${VITE_DEBUG_HANDS:-0}
-        VITE_STT_MODE: ${VITE_STT_MODE:-browser}
-        VITE_STT_LANG: ${VITE_STT_LANG:-vi-VN}
+    build: ./frontend
     image: voya_frontend:latest
     container_name: voya_frontend
     expose:
