@@ -1,24 +1,25 @@
+import os
 import uuid
 import time
 import logging
 import numpy as np
 
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, Body
 
 from app.processing import storage_utils as su
 from app.dataset_manager import get_or_register_class, normalize_dialect
 from app.processing.utils import normalize_hands_vector_126
 from app.processing.utils import normalize_sequence
 from app.dataset_samples import save_sequence_npz
-from app.raw_uploads import append_raw_upload_row, now_str as raw_upload_now_str
+from app.tasks import enqueue_process_video
 from app.config import settings
 from app.api_validation import (
     validate_label,
     validate_language,
     validate_dialect,
+    save_upload_with_limit,
 )
-from app.storage.gdrive_client import upload_to_gdrive
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -26,23 +27,9 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 async def options_camera():
     return {"success": True}
 
-def _safe_path_part(value: str | None, fallback: str) -> str:
-    text = str(value or fallback).strip() or fallback
-    text = Path(text).name.strip() or fallback
-    return "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in text)
-
-
-def _measure_upload_size(upload_file, *, max_bytes: int) -> int:
-    try:
-        upload_file.seek(0, 2)
-        size = upload_file.tell()
-        upload_file.seek(0)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"cannot read uploaded file: {exc}") from exc
-
-    if max_bytes > 0 and size > max_bytes:
-        raise HTTPException(status_code=413, detail=f"upload too large (max {max_bytes} bytes)")
-    return int(size)
+# Align raw video storage with DATASET_ROOT so it matches features path
+UPLOAD_DIR = str(settings.dataset_root / "raw_videos")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @router.post("/video")
@@ -88,70 +75,23 @@ async def upload_video(
     # Register / fetch class in new hierarchy
     class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
 
-    max_mb = int(getattr(settings, "max_upload_mb", 1024))
+    save_name = f"{user}_{label}_{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = os.path.join(UPLOAD_DIR, save_name)
+    max_mb = int(os.getenv("MAX_UPLOAD_MB", "1024"))
     max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
-    upload_size = _measure_upload_size(file.file, max_bytes=max_bytes)
-    log.info("[UPLOAD][video] bytes_received=%s max_bytes=%s", upload_size, max_bytes)
+    written, _ = save_upload_with_limit(file.file, Path(file_path), max_bytes=max_bytes)
+    log.info("[UPLOAD][video] bytes_written=%s max_bytes=%s", written, max_bytes)
+    # Log the resolved save path and dataset root for debugging
+    log.info("[UPLOAD][video] saved path=%s dataset_root=%s", file_path, settings.dataset_root)
 
-    if not getattr(settings, "use_google_drive", False):
-        raise HTTPException(status_code=503, detail="Google Drive storage is disabled")
-
-    upload_uid = uuid.uuid4().hex[:8]
-    original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
-    label_part = _safe_path_part(label, "upload")
-    storage_key = f"raw_videos/{label_part}_{upload_uid}_{original_filename}"
-
+    # Gửi task tới Celery
     try:
-        storage_url = upload_to_gdrive(
-            file.file,
-            storage_key,
-            content_type=file.content_type or "application/octet-stream",
-        )
-        log.info("[UPLOAD][video] raw video uploaded to Google Drive key=%s url=%s", storage_key, storage_url)
+        job = enqueue_process_video.delay(video_path=file_path, user=user, label=label, session_id=session_id, dialect=dialect, language=language)
+        log.info("[UPLOAD][video] queued job=%s elapsed=%.3fs", getattr(job, 'id', 'unknown'), time.time() - start)
+        return {"success": True, "id": job.id, "session_id": session_id, "message": "queued"}
     except Exception as e:
-        log.error("[UPLOAD][video][ERROR] Google Drive upload failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"Google Drive upload failed: {e}") from e
-
-    created_at = raw_upload_now_str()
-    raw_upload_row = {
-        "upload_uid": upload_uid,
-        "class_uid": class_meta.class_uid,
-        "slug": class_meta.slug,
-        "label_original": class_meta.label_original,
-        "language": class_meta.language,
-        "dialect": class_meta.dialect,
-        "source_type": "video",
-        "user_id": user,
-        "session_id": session_id,
-        "original_filename": original_filename,
-        "local_path": "",
-        "storage_key": storage_key,
-        "storage_url": storage_url,
-        "created_at": created_at,
-        "updated_at": created_at,
-    }
-    try:
-        append_raw_upload_row(raw_upload_row)
-    except Exception as e:
-        log.warning("[UPLOAD][video] raw upload CSV metadata failed: %s", e)
-
-    try:
-        from app.storage.metadata_db import insert_raw_upload
-
-        insert_raw_upload({**raw_upload_row, "auth_user_id": None})
-    except Exception as e:
-        if getattr(settings, "debug_logging", False):
-            log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
-
-    log.info("[UPLOAD][video] stored raw video only elapsed=%.3fs", time.time() - start)
-    return {
-        "success": True,
-        "id": upload_uid,
-        "session_id": session_id,
-        "upload_uid": upload_uid,
-        "storage_url": storage_url,
-        "message": "raw video uploaded",
-    }
+        log.error("[UPLOAD][video][ERROR] queue failed: %s", e)
+        return {"success": False, "message": f"queue failed: {e}"}
     
 
 
@@ -173,7 +113,7 @@ async def upload_camera(payload: dict = Body(...)):
 
     # Basic payload size guard (prevents accidental huge posts)
     try:
-        max_frames = int(getattr(settings, "max_camera_frames", 600))
+        max_frames = int(os.getenv("MAX_CAMERA_FRAMES", "600"))
         if max_frames > 0 and isinstance(frames, list) and len(frames) > max_frames:
             return {"success": False, "message": f"Too many frames (max {max_frames})"}
     except Exception:
