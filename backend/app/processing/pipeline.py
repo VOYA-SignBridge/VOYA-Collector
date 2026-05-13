@@ -6,7 +6,6 @@ from app.config import settings
 from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
-from app.processing.utils import canonicalize_sequence_126
 from app.dataset_manager import get_or_register_class
 from app.dataset_samples import save_sequence_npz, count_samples_for_class
 
@@ -24,7 +23,7 @@ def _window_activity_mean_abs_diff(seq_arr: np.ndarray) -> float:
     diffs = np.diff(seq_arr.astype(np.float32, copy=False), axis=0)
     return float(np.mean(np.abs(diffs)))
 
-def process_video_job(video_path: str, user: str, user_id: str, label: str, session_id: str, dialect: str = "common", language: str = "vn" ):
+def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
     """
     Synchronous function to process video without Celery decorator.
     This is called by the Celery task in tasks.py
@@ -155,12 +154,6 @@ def process_video_job(video_path: str, user: str, user_id: str, label: str, sess
                     completeness = float(sum(1 for f in hand_flags if f)) / float(seq_len)
                     # Build window array once (even if rejected) so we can optionally rescue later.
                     seq_arr = np.vstack(list(buffer)).astype(np.float32)
-                    # Apply sequence-level canonicalization for temporal stability (matches live)
-                    if seq_arr.shape[1] == int(getattr(settings, 'feature_dim', 126)):
-                        try:
-                            seq_arr = canonicalize_sequence_126(seq_arr, normalized=bool(getattr(settings, 'normalize_keypoints', False)), mirror_invariant=bool(getattr(settings, 'canonicalize_mirror', True)))
-                        except Exception:
-                            pass
                     # ensure shape is (seq_len, feature_dim)
                     if seq_arr.shape != (seq_len, settings.feature_dim):
                         T, D = seq_arr.shape
@@ -176,9 +169,7 @@ def process_video_job(video_path: str, user: str, user_id: str, label: str, sess
 
                     window_meta = {
                         "user": user,
-                        "user_id": user_id,
                         "session_id": session_id,
-                        "source_uri": video_path,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,
                         "speed_factor": float(speed_factor),
@@ -200,7 +191,6 @@ def process_video_job(video_path: str, user: str, user_id: str, label: str, sess
                     else:
                         kept += 1
                         augmented_seq_list = generate_augmented_sequences(seq_arr, config={"n": aug_n})
-                        logger.info("[VIDEO_AUG] window start=%s end=%s requested_aug=%s generated=%s", window_meta.get('start_frame'), window_meta.get('end_frame'), aug_n, len(augmented_seq_list))
                         for aug_id, aseq in enumerate(augmented_seq_list):
                             # Re-check global cap (best-effort) before each save.
                             if max_per_class > 0 and count_samples_for_class(class_meta.class_uid) >= max_per_class:
@@ -276,7 +266,6 @@ def process_video_job(video_path: str, user: str, user_id: str, label: str, sess
                     if max_per_class > 0 and count_samples_for_class(class_meta.class_uid) >= max_per_class:
                         break
                     meta = dict(best_meta)
-                    meta["user_id"] = user_id
                     meta["rescue_fill"] = True
                     meta["rescue_from_completeness"] = float(round(best_comp, 4))
                     meta["rescue_from_activity"] = float(round(best_act, 6))
