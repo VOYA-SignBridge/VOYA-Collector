@@ -355,6 +355,21 @@ export default function FullscreenCaptureModal({
   // -------------------------------------------------------------------------
   // handleClose
   // -------------------------------------------------------------------------
+  const stopCameraResources = useCallback(() => {
+    if (cameraRef.current) {
+      try { cameraRef.current.stop(); } catch { /* ignore */ }
+      cameraRef.current = null;
+    }
+
+    const video = videoRef.current;
+    if (video?.srcObject) {
+      try {
+        (video.srcObject as MediaStream).getTracks().forEach((track) => track.stop());
+      } catch { /* ignore */ }
+      video.srcObject = null;
+    }
+  }, []);
+
   const handleClose = useCallback(() => {
     const partialFrames = framesRef.current?.length || 0;
     if (recordingRef.current || (partialFrames > 0 && partialFrames < targetFramesRef.current)) {
@@ -365,13 +380,9 @@ export default function FullscreenCaptureModal({
     expectedHandsRef.current = null; setCountdown(0); setIsReady(false);
     setCurrentCaptureIndex(0); setCompletedCaptures(0); setCameraError(null);
     try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* ignore */ }
-    if (cameraRef.current) { cameraRef.current.stop(); cameraRef.current = null; }
-    if (videoRef.current?.srcObject) {
-      (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      videoRef.current.srcObject = null;
-    }
+    stopCameraResources();
     onClose();
-  }, [onClose]);
+  }, [onClose, stopCameraResources]);
 
   useEffect(() => { handleCloseRef.current = handleClose; }, [handleClose]);
 
@@ -778,12 +789,12 @@ export default function FullscreenCaptureModal({
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
       video.removeEventListener("canplay", onCanPlay);
       hands.close();
-      if (cameraRef.current) { cameraRef.current.stop(); cameraRef.current = null; }
+      stopCameraResources();
     };
     // FIX: `expectedHandsOption` removed — would restart MediaPipe on every
     //       hands-mode toggle.  Use `expectedHandsOptionRef` inside callback.
     // FIX: `filterLandmarks` removed — it is not used inside this effect.
-  }, [isOpen, renderLandmarks, computeQuality, getRenderLandmarks, mirrorLandmarkX]);
+  }, [isOpen, renderLandmarks, computeQuality, getRenderLandmarks, mirrorLandmarkX, stopCameraResources]);
 
   // -------------------------------------------------------------------------
   // Countdown effect
@@ -819,15 +830,20 @@ export default function FullscreenCaptureModal({
   // Cleanup on unmount
   // -------------------------------------------------------------------------
   useEffect(() => {
-    const currentCamera = cameraRef.current;
-    const currentVideo  = videoRef.current;
     return () => {
-      if (currentCamera) currentCamera.stop();
-      if (currentVideo?.srcObject) {
-        (currentVideo.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      }
+      stopCameraResources();
     };
-  }, []);
+  }, [stopCameraResources]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setRecording(false);
+      recordingRef.current = false;
+      setPaused(false);
+      pausedRef.current = false;
+      stopCameraResources();
+    }
+  }, [isOpen, stopCameraResources]);
 
   // -------------------------------------------------------------------------
   // Keyboard shortcuts

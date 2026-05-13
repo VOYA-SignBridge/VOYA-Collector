@@ -10,6 +10,8 @@ type FormState = {
   confirmPassword: string;
 };
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function RegisterPage() {
   const navigate = useNavigate();
   const [form, setForm] = useState<FormState>({
@@ -21,11 +23,26 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [showPassword, setShowPassword] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  const email = form.email.trim();
+  const emailError =
+    email.length > 0 && !EMAIL_PATTERN.test(email)
+      ? "Email không đúng định dạng."
+      : "";
+  const passwordError =
+    form.password.length > 0 && form.password.length < 8
+      ? "Mật khẩu phải có ít nhất 8 ký tự."
+      : "";
+  const confirmPasswordError =
+    form.confirmPassword && form.password !== form.confirmPassword
+      ? "Mật khẩu xác nhận không khớp."
+      : "";
 
   const canSubmit = useMemo(() => {
     return (
       form.username.trim().length >= 3 &&
-      form.email.trim().length > 0 &&
+      EMAIL_PATTERN.test(form.email.trim()) &&
       form.password.length >= 8 &&
       form.password === form.confirmPassword &&
       !loading
@@ -34,7 +51,11 @@ export default function RegisterPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    setSubmitAttempted(true);
+    if (!canSubmit) {
+      setError("");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -110,8 +131,14 @@ export default function RegisterPage() {
                     type="email"
                     autoComplete="email"
                     placeholder="vd: minh@example.com"
+                    aria-invalid={!!emailError}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
                   />
+                  {(emailError || (submitAttempted && !email)) ? (
+                    <span className="mt-2 block text-sm text-amber-700">
+                      {emailError || "Vui lòng nhập email."}
+                    </span>
+                  ) : null}
                 </label>
 
                 <label className="block">
@@ -124,8 +151,14 @@ export default function RegisterPage() {
                     type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     placeholder="Tối thiểu 8 ký tự"
+                    aria-invalid={!!passwordError}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
                   />
+                  {(passwordError || (submitAttempted && !form.password)) ? (
+                    <span className="mt-2 block text-sm text-amber-700">
+                      {passwordError || "Vui lòng nhập mật khẩu."}
+                    </span>
+                  ) : null}
                 </label>
 
                 <label className="block">
@@ -141,6 +174,7 @@ export default function RegisterPage() {
                       type={showPassword ? "text" : "password"}
                       autoComplete="new-password"
                       placeholder="Nhập lại mật khẩu"
+                      aria-invalid={!!confirmPasswordError}
                       className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-24 text-slate-900 shadow-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
                     />
                     <button
@@ -153,9 +187,9 @@ export default function RegisterPage() {
                   </div>
                 </label>
 
-                {form.confirmPassword && form.password !== form.confirmPassword ? (
+                {confirmPasswordError ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    Mật khẩu xác nhận không khớp.
+                    {confirmPasswordError}
                   </div>
                 ) : null}
 
