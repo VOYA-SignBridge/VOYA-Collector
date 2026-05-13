@@ -1,15 +1,15 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
-import DebugPanel from "./components/DebugPanel";
+// import DebugPanel from "./components/DebugPanel";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { loadAuthToken } from "./api/axiosClient";
 import { me } from "./api/auth";
 
 // Minimal type for the debug interface exposed on window
-interface DebuggerInterface {
-  getState?: () => { enabled?: boolean };
-  setState?: (s: { enabled?: boolean }) => void;
-}
+// interface DebuggerInterface {
+//   getState?: () => { enabled?: boolean };
+//   setState?: (s: { enabled?: boolean }) => void;
+// }
 
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
@@ -74,23 +74,23 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    // Keyboard shortcut: Shift+D to toggle debug mode
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.shiftKey && e.key === "D") {
-        e.preventDefault();
-        const debuggerInterface = (window as unknown as Record<string, unknown>)
-          .__voyadebug as DebuggerInterface | undefined;
-        if (debuggerInterface?.getState && debuggerInterface?.setState) {
-          const state = debuggerInterface.getState();
-          debuggerInterface.setState({ enabled: !state.enabled });
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  // useEffect(() => {
+  //   // Keyboard shortcut: Shift+D to toggle debug mode
+  //   const handleKeyDown = (e: KeyboardEvent) => {
+  //     if (e.shiftKey && e.key === "D") {
+  //       e.preventDefault();
+  //       const debuggerInterface = (window as unknown as Record<string, unknown>)
+  //         .__voyadebug as DebuggerInterface | undefined;
+  //       if (debuggerInterface?.getState && debuggerInterface?.setState) {
+  //         const state = debuggerInterface.getState();
+  //         debuggerInterface.setState({ enabled: !state.enabled });
+  //       }
+  //     }
+  //   };
+  //
+  //   window.addEventListener("keydown", handleKeyDown);
+  //   return () => window.removeEventListener("keydown", handleKeyDown);
+  // }, []);
 
   if (loading) {
     return <div className="p-6">Loading...</div>;
@@ -132,7 +132,7 @@ function App() {
           </Routes>
         </Suspense>
       </Layout>
-      <DebugPanel />
+      {/* <DebugPanel /> */}
     </Router>
   );
 }
