@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     google_drive_credentials: str = os.getenv("GOOGLE_DRIVE_CREDENTIALS", "gdrive/credentials.json")
     google_drive_token: str = os.getenv("GOOGLE_DRIVE_TOKEN", "gdrive/token.json")
     google_drive_root_folder_id: str = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
+    google_drive_timeout_seconds: int = int(os.getenv("GOOGLE_DRIVE_TIMEOUT_SECONDS", "180"))
+    google_drive_num_retries: int = int(os.getenv("GOOGLE_DRIVE_NUM_RETRIES", "5"))
+    google_drive_chunk_mb: int = int(os.getenv("GOOGLE_DRIVE_CHUNK_MB", "8"))
+    google_drive_simple_upload_threshold_mb: int = int(os.getenv("GOOGLE_DRIVE_SIMPLE_UPLOAD_THRESHOLD_MB", "64"))
 
     # Processing constants (align live-capture and video)
     feature_dim: int = int(os.getenv("FEATURE_DIM", 126))

@@ -3,27 +3,67 @@ import json
 import logging
 import os
 import shutil
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, Iterable, List, Optional, Union
+import httplib2
+from google_auth_httplib2 import AuthorizedHttp
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 
+class _NoRedirectHttp(httplib2.Http):
+    """Let googleapiclient handle Drive upload status codes itself.
+
+    Google Drive resumable uploads use HTTP 308 as "resume incomplete".
+    Recent httplib2 versions can treat a 308 without a Location header as a
+    redirect error before googleapiclient sees it.
+    """
+
+    def request(
+        self,
+        uri,
+        method="GET",
+        body=None,
+        headers=None,
+        redirections=0,
+        connection_type=None,
+    ):
+        return super().request(
+            uri,
+            method=method,
+            body=body,
+            headers=headers,
+            redirections=0,
+            connection_type=connection_type,
+        )
+
+
 class GoogleDriveClient:
     def __init__(self, credentials_path: str, 
                  token_path: str,
-                 root_folder_id: Optional[str] = None):
+                 root_folder_id: Optional[str] = None,
+                 timeout_seconds: int = 120,
+                 num_retries: int = 5,
+                 chunk_mb: int = 8,
+                 simple_upload_threshold_mb: int = 64):
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.root_folder_id = root_folder_id
+        self.timeout_seconds = max(30, int(timeout_seconds or 120))
+        self.num_retries = max(0, int(num_retries or 0))
+        self.chunk_size_bytes = max(1, int(chunk_mb or 1)) * 1024 * 1024
+        self.simple_upload_threshold_bytes = max(0, int(simple_upload_threshold_mb or 0)) * 1024 * 1024
+        self._request_lock = threading.RLock()
         self.service = None
         self._authenticate()
         self.root_folder_id = self._resolve_root_folder(root_folder_id)
@@ -75,7 +115,11 @@ class GoogleDriveClient:
                     'scopes': list(creds.scopes) if creds.scopes else SCOPES
                 }, token, indent=2)
         
-        self.service = build('drive', 'v3', credentials=creds)
+        authed_http = AuthorizedHttp(
+            creds,
+            http=_NoRedirectHttp(timeout=self.timeout_seconds),
+        )
+        self.service = build('drive', 'v3', http=authed_http, cache_discovery=False)
         logger.info("[GDrive] Service initialized")
 
     def _resolve_root_folder(self, root_folder_id: Optional[str]) -> Optional[str]:
@@ -91,7 +135,7 @@ class GoogleDriveClient:
             folder = self.service.files().get(
                 fileId=root_folder_id,
                 fields="id,name,mimeType",
-            ).execute()
+            ).execute(num_retries=self.num_retries)
             if folder.get("mimeType") == "application/vnd.google-apps.folder":
                 logger.info("[GDrive] Using root folder ID: %s (%s)", root_folder_id, folder.get("name"))
                 return root_folder_id
@@ -115,7 +159,7 @@ class GoogleDriveClient:
             q=query,
             spaces='drive',
             fields='files(id, name)'
-        ).execute()
+        ).execute(num_retries=self.num_retries)
         
         files = results.get('files', [])
         
@@ -130,7 +174,7 @@ class GoogleDriveClient:
             'parents': [parent_id] if parent_id != 'root' else []
         }
         
-        file = self.service.files().create(body=file_metadata, fields='id').execute()
+        file = self.service.files().create(body=file_metadata, fields='id').execute(num_retries=self.num_retries)
         logger.info(f"[GDrive] Created folder: {folder_name} (ID: {file.get('id')})")
         return file.get('id')
 
@@ -155,103 +199,146 @@ class GoogleDriveClient:
                     content_type: str = "application/octet-stream",
                     make_public: bool = True) -> str:
         """Upload file to Google Drive."""
-        try:
-            # Split path into folder and filename
-            remote_path = Path(remote_path)
-            folder_path = str(remote_path.parent)
-            filename = remote_path.name
-            
-            # Create folder structure and get folder ID
-            folder_id = self.ensure_path(folder_path)
-            
-            # Prepare media
-            if isinstance(file_data, str):
-                # File path
-                file_size = os.path.getsize(file_data)
-                media = MediaIoBaseUpload(
-                    open(file_data, 'rb'),
-                    mimetype=content_type,
-                    chunksize=1024*1024*10,  # 10MB chunks
-                    resumable=True
+        # google-api-python-client/httplib2 is not thread-safe; serialize Drive requests per client.
+        with self._request_lock:
+            temp_upload_path: Optional[str] = None
+            try:
+                # Split path into folder and filename
+                remote_path = Path(remote_path)
+                folder_path = str(remote_path.parent)
+                filename = remote_path.name
+                
+                # Create folder structure and get folder ID
+                folder_id = self.ensure_path(folder_path)
+                
+                # Prepare media from a disk-backed source for more stable tunnel/proxy uploads.
+                if isinstance(file_data, str):
+                    upload_path = file_data
+                    file_size = os.path.getsize(upload_path)
+                    logger.info(f"[GDrive] Uploading file from disk: {upload_path} ({file_size} bytes)")
+                elif isinstance(file_data, bytes):
+                    file_size = len(file_data)
+                    fd, temp_upload_path = tempfile.mkstemp(
+                        prefix="gdrive_upload_",
+                        suffix=Path(filename).suffix or ".bin",
+                    )
+                    os.close(fd)
+                    with open(temp_upload_path, "wb") as tmp:
+                        tmp.write(file_data)
+                    upload_path = temp_upload_path
+                    logger.info(f"[GDrive] Uploading {file_size} bytes from memory via temp file")
+                else:
+                    fd, temp_upload_path = tempfile.mkstemp(
+                        prefix="gdrive_upload_",
+                        suffix=Path(filename).suffix or ".bin",
+                    )
+                    os.close(fd)
+                    upload_path = temp_upload_path
+                    file_size = 0
+                    try:
+                        file_data.seek(0)
+                    except Exception:
+                        pass
+                    with open(upload_path, "wb") as tmp:
+                        while True:
+                            chunk = file_data.read(8 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            tmp.write(chunk)
+                            file_size += len(chunk)
+                    logger.info(f"[GDrive] Uploading from stream via temp file: {file_size} bytes")
+
+                use_resumable = (
+                    self.simple_upload_threshold_bytes <= 0
+                    or file_size > self.simple_upload_threshold_bytes
                 )
-                logger.info(f"[GDrive] Uploading file from disk: {file_data} ({file_size} bytes)")
-                
-            elif isinstance(file_data, bytes):
-                file_size = len(file_data)
-                media = MediaIoBaseUpload(
-                    io.BytesIO(file_data),
-                    mimetype=content_type,
-                    chunksize=1024*1024*10,
-                    resumable=True
+                logger.info(
+                    "[GDrive] Upload mode for %s: %s (threshold=%s bytes)",
+                    filename,
+                    "resumable" if use_resumable else "simple",
+                    self.simple_upload_threshold_bytes,
                 )
-                logger.info(f"[GDrive] Uploading {file_size} bytes from memory")
+                if use_resumable:
+                    media = MediaFileUpload(
+                        upload_path,
+                        mimetype=content_type,
+                        chunksize=self.chunk_size_bytes,
+                        resumable=True,
+                    )
+                else:
+                    media = MediaFileUpload(
+                        upload_path,
+                        mimetype=content_type,
+                        resumable=False,
+                    )
                 
-            else:
-                # Already a file-like object
-                file_data.seek(0, 2)
-                file_size = file_data.tell()
-                file_data.seek(0)
-                media = MediaIoBaseUpload(
-                    file_data,
-                    mimetype=content_type,
-                    chunksize=1024*1024*10,
-                    resumable=True
-                )
-                logger.info(f"[GDrive] Uploading from stream: {file_size} bytes")
-            
-            # Check if file already exists
-            existing_file_id = self._find_file_by_name(folder_id, filename)
-            if existing_file_id:
-                logger.info(f"[GDrive] File already exists, updating: {filename}")
-                file = self.service.files().update(
-                    fileId=existing_file_id,
-                    media_body=media,
-                    fields='id'
-                ).execute()
-                file_id = file.get('id')
-            else:
-                # Upload new file
-                file_metadata = {
-                    'name': filename,
-                    'parents': [folder_id]
-                }
+                # Check if file already exists
+                existing_file_id = self._find_file_by_name(folder_id, filename)
+                if existing_file_id:
+                    logger.info(f"[GDrive] File already exists, updating: {filename}")
+                    request = self.service.files().update(
+                        fileId=existing_file_id,
+                        media_body=media,
+                        fields='id'
+                    )
+                else:
+                    # Upload new file
+                    file_metadata = {
+                        'name': filename,
+                        'parents': [folder_id]
+                    }
+                    
+                    request = self.service.files().create(
+                        body=file_metadata,
+                        media_body=media,
+                        fields='id'
+                    )
+
+                if use_resumable:
+                    response = None
+                    while response is None:
+                        status, response = request.next_chunk(num_retries=self.num_retries)
+                        if status:
+                            logger.debug("[GDrive] Upload progress for %s: %d%%", filename, int(status.progress() * 100))
+                else:
+                    response = request.execute(num_retries=self.num_retries)
+                file_id = response.get('id')
                 
-                file = self.service.files().create(
-                    body=file_metadata,
-                    media_body=media,
-                    fields='id'
-                ).execute()
-                file_id = file.get('id')
-            
-            # Make file publicly accessible if requested
-            url = None
-            if make_public:
-                # Check if already has public permission
-                permissions = self.service.permissions().list(
-                    fileId=file_id,
-                    fields='permissions(id,type)'
-                ).execute()
-                
-                has_public = any(
-                    p.get('type') == 'anyone' 
-                    for p in permissions.get('permissions', [])
-                )
-                
-                if not has_public:
-                    self.service.permissions().create(
+                # Make file publicly accessible if requested
+                url = None
+                if make_public:
+                    # Check if already has public permission
+                    permissions = self.service.permissions().list(
                         fileId=file_id,
-                        body={'type': 'anyone', 'role': 'reader'}
-                    ).execute()
-                    logger.info(f"[GDrive] Made file public: {filename}")
+                        fields='permissions(id,type)'
+                    ).execute(num_retries=self.num_retries)
+                    
+                    has_public = any(
+                        p.get('type') == 'anyone' 
+                        for p in permissions.get('permissions', [])
+                    )
+                    
+                    if not has_public:
+                        self.service.permissions().create(
+                            fileId=file_id,
+                            body={'type': 'anyone', 'role': 'reader'}
+                        ).execute(num_retries=self.num_retries)
+                        logger.info(f"[GDrive] Made file public: {filename}")
+                    
+                    url = f"https://drive.google.com/file/d/{file_id}/view"
                 
-                url = f"https://drive.google.com/file/d/{file_id}/view"
-            
-            logger.info(f"[GDrive] Upload completed: {url or file_id}")
-            return url or f"gdrive://{file_id}"
-            
-        except Exception as e:
-            logger.error(f"[GDrive] Upload failed: {str(e)}", exc_info=True)
-            raise
+                logger.info(f"[GDrive] Upload completed: {url or file_id}")
+                return url or f"gdrive://{file_id}"
+                
+            except Exception as e:
+                logger.error(f"[GDrive] Upload failed: {str(e)}", exc_info=True)
+                raise
+            finally:
+                if temp_upload_path and os.path.exists(temp_upload_path):
+                    try:
+                        os.remove(temp_upload_path)
+                    except Exception:
+                        pass
 
     def _find_file_by_name(self, folder_id: str, filename: str) -> Optional[str]:
         """Find file by name in folder."""
@@ -260,7 +347,7 @@ class GoogleDriveClient:
             q=query,
             spaces='drive',
             fields='files(id, name)'
-        ).execute()
+        ).execute(num_retries=self.num_retries)
         
         files = results.get('files', [])
         return files[0]['id'] if files else None
@@ -303,6 +390,7 @@ class GoogleDriveClient:
 
 # Singleton instance
 _gdrive_client = None
+_gdrive_client_lock = threading.Lock()
 
 
 def get_gdrive_client() -> GoogleDriveClient:
@@ -310,21 +398,27 @@ def get_gdrive_client() -> GoogleDriveClient:
 
     global _gdrive_client
     if _gdrive_client is None:
-        credentials_path = str(settings.google_drive_credentials)
-        token_path = str(settings.google_drive_token)
-        root_folder = settings.google_drive_root_folder_id or None
-        
-        if not os.path.exists(credentials_path):
-            raise FileNotFoundError(
-                f"credentials.json not found at {credentials_path}. "
-                "Download it from Google Cloud Console."
-            )
-        
-        _gdrive_client = GoogleDriveClient(
-            credentials_path=credentials_path,
-            token_path=token_path,
-            root_folder_id=root_folder
-        )
+        with _gdrive_client_lock:
+            if _gdrive_client is None:
+                credentials_path = str(settings.google_drive_credentials)
+                token_path = str(settings.google_drive_token)
+                root_folder = settings.google_drive_root_folder_id or None
+                
+                if not os.path.exists(credentials_path):
+                    raise FileNotFoundError(
+                        f"credentials.json not found at {credentials_path}. "
+                        "Download it from Google Cloud Console."
+                    )
+                
+                _gdrive_client = GoogleDriveClient(
+                    credentials_path=credentials_path,
+                    token_path=token_path,
+                    root_folder_id=root_folder,
+                    timeout_seconds=int(getattr(settings, "google_drive_timeout_seconds", 120)),
+                    num_retries=int(getattr(settings, "google_drive_num_retries", 5)),
+                    chunk_mb=int(getattr(settings, "google_drive_chunk_mb", 8)),
+                    simple_upload_threshold_mb=int(getattr(settings, "google_drive_simple_upload_threshold_mb", 64)),
+                )
     return _gdrive_client
 
 

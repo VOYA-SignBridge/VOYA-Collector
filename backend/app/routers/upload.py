@@ -330,13 +330,17 @@ async def upload_camera(payload: dict = Body(...)):
         "created_at": su.now_str(),
     }
 
-    path = save_sequence_npz(
-        class_meta,
-        seq_padded,
-        meta=meta,
-        augment_id=0,
-        source_type="camera"
-    )
+    try:
+        path = save_sequence_npz(
+            class_meta,
+            seq_padded,
+            meta=meta,
+            augment_id=0,
+            source_type="camera"
+        )
+    except Exception as e:
+        log.error("[UPLOAD][camera][ERROR] sample save failed: %s", e)
+        return {"success": False, "message": f"Sample upload failed: {e}"}
 
     return {
         "success": True,
