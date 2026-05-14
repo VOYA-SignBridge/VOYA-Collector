@@ -5,13 +5,13 @@ import logging
 import re
 
 from app.config import settings
+from app.storage.postgres_connection import connect_postgres
 
 logger = logging.getLogger(__name__)
 
 def _get_conn():
     # connect_timeout + application_name giúp dễ quan sát và fail fast hơn trong production
-    return psycopg2.connect(
-        settings.database_url,
+    return connect_postgres(
         connect_timeout=5,
         application_name="voya_backend_metadata_db",
     )

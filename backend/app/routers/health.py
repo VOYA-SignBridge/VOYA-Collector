@@ -4,16 +4,16 @@ from datetime import datetime
 from typing import Dict, Any
 
 from fastapi import APIRouter, HTTPException
-import psycopg2
 
 from app.config import settings
+from app.storage.postgres_connection import connect_postgres
 
 router = APIRouter(prefix="/health", tags=["health"])
 logger = logging.getLogger("health")
 
 
 def _check_postgres() -> None:
-    conn = psycopg2.connect(settings.database_url, connect_timeout=3)
+    conn = connect_postgres(connect_timeout=3, application_name="voya_backend_health")
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT 1")

@@ -10,6 +10,42 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/auth': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/classes': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/dataset': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/inference': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/jobs': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/upload': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {

@@ -12,13 +12,14 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.config import settings
+from app.storage.postgres_connection import connect_postgres
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _get_conn():
-    return psycopg2.connect(settings.database_url)
+    return connect_postgres(connect_timeout=5)
 
 
 def _normalize_login(identifier: str) -> str:
