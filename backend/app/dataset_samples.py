@@ -5,6 +5,7 @@ import csv
 import uuid
 import tempfile
 import logging
+import time
 from typing import Dict, Any, List
 from filelock import FileLock
 from datetime import datetime
@@ -141,22 +142,33 @@ def save_sequence_npz(
         log = logging.getLogger(__name__)
         log.info("[SAVE_SEQUENCE] Attempting Google Drive upload")
 
-        try:
-            # Build storage key: features/{lang}/{dialect}/{folder_name}/{filename}
-            folder_name = class_meta.folder_name()
-            storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-            log.info("[SAVE_SEQUENCE] Uploading to Google Drive with key: %s", storage_key)
-            
-            storage_url = upload_to_gdrive(buffer, storage_key)
-            if storage_url:
-                log.info("[SAVE_SEQUENCE] Google Drive upload successful: %s", storage_url)
-                metadata["storage_url"] = storage_url
-                metadata["storage_key"] = storage_key
-                metadata["storage_provider"] = "gdrive"
-            else:
-                log.warning("[SAVE_SEQUENCE] Google Drive upload returned None")
-        except Exception as e:
-            log.error("[SAVE_SEQUENCE] Google Drive upload failed: %s", e)
+        # Build storage key: features/{lang}/{dialect}/{folder_name}/{filename}
+        folder_name = class_meta.folder_name()
+        storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
+        log.info("[SAVE_SEQUENCE] Uploading to Google Drive with key: %s", storage_key)
+
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                buffer.seek(0)
+                storage_url = upload_to_gdrive(buffer, storage_key)
+                if storage_url:
+                    log.info("[SAVE_SEQUENCE] Google Drive upload successful: %s", storage_url)
+                    metadata["storage_url"] = storage_url
+                    metadata["storage_key"] = storage_key
+                    metadata["storage_provider"] = "gdrive"
+                    break
+                last_error = RuntimeError("Google Drive upload returned None")
+                log.warning("[SAVE_SEQUENCE] Google Drive upload returned None attempt=%s/3", attempt)
+            except Exception as e:
+                last_error = e
+                log.error("[SAVE_SEQUENCE] Google Drive upload failed attempt=%s/3: %s", attempt, e)
+
+            if attempt < 3:
+                time.sleep(0.5 * attempt)
+
+        if not storage_url:
+            raise RuntimeError(f"Google Drive sample upload failed after retries: {last_error}")
     else:
         log.info("[SAVE_SEQUENCE] Google Drive not enabled")
 

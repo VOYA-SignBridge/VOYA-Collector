@@ -300,6 +300,10 @@ def append_label_row(row: Dict[str, Any]):
     # Regenerate derived language/dialect index files under dataset/labels/
     regenerate_label_indexes()
 
+    sync_master_labels_to_gdrive()
+
+
+def sync_master_labels_to_gdrive() -> None:
     from app.storage.catalog_mirror import mirror_csv_to_gdrive
 
     mirror_csv_to_gdrive(MASTER_LABELS, "labels.csv")
@@ -382,6 +386,8 @@ def register_class(
 
     existing = find_existing(language_key, dialect_key, slug)
     if existing:
+        # Best-effort re-sync on existing class to recover from prior crash/retry gaps.
+        sync_master_labels_to_gdrive()
         meta = ClassMetadata(
             class_uid=existing["class_uid"],
             class_idx=int(existing.get("class_idx") or 0)
@@ -517,7 +523,7 @@ def get_or_register_class(
                     continue
                 name = d.name
                 # Expect legacy folder pattern: class_####_<slug>
-                if name.startswith("class_") and name.endswith(slug):
+                if re.fullmatch(rf"class_\d+_{re.escape(slug)}", name):
                     return name
         except Exception:
             return None
@@ -534,6 +540,8 @@ def get_or_register_class(
     if base_dir is not None:
         legacy_folder = _find_legacy_folder(base_dir)
         if legacy_folder:
+            # Best-effort re-sync on legacy fast-path to keep Drive catalog fresh.
+            sync_master_labels_to_gdrive()
             # Try to parse class_idx from legacy folder name: class_0001_slug
             cls_idx_val = None
             try:
