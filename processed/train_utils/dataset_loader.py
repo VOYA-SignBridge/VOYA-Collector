@@ -43,6 +43,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         to_tensor: bool = False,
         feature_key_priority: Optional[List[str]] = None,
         dtype: str = "float32",
+        augment_fn: Optional[Any] = None,
     ) -> None:
         self.csv_path = Path(csv_path)
         if root:
@@ -57,6 +58,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         self.rows: List[Dict[str, str]] = []
         self.to_tensor = bool(to_tensor and TORCH_AVAILABLE)
         self.dtype = dtype
+        self.augment_fn = augment_fn
         self.feature_key_priority = feature_key_priority or [
             'sequence',
             'features', 'x', 'data', 'arr_0'
@@ -269,6 +271,27 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             raise ValueError(
                 f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {_EXPECTED_FEATURE_DIM})."
             )
+        if self.augment_fn is not None:
+            x = self.augment_fn(x)
+
+            x = np.asarray(
+                x,
+                dtype=self.dtype
+            )
+
+            if tuple(x.shape) != (
+                _EXPECTED_SEQ_LEN,
+                _EXPECTED_FEATURE_DIM
+            ):
+                raise ValueError(
+                    f"Augmentation returned invalid shape {tuple(x.shape)}"
+                )
+            
+        x = np.ascontiguousarray( x, dtype=np.float32 )
+
+        if not np.isfinite(x).all(): 
+            raise ValueError( f"Non-finite values detected in {path}" )
+    
         y = self._resolve_target(r)
 
         meta = {
@@ -283,81 +306,15 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             y = torch.as_tensor(y, dtype=torch.long)
         return x, y, meta
 
-
-def pad_collate_fn(
-    batch: List[Tuple[Any, int, Dict[str, Any]]],
-    *,
-    feature_dim: Optional[int] = None,
-    on_feature_dim_mismatch: str = "truncate",
-    log_feature_dim_mismatch: bool = False,
-    max_log_paths: int = 3,
-):
-    """Pad variable-length time series to max length in batch (temporal axis=0).
-
-    Returns (X_pad, y_tensor, lengths, metas).
-
-    feature_dim:
-      - None (default): pad feature dimension to max D in the batch (legacy behavior)
-      - int: enforce a fixed feature dimension across all batches.
-
-    on_feature_dim_mismatch: when feature_dim is set and a sample has D > feature_dim
-      - 'truncate' (default): truncate to feature_dim
-      - 'error': raise an error
-    """
-
-    if not TORCH_AVAILABLE:
-        xs, ys, metas = zip(*batch)
-        lengths = [x.shape[0] if hasattr(x, 'shape') and len(x.shape) >= 1 else 1 for x in xs]
-        return list(xs), list(ys), lengths, list(metas)
-
-    xs, ys, metas = zip(*batch)
-    xs = list(xs)
-    ys_t = torch.as_tensor(ys, dtype=torch.long)
-    lengths = torch.as_tensor([x.shape[0] for x in xs], dtype=torch.long)
-    if feature_dim is None:
-        D = max(int(x.shape[1]) if x.ndim >= 2 else 1 for x in xs)
-    else:
-        D = int(feature_dim)
-    T = int(lengths.max())
-    X_pad = torch.zeros((len(xs), T, D), dtype=xs[0].dtype)
-    for i, x in enumerate(xs):
-        t = x.shape[0]
-        d = x.shape[1] if x.ndim >= 2 else 1
-        if feature_dim is not None and d > D:
-            if on_feature_dim_mismatch == 'error':
-                raise RuntimeError(f"Sample feature dim {d} exceeds fixed feature_dim={D}")
-            # default: truncate
-            global _FEATURE_DIM_TRUNCATE_WARNED
-            if log_feature_dim_mismatch and not _FEATURE_DIM_TRUNCATE_WARNED:
-                try:
-                    # log a few example paths to help trace upstream feature extraction issues
-                    example_paths: List[str] = []
-                    for j in range(min(len(metas), max(1, int(max_log_paths)))):
-                        p = metas[j].get('file_path') if isinstance(metas[j], dict) else None
-                        if p:
-                            example_paths.append(str(p))
-                    suffix = (" Examples: " + " | ".join(example_paths)) if example_paths else ""
-                except Exception:
-                    suffix = ""
-                print(
-                    f"[WARN] Feature dim mismatch: truncating sample features from D={d} to fixed feature_dim={D}."
-                    + suffix
-                )
-                _FEATURE_DIM_TRUNCATE_WARNED = True
-            x = x[:, :D]
-            d = D
-        if d != D:
-            # right-pad feature dimension if needed
-            tmp = torch.zeros((t, D), dtype=X_pad.dtype)
-            tmp[:, :d] = x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
-            X_pad[i, :t] = tmp
-        else:
-            X_pad[i, :t] = x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
-    return X_pad, ys_t, lengths, list(metas)
-
-
-def build_dataloader(csv_path: Union[str, Path], batch_size: int = 16, shuffle: bool = True):
+def build_dataloader(csv_path: Union[str, Path], batch_size: int = 16, shuffle: bool = True, augment_fn=None):
     if not TORCH_AVAILABLE:
         raise RuntimeError('PyTorch is not installed; DataLoader is unavailable. Use NPZSignDataset directly.')
-    ds = NPZSignDataset(csv_path, to_tensor=True)
-    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, collate_fn=pad_collate_fn)
+    ds = NPZSignDataset(csv_path, to_tensor=True, augment_fn=augment_fn)
+    return DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True,
+    )
