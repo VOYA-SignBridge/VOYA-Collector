@@ -164,19 +164,35 @@ class TCNClassifier(nn.Module):
         if self.classifier.bias is not None:
             nn.init.zeros_(self.classifier.bias)
 
-    def forward(self, x_btd: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        # x_btd: [B, T, D] -> [B, D, T]
+    def forward(self, x_btd: torch.Tensor) -> torch.Tensor:
+        """
+        x_btd: [B, T, D]
+        Expected:
+            T = 60
+            D = 126
+        """
+
+        if x_btd.ndim != 3:
+            raise RuntimeError(
+                f"Expected 3D tensor [B,T,D], got {x_btd.shape}"
+            )
+
+        if x_btd.shape[-1] != EXPECTED_FEATURE_DIM:
+            raise RuntimeError(
+                f"Expected feature_dim={EXPECTED_FEATURE_DIM}, got {x_btd.shape}"
+            )
+
         x = x_btd.transpose(1, 2)
+
         x = self.proj(x)
+
         x = self.network(x)
-        # masked global average pooling over time
-        b, c, t = x.shape
-        mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        mask = mask.unsqueeze(1)  # [B,1,T]
-        x = x.masked_fill(~mask, 0.0)
-        denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)  # [B,1]
-        pooled = x.sum(dim=2) / denom
+
+        # Global average pooling over time
+        pooled = x.mean(dim=2)
+
         logits = self.classifier(pooled)
+
         return logits
 
 
@@ -282,7 +298,6 @@ def build_loader(
         ds,
         batch_size=batch_size,
         shuffle=shuffle,
-        collate_fn=collate,
         num_workers=num_workers,
         worker_init_fn=_seed_worker,
         generator=g,
@@ -534,11 +549,10 @@ def train_one_epoch(model: nn.Module, loader: DataLoader, opt: torch.optim.Optim
     total_acc = 0.0
     n = 0
     criterion = nn.CrossEntropyLoss()
-    for X, y, lengths, _ in loader:
+    for X, y, _ in loader:
         X = X.to(device)
         y = y.to(device)
-        lengths = lengths.to(device)
-        logits = model(X, lengths)
+        logits = model(X)
         loss = criterion(logits, y)
         if not torch.isfinite(loss):
             print("Non-finite loss detected.")
@@ -563,11 +577,10 @@ def evaluate(model: nn.Module, loader: DataLoader, device: str, num_classes: int
     n = 0
     all_logits: List[torch.Tensor] = []
     all_targets: List[torch.Tensor] = []
-    for X, y, lengths, _ in loader:
+    for X, y, _ in loader:
         X = X.to(device)
         y = y.to(device)
-        lengths = lengths.to(device)
-        logits = model(X, lengths)
+        logits = model(X)
         loss = criterion(logits, y)
         bs = y.size(0)
         total_loss += loss.item() * bs
@@ -580,6 +593,65 @@ def evaluate(model: nn.Module, loader: DataLoader, device: str, num_classes: int
     mf1 = macro_f1(logits, targets, num_classes) if logits.numel() > 0 else 0.0
     return total_loss / n, total_acc / n, mf1
 
+def build_checkpoint(
+    *,
+    model,
+    cfg,
+    in_dim,
+    num_classes,
+    label_map,
+    te_acc=None,
+    te_f1=None,
+    stamp="",
+):
+    return {
+        "schema_version": "1.0",
+
+        "model_state_dict": {
+            k: v.detach().cpu()
+            for k, v in model.state_dict().items()
+        },
+
+        "model_type": "TCN",
+
+        "model_config": {
+            "channels": cfg.channels,
+            "levels": cfg.levels,
+            "kernel_size": cfg.kernel_size,
+            "dropout": cfg.dropout,
+        },
+
+        "feature_dim": EXPECTED_FEATURE_DIM,
+
+        "seq_len": 60,
+
+        "num_classes": num_classes,
+
+        "idx_to_label": {
+            int(v): k
+            for k, v in label_map.items()
+        },
+
+        "label_to_idx": label_map,
+
+        "normalization_version": "hands126_v1",
+
+        "preprocess_contract": {
+            "landmark_order": "MP_Left(63)+MP_Right(63)",
+            "missing_hands": "zero_filled",
+            "coordinate_space": "mediapipe_normalized",
+            "coordinate_order": "xyz",
+            "frontend_mirroring": "visual_only",
+            "expects_strict_shape": [60, 126],
+        },
+
+        "metrics": {
+            "test_acc": te_acc,
+            "test_f1": te_f1,
+        },
+
+        "created_at": stamp,
+    }
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a TCN classifier on NPZ sign-sequence features.")
@@ -591,6 +663,12 @@ def main() -> None:
     parser.add_argument("--train_csv", type=Path, default=default_root / "train.csv")
     parser.add_argument("--val_csv", type=Path, default=default_root / "val.csv")
     parser.add_argument("--test_csv", type=Path, default=default_root / "test.csv")
+    parser.add_argument(
+        "--features_root",
+        type=Path,
+        default=None,
+        help="Root directory containing feature .npz files"
+    )
     parser.add_argument(
         "--dialect",
         action="append",
@@ -638,7 +716,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--out_dir", type=Path, default=Path("train_utils/outputs"))
+    parser.add_argument("--out_dir", type=Path, default=Path("processed/train_utils/outputs"))
     args = parser.parse_args()
 
     cfg = TrainConfig(
@@ -673,12 +751,12 @@ def main() -> None:
     subset_tag = ""
     if subset_mode:
         # Determine an absolute features root so generated CSVs can live anywhere.
-        features_root = _find_features_root_from_csv(cfg.train_csv)
+        features_root = ( args.features_root if args.features_root is not None else _find_features_root_from_csv(cfg.train_csv) )
         if features_root is None:
             # Back-compat heuristic for the default layout: <root>/processed/splits/train.csv
             try:
                 dataset_root = cfg.train_csv.resolve().parents[2]
-                features_root = dataset_root / "features"
+                features_root = dataset_root / "dataset" / "features"
             except Exception:
                 features_root = None
         if features_root is None or not features_root.exists():
@@ -783,6 +861,12 @@ def main() -> None:
     in_dim = EXPECTED_FEATURE_DIM
     # infer number of classes from label_to_index if present
     ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
+    label_map = ds_tmp.label_to_index or {}
+
+    if not label_map:
+        raise SystemExit(
+            "label_map is empty; ensure labels.csv or label_to_index.json is present and valid."
+        )
     if ds_tmp.index_to_label:
         num_classes = len(ds_tmp.index_to_label)
         if num_classes < 2:
@@ -869,7 +953,6 @@ def main() -> None:
         if improved:
             best_val_f1 = va_f1
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}
-            torch.save( best_state, cfg.out_dir / "best_model_tmp.pt" )
             since_best = 0
         else:
             since_best += 1
@@ -893,23 +976,20 @@ def main() -> None:
 
     # save
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_checkpoint = build_checkpoint(
+        model=model,
+        cfg=cfg,
+        in_dim=in_dim,
+        num_classes=num_classes,
+        label_map=label_map,
+        te_acc=te_acc,
+        te_f1=te_f1,
+        stamp=stamp,
+    )
     prefix = f"tcn_{stamp}" if not subset_mode else f"tcn_{subset_tag}_{stamp}"
     out_ckpt = cfg.out_dir / f"{prefix}.pt"
-    label_map = ds_tmp.label_to_index or {}
-    if not label_map:
-        raise SystemExit("label_map is empty; ensure labels.csv or label_to_index.json is present and valid.")
 
-    torch.save({
-        "model_state": model.state_dict(),
-        "config": asdict(cfg),
-        "in_dim": in_dim,
-        "feature_dim": in_dim,
-        "num_classes": num_classes,
-        "label_map": label_map,
-        "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
-        "label_to_index_json": str(label_to_index_json) if label_to_index_json else None,
-        "metrics": {"test_acc": te_acc, "test_f1": te_f1, "test_scs": te_scs},
-    }, out_ckpt)
+    torch.save(final_checkpoint, out_ckpt)
 
     cfg_json = {
         k: (str(v) if isinstance(v, Path) else v)

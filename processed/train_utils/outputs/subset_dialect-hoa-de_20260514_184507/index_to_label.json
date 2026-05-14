@@ -1,0 +1,37 @@
+{
+  "0": {
+    "label_key": "vn/hoa-de/rang-muoi",
+    "label_slug": "rang-muoi",
+    "label_original": "rang muối",
+    "language": "vn",
+    "dialect": "hoa-de"
+  },
+  "1": {
+    "label_key": "vn/hoa-de/tom",
+    "label_slug": "tom",
+    "label_original": "tôm",
+    "language": "vn",
+    "dialect": "hoa-de"
+  },
+  "2": {
+    "label_key": "vn/hoa-de/lot-da-ca",
+    "label_slug": "lot-da-ca",
+    "label_original": "lột da cá",
+    "language": "vn",
+    "dialect": "hoa-de"
+  },
+  "3": {
+    "label_key": "vn/hoa-de/lot-vo-tom",
+    "label_slug": "lot-vo-tom",
+    "label_original": "lột vỏ tôm",
+    "language": "vn",
+    "dialect": "hoa-de"
+  },
+  "4": {
+    "label_key": "vn/hoa-de/lay-chi-tom",
+    "label_slug": "lay-chi-tom",
+    "label_original": "lấy chỉ tôm",
+    "language": "vn",
+    "dialect": "hoa-de"
+  }
+}

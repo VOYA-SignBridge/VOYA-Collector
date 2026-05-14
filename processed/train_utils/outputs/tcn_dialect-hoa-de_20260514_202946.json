@@ -1,0 +1,39 @@
+{
+  "timestamp": "20260514_202946",
+  "subset": {
+    "languages": [],
+    "dialects": [
+      "hoa-de"
+    ],
+    "language_default": "vn",
+    "tag": "dialect-hoa-de"
+  },
+  "config": {
+    "train_csv": "processed\\train_utils\\outputs\\subset_dialect-hoa-de_20260514_202943\\train.csv",
+    "val_csv": "processed\\train_utils\\outputs\\subset_dialect-hoa-de_20260514_202943\\val.csv",
+    "test_csv": "processed\\train_utils\\outputs\\subset_dialect-hoa-de_20260514_202943\\test.csv",
+    "batch_size": 32,
+    "epochs": 80,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "dropout": 0.3,
+    "channels": 64,
+    "levels": 3,
+    "kernel_size": 5,
+    "seed": 42,
+    "device": "cpu",
+    "num_workers": 0,
+    "out_dir": "processed\\train_utils\\outputs"
+  },
+  "in_dim": 126,
+  "feature_dim": 126,
+  "num_classes": 5,
+  "val_best_f1": 1.0,
+  "test": {
+    "loss": 3.6988782085245475e-05,
+    "acc": 1.0,
+    "f1": 1.0,
+    "scs": null
+  },
+  "checkpoint": "processed\\train_utils\\outputs\\tcn_dialect-hoa-de_20260514_202946.pt"
+}

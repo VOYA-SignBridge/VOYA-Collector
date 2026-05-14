@@ -22,8 +22,8 @@ if get_samples_csv:
 else:
     # Backward-compat: older layout used <data_root>/samples.csv
     # Current app layout uses <data_root>/samples/samples.csv
-    cand = DATA_ROOT / 'samples' / 'samples.csv'
-    SAMPLES_CSV = cand if cand.exists() else (DATA_ROOT / 'dataset' / 'samples' / 'samples.csv')
+    cand = DATA_ROOT / 'samples.csv'
+    SAMPLES_CSV = cand if cand.exists() else (DATA_ROOT / 'dataset' / 'samples.csv')
 OUT_DIR = get_splits_dir() if get_splits_dir else ROOT / 'processed' / 'splits'
 if get_labels_csv:
     LABELS_CSV = get_labels_csv(DATA_ROOT)
@@ -59,25 +59,38 @@ def _load_labels_by_uid_and_idx():
                 by_uid[class_uid] = r
     return by_uid, by_idx
 
-
 def _derive_file_from_row(r: dict) -> str:
-    fp = (r.get('file') or '').strip()
-    if fp:
-        return fp
-    file_path = (r.get('file_path') or '').strip()
-    if file_path:
-        try:
-            return Path(file_path).name
-        except Exception:
-            pass
-    storage_key = (r.get('storage_key') or '').strip()
-    if storage_key:
-        try:
-            return Path(storage_key).name
-        except Exception:
-            pass
-    return ''
+    """
+    Derive actual .npz filename from dataset row.
 
+    Priority:
+    1. explicit file column
+    2. file_path basename
+    3. storage_key basename
+
+    Reject non-.npz filenames.
+    """
+
+    candidates = [
+        (r.get('file') or '').strip(),
+        (r.get('file_path') or '').strip(),
+        (r.get('storage_key') or '').strip(),
+    ]
+
+    for c in candidates:
+        if not c:
+            continue
+
+        try:
+            name = Path(c).name.strip()
+
+            if name.lower().endswith('.npz'):
+                return name
+
+        except Exception:
+            continue
+
+    return ''
 
 def read_samples():
     """Read samples from CSV.
@@ -136,7 +149,13 @@ def read_samples():
                 r['dialect'] = (label_row.get('dialect') or '').strip()
 
             # Must have folder_name + file to locate features on disk.
-            if not (r.get('folder_name') or '').strip() or not (r.get('file') or '').strip():
+            file_name = (r.get('file') or '').strip()
+
+            if (
+                not (r.get('folder_name') or '').strip()
+                or not file_name
+                or not file_name.lower().endswith('.npz')
+            ):
                 continue
 
             rows.append(r)
@@ -362,7 +381,7 @@ def _assert_no_overlap(a, b):
 
 def main():
     parser = argparse.ArgumentParser(description='Make dataset splits')
-    parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits', default=True)
+    parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits')
     parser.add_argument('--group_col', type=str, default='user', help='Grouping column to keep disjoint (e.g., user, dialect)')
     parser.add_argument('--by_language', action='store_true', help='Write separate split CSVs per language under splits/<language>/')
     parser.add_argument('--languages', type=str, default='', help='Optional comma-separated whitelist of languages when using --by_language')

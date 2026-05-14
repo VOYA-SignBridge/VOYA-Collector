@@ -5,14 +5,20 @@ import argparse
 import json
 import re
 import time
+import sys
+import numpy as np
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Deque, List, Optional, Tuple
-from backend.app.processing.utils import normalize_hands_vector_126
 
+ROOT = Path(__file__).resolve().parents[2]
 
-import numpy as np
+BACKEND_DIR = ROOT / "processed"
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.append(str(BACKEND_DIR))
+from shared.normalization import ( normalize_hands_vector_126, )
 
 try:
     import cv2
@@ -35,7 +41,7 @@ except Exception:
 @dataclass
 class ModelBundle:
     model: nn.Module
-    in_dim: int
+    feature_dim: int
     num_classes: int
     label_map: List[str]
     device: str
@@ -75,7 +81,7 @@ class TemporalBlock(nn.Module):
 class TCNClassifier(nn.Module):
     def __init__(
         self,
-        in_dim: int,
+        feature_dim: int,
         num_classes: int,
         channels: int = 64,
         levels: int = 3,
@@ -83,7 +89,7 @@ class TCNClassifier(nn.Module):
         dropout: float = 0.3,
     ):
         super().__init__()
-        self.proj = nn.Conv1d(in_dim, channels, kernel_size=1)
+        self.proj = nn.Conv1d(feature_dim, channels, kernel_size=1)
         blocks = []
         for i in range(levels):
             dilation = 2 ** i
@@ -155,58 +161,95 @@ def _load_label_map_from_index_to_label(i2l_path: Path, *, num_classes: int) -> 
     return label_map
 
 
-def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
+def _label_map_from_checkpoint(obj: dict, *, num_classes: int) -> Optional[List[str]]:
+    """Build an index->label list from checkpoint contents.
+
+    Trainer checkpoints store either:
+    - idx_to_label: {index(int/str): label_key(str)}
+    - label_to_idx: {label_key(str): index(int/str)}
+
+    This is the most reliable source to stay compatible with the model.
+    """
+    i2l = obj.get("idx_to_label")
+    if isinstance(i2l, dict):
+        out: List[str] = []
+        for i in range(num_classes):
+            v = i2l.get(i, i2l.get(str(i), str(i)))
+            out.append(str(v))
+        return out
+
+    l2i = obj.get("label_to_idx")
+    if isinstance(l2i, dict):
+        inv: dict[int, str] = {}
+        for k, v in l2i.items():
+            try:
+                inv[int(v)] = str(k)
+            except Exception:
+                continue
+        out = [inv.get(i, str(i)) for i in range(num_classes)]
+        return out
+
+    return None
+
+
+def build_model_from_ckpt(ckpt_path: Path, device: str, *, meta: Optional[dict] = None) -> ModelBundle:
     # FIX for PyTorch 2.6+ (weights_only=True became default)
     obj = torch.load(ckpt_path, map_location=device, weights_only=False)
 
-    in_dim = int(obj.get('in_dim'))
+    feature_dim = int( obj.get('feature_dim', 126) )
     num_classes = int(obj.get('num_classes'))
 
-    cfg = obj.get('config') or {}
+    # Trainer uses "model_config"; keep backward-compat with older keys.
+    cfg = obj.get('model_config') or obj.get('config') or {}
     channels = int(cfg.get('channels', 64)) if isinstance(cfg, dict) else 64
     levels = int(cfg.get('levels', 3)) if isinstance(cfg, dict) else 3
     kernel_size = int(cfg.get('kernel_size', 5)) if isinstance(cfg, dict) else 5
     dropout = float(cfg.get('dropout', 0.3)) if isinstance(cfg, dict) else 0.3
 
     model = TCNClassifier(
-        in_dim=in_dim,
+        feature_dim=feature_dim,
         num_classes=num_classes,
         channels=channels,
         levels=levels,
         kernel_size=kernel_size,
         dropout=dropout,
     )
-    model.load_state_dict(obj['model_state'])
+    model.load_state_dict(obj['model_state_dict'])
     model.to(device).eval()
 
-    # label map: prefer per-checkpoint subset mapping if present.
-    label_map: List[str]
-    l2i = obj.get('label_to_index_json')
-    if l2i:
-        try:
-            i2l_path = Path(str(l2i)).with_name('index_to_label.json')
-            if i2l_path.exists():
-                label_map = _load_label_map_from_index_to_label(i2l_path, num_classes=num_classes)
-            else:
-                raise FileNotFoundError
-        except Exception:
-            if get_analysis_dir:
-                i2l = get_analysis_dir() / 'index_to_label.json'
-            else:
-                root = Path(__file__).resolve().parents[2]
-                i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-            label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
-    else:
-        if get_analysis_dir:
-            i2l = get_analysis_dir() / 'index_to_label.json'
-        else:
-            root = Path(__file__).resolve().parents[2]
-            i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-        label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
+    # label map:
+    # - ALWAYS prefer checkpoint-embedded mapping for compatibility with num_classes/order.
+    # - Optionally replace display names using an index_to_label.json that matches this checkpoint.
+    label_map = _label_map_from_checkpoint(obj, num_classes=num_classes)
+    lookup_path = (
+        ROOT
+        / "processed"
+        / "analysis"
+        / "index_to_label.json"
+    )
+
+    if lookup_path.exists():
+
+        display_lookup = (
+            _load_label_original_lookup(
+                lookup_path
+            )
+        )
+
+        label_map = [
+            display_lookup.get(x, x)
+            for x in label_map
+        ]
+    label_source = "checkpoint"
+    if label_map is None:
+        label_map = [str(i) for i in range(num_classes)]
+        label_source = "fallback"
+
+    print(f"[realtime] label_map_source={label_source} num_classes={num_classes}")
 
     return ModelBundle(
         model=model,
-        in_dim=in_dim,
+        feature_dim=feature_dim,
         num_classes=num_classes,
         label_map=label_map,
         device=device,
@@ -214,6 +257,13 @@ def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
 
 
 def extract_hands_126(frame_bgr: np.ndarray, hands) -> Tuple[np.ndarray, np.ndarray, bool]:
+    feat = np.zeros(
+        126,
+        dtype=np.float32
+    )
+
+    has_hand = False
+
     h, w = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     result = hands.process(frame_rgb)
@@ -244,8 +294,6 @@ def extract_hands_126(frame_bgr: np.ndarray, hands) -> Tuple[np.ndarray, np.ndar
         feat = normalize_hands_vector_126(feat)
 
     return feat, frame_bgr, has_hand
-
-
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
@@ -293,6 +341,41 @@ def draw_text_vietnamese(frame_bgr, text, pos=(10, 30), color=(0, 255, 0), font_
     # convert RGB back to BGR
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
+def _load_label_original_lookup(
+    path: Path,
+) -> dict[str, str]:
+
+    out = {}
+
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+
+        if isinstance(data, dict):
+
+            for _, meta in data.items():
+
+                if not isinstance(meta, dict):
+                    continue
+
+                key = str(
+                    meta.get("label_key", "")
+                ).strip()
+
+                original = str(
+                    meta.get("label_original", "")
+                ).strip()
+
+                if key:
+                    out[key] = (
+                        original or key
+                    )
+
+    except Exception:
+        pass
+
+    return out
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Realtime sign recognition using TCN + MediaPipe Hands')
@@ -331,10 +414,10 @@ def main() -> None:
         ckpt = args.checkpoint
         meta = {}
 
-    bundle = build_model_from_ckpt(ckpt, args.device)
-    in_dim = bundle.in_dim
-    if in_dim != 126:
-        raise SystemExit(f'Model in_dim={in_dim} must match feature extractor (126).')
+    bundle = build_model_from_ckpt(ckpt, args.device, meta=meta)
+    feature_dim = bundle.feature_dim
+    if feature_dim != 126:
+        raise SystemExit(f'Model feature_dim={feature_dim} must match feature extractor (126).')
 
     hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
@@ -402,10 +485,10 @@ def main() -> None:
                 continue
 
             # ----- HAND DETECTED → normal flow -----
-            if feat.shape[0] < in_dim:
-                feat = np.pad(feat, (0, in_dim - feat.shape[0]))
-            elif feat.shape[0] > in_dim:
-                feat = feat[:in_dim]
+            if feat.shape[0] < feature_dim:
+                feat = np.pad(feat, (0, feature_dim - feat.shape[0]))
+            elif feat.shape[0] > feature_dim:
+                feat = feat[:feature_dim]
 
             buf.append(feat.astype(np.float32))
 
@@ -419,7 +502,7 @@ def main() -> None:
                 
                 X = np.stack(list(buf), axis=0)
                 lengths = torch.tensor( [args.window], dtype=torch.long, device=bundle.device )
-                X_pad = np.zeros((1, args.window, in_dim), dtype=np.float32)
+                X_pad = np.zeros((1, args.window, feature_dim), dtype=np.float32)
                 t = min(args.window, X.shape[0])
                 X_pad[0, -t:] = X[-t:]
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hands } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
 
-import { flattenRealtimeHands } from "../../utils/realtimeFlatten";
+import { flattenRealtimeHands, type MediaPipeHandsLikeResults } from "../../utils/realtimeFlatten";
 import { RealtimeRingBuffer } from "../../utils/realtimeRingBuffer";
 import {
   RealtimeInferenceScheduler,
@@ -56,17 +56,26 @@ export default function RealtimeRuntime({
   // Safety: prevent post-unmount work.
   const disposedRef = useRef(false);
 
+  // Prevent double-start / overlapping init.
+  const startingRef = useRef(false);
+  const startEpochRef = useRef(0);
+
   // Minimal UI state (only updates on prediction/status/error, not per frame)
   const [running, setRunning] = useState<boolean>(autoStart);
   const [status, setStatus] = useState<RealtimeSchedulerStatus>("idle");
   const [prediction, setPrediction] = useState<{ label: string; confidence: number; samples: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState<boolean>(false);
 
   const previewStyle = useMemo(() => {
     return mirrorPreview ? ({ transform: "scaleX(-1)" } as const) : undefined;
   }, [mirrorPreview]);
 
-  const stopAll = useCallback(() => {
+  const stopAll = useCallback(async () => {
+    // Ensure start guard is released even if stop happens mid-init.
+    startingRef.current = false;
+    setIsStarting(false);
+
     // Dispose scheduler first (prevents callbacks firing after stop).
     try {
       schedulerRef.current?.dispose();
@@ -115,16 +124,22 @@ export default function RealtimeRuntime({
     disposedRef.current = false;
     return () => {
       disposedRef.current = true;
-      stopAll();
+      void stopAll();
     };
   }, [stopAll]);
 
   // Start/stop runtime based on `running`.
   useEffect(() => {
     if (!running) {
-      stopAll();
+      void stopAll();
       return;
     }
+
+    // Guard: prevent double init (double-click, StrictMode effect re-run, etc.).
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setIsStarting(true);
+    const startEpoch = ++startEpochRef.current;
 
     const video = videoRef.current;
     if (!video) {
@@ -165,7 +180,7 @@ export default function RealtimeRuntime({
         if (!scratch || !ring) return;
 
         // RAW encoding only (no mirroring, no swapping, no normalization).
-        const vec = flattenRealtimeHands(results as any, scratch);
+        const vec = flattenRealtimeHands(results as MediaPipeHandsLikeResults, scratch);
         ring.append(vec);
 
         // Scheduler itself gates on isReady() and inFlight.
@@ -174,7 +189,7 @@ export default function RealtimeRuntime({
         // Encoding/buffer errors should not crash the app.
         // Keep last stable prediction; surface error text.
         const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
+        setError((prev) => (prev === msg ? prev : msg));
       }
     });
 
@@ -209,17 +224,26 @@ export default function RealtimeRuntime({
         smoother.pushPrediction(pred.label, pred.confidence);
         const smoothed = smoother.getSmoothed();
         if (smoothed) {
-          setPrediction({
+          const next = {
             label: smoothed.label,
             confidence: smoothed.confidence,
             samples: smoothed.samples,
+          };
+
+          // Avoid spam/rerenders if nothing materially changed.
+          setPrediction((prev) => {
+            if (!prev) return next;
+            if (prev.label !== next.label) return next;
+            if (prev.samples !== next.samples) return next;
+            if (Math.abs(prev.confidence - next.confidence) >= 0.01) return next;
+            return prev;
           });
         }
       },
       onError: (err) => {
         if (disposedRef.current) return;
         const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
+        setError((prev) => (prev === msg ? prev : msg));
       },
     });
 
@@ -246,19 +270,39 @@ export default function RealtimeRuntime({
       .start()
       .then(() => {
         if (disposedRef.current) return;
+        if (startEpochRef.current !== startEpoch) return;
+        startingRef.current = false;
+        setIsStarting(false);
         setError(null);
       })
       .catch((e: unknown) => {
         if (disposedRef.current) return;
+        if (startEpochRef.current !== startEpoch) return;
+        startingRef.current = false;
+        setIsStarting(false);
         const msg = e instanceof Error ? e.message : String(e);
         setError(`Camera start failed: ${msg}`);
         setRunning(false);
       });
 
     return () => {
-      stopAll();
+      void stopAll();
     };
   }, [running, debounceMs, stopAll]);
+
+  const handleStartStop = useCallback(() => {
+    if (running) {
+      setRunning(false);
+      return;
+    }
+
+    // Ignore double-start clicks while init is in-flight.
+    if (startingRef.current) return;
+
+    setError(null);
+    setPrediction(null);
+    setRunning(true);
+  }, [running]);
 
   return (
     <div className="card space-y-4">
@@ -275,14 +319,11 @@ export default function RealtimeRuntime({
                 ? "bg-red-600 text-white border-red-500 hover:bg-red-500"
                 : "bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-500")
             }
-            onClick={() => {
-              setError(null);
-              setPrediction(null);
-              setRunning((v: boolean) => !v);
-            }}
+            onClick={handleStartStop}
             type="button"
+            disabled={isStarting}
           >
-            {running ? "Stop" : "Start"}
+            {running ? "Stop" : isStarting ? "Starting…" : "Start"}
           </button>
         </div>
       </div>
