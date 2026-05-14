@@ -2,8 +2,8 @@ import axios from "axios";
 
 /**
  * Determine API base URL based on environment
- * - In browser: Use configured VITE_API_URL or fall back to location
- * - Behind proxy: Use relative paths or configured URL
+ * - Prefer configured VITE_API_URL when provided
+ * - Otherwise use same-origin relative paths so Docker/nginx and Vite proxy can handle routing
  */
 
 const AUTH_EVENT = "voya:auth-change";
@@ -13,23 +13,12 @@ const emitAuthChange = () => {
 };
 
 const getApiBaseURL = (): string => {
-  // First, try environment variable (set at build time)
   const envUrl = import.meta.env.VITE_API_URL;
-  
   if (envUrl) {
     return envUrl;
   }
 
-  // Fallback: this deployment serves the frontend on :8080 and the backend on :8000.
-  // Use the backend port explicitly so browser requests do not fall back to the frontend nginx.
-  if (typeof window !== "undefined" && window.location) {
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    return `${protocol}//${hostname}:8000`;
-  }
-
-  // Final fallback
-  return "http://localhost:8000";
+  return "";
 };
 
 const TOKEN_KEY = "VOYA_AUTHENTICATION_TOKEN";

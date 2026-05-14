@@ -17,6 +17,7 @@ from app.api_validation import (
     validate_label,
     validate_language,
     validate_dialect,
+    save_upload_with_limit,
 )
 from app.storage.gdrive_client import upload_to_gdrive
 
@@ -43,6 +44,11 @@ def _measure_upload_size(upload_file, *, max_bytes: int) -> int:
     if max_bytes > 0 and size > max_bytes:
         raise HTTPException(status_code=413, detail=f"upload too large (max {max_bytes} bytes)")
     return int(size)
+
+
+def _raw_upload_local_path(class_meta, upload_uid: str, original_filename: str) -> Path:
+    raw_dir = settings.dataset_root / "raw_videos" / class_meta.language / class_meta.dialect / class_meta.folder_name()
+    return raw_dir / f"{upload_uid}_{original_filename}"
 
 
 @router.post("/video")
@@ -93,24 +99,30 @@ async def upload_video(
     upload_size = _measure_upload_size(file.file, max_bytes=max_bytes)
     log.info("[UPLOAD][video] bytes_received=%s max_bytes=%s", upload_size, max_bytes)
 
-    if not getattr(settings, "use_google_drive", False):
-        raise HTTPException(status_code=503, detail="Google Drive storage is disabled")
-
     upload_uid = uuid.uuid4().hex[:8]
     original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
-    label_part = _safe_path_part(label, "upload")
-    storage_key = f"raw_videos/{label_part}_{upload_uid}_{original_filename}"
+    local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
+    storage_key = local_path.relative_to(settings.dataset_root).as_posix()
 
-    try:
-        storage_url = upload_to_gdrive(
-            file.file,
-            storage_key,
-            content_type=file.content_type or "application/octet-stream",
-        )
-        log.info("[UPLOAD][video] raw video uploaded to Google Drive key=%s url=%s", storage_key, storage_url)
-    except Exception as e:
-        log.error("[UPLOAD][video][ERROR] Google Drive upload failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"Google Drive upload failed: {e}") from e
+    bytes_written, local_path_str = save_upload_with_limit(file.file, local_path, max_bytes=max_bytes)
+    storage_url = local_path_str
+    provider = "local"
+
+    if getattr(settings, "use_google_drive", False):
+        credentials_path = Path(str(getattr(settings, "google_drive_credentials", "")))
+        if credentials_path.exists():
+            try:
+                storage_url = upload_to_gdrive(
+                    local_path_str,
+                    storage_key,
+                    content_type=file.content_type or "application/octet-stream",
+                )
+                provider = "local+gdrive"
+                log.info("[UPLOAD][video] raw video mirrored to Google Drive key=%s url=%s", storage_key, storage_url)
+            except Exception as exc:
+                log.warning("[UPLOAD][video] Google Drive mirror failed, keeping local copy only: %s", exc)
+        else:
+            log.warning("[UPLOAD][video] Google Drive credentials missing at %s; keeping local copy only", credentials_path)
 
     created_at = raw_upload_now_str()
     raw_upload_row = {
@@ -124,7 +136,7 @@ async def upload_video(
         "user_id": user,
         "session_id": session_id,
         "original_filename": original_filename,
-        "local_path": "",
+        "local_path": local_path_str,
         "storage_key": storage_key,
         "storage_url": storage_url,
         "created_at": created_at,
@@ -143,7 +155,13 @@ async def upload_video(
         if getattr(settings, "debug_logging", False):
             log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
 
-    log.info("[UPLOAD][video] stored raw video only elapsed=%.3fs", time.time() - start)
+    log.info(
+        "[UPLOAD][video] stored raw video provider=%s path=%s bytes_written=%s elapsed=%.3fs",
+        provider,
+        local_path_str,
+        bytes_written,
+        time.time() - start,
+    )
     return {
         "success": True,
         "id": upload_uid,
