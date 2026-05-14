@@ -1,14 +1,23 @@
 {
-  "cam-on": [
-    0
-  ],
-  "xin-chao": [
+  "c": [
     1
   ],
-  "rang-muoi": [
+  "a": [
     2
   ],
-  "tom": [
+  "rang-muoi": [
     3
+  ],
+  "tom": [
+    4
+  ],
+  "lot-da-ca": [
+    5
+  ],
+  "lot-vo-tom": [
+    6
+  ],
+  "lay-chi-tom": [
+    7
   ]
 }

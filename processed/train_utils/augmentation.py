@@ -40,6 +40,7 @@ class SignAugment:
         dropout_prob: float = 0.02,
         temporal_mask_prob: float = 0.15,
         temporal_jitter_prob: float = 0.25,
+        mirror_prob: float = 0.5,
         max_temporal_shift: int = 2,
     ):
         self.p = p
@@ -51,6 +52,7 @@ class SignAugment:
 
         self.temporal_mask_prob = temporal_mask_prob
         self.temporal_jitter_prob = temporal_jitter_prob
+        self.mirror_prob = mirror_prob
         self.max_temporal_shift = max_temporal_shift
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
@@ -77,6 +79,7 @@ class SignAugment:
         x = self._spatial_noise(x)
         x = self._spatial_scale(x)
         x = self._spatial_translation(x)
+        x = self._mirror_handedness(x)
 
         x = self._landmark_dropout(x)
 
@@ -158,6 +161,55 @@ class SignAugment:
 
         arr[..., 0] += tx * mask[..., 0]
         arr[..., 1] += ty * mask[..., 0]
+
+        return self._flatten(arr)
+
+    def _mirror_handedness(
+        self,
+        x: np.ndarray
+    ) -> np.ndarray:
+        """
+        Mirror augmentation for handedness diversity.
+
+        IMPORTANT:
+        This project uses swapped handedness semantics:
+            MediaPipe right -> left slot
+            MediaPipe left -> right slot
+
+        Therefore:
+        - we mirror X coordinates
+        - AND swap hand slots
+
+        This augmentation helps reduce:
+        - dominant-hand bias
+        - left/right orientation overfitting
+        - realtime handedness instability
+        """
+
+        if random.random() > self.mirror_prob:
+            return x
+
+        arr = self._reshape(x).copy()
+
+        # -----------------------------------------
+        # Mirror X coordinate
+        # -----------------------------------------
+
+        x_coords = arr[..., 0]
+
+        mask = (x_coords != 0)
+
+        x_coords[mask] = (
+            1.0 - x_coords[mask]
+        )
+
+        arr[..., 0] = x_coords
+
+        # -----------------------------------------
+        # Swap hand slots
+        # -----------------------------------------
+
+        arr[:, [0, 1]] = arr[:, [1, 0]]
 
         return self._flatten(arr)
 

@@ -107,7 +107,7 @@ If you want a model that only targets a specific sign-language subset (e.g. `bac
 Example (North / miền Bắc):
 
 ```powershell
-python train_model/train_utils/train_tcn.py --dialect bac --epochs 80 --batch_size 32
+python processed/train_utils/train_tcn.py --dialect bac --epochs 80 --batch_size 32
 ```
 
 This run will:

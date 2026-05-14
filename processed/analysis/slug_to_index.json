@@ -1,6 +1,9 @@
 {
-  "cam-on": 0,
-  "xin-chao": 1,
-  "rang-muoi": 2,
-  "tom": 3
+  "c": 1,
+  "a": 2,
+  "rang-muoi": 3,
+  "tom": 4,
+  "lot-da-ca": 5,
+  "lot-vo-tom": 6,
+  "lay-chi-tom": 7
 }

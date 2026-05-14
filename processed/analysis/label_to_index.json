@@ -1,6 +1,9 @@
 {
-  "vn/common/cam-on": 0,
-  "vn/common/xin-chao": 1,
-  "vn/hoa-de/rang-muoi": 2,
-  "vn/hoa-de/tom": 3
+  "vn/common/c": 1,
+  "vn/common/a": 2,
+  "vn/hoa-de/rang-muoi": 3,
+  "vn/hoa-de/tom": 4,
+  "vn/hoa-de/lot-da-ca": 5,
+  "vn/hoa-de/lot-vo-tom": 6,
+  "vn/hoa-de/lay-chi-tom": 7
 }

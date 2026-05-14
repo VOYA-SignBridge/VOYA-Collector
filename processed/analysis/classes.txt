@@ -1,4 +1,7 @@
-vn/common/cam-on
-vn/common/xin-chao
+vn/common/c
+vn/common/a
 vn/hoa-de/rang-muoi
 vn/hoa-de/tom
+vn/hoa-de/lot-da-ca
+vn/hoa-de/lot-vo-tom
+vn/hoa-de/lay-chi-tom

@@ -24,7 +24,7 @@ python train_model/realtime/run_realtime.py --video path/to/video.mp4
 ```
 - Use a specific checkpoint:
 ```powershell
-python train_model/realtime/run_realtime.py --checkpoint train_model/processed/train_utils/outputs/tcn_YYYYMMDD_HHMMSS.pt
+python processed/realtime/run_realtime.py --checkpoint processed/train_model/train_utils/outputs/tcn_YYYYMMDD_HHMMSS.pt
 ```
 
 Keys: press `q` to quit.
