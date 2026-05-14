@@ -5,12 +5,12 @@ import argparse
 import json
 import re
 import time
-import urllib.error
-import urllib.request
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Deque, List, Optional, Tuple
+from backend.app.processing.utils import normalize_hands_vector_126
+
 
 import numpy as np
 
@@ -27,9 +27,10 @@ except Exception as e:  # pragma: no cover
 import torch
 import torch.nn as nn
 try:
-    from train_model.dataset_versioning import get_analysis_dir
+    from dataset_versioning import get_analysis_dir
 except Exception:
     get_analysis_dir = None  # type: ignore
+
 
 @dataclass
 class ModelBundle:
@@ -38,44 +39,6 @@ class ModelBundle:
     num_classes: int
     label_map: List[str]
     device: str
-
-
-_HAND_LANDMARKER_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-_HAND_LANDMARKER_MODEL_PATH = Path(__file__).resolve().parent / "assets" / "hand_landmarker.task"
-
-
-def _ensure_hand_landmarker_model() -> Path:
-    model_path = _HAND_LANDMARKER_MODEL_PATH
-    if model_path.exists() and model_path.stat().st_size > 0:
-        return model_path
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = model_path.with_suffix(".task.download")
-    try:
-        with urllib.request.urlopen(_HAND_LANDMARKER_MODEL_URL, timeout=120) as response:
-            model_path.write_bytes(response.read())
-        return model_path
-    except Exception as exc:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except Exception:
-                pass
-        raise RuntimeError(f"Failed to download hand landmarker model: {exc}") from exc
-
-
-def _create_hand_landmarker():
-    if mp is None:
-        raise RuntimeError("mediapipe is not available")
-    model_path = _ensure_hand_landmarker_model()
-    options = mp.tasks.vision.HandLandmarkerOptions(
-        base_options=mp.tasks.BaseOptions(model_asset_path=str(model_path)),
-        running_mode=mp.tasks.vision.RunningMode.IMAGE,
-        num_hands=2,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
-    return mp.tasks.vision.HandLandmarker.create_from_options(options)
 
 
 class Chomp1d(nn.Module):
@@ -250,41 +213,38 @@ def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
     )
 
 
-def extract_hands_126(frame_bgr: np.ndarray, landmarker) -> Tuple[np.ndarray, np.ndarray, bool]:
+def extract_hands_126(frame_bgr: np.ndarray, hands) -> Tuple[np.ndarray, np.ndarray, bool]:
     h, w = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-    result = landmarker.detect(mp_image)
+    result = hands.process(frame_rgb)
 
     left = np.zeros((21, 3), dtype=np.float32)
     right = np.zeros((21, 3), dtype=np.float32)
 
     has_hand = False
-    hand_connections = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 
-    if result.hand_landmarks and result.handedness:
-        has_hand = True
-        for landmarks, handedness in zip(result.hand_landmarks, result.handedness):
-            handedness_label = ""
-            if handedness:
-                category = handedness[0]
-                handedness_label = (getattr(category, "category_name", "") or getattr(category, "display_name", "") or "").lower()
-            coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks], dtype=np.float32)
-            if handedness_label == 'left':
+    if result.multi_hand_landmarks and result.multi_handedness:
+        has_hand = True   # ----> HAND DETECTED
+        for lm, hd in zip(result.multi_hand_landmarks, result.multi_handedness):
+            label = hd.classification[0].label.lower()
+            coords = np.array([[p.x, p.y, p.z] for p in lm.landmark], dtype=np.float32)
+            if label == 'right':
                 left = coords
             else:
                 right = coords
+            mp.solutions.drawing_utils.draw_landmarks(frame_bgr, lm, mp.solutions.hands.HAND_CONNECTIONS)
 
-            points = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
-            for connection in hand_connections:
-                start_pt = points[connection.start]
-                end_pt = points[connection.end]
-                cv2.line(frame_bgr, start_pt, end_pt, (0, 255, 0), 2)
-            for x, y in points:
-                cv2.circle(frame_bgr, (x, y), 2, (0, 0, 255), -1)
+        feat = np.concatenate(
+            [left.reshape(-1), right.reshape(-1)],
+            axis=0
+        ).astype(np.float32)
 
-    feat = np.concatenate([left.reshape(-1), right.reshape(-1)], axis=0)
+        # IMPORTANT:
+        # must match training preprocessing
+        feat = normalize_hands_vector_126(feat)
+
     return feat, frame_bgr, has_hand
+
 
 
 
@@ -376,7 +336,7 @@ def main() -> None:
     if in_dim != 126:
         raise SystemExit(f'Model in_dim={in_dim} must match feature extractor (126).')
 
-    hands = _create_hand_landmarker()
+    hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
     cap = cv2.VideoCapture(0 if not args.video else args.video)
     if not cap.isOpened():
@@ -458,7 +418,7 @@ def main() -> None:
                 inference_start = time.time()
                 
                 X = np.stack(list(buf), axis=0)
-                lengths = torch.tensor([X.shape[0]], dtype=torch.long, device=bundle.device)
+                lengths = torch.tensor( [args.window], dtype=torch.long, device=bundle.device )
                 X_pad = np.zeros((1, args.window, in_dim), dtype=np.float32)
                 t = min(args.window, X.shape[0])
                 X_pad[0, -t:] = X[-t:]

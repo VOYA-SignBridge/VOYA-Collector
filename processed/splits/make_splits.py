@@ -179,9 +179,22 @@ def stratified_split(rows):
         items.sort(key=lambda x: (x.get('sample_id') or x.get('sample_uid') or ''))
         random.Random(RANDOM_SEED).shuffle(items)
         n = len(items)
-        n_train = int(round(n * TRAIN_RATIO))
-        n_val = int(round(n * VAL_RATIO))
+        if n >= 3:
+            n_train = max(1, int(round(n * TRAIN_RATIO)))
+            n_val = max(1, int(round(n * VAL_RATIO)))
+        else:
+            n_train = max(1, n - 1)
+            n_val = 0
+
         n_test = n - n_train - n_val
+
+        if n_test < 1 and n >= 3:
+            n_test = 1
+
+            if n_train > n_val:
+                n_train -= 1
+            else:
+                n_val -= 1
         # adjust if rounding causes overflow
         if n_test < 0:
             n_test = 0
@@ -209,16 +222,22 @@ def _targets_per_split(rows):
         'test': {},
     }
     for k, n in totals.items():
-        n_train = int(round(n * TRAIN_RATIO))
-        n_val = int(round(n * VAL_RATIO))
+        if n >= 3:
+            n_train = max(1, int(round(n * TRAIN_RATIO)))
+            n_val = max(1, int(round(n * VAL_RATIO)))
+        else:
+            n_train = max(1, n - 1)
+            n_val = 0
+
         n_test = n - n_train - n_val
-        if n_test < 0:
-            n_test = 0
-            while n_train + n_val > n:
-                if n_val > 0:
-                    n_val -= 1
-                elif n_train > 0:
-                    n_train -= 1
+
+        if n_test < 1 and n >= 3:
+            n_test = 1
+
+            if n_train > n_val:
+                n_train -= 1
+            else:
+                n_val -= 1
         targets['train'][k] = n_train
         targets['val'][k] = n_val
         targets['test'][k] = n_test
@@ -254,7 +273,7 @@ def stratified_group_split_by(rows, group_col: str):
 
     # deterministic order: users sorted by total samples desc, then name
     rng = random.Random(RANDOM_SEED)
-    ordered_users = sorted(groups.keys(), key=lambda u: (-sum(user_vec[u].values()), str(u)))
+    ordered_users = sorted( groups.keys(), key=lambda u: ( min(user_vec[u].values()), -sum(user_vec[u].values()), str(u) ) )
 
     assign = {}
     for u in ordered_users:
@@ -330,10 +349,20 @@ def summarize(rows, label):
             return 10**9  # push non-numeric to the end
     return {label: dict(sorted(c.items(), key=_key)), 'total': len(rows)}
 
+def _assert_no_overlap(a, b):
+    sa = set(r["sample_id"] for r in a)
+    sb = set(r["sample_id"] for r in b)
+
+    overlap = sa & sb
+
+    if overlap:
+        raise RuntimeError(
+            f"Split leakage detected: {len(overlap)} overlapping samples"
+        )
 
 def main():
     parser = argparse.ArgumentParser(description='Make dataset splits')
-    parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits')
+    parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits', default=True)
     parser.add_argument('--group_col', type=str, default='user', help='Grouping column to keep disjoint (e.g., user, dialect)')
     parser.add_argument('--by_language', action='store_true', help='Write separate split CSVs per language under splits/<language>/')
     parser.add_argument('--languages', type=str, default='', help='Optional comma-separated whitelist of languages when using --by_language')
@@ -380,6 +409,9 @@ def main():
 
     if not args.by_language:
         train, val, test = _do_split(rows)
+        _assert_no_overlap(train, val) 
+        _assert_no_overlap(train, test) 
+        _assert_no_overlap(val, test)
         paths = {
             'train': write_split('train', train, fieldnames),
             'val': write_split('val', val, fieldnames),

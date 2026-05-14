@@ -24,17 +24,25 @@ except Exception:  # pragma: no cover
     import sys as _sys
     from pathlib import Path as _P
     _sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.metrics import sequence_consistency_score  # type: ignore
+    from processed.train_utils.metrics import sequence_consistency_score  # type: ignore
+
+try:
+    from .augmentation import build_train_augment
+except Exception:
+    import sys
+    from pathlib import Path as _P
+    sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.train_utils.augmentation import build_train_augment
 
 try:
     # When run as module: python -m processed.train_utils.train_tcn
-    from .dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
+    from .dataset_loader import NPZSignDataset # type: ignore
 except Exception:  # pragma: no cover
     # When run as script: python processed/train_utils/train_tcn.py
     import sys
     from pathlib import Path as _P
     sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
+    from processed.train_utils.dataset_loader import NPZSignDataset # type: ignore
 
 
 EXPECTED_FEATURE_DIM = 126
@@ -254,22 +262,20 @@ def build_loader(
     batch_size: int,
     shuffle: bool,
     num_workers: int,
+    augment_fn=None,
     *,
     features_root: Optional[Path] = None,
     label_to_index_json: Optional[Path] = None,
     feature_dim: Optional[int] = None,
     seed: int = 42,
 ) -> DataLoader:
-    ds = NPZSignDataset(csv_path, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
-    if feature_dim is None:
-        collate = pad_collate_fn
-    else:
-        collate = lambda b: pad_collate_fn(
-            b,
-            feature_dim=int(feature_dim),
-            on_feature_dim_mismatch="error",
-            log_feature_dim_mismatch=False,
-        )
+    ds = NPZSignDataset(
+        csv_path,
+        root=features_root,
+        label_to_index_json=label_to_index_json,
+        to_tensor=True,
+        augment_fn=augment_fn,
+    )
     g = torch.Generator()
     g.manual_seed(int(seed))
     return DataLoader(
@@ -280,6 +286,8 @@ def build_loader(
         num_workers=num_workers,
         worker_init_fn=_seed_worker,
         generator=g,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=( num_workers > 0 and os.name != "nt" ),
     )
 
 
@@ -532,6 +540,9 @@ def train_one_epoch(model: nn.Module, loader: DataLoader, opt: torch.optim.Optim
         lengths = lengths.to(device)
         logits = model(X, lengths)
         loss = criterion(logits, y)
+        if not torch.isfinite(loss):
+            print("Non-finite loss detected.")
+            continue
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -774,6 +785,10 @@ def main() -> None:
     ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
     if ds_tmp.index_to_label:
         num_classes = len(ds_tmp.index_to_label)
+        if num_classes < 2:
+            raise SystemExit(
+                f"Need at least 2 classes, got {num_classes}"
+            )
     else:
         # fallback: scan labels from a subset of the train set
         label_set = set()
@@ -792,6 +807,8 @@ def main() -> None:
         dropout=cfg.dropout,
     ).to(cfg.device)
 
+    train_augment = build_train_augment()
+
     train_loader = build_loader(
         cfg.train_csv,
         cfg.batch_size,
@@ -801,6 +818,7 @@ def main() -> None:
         label_to_index_json=label_to_index_json,
         feature_dim=in_dim,
         seed=cfg.seed,
+        augment_fn=train_augment,
     )
     val_loader = build_loader(
         cfg.val_csv,
@@ -811,6 +829,7 @@ def main() -> None:
         label_to_index_json=label_to_index_json,
         feature_dim=in_dim,
         seed=cfg.seed,
+        augment_fn=None,
     )
     test_loader = build_loader(
         cfg.test_csv,
@@ -821,7 +840,18 @@ def main() -> None:
         label_to_index_json=label_to_index_json,
         feature_dim=in_dim,
         seed=cfg.seed,
+        augment_fn=None,
     )
+
+    sample_batch = next(iter(train_loader))
+
+    X0 = sample_batch[0]
+
+    if X0.shape[-1] != EXPECTED_FEATURE_DIM:
+        raise RuntimeError(
+            f"Invalid feature dim: {X0.shape}"
+        )
+
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.epochs)
@@ -839,6 +869,7 @@ def main() -> None:
         if improved:
             best_val_f1 = va_f1
             best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+            torch.save( best_state, cfg.out_dir / "best_model_tmp.pt" )
             since_best = 0
         else:
             since_best += 1
