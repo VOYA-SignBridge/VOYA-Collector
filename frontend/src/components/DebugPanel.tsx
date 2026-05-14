@@ -11,7 +11,7 @@ export interface DebugOperation {
   job_id?: string;
   message?: string;
   error?: string;
-  response?: Record<string, any>;
+  response?: Record<string, unknown>;
 }
 
 export interface DebugState {
@@ -20,6 +20,16 @@ export interface DebugState {
   lastBackendPing: number | null;
   backendConnected: boolean;
 }
+
+interface DebuggerInterface {
+  log: (operation: DebugOperation) => void;
+  getState: () => DebugState;
+  setState: (newState: Partial<DebugState>) => void;
+}
+
+type DebugWindow = Window & {
+  __voyadebug?: DebuggerInterface;
+};
 
 const DebugPanel: React.FC = () => {
   const [debugState, setDebugState] = useState<DebugState>(() => {
@@ -47,7 +57,8 @@ const DebugPanel: React.FC = () => {
 
   // Global debug tracker (expose to window for easy access from upload functions)
   useEffect(() => {
-    (window as any).__voyadebug = {
+    const debugWindow = window as DebugWindow;
+    debugWindow.__voyadebug = {
       log: (operation: DebugOperation) => {
         setDebugState((prev) => ({
           ...prev,
@@ -85,7 +96,7 @@ const DebugPanel: React.FC = () => {
       }));
 
       // Log connectivity check
-      (window as any).__voyadebug?.log({
+      (window as DebugWindow).__voyadebug?.log({
         timestamp: Date.now(),
         operation: 'CONNECTIVITY',
         status: response.status >= 200 && response.status < 300 ? 'SUCCESS' : 'FAILURE',
@@ -98,7 +109,7 @@ const DebugPanel: React.FC = () => {
         backendConnected: false,
       }));
 
-      (window as any).__voyadebug?.log({
+      (window as DebugWindow).__voyadebug?.log({
         timestamp: Date.now(),
         operation: 'CONNECTIVITY',
         status: 'FAILURE',

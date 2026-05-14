@@ -3,6 +3,22 @@ import { validateUploadResult } from "./validators";
 import type { Result } from "./validators";
 import type { UploadResult, CameraUploadPayload } from "../types";
 
+type DebugStatus = 'SUCCESS' | 'FAILURE' | 'IN_PROGRESS';
+
+type DebugLogData = Record<string, unknown>;
+
+type DebugLogger = {
+  log?: (entry: {
+    timestamp: number;
+    operation: string;
+    status: DebugStatus;
+  } & DebugLogData) => void;
+};
+
+type DebugWindow = Window & {
+  __voyadebug?: DebugLogger;
+};
+
 const extractErrorMessage = (err: unknown, fallback = "Upload failed"): string => {
   type AxiosLikeError = {
     response?: { status?: number; data?: unknown };
@@ -32,10 +48,10 @@ const extractErrorMessage = (err: unknown, fallback = "Upload failed"): string =
 };
 
 // Helper to log to debug panel
-const logDebugOperation = (operation: string, status: 'SUCCESS' | 'FAILURE' | 'IN_PROGRESS', data: Record<string, any>) => {
-  const debugger_interface = (window as any).__voyadebug;
-  if (debugger_interface?.log) {
-    debugger_interface.log({
+const logDebugOperation = (operation: string, status: DebugStatus, data: DebugLogData) => {
+  const debugWindow = window as DebugWindow;
+  if (debugWindow.__voyadebug?.log) {
+    debugWindow.__voyadebug.log({
       timestamp: Date.now(),
       operation,
       status,
