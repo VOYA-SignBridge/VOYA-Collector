@@ -27,7 +27,8 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const navigation = [
     { name: "Bảng điều khiển", href: "/upload", icon: "📊" },
-    { name: "Thư viện nhãn", href: "/labels", icon: "🏷️" }
+    { name: "Thư viện nhãn", href: "/labels", icon: "🏷️" },
+    { name: "Nhận dạng realtime", href: "/realtime", icon: "🖐️" }
   ];
 
   const handleNewSession = useCallback(() => {

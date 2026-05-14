@@ -13,6 +13,7 @@ import { me } from "./api/auth";
 
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
+const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 
@@ -117,6 +118,15 @@ function App() {
               element={
                 <ProtectedRoute>
                   <LabelsPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/realtime"
+              element={
+                <ProtectedRoute>
+                  <RealtimeRecognitionPage />
                 </ProtectedRoute>
               }
             />
