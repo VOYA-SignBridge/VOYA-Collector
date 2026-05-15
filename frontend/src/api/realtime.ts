@@ -2,6 +2,16 @@ import axiosClient from "./axiosClient";
 import type { Result } from "./validators";
 
 /**
+ * Realtime model metadata (from GET /realtime/models)
+ */
+export interface RealtimeModel {
+  id: string;
+  name: string;
+  language: string;
+  dialect: string;
+}
+
+/**
  * Realtime inference API contract.
  *
  * Frontend must send RAW landmark-derived features only.
@@ -14,12 +24,14 @@ import type { Result } from "./validators";
  * - feature_dim: 126
  */
 export interface RealtimePredictRequest {
+  model_id: string;
   frames: number[][];
 }
 
 export interface RealtimePredictResponse {
   label: string;
   confidence: number;
+  label_key: string;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -27,6 +39,17 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 const isFiniteNumber = (v: unknown): v is number =>
   typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Generate a unique request ID for observability.
+ * Falls back to timestamp + random for older Electron/embedded Chromium without crypto.randomUUID.
+ */
+function createRequestId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 /**
  * Minimal runtime validator to prevent UI crashes from malformed backend data.
@@ -38,6 +61,7 @@ export function validateRealtimePredictResponse(data: unknown): Result<RealtimeP
 
     const label = data.label;
     const confidence = data.confidence;
+    const label_key = data.label_key;
 
     if (typeof label !== "string" || !label.trim()) {
       throw new Error("Invalid response: missing label");
@@ -45,10 +69,72 @@ export function validateRealtimePredictResponse(data: unknown): Result<RealtimeP
     if (!isFiniteNumber(confidence)) {
       throw new Error("Invalid response: missing confidence");
     }
+    if (typeof label_key !== "string" || !label_key.trim()) {
+      throw new Error("Invalid response: missing label_key");
+    }
 
-    return { ok: true, data: { label, confidence } };
+    return { ok: true, data: { label, confidence, label_key } };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Validate models list response.
+ */
+function validateRealtimeModels(data: unknown): Result<RealtimeModel[]> {
+  try {
+    if (!Array.isArray(data)) throw new Error("Invalid models response");
+
+    const models: RealtimeModel[] = data.map((item, idx) => {
+      if (!isObject(item)) throw new Error(`Model[${idx}]: invalid object`);
+      const id = item.id;
+      const name = item.name;
+      const language = item.language;
+      const dialect = item.dialect;
+
+      if (typeof id !== "string" || !id.trim()) {
+        throw new Error(`Model[${idx}]: missing id`);
+      }
+      if (typeof name !== "string" || !name.trim()) {
+        throw new Error(`Model[${idx}]: missing name`);
+      }
+      if (typeof language !== "string") {
+        throw new Error(`Model[${idx}]: missing language`);
+      }
+      if (typeof dialect !== "string") {
+        throw new Error(`Model[${idx}]: missing dialect`);
+      }
+
+      return { id: id.trim(), name: name.trim(), language, dialect };
+    });
+
+    return { ok: true, data: models };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * GET /realtime/models
+ *
+ * Fetch available realtime models from backend.
+ * Returns list of model metadata for UI dropdown.
+ */
+export async function fetchRealtimeModels(): Promise<Result<RealtimeModel[]>> {
+  try {
+    if (import.meta.env.DEV) console.debug("[realtime] fetching models...");
+    const res = await axiosClient.get("/realtime/models");
+    const result = validateRealtimeModels(res.data);
+    if (result.ok && import.meta.env.DEV) {
+      console.debug("[realtime] models loaded:", result.data.length, "models");
+    }
+    return result;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[realtime] models fetch failed:", msg);
     return { ok: false, error: msg };
   }
 }
@@ -59,10 +145,26 @@ export function validateRealtimePredictResponse(data: unknown): Result<RealtimeP
  * Request policy (enforced by realtime runtime component, not here):
  * - debounce 150–250ms
  * - only one in-flight request; if in-flight => SKIP
+ * - request_id sent via X-Request-ID header for observability
  */
 export async function realtimePredict(
   payload: RealtimePredictRequest
 ): Promise<Result<RealtimePredictResponse>> {
-  const res = await axiosClient.post("/realtime/predict", payload);
-  return validateRealtimePredictResponse(res.data);
+  try {
+    const request_id = createRequestId();
+    if (import.meta.env.DEV) {
+      console.debug("[realtime] predict req_id=%s model=%s", request_id, payload.model_id);
+    }
+
+    const res = await axiosClient.post("/realtime/predict", payload, {
+      headers: {
+        "X-Request-ID": request_id,
+      },
+    });
+
+    return validateRealtimePredictResponse(res.data);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: msg };
+  }
 }

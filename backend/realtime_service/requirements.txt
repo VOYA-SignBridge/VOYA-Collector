@@ -1,0 +1,7 @@
+fastapi>=0.95,<1.0
+uvicorn[standard]>=0.22,<1.0
+pydantic>=1.10,<2.0
+numpy>=1.26,<3.0
+# Step 0 requires checkpoint loading + model warmup lifecycle.
+# Pin in production once you standardize runtime.
+torch>=2.2,<3.0

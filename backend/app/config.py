@@ -133,7 +133,14 @@ class Settings(BaseSettings):
         "ADMIN_PASSWORD",
         "",
     )
-    
+
+    # Realtime inference service proxy
+    realtime_service_url: str = os.getenv("REALTIME_SERVICE_URL", "http://localhost:8010")
+    realtime_connect_timeout: float = float(os.getenv("REALTIME_CONNECT_TIMEOUT", "5.0"))
+    realtime_read_timeout: float = float(os.getenv("REALTIME_READ_TIMEOUT", "10.0"))
+    realtime_max_concurrent: int = int(os.getenv("REALTIME_MAX_CONCURRENT", "8"))
+    realtime_max_body_bytes: int = int(os.getenv("REALTIME_MAX_BODY_BYTES", str(1 * 1024 * 1024)))
+
     @validator("speed_variants", pre=True, always=True)
     def _parse_speed_variants(cls, v, values):
         raw = values.get("speed_variants_raw")
