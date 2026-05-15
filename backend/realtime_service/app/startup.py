@@ -48,15 +48,26 @@ def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_p
     logger.info("[STARTUP] loading registry path=%s", registry_path)
     registry = load_registry(registry_path)
 
+    registry_dir = Path(registry_path).parent
+
     bundles = {}
 
     for entry in registry.models:
         validate_registry_contract(entry)
 
-        sha = compute_file_sha256(entry.checkpoint_path)
-        logger.info("[MODEL] id=%s sha256=%s loading checkpoint", entry.id, sha)
+        # Resolve ONCE: canonical absolute path, owned at startup
+        raw = Path(entry.checkpoint_path)
+        resolved = (registry_dir / raw).resolve() if not raw.is_absolute() else raw.resolve()
 
-        ckpt = load_checkpoint(entry.checkpoint_path)
+        # Validate existence BEFORE sha256/torch.load/warmup for clean error
+        if not resolved.exists() or not resolved.is_file():
+            raise RuntimeError(f"[MODEL] id={entry.id} checkpoint not found: {resolved}")
+
+        # Log resolved path ONCE at startup (useful for Docker/Windows service/CI)
+        logger.info("[MODEL] id=%s loading checkpoint path=%s", entry.id, resolved)
+
+        sha = compute_file_sha256(str(resolved))
+        ckpt = load_checkpoint(str(resolved))
         validate_checkpoint_schema(ckpt)
         validate_checkpoint_vs_registry(ckpt, entry)
 
@@ -71,7 +82,7 @@ def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_p
         bundle = build_bundle(
             model_id=entry.id,
             model_name=entry.name,
-            checkpoint_path=entry.checkpoint_path,
+            checkpoint_path=str(resolved),
             language=entry.language,
             dialect=entry.dialect,
             ckpt=ckpt,
