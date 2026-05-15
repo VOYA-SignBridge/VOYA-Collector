@@ -2,12 +2,68 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .schemas import LabelSpec, RegistryModelEntry
 
 
 EXPECTED_HANDEDNESS_POLICY = "swapped_mp_handedness_slots"
+
+
+def _normalize_missing_hands_policy(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"zero_filled", "zero-filled", "zero_filled_by_frontend"}:
+        return "zero_filled_by_frontend"
+    return text
+
+
+def _legacy_slots_from_landmark_order(landmark_order: Any) -> List[str]:
+    text = str(landmark_order or "").strip()
+    if not text:
+        return []
+
+    slots: List[str] = []
+    for hand, count in re.findall(r"(Left|Right)\s*\(\s*(\d+)\s*\)", text, flags=re.IGNORECASE):
+        slots.append(f"{hand.lower()}_slot_{int(count)}")
+    return slots
+
+
+def _canonical_preprocess_contract(raw_contract: Any) -> Dict[str, Any]:
+    contract = raw_contract if isinstance(raw_contract, dict) else {}
+
+    if isinstance(contract.get("feature_layout"), dict):
+        feature_layout = contract.get("feature_layout") or {}
+        canonical_slots = [str(slot) for slot in feature_layout.get("slots") or []]
+        return {
+            "feature_layout": {
+                "type": str(feature_layout.get("type") or "hands_126"),
+                "slots": canonical_slots,
+                "handedness_policy": str(feature_layout.get("handedness_policy") or ""),
+                "coordinate_space": str(feature_layout.get("coordinate_space") or contract.get("coordinate_space") or ""),
+                "coordinate_order": str(feature_layout.get("coordinate_order") or contract.get("coordinate_order") or ""),
+                "frontend_mirroring": str(feature_layout.get("frontend_mirroring") or contract.get("frontend_mirroring") or ""),
+                "missing_hands_policy": _normalize_missing_hands_policy(
+                    feature_layout.get("missing_hands_policy") or contract.get("missing_hands_policy") or contract.get("missing_hands")
+                ),
+            },
+            "expects_strict_shape": [int(x) for x in contract.get("expects_strict_shape") or []],
+        }
+
+    landmark_order = contract.get("landmark_order")
+    legacy_slots = _legacy_slots_from_landmark_order(landmark_order)
+    return {
+        "feature_layout": {
+            "type": "hands_126",
+            "slots": legacy_slots,
+            "handedness_policy": EXPECTED_HANDEDNESS_POLICY if legacy_slots else "",
+            "coordinate_space": str(contract.get("coordinate_space") or ""),
+            "coordinate_order": str(contract.get("coordinate_order") or ""),
+            "frontend_mirroring": str(contract.get("frontend_mirroring") or ""),
+            "missing_hands_policy": _normalize_missing_hands_policy(contract.get("missing_hands")),
+        },
+        "expects_strict_shape": [int(x) for x in contract.get("expects_strict_shape") or []],
+    }
 
 
 def canonical_json_sha256(obj: Any) -> str:
@@ -56,8 +112,8 @@ def validate_checkpoint_schema(ckpt: Dict[str, Any]) -> None:
     if missing:
         raise ValueError(f"checkpoint missing required keys: {missing}")
 
-    if not isinstance(ckpt.get("idx_to_label"), list):
-        raise ValueError("checkpoint idx_to_label must be a list")
+    if not isinstance(ckpt.get("idx_to_label"), (list, dict)):
+        raise ValueError("checkpoint idx_to_label must be a list or dict")
 
 
 def validate_labels(
@@ -112,8 +168,9 @@ def validate_checkpoint_vs_registry(ckpt: Dict[str, Any], entry: RegistryModelEn
             f"checkpoint normalization_version {ckpt.get('normalization_version')!r} != registry {entry.normalization_version!r}"
         )
 
-    # Preprocess contract must match exactly (semantic invariants)
-    if ckpt.get("preprocess_contract") != entry.preprocess_contract.dict():
+    # Preprocess contract must match semantically. The checkpoint may carry a
+    # legacy flat contract, while the registry stores the canonical nested form.
+    if _canonical_preprocess_contract(ckpt.get("preprocess_contract")) != _canonical_preprocess_contract(entry.preprocess_contract.dict()):
         raise ValueError("checkpoint preprocess_contract != registry preprocess_contract (refusing to start)")
 
     # Optional semantic contract hash pinning

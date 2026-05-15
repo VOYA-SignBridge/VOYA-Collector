@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import importlib.util
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import FastAPI
 
-from .contracts import validate_checkpoint_schema, validate_checkpoint_vs_registry, validate_labels, validate_registry_contract
+from .contracts import validate_checkpoint_schema, validate_checkpoint_vs_registry, validate_registry_contract
 from .model_loader import build_bundle, compute_file_sha256, load_checkpoint
 from .registry import load_registry
 
@@ -37,7 +39,59 @@ def _load_normalization_module(normalization_py_path: str) -> Any:
     return mod
 
 
-def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_path: str) -> None:
+def _resolve_optional_path(path_value: str) -> Path | None:
+    raw = (path_value or "").strip()
+    if not raw:
+        return None
+
+    candidate = Path(raw)
+    if candidate.exists():
+        return candidate
+
+    if candidate.is_absolute():
+        return None
+
+    cwd = Path.cwd().resolve()
+    for base in [cwd, *cwd.parents]:
+        probe = (base / candidate).resolve()
+        if probe.exists():
+            return probe
+
+    return None
+
+
+def _load_label_lookup(label_index_path: str) -> Dict[str, Dict[str, Any]]:
+    resolved = _resolve_optional_path(label_index_path)
+    if resolved is None:
+        logger.warning("[STARTUP] label index not found path=%s", label_index_path)
+        return {}
+
+    try:
+        data = json.loads(resolved.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"failed to load label index: {resolved}") from exc
+
+    if not isinstance(data, dict):
+        raise RuntimeError(f"label index must be a dict: {resolved}")
+
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for item in data.values():
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("label_key") or "").strip()
+        if key:
+            lookup[key] = item
+
+    return lookup
+
+
+def initialize_app_state(
+    app: FastAPI,
+    *,
+    registry_path: str,
+    normalization_py_path: str,
+    label_index_path: str,
+) -> None:
     """All-or-nothing startup initializer.
 
     Any failure raises and prevents app from starting.
@@ -49,6 +103,8 @@ def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_p
     registry = load_registry(registry_path)
 
     registry_dir = Path(registry_path).parent
+    logger.info("[STARTUP] loading label index path=%s", label_index_path)
+    label_lookup = _load_label_lookup(label_index_path)
 
     bundles = {}
 
@@ -71,14 +127,6 @@ def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_p
         validate_checkpoint_schema(ckpt)
         validate_checkpoint_vs_registry(ckpt, entry)
 
-        # Validate labels (structured objects) and alignment with registry scope
-        _ = validate_labels(
-            ckpt["idx_to_label"],
-            num_classes=int(ckpt["num_classes"]),
-            registry_language=entry.language,
-            registry_dialect=entry.dialect,
-        )
-
         bundle = build_bundle(
             model_id=entry.id,
             model_name=entry.name,
@@ -87,6 +135,7 @@ def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_p
             dialect=entry.dialect,
             ckpt=ckpt,
             checkpoint_sha256=sha,
+            label_lookup=label_lookup,
         )
 
         bundles[entry.id] = bundle
@@ -98,8 +147,19 @@ def initialize_app_state(app: FastAPI, *, registry_path: str, normalization_py_p
     app.state.normalization_module = normalization_module
 
 
-def register_startup(app: FastAPI, *, registry_path: str, normalization_py_path: str) -> None:
+def register_startup(
+    app: FastAPI,
+    *,
+    registry_path: str,
+    normalization_py_path: str,
+    label_index_path: str,
+) -> None:
     @app.on_event("startup")
     def _startup() -> None:
         # Fail-fast: if this raises, uvicorn will fail to boot.
-        initialize_app_state(app, registry_path=registry_path, normalization_py_path=normalization_py_path)
+        initialize_app_state(
+            app,
+            registry_path=registry_path,
+            normalization_py_path=normalization_py_path,
+            label_index_path=label_index_path,
+        )

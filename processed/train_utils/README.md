@@ -31,7 +31,7 @@ python -m pip install --upgrade pip
 Cài dependency train:
 
 ```powershell
-pip install -r train_model/requirements-train.txt
+pip install -r processed/requirements-train.txt
 ```
 
 Nếu cần cài riêng PyTorch CPU:
@@ -69,33 +69,33 @@ If you have CUDA, refer to https://pytorch.org/get-started/locally/ for the corr
 	- `dataset/labels.csv`
 	- `dataset/samples/samples.csv`
 	- `dataset/features/.../*.npz` (mỗi sample 1 file, key chính là `sequence`)
-- Splits sẽ được sinh ra ở `train_model/processed/splits/{train,val,test}.csv`.
-- Optional label maps ở `train_model/processed/analysis/{label_to_index.json,index_to_label.json}`.
+- Splits sẽ được sinh ra ở `processed/splits/{train,val,test}.csv`.
+- Optional label maps ở `processed/analysis/{label_to_index.json,index_to_label.json}`.
 
 ## Quick checks
 Tạo splits từ dataset hiện tại (chạy từ repo root):
 
 ```powershell
-python train_model/splits/make_splits.py
+python processed/splits/make_splits.py
 ```
 
 Sau đó chạy sanity để chắc loader đọc được `.npz` và CSV:
 
 ```powershell
-python train_model/train_utils/run_loader_sanity.py
+python processed/train_utils/run_loader_sanity.py
 ```
 
 ## Train a TCN
 Default settings work well for this dataset size and sequence length (~60 frames):
 
 ```powershell
-python train_model/train_utils/train_tcn.py --epochs 80 --batch_size 32 --dropout 0.3 --channels 64 --levels 3 --kernel_size 5
+python processed/train_utils/train_tcn.py --epochs 80 --batch_size 32 --dropout 0.3 --channels 64 --levels 3 --kernel_size 5
 ```
 
 Key flags:
 - `--train_csv --val_csv --test_csv`: Override split paths if needed.
 - `--device`: `cuda` or `cpu` (auto-detects if CUDA is available).
-- `--out_dir`: Output directory for checkpoints and metrics (default `train_model/processed/train_utils/outputs`).
+- `--out_dir`: Output directory for checkpoints and metrics (default `processed/train_utils/outputs`).
 
 Outputs:
 - `tcn_YYYYMMDD_HHMMSS.pt`: Checkpoint with model state and config.
@@ -119,7 +119,7 @@ This run will:
 
 Notes:
 - Default behavior is unchanged when you omit `--dialect`.
-- Subset label maps are written under `train_model/processed/train_utils/outputs/subset_<tag>_<timestamp>/` and the checkpoint stores the path in `label_to_index_json`.
+- Subset label maps are written under `processed/train_utils/outputs/subset_<tag>_<timestamp>/` and the checkpoint stores the path in `label_to_index_json`.
 
 ## Train per language (export one model per language)
 If your dataset contains multiple languages, you can filter by `language` (or infer it from `label_key` if needed) and export a model per language.
@@ -127,7 +127,7 @@ If your dataset contains multiple languages, you can filter by `language` (or in
 Example (Vietnamese only):
 
 ```powershell
-python train_model/train_utils/train_tcn.py --filter_language vn --epochs 80 --batch_size 32
+python processed/train_utils/train_tcn.py --filter_language vn --epochs 80 --batch_size 32
 ```
 
 Notes:
@@ -138,40 +138,40 @@ Notes:
 To train one model per language automatically, use:
 
 ```powershell
-python train_model/train_utils/train_all_languages.py -- --epochs 80 --batch_size 32
+python processed/train_utils/train_all_languages.py -- --epochs 80 --batch_size 32
 ```
 
 ## Train all dialects within each language
 If you want *one model per dialect per language* (e.g. `vn/bac`, `vn/nam`, ...), run:
 
 ```powershell
-python train_model/train_utils/train_all_languages.py --by_dialect -- --epochs 80 --batch_size 32
+python processed/train_utils/train_all_languages.py --by_dialect -- --epochs 80 --batch_size 32
 ```
 
 Optional filters:
 - Only certain languages:
 
 ```powershell
-python train_model/train_utils/train_all_languages.py --by_dialect --languages vn,en -- --epochs 80 --batch_size 32
+python processed/train_utils/train_all_languages.py --by_dialect --languages vn,en -- --epochs 80 --batch_size 32
 ```
 
 - Only certain dialect names:
 
 ```powershell
-python train_model/train_utils/train_all_languages.py --by_dialect --dialects bac,nam -- --epochs 80 --batch_size 32
+python processed/train_utils/train_all_languages.py --by_dialect --dialects bac,nam -- --epochs 80 --batch_size 32
 ```
 
 Options:
 - Train only specific languages (in order):
 
 ```powershell
-python train_model/train_utils/train_all_languages.py --languages vn,en -- --epochs 80 --batch_size 32
+python processed/train_utils/train_all_languages.py --languages vn,en -- --epochs 80 --batch_size 32
 ```
 
 - Skip languages that fail (e.g. too few classes):
 
 ```powershell
-python train_model/train_utils/train_all_languages.py --skip_failed -- --epochs 80 --batch_size 32
+python processed/train_utils/train_all_languages.py --skip_failed -- --epochs 80 --batch_size 32
 ```
 
 ## Notes
@@ -185,5 +185,5 @@ Training code assumes features are already in the correct format. Realtime extra
 To inspect how your dataset `.npz` features look (ranges, likely left/right ordering, whether x/y are in [0,1]):
 
 ```powershell
-python train_model/train_utils/check_preprocess_compat.py --csv train_model/processed/splits/train.csv --n 200
+python processed/train_utils/check_preprocess_compat.py --csv processed/splits/train.csv --n 200
 ```

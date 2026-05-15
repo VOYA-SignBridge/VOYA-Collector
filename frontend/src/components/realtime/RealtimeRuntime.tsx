@@ -268,7 +268,7 @@ export default function RealtimeRuntime({
 
         if (!scratch || !ring) return;
 
-        // RAW encoding only (no mirroring, no swapping, no normalization).
+        // RAW webcam coordinates only; flatten handles the required handedness swap.
         const vec = flattenRealtimeHands(results as MediaPipeHandsLikeResults, scratch);
         ring.append(vec);
 
