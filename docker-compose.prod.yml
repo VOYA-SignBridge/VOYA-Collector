@@ -1,6 +1,7 @@
 services:
   frontend:
-    image: tamb2203579/voya_frontend:latest
+    build: ./frontend
+    image: voya_frontend:latest
     container_name: voya_frontend
     expose:
       - "80"
@@ -14,7 +15,8 @@ services:
           - frontend
 
   backend:
-    image: tamb2203579/voya_backend:latest
+    build: ./backend
+    image: voya_backend:latest
     container_name: voya_backend
     expose:
       - "8000"
@@ -34,7 +36,7 @@ services:
           - backend
 
   # worker:
-  #   image: tamb2203579/voya_backend:latest
+  #   image: voya_backend:latest
   #   container_name: voya_worker
   #   env_file:
   #     - .env
