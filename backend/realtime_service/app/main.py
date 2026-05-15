@@ -20,13 +20,19 @@ def create_app() -> FastAPI:
     )
     registry_path = os.getenv("MODEL_REGISTRY_PATH", default_registry_path)
     normalization_py_path = (os.getenv("NORMALIZATION_PY_PATH", "") or "").strip()
+    label_index_path = os.getenv("LABEL_INDEX_PATH", "processed/analysis/index_to_label.json")
 
     if not normalization_py_path:
         # Hard requirement: inference service must use processed/shared/normalization.py.
         # We require explicit path to avoid importing backend code.
         raise RuntimeError("NORMALIZATION_PY_PATH must be set to processed/shared/normalization.py")
 
-    register_startup(app, registry_path=registry_path, normalization_py_path=normalization_py_path)
+    register_startup(
+        app,
+        registry_path=registry_path,
+        normalization_py_path=normalization_py_path,
+        label_index_path=label_index_path,
+    )
 
     return app
 

@@ -1,6 +1,9 @@
 services:
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     image: voya_frontend:latest
     container_name: voya_frontend
     expose:
@@ -14,6 +17,24 @@ services:
           - voya_frontend
           - frontend
 
+  realtime_service:
+    build: ./backend/realtime_service
+    image: voya_realtime_service:latest
+    container_name: voya_realtime_service
+    expose:
+      - "8010"
+    environment:
+      NORMALIZATION_PY_PATH: /app/processed/shared/normalization.py
+    volumes:
+      - ./backend/realtime_service:/app/realtime_service
+      - ./processed/shared:/app/processed/shared:ro
+      - ./processed/analysis:/app/processed/analysis:ro
+    restart: unless-stopped
+    networks:
+      voya_network:
+        aliases:
+          - realtime_service
+
   backend:
     build: ./backend
     image: voya_backend:latest
@@ -25,9 +46,12 @@ services:
       - ./gdrive:/gdrive
     env_file:
       - .env
+    environment:
+      REALTIME_SERVICE_URL: http://realtime_service:8010
     depends_on:
       - postgres
       - redis
+      - realtime_service
     restart: unless-stopped
     networks:
       voya_network:

@@ -176,9 +176,13 @@ export class RealtimeInferenceScheduler<TPrediction> {
       return;
     }
 
+    if (this.inFlight) {
+      this.onSkip?.("in_flight");
+      return;
+    }
+
     if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
+      return;
     }
 
     this.setStatus("debouncing");

@@ -1,6 +1,8 @@
 # Realtime demo dependencies (webcam/video inference)
 # Recommended Python: 3.10+ (MediaPipe wheels are most reliable here)
 
+numpy==1.26.2
+torch
 opencv-python==4.11.0.86
 mediapipe==0.10.21
 Pillow==10.4.0

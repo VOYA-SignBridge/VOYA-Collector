@@ -14,10 +14,10 @@ export interface RealtimeModel {
 /**
  * Realtime inference API contract.
  *
- * Frontend must send RAW landmark-derived features only.
+ * Frontend must send RAW landmark-derived features with anatomical hand slots.
  * - No normalization
  * - No mirroring
- * - No handedness swapping
+ * - MediaPipe handedness is swapped into left/right anatomical slots
  *
  * Payload shape is fixed for compatibility with training pipeline:
  * - frames: 60

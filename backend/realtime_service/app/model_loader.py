@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import math
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+
+from .contracts import validate_labels
 
 
 logger = logging.getLogger("realtime_service.model_loader")
@@ -78,66 +81,117 @@ def load_checkpoint(path: str) -> Dict[str, Any]:
     return obj
 
 
-class TemporalBlock(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int, kernel_size: int, stride: int, dilation: int, dropout: float):
+class Chomp1d(nn.Module):
+    def __init__(self, chomp_size: int):
         super().__init__()
-        padding = (kernel_size - 1) * dilation
-        self.conv1 = nn.Conv1d(in_ch, out_ch, kernel_size, stride=stride, padding=padding, dilation=dilation)
+        self.chomp_size = int(chomp_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.chomp_size <= 0:
+            return x
+        return x[:, :, : x.size(2) - self.chomp_size]
+
+
+class TemporalBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        dilation: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        pad = (kernel_size - 1) * dilation
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
+        self.chomp1 = Chomp1d(pad)
         self.relu1 = nn.ReLU()
         self.drop1 = nn.Dropout(dropout)
-        self.conv2 = nn.Conv1d(out_ch, out_ch, kernel_size, stride=stride, padding=padding, dilation=dilation)
+
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
+        self.chomp2 = Chomp1d(pad)
         self.relu2 = nn.ReLU()
         self.drop2 = nn.Dropout(dropout)
-        self.downsample = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else None
+
+        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
+        self.out_relu = nn.ReLU()
+
+        for m in [self.conv1, self.conv2]:
+            nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        if self.downsample is not None:
+            nn.init.kaiming_normal_(self.downsample.weight, nonlinearity="linear")
+            if self.downsample.bias is not None:
+                nn.init.zeros_(self.downsample.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.conv1(x)
+        out = self.chomp1(out)
         out = self.relu1(out)
         out = self.drop1(out)
+
         out = self.conv2(out)
+        out = self.chomp2(out)
         out = self.relu2(out)
         out = self.drop2(out)
+
         res = x if self.downsample is None else self.downsample(x)
-        # Trim for causal padding alignment if needed
-        if out.shape[-1] != res.shape[-1]:
-            min_t = min(out.shape[-1], res.shape[-1])
-            out = out[..., :min_t]
-            res = res[..., :min_t]
-        return out + res
+        return self.out_relu(out + res)
 
 
 class TCNClassifier(nn.Module):
-    def __init__(self, feature_dim: int, num_classes: int, *, channels: List[int], kernel_size: int = 3, dropout: float = 0.0):
+    def __init__(
+        self,
+        in_dim: int,
+        num_classes: int,
+        channels: int = 64,
+        levels: int = 3,
+        kernel_size: int = 5,
+        dropout: float = 0.3,
+        use_proj: bool = True,
+        proj_dim: Optional[int] = None,
+    ) -> None:
         super().__init__()
-        if not channels:
-            raise ValueError("TCN channels must be non-empty")
-        layers: List[nn.Module] = []
-        in_ch = int(feature_dim)
-        for i, out_ch in enumerate(channels):
+        proj_dim = int(proj_dim or channels)
+        self.proj: nn.Module = nn.Identity()
+        current_in = int(in_dim)
+        if use_proj and int(in_dim) != proj_dim:
+            self.proj = nn.Conv1d(int(in_dim), proj_dim, kernel_size=1)
+            current_in = proj_dim
+
+        blocks: List[nn.Module] = []
+        for i in range(int(levels)):
             dilation = 2 ** i
-            layers.append(TemporalBlock(in_ch, int(out_ch), int(kernel_size), stride=1, dilation=dilation, dropout=float(dropout)))
-            in_ch = int(out_ch)
-        self.tcn = nn.Sequential(*layers)
-        self.head = nn.Linear(in_ch, int(num_classes))
+            blocks.append(
+                TemporalBlock(
+                    in_channels=current_in if i == 0 else int(channels),
+                    out_channels=int(channels),
+                    kernel_size=int(kernel_size),
+                    dilation=dilation,
+                    dropout=float(dropout),
+                )
+            )
+        self.network = nn.Sequential(*blocks)
+        self.classifier = nn.Linear(int(channels), int(num_classes))
+        nn.init.kaiming_uniform_(self.classifier.weight, a=math.sqrt(5))
+        if self.classifier.bias is not None:
+            nn.init.zeros_(self.classifier.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Accept either (B,T,D) or (B,D,T)
-        if x.ndim != 3:
-            raise ValueError(f"expected 3D tensor, got shape={tuple(x.shape)}")
-        if x.shape[1] == 60 and x.shape[2] == 126:
-            # (B,T,D) -> (B,D,T)
-            x = x.permute(0, 2, 1).contiguous()
-        elif x.shape[1] == 126 and x.shape[2] == 60:
-            # already (B,D,T)
-            pass
-        else:
-            # Do not reshape; refuse unknown layout
-            raise ValueError(f"unexpected input layout for warmup: shape={tuple(x.shape)}")
+    def forward(self, x_btd: torch.Tensor) -> torch.Tensor:
+        if x_btd.ndim != 3:
+            raise RuntimeError(f"Expected 3D tensor [B,T,D], got {x_btd.shape}")
 
-        y = self.tcn(x)
-        # Global average pool over time dim
-        y = y.mean(dim=-1)
-        return self.head(y)
+        if x_btd.shape[-1] != 126:
+            raise RuntimeError(f"Expected feature_dim=126, got {x_btd.shape}")
+
+        x = x_btd.transpose(1, 2)
+        x = self.proj(x)
+        x = self.network(x)
+
+        pooled = x.mean(dim=2)
+        logits = self.classifier(pooled)
+        return logits
 
 
 def build_model_from_checkpoint(ckpt: Dict[str, Any]) -> nn.Module:
@@ -149,18 +203,34 @@ def build_model_from_checkpoint(ckpt: Dict[str, Any]) -> nn.Module:
     if not isinstance(cfg, dict):
         raise ValueError("model_config must be a dict")
 
-    # Minimal, explicit config expectations for this service.
-    channels = cfg.get("channels") or cfg.get("num_channels")
-    if not isinstance(channels, list) or not channels:
-        raise ValueError("model_config must include non-empty list 'channels' (or 'num_channels')")
+    channels_value = cfg.get("channels") or cfg.get("num_channels")
+    if isinstance(channels_value, list):
+        if not channels_value:
+            raise ValueError("model_config must include non-empty 'channels' or 'num_channels'")
+        channels = int(channels_value[0])
+    elif channels_value is not None:
+        channels = int(channels_value)
+    else:
+        raise ValueError("model_config must include 'channels' (int or list) or 'num_channels'")
 
-    kernel_size = int(cfg.get("kernel_size") or 3)
-    dropout = float(cfg.get("dropout") or 0.0)
+    levels = int(cfg.get("levels") or 3)
+    kernel_size = int(cfg.get("kernel_size") or 5)
+    dropout = float(cfg.get("dropout") or 0.3)
+    proj_dim = int(cfg.get("proj_dim") or channels)
 
     feature_dim = int(ckpt.get("feature_dim"))
     num_classes = int(ckpt.get("num_classes"))
 
-    return TCNClassifier(feature_dim=feature_dim, num_classes=num_classes, channels=[int(c) for c in channels], kernel_size=kernel_size, dropout=dropout)
+    return TCNClassifier(
+        in_dim=feature_dim,
+        num_classes=num_classes,
+        channels=channels,
+        levels=levels,
+        kernel_size=kernel_size,
+        dropout=dropout,
+        use_proj=bool(cfg.get("use_proj", True)),
+        proj_dim=proj_dim,
+    )
 
 
 def load_weights(model: nn.Module, ckpt: Dict[str, Any]) -> None:
@@ -173,6 +243,91 @@ def load_weights(model: nn.Module, ckpt: Dict[str, Any]) -> None:
     unexpected = list(getattr(incompat, "unexpected_keys", []) or [])
     if missing or unexpected:
         raise ValueError(f"state_dict mismatch missing={missing} unexpected={unexpected}")
+
+
+def _sorted_idx_items(raw_idx_to_label: Any) -> List[Tuple[Any, Any]]:
+    if isinstance(raw_idx_to_label, dict):
+        def sort_key(item: Tuple[Any, Any]) -> Tuple[int, str]:
+            raw_key = item[0]
+            try:
+                return (0, f"{int(raw_key):08d}")
+            except Exception:
+                try:
+                    return (0, f"{int(str(raw_key)):08d}")
+                except Exception:
+                    return (1, str(raw_key))
+
+        return sorted(raw_idx_to_label.items(), key=sort_key)
+
+    if isinstance(raw_idx_to_label, list):
+        return list(enumerate(raw_idx_to_label))
+
+    raise TypeError("idx_to_label must be a list or dict")
+
+
+def _label_lookup_by_key(label_lookup: Optional[Dict[str, Dict[str, Any]]], label_key: str) -> Dict[str, Any]:
+    if not label_lookup:
+        return {}
+
+    value = label_lookup.get(label_key)
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def normalize_idx_to_label(
+    raw_idx_to_label: Any,
+    *,
+    label_lookup: Optional[Dict[str, Dict[str, Any]]],
+    default_language: str,
+    default_dialect: Optional[str],
+) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+
+    for _, raw_value in _sorted_idx_items(raw_idx_to_label):
+        if isinstance(raw_value, dict):
+            label_key = str(
+                raw_value.get("label_key")
+                or raw_value.get("label_slug")
+                or raw_value.get("slug")
+                or ""
+            ).strip()
+            label_original = str(raw_value.get("label_original") or raw_value.get("label") or label_key).strip()
+            label_slug = str(raw_value.get("label_slug") or raw_value.get("slug") or label_key.rsplit("/", 1)[-1]).strip()
+            language = str(raw_value.get("language") or default_language).strip()
+            dialect_raw = raw_value.get("dialect", default_dialect)
+            dialect = None if dialect_raw is None else str(dialect_raw).strip() or None
+        else:
+            label_key = str(raw_value or "").strip()
+            lookup = _label_lookup_by_key(label_lookup, label_key)
+            label_original = str(lookup.get("label_original") or label_key).strip()
+            label_slug = str(lookup.get("slug") or label_key.rsplit("/", 1)[-1]).strip()
+            language = str(lookup.get("language") or default_language).strip()
+            dialect_raw = lookup.get("dialect", default_dialect)
+            dialect = None if dialect_raw is None else str(dialect_raw).strip() or None
+
+        lookup = _label_lookup_by_key(label_lookup, label_key)
+        if lookup:
+            label_original = str(lookup.get("label_original") or label_original).strip()
+            label_slug = str(lookup.get("slug") or label_slug).strip()
+            language = str(lookup.get("language") or language).strip()
+            dialect_raw = lookup.get("dialect", dialect)
+            dialect = None if dialect_raw is None else str(dialect_raw).strip() or None
+
+        if not label_key:
+            raise ValueError("checkpoint idx_to_label contains empty label key")
+
+        normalized.append(
+            {
+                "label_key": label_key,
+                "label_slug": label_slug or label_key.rsplit("/", 1)[-1],
+                "label_original": label_original or label_key,
+                "language": language or default_language,
+                "dialect": dialect,
+            }
+        )
+
+    return normalized
 
 
 def warmup(model: nn.Module, *, seq_len: int, feature_dim: int, device: str = "cpu") -> None:
@@ -193,9 +348,23 @@ def build_bundle(
     dialect: Optional[str],
     ckpt: Dict[str, Any],
     checkpoint_sha256: str,
+    label_lookup: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> ModelBundle:
     model = build_model_from_checkpoint(ckpt)
     load_weights(model, ckpt)
+
+    idx_to_label = normalize_idx_to_label(
+        ckpt["idx_to_label"],
+        label_lookup=label_lookup,
+        default_language=language,
+        default_dialect=dialect,
+    )
+    validate_labels(
+        idx_to_label,
+        num_classes=int(ckpt["num_classes"]),
+        registry_language=language,
+        registry_dialect=dialect,
+    )
 
     # Warmup lifecycle (fail-fast)
     warmup_ok = False
@@ -208,7 +377,7 @@ def build_bundle(
         model_id=model_id,
         model_name=model_name,
         model=model,
-        idx_to_label=ckpt["idx_to_label"],
+        idx_to_label=idx_to_label,
         normalization_version=str(ckpt["normalization_version"]),
         preprocess_contract=dict(ckpt["preprocess_contract"]),
         checkpoint_sha256=str(checkpoint_sha256),

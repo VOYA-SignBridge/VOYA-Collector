@@ -4,7 +4,8 @@ import type { MediaPipeLandmark } from "../types";
  * Realtime semantic encoding constants.
  *
  * Vector layout MUST be:
- *   [MP_LeftHand(63), MP_RightHand(63)]
+ *   [User_LeftHand(63), User_RightHand(63)]
+ * where MediaPipe raw handedness is swapped into anatomical slots.
  * where each hand is 21 landmarks × (x,y,z).
  */
 export const REALTIME_LANDMARKS_PER_HAND = 21;
@@ -116,11 +117,11 @@ const writeHand63 = (
  *
  * Deterministically encodes RAW MediaPipe Hands results into a fixed-shape
  * Float32Array(126) using:
- *   [MP_LeftHand(63), MP_RightHand(63)]
+ *   [User_LeftHand(63), User_RightHand(63)]
  *
  * Semantic guarantees:
  * - No mirroring
- * - No swapping
+ * - MediaPipe handedness labels are swapped into anatomical slots
  * - No normalization
  * - Handedness labels used ONLY for stable slot assignment
  *
@@ -145,11 +146,13 @@ export function flattenRealtimeHands(
 
   const handedness = results?.multiHandedness;
 
-  const left = selectHandByLabel(allLandmarks, handedness, "Left");
-  const right = selectHandByLabel(allLandmarks, handedness, "Right");
+  const mpLeft = selectHandByLabel(allLandmarks, handedness, "Left");
+  const mpRight = selectHandByLabel(allLandmarks, handedness, "Right");
 
-  writeHand63(vec, 0, left?.landmarks);
-  writeHand63(vec, REALTIME_DIMS_PER_HAND, right?.landmarks);
+  // MediaPipe returns raw camera-perspective labels on the unflipped webcam
+  // frame. Swap them so slot 0 is the user's left hand and slot 1 is right.
+  writeHand63(vec, 0, mpRight?.landmarks);
+  writeHand63(vec, REALTIME_DIMS_PER_HAND, mpLeft?.landmarks);
 
   return vec;
 }
