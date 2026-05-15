@@ -4,7 +4,7 @@
     {
       "id": "hoa-de",
       "name": "Hòa đê",
-      "checkpoint_path": "checkpoints/tcn_dialect-hoa-de_20260514_214512.pt",
+      "checkpoint_path": "checkpoints/tcn_dialect-hoa-de_20260515_131050.pt",
       "language": "vn",
       "dialect": "hoa-de",
       "seq_len": 60,
