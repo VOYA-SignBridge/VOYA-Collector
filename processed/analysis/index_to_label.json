@@ -1,24 +1,4 @@
 {
-  "1": {
-    "slug": "c",
-    "label_original": "C",
-    "language": "vn",
-    "dialect": "common",
-    "class_idx": 1,
-    "class_uid": "68200ce8-969c-4c2e-91b0-d6e5416c42eb",
-    "folder_name": "class_c_68200ce8",
-    "label_key": "vn/common/c"
-  },
-  "2": {
-    "slug": "a",
-    "label_original": "A",
-    "language": "vn",
-    "dialect": "common",
-    "class_idx": 2,
-    "class_uid": "832e67d8-4cb1-4ca8-82a6-e4d6f34434cd",
-    "folder_name": "class_a_832e67d8",
-    "label_key": "vn/common/a"
-  },
   "3": {
     "slug": "rang-muoi",
     "label_original": "rang muối",
@@ -68,5 +48,285 @@
     "class_uid": "b5c5ceb2-ffe5-4c4d-a31e-54a7ca3b1b84",
     "folder_name": "class_lay-chi-tom_b5c5ceb2",
     "label_key": "vn/hoa-de/lay-chi-tom"
+  },
+  "8": {
+    "slug": "cat-ky",
+    "label_original": "Cắt kỳ",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 8,
+    "class_uid": "cab3132f-742c-4b7a-a2dc-be79e1c1de15",
+    "folder_name": "class_cat-ky_cab3132f",
+    "label_key": "vn/hoa-de/cat-ky"
+  },
+  "9": {
+    "slug": "a",
+    "label_original": "A",
+    "language": "vn",
+    "dialect": "can-tho",
+    "class_idx": 9,
+    "class_uid": "22000be4-2ef1-4eee-aacf-4b237f29b0c5",
+    "folder_name": "class_a_22000be4",
+    "label_key": "vn/can-tho/a"
+  },
+  "10": {
+    "slug": "b",
+    "label_original": "B",
+    "language": "vn",
+    "dialect": "can-tho",
+    "class_idx": 10,
+    "class_uid": "4c671a31-23af-4e4b-a004-4abd11856200",
+    "folder_name": "class_b_4c671a31",
+    "label_key": "vn/can-tho/b"
+  },
+  "11": {
+    "slug": "c",
+    "label_original": "C",
+    "language": "vn",
+    "dialect": "can-tho",
+    "class_idx": 11,
+    "class_uid": "e356e577-20b9-42ec-8589-35d5ebc160fc",
+    "folder_name": "class_c_e356e577",
+    "label_key": "vn/can-tho/c"
+  },
+  "12": {
+    "slug": "d",
+    "label_original": "D",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 12,
+    "class_uid": "a447f40e-4e68-42c2-b20d-08ac5b12c451",
+    "folder_name": "class_d_a447f40e",
+    "label_key": "vn/bang-chu-cai/d"
+  },
+  "13": {
+    "slug": "e",
+    "label_original": "E",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 13,
+    "class_uid": "c09fc8ba-781d-434a-844c-ab57902e06ed",
+    "folder_name": "class_e_c09fc8ba",
+    "label_key": "vn/bang-chu-cai/e"
+  },
+  "15": {
+    "slug": "m",
+    "label_original": "M",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 15,
+    "class_uid": "6a698d04-19f5-4742-94dd-419deab85c49",
+    "folder_name": "class_m_6a698d04",
+    "label_key": "vn/bang-chu-cai/m"
+  },
+  "16": {
+    "slug": "n",
+    "label_original": "N",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 16,
+    "class_uid": "07ab9408-4fc6-42ac-a41f-9ad289b91969",
+    "folder_name": "class_n_07ab9408",
+    "label_key": "vn/bang-chu-cai/n"
+  },
+  "17": {
+    "slug": "o",
+    "label_original": "O",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 17,
+    "class_uid": "0cebb97d-5300-4297-952e-601fde506004",
+    "folder_name": "class_o_0cebb97d",
+    "label_key": "vn/bang-chu-cai/o"
+  },
+  "18": {
+    "slug": "p",
+    "label_original": "P",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 18,
+    "class_uid": "bd134d66-3e4b-4273-a8cf-8e33966c8cbd",
+    "folder_name": "class_p_bd134d66",
+    "label_key": "vn/bang-chu-cai/p"
+  },
+  "19": {
+    "slug": "q",
+    "label_original": "Q",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 19,
+    "class_uid": "795eec29-34d7-4b23-aba9-89cab7a5deec",
+    "folder_name": "class_q_795eec29",
+    "label_key": "vn/bang-chu-cai/q"
+  },
+  "20": {
+    "slug": "r",
+    "label_original": "R",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 20,
+    "class_uid": "3a9d324b-5e21-4bc1-8cc1-7de8346b85b8",
+    "folder_name": "class_r_3a9d324b",
+    "label_key": "vn/bang-chu-cai/r"
+  },
+  "21": {
+    "slug": "s",
+    "label_original": "S",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 21,
+    "class_uid": "86198dbe-45b0-40c6-903e-10bc99642571",
+    "folder_name": "class_s_86198dbe",
+    "label_key": "vn/bang-chu-cai/s"
+  },
+  "22": {
+    "slug": "t",
+    "label_original": "T",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 22,
+    "class_uid": "42d9e7de-4628-40e2-b90b-a235d32e6632",
+    "folder_name": "class_t_42d9e7de",
+    "label_key": "vn/bang-chu-cai/t"
+  },
+  "23": {
+    "slug": "u",
+    "label_original": "U",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 23,
+    "class_uid": "8c1e0174-e611-4300-8c1c-1565871f03aa",
+    "folder_name": "class_u_8c1e0174",
+    "label_key": "vn/bang-chu-cai/u"
+  },
+  "24": {
+    "slug": "v",
+    "label_original": "V",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 24,
+    "class_uid": "849d0b5c-96dd-4dc4-96cc-421d69364e40",
+    "folder_name": "class_v_849d0b5c",
+    "label_key": "vn/bang-chu-cai/v"
+  },
+  "25": {
+    "slug": "danh-vay-ca",
+    "label_original": "đánh vẩy cá",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 25,
+    "class_uid": "f41e437d-453e-43a8-a6f3-9269f3d0d17d",
+    "folder_name": "class_danh-vay-ca_f41e437d",
+    "label_key": "vn/hoa-de/danh-vay-ca"
+  },
+  "26": {
+    "slug": "a",
+    "label_original": "A",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 26,
+    "class_uid": "49ab9b7a-4a36-41ca-acea-92da53adc53c",
+    "folder_name": "class_a_49ab9b7a",
+    "label_key": "vn/bang-chu-cai/a"
+  },
+  "27": {
+    "slug": "b",
+    "label_original": "B",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 27,
+    "class_uid": "60bed4e1-4f2f-4526-ad75-a4501ee58a85",
+    "folder_name": "class_b_60bed4e1",
+    "label_key": "vn/bang-chu-cai/b"
+  },
+  "28": {
+    "slug": "c",
+    "label_original": "C",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 28,
+    "class_uid": "fd742027-b37f-4ef3-934e-fb53f1905021",
+    "folder_name": "class_c_fd742027",
+    "label_key": "vn/bang-chu-cai/c"
+  },
+  "29": {
+    "slug": "g",
+    "label_original": "G",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 29,
+    "class_uid": "74491583-7d72-4b9f-91b5-18f039d50aa7",
+    "folder_name": "class_g_74491583",
+    "label_key": "vn/bang-chu-cai/g"
+  },
+  "30": {
+    "slug": "h",
+    "label_original": "H",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 30,
+    "class_uid": "aa57b18a-8318-4030-b356-00eddeef3845",
+    "folder_name": "class_h_aa57b18a",
+    "label_key": "vn/bang-chu-cai/h"
+  },
+  "31": {
+    "slug": "i",
+    "label_original": "I",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 31,
+    "class_uid": "3910ecab-6306-4d26-a9ff-e7e923f7ad9f",
+    "folder_name": "class_i_3910ecab",
+    "label_key": "vn/bang-chu-cai/i"
+  },
+  "32": {
+    "slug": "k",
+    "label_original": "K",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 32,
+    "class_uid": "d97fc7fd-0b6a-4feb-a857-d33ca6b9c12e",
+    "folder_name": "class_k_d97fc7fd",
+    "label_key": "vn/bang-chu-cai/k"
+  },
+  "33": {
+    "slug": "l",
+    "label_original": "L",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 33,
+    "class_uid": "905a0da2-0e92-4d75-8253-45dc79d0f44d",
+    "folder_name": "class_l_905a0da2",
+    "label_key": "vn/bang-chu-cai/l"
+  },
+  "34": {
+    "slug": "x",
+    "label_original": "X",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 34,
+    "class_uid": "f759ae47-ef10-40aa-9503-e9e259267a1e",
+    "folder_name": "class_x_f759ae47",
+    "label_key": "vn/bang-chu-cai/x"
+  },
+  "35": {
+    "slug": "y",
+    "label_original": "Y",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 35,
+    "class_uid": "ba9d934f-9836-4da5-946a-f6b5193a3cc8",
+    "folder_name": "class_y_ba9d934f",
+    "label_key": "vn/bang-chu-cai/y"
+  },
+  "36": {
+    "slug": "cat-dau-ca",
+    "label_original": "cắt đầu cá",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 36,
+    "class_uid": "ec69ab15-ccd3-4fbe-bbd8-ae1594b209b5",
+    "folder_name": "class_cat-dau-ca_ec69ab15",
+    "label_key": "vn/hoa-de/cat-dau-ca"
   }
 }
