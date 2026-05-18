@@ -3,7 +3,9 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        # Do not bake a localhost backend URL into the frontend build by default.
+        # Leave empty so the frontend uses same-origin relative paths when possible.
+        VITE_API_URL: ${VITE_API_URL:-}
     image: voya_frontend:latest
     container_name: voya_frontend
     expose:
