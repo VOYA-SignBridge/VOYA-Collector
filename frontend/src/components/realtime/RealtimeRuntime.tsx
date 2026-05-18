@@ -453,47 +453,59 @@ export default function RealtimeRuntime({
     setRunning(true);
   }, [running]);
 
+  const [showDebug, setShowDebug] = useState(false);
+
+  // Map scheduler status to user-friendly Vietnamese message
+  const getFriendlyStatusMessage = (): string => {
+    if (!running) return "Chưa bắt đầu";
+    if (isStarting) return "Đang khởi động...";
+    switch (status) {
+      case "idle":
+        return "Đang chờ...";
+      case "debouncing":
+        return "Đang xử lý...";
+      case "in_flight":
+        return "Đang gửi yêu cầu...";
+      default:
+        return "Đang xử lý...";
+    }
+  };
+
+  // Map errors to user-friendly Vietnamese messages (memoized to prevent recomputation)
+  const friendlyError = useMemo(() => {
+    if (!error) return null;
+    if (error.includes("Camera")) return "Vui lòng cấp quyền sử dụng camera";
+    if (error.includes("timeout") || error.includes("504")) return "Phản hồi chậm, vui lòng thử lại";
+    if (error.includes("503") || error.includes("unavailable")) return "Không thể kết nối hệ thống nhận diện";
+    if (error.includes("404") || error.includes("not found")) return "Bộ nhận diện không tồn tại";
+    return null;
+  }, [error]);
+
   return (
-    <div className="card space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-lg font-semibold text-slate-900">Realtime Recognition (Runtime)</div>
-          <div className="text-sm text-slate-600">Minimal runtime preview + smoothed prediction</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className={
-              "px-3 py-2 rounded-lg text-sm font-medium border transition-colors " +
-              (running
-                ? "bg-red-600 text-white border-red-500 hover:bg-red-500"
-                : "bg-emerald-600 text-white border-emerald-500 hover:bg-emerald-500")
-            }
-            onClick={handleStartStop}
-            type="button"
-            disabled={isStarting}
-          >
-            {running ? "Stop" : isStarting ? "Starting…" : "Start"}
-          </button>
-        </div>
+    <div className="w-full max-w-6xl mx-auto space-y-6 p-4">
+      {/* Header */}
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold text-slate-900">Nhận diện dấu hiệu</h1>
+        <p className="text-slate-600">Ứng dụng nhận diện dấu hiệu realtime</p>
       </div>
 
-      {/* Model Selector (Language-Aware Two-Stage) */}
-      <div className="p-3 rounded-xl border bg-white space-y-3">
-        <div className="text-xs font-medium text-slate-700">Select Language & Model</div>
+      {/* Model Selection */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-900">Cấu hình nhận diện</h2>
 
         {/* Selection Warning */}
         {selectionWarning && (
-          <div className="p-2 rounded-lg bg-amber-50 border border-amber-200">
-            <div className="text-xs text-amber-800">{selectionWarning}</div>
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+            <div className="text-sm text-amber-800">{selectionWarning}</div>
           </div>
         )}
 
         {/* Error State */}
         {modelsError && (
           <div className="space-y-2">
-            <div className="text-sm text-red-600">{modelsError}</div>
+            <div className="text-sm text-red-700">Không thể tải danh sách bộ nhận diện</div>
             <button
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
               onClick={() => {
                 setModelsError(null);
                 setIsLoadingModels(true);
@@ -516,34 +528,34 @@ export default function RealtimeRuntime({
               }}
               type="button"
             >
-              Retry
+              Thử lại
             </button>
           </div>
         )}
 
         {/* Loading State */}
         {isLoadingModels && (
-          <div className="text-sm text-slate-600">Loading models…</div>
+          <div className="text-sm text-slate-600">Đang tải bộ nhận diện...</div>
         )}
 
         {/* Empty State */}
         {!isLoadingModels && !modelsError && models.length === 0 && (
-          <div className="text-sm text-slate-600">No models available</div>
+          <div className="text-sm text-slate-600">Không có bộ nhận diện khả dụng</div>
         )}
 
         {/* Language + Model Selectors */}
         {!isLoadingModels && !modelsError && models.length > 0 && (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Language Selector */}
             <div>
-              <label className="text-xs text-slate-600">Language</label>
+              <label className="block text-xs font-medium text-slate-700 mb-2">Ngôn ngữ</label>
               <select
-                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 value={selectedLanguage || ""}
                 onChange={(e) => handleLanguageSelect(e.target.value)}
-                disabled={running && isStarting}
+                disabled={!running && isStarting}
               >
-                <option value="">-- Select Language --</option>
+                <option value="">-- Chọn ngôn ngữ --</option>
                 {languages.map((lang) => (
                   <option key={lang} value={lang}>
                     {lang}
@@ -553,82 +565,150 @@ export default function RealtimeRuntime({
             </div>
 
             {/* Model Selector (Filtered by Language) */}
-            {selectedLanguage && (
-              <div>
-                <label className="text-xs text-slate-600">Model</label>
-                {filteredModels.length === 0 ? (
-                  <div className="mt-1 px-3 py-2 rounded-lg text-sm text-slate-600 bg-slate-50">
-                    No models in selected language
-                  </div>
-                ) : (
-                  <select
-                    className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    value={selectedModelId || ""}
-                    onChange={(e) => handleModelSelect(e.target.value)}
-                    disabled={running && isStarting}
-                  >
-                    <option value="">-- Select Model --</option>
-                    {filteredModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                        {model.dialect && model.dialect !== model.name && ` (${model.dialect})`}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
+            <div>
+              <label className="block text-xs font-medium text-slate-700 mb-2">Bộ nhận diện</label>
+              {!selectedLanguage ? (
+                <div className="px-3 py-2.5 rounded-lg text-sm text-slate-500 bg-slate-50">
+                  Chọn ngôn ngữ trước
+                </div>
+              ) : filteredModels.length === 0 ? (
+                <div className="px-3 py-2.5 rounded-lg text-sm text-slate-500 bg-slate-50">
+                  Không có bộ nhận diện cho ngôn ngữ này
+                </div>
+              ) : (
+                <select
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={selectedModelId || ""}
+                  onChange={(e) => handleModelSelect(e.target.value)}
+                  disabled={!running && isStarting}
+                >
+                  <option value="">-- Chọn bộ nhận diện --</option>
+                  {filteredModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                      {model.dialect && model.dialect !== model.name && ` (${model.dialect})`}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="rounded-xl overflow-hidden border bg-black">
-          <video
-            ref={videoRef}
-            style={previewStyle}
-            className="w-full h-auto"
-            autoPlay
-            playsInline
-            muted
-          />
+      {/* Main Content Area */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Camera Preview (Left/Top) */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-2xl overflow-hidden border border-slate-200 bg-black shadow-sm aspect-video">
+            <video
+              ref={videoRef}
+              style={previewStyle}
+              className="w-full h-full object-contain"
+              autoPlay
+              playsInline
+              muted
+            />
+          </div>
+
+          {/* Error Message (if any) — only show when error stable */}
+          {friendlyError && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 animate-in fade-in duration-300">
+              <p className="text-sm text-red-800">{friendlyError}</p>
+            </div>
+          )}
         </div>
 
-        <div className="space-y-3">
-          <div className="p-3 rounded-xl border bg-white">
-            <div className="text-xs text-slate-500">Status</div>
-            <div className="text-sm font-medium text-slate-800">{status}</div>
-          </div>
-
-          <div className="p-3 rounded-xl border bg-white">
-            <div className="text-xs text-slate-500">Prediction (smoothed)</div>
-            {prediction ? (
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-slate-900">
-                  {prediction.label}{" "}
-                  <span className="font-normal text-slate-600">
-                    ({Math.round(prediction.confidence * 1000) / 10}% · {prediction.samples} samples)
-                  </span>
+        {/* Right Panel: Prediction + Controls */}
+        <div className="space-y-4">
+          {/* Prediction Display (PROMINENT) */}
+          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-6 shadow-sm">
+            <div className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-3">
+              Kết quả nhận diện
+            </div>
+            <div className="min-h-[140px] flex flex-col justify-center">
+              {prediction ? (
+                <div className="space-y-3">
+                  <div className="text-4xl sm:text-5xl font-bold text-blue-600 text-center break-words line-clamp-2">
+                    {prediction.label}
+                  </div>
+                  <div className="space-y-2 text-center">
+                    <div className="text-sm text-slate-600">
+                      Độ tin cậy: <span className="font-semibold text-slate-900">{Math.round(prediction.confidence * 100)}%</span>
+                    </div>
+                    {import.meta.env.DEV && (
+                      <div className="text-xs text-slate-500">
+                        {prediction.samples} mẫu
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="text-xs text-slate-500">
-                  Label Key: <span className="font-mono text-slate-700">{prediction.labelKey}</span>
+              ) : (
+                <div className="text-center">
+                  <div className="text-4xl text-slate-300 mb-2">–</div>
+                  <div className="text-sm text-slate-500">
+                    {running ? "Chờ dữ liệu..." : "Chưa bắt đầu"}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="text-sm text-slate-500">No prediction yet</div>
-            )}
+              )}
+            </div>
           </div>
 
-          <div className="p-3 rounded-xl border bg-white">
-            <div className="text-xs text-slate-500">Errors</div>
-            <div className="text-sm text-slate-700">{error ?? "None"}</div>
+          {/* Status Indicator */}
+          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${
+                running && status === "in_flight" ? "bg-green-500" :
+                running && status === "debouncing" ? "bg-yellow-500" :
+                running ? "bg-blue-500" : "bg-slate-300"
+              }`} />
+              <div className="text-xs text-slate-600">{getFriendlyStatusMessage()}</div>
+            </div>
           </div>
 
-          <div className="text-xs text-slate-500">
-            Notes: payload uses raw MediaPipe landmarks only; preview mirroring is visual-only.
-          </div>
+          {/* Start/Stop Button (LARGE & PROMINENT) */}
+          <button
+            className={
+              "w-full py-3 rounded-xl text-base font-semibold border transition-all " +
+              (running
+                ? "bg-red-600 text-white border-red-600 hover:bg-red-700 active:scale-95"
+                : "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 active:scale-95")
+            }
+            onClick={handleStartStop}
+            type="button"
+            disabled={isStarting}
+          >
+            {running ? "Dừng nhận diện" : isStarting ? "Đang khởi động..." : "Bắt đầu nhận diện"}
+          </button>
+
+          {/* Optional: Debug Toggle (DEV only) */}
+          {import.meta.env.DEV && (
+            <button
+              className="w-full py-2 rounded-lg text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={() => setShowDebug(!showDebug)}
+              type="button"
+            >
+              {showDebug ? "Ẩn thông tin kỹ thuật" : "Hiện thông tin kỹ thuật"}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Debug Panel (DEV mode, collapsible) */}
+      {import.meta.env.DEV && showDebug && (
+        <div className="rounded-xl border border-slate-300 bg-slate-50 p-4 space-y-2 text-xs font-mono text-slate-700">
+          <div className="text-xs font-semibold text-slate-900 mb-2">Thông tin kỹ thuật</div>
+          <div>Status: <span className="text-slate-600">{status}</span></div>
+          <div>Model ID: <span className="text-slate-600">{selectedModelId ?? "none"}</span></div>
+          <div>Generation: <span className="text-slate-600">{activeGenerationRef.current}</span></div>
+          {prediction && (
+            <div>Label Key: <span className="text-slate-600 font-normal">{prediction.labelKey}</span></div>
+          )}
+          {error && (
+            <div className="mt-2 text-red-600">Raw Error: {error}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
