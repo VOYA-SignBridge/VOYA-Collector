@@ -2,7 +2,7 @@ import axiosClient from "./axiosClient";
 import type { Result } from "./validators";
 
 /**
- * Realtime model metadata (from GET /realtime/models)
+ * Realtime model metadata (from GET /api/v1/realtime/models)
  */
 export interface RealtimeModel {
   id: string;
@@ -118,7 +118,7 @@ function validateRealtimeModels(data: unknown): Result<RealtimeModel[]> {
 }
 
 /**
- * GET /realtime/models
+ * GET /api/v1/realtime/models
  *
  * Fetch available realtime models from backend.
  * Returns list of model metadata for UI dropdown.
@@ -126,7 +126,7 @@ function validateRealtimeModels(data: unknown): Result<RealtimeModel[]> {
 export async function fetchRealtimeModels(): Promise<Result<RealtimeModel[]>> {
   try {
     if (import.meta.env.DEV) console.debug("[realtime] fetching models...");
-    const res = await axiosClient.get("/realtime/models");
+    const res = await axiosClient.get("/api/v1/realtime/models");
     const result = validateRealtimeModels(res.data);
     if (result.ok && import.meta.env.DEV) {
       console.debug("[realtime] models loaded:", result.data.length, "models");
@@ -140,7 +140,7 @@ export async function fetchRealtimeModels(): Promise<Result<RealtimeModel[]>> {
 }
 
 /**
- * POST /realtime/predict
+ * POST /api/v1/realtime/predict
  *
  * Request policy (enforced by realtime runtime component, not here):
  * - debounce 150–250ms
@@ -156,7 +156,7 @@ export async function realtimePredict(
       console.debug("[realtime] predict req_id=%s model=%s", request_id, payload.model_id);
     }
 
-    const res = await axiosClient.post("/realtime/predict", payload, {
+    const res = await axiosClient.post("/api/v1/realtime/predict", payload, {
       headers: {
         "X-Request-ID": request_id,
       },

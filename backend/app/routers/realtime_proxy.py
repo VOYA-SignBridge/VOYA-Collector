@@ -158,6 +158,33 @@ async def proxy_models(response: Response) -> Any:
     raise HTTPException(status_code=502, detail="Upstream error")
 
 
+@router.get("/health")
+async def proxy_health(response: Response) -> Any:
+    """Proxy realtime service health through the backend gateway.
+
+    Keeps frontend traffic behind one consistent public entrypoint.
+    """
+    client = _get_client()
+    try:
+        upstream = await client.get(f"{settings.realtime_service_url}/health")
+    except httpx.ConnectError:
+        logger.error("[REALTIME_PROXY] event=CONNECT_ERROR endpoint=health")
+        raise HTTPException(status_code=503, detail="Inference service unavailable")
+    except httpx.TimeoutException:
+        logger.warning("[REALTIME_PROXY] event=TIMEOUT endpoint=health")
+        raise HTTPException(status_code=504, detail="Gateway timeout")
+
+    if upstream.status_code == 200:
+        response.headers["Cache-Control"] = "no-store"
+        return upstream.json()
+
+    logger.error(
+        "[REALTIME_PROXY] event=UPSTREAM_ERROR endpoint=health status=%d",
+        upstream.status_code,
+    )
+    raise HTTPException(status_code=502, detail="Upstream error")
+
+
 @router.post("/predict", response_model=RealtimeProxyResponse)
 async def proxy_predict(request: Request, response: Response) -> RealtimeProxyResponse:
     """Proxy POST /predict to inference service.
