@@ -65,3 +65,6 @@ dataset/
 
 # Google Drive credentials
 gdrive/
+
+# Spreadsheet credentials
+SsheetAPI/
