@@ -170,12 +170,19 @@ export const updateClass = async (
 ): Promise<Result<ClassRow>> => {
   try {
     const res = await axiosClient.put(`/classes/${classRef}`, payload);
-
     if (res.status < 200 || res.status >= 300) {
       return { ok: false, error: res.statusText };
     }
 
-    return validateClass(res.data); // ✅ validate runtime
+    const raw = res.data || {};
+    const validated = validateClass(raw);
+    if (!validated.ok) return validated;
+
+    // Return validated class row and pass through operation logs (if any)
+    const out: any = { ok: true, data: { ...validated.data } as ClassRow };
+    if (raw.operation_logs) out.operation_logs = raw.operation_logs;
+    if (raw.op_id) out.op_id = raw.op_id;
+    return out as Result<ClassRow> & { operation_logs?: string[]; op_id?: string };
   } catch (err) {
     return {
       ok: false,
@@ -184,19 +191,33 @@ export const updateClass = async (
   }
 };
 
-export const deleteClass = async (classRef: string): Promise<Result<null>> => {
+export const deleteClass = async (classRef: string): Promise<Result<{ message: string; deleted: boolean; class_uid: string; class_idx: number; sample_count: number; raw_upload_count: number; op_id?: string; operation_logs?: string[] }>> => {
   try {
     const res = await axiosClient.delete(`/classes/${classRef}`);
+    const data = res.data || {};
 
-    return {
-      ok: res.status >= 200 && res.status < 300,
-      data: null,
-      error: res.statusText,
-    };
+    if (data.success === true || data.deleted === true) {
+      return {
+        ok: true,
+        data: {
+          message: data.message || "Nhãn được xóa thành công",
+          deleted: true,
+          class_uid: data.class_uid || "",
+          class_idx: data.class_idx || 0,
+          sample_count: data.sample_count || 0,
+          raw_upload_count: data.raw_upload_count || 0,
+          op_id: data.op_id,
+          operation_logs: data.operation_logs,
+        },
+      };
+    }
+
+    return { ok: false, error: data.message || data.error || res.statusText };
   } catch (err) {
+    const errMessage = err instanceof Error ? err.message : "Unknown error";
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Unknown error",
+      error: errMessage,
     };
   }
 };

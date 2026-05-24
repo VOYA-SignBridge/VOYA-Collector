@@ -18,6 +18,47 @@ export default function LabelsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [operationLogs, setOperationLogs] = useState<string[] | null>(null);
+  const [showOperationLogs, setShowOperationLogs] = useState(false);
+
+  // Auto-dismiss status message after 2 seconds
+  useEffect(() => {
+    if (!statusMessage) return;
+    const timer = setTimeout(() => setStatusMessage(null), 2000);
+    return () => clearTimeout(timer);
+  }, [statusMessage]);
+
+  const extractOperationLogs = (res: unknown): string[] | null => {
+    if (!res || typeof res !== "object") return null;
+    const obj = res as Record<string, unknown>;
+    const top = obj["operation_logs"];
+    if (Array.isArray(top) && top.every((x) => typeof x === "string")) return top as string[];
+    const data = obj["data"];
+    if (data && typeof data === "object") {
+      const d = data as Record<string, unknown>;
+      const logs = d["operation_logs"];
+      if (Array.isArray(logs) && logs.every((x) => typeof x === "string")) return logs as string[];
+    }
+    return null;
+  };
+  
+  const getLanguageName = (lang?: string): string => {
+    const l = (lang || language);
+    return l === 'vn' ? 'Tiếng Việt' : l === 'en' ? 'English' : l;
+  };
+  
+  const getDialectName = (dialect?: string): string => {
+    const d = (dialect || 'common');
+    const map: Record<string, string> = {
+      'common': 'Chung',
+      'bac': 'Miền Bắc',
+      'nam': 'Miền Nam',
+      'trung': 'Miền Trung',
+      'hoa-de': 'Hòa Đê',
+      'can-tho': 'Cần Thơ',
+    };
+    return map[d] || d;
+  };
   const [search, setSearch] = useState<string>("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [editTarget, setEditTarget] = useState<RenderItem | null>(null);
@@ -257,6 +298,7 @@ export default function LabelsPage() {
 
     setEditSaving(true);
     setError(null);
+    setShowOperationLogs(false);
     try {
       const classRef = getClassRef(editTarget);
       const result = await updateClass(classRef, {
@@ -267,10 +309,14 @@ export default function LabelsPage() {
       });
       if (!result.ok) {
         setError(result.error || "Không thể cập nhật nhãn.");
+        setOperationLogs(extractOperationLogs(result));
+        setShowOperationLogs(true);
         return;
       }
 
       const updated = result.data;
+      const logs = extractOperationLogs(result);
+      setOperationLogs(logs);
       applyLabelUpdate(
         classRef,
         updated.label_original || nextLabel,
@@ -278,7 +324,9 @@ export default function LabelsPage() {
         updated.language || editLanguage,
         updated.dialect || editDialect,
       );
-      setStatusMessage(`Đã cập nhật nhãn #${editTarget.class_idx} thành ${updated.label_original || nextLabel}.`);
+      setStatusMessage(
+        `Đã cập nhật nhãn "${updated.label_original || nextLabel}" (${getLanguageName(updated.language || editLanguage)} / ${getDialectName(updated.dialect || editDialect)})`
+      );
       setEditTarget(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -292,16 +340,23 @@ export default function LabelsPage() {
     if (!deleteTarget) return;
     setDeleteSaving(true);
     setError(null);
+    setShowOperationLogs(false);
     try {
       const classRef = getClassRef(deleteTarget);
       const result = await deleteClass(classRef);
       if (!result.ok) {
         setError(result.error || "Không thể xóa nhãn.");
+        setOperationLogs(extractOperationLogs(result));
+        setShowOperationLogs(true);
         return;
       }
 
       applyLabelDelete(classRef);
-      setStatusMessage(`Đã xóa nhãn #${deleteTarget.class_idx} và đồng bộ dữ liệu liên quan.`);
+      const logs = extractOperationLogs(result);
+      setOperationLogs(logs);
+      setStatusMessage(
+        `Đã xóa nhãn "${deleteTarget.label_original}" (${getLanguageName(deleteTarget.language)} / ${getDialectName(deleteTarget.dialect)})`
+      );
       setDeleteTarget(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -331,8 +386,29 @@ export default function LabelsPage() {
       )}
 
       {statusMessage && !error && (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-          {statusMessage}
+        <div className="fixed bottom-6 right-6 max-w-md rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">{statusMessage}</div>
+            <button onClick={() => setStatusMessage(null)} className="mt-0.5 text-green-600 hover:text-green-700">
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+      {operationLogs && operationLogs.length > 0 && (
+        <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="font-medium text-sm text-gray-800">📋 Hoạt động (logs)</div>
+            <button
+              onClick={() => setShowOperationLogs(!showOperationLogs)}
+              className="px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded transition-colors"
+            >
+              {showOperationLogs ? '▼ Ẩn' : '▶ Hiển thị'}
+            </button>
+          </div>
+          {showOperationLogs && (
+            <pre className="whitespace-pre-wrap break-words text-xs text-gray-700 bg-white rounded p-2 border border-gray-100 max-h-60 overflow-auto">{operationLogs.join('\n')}</pre>
+          )}
         </div>
       )}
 

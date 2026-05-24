@@ -70,9 +70,9 @@ def append_sample_row(row: Dict[str, Any]):
             f.flush()
             os.fsync(f.fileno())
 
-    from app.storage.catalog_mirror import mirror_csv_to_gdrive
+    from app.storage.catalog_mirror import mirror_samples_to_gdrive_and_sheets
 
-    mirror_csv_to_gdrive(SAMPLES_CSV, "samples.csv")
+    mirror_samples_to_gdrive_and_sheets(SAMPLES_CSV)
 
 
 def list_samples() -> List[Dict[str, str]]:
@@ -105,11 +105,15 @@ def count_samples_for_class(class_uid: str) -> int:
 def save_sequence_npz(
     class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str
 ) -> str:
-    """Save a (T,D) sequence to Google Drive when enabled, with local fallback.
-    Returns storage URL if successful, local path as fallback.
+    """Save a (T,D) sequence locally first, then mirror to Google Drive when enabled.
+
+    Returns the local file path. If Drive upload succeeds, the Drive URL is also stored
+    in the sample metadata, but the local NPZ remains the canonical on-disk artifact.
     """
     import numpy as np
     import io
+
+    log = logging.getLogger(__name__)
 
     sample_uid = uuid.uuid4().hex[:10]
     created_at = (meta or {}).get("created_at") or now_str()
@@ -131,80 +135,79 @@ def save_sequence_npz(
     np.savez_compressed(buffer, sequence=sequence.astype("float32"), meta=metadata)
     buffer.seek(0)
 
-    # Upload to Google Drive if configured.
+    class_dir = class_meta.hierarchy_path()
+    class_dir.mkdir(parents=True, exist_ok=True)
+    fpath = class_dir / fname
+    sidecar = class_dir / f"sample_{sample_uid}.json"
+
+    fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=str(class_dir))
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as f:
+            np.savez_compressed(
+                f, sequence=sequence.astype("float32"), meta=metadata
+            )
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, fpath)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except:
+                pass
+
+    try:
+        metadata["storage_provider"] = "local"
+        atomic_write_json(sidecar, metadata, indent=2)
+    except Exception as e:
+        logging.getLogger(__name__).warning("[SIDECAR] write failed: %s", e)
+
     storage_url = None
     storage_key = None
     use_google_drive = settings.use_google_drive
-    
+
     if use_google_drive:
         from app.storage.gdrive_client import upload_to_gdrive
 
-        log = logging.getLogger(__name__)
-        log.info("[SAVE_SEQUENCE] Attempting Google Drive upload")
+        log.info("[SAVE_SEQUENCE] Attempting Google Drive mirror")
 
-        # Build storage key: features/{lang}/{dialect}/{folder_name}/{filename}
         folder_name = class_meta.folder_name()
         storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-        log.info("[SAVE_SEQUENCE] Uploading to Google Drive with key: %s", storage_key)
+        log.info("[SAVE_SEQUENCE] Mirroring local NPZ to Google Drive with key: %s", storage_key)
 
         last_error = None
         for attempt in range(1, 4):
             try:
-                buffer.seek(0)
-                storage_url = upload_to_gdrive(buffer, storage_key)
+                storage_url = upload_to_gdrive(str(fpath), storage_key)
                 if storage_url:
-                    log.info("[SAVE_SEQUENCE] Google Drive upload successful: %s", storage_url)
+                    log.info("[SAVE_SEQUENCE] Google Drive mirror successful: %s", storage_url)
                     metadata["storage_url"] = storage_url
                     metadata["storage_key"] = storage_key
-                    metadata["storage_provider"] = "gdrive"
+                    metadata["storage_provider"] = "local+gdrive"
+                    try:
+                        atomic_write_json(sidecar, metadata, indent=2)
+                    except Exception as e:
+                        logging.getLogger(__name__).warning("[SIDECAR] drive update failed: %s", e)
                     break
                 last_error = RuntimeError("Google Drive upload returned None")
                 log.warning("[SAVE_SEQUENCE] Google Drive upload returned None attempt=%s/3", attempt)
             except Exception as e:
                 last_error = e
-                log.error("[SAVE_SEQUENCE] Google Drive upload failed attempt=%s/3: %s", attempt, e)
+                log.error("[SAVE_SEQUENCE] Google Drive mirror failed attempt=%s/3: %s", attempt, e)
 
             if attempt < 3:
                 time.sleep(0.5 * attempt)
 
         if not storage_url:
-            raise RuntimeError(f"Google Drive sample upload failed after retries: {last_error}")
+            logging.getLogger(__name__).warning(
+                "[SAVE_SEQUENCE] Google Drive mirror failed after retries; keeping local copy only: %s",
+                last_error,
+            )
     else:
-        log.info("[SAVE_SEQUENCE] Google Drive not enabled")
+        log.info("[SAVE_SEQUENCE] Google Drive not enabled; keeping local copy only")
 
-    # If Google Drive failed, fallback to local disk.
-    if not storage_url:
-        class_dir = class_meta.hierarchy_path()
-        class_dir.mkdir(parents=True, exist_ok=True)
-        fpath = class_dir / fname
-        sidecar = class_dir / f"sample_{sample_uid}.json"
-
-        fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=str(class_dir))
-        os.close(fd)
-        try:
-            with open(tmp, "wb") as f:
-                np.savez_compressed(
-                    f, sequence=sequence.astype("float32"), meta=metadata
-                )
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, fpath)
-        finally:
-            if os.path.exists(tmp):
-                try:
-                    os.remove(tmp)
-                except:
-                    pass
-
-        try:
-            metadata["storage_provider"] = "local"
-            atomic_write_json(sidecar, metadata, indent=2)
-        except Exception as e:
-            logging.getLogger(__name__).warning("[SIDECAR] write failed: %s", e)
-
-        result_path = str(fpath)
-    else:
-        result_path = storage_url
+    result_path = str(fpath)
 
     # Append sample record
     try:

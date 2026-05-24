@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     google_drive_num_retries: int = int(os.getenv("GOOGLE_DRIVE_NUM_RETRIES", "5"))
     google_drive_chunk_mb: int = int(os.getenv("GOOGLE_DRIVE_CHUNK_MB", "8"))
     google_drive_simple_upload_threshold_mb: int = int(os.getenv("GOOGLE_DRIVE_SIMPLE_UPLOAD_THRESHOLD_MB", "64"))
+    gdrive_filename_suffix: str = os.getenv("GDRIVE_FILENAME_SUFFIX", "2.0")
+    google_sheets_labels_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_LABELS_SPREADSHEET_ID", "")
+    google_sheets_labels_sheet_gid: int = int(os.getenv("GOOGLE_SHEETS_LABELS_SHEET_GID", "0"))
+    google_sheets_samples_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_SAMPLES_SPREADSHEET_ID", "")
+    google_sheets_samples_sheet_gid: int = int(os.getenv("GOOGLE_SHEETS_SAMPLES_SHEET_GID", "0"))
 
     # Processing constants (align live-capture and video)
     feature_dim: int = int(os.getenv("FEATURE_DIM", 126))

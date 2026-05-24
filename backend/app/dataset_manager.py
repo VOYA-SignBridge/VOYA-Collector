@@ -304,9 +304,9 @@ def append_label_row(row: Dict[str, Any]):
 
 
 def sync_master_labels_to_gdrive() -> None:
-    from app.storage.catalog_mirror import mirror_csv_to_gdrive
+    from app.storage.catalog_mirror import mirror_labels_to_gdrive_and_sheets
 
-    mirror_csv_to_gdrive(MASTER_LABELS, "labels.csv")
+    mirror_labels_to_gdrive_and_sheets(MASTER_LABELS)
 
 
 def regenerate_label_indexes():
@@ -438,6 +438,17 @@ def register_class(
         folder_override=folder_name,
     )
     append_label_row(meta.to_label_row())
+
+    if getattr(settings, "use_google_drive", False):
+        try:
+            from app.storage.gdrive_client import get_gdrive_client
+
+            drive_folder_path = f"features/{meta.language}/{meta.dialect}/{meta.folder_name()}"
+            get_gdrive_client().ensure_path(drive_folder_path)
+            logger.info("[CLASS] Ensured Drive folder path=%s", drive_folder_path)
+        except Exception as exc:
+            logger.warning("[CLASS] Drive folder ensure failed: %s", exc)
+
     # create folder and metadata.json
     folder = meta.hierarchy_path()
     folder.mkdir(parents=True, exist_ok=True)

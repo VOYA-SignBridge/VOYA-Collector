@@ -62,15 +62,37 @@ def balance_plan(target: int | None = None):
 def update_class(class_ref: str, payload: dict = Body(...)):
     try:
         result = sync_update_class(class_ref, payload)
-        return {"success": True, **result}
+        return {
+            "success": True,
+            "message": f"Nhãn được cập nhật thành công: {result.get('slug', '')}",
+            "op_id": result.get("op_id"),
+            "operation_logs": result.get("operation_logs"),
+            **result
+        }
     except CatalogSyncError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return {
+            "success": False,
+            "message": f"Lỗi cập nhật nhãn: {str(exc)}",
+            "error_code": exc.error_code,
+            "operation_logs": getattr(exc, "logs", None),
+        }
 
 
 @router.delete("/{class_ref}")
 def delete_class(class_ref: str):
     try:
         result = sync_delete_class(class_ref)
-        return {"success": True, **result}
+        return {
+            "success": True,
+            "message": f"Nhãn được xóa thành công. Đã xóa {result.get('sample_count', 0)} mẫu và {result.get('raw_upload_count', 0)} video gốc.",
+            "op_id": result.get("op_id"),
+            "operation_logs": result.get("operation_logs"),
+            **result
+        }
     except CatalogSyncError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return {
+            "success": False,
+            "message": f"Lỗi xóa nhãn: {str(exc)}",
+            "error_code": exc.error_code,
+            "operation_logs": getattr(exc, "logs", None),
+        }

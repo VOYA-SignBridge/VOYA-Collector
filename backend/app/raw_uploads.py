@@ -72,6 +72,10 @@ def append_raw_upload_row(row: Dict[str, Any]) -> None:
             f.flush()
             os.fsync(f.fileno())
 
+    from app.storage.catalog_mirror import mirror_csv_to_gdrive
+
+    mirror_csv_to_gdrive(RAW_UPLOADS_CSV, "raw_uploads.csv")
+
 
 def write_raw_upload_rows(rows: List[Dict[str, Any]]) -> None:
     _ensure_raw_uploads_file()
@@ -83,6 +87,10 @@ def write_raw_upload_rows(rows: List[Dict[str, Any]]) -> None:
             writer.writerows(rows)
             f.flush()
             os.fsync(f.fileno())
+
+    from app.storage.catalog_mirror import mirror_csv_to_gdrive
+
+    mirror_csv_to_gdrive(RAW_UPLOADS_CSV, "raw_uploads.csv")
 
 
 def find_raw_upload(upload_uid: str) -> Optional[Dict[str, str]]:
