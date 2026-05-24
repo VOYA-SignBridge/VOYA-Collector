@@ -138,18 +138,18 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
 def update_label(class_ref: str, label: str = Form(...)):
     try:
         result = sync_update_class(class_ref, {"label_original": label})
-        return {"success": True, **result}
+        return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
 
 
 @router.delete("/labels/{class_ref}")
 def delete_label(class_ref: str):
     try:
         result = sync_delete_class(class_ref)
-        return {"success": True, **result}
+        return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
 
 
 @router.get("/samples", response_model=List[SampleOut])

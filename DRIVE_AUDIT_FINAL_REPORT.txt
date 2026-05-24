@@ -1,0 +1,74 @@
+================================================================================
+                    DRIVE AUDIT REPORT - FINAL SUMMARY
+                         May 18, 2026 - hoa-de Dialect
+================================================================================
+
+SCOPE:
+  - Only labels2.0.csv and samples2.0.csv on Drive (per user request)
+  - Only class folders in features/vn/hoa-de/ (per user request)
+  - DELETE RULE: Only class_z_* folders (if found)
+  - KEEP RULE: All other class folders and CSV catalogs
+
+================================================================================
+PHASE 1: CSV CATALOG FILES
+================================================================================
+
+  ✓ [KEEP] labels2.0.csv
+    Reason: CSV catalog file, always synchronized with local labels_dialect.csv
+    
+  ✓ [KEEP] samples2.0.csv
+    Reason: CSV catalog file, always synchronized with local samples.csv
+
+================================================================================
+PHASE 2: CLASS FOLDERS IN features/vn/hoa-de/
+================================================================================
+
+Total class folders on Drive:  8
+Total to DELETE (class_z_*):   0
+Total to KEEP:                 8
+
+Detailed breakdown:
+  ✓ [KEEP] class_cat-dau-ca_ec69ab15      - Active class (not class_z_*)
+  ✓ [KEEP] class_cat-ky_cab3132f          - Active class (not class_z_*)
+  ✓ [KEEP] class_danh-vay-ca_f41e437d     - Active class (not class_z_*)
+  ✓ [KEEP] class_lay-chi-tom_b5c5ceb2     - Active class (not class_z_*)
+  ✓ [KEEP] class_lot-da-ca_55dc73f1       - Active class (not class_z_*)
+  ✓ [KEEP] class_lot-vo-tom_de9eb6e1      - Active class (not class_z_*)
+  ✓ [KEEP] class_rang-muoi_9257a41e       - Active class (not class_z_*)
+  ✓ [KEEP] class_tom_7246af3c             - Active class (not class_z_*)
+
+================================================================================
+COMPREHENSIVE SEARCH RESULTS
+================================================================================
+
+Search scope: Entire Drive (signbridge-storage root)
+Search criteria: "class_z_*" - case insensitive
+Results: 0 folders found
+
+Conclusion: No class_z_* folders exist anywhere on the Drive.
+
+================================================================================
+AUDIT CONCLUSION
+================================================================================
+
+✓ AUDIT STATUS: COMPLETE
+✓ CSV FILES: All catalogs present and will be kept
+✓ CLASS FOLDERS: All 8 hoa-de class folders are active and should be kept
+✓ DELETION LIST: EMPTY (no class_z_* folders to delete)
+
+RECOMMENDATION:
+  No cleanup needed at this time. The Drive is clean:
+  - All CSV catalogs are synchronized
+  - All class folders are active
+  - No stale class_z_* folders found
+
+NEXT STEPS:
+  The transactional sync system is now in place and will automatically:
+  1. Keep labels2.0.csv and samples2.0.csv synchronized when labels/samples change
+  2. Move/delete class folders on Drive when classes are renamed/deleted locally
+  3. Roll back all changes (local + DB + Drive) if any step fails
+
+You can proceed with confidence that future label/sample changes will be
+properly reflected on Drive.
+
+================================================================================

@@ -28,6 +28,7 @@ from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
 from app.logging_utils import get_logger as get_structured_logger, OperationStatus, OperationType
 from app.processing.utils import atomic_write_json
 from app.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
+from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
     delete_raw_upload as db_delete_raw_upload,
@@ -46,10 +47,11 @@ CATALOG_LOCK = DATASET_ROOT / ".catalog_sync.lock"
 
 
 class CatalogSyncError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int = 400, error_code: str = "CATALOG_SYNC_FAILED"):
+    def __init__(self, message: str, *, status_code: int = 400, error_code: str = "CATALOG_SYNC_FAILED", logs: list | None = None):
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+        self.logs = logs or []
 
 
 @dataclass
@@ -243,6 +245,217 @@ def _dataset_storage_key(local_path: Path) -> Optional[str]:
     return relative.as_posix()
 
 
+def _google_drive_configured() -> bool:
+    if not getattr(settings, "use_google_drive", False):
+        return False
+    credentials_path = Path(str(getattr(settings, "google_drive_credentials", "")))
+    return credentials_path.exists()
+
+
+def _drive_relative_path(local_path: Path) -> Optional[str]:
+    return _dataset_storage_key(local_path)
+
+
+def _sync_drive_catalog_csv(local_path: Path, remote_name: str) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] csv sync skipped: google drive not configured for %s", remote_name)
+        return
+
+    try:
+        from app.storage.gdrive_client import apply_gdrive_suffix_to_remote_path, upload_to_gdrive
+
+        remote_path = apply_gdrive_suffix_to_remote_path(remote_name)
+        logger.info("[CATALOG][GDRIVE] csv sync begin: local=%s remote=%s", local_path, remote_path)
+        upload_to_gdrive(
+            str(local_path),
+            remote_path,
+            content_type="text/csv",
+            make_public=False,
+            replace_existing=True,
+        )
+        logger.info("[CATALOG][GDRIVE] csv sync done: local=%s remote=%s", local_path, remote_path)
+    except Exception as exc:
+        logger.warning("[CATALOG][GDRIVE] csv sync failed for %s: %s", remote_name, exc)
+
+
+def _sync_drive_catalog_snapshots() -> None:
+    _sync_drive_catalog_csv(MASTER_LABELS, "labels.csv")
+    _sync_drive_catalog_csv(SAMPLES_CSV, "samples.csv")
+    _sync_drive_catalog_csv(RAW_UPLOADS_CSV, "raw_uploads.csv")
+
+
+def _sync_drive_versioned_csv(local_path: Path, drive_file_name: str) -> None:
+    """Sync versioned CSV files (labels2.0.csv, samples2.0.csv) to Google Drive root."""
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] versioned csv sync skipped: google drive not configured for %s", drive_file_name)
+        return
+
+    try:
+        if not local_path.exists():
+            logger.warning("[CATALOG][GDRIVE] local file not found for %s: %s", drive_file_name, local_path)
+            return
+
+        from app.storage.gdrive_client import get_gdrive_client
+
+        client = get_gdrive_client()
+        logger.info("[CATALOG][GDRIVE] versioned csv sync begin: local=%s remote=%s", local_path, drive_file_name)
+
+        # Upload to Google Drive
+        client.upload_file(
+            file_data=str(local_path),
+            remote_path=f"signbridge-storage/{drive_file_name}",
+            content_type="text/csv",
+            replace_existing=True
+        )
+        logger.info("[CATALOG][GDRIVE] versioned csv sync done: %s", drive_file_name)
+    except Exception as e:
+        logger.warning("[CATALOG][GDRIVE] versioned csv sync failed for %s: %s", drive_file_name, e)
+
+
+def _rows_to_matrix(fieldnames: Sequence[str], rows: Sequence[Dict[str, Any]]) -> List[List[Any]]:
+    matrix: List[List[Any]] = [list(fieldnames)]
+    for row in rows:
+        matrix.append([row.get(field, "") for field in fieldnames])
+    return matrix
+
+
+def _google_sheets_configured() -> bool:
+    return bool(
+        getattr(settings, "google_sheets_labels_spreadsheet_id", "")
+        and int(getattr(settings, "google_sheets_labels_sheet_gid", 0) or 0)
+        and getattr(settings, "google_sheets_samples_spreadsheet_id", "")
+        and int(getattr(settings, "google_sheets_samples_sheet_gid", 0) or 0)
+    )
+
+
+def _sync_google_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]], sample_rows: Sequence[Dict[str, Any]]) -> None:
+    labels_spreadsheet_id = str(getattr(settings, "google_sheets_labels_spreadsheet_id", "")).strip()
+    labels_sheet_gid = int(getattr(settings, "google_sheets_labels_sheet_gid", 0) or 0)
+    samples_spreadsheet_id = str(getattr(settings, "google_sheets_samples_spreadsheet_id", "")).strip()
+    samples_sheet_gid = int(getattr(settings, "google_sheets_samples_sheet_gid", 0) or 0)
+
+    if not labels_spreadsheet_id and not samples_spreadsheet_id:
+        logger.info("[CATALOG][SHEETS] versioned sheet sync skipped: spreadsheet ids not configured")
+        return
+
+    client = get_gdrive_client()
+
+    if labels_spreadsheet_id and labels_sheet_gid:
+        try:
+            label_values = _rows_to_matrix(LABEL_FIELDS, label_rows)
+            logger.info("[CATALOG][SHEETS] syncing labels spreadsheet_id=%s gid=%s", labels_spreadsheet_id, labels_sheet_gid)
+            client.replace_sheet_values(labels_spreadsheet_id, labels_sheet_gid, label_values)
+        except Exception as exc:
+            logger.warning("[CATALOG][SHEETS] labels sync failed: %s", exc)
+    else:
+        logger.info("[CATALOG][SHEETS] labels sync skipped: spreadsheet id or gid missing")
+
+    if samples_spreadsheet_id and samples_sheet_gid:
+        try:
+            sample_values = _rows_to_matrix(SAMPLE_FIELDS, sample_rows)
+            logger.info("[CATALOG][SHEETS] syncing samples spreadsheet_id=%s gid=%s", samples_spreadsheet_id, samples_sheet_gid)
+            client.replace_sheet_values(samples_spreadsheet_id, samples_sheet_gid, sample_values)
+        except Exception as exc:
+            logger.warning("[CATALOG][SHEETS] samples sync failed: %s", exc)
+    else:
+        logger.info("[CATALOG][SHEETS] samples sync skipped: spreadsheet id or gid missing")
+
+
+def _sync_drive_and_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]], sample_rows: Sequence[Dict[str, Any]]) -> None:
+    logger.info("[CATALOG][SYNC] versioned output sync begin")
+    _sync_drive_versioned_csv(MASTER_LABELS, "labels2.0.csv")
+    _sync_drive_versioned_csv(SAMPLES_CSV, "samples2.0.csv")
+    _sync_google_sheets_versioned_tables(label_rows, sample_rows)
+    logger.info("[CATALOG][SYNC] versioned output sync done")
+
+
+def _sync_drive_move_folder_pairs(pairs: Sequence[tuple[Path, Path]]) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] move skipped: google drive not configured")
+        return
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    moved_pairs: List[tuple[str, str]] = []
+    try:
+        for old_path, new_path in pairs:
+            old_rel = _drive_relative_path(old_path)
+            new_rel = _drive_relative_path(new_path)
+            if not old_rel or not new_rel or old_rel == new_rel:
+                logger.debug(
+                    "[CATALOG][GDRIVE] move skipped: old=%s new=%s old_rel=%s new_rel=%s",
+                    old_path,
+                    new_path,
+                    old_rel,
+                    new_rel,
+                )
+                continue
+            logger.info("[CATALOG][GDRIVE] move begin: %s -> %s", old_rel, new_rel)
+            client.move_folder_path(old_rel, new_rel)
+            moved_pairs.append((old_rel, new_rel))
+            logger.info("[CATALOG][GDRIVE] move done: %s -> %s", old_rel, new_rel)
+    except Exception:
+        logger.warning("[CATALOG][GDRIVE] move failed; starting rollback for %s moved pair(s)", len(moved_pairs))
+        for old_rel, new_rel in reversed(moved_pairs):
+            try:
+                logger.info("[CATALOG][GDRIVE] move rollback begin: %s -> %s", new_rel, old_rel)
+                client.move_folder_path(new_rel, old_rel)
+                logger.info("[CATALOG][GDRIVE] move rollback done: %s -> %s", new_rel, old_rel)
+            except Exception as rollback_exc:
+                logger.error(
+                    "[CATALOG][ROLLBACK][GDRIVE] Failed to move folder back %s -> %s: %s",
+                    new_rel,
+                    old_rel,
+                    rollback_exc,
+                )
+        raise
+
+
+def _sync_drive_delete_folder_pairs(pairs: Sequence[Path]) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] delete skipped: google drive not configured")
+        return
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    for path in pairs:
+        rel = _drive_relative_path(path)
+        if not rel:
+            logger.debug("[CATALOG][GDRIVE] delete skipped: cannot build relative path for %s", path)
+            continue
+        logger.info("[CATALOG][GDRIVE] delete begin: %s", rel)
+        client.delete_path(rel)
+        logger.info("[CATALOG][GDRIVE] delete done: %s", rel)
+
+
+def _restore_drive_from_backup(backup_root: Path, remote_root: Path) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] restore skipped: google drive not configured")
+        return
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    backup_root = Path(backup_root)
+    remote_root = Path(remote_root)
+    if not backup_root.exists():
+        logger.debug("[CATALOG][GDRIVE] restore skipped: backup not found=%s", backup_root)
+        return
+    logger.info(
+        "[CATALOG][GDRIVE] restore begin: backup=%s remote=%s",
+        backup_root,
+        _drive_relative_path(remote_root) or remote_root.as_posix(),
+    )
+    client.upload_folder_tree(str(backup_root), _drive_relative_path(remote_root) or remote_root.as_posix(), make_public=False, replace_existing=True)
+    logger.info(
+        "[CATALOG][GDRIVE] restore done: backup=%s remote=%s",
+        backup_root,
+        _drive_relative_path(remote_root) or remote_root.as_posix(),
+    )
+
+
 def _update_sample_metadata_json(sample_path: Path, new_meta: ClassMetadata) -> None:
     json_path = sample_path.with_suffix(".json")
     if not json_path.exists():
@@ -303,6 +516,7 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
     ensure_tables()
     op_id = f"class_update_{class_idx}"
     slog.start_operation(op_id)
+    op_logs: List[str] = []
 
     with _catalog_lock():
         rows = load_labels()
@@ -481,6 +695,58 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
             _sync_db_samples([row for row in sample_rows_after if row.get("class_uid") == new_meta.class_uid])
             _sync_db_raw_uploads([row for row in raw_rows_after if row.get("class_uid") == new_meta.class_uid])
 
+            _sync_drive_catalog_snapshots()
+
+            try:
+                logger.info(
+                    "[CATALOG][GDRIVE] class update sync begin: class_uid=%s old=%s new=%s",
+                    old_meta.class_uid,
+                    old_feature_dir,
+                    new_feature_dir,
+                )
+                op_logs.append(f"class update sync begin: class_uid={old_meta.class_uid} old={old_feature_dir} new={new_feature_dir}")
+                _sync_drive_move_folder_pairs(
+                    [
+                        (old_feature_dir, new_feature_dir),
+                        (old_raw_dir, new_raw_dir),
+                    ]
+                )
+                op_logs.append(f"drive move completed for class_uid={old_meta.class_uid}")
+                logger.info("[CATALOG][GDRIVE] syncing versioned outputs after update for class_uid=%s", old_meta.class_uid)
+                op_logs.append(f"syncing versioned outputs for class_uid={old_meta.class_uid}")
+                _sync_drive_and_sheets_versioned_tables(updated_label_rows, sample_rows_after)
+                logger.info("[CATALOG][GDRIVE] versioned outputs synced successfully for class_uid=%s", old_meta.class_uid)
+                op_logs.append(f"versioned outputs synced for class_uid={old_meta.class_uid}")
+                
+                logger.info("[CATALOG][GDRIVE] class update sync done: class_uid=%s", old_meta.class_uid)
+            except Exception as drive_exc:
+                logger.error("[CATALOG][GDRIVE] class update sync failed: class_uid=%s error=%s", old_meta.class_uid, drive_exc)
+                try:
+                    logger.info("[CATALOG][ROLLBACK] restoring local/db state after Drive move failure for class_uid=%s", old_meta.class_uid)
+                    _write_csv(MASTER_LABELS, LABEL_FIELDS, rows)
+                    regenerate_label_indexes()
+                    _write_csv(SAMPLES_CSV, SAMPLE_FIELDS, all_samples_before)
+                    _write_csv(RAW_UPLOADS_CSV, RAW_UPLOAD_FIELDS, all_raw_before)
+                    _restore_tree(backup_feature_dir, old_feature_dir)
+                    _restore_tree(backup_raw_dir, old_raw_dir)
+                    db_upsert_class(target_row)
+                    _sync_db_samples(all_samples_before)
+                    _sync_db_raw_uploads(all_raw_before)
+                    _sync_drive_catalog_snapshots()
+                    _sync_drive_and_sheets_versioned_tables(rows, all_samples_before)
+                except Exception as rollback_exc:
+                    logger.error("[CATALOG][ROLLBACK] Failed to restore class update after Drive sync failure for class_uid=%s: %s", old_meta.class_uid, rollback_exc)
+                slog.log_operation(
+                    OperationType.CATALOG_ROLLBACK,
+                    OperationStatus.FAILURE,
+                    {"class_idx": class_idx, "class_uid": old_meta.class_uid, "error": str(drive_exc)},
+                    duration_ms=slog.end_operation(op_id),
+                    error_code="CATALOG_ROLLBACK_FAILED",
+                    error_message=str(drive_exc),
+                    log_level=logging.ERROR,
+                )
+                raise CatalogSyncError(str(drive_exc), status_code=getattr(drive_exc, "status_code", 500), error_code=getattr(drive_exc, "error_code", "CATALOG_SYNC_FAILED")) from drive_exc
+
             slog.log_operation(
                 OperationType.CLASS_UPDATE,
                 OperationStatus.SUCCESS,
@@ -501,6 +767,8 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
                 "slug": new_meta.slug,
                 "language": new_meta.language,
                 "dialect": new_meta.dialect,
+                "op_id": op_id,
+                "operation_logs": op_logs,
             }
         except Exception as exc:
             # Roll back the visible state first.
@@ -514,6 +782,10 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
                 db_upsert_class(target_row)
                 _sync_db_samples(all_samples_before)
                 _sync_db_raw_uploads(all_raw_before)
+                # Do NOT sync the non-versioned catalog snapshots (labels.csv / samples.csv) to Drive
+                # Also restore versioned csvs
+                _sync_drive_and_sheets_versioned_tables(rows, all_samples_before)
+                op_logs.append("rollback: restored local CSVs and trees; versioned Drive+Sheets outputs restored")
             except Exception as rollback_exc:
                 logger.error("[CATALOG][ROLLBACK] Failed to restore class update for class_uid=%s: %s", old_meta.class_uid, rollback_exc)
             slog.log_operation(
@@ -525,7 +797,7 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
                 error_message=str(exc),
                 log_level=logging.ERROR,
             )
-            raise CatalogSyncError(str(exc), status_code=getattr(exc, "status_code", 500), error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED")) from exc
+            raise CatalogSyncError(str(exc), status_code=getattr(exc, "status_code", 500), error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED"), logs=op_logs) from exc
         finally:
             shutil.rmtree(snapshot_root, ignore_errors=True)
 
@@ -534,6 +806,8 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
     ensure_tables()
     op_id = f"class_delete_{class_idx}"
     slog.start_operation(op_id)
+
+    op_logs: List[str] = []
 
     with _catalog_lock():
         rows = load_labels()
@@ -560,6 +834,17 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
         backup_feature_dir = _backup_tree(old_feature_dir, snapshot_root)
         backup_raw_dir = _backup_tree(old_raw_dir, snapshot_root)
         try:
+            logger.info(
+                "[CATALOG][GDRIVE] class delete sync begin: class_uid=%s feature=%s raw=%s",
+                old_meta.class_uid,
+                old_feature_dir,
+                old_raw_dir,
+            )
+            op_logs.append(f"class delete sync begin: class_uid={old_meta.class_uid} feature={old_feature_dir} raw={old_raw_dir}")
+            _sync_drive_delete_folder_pairs([old_feature_dir, old_raw_dir])
+            logger.info("[CATALOG][GDRIVE] class delete sync done: class_uid=%s", old_meta.class_uid)
+            op_logs.append(f"drive delete completed for class_uid={old_meta.class_uid}")
+
             _remove_tree(old_feature_dir)
             _remove_tree(old_raw_dir)
 
@@ -575,6 +860,14 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
             db_delete_class(old_meta.class_uid)
             db_delete_samples_by_class(old_meta.class_uid)
             db_delete_raw_uploads_by_class(old_meta.class_uid)
+
+            _sync_drive_catalog_snapshots()
+
+            logger.info("[CATALOG][GDRIVE] syncing versioned outputs after delete for class_uid=%s", old_meta.class_uid)
+            op_logs.append(f"syncing versioned outputs after delete for class_uid={old_meta.class_uid}")
+            _sync_drive_and_sheets_versioned_tables(remaining_label_rows, remaining_sample_rows)
+            logger.info("[CATALOG][GDRIVE] versioned outputs synced successfully for class_uid=%s", old_meta.class_uid)
+            op_logs.append(f"versioned outputs synced successfully for class_uid={old_meta.class_uid}")
 
             slog.log_operation(
                 OperationType.CLASS_DELETE,
@@ -593,18 +886,26 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
                 "class_idx": old_meta.class_idx,
                 "sample_count": len(sample_rows_before),
                 "raw_upload_count": len(raw_rows_before),
+                "op_id": op_id,
+                "operation_logs": op_logs,
             }
         except Exception as exc:
             try:
+                logger.info("[CATALOG][ROLLBACK] restoring local/db/drive state after delete failure for class_uid=%s", old_meta.class_uid)
                 _write_csv(MASTER_LABELS, LABEL_FIELDS, rows)
                 regenerate_label_indexes()
                 _write_csv(SAMPLES_CSV, SAMPLE_FIELDS, all_samples_before)
                 _write_csv(RAW_UPLOADS_CSV, RAW_UPLOAD_FIELDS, all_raw_before)
                 _restore_tree(backup_feature_dir, old_feature_dir)
                 _restore_tree(backup_raw_dir, old_raw_dir)
+                _restore_drive_from_backup(backup_feature_dir or old_feature_dir, old_feature_dir)
+                _restore_drive_from_backup(backup_raw_dir or old_raw_dir, old_raw_dir)
                 db_upsert_class(target_row)
                 _sync_db_samples(all_samples_before)
                 _sync_db_raw_uploads(all_raw_before)
+                _sync_drive_catalog_snapshots()
+                _sync_drive_and_sheets_versioned_tables(rows, all_samples_before)
+                op_logs.append("rollback: restored local CSVs/DB/drive from backup; versioned Drive+Sheets outputs restored")
             except Exception as rollback_exc:
                 logger.error("[CATALOG][ROLLBACK] Failed to restore class delete for class_uid=%s: %s", old_meta.class_uid, rollback_exc)
             slog.log_operation(
@@ -616,7 +917,7 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
                 error_message=str(exc),
                 log_level=logging.ERROR,
             )
-            raise CatalogSyncError(str(exc), status_code=getattr(exc, "status_code", 500), error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED")) from exc
+            raise CatalogSyncError(str(exc), status_code=getattr(exc, "status_code", 500), error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED"), logs=op_logs) from exc
         finally:
             shutil.rmtree(snapshot_root, ignore_errors=True)
 
@@ -670,6 +971,21 @@ def sync_delete_sample(sample_uid: str) -> Dict[str, Any]:
             remaining_rows = [row for row in rows if row.get("sample_uid") != sample_uid]
             _write_csv(SAMPLES_CSV, SAMPLE_FIELDS, remaining_rows)
             db_delete_sample(sample_uid)
+
+            from app.storage.catalog_mirror import mirror_samples_to_gdrive_and_sheets
+
+            mirror_samples_to_gdrive_and_sheets(SAMPLES_CSV)
+
+            drive_ref = str(target_row.get("storage_key") or "").strip()
+            if not drive_ref:
+                storage_url = str(target_row.get("storage_url") or "").strip()
+                if storage_url.startswith(("gdrive://", "https://drive.google.com")):
+                    drive_ref = storage_url
+            if drive_ref:
+                try:
+                    get_gdrive_client().delete_file(drive_ref)
+                except Exception as drive_exc:
+                    logger.warning("[CATALOG][GDRIVE] sample delete mirror failed for %s: %s", sample_uid, drive_exc)
 
             slog.log_operation(
                 OperationType.SAMPLE_DELETE,
