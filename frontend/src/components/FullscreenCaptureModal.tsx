@@ -175,6 +175,18 @@ export default function FullscreenCaptureModal({
   // once, not on every re-render while countdown===0 && recording.
   const backupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // =========================================================================
+  // PHASE 1A: TEMPORAL STABILIZATION REFS (Majority voting + grace + recovery)
+  // =========================================================================
+  const initializationCompleteRef = useRef(false);
+  const initFrameCountRef = useRef(0);
+  const detectionHistoryRef = useRef<number[]>([0, 0, 0, 0, 0, 0, 0]); // Ring buffer for hand counts
+  const historyIndexRef = useRef(0);
+  const graceCounterRef = useRef(0);           // Counts CONSECUTIVE hand-count mismatches
+  const isRecoveringRef = useRef(false);       // True when in recovery state
+  const recoveryTimeoutRef = useRef(0);        // Counts total frames in recovery (for timeout)
+  const recoveryConfirmRef = useRef(0);        // Counts CONSECUTIVE matching frames (for resume)
+
   // -------------------------------------------------------------------------
   // Sync state → refs
   // -------------------------------------------------------------------------
@@ -189,6 +201,20 @@ export default function FullscreenCaptureModal({
   useEffect(() => { completedCapturesRef.current = completedCaptures; }, [completedCaptures]);
   useEffect(() => { targetFramesRef.current = FIXED_TARGET_FRAMES; }, [targetFrames]);
 
+  // PHASE 1A: Reset temporal stabilization refs when recording starts
+  useEffect(() => {
+    if (recording) {
+      // Recording just started: reset all temporal stabilization refs
+      initializationCompleteRef.current = false;
+      initFrameCountRef.current = 0;
+      detectionHistoryRef.current = [0, 0, 0, 0, 0, 0, 0];
+      historyIndexRef.current = 0;
+      graceCounterRef.current = 0;
+      isRecoveringRef.current = false;
+      recoveryTimeoutRef.current = 0;
+      recoveryConfirmRef.current = 0;
+    }
+  }, [recording]);
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -664,22 +690,130 @@ export default function FullscreenCaptureModal({
 
       let accept = false;
       const userChoice = expectedHandsOptionRef.current;
+
+      // =====================================================================
+      // PHASE 1A: TEMPORAL STABILIZATION
+      // Majority voting (init) + grace period + recovery with no auto-switching
+      // =====================================================================
+      const INIT_WINDOW = 5;
+      const INIT_MAJORITY_THRESHOLD = 0.60;
+      const GRACE_FRAMES = 2;
+      const RECOVERY_TIMEOUT = 3;
+      const RECOVERY_CONFIRM = 3;
+      const HISTORY_SIZE = 7;
+
       if (detectedHandsCountRaw === 0) {
+        // No hands detected at all
         accept = false;
       } else if (userChoice != null) {
+        // Manual mode: user selected 1 or 2 hands explicitly
         if (userChoice === 2) accept = presentLeftRaw && presentRightRaw;
         else if (userChoice === 1) accept = presentLeftRaw !== presentRightRaw;
         else accept = true;
       } else if (expectedHandsRef.current == null) {
-        expectedHandsRef.current = detectedHandsCountRaw === 2 ? 2 : 1;
-        accept = true;
-        if (DEBUG_HANDS) console.log("Inferred expectedHands =", expectedHandsRef.current);
-      } else if (expectedHandsRef.current === 2) {
-        accept = presentLeftRaw && presentRightRaw;
-      } else if (expectedHandsRef.current === 1) {
-        accept = presentLeftRaw !== presentRightRaw;
+        // AUTO MODE: INITIALIZATION PHASE (warmup-only, no append to dataset)
+        initFrameCountRef.current++;
+
+        // Update history ring buffer
+        detectionHistoryRef.current[historyIndexRef.current] = detectedHandsCountRaw;
+        historyIndexRef.current = (historyIndexRef.current + 1) % HISTORY_SIZE;
+
+        if (initFrameCountRef.current < INIT_WINDOW) {
+          // Still collecting frames for initialization
+          accept = false;
+        } else if (initFrameCountRef.current === INIT_WINDOW) {
+          // End of warmup window: calculate expected hand count via majority vote
+          const recentCounts = detectionHistoryRef.current.slice(0, INIT_WINDOW);
+          const twoHandCount = recentCounts.filter(c => c === 2).length;
+          const agreement = twoHandCount / INIT_WINDOW;
+
+          if (agreement >= INIT_MAJORITY_THRESHOLD) {
+            expectedHandsRef.current = 2;
+          } else {
+            expectedHandsRef.current = twoHandCount > 0 ? 1 : 2;
+          }
+          initializationCompleteRef.current = true;
+          accept = false; // Don't accept the init frame itself
+          if (DEBUG_HANDS) console.log("Inferred expectedHands via majority vote =", expectedHandsRef.current, "agreement =", agreement);
+        }
+      } else if (initializationCompleteRef.current && expectedHandsRef.current !== null) {
+        // AUTO MODE: TRACKING / GRACE / RECOVERY PHASES
+
+        // Update history ring buffer (for debug/telemetry only)
+        detectionHistoryRef.current[historyIndexRef.current] = detectedHandsCountRaw;
+        historyIndexRef.current = (historyIndexRef.current + 1) % HISTORY_SIZE;
+
+        const currentHandCount = detectedHandsCountRaw;
+        const isMatching = currentHandCount === expectedHandsRef.current;
+
+        if (isMatching) {
+          // TRACKING: Hand count matches expectation
+          // Reset all grace/recovery counters
+          graceCounterRef.current = 0;
+          isRecoveringRef.current = false;
+          recoveryTimeoutRef.current = 0;
+          recoveryConfirmRef.current = 0;
+          accept = true;
+        } else if (!isRecoveringRef.current) {
+          // GRACE PERIOD: Mismatch & not in recovery yet
+          graceCounterRef.current++;
+
+          if (graceCounterRef.current <= GRACE_FRAMES) {
+            // Still in grace period: don't accept, but don't pause
+            accept = false;
+            if (DEBUG_HANDS) console.debug("Grace period", graceCounterRef.current, "/", GRACE_FRAMES);
+          } else {
+            // Grace period exceeded: enter recovery state, pause capture
+            isRecoveringRef.current = true;
+            recoveryTimeoutRef.current = 0;
+            recoveryConfirmRef.current = 0;
+            accept = false;
+            if (DEBUG_HANDS) console.warn("Grace period exceeded, entering recovery");
+          }
+        } else if (isRecoveringRef.current) {
+          // RECOVERY: Wait for hands to return
+          // Track two separate counts:
+          // - recoveryTimeoutRef: total frames in recovery (for timeout detection)
+          // - recoveryConfirmRef: CONSECUTIVE matching frames (for resume confirmation)
+
+          recoveryTimeoutRef.current++;
+
+          if (currentHandCount === expectedHandsRef.current) {
+            // Hands match this frame!
+            recoveryConfirmRef.current++;
+
+            if (recoveryConfirmRef.current >= RECOVERY_CONFIRM) {
+              // Confirmed! Resume capture (3 consecutive matching frames)
+              isRecoveringRef.current = false;
+              graceCounterRef.current = 0;
+              recoveryTimeoutRef.current = 0;
+              recoveryConfirmRef.current = 0;
+              accept = true;
+              if (DEBUG_HANDS) console.log("Recovery successful, resuming capture");
+            } else {
+              // Still building up consecutive matches
+              accept = false;
+              if (DEBUG_HANDS) console.debug("Recovery progress", recoveryConfirmRef.current, "/", RECOVERY_CONFIRM);
+            }
+          } else {
+            // Hands DON'T match this frame
+            recoveryConfirmRef.current = 0; // RESET consecutive match counter on mismatch
+
+            if (recoveryTimeoutRef.current >= RECOVERY_TIMEOUT) {
+              // Recovery timeout exceeded (hands missing for 3+ frames)
+              // DO NOT auto-switch expectations (prevents mode drift from temporary occlusion)
+              // Remain in recovery state, pause capture
+              accept = false;
+              if (DEBUG_HANDS) console.warn("Recovery timeout exceeded, waiting for hands to reappear");
+            } else {
+              // Still within recovery window, waiting for hands
+              accept = false;
+            }
+          }
+        }
       } else {
-        accept = true;
+        // Fallback (should not reach here in normal operation)
+        accept = false;
       }
 
       if (!accept) {
@@ -703,8 +837,12 @@ export default function FullscreenCaptureModal({
         confidence: typeof confidence === "number" ? confidence : undefined,
       };
 
-      framesRef.current.push(frameEntry);
-      setFrames([...framesRef.current]);
+      // PHASE 1A: Only append to dataset after initialization is complete
+      // (Warmup frames during first 5 frames are not appended)
+      if (accept && initializationCompleteRef.current) {
+        framesRef.current.push(frameEntry);
+        setFrames([...framesRef.current]);
+      }
 
       if (framesRef.current.length >= FIXED_TARGET_FRAMES) {
         recordingRef.current = false;
@@ -727,6 +865,15 @@ export default function FullscreenCaptureModal({
           setFrames([]); framesRef.current = [];
           expectedHandsRef.current = expectedHandsOptionRef.current;
           lastFrameTimeRef.current = 0;
+          // PHASE 1A: Reset temporal stabilization refs for next capture
+          initializationCompleteRef.current = false;
+          initFrameCountRef.current = 0;
+          detectionHistoryRef.current = [0, 0, 0, 0, 0, 0, 0];
+          historyIndexRef.current = 0;
+          graceCounterRef.current = 0;
+          isRecoveringRef.current = false;
+          recoveryTimeoutRef.current = 0;
+          recoveryConfirmRef.current = 0;
           setTimeout(() => {
             setCountdown(3); setMode("COUNTDOWN");
             setTimeout(() => {
@@ -742,6 +889,15 @@ export default function FullscreenCaptureModal({
             completedCapturesRef.current = 0;
             setCompletedCaptures(0); setCurrentCaptureIndex(0);
             recordingRef.current = false; setRecording(false); setMode("IDLE"); setLabel("");
+            // PHASE 1A: Reset temporal stabilization refs when done
+            initializationCompleteRef.current = false;
+            initFrameCountRef.current = 0;
+            detectionHistoryRef.current = [0, 0, 0, 0, 0, 0, 0];
+            historyIndexRef.current = 0;
+            graceCounterRef.current = 0;
+            isRecoveringRef.current = false;
+            recoveryTimeoutRef.current = 0;
+            recoveryConfirmRef.current = 0;
           }, 1000);
         }
       }
