@@ -35,18 +35,7 @@
 - ✅ Helper `extractMessage()`: Trích xuất message từ response
 - ✅ Hiển thị logs trong UI khi update/delete thành công hoặc thất bại
 
-## ✅ Cấu hình .env - Đầy đủ & Chính xác
 
-```
-GOOGLE_SHEETS_LABELS_SPREADSHEET_ID=1ulsPQ1qDe31Y8cHKQwx_KPrq-BA2eZenRf-LLq74QkY
-GOOGLE_SHEETS_LABELS_SHEET_GID=1266519527
-GOOGLE_SHEETS_SAMPLES_SPREADSHEET_ID=1f3xv2_X13Vmj63DwgP3YXFp3vmQV-kSHq5G_lvWIls0
-GOOGLE_SHEETS_SAMPLES_SHEET_GID=580985092
-GOOGLE_SHEETS_API_KEY=AIzaSyCBpNAkr-Bc36HNVXuM4uhW0AO0riGbvD8
-
-GOOGLE_DRIVE_CREDENTIALS=/gdrive/credentials.json
-GOOGLE_DRIVE_TOKEN=/gdrive/token.json
-```
 
 ## ✅ Quy trình Transactional
 
