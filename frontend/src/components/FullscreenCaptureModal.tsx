@@ -722,19 +722,25 @@ export default function FullscreenCaptureModal({
           // Still collecting frames for initialization
           accept = false;
         } else if (initFrameCountRef.current === INIT_WINDOW) {
-          // End of warmup window: calculate expected hand count via majority vote
+          // End of warmup window: infer the most likely hand-count mode.
           const recentCounts = detectionHistoryRef.current.slice(0, INIT_WINDOW);
+          const oneHandCount = recentCounts.filter(c => c === 1).length;
           const twoHandCount = recentCounts.filter(c => c === 2).length;
-          const agreement = twoHandCount / INIT_WINDOW;
 
-          if (agreement >= INIT_MAJORITY_THRESHOLD) {
+          if (twoHandCount >= INIT_WINDOW * INIT_MAJORITY_THRESHOLD && twoHandCount >= oneHandCount) {
             expectedHandsRef.current = 2;
+          } else if (oneHandCount > 0) {
+            expectedHandsRef.current = 1;
           } else {
-            expectedHandsRef.current = twoHandCount > 0 ? 1 : 2;
+            expectedHandsRef.current = 1;
           }
           initializationCompleteRef.current = true;
           accept = false; // Don't accept the init frame itself
-          if (DEBUG_HANDS) console.log("Inferred expectedHands via majority vote =", expectedHandsRef.current, "agreement =", agreement);
+          if (DEBUG_HANDS) console.log("Inferred expectedHands via warmup =", expectedHandsRef.current, {
+            oneHandCount,
+            twoHandCount,
+            recentCounts,
+          });
         }
       } else if (initializationCompleteRef.current && expectedHandsRef.current !== null) {
         // AUTO MODE: TRACKING / GRACE / RECOVERY PHASES
