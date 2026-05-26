@@ -64,12 +64,12 @@ export default function AnalyticsOverview() {
   return (
     <div className="space-y-6">
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-blue-600 mb-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
+        <div className="card text-center p-4 sm:p-6">
+          <div className="text-2xl sm:text-3xl font-bold text-blue-600 mb-1">
             {analytics.totalSamples.toLocaleString()}
           </div>
-          <div className="text-gray-600 text-sm">Total Samples</div>
+          <div className="text-gray-600 text-xs sm:text-sm">Total Samples</div>
           <div className="flex items-center justify-center mt-2">
             <Badge variant="success" size="sm">
               +{analytics.weeklyGrowth}% this week
@@ -77,11 +77,11 @@ export default function AnalyticsOverview() {
           </div>
         </div>
 
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-green-600 mb-1">
+        <div className="card text-center p-4 sm:p-6">
+          <div className="text-2xl sm:text-3xl font-bold text-green-600 mb-1">
             {analytics.totalLabels}
           </div>
-          <div className="text-gray-600 text-sm">Active Labels</div>
+          <div className="text-gray-600 text-xs sm:text-sm">Active Labels</div>
           <div className="flex items-center justify-center mt-2">
             <Badge variant="info" size="sm">
               Ready for training
@@ -89,11 +89,11 @@ export default function AnalyticsOverview() {
           </div>
         </div>
 
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-purple-600 mb-1">
+        <div className="card text-center p-4 sm:p-6">
+          <div className="text-2xl sm:text-3xl font-bold text-purple-600 mb-1">
             {analytics.todaySamples}
           </div>
-          <div className="text-gray-600 text-sm">Today's Samples</div>
+          <div className="text-gray-600 text-xs sm:text-sm">Today's Samples</div>
           <div className="flex items-center justify-center mt-2">
             <Badge variant="warning" size="sm">
               🔥 Keep going!
@@ -101,11 +101,11 @@ export default function AnalyticsOverview() {
           </div>
         </div>
 
-        <div className="card text-center">
-          <div className="text-3xl font-bold text-orange-600 mb-1">
+        <div className="card text-center p-4 sm:p-6">
+          <div className="text-2xl sm:text-3xl font-bold text-orange-600 mb-1">
             {analytics.activeJobs}
           </div>
-          <div className="text-gray-600 text-sm">Active Jobs</div>
+          <div className="text-gray-600 text-xs sm:text-sm">Active Jobs</div>
           <div className="flex items-center justify-center mt-2">
             <Badge variant={analytics.activeJobs > 0 ? "info" : "default"} size="sm">
               {analytics.activeJobs > 0 ? "Processing..." : "Idle"}
@@ -115,12 +115,12 @@ export default function AnalyticsOverview() {
       </div>
 
       {/* Charts and Details */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Top Labels */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
+        <div className="card p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
             <h3 className="text-lg font-semibold text-gray-900">📊 Top Labels</h3>
-            <Button variant="ghost" size="sm">View All</Button>
+            <Button variant="ghost" size="sm" className="w-full sm:w-auto">View All</Button>
           </div>
           
           <div className="space-y-3">
@@ -147,10 +147,10 @@ export default function AnalyticsOverview() {
         </div>
 
         {/* Recent Activity */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
+        <div className="card p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
             <h3 className="text-lg font-semibold text-gray-900">⚡ Recent Activity</h3>
-            <Button variant="ghost" size="sm">View All</Button>
+            <Button variant="ghost" size="sm" className="w-full sm:w-auto">View All</Button>
           </div>
           
           <div className="space-y-3">
@@ -176,18 +176,18 @@ export default function AnalyticsOverview() {
       </div>
 
       {/* Quick Actions */}
-      <div className="card">
+      <div className="card p-4 sm:p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">🚀 Quick Actions</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Button className="justify-start" variant="secondary">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+          <Button className="w-full justify-start" variant="secondary">
             <span className="mr-2">📷</span>
             Start New Capture Session
           </Button>
-          <Button className="justify-start" variant="secondary">
+          <Button className="w-full justify-start" variant="secondary">
             <span className="mr-2">📊</span>
             Export Dataset
           </Button>
-          <Button className="justify-start" variant="secondary">
+          <Button className="w-full justify-start" variant="secondary">
             <span className="mr-2">🤖</span>
             Train Model
           </Button>

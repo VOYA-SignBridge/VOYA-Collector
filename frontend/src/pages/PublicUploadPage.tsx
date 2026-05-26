@@ -50,9 +50,9 @@ export default function PublicUploadPage() {
   };
 
   return (
-    <div className="card max-w-xl mx-auto">
-      <div className="p-6">
-        <h2 className="text-lg font-semibold mb-2">Community Upload</h2>
+    <div className="card w-full max-w-xl mx-auto">
+      <div className="p-4 sm:p-6">
+        <h2 className="text-xl font-semibold mb-2">Community Upload</h2>
         <p className="text-sm text-gray-600 mb-4">Quickly submit a labeled sample. Advanced options are reserved for admins.</p>
 
         <div className="space-y-4">
@@ -66,9 +66,9 @@ export default function PublicUploadPage() {
             <input className="input w-full" value={label} onChange={(e) => setLabel(e.target.value)} />
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+          <div className="flex flex-col gap-3 pt-4 border-t border-gray-200 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-gray-500">Role: <strong>{role}</strong></div>
-            <Button onClick={handleSubmit} loading={loading} disabled={loading || !label || !user}>Submit</Button>
+            <Button className="w-full sm:w-auto" onClick={handleSubmit} loading={loading} disabled={loading || !label || !user}>Submit</Button>
           </div>
 
           {message && (

@@ -386,7 +386,7 @@ export default function LabelsPage() {
       )}
 
       {statusMessage && !error && (
-        <div className="fixed bottom-6 right-6 max-w-md rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div className="fixed bottom-4 left-4 right-4 z-40 sm:left-auto sm:right-6 sm:max-w-md rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">{statusMessage}</div>
             <button onClick={() => setStatusMessage(null)} className="mt-0.5 text-green-600 hover:text-green-700">
@@ -414,32 +414,32 @@ export default function LabelsPage() {
 
       {/* Stats Overview */}
       {!loading && renderItems.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="card bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 border-indigo-200">
             <div className="text-sm font-medium text-indigo-600">Tổng nhãn</div>
-            <div className="text-3xl font-bold text-indigo-900 mt-1">{renderItems.length}</div>
+            <div className="text-xl sm:text-3xl font-bold text-indigo-900 mt-1">{renderItems.length}</div>
             <div className="text-xs text-indigo-600 mt-2">trong {language === 'vn' ? 'Tiếng Việt' : 'English'}</div>
           </div>
           
-          <div className="card bg-gradient-to-br from-green-50 to-green-100 border-green-200">
+          <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 border-green-200">
             <div className="text-sm font-medium text-green-600">Tổng mẫu</div>
-            <div className="text-3xl font-bold text-green-900 mt-1">
+            <div className="text-xl sm:text-3xl font-bold text-green-900 mt-1">
               {renderItems.reduce((sum, item) => sum + (item.samples_count ?? 0), 0)}
             </div>
             <div className="text-xs text-green-600 mt-2">video samples</div>
           </div>
           
-          <div className="card bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
+          <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 border-purple-200">
             <div className="text-sm font-medium text-purple-600">Phổ biến</div>
-            <div className="text-3xl font-bold text-purple-900 mt-1">
+            <div className="text-xl sm:text-3xl font-bold text-purple-900 mt-1">
               {renderItems.filter(item => item.is_common_language || item.is_common_global).length}
             </div>
             <div className="text-xs text-purple-600 mt-2">nhãn phổ biến</div>
           </div>
           
-          <div className="card bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200">
+          <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 border-orange-200">
             <div className="text-sm font-medium text-orange-600">Phương ngữ</div>
-            <div className="text-3xl font-bold text-orange-900 mt-1">
+            <div className="text-xl sm:text-3xl font-bold text-orange-900 mt-1">
               {new Set(renderItems.map(item => item.dialect)).size}
             </div>
             <div className="text-xs text-orange-600 mt-2">vùng miền</div>
@@ -448,10 +448,10 @@ export default function LabelsPage() {
       )}
 
       {/* Labels list */}
-      <div className="card">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-gray-900 flex items-center">
+      <div className="card card-compact p-3 sm:p-4 lg:p-5">
+        <div className="space-y-3 sm:space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center">
               📚 Danh sách nhãn
               {!loading && (
                 <Badge variant="info" className="ml-3">
@@ -474,13 +474,15 @@ export default function LabelsPage() {
             </div>
           </div>
           
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <select className="input text-sm" value={language} onChange={(e) => setLanguage(e.target.value)}>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center">
+            <div className="min-w-0">
+              <select className="input text-sm py-2.5" value={language} onChange={(e) => setLanguage(e.target.value)}>
                 <option value="vn">🇻🇳 Tiếng Việt</option>
                 <option value="en">🇬🇧 English</option>
               </select>
-              <select className="input text-sm" value={dialect} onChange={(e) => setDialect(e.target.value)}>
+            </div>
+            <div className="min-w-0">
+              <select className="input text-sm py-2.5" value={dialect} onChange={(e) => setDialect(e.target.value)}>
                 <option value="">🗺️ Tất cả vùng</option>
                 <option value="common">Chung</option>
                 <option value="bac">Miền Bắc</option>
@@ -491,18 +493,18 @@ export default function LabelsPage() {
               </select>
             </div>
             
-            <div className="flex-1 w-full">
+            <div className="col-span-2 sm:flex-1 w-full">
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="🔍 Tìm kiếm nhãn, slug hoặc ID..."
-                className="input w-full"
+                className="input w-full text-sm py-2.5"
                 aria-label="Tìm kiếm nhãn"
               />
             </div>
             
-            <div className="flex border border-gray-300 rounded-lg overflow-hidden w-full sm:w-auto">
+            <div className="col-span-2 sm:col-span-1 flex border border-gray-300 rounded-lg overflow-hidden w-full sm:w-auto">
               <button
                 className={`px-3 py-2 text-sm font-medium transition-colors ${
                   viewMode === 'grid' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
@@ -540,30 +542,30 @@ export default function LabelsPage() {
             description="Thử điều chỉnh bộ lọc hoặc tìm kiếm với từ khóa khác."
           />
         ) : (
-          <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5' : 'space-y-3'}>
+          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-4' : 'space-y-3'}>
             {renderItems.map((item) => (
               <div 
                 key={item.class_uid ?? item.class_idx}
                 className={`${
                   viewMode === 'grid' 
-                    ? 'card group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 p-6 border-2 border-transparent hover:border-indigo-200' 
-                    : 'card group hover:bg-gradient-to-r hover:from-indigo-50 hover:to-purple-50 transition-all duration-200 p-5'
+                    ? 'card card-compact group hover:shadow-xl hover:-translate-y-1 transition-all duration-300 p-3 sm:p-4 border-2 border-transparent hover:border-indigo-200' 
+                    : 'card card-compact group hover:bg-gradient-to-r hover:from-indigo-50 hover:to-purple-50 transition-all duration-200 p-3 sm:p-4'
                 }`}
               >
                 <div className={`flex ${
-                  viewMode === 'grid' ? 'flex-col' : 'flex-row items-center justify-between'
+                  viewMode === 'grid' ? 'flex-col' : 'flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'
                 }`}>
                   <div className="flex-1 min-w-0 w-full">
                     {/* Header */}
-                    <div className="flex items-start gap-3 mb-4">
+                    <div className="flex items-start gap-2.5 mb-2.5">
                       <div className="flex-shrink-0">
-                        <span className="text-3xl">🏷️</span>
+                        <span className="text-2xl">🏷️</span>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-bold text-xl text-gray-900 leading-tight mb-1 truncate">
+                        <h3 className="font-bold text-base sm:text-lg text-gray-900 leading-tight mb-0.5 truncate">
                           {item.label_original}
                         </h3>
-                        <p className="text-sm text-gray-500 font-mono truncate">
+                        <p className="text-[11px] sm:text-xs text-gray-500 font-mono truncate">
                           {item.slug}
                         </p>
                       </div>
@@ -571,44 +573,44 @@ export default function LabelsPage() {
                     
                     {/* Badges */}
                     {viewMode === 'grid' && (
-                      <div className="flex items-center gap-2 flex-wrap mb-4">
+                      <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
                         {item.class_idx !== -1 && (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 text-gray-700">
                             #{item.class_idx}
                           </span>
                         )}
                         {item.dialect === 'common' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-800">
                             Chung
                           </span>
                         )}
                         {item.dialect === 'bac' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-800">
                             Miền Bắc
                           </span>
                         )}
                         {item.dialect === 'nam' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
                             Miền Nam
                           </span>
                         )}
                         {item.dialect === 'trung' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
                             Miền Trung
                           </span>
                         )}
                         {item.dialect === 'hoa-de' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-100 text-purple-800">
                             Hòa Đê
                           </span>
                         )}
                         {item.dialect === 'can-tho' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-100 text-cyan-800">
                             Cần Thơ
                           </span>
                         )}
                         {item.is_common_global && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800">
                             ⭐ Toàn cầu
                           </span>
                         )}
@@ -650,10 +652,11 @@ export default function LabelsPage() {
                     </div>
                   )}
 
-                  <div className={`mt-5 flex flex-wrap gap-2 ${viewMode === 'list' ? 'justify-end' : ''}`}>
+                  <div className={`mt-3 grid grid-cols-2 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
                     <Button
                       variant="secondary"
                       size="sm"
+                      className="w-full justify-center px-3 py-2 text-xs"
                       onClick={() => openEdit(item)}
                     >
                       Chỉnh sửa
@@ -661,6 +664,7 @@ export default function LabelsPage() {
                     <Button
                       variant="danger"
                       size="sm"
+                      className="w-full justify-center px-3 py-2 text-xs"
                       onClick={() => openDelete(item)}
                     >
                       Xóa

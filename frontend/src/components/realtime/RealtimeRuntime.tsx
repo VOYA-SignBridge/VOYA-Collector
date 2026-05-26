@@ -482,16 +482,16 @@ export default function RealtimeRuntime({
   }, [error]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-6 p-4">
+    <div className="w-full max-w-6xl mx-auto space-y-2.5 sm:space-y-4 p-2.5 sm:p-4 lg:p-5">
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold text-slate-900">Nhận diện ngôn ngữ kí hiệu</h1>
-        <p className="text-slate-600">Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực</p>
+        <h1 className="text-lg sm:text-3xl font-bold text-slate-900">Nhận diện ngôn ngữ kí hiệu</h1>
+        <p className="text-xs sm:text-base text-slate-600">Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực</p>
       </div>
 
       {/* Model Selection */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-900">Cấu hình nhận diện</h2>
+      <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-4 space-y-2 sm:space-y-3 shadow-sm">
+        <h2 className="text-xs sm:text-sm font-semibold text-slate-900">Cấu hình nhận diện</h2>
 
         {/* Selection Warning */}
         {selectionWarning && (
@@ -545,12 +545,12 @@ export default function RealtimeRuntime({
 
         {/* Language + Model Selectors */}
         {!isLoadingModels && !modelsError && models.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 sm:gap-4">
             {/* Language Selector */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-2">Ngôn ngữ</label>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1.5">Ngôn ngữ</label>
               <select
-                className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 value={selectedLanguage || ""}
                 onChange={(e) => handleLanguageSelect(e.target.value)}
                 disabled={!running && isStarting}
@@ -566,18 +566,18 @@ export default function RealtimeRuntime({
 
             {/* Model Selector (Filtered by Language) */}
             <div>
-              <label className="block text-xs font-medium text-slate-700 mb-2">Bộ nhận diện</label>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1.5">Bộ nhận diện</label>
               {!selectedLanguage ? (
-                <div className="px-3 py-2.5 rounded-lg text-sm text-slate-500 bg-slate-50">
+                <div className="px-2.5 py-2 rounded-lg text-xs sm:text-sm text-slate-500 bg-slate-50">
                   Chọn ngôn ngữ trước
                 </div>
               ) : filteredModels.length === 0 ? (
-                <div className="px-3 py-2.5 rounded-lg text-sm text-slate-500 bg-slate-50">
+                <div className="px-2.5 py-2 rounded-lg text-xs sm:text-sm text-slate-500 bg-slate-50">
                   Không có bộ nhận diện cho ngôn ngữ này
                 </div>
               ) : (
                 <select
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   value={selectedModelId || ""}
                   onChange={(e) => handleModelSelect(e.target.value)}
                   disabled={!running && isStarting}
@@ -597,14 +597,14 @@ export default function RealtimeRuntime({
       </div>
 
       {/* Main Content Area */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
         {/* Camera Preview (Left/Top) */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-2xl overflow-hidden border border-slate-200 bg-black shadow-sm aspect-[4/5] lg:aspect-video">
+        <div className="lg:col-span-2 space-y-3 sm:space-y-4">
+          <div className="rounded-2xl overflow-hidden border border-slate-200 bg-black shadow-sm aspect-[7/5] sm:aspect-[4/5] lg:aspect-video">
             <video
               ref={videoRef}
               style={previewStyle}
-              className="w-full h-full object-contain"
+              className="w-full h-full object-cover sm:object-contain"
               autoPlay
               playsInline
               muted
@@ -620,20 +620,20 @@ export default function RealtimeRuntime({
         </div>
 
         {/* Right Panel: Prediction + Controls */}
-        <div className="space-y-4">
+        <div className="space-y-2.5 sm:space-y-4">
           {/* Prediction Display (PROMINENT) */}
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-6 shadow-sm">
-            <div className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-3">
+          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-3 sm:p-6 shadow-sm">
+            <div className="text-[11px] sm:text-xs font-medium text-slate-600 uppercase tracking-wide mb-2 sm:mb-3">
               Kết quả nhận diện
             </div>
-            <div className="min-h-[140px] flex flex-col justify-center">
+            <div className="min-h-[88px] sm:min-h-[112px] flex flex-col justify-center">
               {prediction ? (
-                <div className="space-y-3">
-                  <div className="text-4xl sm:text-5xl font-bold text-blue-600 text-center break-words line-clamp-2">
+                <div className="space-y-2 sm:space-y-3">
+                  <div className="text-2xl sm:text-4xl lg:text-5xl font-bold text-blue-600 text-center break-words line-clamp-2">
                     {prediction.label}
                   </div>
                   <div className="space-y-2 text-center">
-                    <div className="text-sm text-slate-600">
+                    <div className="text-[11px] sm:text-sm text-slate-600">
                       Độ tin cậy: <span className="font-semibold text-slate-900">{Math.round(prediction.confidence * 100)}%</span>
                     </div>
                     {import.meta.env.DEV && (
@@ -655,7 +655,7 @@ export default function RealtimeRuntime({
           </div>
 
           {/* Status Indicator */}
-          <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="rounded-lg border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
             <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${
                 running && status === "in_flight" ? "bg-green-500" :
@@ -669,7 +669,7 @@ export default function RealtimeRuntime({
           {/* Start/Stop Button (LARGE & PROMINENT) */}
           <button
             className={
-              "w-full py-3 rounded-xl text-base font-semibold border transition-all " +
+              "w-full py-2.5 rounded-xl text-sm sm:text-base font-semibold border transition-all " +
               (running
                 ? "bg-red-600 text-white border-red-600 hover:bg-red-700 active:scale-95"
                 : "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 active:scale-95")
@@ -696,7 +696,7 @@ export default function RealtimeRuntime({
 
       {/* Debug Panel (DEV mode, collapsible) */}
       {import.meta.env.DEV && showDebug && (
-        <div className="rounded-xl border border-slate-300 bg-slate-50 p-4 space-y-2 text-xs font-mono text-slate-700">
+        <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 sm:p-4 space-y-2 text-[11px] sm:text-xs font-mono text-slate-700">
           <div className="text-xs font-semibold text-slate-900 mb-2">Thông tin kỹ thuật</div>
           <div>Status: <span className="text-slate-600">{status}</span></div>
           <div>Model ID: <span className="text-slate-600">{selectedModelId ?? "none"}</span></div>

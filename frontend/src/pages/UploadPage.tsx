@@ -51,7 +51,7 @@ export default function UploadPage() {
       {/* Method Selection with Quick Stats */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div 
-          className={`card cursor-pointer transition-all duration-200 ${
+          className={`card card-compact cursor-pointer transition-all duration-200 ${
             tab === "camera" 
               ? "ring-2 ring-blue-500 bg-blue-50" 
               : "hover:shadow-md"
@@ -60,15 +60,15 @@ export default function UploadPage() {
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center">
-              <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mr-4">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center mr-3 sm:mr-4 shrink-0">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Ghi hình trực tiếp</h3>
-                <p className="text-gray-600 text-sm">Thu thập nhanh theo lô với phản hồi tức thì</p>
-                <div className="flex items-center mt-2 space-x-2">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Ghi hình trực tiếp</h3>
+                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Thu thập nhanh theo lô với phản hồi tức thì</p>
+                <div className="flex flex-wrap items-center mt-2 gap-2">
                   <Badge variant="success" size="sm">⚡ Nhanh nhất</Badge>
                   <Badge variant="info" size="sm">🎯 Chế độ lô</Badge>
                 </div>
@@ -85,7 +85,7 @@ export default function UploadPage() {
         </div>
 
         <div 
-          className={`card cursor-pointer transition-all duration-200 ${
+          className={`card card-compact cursor-pointer transition-all duration-200 ${
             tab === "video" 
               ? "ring-2 ring-blue-500 bg-blue-50" 
               : "hover:shadow-md"
@@ -94,15 +94,15 @@ export default function UploadPage() {
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center">
-              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mr-4">
-                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center mr-3 sm:mr-4 shrink-0">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Tải video lên</h3>
-                <p className="text-gray-600 text-sm">Xử lý các tệp video có sẵn</p>
-                <div className="flex items-center mt-2 space-x-2">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Tải video lên</h3>
+                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Xử lý các tệp video có sẵn</p>
+                <div className="flex flex-wrap items-center mt-2 gap-2">
                   <Badge variant="warning" size="sm">📁 Dựa trên tệp</Badge>
                   <Badge variant="info" size="sm">🔄 Xử lý hàng loạt</Badge>
                 </div>
