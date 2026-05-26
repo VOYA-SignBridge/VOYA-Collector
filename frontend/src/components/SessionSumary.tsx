@@ -26,10 +26,10 @@ export default function SessionSummary({ sessionId, stats, onClose }: SessionSum
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4">
-      <div className="bg-white p-6 rounded-lg w-full max-w-[700px] max-h-[85vh] overflow-y-auto shadow-lg">
-        <h2 className="text-2xl font-bold mb-3">📊 Session Summary</h2>
-        <p className="text-gray-700 mb-1">
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white p-4 sm:p-6 rounded-lg w-full max-w-[calc(100vw-1.5rem)] sm:max-w-3xl max-h-[calc(100dvh-1.5rem)] sm:max-h-[85vh] overflow-y-auto shadow-lg">
+        <h2 className="text-xl sm:text-2xl font-bold mb-3">📊 Session Summary</h2>
+        <p className="text-gray-700 mb-1 break-all">
           <b>Session ID:</b> {sessionId}
         </p>
         <p className="text-gray-700 mb-1">
@@ -42,9 +42,10 @@ export default function SessionSummary({ sessionId, stats, onClose }: SessionSum
           <b>Average Frames per Sample:</b> {stats.avgFrames.toFixed(1)}
         </p>
 
-        <h3 className="font-semibold mb-2">📈 Samples per Label</h3>
+        <h3 className="font-semibold mb-2 text-sm sm:text-base">📈 Samples per Label</h3>
+        <div className="h-[220px] sm:h-[250px]">
         {Recharts ? (
-          <Recharts.ResponsiveContainer width="100%" height={250}>
+          <Recharts.ResponsiveContainer width="100%" height="100%">
             <Recharts.BarChart data={chartData}>
               <Recharts.CartesianGrid strokeDasharray="3 3" />
               <Recharts.XAxis dataKey="label" />
@@ -54,12 +55,15 @@ export default function SessionSummary({ sessionId, stats, onClose }: SessionSum
             </Recharts.BarChart>
           </Recharts.ResponsiveContainer>
         ) : (
-          <div className="p-8 text-center">Loading chart…</div>
+          <div className="h-full flex items-center justify-center text-center text-sm text-gray-500">Loading chart…</div>
         )}
+        </div>
 
-        <button className="mt-5 bg-blue-600 text-white px-4 py-2 rounded" onClick={onClose}>
-          Close
-        </button>
+        <div className="mt-5 flex justify-end">
+          <button className="w-full sm:w-auto bg-blue-600 text-white px-4 py-2 rounded" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );

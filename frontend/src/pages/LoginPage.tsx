@@ -52,10 +52,10 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-2rem)] flex items-center justify-center px-4 py-8">
-      <div className="relative w-full max-w-6xl overflow-hidden rounded-[2rem] border border-white/60 bg-white/70 shadow-[0_30px_80px_rgba(15,23,42,0.12)] backdrop-blur-xl">
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr] min-h-[720px]">
-          <aside className="relative overflow-hidden bg-gradient-to-br from-indigo-600 via-violet-600 to-cyan-500 px-8 py-10 text-white">
+    <div className="min-h-[calc(100dvh-3.5rem)] flex items-start sm:items-center justify-center px-3 sm:px-4 py-3 sm:py-8">
+      <div className="relative w-full max-w-6xl overflow-hidden rounded-[1.5rem] sm:rounded-[2rem] border border-white/60 bg-white/75 shadow-[0_30px_80px_rgba(15,23,42,0.12)] backdrop-blur-xl">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] lg:min-h-[720px]">
+          <aside className="order-1 lg:order-1 relative overflow-hidden bg-gradient-to-br from-indigo-600 via-violet-600 to-cyan-500 px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-12 text-white">
             <div className="absolute inset-0 opacity-20">
               <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-white blur-3xl" />
               <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-cyan-300 blur-3xl" />
@@ -63,16 +63,16 @@ export default function LoginPage() {
 
             <div className="relative flex h-full flex-col justify-between">
               <div>
-                <div className="inline-flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm backdrop-blur">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-2 text-xs sm:text-sm backdrop-blur">
                   <span className="h-2.5 w-2.5 rounded-full bg-emerald-300 animate-pulse" />
                   Login bảo mật cho VOYA
                 </div>
 
-                <h1 className="mt-8 max-w-md text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+                <h1 className="mt-5 sm:mt-8 max-w-md text-2xl font-semibold leading-tight tracking-tight sm:text-4xl">
                   Đăng nhập để quản lý dữ liệu nhanh hơn.
                 </h1>
 
-                <p className="mt-5 max-w-xl text-base leading-7 text-white/85 sm:text-lg">
+                <p className="mt-3 sm:mt-5 max-w-xl text-sm leading-6 text-white/85 sm:text-base sm:leading-7">
                   Quản lý phiên thu thập, theo dõi dataset theo user, và mở khóa
                   quyền admin khi cần duyệt hoặc xoá mẫu.
                 </p>
@@ -91,10 +91,10 @@ export default function LoginPage() {
             </div>
           </aside>
 
-          <section className="px-6 py-8 sm:px-10 lg:px-12 lg:py-14">
+          <section className="order-2 lg:order-2 px-5 py-6 sm:px-8 sm:py-8 lg:px-12 lg:py-14">
             <div className="mx-auto flex h-full max-w-xl flex-col justify-center">
-              <div className="mb-8">
-                <h2 className="text-3xl font-semibold tracking-tight text-slate-900">
+              <div className="mb-5 sm:mb-8">
+                <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900">
                   Chào mừng quay lại
                 </h2>
                 <p className="mt-2 text-sm text-slate-500">
@@ -102,7 +102,7 @@ export default function LoginPage() {
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
                 <label className="block">
                   <span className="mb-2 block text-sm font-medium text-slate-700">
                     Username hoặc email
@@ -157,7 +157,7 @@ export default function LoginPage() {
                   </span>
                 </button>
 
-                <div className="flex items-center justify-between text-sm text-slate-500">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-slate-500">
                   <span>Chưa có tài khoản?</span>
                   <Link to="/register" className="font-medium text-indigo-600 hover:text-indigo-700">
                     Tạo tài khoản

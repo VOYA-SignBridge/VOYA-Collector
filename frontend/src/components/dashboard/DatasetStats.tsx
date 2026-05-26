@@ -30,11 +30,12 @@ export default function DatasetStats({ sessions }: { sessions: Session[] }) {
   const userData = useMemo(() => Object.entries(userCount).map(([name, value]) => ({ name, value })), [userCount]);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-      <div className="bg-white border rounded-lg p-4 shadow-sm">
-        <h3 className="font-semibold mb-3">📈 Distribution by Label</h3>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
+      <div className="bg-white border rounded-lg p-4 sm:p-5 shadow-sm">
+        <h3 className="font-semibold text-sm sm:text-base mb-3">📈 Distribution by Label</h3>
+        <div className="h-[220px] sm:h-[250px]">
         {Recharts ? (
-          <Recharts.ResponsiveContainer width="100%" height={250}>
+          <Recharts.ResponsiveContainer width="100%" height="100%">
             <Recharts.PieChart>
               <Recharts.Pie data={labelData} dataKey="value" nameKey="name" label>
                 {labelData.map((_, i) => (
@@ -45,14 +46,16 @@ export default function DatasetStats({ sessions }: { sessions: Session[] }) {
             </Recharts.PieChart>
           </Recharts.ResponsiveContainer>
         ) : (
-          <div className="p-8 text-center">Loading chart…</div>
+          <div className="h-full flex items-center justify-center text-center text-sm text-gray-500">Loading chart…</div>
         )}
+        </div>
       </div>
 
-      <div className="bg-white border rounded-lg p-4 shadow-sm">
-        <h3 className="font-semibold mb-3">👥 Active Users</h3>
+      <div className="bg-white border rounded-lg p-4 sm:p-5 shadow-sm">
+        <h3 className="font-semibold text-sm sm:text-base mb-3">👥 Active Users</h3>
+        <div className="h-[220px] sm:h-[250px]">
         {Recharts ? (
-          <Recharts.ResponsiveContainer width="100%" height={250}>
+          <Recharts.ResponsiveContainer width="100%" height="100%">
             <Recharts.BarChart data={userData}>
               <Recharts.XAxis dataKey="name" />
               <Recharts.YAxis />
@@ -61,8 +64,9 @@ export default function DatasetStats({ sessions }: { sessions: Session[] }) {
             </Recharts.BarChart>
           </Recharts.ResponsiveContainer>
         ) : (
-          <div className="p-8 text-center">Loading chart…</div>
+          <div className="h-full flex items-center justify-center text-center text-sm text-gray-500">Loading chart…</div>
         )}
+        </div>
       </div>
     </div>
   );

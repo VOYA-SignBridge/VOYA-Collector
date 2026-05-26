@@ -35,7 +35,7 @@ const parseBoolEnv = (value: unknown, fallback: boolean) => {
 };
 
 // Default to selfie-style mirroring (front camera). Override with VITE_MIRROR_PREVIEW=0.
-const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, false);
+const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true);
 
 // FIX (handedness): When @mediapipe/camera_utils sends raw (unflipped) video
 // frames to MediaPipe Hands, the model — which was trained on mirrored selfie
@@ -58,6 +58,8 @@ const DEBUG_HANDS = parseBoolEnv(import.meta.env.VITE_DEBUG_HANDS, false);
 
 // Keep CDN asset version aligned with pinned npm dependency.
 const MP_HANDS_VERSION = "0.4.1675469240";
+const CAPTURE_FRAME_WIDTH = 1280;
+const CAPTURE_FRAME_HEIGHT = 720;
 
 // ---------------------------------------------------------------------------
 // Camera error → Vietnamese message
@@ -85,6 +87,18 @@ function getCameraErrorMessage(error: unknown): string {
     return "Không có thiết bị camera nào được tìm thấy. Vui lòng kiểm tra kết nối phần cứng.";
 
   return `Lỗi camera: ${errorMessage}`;
+}
+
+function getFrameDimensions(source: HTMLImageElement | HTMLVideoElement): { width: number; height: number } {
+  if (source instanceof HTMLVideoElement && source.videoWidth > 0 && source.videoHeight > 0) {
+    return { width: source.videoWidth, height: source.videoHeight };
+  }
+
+  if (source instanceof HTMLImageElement && source.naturalWidth > 0 && source.naturalHeight > 0) {
+    return { width: source.naturalWidth, height: source.naturalHeight };
+  }
+
+  return { width: CAPTURE_FRAME_WIDTH, height: CAPTURE_FRAME_HEIGHT };
 }
 
 // ---------------------------------------------------------------------------
@@ -319,14 +333,18 @@ export default function FullscreenCaptureModal({
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.save();
-    if (MIRROR_PREVIEW) { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
+    const frameSource = (video && video.readyState >= 2 && video.videoWidth > 0 ? video : data.image) as HTMLImageElement | HTMLVideoElement | null | undefined;
+    if (!frameSource) return;
 
-    if (video && video.readyState >= 2 && video.videoWidth > 0)
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    else if (data.image)
-      ctx.drawImage(data.image, 0, 0, canvas.width, canvas.height);
+    const { width: frameWidth, height: frameHeight } = getFrameDimensions(frameSource);
+    if (canvas.width !== frameWidth) canvas.width = frameWidth;
+    if (canvas.height !== frameHeight) canvas.height = frameHeight;
+
+    ctx.clearRect(0, 0, frameWidth, frameHeight);
+    ctx.save();
+    if (MIRROR_PREVIEW) { ctx.translate(frameWidth, 0); ctx.scale(-1, 1); }
+
+    ctx.drawImage(frameSource, 0, 0, frameWidth, frameHeight);
 
     if (data.leftHandLandmarks) {
       // @ts-expect-error - HAND_CONNECTIONS types not exported in this version
@@ -822,6 +840,13 @@ export default function FullscreenCaptureModal({
         accept = false;
       }
 
+      // Auto mode should not stall on transient hand-count drops.
+      // The backend zero-fills missing hand slots, so as long as at least one
+      // hand is visible we can keep sampling without blocking the recording.
+      if (userChoice == null && initializationCompleteRef.current && detectedHandsCountRaw > 0) {
+        accept = true;
+      }
+
       if (!accept) {
         if (DEBUG_HANDS) console.debug("Skipping frame:", { expectedHands: expectedHandsRef.current, detectedRaw: detectedHandsCountRaw });
         return;
@@ -917,7 +942,7 @@ export default function FullscreenCaptureModal({
     }
 
     const canvas = canvasRef.current;
-    if (canvas) { canvas.width = 1280; canvas.height = 720; }
+    if (canvas) { canvas.width = CAPTURE_FRAME_WIDTH; canvas.height = CAPTURE_FRAME_HEIGHT; }
 
     const video = videoRef.current;
     const onLoadedMetadata = () => console.log("Video metadata loaded:", { w: video.videoWidth, h: video.videoHeight });
@@ -934,8 +959,8 @@ export default function FullscreenCaptureModal({
       onFrame: async () => {
         if (videoRef.current) await hands.send({ image: videoRef.current });
       },
-      width: 1280,
-      height: 720,
+      width: CAPTURE_FRAME_WIDTH,
+      height: CAPTURE_FRAME_HEIGHT,
       facingMode: "user",
     });
 
@@ -1131,16 +1156,16 @@ export default function FullscreenCaptureModal({
       </div>
 
       {/* Main Content */}
-      <div className="h-full flex flex-col lg:flex-row pt-16 sm:pt-20">
+      <div className="h-full flex flex-col lg:flex-row pt-0 sm:pt-20">
         {/* Camera Feed */}
-        <div className="flex-1 relative flex items-center justify-center bg-gray-900 w-full h-[40vh] sm:h-[50vh] lg:h-full">
+        <div className="flex-1 relative flex items-center justify-center bg-gray-900 w-full min-h-[42svh] sm:min-h-[50vh] lg:h-full overflow-hidden">
           <video ref={videoRef} autoPlay muted playsInline className="hidden" />
           <canvas
             ref={canvasRef}
-            width={1280}
-            height={720}
-            className="w-full h-full max-w-full max-h-full object-contain border border-gray-600 rounded-lg"
-            style={{ minHeight: "200px", backgroundColor: "#1a1a1a" }}
+            width={CAPTURE_FRAME_WIDTH}
+            height={CAPTURE_FRAME_HEIGHT}
+            className="block w-full h-full max-w-full max-h-full object-cover sm:object-contain border border-gray-600 rounded-lg bg-gray-950"
+            style={{ minHeight: "200px" }}
           />
 
           {recording && !handsVisible && (
@@ -1161,7 +1186,7 @@ export default function FullscreenCaptureModal({
           {showGuide && !recording && countdown === 0 && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative">
-                <div className="w-80 h-80 relative">
+                <div className="relative w-56 h-56 sm:w-80 sm:h-80">
                   <div className="absolute top-0 left-0 w-8 h-8 border-l-4 border-t-4 border-green-400/80 rounded-tl-xl"></div>
                   <div className="absolute top-0 right-0 w-8 h-8 border-r-4 border-t-4 border-green-400/80 rounded-tr-xl"></div>
                   <div className="absolute bottom-0 left-0 w-8 h-8 border-l-4 border-b-4 border-green-400/80 rounded-bl-xl"></div>
@@ -1178,8 +1203,8 @@ export default function FullscreenCaptureModal({
                     <span className="text-teal-400 text-xs">R</span>
                   </div>
                 </div>
-                <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-4 py-2 rounded-lg text-sm font-medium">🎯 Đặt vị trí vào khung</div>
-                <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-xs">Thấy phần trên cơ thể và hai tay</div>
+                <div className="absolute -top-10 sm:-top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium">🎯 Đặt vị trí vào khung</div>
+                <div className="absolute -bottom-7 sm:-bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-[11px] sm:text-xs text-center">Thấy phần trên cơ thể và hai tay</div>
               </div>
             </div>
           )}
@@ -1199,7 +1224,7 @@ export default function FullscreenCaptureModal({
 
           {recording && paused && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20">
-              <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 w-[500px]">
+              <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 sm:p-8 w-full max-w-[calc(100vw-2rem)] sm:max-w-lg">
                 <div className="text-center">
                   <div className="text-6xl mb-4">⏸️</div>
                   <h3 className="text-3xl font-bold text-white mb-2">Đã tạm dừng</h3>
@@ -1260,7 +1285,7 @@ export default function FullscreenCaptureModal({
           )}
 
           {recording && (
-            <div className="absolute top-24 left-6 flex items-center space-x-3 bg-red-500 text-white px-4 py-2 rounded-full shadow-lg">
+            <div className="absolute top-20 sm:top-24 left-3 sm:left-6 flex items-center space-x-3 bg-red-500 text-white px-3 sm:px-4 py-2 rounded-full shadow-lg">
               <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
               <span className="font-medium">ĐANG GHI</span>
               {FIXED_CAPTURE_COUNT > 1 && <span className="text-sm">({completedCaptures + 1}/{FIXED_CAPTURE_COUNT})</span>}
@@ -1268,24 +1293,24 @@ export default function FullscreenCaptureModal({
           )}
 
           {recording && (
-            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-6 py-2">
+            <div className="absolute bottom-3 sm:bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-4 sm:px-6 py-2 max-w-[calc(100vw-2rem)]">
               <div className="text-white text-sm">📊 {frames.length} khung đã chụp</div>
             </div>
           )}
         </div>
 
         {/* Control Panel */}
-        <div className="w-full lg:w-96 bg-gray-900 border-l border-gray-700 flex flex-col max-h-[calc(100vh-8rem)] lg:max-h-none">
-          <div className="flex-1 p-6 space-y-6 overflow-y-auto">
-            <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-5 border border-blue-500/20">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+        <div className="w-full lg:w-96 bg-gray-900 border-l border-gray-700 flex flex-col max-h-[calc(100svh-4rem)] lg:max-h-none">
+          <div className="flex-1 p-4 sm:p-6 space-y-4 overflow-y-auto">
+            <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-4 border border-blue-500/20">
+              <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center">
                 <span className="w-3 h-3 bg-blue-400 rounded-full mr-3"></span>Cài đặt chụp
               </h3>
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-blue-300 mb-2">📝 Nhãn hành động *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-blue-300 mb-2">📝 Nhãn hành động *</label>
                   <div className="relative">
-                    <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ví dụ: đi bộ, nhảy, vẫy tay" className="w-full pr-12 px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200" disabled={recording || countdown > 0} />
+                    <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ví dụ: đi bộ, nhảy, vẫy tay" className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0} />
                     <div className="absolute inset-y-0 right-2 flex items-center">
                       <SpeechInputButton onText={(text) => setLabel(text)} title="Dùng giọng nói để điền nhãn hành động" className="h-8 w-8" />
                     </div>
@@ -1294,16 +1319,16 @@ export default function FullscreenCaptureModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-blue-300 mb-2">👤 Người thực hiện *</label>
+                  <label className="block text-xs sm:text-sm font-medium text-blue-300 mb-2">👤 Người thực hiện *</label>
                   <div className="relative">
-                    <input type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="ví dụ: user001, john_doe" className="w-full pr-12 px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200" disabled={recording || countdown > 0} onBlur={() => rememberUser(user)} />
+                    <input type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="ví dụ: user001, john_doe" className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0} onBlur={() => rememberUser(user)} />
                     <div className="absolute inset-y-0 right-2 flex items-center">
                       <SpeechInputButton onText={(text) => setUser(text)} title="Dùng giọng nói để điền tên người thực hiện" className="h-8 w-8" />
                     </div>
                   </div>
                   {!user && <p className="text-xs text-yellow-400 mt-1">⚠️ ID người dùng là bắt buộc</p>}
                   {recentUsers.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-blue-200">
+                    <div className="mt-2 hidden sm:flex flex-wrap gap-2 text-xs text-blue-200">
                       <span className="text-[11px] text-blue-300">Gợi ý:</span>
                       {recentUsers.map((name) => (
                         <button type="button" key={name} onClick={() => setUser(name)} className="px-2 py-1 rounded-full bg-blue-900/60 hover:bg-blue-800 text-blue-100 border border-blue-500/40 text-[11px]">{name}</button>
@@ -1313,8 +1338,8 @@ export default function FullscreenCaptureModal({
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
-                  <select value={dialect} onChange={(e) => { const v = e.target.value; if (v === "Khác") { setShowAddDialectModal(true); } else { setDialect(v); localStorage.setItem("dialectSelected", v); } }} className="w-full px-4 py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200" disabled={recording || countdown > 0}>
+                  <label className="block text-xs sm:text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
+                  <select value={dialect} onChange={(e) => { const v = e.target.value; if (v === "Khác") { setShowAddDialectModal(true); } else { setDialect(v); localStorage.setItem("dialectSelected", v); } }} className="w-full px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0}>
                     {dialectList.map((d) => <option key={d} value={d}>{d}</option>)}
                     <option value="Khác">Khác (thêm mới)</option>
                   </select>
@@ -1352,36 +1377,36 @@ export default function FullscreenCaptureModal({
           </div>
 
           {/* Action Buttons */}
-          <div className="p-6 border-t border-gray-700 space-y-3">
+          <div className="p-4 sm:p-6 border-t border-gray-700 space-y-3 bg-gray-900/95">
             {countdown > 0 ? (
-              <div className="w-full py-4 bg-yellow-600 text-white rounded-lg text-center font-medium">Bắt đầu sau {countdown}...</div>
+              <div className="w-full py-3 bg-yellow-600 text-white rounded-lg text-center font-medium text-sm sm:text-base">Bắt đầu sau {countdown}...</div>
             ) : !recording ? (
-              <Button onClick={handleQuickCapture} disabled={!label || !user || !isReady} className="w-full py-4 text-lg font-medium" variant="primary">
-                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              <Button onClick={handleQuickCapture} disabled={!label || !user || !isReady} className="w-full py-3 sm:py-4 text-sm sm:text-base font-medium" variant="primary">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 {FIXED_CAPTURE_COUNT > 1 ? `Bắt đầu chụp (${FIXED_CAPTURE_COUNT}x)` : "Bắt đầu chụp"} (Enter)
               </Button>
             ) : paused ? (
-              <div className="text-center py-4 text-gray-400">
+              <div className="text-center py-3 text-gray-400 text-sm">
                 <span className="text-yellow-500 font-medium">⏸ Đã tạm dừng</span>
                 <p className="text-sm mt-1">Xem các tùy chọn trên màn hình</p>
               </div>
             ) : (
               <>
-                <Button onClick={handlePause} className="w-full py-4 text-lg font-medium bg-yellow-600 hover:bg-yellow-500" variant="secondary">
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <Button onClick={handlePause} className="w-full py-3 sm:py-4 text-sm sm:text-base font-medium bg-yellow-600 hover:bg-yellow-500" variant="secondary">
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   Tạm dừng (Space)
                 </Button>
-                <Button onClick={handleStop} className="w-full py-3" variant="danger" disabled={frames.length < FIXED_TARGET_FRAMES} title={frames.length < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}>
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" /></svg>
+                <Button onClick={handleStop} className="w-full py-3 text-sm sm:text-base" variant="danger" disabled={frames.length < FIXED_TARGET_FRAMES} title={frames.length < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}>
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" /></svg>
                   Dừng và lưu
                 </Button>
               </>
             )}
-            <Button onClick={handleClose} className="w-full" variant="secondary">Thoát toàn màn hình</Button>
+            <Button onClick={handleClose} className="w-full py-3 text-sm sm:text-base" variant="secondary">Thoát toàn màn hình</Button>
           </div>
 
           {/* Tips */}
-          <div className="bg-gray-800 border-t border-gray-700 p-4">
+          <div className="hidden sm:block bg-gray-800 border-t border-gray-700 p-4">
             <button onClick={() => setShowTips(!showTips)} className="w-full flex items-center justify-between text-sm font-medium text-gray-300 hover:text-white transition-colors">
               <span>💡 Mẹo nhanh để có kết quả tốt</span>
               <span className="text-xs">{showTips ? "🔽" : "▶️"}</span>

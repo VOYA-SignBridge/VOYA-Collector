@@ -41,15 +41,15 @@ export default function SamplePreview({ keypoints, onClose }: Props) {
   }, [keypoints]);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-      <div className="bg-white p-4 rounded shadow-lg">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white p-4 rounded shadow-lg w-full max-w-[calc(100vw-1.5rem)] sm:max-w-md">
         <button
           onClick={onClose}
-          className="mb-2 px-3 py-1 bg-red-500 text-white rounded"
+          className="mb-3 w-full sm:w-auto px-3 py-2 bg-red-500 text-white rounded"
         >
           Close
         </button>
-        <canvas ref={canvasRef} width={400} height={400} className="border" />
+        <canvas ref={canvasRef} width={400} height={400} className="border w-full max-w-[400px] h-auto aspect-square mx-auto" />
       </div>
     </div>
   );

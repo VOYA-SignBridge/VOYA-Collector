@@ -135,27 +135,27 @@ export default function CaptureCamera({ onError }: Props) {
 
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 sm:space-y-8">
       {/* Quick Start Section */}
-      <div className="card">
-        <div className="text-center py-12">
-          <div className="w-24 h-24 bg-gradient-to-br from-green-400 to-blue-500 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl">
-            <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="card card-compact">
+        <div className="text-center py-8 sm:py-10">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-gradient-to-br from-green-400 to-blue-500 rounded-3xl flex items-center justify-center mx-auto mb-5 sm:mb-6 shadow-xl">
+            <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
           </div>
           
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Ghi chuyển động chuyên nghiệp</h2>
-          <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3">Ghi chuyển động chuyên nghiệp</h2>
+          <p className="text-sm sm:text-base text-gray-600 mb-6 sm:mb-8 max-w-2xl mx-auto leading-relaxed">
             Mở giao diện chụp toàn màn hình để thu dữ liệu tư thế không bị phân tâm. Tối ưu cho tốc độ và độ chính xác.
           </p>
 
           {/* Capture settings are fixed for public uploader. Edit src/config/capture.ts to change them. */}
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-6">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center mb-5 sm:mb-6">
             <Button
               onClick={() => setShowFullscreen(true)}
-              className="px-8 py-4 text-lg font-semibold min-w-48"
+              className="w-full sm:w-auto px-5 sm:px-8 py-3.5 sm:py-4 text-base sm:text-lg font-semibold"
               variant="primary"
             >
               <svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,7 +167,7 @@ export default function CaptureCamera({ onError }: Props) {
             <Button
               onClick={() => setShowGuide(true)}
               variant="secondary"
-              className="px-6 py-4"
+              className="w-full sm:w-auto px-5 sm:px-6 py-3.5 sm:py-4"
             >
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -177,20 +177,20 @@ export default function CaptureCamera({ onError }: Props) {
           </div>
 
           {/* Quick Features */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto text-sm">
-            <div className="flex items-center justify-center p-4 bg-green-50 rounded-xl">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto text-xs sm:text-sm">
+            <div className="flex items-center justify-center p-3 sm:p-4 bg-green-50 rounded-xl">
               <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
               <span className="text-green-800 font-medium">Đếm ngược 3 giây</span>
             </div>
-            <div className="flex items-center justify-center p-4 bg-blue-50 rounded-xl">
+            <div className="flex items-center justify-center p-3 sm:p-4 bg-blue-50 rounded-xl">
               <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span className="text-blue-800 font-medium">Phát hiện bàn tay bằng AI</span>
             </div>
-            <div className="flex items-center justify-center p-4 bg-purple-50 rounded-xl">
+            <div className="flex items-center justify-center p-3 sm:p-4 bg-purple-50 rounded-xl">
               <svg className="w-5 h-5 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h4a1 1 0 011 1v2m-6 0h8m-6 0a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2m-6 0V4" />
               </svg>

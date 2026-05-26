@@ -9,9 +9,9 @@ interface PageHeaderProps {
 
 export default function PageHeader({ title, subtitle, actions, breadcrumb }: PageHeaderProps) {
   return (
-    <div className="mb-8">
+    <div className="mb-4 sm:mb-8">
       {breadcrumb && (
-        <nav className="flex text-sm text-slate-500 mb-3">
+        <nav className="flex flex-wrap items-center gap-y-1 text-xs sm:text-sm text-slate-500 mb-2 sm:mb-3">
           {breadcrumb.map((item, index) => (
             <span key={index}>
               {index > 0 && <span className="mx-2 text-slate-300">/</span>}
@@ -23,20 +23,20 @@ export default function PageHeader({ title, subtitle, actions, breadcrumb }: Pag
         </nav>
       )}
       
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+      <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 via-indigo-800 to-cyan-700 bg-clip-text text-transparent">
+          <h1 className="text-xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 via-indigo-800 to-cyan-700 bg-clip-text text-transparent">
             {title}
           </h1>
           {subtitle && (
-            <p className="text-slate-600 mt-2 text-lg leading-relaxed max-w-2xl">
+            <p className="text-slate-600 mt-1.5 sm:mt-2 text-sm sm:text-lg leading-relaxed max-w-2xl">
               {subtitle}
             </p>
           )}
         </div>
         
         {actions && (
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-shrink-0 w-full lg:w-auto">
             {actions}
           </div>
         )}

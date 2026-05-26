@@ -24,15 +24,15 @@ export default function PreviewModal({ frames, onConfirm, onDiscard }: { frames:
   }, [frames]);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center">
-      <div className="bg-white p-6 rounded shadow-lg w-[500px]">
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white p-4 sm:p-6 rounded shadow-lg w-full max-w-[calc(100vw-1.5rem)] sm:max-w-lg">
         <h2 className="text-xl font-bold mb-3">Preview Recording</h2>
-        <canvas ref={canvasRef} width={400} height={400} className="border mb-3" />
-        <div className="flex justify-end space-x-2">
-          <button className="bg-red-500 text-white px-4 py-2 rounded" onClick={onDiscard}>
+        <canvas ref={canvasRef} width={400} height={400} className="border mb-3 w-full max-w-[400px] h-auto aspect-square mx-auto" />
+        <div className="flex flex-col sm:flex-row justify-end gap-2">
+          <button className="w-full sm:w-auto bg-red-500 text-white px-4 py-2 rounded" onClick={onDiscard}>
             Discard
           </button>
-          <button className="bg-green-600 text-white px-4 py-2 rounded" onClick={onConfirm}>
+          <button className="w-full sm:w-auto bg-green-600 text-white px-4 py-2 rounded" onClick={onConfirm}>
             Confirm & Upload
           </button>
         </div>

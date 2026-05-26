@@ -504,18 +504,18 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
   // ============================================================================
   
   return (
-    <div className="w-full mx-auto space-y-6">
+    <div className="w-full mx-auto space-y-5 sm:space-y-6">
       {/* Header with Stats */}
-      <div className="card">
+      <div className="card card-compact">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
           <div className="flex items-center">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mr-4 shadow-md">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mr-3 sm:mr-4 shadow-md">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
               </svg>
             </div>
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Tải video</h2>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Tải video</h2>
               <p className="text-sm text-gray-600">Quản lý và tải nhiều video cùng lúc</p>
             </div>
           </div>
@@ -531,7 +531,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         </div>
         
         {/* Default Values Form */}
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-5 border border-blue-200 mb-6">
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-5 border border-blue-200 mb-6">
           <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center">
             <svg className="w-4 h-4 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -539,7 +539,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
             </svg>
             Giá trị mặc định (áp dụng cho file mới)
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Nhãn mặc định</label>
               <div className="flex items-center space-x-2">
@@ -623,7 +623,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         {/* Upload Area */}
         <div
           className={`
-            relative border-2 border-dashed rounded-xl p-8 transition-all duration-200
+            relative border-2 border-dashed rounded-xl p-5 sm:p-8 transition-all duration-200
             ${dragActive ? 'border-blue-500 bg-blue-50 scale-[1.02]' : 'border-gray-300 hover:border-gray-400 bg-gray-50'}
           `}
           onDragEnter={handleDrag}
@@ -641,7 +641,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           />
           
           <div className="text-center">
-            <div className="w-16 h-16 bg-gradient-to-br from-gray-200 to-gray-300 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-gray-200 to-gray-300 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
               <svg className="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
@@ -700,7 +700,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       
       {/* File List */}
       {files.length > 0 && (
-        <div className="card">
+        <div className="card card-compact">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">
               Danh sách file ({files.length})
@@ -733,7 +733,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               <h4 className="text-sm font-semibold text-gray-900 mb-3">
                 Áp dụng cho {selectedIds.size} file đã chọn:
               </h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Nhãn</label>
                   <div className="flex flex-col sm:flex-row gap-2">
@@ -820,11 +820,11 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           )}
           
           {/* Files Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <table className="w-full min-w-[920px] text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">
                     <input
                       type="checkbox"
                       checked={selectedIds.size === files.length && files.length > 0}
@@ -832,12 +832,12 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       className="rounded"
                     />
                   </th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">File</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Nhãn</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Người ký hiệu</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Bộ ngôn ngữ</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-700">Trạng thái</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-700">Thao tác</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">File</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Nhãn</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Người ký hiệu</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Bộ ngôn ngữ</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Trạng thái</th>
+                  <th className="px-2 sm:px-3 py-2 text-right text-xs font-medium text-gray-700 whitespace-nowrap">Thao tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -869,8 +869,8 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           className="rounded"
                         />
                       </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center space-x-2">
+                      <td className="px-2 sm:px-3 py-2">
+                        <div className="flex items-center space-x-2 min-w-0">
                           <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center flex-shrink-0">
                             <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -884,7 +884,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 sm:px-3 py-2">
                         <input
                           type="text"
                           value={item.label}
@@ -894,7 +894,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           disabled={item.status === 'uploading' || item.status === 'done'}
                         />
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 sm:px-3 py-2">
                         <input
                           type="text"
                           value={item.user}
@@ -904,7 +904,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           disabled={item.status === 'uploading' || item.status === 'done'}
                         />
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 sm:px-3 py-2">
                         <select
                           value={item.dialect}
                           onChange={(e) => updateFile(item.id, { dialect: e.target.value })}
@@ -914,7 +914,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           {dialectList.map(d => <option key={d} value={d}>{d}</option>)}
                         </select>
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 sm:px-3 py-2">
                         <div className="flex flex-col space-y-1">
                           <Badge variant={badge.variant} size="sm">
                             {badge.text}
@@ -934,8 +934,8 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="flex items-center justify-end space-x-2">
+                      <td className="px-2 sm:px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-2">
                           {item.status === 'error' && (
                             <button
                               onClick={() => uploadSingle(item)}
@@ -1035,7 +1035,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
             </button>
             
             {showAdvanced && (
-              <div className="mt-3 bg-gray-50 rounded-lg p-4">
+              <div className="mt-3 bg-gray-50 rounded-lg p-3 sm:p-4">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                   <label className="text-sm font-medium text-gray-700">
                     Số luồng upload đồng thời:
