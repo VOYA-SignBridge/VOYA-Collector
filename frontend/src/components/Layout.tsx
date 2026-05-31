@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthToken, loadAuthToken } from "../api/axiosClient";
+import { me as fetchMe } from "../api/auth";
+import type { AuthUser } from "../api/auth";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
 
@@ -11,6 +13,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [hasToken, setHasToken] = useState<boolean>(() => !!loadAuthToken());
+  const [user, setUser] = useState<AuthUser | null>(null);
   const isAuthPage = location.pathname === "/login" || location.pathname === "/register";
 
   useEffect(() => {
@@ -26,6 +29,27 @@ export default function Layout({ children }: { children: ReactNode }) {
       window.removeEventListener("storage", syncAuthState);
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadUser() {
+      if (!hasToken) {
+        setUser(null);
+        return;
+      }
+      try {
+        const u = await fetchMe();
+        if (mounted) setUser(u);
+      } catch (err) {
+        if (mounted) setUser(null);
+      }
+    }
+
+    loadUser();
+    return () => {
+      mounted = false;
+    };
+  }, [hasToken]);
 
   const navigation = [
     { name: "Bảng điều khiển", href: "/upload", icon: "📊" },
@@ -70,7 +94,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   if (isAuthPage) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 overflow-x-hidden">
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-end border-b border-slate-200/60 bg-white/85 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
+        <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-end border-b border-slate-200/60 bg-white/85 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
           <nav className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-slate-50/90 p-1 shadow-sm">
             <NavLink
               to="/login"
@@ -101,7 +125,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </nav>
         </header>
 
-        <main className="min-h-[calc(100dvh-3.5rem)]">
+        <main className="min-h-[calc(100dvh-3.5rem)] pt-14">
           {children}
         </main>
       </div>
@@ -127,11 +151,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="flex items-center justify-between h-16 px-6 border-b border-slate-200/50">
             <div className="flex items-center min-w-0">
               <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-cyan-500 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
-                V
+                {user?.username ? user.username.charAt(0).toUpperCase() : "C"}
               </div>
               <div className="ml-3 min-w-0">
-                <div className="text-slate-800 font-semibold text-lg truncate">VOYA</div>
-                <div className="text-slate-500 text-xs truncate">Thu thập dữ liệu</div>
+                <div className="text-slate-800 font-semibold text-lg truncate">{user?.username ?? "CTU"}</div>
+                <div className="text-slate-500 text-xs truncate">SignBridge</div>
               </div>
             </div>
 
@@ -192,8 +216,8 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-slate-200/60 bg-white/80 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
+      <div className="flex-1 flex flex-col min-w-0 pt-14">
+        <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-slate-200/60 bg-white/80 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               type="button"
@@ -208,9 +232,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             </button>
             <div className="min-w-0">
               <h1 className="truncate text-sm font-semibold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent sm:text-base lg:text-xl">
-                Quản lý dữ liệu
+                CTU.SignBridge
               </h1>
-              <p className="hidden sm:block text-[11px] text-slate-500">Thu thập dữ liệu</p>
             </div>
           </div>
 
