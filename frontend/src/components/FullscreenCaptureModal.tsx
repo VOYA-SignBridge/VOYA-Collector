@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Hands, HAND_CONNECTIONS } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
 import * as drawing from "@mediapipe/drawing_utils";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
-import type { MediaPipeLandmark, CameraInfo, QualityInfo } from "../types";
+import type { ClassRow, MediaPipeLandmark, CameraInfo, QualityInfo } from "../types";
 
 import { TARGET_FRAMES, CAPTURE_COUNT, FRAME_INTERVAL_MS } from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
+import { getClassesList, getClassesStats } from "../api/dataset";
 
 // ---------------------------------------------------------------------------
 // Module-level constants — stable across renders, safe in hook dep arrays.
@@ -60,6 +61,81 @@ const DEBUG_HANDS = parseBoolEnv(import.meta.env.VITE_DEBUG_HANDS, false);
 const MP_HANDS_VERSION = "0.4.1675469240";
 const CAPTURE_FRAME_WIDTH = 1280;
 const CAPTURE_FRAME_HEIGHT = 720;
+const DEFAULT_DIALECTS = ["Bắc", "Trung", "Nam", "Cần Thơ"];
+const DEFAULT_LANGUAGES = ["vn", "en"];
+
+const DIALECT_LABELS: Record<string, string> = {
+  common: "Chung",
+  bac: "Bắc",
+  trung: "Trung",
+  nam: "Nam",
+  "hoa-de": "Hòa Đê",
+  "can-tho": "Cần Thơ",
+};
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  vn: "Tiếng Việt",
+  vi: "Tiếng Việt",
+  en: "English",
+};
+
+const sanitizeCollectorName = (value: string) =>
+  value
+    .replace(/[^\p{L}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizeText = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizeLanguageKey = (value?: string) => (value || "").trim().toLowerCase();
+
+const normalizeDialectKey = (value?: string) => {
+  const normalized = normalizeText(value || "");
+  if (!normalized) return "";
+
+  const compact = normalized.replace(/\s+/g, " ");
+  const slug = compact.replace(/\s+/g, "-");
+
+  const mappings: Record<string, string> = {
+    bac: "bac",
+    "mien bac": "bac",
+    trung: "trung",
+    "mien trung": "trung",
+    nam: "nam",
+    "mien nam": "nam",
+    "hoa de": "hoa-de",
+    hoade: "hoa-de",
+    "hoa-de": "hoa-de",
+    "can tho": "can-tho",
+    cantho: "can-tho",
+    "can-tho": "can-tho",
+    chung: "common",
+    common: "common",
+  };
+
+  return mappings[compact] || mappings[slug] || slug;
+};
+
+const displayDialectLabel = (value?: string) => {
+  const key = normalizeDialectKey(value);
+  if (key && DIALECT_LABELS[key]) return DIALECT_LABELS[key];
+  return value?.trim() || "";
+};
+
+const displayLanguageLabel = (value?: string) => {
+  const key = normalizeLanguageKey(value);
+  if (key && LANGUAGE_LABELS[key]) return LANGUAGE_LABELS[key];
+  return value?.trim() || "";
+};
 
 // ---------------------------------------------------------------------------
 // Camera error → Vietnamese message
@@ -140,8 +216,14 @@ export default function FullscreenCaptureModal({
   const [frames, setFrames] = useState<CaptureFrame[]>([]);
   const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState(initialUser);
+  const [language, setLanguage] = useState<string>("vn");
   const [dialect, setDialect] = useState<string>("Bắc");
-  const [dialectList, setDialectList] = useState<string[]>(["Bắc", "Trung", "Nam", "Cần Thơ"]);
+  const [languageList, setLanguageList] = useState<string[]>(DEFAULT_LANGUAGES);
+  const [dialectList, setDialectList] = useState<string[]>(DEFAULT_DIALECTS);
+  const [catalogRows, setCatalogRows] = useState<ClassRow[]>([]);
+  const [catalogStatsByUid, setCatalogStatsByUid] = useState<Record<string, number>>({});
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string>("");
   const [countdown, setCountdown] = useState(0);
   const [isReady, setIsReady] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -214,6 +296,12 @@ export default function FullscreenCaptureModal({
   useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
   useEffect(() => { completedCapturesRef.current = completedCaptures; }, [completedCaptures]);
   useEffect(() => { targetFramesRef.current = FIXED_TARGET_FRAMES; }, [targetFrames]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setLabel(initialLabel);
+    setUser(sanitizeCollectorName(initialUser));
+  }, [isOpen, initialLabel, initialUser]);
 
   // PHASE 1A: Reset temporal stabilization refs when recording starts
   useEffect(() => {
@@ -451,22 +539,156 @@ export default function FullscreenCaptureModal({
   }, [isOpen]);
 
   // -------------------------------------------------------------------------
-  // Dialect persistence
+  // Catalog sync
   // -------------------------------------------------------------------------
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("dialectList") || "null");
-      if (Array.isArray(stored) && stored.length > 0) {
-        const merged = Array.from(new Set([...stored, "Cần Thơ"]));
-        setDialectList(merged); localStorage.setItem("dialectList", JSON.stringify(merged));
-      } else {
-        const defaultList = ["Bắc", "Trung", "Nam", "Cần Thơ"];
-        setDialectList(defaultList); localStorage.setItem("dialectList", JSON.stringify(defaultList));
+    if (!isOpen) return;
+
+    let active = true;
+
+    const loadDialectCatalog = async () => {
+      setCatalogLoading(true);
+      setCatalogError("");
+
+      try {
+        const [classesRes, statsRes] = await Promise.all([
+          getClassesList(),
+          getClassesStats(),
+        ]);
+
+        if (!active) return;
+
+        const serverRows = classesRes.ok ? classesRes.data.items : [];
+        const serverDialects = Array.from(
+          new Set(
+            serverRows
+              .map((row) => displayDialectLabel(row.dialect))
+              .filter((item): item is string => Boolean(item))
+          )
+        );
+          const serverLanguages = Array.from(
+            new Set(
+              serverRows
+                .map((row) => normalizeLanguageKey(row.language))
+                .filter((item): item is string => Boolean(item))
+            )
+          );
+
+        let storedDialects: string[] = [];
+        try {
+          const raw = localStorage.getItem("dialectList");
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(parsed)) {
+            storedDialects = parsed
+              .map((item) => displayDialectLabel(String(item)))
+              .filter((item): item is string => Boolean(item));
+          }
+        } catch {
+          storedDialects = [];
+        }
+
+        const mergedDialects = Array.from(new Set([
+          ...serverDialects,
+          ...storedDialects,
+          ...DEFAULT_DIALECTS,
+        ]));
+        const mergedLanguages = Array.from(new Set([
+          ...serverLanguages,
+          ...DEFAULT_LANGUAGES,
+        ]));
+
+        setLanguageList(mergedLanguages);
+        setDialectList(mergedDialects);
+        setCatalogRows(serverRows);
+
+        const nextStats: Record<string, number> = {};
+        if (statsRes.ok) {
+          for (const row of statsRes.data.distribution) {
+            if (row.class_uid) nextStats[row.class_uid] = row.count ?? row.samples_count ?? 0;
+          }
+        }
+        setCatalogStatsByUid(nextStats);
+
+        try {
+          localStorage.setItem("languageList", JSON.stringify(mergedLanguages));
+          localStorage.setItem("dialectList", JSON.stringify(mergedDialects));
+        } catch {
+          /* ignore */
+        }
+
+        const storedLanguage = normalizeLanguageKey(localStorage.getItem("languageSelected") || "");
+        const nextLanguage = storedLanguage && mergedLanguages.includes(storedLanguage)
+          ? storedLanguage
+          : (mergedLanguages[0] || DEFAULT_LANGUAGES[0]);
+
+        const storedSel = displayDialectLabel(localStorage.getItem("dialectSelected") || "");
+        const availableDialectsForLanguage = Array.from(
+          new Set(
+            serverRows
+              .filter((row) => normalizeLanguageKey(row.language) === nextLanguage)
+              .map((row) => displayDialectLabel(row.dialect))
+              .filter((item): item is string => Boolean(item))
+          )
+        );
+
+        const nextDialect = storedSel && mergedDialects.includes(storedSel) && (
+          availableDialectsForLanguage.length === 0 || availableDialectsForLanguage.includes(storedSel)
+        )
+          ? storedSel
+          : (availableDialectsForLanguage[0] || mergedDialects[0] || DEFAULT_DIALECTS[0]);
+
+        setLanguage(nextLanguage);
+        setDialect(nextDialect);
+
+        try {
+          localStorage.setItem("languageSelected", nextLanguage);
+          localStorage.setItem("dialectSelected", nextDialect);
+        } catch {
+          /* ignore */
+        }
+
+        if (!classesRes.ok && !statsRes.ok) {
+          setCatalogError("Không tải được danh sách bộ ngôn ngữ từ máy chủ.");
+        }
+      } catch {
+        if (!active) return;
+        setCatalogError("Không tải được dữ liệu bộ ngôn ngữ.");
+        setDialectList((prev) => prev.length > 0 ? prev : DEFAULT_DIALECTS);
+      } finally {
+        if (active) setCatalogLoading(false);
       }
-      const storedSel = localStorage.getItem("dialectSelected");
-      if (storedSel) setDialect(storedSel);
-    } catch { /* ignore */ }
-  }, []);
+    };
+
+    loadDialectCatalog();
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
+
+  const selectedLanguageKey = normalizeLanguageKey(language);
+  const selectedDialectKey = normalizeDialectKey(dialect);
+  const selectedLanguageRows = catalogRows.filter((row) => normalizeLanguageKey(row.language) === selectedLanguageKey);
+  const selectedDialectRows = selectedLanguageRows.filter((row) => normalizeDialectKey(row.dialect) === selectedDialectKey);
+  const normalizedLabel = normalizeText(label);
+  const labelSuggestions = useMemo(() => {
+    const baseRows = selectedDialectRows
+      .map((row) => row.label_original)
+      .filter((item): item is string => Boolean(item.trim()));
+
+    const uniqueRows = Array.from(new Set(baseRows));
+    uniqueRows.sort((a, b) => a.localeCompare(b, "vi", { sensitivity: "base" }));
+
+    if (!normalizedLabel) return uniqueRows.slice(0, 10);
+
+    return uniqueRows.filter((item) => normalizeText(item).startsWith(normalizedLabel)).slice(0, 10);
+  }, [normalizedLabel, selectedDialectRows]);
+  const matchingCatalogRow = normalizedLabel
+    ? selectedDialectRows.find((row) => normalizeText(row.label_original) === normalizedLabel)
+    : undefined;
+  const labelExists = Boolean(matchingCatalogRow);
+  const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0;
+  const currentCatalogLabelCount = selectedDialectRows.length;
 
   // -------------------------------------------------------------------------
   // Capture handlers
@@ -1308,28 +1530,80 @@ export default function FullscreenCaptureModal({
               </h3>
               <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-blue-300 mb-2">📝 Nhãn hành động *</label>
+                  <div className="flex items-end justify-between gap-3 mb-2">
+                    <label className="block text-xs sm:text-sm font-medium text-blue-300">📝 Nhãn hành động *</label>
+                    <Badge
+                      variant={labelExists ? "success" : "info"}
+                      size="sm"
+                      className="shrink-0"
+                    >
+                      Bộ {displayLanguageLabel(language)} / {displayDialectLabel(dialect)} có {currentCatalogLabelCount} nhãn
+                    </Badge>
+                  </div>
                   <div className="relative">
                     <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ví dụ: đi bộ, nhảy, vẫy tay" className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0} />
                     <div className="absolute inset-y-0 right-2 flex items-center">
                       <SpeechInputButton onText={(text) => setLabel(text)} title="Dùng giọng nói để điền nhãn hành động" className="h-8 w-8" />
                     </div>
                   </div>
-                  {!label && <p className="text-xs text-yellow-400 mt-1">⚠️ Nhãn hành động là bắt buộc</p>}
+                  {!catalogLoading && !catalogError && labelSuggestions.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {labelSuggestions.map((suggestion) => (
+                        <button
+                          type="button"
+                          key={suggestion}
+                          onClick={() => setLabel(suggestion)}
+                          className="rounded-full border border-blue-500/40 bg-blue-950/60 px-3 py-1 text-[11px] text-blue-100 transition-colors hover:bg-blue-800 hover:text-white"
+                          disabled={recording || countdown > 0}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {(catalogLoading || catalogError || normalizedLabel) && (
+                    <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs sm:text-sm text-blue-100">
+                      {catalogLoading ? (
+                        <span>Đang tải danh sách nhãn từ dataset...</span>
+                      ) : catalogError ? (
+                        <span>{catalogError}</span>
+                      ) : labelExists ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="success" size="sm">Đã tồn tại</Badge>
+                            <span>Nhãn “{matchingCatalogRow?.label_original || label}” hiện có {labelSamplesCount} mẫu trong bộ {displayLanguageLabel(language)} / {displayDialectLabel(dialect)}.</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant="warning" size="sm">Chưa có trong bộ này</Badge>
+                          <span>Bộ {displayLanguageLabel(language)} / {displayDialectLabel(dialect)} hiện có {currentCatalogLabelCount} nhãn.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-blue-300 mb-2">👤 Người thực hiện *</label>
+                  <div className="flex items-end justify-between gap-3 mb-2">
+                    <label className="block text-xs sm:text-sm font-medium text-blue-300">👤 Người thực hiện *</label>
+                  </div>
                   <div className="relative">
-                    <input type="text" value={user} onChange={(e) => setUser(e.target.value)} placeholder="ví dụ: user001, john_doe" className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0} onBlur={() => rememberUser(user)} />
+                    <input
+                      type="text"
+                      value={user}
+                      onChange={(e) => setUser(sanitizeCollectorName(e.target.value))}
+                      placeholder="tên người thu thập"
+                      className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base"
+                      disabled={recording || countdown > 0}
+                      onBlur={() => rememberUser(user)}
+                    />
                     <div className="absolute inset-y-0 right-2 flex items-center">
                       <SpeechInputButton onText={(text) => setUser(text)} title="Dùng giọng nói để điền tên người thực hiện" className="h-8 w-8" />
                     </div>
                   </div>
-                  {!user && <p className="text-xs text-yellow-400 mt-1">⚠️ ID người dùng là bắt buộc</p>}
                   {recentUsers.length > 0 && (
                     <div className="mt-2 hidden sm:flex flex-wrap gap-2 text-xs text-blue-200">
-                      <span className="text-[11px] text-blue-300">Gợi ý:</span>
                       {recentUsers.map((name) => (
                         <button type="button" key={name} onClick={() => setUser(name)} className="px-2 py-1 rounded-full bg-blue-900/60 hover:bg-blue-800 text-blue-100 border border-blue-500/40 text-[11px]">{name}</button>
                       ))}
@@ -1338,11 +1612,65 @@ export default function FullscreenCaptureModal({
                 </div>
 
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-blue-300 mb-2">🗂️ Bộ ngôn ngữ</label>
-                  <select value={dialect} onChange={(e) => { const v = e.target.value; if (v === "Khác") { setShowAddDialectModal(true); } else { setDialect(v); localStorage.setItem("dialectSelected", v); } }} className="w-full px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0}>
-                    {dialectList.map((d) => <option key={d} value={d}>{d}</option>)}
-                    <option value="Khác">Khác (thêm mới)</option>
-                  </select>
+                  <div className="flex items-end justify-between gap-3 mb-2">
+                    <label className="block text-xs sm:text-sm font-medium text-blue-300">🗂️ Bộ ngôn ngữ</label>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-blue-200">🌐 Ngôn ngữ</label>
+                      <select
+                        value={language}
+                        onChange={(e) => {
+                          const v = normalizeLanguageKey(e.target.value);
+                          setLanguage(v);
+                          localStorage.setItem("languageSelected", v);
+
+                          const availableDialectsForLanguage = Array.from(
+                            new Set(
+                              catalogRows
+                                .filter((row) => normalizeLanguageKey(row.language) === v)
+                                .map((row) => displayDialectLabel(row.dialect))
+                                .filter((item): item is string => Boolean(item))
+                            )
+                          );
+                          if (availableDialectsForLanguage.length > 0 && !availableDialectsForLanguage.includes(dialect)) {
+                            const fallbackDialect = availableDialectsForLanguage[0];
+                            setDialect(fallbackDialect);
+                            localStorage.setItem("dialectSelected", fallbackDialect);
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base"
+                        disabled={recording || countdown > 0}
+                      >
+                        {languageList.map((item) => (
+                          <option key={item} value={item}>{displayLanguageLabel(item)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-blue-200">🧭 Phương ngữ</label>
+                      <select
+                        value={dialect}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "Khác") {
+                            setShowAddDialectModal(true);
+                          } else {
+                            setDialect(v);
+                            localStorage.setItem("dialectSelected", v);
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base"
+                        disabled={recording || countdown > 0}
+                      >
+                        {dialectList.map((d) => <option key={d} value={d}>{d}</option>)}
+                        <option value="Khác">Khác (thêm mới)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-blue-200">
+                    {catalogLoading ? "Đang đồng bộ danh sách từ máy chủ..." : `Bộ ${displayLanguageLabel(language)} / ${displayDialectLabel(dialect)} hiện có ${currentCatalogLabelCount} nhãn`}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1355,12 +1683,9 @@ export default function FullscreenCaptureModal({
             }} />
 
             <div className="bg-gray-800 rounded-lg p-4 hidden sm:block">
-              <h4 className="text-sm font-medium text-gray-300 mb-3">📊 Cài đặt & Tiến độ chụp</h4>
+              <h4 className="text-sm font-medium text-gray-300 mb-3">📊 Trạng thái ghi hình</h4>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between text-gray-400"><span>Tổng số lần chụp:</span><span className="text-white">{FIXED_CAPTURE_COUNT}</span></div>
                 <div className="flex justify-between text-gray-400"><span>Lần chụp hiện tại:</span><span className="text-white">{currentCaptureIndex + 1}/{FIXED_CAPTURE_COUNT}</span></div>
-                <div className="flex justify-between text-gray-400"><span>Đã hoàn thành:</span><span className="text-white">{completedCaptures}/{FIXED_CAPTURE_COUNT}</span></div>
-                <div className="flex justify-between text-gray-400"><span>Khung hiện tại:</span><span className="text-white">{frames.length}/{FIXED_TARGET_FRAMES}</span></div>
                 {frames.length > 0 && (
                   <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
                     <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
