@@ -23,6 +23,29 @@
         },
         "expects_strict_shape": [60, 126]
       }
+    },
+    {
+      "id": "bang-chu-cai",
+      "name": "Bảng Chữ Cái",
+      "checkpoint_path": "checkpoints/tcn_dialect-bang-chu-cai_20260515_154037.pt",
+      "language": "vn",
+      "dialect": "bang-chu-cai",
+      "seq_len": 60,
+      "feature_dim": 126,
+      "normalization_version": "hands126_v1",
+      "expected_contract_hash": null,
+      "preprocess_contract": {
+        "feature_layout": {
+          "type": "hands_126",
+          "slots": ["left_slot_63", "right_slot_63"],
+          "handedness_policy": "swapped_mp_handedness_slots",
+          "coordinate_space": "mediapipe_normalized",
+          "coordinate_order": "xyz",
+          "frontend_mirroring": "visual_only",
+          "missing_hands_policy": "zero_filled_by_frontend"
+        },
+        "expects_strict_shape": [60, 126]
+      }
     }
   ]
 }
