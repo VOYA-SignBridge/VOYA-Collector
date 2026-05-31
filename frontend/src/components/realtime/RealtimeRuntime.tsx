@@ -166,7 +166,6 @@ export default function RealtimeRuntime({
   }, [stopAll]);
 
   // Fetch available models on mount (independent of webcam lifecycle)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     let cancelled = false;
 
@@ -174,10 +173,13 @@ export default function RealtimeRuntime({
     setModelsError(null);
     setSelectionWarning(null);
 
+    console.log("[realtime] Starting to fetch models from /api/v1/realtime/models");
+
     fetchRealtimeModels().then((res) => {
       if (cancelled) return;
 
       if (res.ok) {
+        console.log("[realtime] ✅ Models loaded successfully:", res.data.length, "models", res.data);
         setModels(res.data);
 
         // Check if previously selected model still exists
@@ -203,10 +205,12 @@ export default function RealtimeRuntime({
           selectedModelIdRef.current = firstModel;
           setSelectedModelId(firstModel);
           setSelectedLanguage(firstLang);
+          console.log("[realtime] Auto-selected model:", firstModel, "language:", firstLang);
         }
 
         setIsLoadingModels(false);
       } else {
+        console.error("[realtime] ❌ Models fetch FAILED:", res.error);
         setModelsError(res.error);
         setIsLoadingModels(false);
       }
@@ -215,6 +219,7 @@ export default function RealtimeRuntime({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Start/stop runtime based on `running`.
@@ -399,7 +404,39 @@ export default function RealtimeRuntime({
     };
   }, [running, debounceMs, stopAll]);
 
+  const canSwitchModel = useCallback((): boolean => {
+    // If scheduler doesn't exist (not running), can always switch
+    if (!schedulerRef.current) {
+      return true;
+    }
+
+    // ✅ SAFETY CHECK 1: Cannot switch if inference is in-flight
+    if (schedulerRef.current.isInFlight()) {
+      if (import.meta.env.DEV) {
+        console.debug("[realtime] cannot switch model: inference in-flight");
+      }
+      return false;
+    }
+
+    // ✅ SAFETY CHECK 2: Cannot switch if scheduler is debouncing or processing
+    const schedulerStatus = schedulerRef.current.getStatus();
+    if (schedulerStatus !== "idle") {
+      if (import.meta.env.DEV) {
+        console.debug("[realtime] cannot switch model: scheduler status is", schedulerStatus);
+      }
+      return false;
+    }
+
+    return true;
+  }, []);
+
   const handleModelSelect = useCallback((modelId: string) => {
+    // ✅ SAFETY CHECK: Verify we can switch before proceeding
+    if (!canSwitchModel()) {
+      setSelectionWarning("Không thể thay đổi bộ nhận diện khi đang xử lý. Vui lòng chờ đến khi xong.");
+      return;
+    }
+
     // Clear any selection warning when user actively selects a model
     setSelectionWarning(null);
     // Increment generation to drop any in-flight stale responses
@@ -414,7 +451,7 @@ export default function RealtimeRuntime({
     if (import.meta.env.DEV) {
       console.debug("[realtime] model switched:", modelId);
     }
-  }, []);
+  }, [canSwitchModel]);
 
   const handleLanguageSelect = useCallback(
     (lang: string) => {
@@ -550,10 +587,15 @@ export default function RealtimeRuntime({
             <div>
               <label className="block text-[11px] font-medium text-slate-700 mb-1.5">Ngôn ngữ</label>
               <select
-                className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
+                  running && (isStarting || !canSwitchModel())
+                    ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
+                    : "border-slate-300 bg-white focus:ring-blue-500"
+                }`}
                 value={selectedLanguage || ""}
                 onChange={(e) => handleLanguageSelect(e.target.value)}
-                disabled={!running && isStarting}
+                disabled={running && (isStarting || !canSwitchModel())}
+                title={running && !canSwitchModel() ? "Không thể thay đổi khi đang xử lý" : ""}
               >
                 <option value="">-- Chọn ngôn ngữ --</option>
                 {languages.map((lang) => (
@@ -577,10 +619,15 @@ export default function RealtimeRuntime({
                 </div>
               ) : (
                 <select
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
+                    running && (isStarting || !canSwitchModel())
+                      ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
+                      : "border-slate-300 bg-white focus:ring-blue-500"
+                  }`}
                   value={selectedModelId || ""}
                   onChange={(e) => handleModelSelect(e.target.value)}
-                  disabled={!running && isStarting}
+                  disabled={running && (isStarting || !canSwitchModel())}
+                  title={running && !canSwitchModel() ? "Không thể thay đổi khi đang xử lý" : ""}
                 >
                   <option value="">-- Chọn bộ nhận diện --</option>
                   {filteredModels.map((model) => (
