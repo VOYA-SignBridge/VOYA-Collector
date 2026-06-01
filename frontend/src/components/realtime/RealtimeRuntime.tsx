@@ -273,8 +273,17 @@ export default function RealtimeRuntime({
 
         if (!scratch || !ring) return;
 
-        // RAW webcam coordinates only; flatten handles the required handedness swap.
-        const vec = flattenRealtimeHands(results as MediaPipeHandsLikeResults, scratch);
+        const mpResults = results as MediaPipeHandsLikeResults;
+        const hasHands = mpResults?.multiHandLandmarks && mpResults.multiHandLandmarks.length > 0;
+
+        if (!hasHands) {
+          // No hands detected: clear ring buffer to reset on next hand detection
+          ring.clear();
+          return;
+        }
+
+        // Hands detected: RAW webcam coordinates only; flatten handles the required handedness swap.
+        const vec = flattenRealtimeHands(mpResults, scratch);
         ring.append(vec);
 
         // Scheduler itself gates on isReady() and inFlight.
