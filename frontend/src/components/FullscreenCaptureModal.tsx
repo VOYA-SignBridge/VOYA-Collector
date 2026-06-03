@@ -1530,15 +1530,8 @@ export default function FullscreenCaptureModal({
               </h3>
               <div className="space-y-3 sm:space-y-4">
                 <div>
-                  <div className="flex items-end justify-between gap-3 mb-2">
+                  <div className="mb-2">
                     <label className="block text-xs sm:text-sm font-medium text-blue-300">📝 Nhãn hành động *</label>
-                    <Badge
-                      variant={labelExists ? "success" : "info"}
-                      size="sm"
-                      className="shrink-0"
-                    >
-                      Bộ {displayLanguageLabel(language)} / {displayDialectLabel(dialect)} có {currentCatalogLabelCount} nhãn
-                    </Badge>
                   </div>
                   <div className="relative">
                     <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ví dụ: đi bộ, nhảy, vẫy tay" className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0} />
