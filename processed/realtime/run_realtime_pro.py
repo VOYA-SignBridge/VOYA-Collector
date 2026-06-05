@@ -378,6 +378,12 @@ def load_checkpoint(checkpoint_path: Path, device: str, logger: logging.Logger) 
     """Load model from checkpoint."""
     logger.info(f"Loading checkpoint from {checkpoint_path}")
     
+    # Workaround for Python 3.13 checkpoint loaded in Python 3.12
+    import sys
+    import pathlib
+    if 'pathlib._local' not in sys.modules:
+        sys.modules['pathlib._local'] = pathlib
+    
     try:
         obj = torch.load(checkpoint_path, map_location=device, weights_only=False)
     except Exception as e:

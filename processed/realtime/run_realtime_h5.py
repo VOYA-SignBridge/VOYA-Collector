@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Deque, List, Optional, Tuple
 
 import numpy as np
+import tensorflow as tf
 
 try:
     import cv2
@@ -24,8 +25,6 @@ try:
 except Exception as e:  # pragma: no cover
     mp = None  # type: ignore
 
-import torch
-import torch.nn as nn
 try:
     from train_model.dataset_versioning import get_analysis_dir
 except Exception:
@@ -33,7 +32,7 @@ except Exception:
 
 @dataclass
 class ModelBundle:
-    model: nn.Module
+    model: tf.keras.Model
     in_dim: int
     num_classes: int
     label_map: List[str]
@@ -78,72 +77,6 @@ def _create_hand_landmarker():
     return mp.tasks.vision.HandLandmarker.create_from_options(options)
 
 
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size: int):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, : x.size(2) - self.chomp_size]
-
-
-class TemporalBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int, dropout: float):
-        super().__init__()
-        pad = (kernel_size - 1) * dilation
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp1 = Chomp1d(pad)
-        self.relu1 = nn.ReLU()
-        self.drop1 = nn.Dropout(dropout)
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp2 = Chomp1d(pad)
-        self.relu2 = nn.ReLU()
-        self.drop2 = nn.Dropout(dropout)
-        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
-        self.out_relu = nn.ReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.drop1(self.relu1(self.chomp1(self.conv1(x))))
-        out = self.drop2(self.relu2(self.chomp2(self.conv2(out))))
-        res = x if self.downsample is None else self.downsample(x)
-        return self.out_relu(out + res)
-
-
-class TCNClassifier(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        num_classes: int,
-        channels: int = 64,
-        levels: int = 3,
-        kernel_size: int = 5,
-        dropout: float = 0.3,
-    ):
-        super().__init__()
-        self.proj = nn.Conv1d(in_dim, channels, kernel_size=1)
-        blocks = []
-        for i in range(levels):
-            dilation = 2 ** i
-            blocks.append(TemporalBlock(channels, channels, kernel_size, dilation, dropout))
-        self.network = nn.Sequential(*blocks)
-        self.classifier = nn.Linear(channels, num_classes)
-
-    def forward(self, x_btd: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        # x_btd: [B, T, D] -> [B, D, T]
-        x = x_btd.transpose(1, 2)
-        x = self.proj(x)
-        x = self.network(x)
-        # masked GAP
-        b, c, t = x.shape
-        mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        mask = mask.unsqueeze(1)
-        x = x.masked_fill(~mask, 0.0)
-        denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)
-        pooled = x.sum(dim=2) / denom
-        logits = self.classifier(pooled)
-        return logits
-
-
 def _slugify(text: str) -> str:
     s = (text or "").strip().lower()
     s = re.sub(r"\s+", "-", s)
@@ -168,11 +101,11 @@ def load_latest_checkpoint(out_dir: Path, *, tag: str = "") -> Tuple[Path, dict]
     meta = json.loads(latest.read_text(encoding='utf-8'))
     ckpt = Path(meta.get('checkpoint', ''))
     if not ckpt.exists():
-        # fallback: pick latest .pt
-        pts = sorted(out_dir.glob('tcn_*.pt'))
-        if not pts:
+        # fallback: pick latest .h5
+        h5s = sorted(out_dir.glob('tcn_*.h5'))
+        if not h5s:
             raise FileNotFoundError('No checkpoint found')
-        ckpt = pts[-1]
+        ckpt = h5s[-1]
     return ckpt, meta
 
 
@@ -192,60 +125,60 @@ def _load_label_map_from_index_to_label(i2l_path: Path, *, num_classes: int) -> 
     return label_map
 
 
-def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
-    # Workaround for Python 3.13 checkpoint loaded in Python 3.12
-    import sys
-    import pathlib
-    if 'pathlib._local' not in sys.modules:
-        sys.modules['pathlib._local'] = pathlib
+def build_model_from_ckpt(ckpt_path: Path, meta: dict, device: str) -> ModelBundle:
+    in_dim = int(meta.get('in_dim', 126))
 
-    # FIX for PyTorch 2.6+ (weights_only=True became default)
-    obj = torch.load(ckpt_path, map_location=device, weights_only=False)
+    # Load Keras Model
+    # compile=False avoids issues with custom ops like tf.sequence_mask in functional API
+    model = tf.keras.models.load_model(str(ckpt_path), compile=False)
 
-    in_dim = int(obj.get('in_dim'))
-    num_classes = int(obj.get('num_classes'))
-
-    cfg = obj.get('config') or {}
-    channels = int(cfg.get('channels', 64)) if isinstance(cfg, dict) else 64
-    levels = int(cfg.get('levels', 3)) if isinstance(cfg, dict) else 3
-    kernel_size = int(cfg.get('kernel_size', 5)) if isinstance(cfg, dict) else 5
-    dropout = float(cfg.get('dropout', 0.3)) if isinstance(cfg, dict) else 0.3
-
-    model = TCNClassifier(
-        in_dim=in_dim,
-        num_classes=num_classes,
-        channels=channels,
-        levels=levels,
-        kernel_size=kernel_size,
-        dropout=dropout,
-    )
-    model.load_state_dict(obj['model_state'])
-    model.to(device).eval()
-
-    # label map: prefer per-checkpoint subset mapping if present.
-    label_map: List[str]
-    l2i = obj.get('label_to_index_json')
-    if l2i:
-        try:
-            i2l_path = Path(str(l2i)).with_name('index_to_label.json')
-            if i2l_path.exists():
-                label_map = _load_label_map_from_index_to_label(i2l_path, num_classes=num_classes)
-            else:
-                raise FileNotFoundError
-        except Exception:
-            if get_analysis_dir:
-                i2l = get_analysis_dir() / 'index_to_label.json'
-            else:
-                root = Path(__file__).resolve().parents[2]
-                i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-            label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
+    # label map logic — label_map in summary.json is {label_key: index} (str->int)
+    label_map: List[str] = []
+    l2i = meta.get('label_map')  # type: Optional[dict]
+    if l2i and isinstance(l2i, dict):
+        # Invert: {label_key: index} -> {index: label_key}
+        inv_map = {int(v): str(k) for k, v in l2i.items()}
+        num_classes = int(meta.get('num_classes', len(inv_map)))
+        # Guarantee num_classes covers all indices in the dict
+        num_classes = max(num_classes, max(inv_map.keys()) + 1) if inv_map else num_classes
+        for i in range(num_classes):
+            label_map.append(inv_map.get(i, str(i)))
     else:
-        if get_analysis_dir:
-            i2l = get_analysis_dir() / 'index_to_label.json'
+        # meta is incomplete (e.g. --checkpoint passed without sidecar .json)
+        # Try to infer num_classes from the model's output layer
+        try:
+            num_classes = int(model.output_shape[-1])
+        except Exception:
+            num_classes = int(meta.get('num_classes', 0))
+
+        # Fallback label resolution: try index_to_label.json from analysis dir
+        i2l_path: Optional[Path] = None
+        # 1. Next to the checkpoint (subset mode writes it there)
+        subset_i2l = ckpt_path.parent / 'index_to_label.json'
+        if subset_i2l.exists():
+            i2l_path = subset_i2l
+        elif get_analysis_dir:
+            cand = get_analysis_dir() / 'index_to_label.json'
+            if cand.exists():
+                i2l_path = cand
         else:
-            root = Path(__file__).resolve().parents[2]
-            i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-        label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
+            cand = Path(__file__).resolve().parents[2] / 'processed' / 'analysis' / 'index_to_label.json'
+            if cand.exists():
+                i2l_path = cand
+
+        if i2l_path:
+            label_map = _load_label_map_from_index_to_label(i2l_path, num_classes=num_classes)
+        else:
+            label_map = [str(i) for i in range(num_classes)]
+
+    if not label_map:
+        raise SystemExit(
+            f'label_map is empty after loading checkpoint. '
+            f'Ensure the sidecar .json exists next to {ckpt_path.name}, '
+            f'or that processed/analysis/index_to_label.json is present.'
+        )
+
+    num_classes = len(label_map)  # canonical source of truth
 
     return ModelBundle(
         model=model,
@@ -342,14 +275,14 @@ def draw_text_vietnamese(frame_bgr, text, pos=(10, 30), color=(0, 255, 0), font_
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Realtime sign recognition using TCN + MediaPipe Hands')
-    parser.add_argument('--checkpoint', type=Path, default=None, help='Path to .pt checkpoint (optional)')
+    parser.add_argument('--checkpoint', type=Path, default=None, help='Path to .h5 checkpoint (optional)')
     parser.add_argument('--outputs_dir', type=Path, default=Path('processed/train_utils/outputs'))
     parser.add_argument('--dialect', type=str, default='', help="Load latest checkpoint for this dialect (e.g. 'hoa-de').")
     parser.add_argument('--tag', type=str, default='', help="Load latest checkpoint by tag (matches trainer prefix, e.g. 'dialect-hoa-de').")
     parser.add_argument('--window', type=int, default=60, help='Temporal window size (frames)')
     parser.add_argument('--every', type=int, default=2, help='Run inference every N frames')
     parser.add_argument('--video', type=str, default='', help='Optional video file path; empty uses webcam')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument('--device', type=str, default='CPU')
     parser.add_argument('--smoothing', type=float, default=0.7, help='EMA smoothing for logits [0-1]')
     parser.add_argument('--vote_window', type=int, default=5, help='Temporal voting window size (predictions)')
     parser.add_argument('--vote_min_conf', type=float, default=0.6, help='Min confidence to include in voting [0-1]')
@@ -375,9 +308,11 @@ def main() -> None:
         ckpt, meta = load_latest_checkpoint(args.outputs_dir, tag=tag)
     else:
         ckpt = args.checkpoint
-        meta = {}
+        # Try to load meta if explicitly passing checkpoint
+        meta_path = ckpt.with_suffix('.json')
+        meta = json.loads(meta_path.read_text(encoding='utf-8')) if meta_path.exists() else {}
 
-    bundle = build_model_from_ckpt(ckpt, args.device)
+    bundle = build_model_from_ckpt(ckpt, meta, args.device)
     in_dim = bundle.in_dim
     if in_dim != 126:
         raise SystemExit(f'Model in_dim={in_dim} must match feature extractor (126).')
@@ -467,24 +402,28 @@ def main() -> None:
                 inference_start = time.time()
                 
                 X = np.stack(list(buf), axis=0)
-                lengths = torch.tensor([X.shape[0]], dtype=torch.long, device=bundle.device)
+                # Keras Model expects Inputs: [X_tf, lengths_tf]
+                # X_pad shape must be (1, T, D)
+                # lengths shape must be (1,)
                 X_pad = np.zeros((1, args.window, in_dim), dtype=np.float32)
                 t = min(args.window, X.shape[0])
                 X_pad[0, -t:] = X[-t:]
+                lengths_tf = tf.convert_to_tensor([t], dtype=tf.int32)
+                X_tf = tf.convert_to_tensor(X_pad, dtype=tf.float32)
 
-                with torch.no_grad():
-                    logits = bundle.model(torch.from_numpy(X_pad).to(bundle.device), lengths)
-                    vec = logits.cpu().numpy()[0]
-                    if ema_logits is None:
-                        ema_logits = vec
-                    else:
-                        alpha = float(args.smoothing)
-                        ema_logits = alpha * ema_logits + (1 - alpha) * vec
+                logits_tensor = bundle.model([X_tf, lengths_tf], training=False)
+                vec = logits_tensor.numpy()[0]
 
-                    probs = softmax(ema_logits)
-                    idx = int(np.argmax(probs))
-                    pred_label = bundle.label_map[idx]
-                    pred_conf = float(probs[idx])
+                if ema_logits is None:
+                    ema_logits = vec
+                else:
+                    alpha = float(args.smoothing)
+                    ema_logits = alpha * ema_logits + (1 - alpha) * vec
+
+                probs = softmax(ema_logits)
+                idx = int(np.argmax(probs))
+                pred_label = bundle.label_map[idx]
+                pred_conf = float(probs[idx])
                 
                 inference_time_ms = (time.time() - inference_start) * 1000
 
@@ -507,44 +446,33 @@ def main() -> None:
                     adaptive_every = max(int(args.every), adaptive_every - 1)
 
             # ----- Label persistence logic (debounce + hysteresis) -----
-            # Debounce rule:
-            # - Only switch labels after *consecutive* confident predictions.
-            # - Frames where inference is skipped (--every) must NOT break the streak.
             if did_infer and pred_label and pred_conf >= args.confidence_threshold:
                 if pred_label == display_label:
-                    # Same label: refresh hold counter and update confidence
                     display_conf = pred_conf
                     hold_counter = args.hold_frames
                     candidate_label = ""
                     candidate_count = 0
                 elif pred_label == candidate_label:
-                    # Building consensus for new label
                     candidate_count += 1
                     if candidate_count >= args.stable_frames:
-                        # Switch to new label
                         display_label = pred_label
                         display_conf = pred_conf
                         hold_counter = args.hold_frames
                         candidate_label = ""
                         candidate_count = 0
                 else:
-                    # New candidate label
                     candidate_label = pred_label
                     candidate_count = 1
             else:
-                # No (confident) prediction: use hold counter
                 if hold_counter > 0:
                     hold_counter -= 1
                 else:
-                    # Hold expired: clear display
                     if display_label:
                         display_label = ""
                         display_conf = 0.0
                         candidate_label = ""
                         candidate_count = 0
 
-                # If we DID run inference but it wasn't confident enough,
-                # reset the candidate so stability requires consecutive confident hits.
                 if did_infer:
                     candidate_label = ""
                     candidate_count = 0
@@ -552,7 +480,9 @@ def main() -> None:
             # ----- Draw display label if exists -----
             y_offset = 30
             if display_label:
-                txt = f"{display_label} ({display_conf*100:.1f}%)"
+                # Lấy phần chữ dễ đọc từ "vn/phai" -> "phai"
+                clean_label = display_label.split('/')[-1].replace('-', ' ')
+                txt = f"{clean_label.capitalize()} ({display_conf*100:.1f}%)"
                 vis = draw_text_vietnamese(vis, txt, (10, y_offset), (0, 255, 0), args.font_size)
                 y_offset += args.font_size + 10
             
@@ -561,13 +491,8 @@ def main() -> None:
                 stats_lines = [
                     f"FPS: {current_fps:.1f}",
                     f"Buffer: {len(buf)}/{args.window}",
-                    f"Inference: {inference_time_ms:.1f}ms (every={adaptive_every})",
+                    f"Inference: {inference_time_ms:.1f}ms",
                 ]
-                if candidate_label and candidate_count > 0:
-                    stats_lines.append(f"Candidate: {candidate_label} ({candidate_count}/{args.stable_frames})")
-                if hold_counter > 0 and not pred_label:
-                    stats_lines.append(f"Hold: {hold_counter}/{args.hold_frames}")
-                
                 stats_text = " | ".join(stats_lines)
                 vis = draw_text_vietnamese(vis, stats_text, (10, y_offset), (200, 200, 200), args.font_size // 2)
 

@@ -1,67 +1,85 @@
-# Dependencies
-node_modules/
+# ==================================
+# Python & Virtual Environments
+# ==================================
+venv/
 .venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyc
+*.pyo
+*.pyd
+.Python
 
-# Build artifacts
+# ==================================
+# Machine Learning / AI Models
+# ==================================
+*.pt
+*.pth
+*.h5
+*.keras
+*.tflite
+*.onnx
+runs/
+wandb/
+outputs/
+
+# ==================================
+# Data & Videos
+# ==================================
+dataset/
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.npz
+*.npy
+*.tfrecord
+*.csv
+
+# ==================================
+# Node.js / Frontend
+# ==================================
+node_modules/
 dist/
-.cache/
 build/
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# IDE and editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Log fileslog
+.cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.pyc
-*.pyo
-*.pyd
+# ==================================
+# Environment Variables & Secrets
+# ==================================
+.env
+.env.local
+.env.*.local
+gdrive/
+*credentials*.json
+*token*.json
 
-# Git
-.gitnexus/
-
-# OS files
+# ==================================
+# IDE, OS & Temporary Files
+# ==================================
+.vscode/
+.idea/
+.ipynb_checkpoints/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Temporary files
 temp/
 tmp/
 *.tmp
+*.log
 
-# Video and model files
-dataset/
-*.mp4
-*.npz
-*.npy
-*.mov
-*.avi
-
-# Git
-.git/
-
-# Google Drive credentials
-gdrive/
+# ==================================
+# Database
+# ==================================
+*.db
+*.sqlite
+*.sqlite3
