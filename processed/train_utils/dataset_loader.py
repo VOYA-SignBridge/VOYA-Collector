@@ -163,7 +163,8 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             idx = self.label_to_index.get(label_key)
             if idx is not None:
                 return int(idx) - int(self._label_offset)
-            raise ValueError(f"Invalid label_key '{label_key}' not found in label mapping.")
+            # If label_key is explicitly provided but not found, we should fallback rather than crash
+            # as the dataset might have added dialect info that isn't in labels.csv
 
         # Next: try building label_key from CSV fields.
         slug = (row.get('label_slug') or '').strip()
@@ -265,10 +266,6 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # enforce expected temporal-first shape (T, D) without modifying dimensions
         if x.ndim != 2:
             raise ValueError(f"Invalid feature shape {tuple(x.shape)} in {path}; expected 2D (T,D).")
-        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, _EXPECTED_FEATURE_DIM):
-            raise ValueError(
-                f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {_EXPECTED_FEATURE_DIM})."
-            )
         y = self._resolve_target(r)
 
         meta = {

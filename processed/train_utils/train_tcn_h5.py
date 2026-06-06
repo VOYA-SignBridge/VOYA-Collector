@@ -23,24 +23,43 @@ try:
     # local metrics (accuracy, SCS, macro-f1) for future use
     from .metrics import sequence_consistency_score  # type: ignore
 except Exception:  # pragma: no cover
-    import sys as _sys
-    from pathlib import Path as _P
-    _sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.metrics import sequence_consistency_score  # type: ignore
+    try:
+        from metrics import sequence_consistency_score
+    except ImportError:
+        import sys as _sys
+        from pathlib import Path as _P
+        _sys.path.append(str(_P(__file__).resolve().parents[2]))
+        from processed.train_utils.metrics import sequence_consistency_score  # type: ignore
 
 try:
     # When run as module: python -m processed.train_utils.train_tcn
     from .dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
 except Exception:  # pragma: no cover
     # When run as script: python processed/train_utils/train_tcn.py
-    import sys
-    from pathlib import Path as _P
-    sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
+    try:
+        from dataset_loader import NPZSignDataset, pad_collate_fn
+    except ImportError:
+        import sys
+        from pathlib import Path as _P
+        sys.path.append(str(_P(__file__).resolve().parents[2]))
+        from processed.train_utils.dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
 
 
 EXPECTED_FEATURE_DIM = 126
 
+
+import keras
+
+@keras.saving.register_keras_serializable(name="compute_masked_pooling")
+def compute_masked_pooling(inputs):
+    x_val, lens_val = inputs
+    t = tf.shape(x_val)[1]
+    mask = tf.sequence_mask(lens_val, maxlen=t, dtype=x_val.dtype)
+    mask = tf.expand_dims(mask, axis=-1)
+    x_masked = x_val * mask
+    denom = tf.cast(tf.maximum(lens_val, 1), x_val.dtype)
+    denom = tf.expand_dims(denom, axis=-1)
+    return tf.reduce_sum(x_masked, axis=1) / denom
 
 def set_seed(seed: int) -> None:
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
@@ -125,16 +144,7 @@ def build_tcn_model(
         current_in = channels
         
     # Masked Global Average Pooling
-    t = tf.shape(x)[1]
-    mask = tf.sequence_mask(lengths, maxlen=t, dtype=x.dtype)
-    mask = tf.expand_dims(mask, axis=-1)
-    
-    x_masked = layers.Multiply(name="apply_mask")([x, mask])
-    
-    denom = tf.cast(tf.maximum(lengths, 1), x.dtype)
-    denom = tf.expand_dims(denom, axis=-1)
-    
-    pooled = tf.reduce_sum(x_masked, axis=1) / denom
+    pooled = layers.Lambda(compute_masked_pooling, name="masked_pool")([x, lengths])
     
     # Force float32 for mixed precision stability
     logits = layers.Dense(num_classes, name="classifier", dtype=tf.float32)(pooled)
@@ -514,18 +524,14 @@ def train_one_epoch(model: tf.keras.Model, loader: DataLoader, opt: tf.keras.opt
             loss = loss_fn(y_onehot, logits)
             
             # If using mixed precision, scale the loss before computing gradients
-            if isinstance(opt, tf.keras.mixed_precision.LossScaleOptimizer):
+            if hasattr(opt, 'scale_loss'):
+                scaled_loss = opt.scale_loss(loss)
+            elif hasattr(opt, 'get_scaled_loss'):
                 scaled_loss = opt.get_scaled_loss(loss)
             else:
                 scaled_loss = loss
 
-        if isinstance(opt, tf.keras.mixed_precision.LossScaleOptimizer):
-            scaled_grads = tape.gradient(scaled_loss, model.trainable_variables)
-            grads = opt.get_unscaled_gradients(scaled_grads)
-        else:
-            grads = tape.gradient(scaled_loss, model.trainable_variables)
-            
-        grads, _ = tf.clip_by_global_norm(grads, 1.0)
+        grads = tape.gradient(scaled_loss, model.trainable_variables)
         opt.apply_gradients(zip(grads, model.trainable_variables))
 
         preds = tf.argmax(logits, axis=1)
@@ -627,7 +633,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="gpu")
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--out_dir", type=Path, default=Path("train_utils/outputs"))
+    parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
     
     # Advanced features args
     parser.add_argument("--label_smoothing", type=float, default=0.1)
@@ -824,7 +830,7 @@ def main() -> None:
         seed=cfg.seed,
     )
 
-    opt = tf.keras.optimizers.AdamW(learning_rate=cfg.lr, weight_decay=cfg.weight_decay)
+    opt = tf.keras.optimizers.AdamW(learning_rate=cfg.lr, weight_decay=cfg.weight_decay, clipnorm=1.0)
     if cfg.mixed_precision:
         opt = tf.keras.mixed_precision.LossScaleOptimizer(opt)
         
