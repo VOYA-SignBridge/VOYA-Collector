@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
     import sys as _sys
     from pathlib import Path as _P
     _sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.metrics import sequence_consistency_score  # type: ignore
+    from processed.train_utils.metrics import sequence_consistency_score  # type: ignore
 
 try:
     # When run as module: python -m processed.train_utils.train_tcn
@@ -34,7 +34,7 @@ except Exception:  # pragma: no cover
     import sys
     from pathlib import Path as _P
     sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
+    from processed.train_utils.dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
 
 
 EXPECTED_FEATURE_DIM = 126

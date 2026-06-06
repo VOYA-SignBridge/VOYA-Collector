@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import time
+import threading
 import urllib.error
 import urllib.request
 from collections import Counter, deque
@@ -51,8 +52,7 @@ _POSE_LANDMARKER_MODEL_PATH = Path(__file__).resolve().parent / "assets" / "pose
 
 
 def _ensure_mp_models():
-    for url, path in [(_HAND_LANDMARKER_MODEL_URL, _HAND_LANDMARKER_MODEL_PATH),
-                      (_POSE_LANDMARKER_MODEL_URL, _POSE_LANDMARKER_MODEL_PATH)]:
+    for url, path in [(_HAND_LANDMARKER_MODEL_URL, _HAND_LANDMARKER_MODEL_PATH)]:
         if path.exists() and path.stat().st_size > 0:
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,27 +72,16 @@ def init_mediapipe():
         raise RuntimeError("mediapipe is not available")
     _ensure_mp_models()
     
-    pose_options = mp.tasks.vision.PoseLandmarkerOptions(
-        base_options=mp.tasks.BaseOptions(model_asset_path=str(_POSE_LANDMARKER_MODEL_PATH)),
-        running_mode=mp.tasks.vision.RunningMode.VIDEO,
-        num_poses=1,
-        min_pose_detection_confidence=0.5,
-        min_pose_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-        output_segmentation_masks=False,
-    )
-    
     hands_options = mp.tasks.vision.HandLandmarkerOptions(
         base_options=mp.tasks.BaseOptions(model_asset_path=str(_HAND_LANDMARKER_MODEL_PATH)),
         running_mode=mp.tasks.vision.RunningMode.VIDEO,
         num_hands=2,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5
+        min_hand_detection_confidence=0.3,
+        min_hand_presence_confidence=0.3,
+        min_tracking_confidence=0.8
     )
     
-    return (mp.tasks.vision.PoseLandmarker.create_from_options(pose_options),
-            mp.tasks.vision.HandLandmarker.create_from_options(hands_options))
+    return mp.tasks.vision.HandLandmarker.create_from_options(hands_options)
 
 
 def _slugify(text: str) -> str:
@@ -115,15 +104,23 @@ def load_latest_checkpoint(out_dir: Path, *, tag: str = "") -> Tuple[Path, dict]
             raise FileNotFoundError(f"No summaries found for tag='{tag_s}' in {out_dir}")
         summaries = filtered
 
-    latest = summaries[-1]
-    meta = json.loads(latest.read_text(encoding='utf-8'))
-    ckpt = Path(meta.get('checkpoint', ''))
-    if not ckpt.exists():
-        # fallback: pick latest .h5
-        h5s = sorted(out_dir.glob('tcn_*.h5'))
-        if not h5s:
-            raise FileNotFoundError('No checkpoint found')
-        ckpt = h5s[-1]
+    for summary in reversed(summaries):
+        try:
+            meta = json.loads(summary.read_text(encoding='utf-8'))
+            ckpt = Path(meta.get('checkpoint', ''))
+            if ckpt.exists() and ckpt.suffix == '.h5':
+                return ckpt, meta
+        except Exception:
+            pass
+
+    # fallback: pick latest .h5
+    h5s = sorted(out_dir.glob('tcn_*.h5'))
+    if not h5s:
+        raise FileNotFoundError('No .h5 checkpoint found')
+    ckpt = h5s[-1]
+    
+    meta_path = ckpt.with_suffix('.json')
+    meta = json.loads(meta_path.read_text(encoding='utf-8')) if meta_path.exists() else {}
     return ckpt, meta
 
 
@@ -240,14 +237,16 @@ def build_model_from_ckpt(ckpt_path: Path, meta: dict, device: str) -> ModelBund
         num_classes = int(meta.get('num_classes', 4))
         # Fallback will try index_to_label.json below
 
+    # Extract architecture config from nested 'config' dict in summary.json
+    cfg_meta = meta.get('config', {})
     # Rebuild Model in Python (bypassing Keras Config serialization bugs entirely!)
     model = build_tcn_model(
         in_dim=in_dim,
         num_classes=num_classes,
-        channels=int(meta.get('channels', 64)),
-        levels=int(meta.get('levels', 3)),
-        kernel_size=int(meta.get('kernel_size', 5)),
-        dropout=0.0 # set dropout to 0 for inference
+        channels=int(cfg_meta.get('channels', meta.get('channels', 64))),
+        levels=int(cfg_meta.get('levels', meta.get('levels', 3))),
+        kernel_size=int(cfg_meta.get('kernel_size', meta.get('kernel_size', 5))),
+        dropout=0.0  # set dropout to 0 for inference
     )
 
     # Initialize model inputs so weights can be loaded
@@ -303,105 +302,47 @@ def build_model_from_ckpt(ckpt_path: Path, meta: dict, device: str) -> ModelBund
     )
 
 
-class HandTracker:
-    class _P:
-        __slots__ = ('x', 'y')
-        def __init__(self, x: float, y: float): self.x = x; self.y = y
+class ThreadedCamera:
+    def __init__(self, src=0):
+        self.cap = cv2.VideoCapture(src)
+        if isinstance(src, int) or src == 0 or src == '0':
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.ret, self.frame = self.cap.read()
+        self.stopped = False
+        self.thread = threading.Thread(target=self.update, daemon=True)
+        self.thread.start()
 
-    def __init__(self, ema_alpha: float = 0.45, miss_ttl: int = 5, max_jump: float = 0.28):
-        self.alpha    = ema_alpha
-        self.ttl      = miss_ttl
-        self.max_jump = max_jump
-        self._ema_l   = None
-        self._ema_r   = None
-        self._miss_l  = 0
-        self._miss_r  = 0
+    def update(self):
+        while not self.stopped:
+            self.ret, self.frame = self.cap.read()
+        self.cap.release()
 
-    def anchors(self):
-        P = self._P
-        return (
-            P(*self._ema_l) if self._ema_l else None,
-            P(*self._ema_r) if self._ema_r else None,
-        )
+    def read(self):
+        if self.frame is not None:
+            return self.ret, self.frame.copy()
+        return self.ret, None
 
-    def is_plausible(self, x: float, y: float, slot: int) -> bool:
-        ema = self._ema_l if slot == LHAND_START else self._ema_r
-        if ema is None:
-            return True
-        return ((x - ema[0])**2 + (y - ema[1])**2)**0.5 < self.max_jump
+    def release(self):
+        self.stopped = True
+        if self.thread.is_alive():
+            self.thread.join()
 
-    def update(self, frame_data_42x3: np.ndarray):
-        """Cập nhật EMA từ frame_data dạng (42,3) còn NaN (raw từ extract_hybrid).
-        Dùng NaN để phân biệt tay không có vs tay ở tọa độ gần (0,0)."""
-        vec = frame_data_42x3
-        def _upd(ema, miss, slot):
-            w = vec[slot]
-            if not np.isnan(w[0]):  # NaN = không có tay; 0.0 hợp lệ = tay ở góc màn hình
-                wx, wy = float(w[0]), float(w[1])
-                if ema is None:
-                    return (wx, wy), 0
-                return (self.alpha*wx + (1-self.alpha)*ema[0],
-                        self.alpha*wy + (1-self.alpha)*ema[1]), 0
-            miss += 1
-            return (None if miss >= self.ttl else ema), miss
-        self._ema_l, self._miss_l = _upd(self._ema_l, self._miss_l, LHAND_START)
-        self._ema_r, self._miss_r = _upd(self._ema_r, self._miss_r, RHAND_START)
-
-    def reset(self):
-        self._ema_l = self._ema_r = None
-        self._miss_l = self._miss_r = 0
+    def isOpened(self):
+        return self.cap.isOpened()
 
 
-def extract_hybrid(res_pose, res_hands, tracker=None) -> Tuple[np.ndarray, bool]:
+def extract_hybrid(res_hands) -> Tuple[np.ndarray, np.ndarray, bool]:
     frame_data = np.full((42, 3), np.nan, dtype=np.float32)
 
-    anchor_l = None
-    anchor_r = None
-    if tracker is not None:
-        anchor_l, anchor_r = tracker.anchors()
-
-    if res_pose and res_pose.pose_landmarks and len(res_pose.pose_landmarks) > 0:
-        pose_lms = res_pose.pose_landmarks[0]
-        if anchor_l is None and getattr(pose_lms[15], 'visibility', 1.0) > 0.4:
-            anchor_l = pose_lms[15]
-        if anchor_r is None and getattr(pose_lms[16], 'visibility', 1.0) > 0.4:
-            anchor_r = pose_lms[16]
-
-    def _dist(a, b):
-        return ((a.x - b.x)**2 + (a.y - b.y)**2) ** 0.5
-
-    def _slot_for_hand(wrist) -> int:
-        if anchor_l is not None and anchor_r is not None:
-            slot = LHAND_START if _dist(wrist, anchor_l) < _dist(wrist, anchor_r) else RHAND_START
-        elif anchor_l is not None:
-            slot = LHAND_START if _dist(wrist, anchor_l) < 0.15 else RHAND_START
-        elif anchor_r is not None:
-            slot = RHAND_START if _dist(wrist, anchor_r) < 0.15 else LHAND_START
-        else:
-            slot = LHAND_START if wrist.x >= 0.5 else RHAND_START
-
-        if tracker is not None and not tracker.is_plausible(wrist.x, wrist.y, slot):
-            other = RHAND_START if slot == LHAND_START else LHAND_START
-            if tracker.is_plausible(wrist.x, wrist.y, other):
-                slot = other
-        return slot
-
-    def _is_duplicate_hand(wrist, threshold=0.1):
-        if not np.isnan(frame_data[LHAND_START, 0]):
-            l_wrist = frame_data[LHAND_START]
-            if ((wrist.x - l_wrist[0])**2 + (wrist.y - l_wrist[1])**2)**0.5 < threshold:
-                return True
-        if not np.isnan(frame_data[RHAND_START, 0]):
-            r_wrist = frame_data[RHAND_START]
-            if ((wrist.x - r_wrist[0])**2 + (wrist.y - r_wrist[1])**2)**0.5 < threshold:
-                return True
-        return False
-
-    if res_hands and res_hands.hand_landmarks:
-        for hand_lms in res_hands.hand_landmarks:
-            wrist = hand_lms[0]
-            slot  = _slot_for_hand(wrist)
-            if np.isnan(frame_data[slot, 0]) and not _is_duplicate_hand(wrist):
+    if res_hands and res_hands.hand_landmarks and res_hands.handedness:
+        for hand_lms, handedness in zip(res_hands.hand_landmarks, res_hands.handedness):
+            label = handedness[0].category_name.lower()
+            slot = LHAND_START if label == 'left' else RHAND_START
+            
+            # Prevent overwriting if already populated by a higher confidence hand
+            if np.isnan(frame_data[slot, 0]):
                 for i, lm in enumerate(hand_lms):
                     if i < 21:
                         frame_data[slot + i] = [lm.x, lm.y, lm.z]
@@ -413,6 +354,7 @@ def extract_hybrid(res_pose, res_hands, tracker=None) -> Tuple[np.ndarray, bool]
 
 
 def draw_landmarks_cv2(frame: np.ndarray, feat_126: np.ndarray) -> np.ndarray:
+    """Draw landmarks on ALREADY-FLIPPED frame (mirror view)."""
     h, w, _ = frame.shape
     vec = feat_126.reshape(42, 3)
     
@@ -490,104 +432,213 @@ def draw_text_vietnamese(frame_bgr, text, pos=(10, 30), color=(0, 255, 0), font_
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
+class LabelStabilityTracker:
+    def __init__(self, stable_frames: int = 3, hold_frames: int = 15, min_conf: float = 0.6):
+        self.stable_frames = stable_frames
+        self.hold_frames = hold_frames
+        self.min_conf = min_conf
+
+        self.display_label = ""
+        self.display_conf = 0.0
+        self.candidate_label = ""
+        self.candidate_count = 0
+        self.hold_counter = 0
+
+    def update(self, pred_label: str, pred_conf: float, has_prediction: bool = True) -> Tuple[str, float]:
+        if has_prediction and pred_label and pred_conf >= self.min_conf:
+            if pred_label == self.display_label:
+                # Same label: refresh hold counter
+                self.display_conf = pred_conf
+                self.hold_counter = self.hold_frames
+                self.candidate_label = ""
+                self.candidate_count = 0
+            elif pred_label == self.candidate_label:
+                # Building consensus toward a new label
+                self.candidate_count += 1
+                if self.candidate_count >= self.stable_frames:
+                    self.display_label = pred_label
+                    self.display_conf = pred_conf
+                    self.hold_counter = self.hold_frames
+                    self.candidate_count = 0
+                    self.candidate_label = ""
+            else:
+                # New candidate — reset streak
+                self.candidate_label = pred_label
+                self.candidate_count = 1
+        else:
+            # No confident prediction: count down hold
+            if self.hold_counter > 0:
+                self.hold_counter -= 1
+            else:
+                self.display_label = ""
+                self.display_conf = 0.0
+                self.candidate_label = ""
+                self.candidate_count = 0
+            # If inference ran but wasn't confident, reset candidate streak
+            if has_prediction:
+                self.candidate_label = ""
+                self.candidate_count = 0
+
+        return self.display_label, self.display_conf
+
+
 class SignPredictor:
-    def __init__(self, bundle: ModelBundle, window: int = 60, slide: int = 30, topk: int = 3):
+    def __init__(self, bundle: ModelBundle, window: int = 60, ema_alpha: float = 0.7, vote_window: int = 5, vote_min_conf: float = 0.6):
         self.bundle = bundle
         self.window = window
-        self.slide = slide
-        self.topk = topk
+        self.ema_alpha = ema_alpha
+        self.vote_window = vote_window
+        self.vote_min_conf = vote_min_conf
 
-        self.buffer = []
+        self.buffer = deque(maxlen=window)
+        self.ema_logits = None
+        self.vote_labels = deque(maxlen=vote_window)
+        self.vote_confs = deque(maxlen=vote_window)
 
-        self.last_label = ""
-        self.last_confidence = 0.0
         self.is_detecting = False
-        self.hand_detected = False
-        self._grace_count = 0
-        self._recent_labels = []
-        self._last_known_vec = None
+        self.last_inference_ms = 0.0
+        self.inference_count = 0
+        self.total_inference_ms = 0.0
 
-        self.GRACE_MAX = 8
-        self.CLEAR_AFTER = 20
+    @property
+    def avg_inference_ms(self) -> float:
+        return self.total_inference_ms / max(1, self.inference_count)
 
-    def push_frame(self, feat: np.ndarray, has_hand: bool) -> bool:
-        self.hand_detected = has_hand
+    def push_frame(self, feat: np.ndarray, has_hand: bool):
+        self.is_detecting = has_hand
+        if not has_hand:
+            self.buffer.clear()
+            self.ema_logits = None
+            return "", 0.0, False
 
-        if has_hand:
-            self.is_detecting = True
-            self._grace_count = 0
-            self._last_known_vec = feat.copy()
-            self.buffer.append(feat)
-        elif self._grace_count < self.GRACE_MAX and self._last_known_vec is not None:
-            self._grace_count += 1
-            self.buffer.append(self._last_known_vec)
-        else:
-            self._grace_count += 1
-            if self._grace_count >= self.CLEAR_AFTER:
-                self.buffer = []
-                self.is_detecting = False
-                self._last_known_vec = None
-
-        if len(self.buffer) >= self.window:
-            self._predict()
-            self.buffer = self.buffer[self.slide:]
-            return True
-
-        return False
+        self.buffer.append(feat)
+        return self._predict()
 
     def _predict(self):
-        seq = np.stack(self.buffer[:self.window], axis=0)
-        X_tf = tf.convert_to_tensor(seq[None, ...], dtype=tf.float32)
-        lengths_tf = tf.convert_to_tensor([self.window], dtype=tf.int32)
+        if len(self.buffer) < 5:
+            return "", 0.0, False
 
-        logits = self.bundle.model([X_tf, lengths_tf], training=False)
-        probs = softmax(logits.numpy()[0])
+        t0 = time.perf_counter()
 
-        top_idx = np.argsort(probs)[::-1][:self.topk]
-        best_idx = top_idx[0]
-        raw_label = self.bundle.label_map[best_idx]
-        raw_conf = float(probs[best_idx])
+        X = np.stack(list(self.buffer), axis=0)
+        X_pad = np.zeros((1, self.window, self.bundle.in_dim), dtype=np.float32)
+        t = min(self.window, X.shape[0])
+        X_pad[0, -t:] = X[-t:]
+        
+        X_tf = tf.convert_to_tensor(X_pad, dtype=tf.float32)
+        lengths_tf = tf.convert_to_tensor([min(X.shape[0], self.window)], dtype=tf.int32)
 
-        self._recent_labels.append(raw_label)
-        if len(self._recent_labels) > 3:
-            self._recent_labels.pop(0)
+        logits = self.bundle.model([X_tf, lengths_tf], training=False).numpy()[0]
 
-        from collections import Counter
-        vote = Counter(self._recent_labels).most_common(1)[0]
-        if vote[1] >= 2:
-            self.last_label = raw_label
-            self.last_confidence = raw_conf
+        if self.ema_logits is None:
+            self.ema_logits = logits
+        else:
+            self.ema_logits = self.ema_alpha * self.ema_logits + (1 - self.ema_alpha) * logits
 
-    def reset(self):
-        self.buffer = []
-        self.last_label = ""
-        self.last_confidence = 0.0
-        self.is_detecting = False
-        self._grace_count = 0
-        self._recent_labels = []
-        self._last_known_vec = None
+        probs = softmax(self.ema_logits)
+        best_idx = int(np.argmax(probs))
+        pred_label = self.bundle.label_map[best_idx]
+        pred_conf = float(probs[best_idx])
+
+        if pred_label and pred_conf >= self.vote_min_conf:
+            self.vote_labels.append(pred_label)
+            self.vote_confs.append(pred_conf)
+
+        if self.vote_labels:
+            counts = Counter(self.vote_labels)
+            vote_label = counts.most_common(1)[0][0]
+            confs = [c for l, c in zip(self.vote_labels, self.vote_confs) if l == vote_label]
+            if confs:
+                pred_label = vote_label
+                pred_conf = float(sum(confs) / len(confs))
+
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        self.last_inference_ms = elapsed_ms
+        self.total_inference_ms += elapsed_ms
+        self.inference_count += 1
+
+        return pred_label, pred_conf, True
+
+
+def _clean_label(raw_label: str) -> str:
+    """Extract display-friendly label from label_key (e.g. 'vn/xin-chao' -> 'Xin Chào')."""
+    part = raw_label.split('/')[-1]  # strip language/dialect prefix
+    return part.replace('-', ' ').title()
+
+
+def render_prediction_overlay(
+    frame: np.ndarray,
+    disp_label: str,
+    disp_conf: float,
+    stability_state: dict,
+    buffer_size: int,
+    window_size: int,
+    current_fps: float,
+    avg_latency_ms: float,
+    font_size: int,
+    show_fps: bool,
+) -> np.ndarray:
+    """Render full overlay matching run_realtime_pro style."""
+    h, w = frame.shape[:2]
+    y_offset = 30
+
+    # --- Prediction text + confidence bar ---
+    if disp_label:
+        clean = _clean_label(disp_label)
+        txt = f"{clean} ({disp_conf*100:.1f}%)"
+        frame = draw_text_vietnamese(frame, txt, (10, y_offset), (0, 255, 0), font_size)
+        y_offset += font_size + 8
+
+        # Confidence bar (matching pro visual style)
+        bar_w = int(w * 0.35)
+        bar_h = 8
+        bar_x, bar_y = 10, y_offset
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (60, 60, 60), -1)
+        filled = int(bar_w * disp_conf)
+        bar_color = (0, 200, 100) if disp_conf >= 0.8 else (0, 165, 255) if disp_conf >= 0.6 else (0, 80, 200)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + filled, bar_y + bar_h), bar_color, -1)
+        y_offset += bar_h + 8
+
+    # --- Stats overlay (only when show_fps=True) ---
+    if show_fps:
+        small = font_size // 2
+        stats_parts = [f"FPS:{current_fps:.1f}", f"Buf:{buffer_size}/{window_size}", f"Lat:{avg_latency_ms:.1f}ms"]
+
+        cand = stability_state.get('candidate_label', '')
+        cand_count = stability_state.get('candidate_count', 0)
+        stable_req = stability_state.get('stable_frames_required', 3)
+        if cand:
+            stats_parts.append(f"Cand:{cand}({cand_count}/{stable_req})")
+
+        hold = stability_state.get('hold_counter', 0)
+        if hold > 0:
+            stats_parts.append(f"Hold:{hold}")
+
+        stats_txt = " | ".join(stats_parts)
+        frame = draw_text_vietnamese(frame, stats_txt, (10, y_offset), (180, 180, 180), small)
+
+    return frame
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Realtime sign recognition using TCN + MediaPipe Hands')
+    parser = argparse.ArgumentParser(description='Realtime sign recognition using TCN/H5 + MediaPipe Hands')
     parser.add_argument('--checkpoint', type=Path, default=None, help='Path to .h5 checkpoint (optional)')
     parser.add_argument('--outputs_dir', type=Path, default=Path('processed/train_utils/outputs'))
-    parser.add_argument('--dialect', type=str, default='', help="Load latest checkpoint for this dialect (e.g. 'hoa-de').")
-    parser.add_argument('--tag', type=str, default='', help="Load latest checkpoint by tag (matches trainer prefix, e.g. 'dialect-hoa-de').")
+    parser.add_argument('--dialect', type=str, default='', help="Load latest checkpoint for this dialect.")
+    parser.add_argument('--tag', type=str, default='', help="Load latest checkpoint by tag.")
     parser.add_argument('--window', type=int, default=60, help='Temporal window size (frames)')
     parser.add_argument('--every', type=int, default=2, help='Run inference every N frames')
     parser.add_argument('--video', type=str, default='', help='Optional video file path; empty uses webcam')
     parser.add_argument('--device', type=str, default='CPU')
     parser.add_argument('--smoothing', type=float, default=0.7, help='EMA smoothing for logits [0-1]')
-    parser.add_argument('--vote_window', type=int, default=5, help='Temporal voting window size (predictions)')
-    parser.add_argument('--vote_min_conf', type=float, default=0.6, help='Min confidence to include in voting [0-1]')
-    parser.add_argument('--max_latency_ms', type=float, default=50.0, help='Target max inference latency in ms')
+    parser.add_argument('--vote_window', type=int, default=5, help='Temporal voting window size')
+    parser.add_argument('--vote_min_conf', type=float, default=0.6, help='Min confidence for voting')
+    parser.add_argument('--max_latency_ms', type=float, default=50.0, help='Target max inference latency (ms)')
     parser.add_argument('--max_every', type=int, default=6, help='Max inference stride for latency control')
-    
-    parser.add_argument('--confidence_threshold', type=float, default=0.6, help='Minimum confidence to display prediction [0-1]')
+    parser.add_argument('--confidence_threshold', type=float, default=0.6, help='Min confidence to display [0-1]')
     parser.add_argument('--stable_frames', type=int, default=3, help='Frames needed to confirm label switch')
     parser.add_argument('--hold_frames', type=int, default=15, help='Frames to hold label after loss')
-    parser.add_argument('--show_fps', action='store_true', help='Show FPS and stats on screen')
+    parser.add_argument('--show_fps', action='store_true', help='Show FPS and stats overlay')
     parser.add_argument('--font_size', type=int, default=32, help='Font size for displayed text')
     
     args = parser.parse_args()
@@ -605,20 +656,33 @@ def main() -> None:
         meta_path = ckpt.with_suffix('.json')
         meta = json.loads(meta_path.read_text(encoding='utf-8')) if meta_path.exists() else {}
 
+    print(f"[INFO] Loading checkpoint: {ckpt}")
     bundle = build_model_from_ckpt(ckpt, meta, args.device)
     in_dim = bundle.in_dim
     if in_dim != 126:
         raise SystemExit(f'Model in_dim={in_dim} must match feature extractor (126).')
+    print(f"[INFO] Model: in_dim={in_dim}, num_classes={bundle.num_classes}, labels={bundle.label_map[:5]}...")
 
-    pose_model, hand_model = init_mediapipe()
-    tracker = HandTracker()
-    predictor = SignPredictor(bundle, window=args.window, slide=args.window // 2)
+    hand_model = init_mediapipe()
+    predictor = SignPredictor(
+        bundle, 
+        window=args.window, 
+        ema_alpha=args.smoothing, 
+        vote_window=args.vote_window, 
+        vote_min_conf=args.vote_min_conf
+    )
+    stability_tracker = LabelStabilityTracker(
+        stable_frames=args.stable_frames, 
+        hold_frames=args.hold_frames, 
+        min_conf=args.confidence_threshold
+    )
 
-    cap = cv2.VideoCapture(0 if not args.video else args.video)
+    cap = ThreadedCamera(0 if not args.video else args.video)
     if not cap.isOpened():
         raise SystemExit('Could not open webcam/video')
 
     frame_idx = 0
+    adaptive_every = max(1, args.every)
     
     fps_start_time = time.time()
     fps_frame_count = 0
@@ -644,36 +708,39 @@ def main() -> None:
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 current_ms = (time.perf_counter_ns() - t_start_ns) // 1_000_000
                 
-                future_pose = mp_executor.submit(pose_model.detect_for_video, mp_image, current_ms)
                 future_hands = mp_executor.submit(hand_model.detect_for_video, mp_image, current_ms)
-                res_pose = future_pose.result()
                 res_hands = future_hands.result()
 
-                feat, frame_data_raw, has_hand = extract_hybrid(res_pose, res_hands, tracker)
-                tracker.update(frame_data_raw)
+                feat, frame_data_raw, has_hand = extract_hybrid(res_hands)
 
+                # Draw landmarks on raw frame before flip
                 draw_landmarks_cv2(frame, feat)
                 vis = cv2.flip(frame, 1)
 
-                predictor.push_frame(feat, has_hand)
+                pred_label, pred_conf, has_pred = predictor.push_frame(feat, has_hand)
+                disp_label, disp_conf = stability_tracker.update(pred_label, pred_conf, has_pred)
 
-                y_offset = 30
-                if predictor.last_label and predictor.last_confidence >= args.confidence_threshold:
-                    clean_label = predictor.last_label.split('/')[-1].replace('-', ' ')
-                    txt = f"{clean_label.capitalize()} ({predictor.last_confidence*100:.1f}%)"
-                    vis = draw_text_vietnamese(vis, txt, (10, y_offset), (0, 255, 0), args.font_size)
-                    y_offset += args.font_size + 10
-                
-                if args.show_fps:
-                    stats_lines = [
-                        f"FPS: {current_fps:.1f}",
-                        f"Buffer: {len(predictor.buffer)}/{args.window}",
-                        f"Detecting: {predictor.is_detecting}",
-                    ]
-                    stats_text = " | ".join(stats_lines)
-                    vis = draw_text_vietnamese(vis, stats_text, (10, y_offset), (200, 200, 200), args.font_size // 2)
+                # Build stability state dict for stats display
+                stability_state = {
+                    'candidate_label': stability_tracker.candidate_label,
+                    'candidate_count': stability_tracker.candidate_count,
+                    'stable_frames_required': args.stable_frames,
+                    'hold_counter': stability_tracker.hold_counter,
+                }
 
-                cv2.imshow("Sign Recognition (q to quit)", vis)
+                vis = render_prediction_overlay(
+                    vis,
+                    disp_label, disp_conf,
+                    stability_state,
+                    buffer_size=len(predictor.buffer),
+                    window_size=args.window,
+                    current_fps=current_fps,
+                    avg_latency_ms=predictor.avg_inference_ms,
+                    font_size=args.font_size,
+                    show_fps=args.show_fps,
+                )
+
+                cv2.imshow("Sign Recognition H5 (q to quit)", vis)
 
                 frame_idx += 1
                 if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -681,7 +748,6 @@ def main() -> None:
 
     finally:
         cap.release()
-        pose_model.close()
         hand_model.close()
         cv2.destroyAllWindows()
 

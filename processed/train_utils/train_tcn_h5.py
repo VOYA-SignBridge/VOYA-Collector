@@ -68,10 +68,9 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     tf.random.set_seed(seed)
-    try:
-        tf.config.experimental.enable_op_determinism()
-    except Exception:
-        pass
+    # NOTE: enable_op_determinism() is intentionally NOT called here.
+    # It breaks dilated causal convolution gradients (space_to_batch_nd)
+    # causing loss to collapse to 0 in a few epochs.
 
 
 def _seed_worker(worker_id: int) -> None:
@@ -172,10 +171,10 @@ class TrainConfig:
     out_dir: Path = Path(__file__).resolve().parents[1] / "train_utils" / "outputs"
     
     # --- Advanced Training Features ---
-    label_smoothing: float = 0.1
-    mixed_precision: bool = True
-    warmup_ratio: float = 0.1
-    temporal_mask_prob: float = 0.15
+    label_smoothing: float = 0.0      # 0.0 = disabled, matches train_tcn.py
+    mixed_precision: bool = False     # False = stable float32, matches train_tcn.py
+    warmup_ratio: float = 0.0        # 0.0 = no warmup, use CosineAnnealingLR directly
+    temporal_mask_prob: float = 0.0   # 0.0 = disabled, matches train_tcn.py
 
 
 def macro_f1(logits_np: np.ndarray, targets_np: np.ndarray, num_classes: int) -> float:
@@ -508,30 +507,21 @@ def train_one_epoch(model: tf.keras.Model, loader: DataLoader, opt: tf.keras.opt
     total_loss = 0.0
     total_acc = 0.0
     n = 0
-    for X, y, lengths, _ in loader:
+    for batch_idx, (X, y, lengths, _) in enumerate(loader):
         X_tf = tf.convert_to_tensor(X.numpy(), dtype=tf.float32)
         y_tf = tf.convert_to_tensor(y.numpy(), dtype=tf.int64)
         lengths_tf = tf.convert_to_tensor(lengths.numpy(), dtype=tf.int32)
 
-        # Apply augmentation: temporal masking
         if temporal_mask_prob > 0:
             X_tf = apply_temporal_mask(X_tf, temporal_mask_prob)
 
-        y_onehot = tf.one_hot(y_tf, depth=num_classes)
-
         with tf.GradientTape() as tape:
             logits = model([X_tf, lengths_tf], training=True)
-            loss = loss_fn(y_onehot, logits)
-            
-            # If using mixed precision, scale the loss before computing gradients
-            if hasattr(opt, 'scale_loss'):
-                scaled_loss = opt.scale_loss(loss)
-            elif hasattr(opt, 'get_scaled_loss'):
-                scaled_loss = opt.get_scaled_loss(loss)
-            else:
-                scaled_loss = loss
+            loss = loss_fn(y_tf, logits)  # SparseCategorical: integer labels
 
-        grads = tape.gradient(scaled_loss, model.trainable_variables)
+        grads = tape.gradient(loss, model.trainable_variables)
+        # Clip gradients (same as PyTorch clip_grad_norm_ max_norm=1.0)
+        grads, _ = tf.clip_by_global_norm(grads, 1.0)
         opt.apply_gradients(zip(grads, model.trainable_variables))
 
         preds = tf.argmax(logits, axis=1)
@@ -556,9 +546,7 @@ def evaluate(model: tf.keras.Model, loader: DataLoader, num_classes: int, loss_f
         lengths_tf = tf.convert_to_tensor(lengths.numpy(), dtype=tf.int32)
 
         logits = model([X_tf, lengths_tf], training=False)
-        
-        y_onehot = tf.one_hot(y_tf, depth=num_classes)
-        loss = loss_fn(y_onehot, logits)
+        loss = loss_fn(y_tf, logits)  # SparseCategorical: integer labels
 
         bs = int(tf.shape(y_tf)[0].numpy())
         total_loss += loss.numpy() * bs
@@ -635,12 +623,14 @@ def main() -> None:
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
     
-    # Advanced features args
-    parser.add_argument("--label_smoothing", type=float, default=0.1)
-    parser.add_argument("--mixed_precision", type=lambda v: v.lower() not in ("false", "0", "no"), default=True,
-                        help="Enable mixed precision FP16 training (default: True). Pass False/0/no to disable.")
-    parser.add_argument("--warmup_ratio", type=float, default=0.1)
-    parser.add_argument("--temporal_mask_prob", type=float, default=0.15)
+    parser.add_argument("--label_smoothing", type=float, default=0.0,
+                        help="Label smoothing factor (0.0 = disabled, matches train_tcn.py)")
+    parser.add_argument("--mixed_precision", type=lambda v: v.lower() not in ("false", "0", "no"), default=False,
+                        help="Enable mixed precision FP16 training (default: False for stability). Use only with large datasets.")
+    parser.add_argument("--warmup_ratio", type=float, default=0.0,
+                        help="Warmup ratio (0.0 = disabled, use CosineAnnealingLR like train_tcn.py)")
+    parser.add_argument("--temporal_mask_prob", type=float, default=0.0,
+                        help="Temporal masking probability (0.0 = disabled, matches train_tcn.py)")
     
     args = parser.parse_args()
 
@@ -780,15 +770,32 @@ def main() -> None:
     in_dim = EXPECTED_FEATURE_DIM
     
     ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
+    
+    # Always scan actual labels to get true num_classes and detect mismatches early.
+    # This prevents the "label X outside [0, N)" crash at training time.
+    label_set = set()
+    n_scan = min(len(ds_tmp), len(ds_tmp))  # full scan for accuracy
+    for i in range(n_scan):
+        _, y_i, _ = ds_tmp[i]
+        label_set.add(int(y_i))
+    
     if ds_tmp.index_to_label:
-        num_classes = len(ds_tmp.index_to_label)
+        num_classes_from_map = len(ds_tmp.index_to_label)
+        num_classes_from_data = max(label_set) + 1 if label_set else 1
+        if num_classes_from_data > num_classes_from_map:
+            raise SystemExit(
+                f"Label mismatch: dataset has labels up to {max(label_set)} "
+                f"but label map only has {num_classes_from_map} classes.\n"
+                f"Hint: Run with --filter_language vn and explicit CSV paths:\n"
+                f"  --train_csv d:/SignBridge/VOYA-Collector/dataset/processed/splits/train.csv\n"
+                f"  --val_csv   d:/SignBridge/VOYA-Collector/dataset/processed/splits/val.csv\n"
+                f"  --test_csv  d:/SignBridge/VOYA-Collector/dataset/processed/splits/test.csv"
+            )
+        num_classes = num_classes_from_map
     else:
-        label_set = set()
-        n_scan = min(len(ds_tmp), 512)
-        for i in range(n_scan):
-            _, y_i, _ = ds_tmp[i]
-            label_set.add(int(y_i))
         num_classes = max(label_set) + 1 if label_set else 1
+    
+    print(f"[INFO] num_classes={num_classes}, train_samples={len(ds_tmp)}")
 
     model = build_tcn_model(
         in_dim=in_dim,
@@ -830,30 +837,31 @@ def main() -> None:
         seed=cfg.seed,
     )
 
-    opt = tf.keras.optimizers.AdamW(learning_rate=cfg.lr, weight_decay=cfg.weight_decay, clipnorm=1.0)
-    if cfg.mixed_precision:
-        opt = tf.keras.mixed_precision.LossScaleOptimizer(opt)
-        
-    loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=cfg.label_smoothing)
+    # AdamW with weight_decay (matches PyTorch Adam + weight_decay)
+    opt = tf.keras.optimizers.AdamW(learning_rate=cfg.lr, weight_decay=cfg.weight_decay)
+    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
     best_val_f1 = -1.0
     best_weights = None
     patience = 10
     since_best = 0
 
-    warmup_epochs = max(1, int(cfg.epochs * cfg.warmup_ratio))
-    
+
     for epoch in range(1, cfg.epochs + 1):
-        if epoch <= warmup_epochs:
-            lr = cfg.lr * (epoch / warmup_epochs)
+        # Cosine LR decay, same as CosineAnnealingLR in train_tcn.py
+        if cfg.warmup_ratio > 0:
+            warmup_epochs = max(1, int(cfg.epochs * cfg.warmup_ratio))
+            if epoch <= warmup_epochs:
+                lr = cfg.lr * (epoch / warmup_epochs)
+            else:
+                progress = (epoch - warmup_epochs) / (cfg.epochs - warmup_epochs)
+                lr = cfg.lr * 0.5 * (1 + math.cos(math.pi * progress))
         else:
-            progress = (epoch - warmup_epochs) / (cfg.epochs - warmup_epochs)
+            # Pure cosine decay (matches CosineAnnealingLR T_max=epochs)
+            progress = (epoch - 1) / max(cfg.epochs - 1, 1)
             lr = cfg.lr * 0.5 * (1 + math.cos(math.pi * progress))
-            
-        if isinstance(opt, tf.keras.mixed_precision.LossScaleOptimizer):
-            opt.inner_optimizer.learning_rate.assign(lr)
-        else:
-            opt.learning_rate.assign(lr)
+
+        opt.learning_rate.assign(lr)
 
         tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, loss_fn, num_classes, cfg.temporal_mask_prob)
         va_loss, va_acc, va_f1 = evaluate(model, val_loader, num_classes, loss_fn)

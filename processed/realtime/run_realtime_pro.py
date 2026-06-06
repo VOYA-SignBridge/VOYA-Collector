@@ -122,7 +122,7 @@ class SystemConfig:
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     
     checkpoint_path: Optional[Path] = None
-    outputs_dir: Path = Path("processed/train_utils/outputs")
+    outputs_dir: Path = Path("train_utils/outputs")
     video_source: str = ""  # Empty for webcam
     log_level: str = "INFO"
     enable_metrics: bool = False
@@ -446,13 +446,15 @@ def find_latest_checkpoint(outputs_dir: Path, logger: logging.Logger) -> Path:
     """Find the latest checkpoint in outputs directory."""
     # Try to find summary files
     summaries = sorted(outputs_dir.glob('tcn_*.json'))
-    if summaries:
-        latest = summaries[-1]
-        meta = json.loads(latest.read_text(encoding='utf-8'))
-        ckpt = Path(meta.get('checkpoint', ''))
-        if ckpt.exists():
-            logger.info(f"Found checkpoint from summary: {ckpt}")
-            return ckpt
+    for summary in reversed(summaries):
+        try:
+            meta = json.loads(summary.read_text(encoding='utf-8'))
+            ckpt = Path(meta.get('checkpoint', ''))
+            if ckpt.exists() and ckpt.suffix == '.pt':
+                logger.info(f"Found checkpoint from summary: {ckpt}")
+                return ckpt
+        except Exception:
+            continue
     
     # Fallback: find latest .pt file
     checkpoints = sorted(outputs_dir.glob('tcn_*.pt'))
@@ -992,6 +994,9 @@ class SignLanguageRecognizer:
                     draw_landmarks=self.config.visualization.show_landmarks
                 )
                 
+                # Flip the frame horizontally for a selfie-view display
+                frame = cv2.flip(frame, 1)
+                
                 # Process based on hand detection
                 if has_hand:
                     frame = self._handle_hand_detected(frame, features)
@@ -1064,9 +1069,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--checkpoint', type=Path, default=None,
                        help='Path to .pt checkpoint (auto-detect if not specified)')
     parser.add_argument('--outputs_dir', type=Path, 
-                       default=Path('processed/train_utils/outputs'),
+                       default=Path('train_utils/outputs'),
                        help='Directory containing checkpoints')
-    
     # Input Source
     parser.add_argument('--video', type=str, default='',
                        help='Video file path (empty for webcam)')

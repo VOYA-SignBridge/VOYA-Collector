@@ -164,15 +164,27 @@ def load_latest_checkpoint(out_dir: Path, *, tag: str = "") -> Tuple[Path, dict]
             raise FileNotFoundError(f"No summaries found for tag='{tag_s}' in {out_dir}")
         summaries = filtered
 
-    latest = summaries[-1]
-    meta = json.loads(latest.read_text(encoding='utf-8'))
-    ckpt = Path(meta.get('checkpoint', ''))
-    if not ckpt.exists():
-        # fallback: pick latest .pt
-        pts = sorted(out_dir.glob('tcn_*.pt'))
-        if not pts:
-            raise FileNotFoundError('No checkpoint found')
-        ckpt = pts[-1]
+    # Filter out summaries that point to non-.pt checkpoints
+    valid_summaries = []
+    for s in summaries:
+        meta = json.loads(s.read_text(encoding='utf-8'))
+        ckpt = Path(meta.get('checkpoint', ''))
+        if ckpt.exists() and ckpt.suffix == '.pt':
+            valid_summaries.append(s)
+            
+    if valid_summaries:
+        latest = valid_summaries[-1]
+        meta = json.loads(latest.read_text(encoding='utf-8'))
+        ckpt = Path(meta.get('checkpoint', ''))
+        return ckpt, meta
+        
+    # fallback: pick latest .pt directly
+    pts = sorted(out_dir.glob('tcn_*.pt'))
+    if not pts:
+        raise FileNotFoundError('No .pt checkpoint found')
+    ckpt = pts[-1]
+    meta_path = ckpt.with_suffix('.json')
+    meta = json.loads(meta_path.read_text(encoding='utf-8')) if meta_path.exists() else {}
     return ckpt, meta
 
 
