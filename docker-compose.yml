@@ -50,6 +50,7 @@ services:
       - .env
     environment:
       REALTIME_SERVICE_URL: http://realtime_service:8010
+      TTS_REDIS_URL: redis://redis:6379/0
     depends_on:
       - postgres
       - redis

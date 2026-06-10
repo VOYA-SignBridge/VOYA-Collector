@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Hands, HAND_CONNECTIONS } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
 import * as drawing from "@mediapipe/drawing_utils";
@@ -10,6 +10,7 @@ import { TARGET_FRAMES, CAPTURE_COUNT, FRAME_INTERVAL_MS } from "../config/captu
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
 import { getClassesList, getClassesStats } from "../api/dataset";
+import { fetchLabelSuggestions, fetchCollectorSuggestions, getPreference, setPreference } from "../api/preferences";
 
 // ---------------------------------------------------------------------------
 // Module-level constants — stable across renders, safe in hook dep arrays.
@@ -51,7 +52,7 @@ const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true);
 // sends pre-mirrored frames to MediaPipe (e.g., a rear-facing camera).
 const SWAP_HANDEDNESS = parseBoolEnv(
   import.meta.env.VITE_SWAP_HANDEDNESS,
-  true  
+  true
 );
 
 // Enable verbose hand diagnostics: set VITE_DEBUG_HANDS=1
@@ -178,6 +179,96 @@ function getFrameDimensions(source: HTMLImageElement | HTMLVideoElement): { widt
 }
 
 // ---------------------------------------------------------------------------
+// SearchableSelect — compact dropdown with inline search (mobile-friendly)
+// ---------------------------------------------------------------------------
+function SearchableSelect({
+  label,
+  value,
+  options,
+  displayFn,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  displayFn: (v: string) => string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (open) { setSearch(""); setTimeout(() => searchInputRef.current?.focus(), 50); }
+  }, [open]);
+
+  const normalizeForSearch = (t: string) => t.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  const filtered = search
+    ? options.filter((o) => normalizeForSearch(displayFn(o)).includes(normalizeForSearch(search)))
+    : options;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="block text-[10px] sm:text-[11px] text-blue-200/70 mb-0.5">{label}</label>
+      <button
+        type="button"
+        onClick={() => { if (!disabled) setOpen(!open); }}
+        className={`w-full px-2 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white text-xs sm:text-sm text-left flex items-center justify-between ${disabled ? "opacity-50 cursor-not-allowed" : "hover:border-blue-500 cursor-pointer"}`}
+      >
+        <span className="truncate">{displayFn(value)}</span>
+        <svg className={`w-3 h-3 ml-1 flex-shrink-0 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden">
+          <div className="p-1.5">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Tìm..."
+              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+          </div>
+          <div className="max-h-32 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-2 py-1.5 text-[10px] text-gray-400 text-center">Không tìm thấy</div>
+            ) : (
+              filtered.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onChange(opt); setOpen(false); }}
+                  className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-blue-600/40 transition-colors ${opt === value ? "bg-blue-600/20 text-blue-200 font-medium" : "text-gray-200"}`}
+                >
+                  {displayFn(opt)}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 interface FullscreenCaptureModalProps {
@@ -240,14 +331,18 @@ export default function FullscreenCaptureModal({
   const [mode, setMode] = useState<"IDLE" | "COUNTDOWN" | "RECORD">("IDLE");
   const [handsVisible, setHandsVisible] = useState(false);
   const [showAddDialectModal, setShowAddDialectModal] = useState(false);
-  const [recentUsers, setRecentUsers] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem("recentSigners");
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === "string").slice(0, 5);
-    } catch { /* ignore */ }
-    return [];
-  });
+
+  // --- Debounced label suggestions from server ---
+  const [serverLabelSuggestions, setServerLabelSuggestions] = useState<string[]>([]);
+  const labelSuggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [labelConfirmed, setLabelConfirmed] = useState(false);
+  const [labelFocused, setLabelFocused] = useState(false);
+
+  // --- Debounced collector suggestions from server ---
+  const [collectorSuggestions, setCollectorSuggestions] = useState<string[]>([]);
+  const collectorSuggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [collectorConfirmed, setCollectorConfirmed] = useState(false);
+  const [collectorFocused, setCollectorFocused] = useState(false);
 
   // -------------------------------------------------------------------------
   // Refs (prevent stale closures in MediaPipe callbacks)
@@ -262,7 +357,7 @@ export default function FullscreenCaptureModal({
   const dialectRef = useRef(dialect);
   const targetFramesRef = useRef(targetFrames);
   const onSampleCaptureRef = useRef(onSampleCapture);
-  const handleCloseRef = useRef<() => void>(() => {});
+  const handleCloseRef = useRef<() => void>(() => { });
   const completedCapturesRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
   const frameIntervalMs = useRef(FRAME_INTERVAL_MS);
@@ -319,17 +414,46 @@ export default function FullscreenCaptureModal({
   }, [recording]);
 
   // -------------------------------------------------------------------------
+  // Debounced label suggestions from server
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (labelSuggestTimerRef.current) clearTimeout(labelSuggestTimerRef.current);
+    // Don't fetch when confirmed or empty
+    if (labelConfirmed || !label.trim()) {
+      setServerLabelSuggestions([]);
+      return;
+    }
+    const langKey = normalizeLanguageKey(language);
+    const diaKey = normalizeDialectKey(dialect);
+    labelSuggestTimerRef.current = setTimeout(async () => {
+      const results = await fetchLabelSuggestions(label, langKey, diaKey, 3);
+      setServerLabelSuggestions(results);
+    }, 200);
+    return () => { if (labelSuggestTimerRef.current) clearTimeout(labelSuggestTimerRef.current); };
+  }, [label, language, dialect, labelConfirmed]);
+
+  // -------------------------------------------------------------------------
+  // Debounced collector suggestions from server
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (collectorSuggestTimerRef.current) clearTimeout(collectorSuggestTimerRef.current);
+    // Don't fetch when confirmed or empty
+    if (collectorConfirmed || !user.trim()) {
+      setCollectorSuggestions([]);
+      return;
+    }
+    const langKey = normalizeLanguageKey(language);
+    const diaKey = normalizeDialectKey(dialect);
+    collectorSuggestTimerRef.current = setTimeout(async () => {
+      const results = await fetchCollectorSuggestions(user, langKey, diaKey, 3);
+      setCollectorSuggestions(results);
+    }, 200);
+    return () => { if (collectorSuggestTimerRef.current) clearTimeout(collectorSuggestTimerRef.current); };
+  }, [user, language, dialect, collectorConfirmed]);
+
+  // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
-  const rememberUser = useCallback((name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setRecentUsers((prev) => {
-      const next = [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, 5);
-      try { localStorage.setItem("recentSigners", JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
 
   const handleSetExpectedHands = useCallback((v: number | null) => {
     setExpectedHandsOption(v);
@@ -551,9 +675,12 @@ export default function FullscreenCaptureModal({
       setCatalogError("");
 
       try {
-        const [classesRes, statsRes] = await Promise.all([
+        // Load saved preferences from server (replaces localStorage)
+        const [classesRes, statsRes, savedLanguage, savedDialect] = await Promise.all([
           getClassesList(),
           getClassesStats(),
+          getPreference("languageSelected"),
+          getPreference("dialectSelected"),
         ]);
 
         if (!active) return;
@@ -566,30 +693,16 @@ export default function FullscreenCaptureModal({
               .filter((item): item is string => Boolean(item))
           )
         );
-          const serverLanguages = Array.from(
-            new Set(
-              serverRows
-                .map((row) => normalizeLanguageKey(row.language))
-                .filter((item): item is string => Boolean(item))
-            )
-          );
-
-        let storedDialects: string[] = [];
-        try {
-          const raw = localStorage.getItem("dialectList");
-          const parsed = raw ? JSON.parse(raw) : [];
-          if (Array.isArray(parsed)) {
-            storedDialects = parsed
-              .map((item) => displayDialectLabel(String(item)))
-              .filter((item): item is string => Boolean(item));
-          }
-        } catch {
-          storedDialects = [];
-        }
+        const serverLanguages = Array.from(
+          new Set(
+            serverRows
+              .map((row) => normalizeLanguageKey(row.language))
+              .filter((item): item is string => Boolean(item))
+          )
+        );
 
         const mergedDialects = Array.from(new Set([
           ...serverDialects,
-          ...storedDialects,
           ...DEFAULT_DIALECTS,
         ]));
         const mergedLanguages = Array.from(new Set([
@@ -609,19 +722,13 @@ export default function FullscreenCaptureModal({
         }
         setCatalogStatsByUid(nextStats);
 
-        try {
-          localStorage.setItem("languageList", JSON.stringify(mergedLanguages));
-          localStorage.setItem("dialectList", JSON.stringify(mergedDialects));
-        } catch {
-          /* ignore */
-        }
-
-        const storedLanguage = normalizeLanguageKey(localStorage.getItem("languageSelected") || "");
+        // Restore language/dialect from server preferences
+        const storedLanguage = normalizeLanguageKey(savedLanguage || "");
         const nextLanguage = storedLanguage && mergedLanguages.includes(storedLanguage)
           ? storedLanguage
           : (mergedLanguages[0] || DEFAULT_LANGUAGES[0]);
 
-        const storedSel = displayDialectLabel(localStorage.getItem("dialectSelected") || "");
+        const storedSel = displayDialectLabel(savedDialect || "");
         const availableDialectsForLanguage = Array.from(
           new Set(
             serverRows
@@ -640,12 +747,9 @@ export default function FullscreenCaptureModal({
         setLanguage(nextLanguage);
         setDialect(nextDialect);
 
-        try {
-          localStorage.setItem("languageSelected", nextLanguage);
-          localStorage.setItem("dialectSelected", nextDialect);
-        } catch {
-          /* ignore */
-        }
+        // Persist to server
+        setPreference("languageSelected", nextLanguage);
+        setPreference("dialectSelected", nextDialect);
 
         if (!classesRes.ok && !statsRes.ok) {
           setCatalogError("Không tải được danh sách bộ ngôn ngữ từ máy chủ.");
@@ -671,18 +775,8 @@ export default function FullscreenCaptureModal({
   const selectedLanguageRows = catalogRows.filter((row) => normalizeLanguageKey(row.language) === selectedLanguageKey);
   const selectedDialectRows = selectedLanguageRows.filter((row) => normalizeDialectKey(row.dialect) === selectedDialectKey);
   const normalizedLabel = normalizeText(label);
-  const labelSuggestions = useMemo(() => {
-    const baseRows = selectedDialectRows
-      .map((row) => row.label_original)
-      .filter((item): item is string => Boolean(item.trim()));
-
-    const uniqueRows = Array.from(new Set(baseRows));
-    uniqueRows.sort((a, b) => a.localeCompare(b, "vi", { sensitivity: "base" }));
-
-    if (!normalizedLabel) return uniqueRows.slice(0, 10);
-
-    return uniqueRows.filter((item) => normalizeText(item).startsWith(normalizedLabel)).slice(0, 10);
-  }, [normalizedLabel, selectedDialectRows]);
+  // Use server-side suggestions instead of client-side filter
+  const labelSuggestions = serverLabelSuggestions;
   const matchingCatalogRow = normalizedLabel
     ? selectedDialectRows.find((row) => normalizeText(row.label_original) === normalizedLabel)
     : undefined;
@@ -705,7 +799,7 @@ export default function FullscreenCaptureModal({
     }, 3000);
   }, []);
 
-  const handlePause  = useCallback(() => { setPaused(true);  pausedRef.current = true;  }, []);
+  const handlePause = useCallback(() => { setPaused(true); pausedRef.current = true; }, []);
   const handleResume = useCallback(() => {
     setPaused(false); pausedRef.current = false;
     lastFrameTimeRef.current = Date.now();
@@ -788,7 +882,7 @@ export default function FullscreenCaptureModal({
         image?: HTMLImageElement | HTMLVideoElement;
       };
 
-      const detected     = r.multiHandLandmarks || [];
+      const detected = r.multiHandLandmarks || [];
       const handednessData = r.multiHandedness || [];
 
       // FIX (handedness): MediaPipe Hands was trained on MIRRORED selfie
@@ -806,7 +900,7 @@ export default function FullscreenCaptureModal({
       // Previously this was documented incorrectly and defaulted to false,
       // so every saved sample had left/right swapped — this is the primary
       // fix for wrong hand recognition in the trained model.
-      let leftHandLandmarks:  MediaPipeLandmark[] | undefined;
+      let leftHandLandmarks: MediaPipeLandmark[] | undefined;
       let rightHandLandmarks: MediaPipeLandmark[] | undefined;
 
       detected.forEach((landmarks, i) => {
@@ -815,12 +909,12 @@ export default function FullscreenCaptureModal({
           ? rawLabel === "Left" ? "Right" : "Left"
           : rawLabel;
 
-        if (effectiveLabel === "Left")  leftHandLandmarks  = landmarks;
+        if (effectiveLabel === "Left") leftHandLandmarks = landmarks;
         else if (effectiveLabel === "Right") rightHandLandmarks = landmarks;
       });
 
       // ---- Temporal smoothing for presence / preview ----
-      const leftDetectedNow  = !!(leftHandLandmarks  && leftHandLandmarks.length  > 0);
+      const leftDetectedNow = !!(leftHandLandmarks && leftHandLandmarks.length > 0);
       const rightDetectedNow = !!(rightHandLandmarks && rightHandLandmarks.length > 0);
 
       leftPresenceHistoryRef.current.push(leftDetectedNow);
@@ -828,9 +922,9 @@ export default function FullscreenCaptureModal({
       rightPresenceHistoryRef.current.push(rightDetectedNow);
       if (rightPresenceHistoryRef.current.length > PRESENCE_HISTORY_SIZE) rightPresenceHistoryRef.current.shift();
 
-      const leftVotes  = leftPresenceHistoryRef.current.filter(Boolean).length;
+      const leftVotes = leftPresenceHistoryRef.current.filter(Boolean).length;
       const rightVotes = rightPresenceHistoryRef.current.filter(Boolean).length;
-      const leftSmoothedVisible  = leftVotes  > leftPresenceHistoryRef.current.length  / 2;
+      const leftSmoothedVisible = leftVotes > leftPresenceHistoryRef.current.length / 2;
       const rightSmoothedVisible = rightVotes > rightPresenceHistoryRef.current.length / 2;
 
       visibilityStateRef.current = { left: leftSmoothedVisible, right: rightSmoothedVisible };
@@ -844,7 +938,7 @@ export default function FullscreenCaptureModal({
       }
 
       // ---- Render (preview uses smoothed/lerped positions) ----
-      let renderLeft:  MediaPipeLandmark[] = [];
+      let renderLeft: MediaPipeLandmark[] = [];
       let renderRight: MediaPipeLandmark[] = [];
 
       if (leftDetectedNow) {
@@ -894,10 +988,10 @@ export default function FullscreenCaptureModal({
       lastFrameTimeRef.current = currentTime;
 
       // IMPORTANT: use RAW MediaPipe output for training uploads — no smoothing.
-      const rawLeft  = leftHandLandmarks;
+      const rawLeft = leftHandLandmarks;
       const rawRight = rightHandLandmarks;
 
-      const rawLeftHas  = (rawLeft?.length  ?? 0) > 0;
+      const rawLeftHas = (rawLeft?.length ?? 0) > 0;
       const rawRightHas = (rawRight?.length ?? 0) > 0;
 
       const computeHandConfidence = (lms?: MediaPipeLandmark[]) => {
@@ -907,11 +1001,11 @@ export default function FullscreenCaptureModal({
         return cnt > 0 ? sum / cnt : undefined;
       };
 
-      const leftConf  = computeHandConfidence(rawLeft);
+      const leftConf = computeHandConfidence(rawLeft);
       const rightConf = computeHandConfidence(rawRight);
 
       const confCandidates: number[] = [];
-      if (typeof leftConf  === "number") confCandidates.push(leftConf);
+      if (typeof leftConf === "number") confCandidates.push(leftConf);
       if (typeof rightConf === "number") confCandidates.push(rightConf);
       if (confCandidates.length === 0 && r.multiHandedness) {
         for (const h of r.multiHandedness) {
@@ -924,7 +1018,7 @@ export default function FullscreenCaptureModal({
 
       setHandsVisible(leftSmoothedVisible || rightSmoothedVisible || rawLeftHas || rawRightHas);
 
-      const presentLeftRaw  = rawLeftHas;
+      const presentLeftRaw = rawLeftHas;
       const presentRightRaw = rawRightHas;
       const detectedHandsCountRaw = (presentLeftRaw ? 1 : 0) + (presentRightRaw ? 1 : 0);
 
@@ -1083,7 +1177,7 @@ export default function FullscreenCaptureModal({
           : Date.now();
 
       const frameEntry: CaptureFrame = {
-        left_hand:  rawLeft  ? rawLeft.map(mirrorLandmarkX)  : [],
+        left_hand: rawLeft ? rawLeft.map(mirrorLandmarkX) : [],
         right_hand: rawRight ? rawRight.map(mirrorLandmarkX) : [],
         timestamp_ms,
         fallback_used: false,
@@ -1273,7 +1367,7 @@ export default function FullscreenCaptureModal({
           setTimeout(() => { setRecording(true); recordingRef.current = true; setMode("RECORD"); }, 3000);
         } else if (recordingRef.current) {
           const collected = framesRef.current.length || 0;
-          const required  = targetFramesRef.current  || 0;
+          const required = targetFramesRef.current || 0;
           if (collected < required) {
             window.alert(`Bạn chưa thu đủ khung hình: ${collected}/${required}. Vui lòng tiếp tục quay cho đến khi đủ.`);
           } else {
@@ -1308,13 +1402,28 @@ export default function FullscreenCaptureModal({
     return () => document.removeEventListener("keydown", handleKeyPress);
   }, [isOpen, computeQuality, handlePause, handleResume]);
 
+  useEffect(() => {
+    // Chặn cuộn trên body
+    const originalOverflow = document.body.style.overflow;
+    const originalHeight = document.body.style.height;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.height = '100dvh';
+
+    return () => {
+      // Trả lại trạng thái cũ khi đóng full screen
+      document.body.style.overflow = originalOverflow;
+      document.body.style.height = originalHeight;
+    };
+  }, []);
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
   if (!isOpen) return null;
 
   return (
-    <div ref={rootRef} className="fixed inset-0 z-[9999] bg-black">
+    <div ref={rootRef} className="fixed inset-0 h-[100dvh] w-screen z-[9999] bg-black flex flex-col overflow-hidden">
       {/* Camera Error */}
       {cameraError && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -1378,7 +1487,7 @@ export default function FullscreenCaptureModal({
       </div>
 
       {/* Main Content */}
-      <div className="h-full flex flex-col lg:flex-row pt-0 sm:pt-20">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row pt-0 sm:pt-20 overflow-hidden">
         {/* Camera Feed */}
         <div className="flex-1 relative flex items-center justify-center bg-gray-900 w-full min-h-[42svh] sm:min-h-[50vh] lg:h-full overflow-hidden">
           <video ref={videoRef} autoPlay muted playsInline className="hidden" />
@@ -1522,166 +1631,110 @@ export default function FullscreenCaptureModal({
         </div>
 
         {/* Control Panel */}
-        <div className="w-full lg:w-96 bg-gray-900 border-l border-gray-700 flex flex-col max-h-[calc(100svh-4rem)] lg:max-h-none">
-          <div className="flex-1 p-4 sm:p-6 space-y-4 overflow-y-auto">
-            <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-4 border border-blue-500/20">
-              <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center">
-                <span className="w-3 h-3 bg-blue-400 rounded-full mr-3"></span>Cài đặt chụp
-              </h3>
-              <div className="space-y-3 sm:space-y-4">
-                <div>
-                  <div className="mb-2">
-                    <label className="block text-xs sm:text-sm font-medium text-blue-300">📝 Nhãn hành động *</label>
-                  </div>
-                  <div className="relative">
-                    <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ví dụ: đi bộ, nhảy, vẫy tay" className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base" disabled={recording || countdown > 0} />
-                    <div className="absolute inset-y-0 right-2 flex items-center">
-                      <SpeechInputButton onText={(text) => setLabel(text)} title="Dùng giọng nói để điền nhãn hành động" className="h-8 w-8" />
-                    </div>
-                  </div>
-                  {!catalogLoading && !catalogError && labelSuggestions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {labelSuggestions.map((suggestion) => (
-                        <button
-                          type="button"
-                          key={suggestion}
-                          onClick={() => setLabel(suggestion)}
-                          className="rounded-full border border-blue-500/40 bg-blue-950/60 px-3 py-1 text-[11px] text-blue-100 transition-colors hover:bg-blue-800 hover:text-white"
-                          disabled={recording || countdown > 0}
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {(catalogLoading || catalogError || normalizedLabel) && (
-                    <div className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs sm:text-sm text-blue-100">
-                      {catalogLoading ? (
-                        <span>Đang tải danh sách nhãn từ dataset...</span>
-                      ) : catalogError ? (
-                        <span>{catalogError}</span>
-                      ) : labelExists ? (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="success" size="sm">Đã tồn tại</Badge>
-                            <span>Nhãn “{matchingCatalogRow?.label_original || label}” hiện có {labelSamplesCount} mẫu trong bộ {displayLanguageLabel(language)} / {displayDialectLabel(dialect)}.</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="warning" size="sm">Chưa có trong bộ này</Badge>
-                          <span>Bộ {displayLanguageLabel(language)} / {displayDialectLabel(dialect)} hiện có {currentCatalogLabelCount} nhãn.</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-end justify-between gap-3 mb-2">
-                    <label className="block text-xs sm:text-sm font-medium text-blue-300">👤 Người thực hiện *</label>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={user}
-                      onChange={(e) => setUser(sanitizeCollectorName(e.target.value))}
-                      placeholder="tên người thu thập"
-                      className="w-full pr-12 px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base"
-                      disabled={recording || countdown > 0}
-                      onBlur={() => rememberUser(user)}
-                    />
-                    <div className="absolute inset-y-0 right-2 flex items-center">
-                      <SpeechInputButton onText={(text) => setUser(text)} title="Dùng giọng nói để điền tên người thực hiện" className="h-8 w-8" />
-                    </div>
-                  </div>
-                  {recentUsers.length > 0 && (
-                    <div className="mt-2 hidden sm:flex flex-wrap gap-2 text-xs text-blue-200">
-                      {recentUsers.map((name) => (
-                        <button type="button" key={name} onClick={() => setUser(name)} className="px-2 py-1 rounded-full bg-blue-900/60 hover:bg-blue-800 text-blue-100 border border-blue-500/40 text-[11px]">{name}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="flex items-end justify-between gap-3 mb-2">
-                    <label className="block text-xs sm:text-sm font-medium text-blue-300">🗂️ Bộ ngôn ngữ</label>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1 block text-[11px] text-blue-200">🌐 Ngôn ngữ</label>
-                      <select
-                        value={language}
-                        onChange={(e) => {
-                          const v = normalizeLanguageKey(e.target.value);
-                          setLanguage(v);
-                          localStorage.setItem("languageSelected", v);
-
-                          const availableDialectsForLanguage = Array.from(
-                            new Set(
-                              catalogRows
-                                .filter((row) => normalizeLanguageKey(row.language) === v)
-                                .map((row) => displayDialectLabel(row.dialect))
-                                .filter((item): item is string => Boolean(item))
-                            )
-                          );
-                          if (availableDialectsForLanguage.length > 0 && !availableDialectsForLanguage.includes(dialect)) {
-                            const fallbackDialect = availableDialectsForLanguage[0];
-                            setDialect(fallbackDialect);
-                            localStorage.setItem("dialectSelected", fallbackDialect);
-                          }
-                        }}
-                        className="w-full px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base"
-                        disabled={recording || countdown > 0}
-                      >
-                        {languageList.map((item) => (
-                          <option key={item} value={item}>{displayLanguageLabel(item)}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[11px] text-blue-200">🧭 Phương ngữ</label>
-                      <select
-                        value={dialect}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === "Khác") {
-                            setShowAddDialectModal(true);
-                          } else {
-                            setDialect(v);
-                            localStorage.setItem("dialectSelected", v);
-                          }
-                        }}
-                        className="w-full px-3.5 py-2.5 sm:px-4 sm:py-3 bg-gray-800/80 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 text-sm sm:text-base"
-                        disabled={recording || countdown > 0}
-                      >
-                        {dialectList.map((d) => <option key={d} value={d}>{d}</option>)}
-                        <option value="Khác">Khác (thêm mới)</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="mt-2 text-xs text-blue-200">
-                    {catalogLoading ? "Đang đồng bộ danh sách từ máy chủ..." : `Bộ ${displayLanguageLabel(language)} / ${displayDialectLabel(dialect)} hiện có ${currentCatalogLabelCount} nhãn`}
+        <div className="w-full lg:w-96 bg-gray-900 border-l border-gray-700 flex flex-col max-h-[60%] lg:max-h-none flex-shrink-0">
+          <div className="flex-1 p-2.5 sm:p-4 lg:p-5 space-y-2 sm:space-y-3 overflow-y-auto">
+            {/* --- Compact Settings Card --- */}
+            <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-2.5 sm:p-4 border border-blue-500/20 space-y-2 sm:space-y-3">
+              {/* Label input */}
+              <div>
+                <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">📝 Nhãn *</label>
+                <div className="relative">
+                  <input type="text" value={label} onChange={(e) => { setLabel(e.target.value); setLabelConfirmed(false); }} onFocus={() => setLabelFocused(true)} onBlur={() => setTimeout(() => setLabelFocused(false), 150)} placeholder="vd: xin chào, cảm ơn" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                  <div className="absolute inset-y-0 right-1.5 flex items-center">
+                    <SpeechInputButton onText={(text) => setLabel(text)} title="Giọng nói" className="h-7 w-7" />
                   </div>
                 </div>
+                {labelFocused && !catalogLoading && !catalogError && labelSuggestions.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {labelSuggestions.map((s) => (
+                      <button type="button" key={s} onMouseDown={(e) => e.preventDefault()} onClick={() => { setLabel(s); setLabelConfirmed(true); setServerLabelSuggestions([]); setLabelFocused(false); }} className="rounded-full border border-blue-500/30 bg-blue-950/50 px-2 py-px text-[10px] text-blue-200 hover:bg-blue-800 hover:text-white" disabled={recording || countdown > 0}>{s}</button>
+                    ))}
+                  </div>
+                )}
+                {normalizedLabel && !catalogLoading && !catalogError && (
+                  <div className="mt-1 text-[10px] sm:text-xs text-blue-200/80">
+                    {labelExists ? (
+                      <span className="text-green-300">✓ Đã có {labelSamplesCount} mẫu</span>
+                    ) : (
+                      <span className="text-yellow-300">⚠ Nhãn mới ({currentCatalogLabelCount} nhãn hiện có)</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* User input */}
+              <div>
+                <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">👤 Người thực hiện *</label>
+                <div className="relative">
+                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder="tên người thu thập" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                  <div className="absolute inset-y-0 right-1.5 flex items-center">
+                    <SpeechInputButton onText={(text) => setUser(text)} title="Giọng nói" className="h-7 w-7" />
+                  </div>
+                </div>
+                {collectorFocused && collectorSuggestions.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {collectorSuggestions.map((name) => (
+                      <button type="button" key={name} onMouseDown={(e) => e.preventDefault()} onClick={() => { setUser(name); setCollectorConfirmed(true); setCollectorSuggestions([]); setCollectorFocused(false); }} className="rounded-full border border-blue-500/30 bg-blue-950/50 px-2 py-px text-[10px] text-blue-200 hover:bg-blue-800 hover:text-white">{name}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* Language / Dialect — searchable compact dropdowns */}
+              <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+                <SearchableSelect
+                  label="🌐 Ngôn ngữ"
+                  value={language}
+                  options={languageList}
+                  displayFn={displayLanguageLabel}
+                  onChange={(v) => {
+                    const key = normalizeLanguageKey(v);
+                    setLanguage(key);
+                    setPreference("languageSelected", key);
+                    const availableDialectsForLanguage = Array.from(
+                      new Set(
+                        catalogRows
+                          .filter((row) => normalizeLanguageKey(row.language) === key)
+                          .map((row) => displayDialectLabel(row.dialect))
+                          .filter((item): item is string => Boolean(item))
+                      )
+                    );
+                    if (availableDialectsForLanguage.length > 0 && !availableDialectsForLanguage.includes(dialect)) {
+                      const fallbackDialect = availableDialectsForLanguage[0];
+                      setDialect(fallbackDialect);
+                      setPreference("dialectSelected", fallbackDialect);
+                    }
+                  }}
+                  disabled={recording || countdown > 0}
+                />
+                <SearchableSelect
+                  label="🧭 Phương ngữ"
+                  value={dialect}
+                  options={[...dialectList, "Khác (+)"]}
+                  displayFn={(v) => v}
+                  onChange={(v) => {
+                    if (v === "Khác (+)") { setShowAddDialectModal(true); }
+                    else { setDialect(v); setPreference("dialectSelected", v); }
+                  }}
+                  disabled={recording || countdown > 0}
+                />
+              </div>
+              <div className="text-[10px] text-blue-200/60">
+                {catalogLoading ? "Đang tải..." : `${displayLanguageLabel(language)} / ${displayDialectLabel(dialect)} • ${currentCatalogLabelCount} nhãn`}
               </div>
             </div>
 
             <AddDialectModal isOpen={showAddDialectModal} onClose={() => setShowAddDialectModal(false)} onAdd={(name) => {
               const updated = Array.from(new Set([...dialectList, name]));
               setDialectList(updated); setDialect(name);
-              localStorage.setItem("dialectList", JSON.stringify(updated));
-              localStorage.setItem("dialectSelected", name);
+              setPreference("dialectSelected", name);
             }} />
 
-            <div className="bg-gray-800 rounded-lg p-4 hidden sm:block">
-              <h4 className="text-sm font-medium text-gray-300 mb-3">📊 Trạng thái ghi hình</h4>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between text-gray-400"><span>Lần chụp hiện tại:</span><span className="text-white">{currentCaptureIndex + 1}/{FIXED_CAPTURE_COUNT}</span></div>
+            {/* Status — desktop only */}
+            <div className="bg-gray-800 rounded-lg p-3 hidden sm:block">
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between text-gray-400"><span>Lần chụp:</span><span className="text-white">{currentCaptureIndex + 1}/{FIXED_CAPTURE_COUNT}</span></div>
                 {frames.length > 0 && (
-                  <div className="w-full bg-gray-700 rounded-full h-2 mt-2">
-                    <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
+                  <div className="w-full bg-gray-700 rounded-full h-1.5">
+                    <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
                   </div>
                 )}
                 <div className="flex justify-between text-gray-400">
@@ -1695,7 +1748,7 @@ export default function FullscreenCaptureModal({
           </div>
 
           {/* Action Buttons */}
-          <div className="p-4 sm:p-6 border-t border-gray-700 space-y-3 bg-gray-900/95">
+          <div className="p-3 sm:p-4 lg:p-6 border-t border-gray-700 space-y-2 sm:space-y-3 bg-gray-900/95">
             {countdown > 0 ? (
               <div className="w-full py-3 bg-yellow-600 text-white rounded-lg text-center font-medium text-sm sm:text-base">Bắt đầu sau {countdown}...</div>
             ) : !recording ? (
