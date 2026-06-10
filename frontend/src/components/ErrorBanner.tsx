@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 type Props = {
   message: string;
   onClose?: () => void;
-  type?: "error" | "warning" | "info";
+  type?: "error" | "warning" | "info" | "success";
   autoClose?: boolean;
   duration?: number;
 };
@@ -16,6 +16,10 @@ export default function ErrorBanner({
   duration = 5000 
 }: Props) {
   const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    setIsVisible(true);
+  }, [message, type]);
 
   useEffect(() => {
     if (autoClose) {
@@ -45,6 +49,12 @@ export default function ErrorBanner({
       border: "border-blue-200",
       text: "text-blue-700",
       icon: "ℹ️"
+    },
+    success: {
+      bg: "bg-emerald-50",
+      border: "border-emerald-200",
+      text: "text-emerald-700",
+      icon: "✅"
     }
   };
 
@@ -65,7 +75,7 @@ export default function ErrorBanner({
       <div className="flex items-start gap-4">
         <div className="text-xl flex-shrink-0 mt-0.5">{config.icon}</div>
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-white text-sm mb-1">
+          <div className="font-medium text-slate-900 text-sm mb-1">
             {type.charAt(0).toUpperCase() + type.slice(1)}
           </div>
           <div className="text-sm leading-relaxed">{message}</div>
@@ -73,7 +83,7 @@ export default function ErrorBanner({
         {onClose && (
           <button
             onClick={handleClose}
-            className="text-gray-400 hover:text-white transition-colors p-1 rounded-md hover:bg-white/10"
+            className="text-slate-500 hover:text-slate-900 transition-colors p-1 rounded-md hover:bg-white/50"
             aria-label="Close notification"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">

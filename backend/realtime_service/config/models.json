@@ -27,7 +27,7 @@
     {
       "id": "bang-chu-cai",
       "name": "Bảng Chữ Cái",
-      "checkpoint_path": "checkpoints/tcn_dialect-bang-chu-cai_20260515_154037.pt",
+      "checkpoint_path": "checkpoints/tcn_dialect-bang-chu-cai_20260607_130922.pt",
       "language": "vn",
       "dialect": "bang-chu-cai",
       "seq_len": 60,

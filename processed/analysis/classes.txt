@@ -4,9 +4,6 @@ vn/hoa-de/lot-da-ca
 vn/hoa-de/lot-vo-tom
 vn/hoa-de/lay-chi-tom
 vn/hoa-de/cat-ky
-vn/can-tho/a
-vn/can-tho/b
-vn/can-tho/c
 vn/bang-chu-cai/d
 vn/bang-chu-cai/e
 vn/bang-chu-cai/m
@@ -31,3 +28,13 @@ vn/bang-chu-cai/l
 vn/bang-chu-cai/x
 vn/bang-chu-cai/y
 vn/hoa-de/cat-dau-ca
+vn/trung/mien-dien
+vn/bang-chu-cai/z
+vn/can-tho/nhan-vien
+vn/can-tho/may-khoan
+vn/can-tho/khoan
+vn/can-tho/do-dac
+vn/can-tho/ca-phe
+vn/can-tho/chao-co
+vn/can-tho/phuc-vu
+vn/can-tho/vao-lop

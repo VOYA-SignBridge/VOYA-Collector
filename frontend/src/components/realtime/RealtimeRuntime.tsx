@@ -36,6 +36,43 @@ const parseBoolEnv = (value: unknown, fallback: boolean) => {
 // Keep CDN asset version aligned with pinned dependency (matches capture modal).
 const MP_HANDS_VERSION = "0.4.1675469240";
 
+const isVietnameseVoice = (voice: SpeechSynthesisVoice) => {
+  const lang = voice.lang?.toLowerCase() || "";
+  const name = voice.name.toLowerCase();
+  return lang.startsWith("vi") || name.includes("viet") || name.includes("vietnam");
+};
+
+const getBestVietnameseVoice = (voices: SpeechSynthesisVoice[]) => {
+  if (voices.length === 0) return null;
+
+  const scoreVoice = (voice: SpeechSynthesisVoice) => {
+    const lang = voice.lang?.toLowerCase() || "";
+    const name = voice.name.toLowerCase();
+    let score = 0;
+
+    if (lang === "vi-vn") score += 100;
+    else if (lang.startsWith("vi")) score += 80;
+
+    if (name.includes("viet")) score += 50;
+    if (name.includes("vietnam")) score += 50;
+    if (name.includes("google")) score += 10;
+
+    return score;
+  };
+
+  return [...voices]
+    .filter(isVietnameseVoice)
+    .sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] ?? null;
+};
+
+const resolveSpeechVoice = (voices: SpeechSynthesisVoice[], preferredVoiceId: string) => {
+  if (preferredVoiceId !== "auto") {
+    const chosen = voices.find((voice) => voice.voiceURI === preferredVoiceId);
+    if (chosen) return chosen;
+  }
+  return getBestVietnameseVoice(voices);
+};
+
 export default function RealtimeRuntime({
   mirrorPreview = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true),
   autoStart = true,
@@ -82,6 +119,23 @@ export default function RealtimeRuntime({
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [selectionWarning, setSelectionWarning] = useState<string | null>(null);
+  const [speechEnabled, setSpeechEnabled] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem("realtimeSpeechEnabled");
+      if (stored === null) return true;
+      return stored === "1" || stored === "true";
+    } catch {
+      return true;
+    }
+  });
+  const [speechVoiceId, setSpeechVoiceId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("realtimeSpeechVoiceId") || "auto";
+    } catch {
+      return "auto";
+    }
+  });
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const groupedModels = useMemo(() => {
     const groups = new Map<string, RealtimeModel[]>();
@@ -107,6 +161,129 @@ export default function RealtimeRuntime({
   const previewStyle = useMemo(() => {
     return mirrorPreview ? ({ transform: "scaleX(-1)" } as const) : undefined;
   }, [mirrorPreview]);
+
+  const speechSynthesisRef = useRef<SpeechSynthesis | null>(null);
+  const speechTimerRef = useRef<number | null>(null);
+  const lastSpokenLabelRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("realtimeSpeechEnabled", speechEnabled ? "1" : "0");
+    } catch {
+      // ignore persistence errors
+    }
+  }, [speechEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("realtimeSpeechVoiceId", speechVoiceId);
+    } catch {
+      // ignore persistence errors
+    }
+  }, [speechVoiceId]);
+
+  useEffect(() => {
+    speechSynthesisRef.current = window.speechSynthesis;
+
+    const loadVoices = () => {
+      setAvailableVoices(window.speechSynthesis.getVoices());
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+      if (speechTimerRef.current !== null) {
+        window.clearTimeout(speechTimerRef.current);
+        speechTimerRef.current = null;
+      }
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!running || !speechEnabled || !prediction) {
+      if (speechTimerRef.current !== null) {
+        window.clearTimeout(speechTimerRef.current);
+        speechTimerRef.current = null;
+      }
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const normalizedLabel = prediction.label.trim();
+    const shouldSpeak = normalizedLabel.length > 0 && prediction.confidence >= 0.8;
+
+    if (!shouldSpeak) {
+      if (speechTimerRef.current !== null) {
+        window.clearTimeout(speechTimerRef.current);
+        speechTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (lastSpokenLabelRef.current === prediction.labelKey) {
+      return;
+    }
+
+    if (speechTimerRef.current !== null) {
+      window.clearTimeout(speechTimerRef.current);
+    }
+
+    speechTimerRef.current = window.setTimeout(() => {
+      if (!speechEnabled || !running) return;
+      const currentPrediction = prediction;
+      const label = currentPrediction.label.trim();
+      if (!label || currentPrediction.confidence < 0.8) return;
+      if (lastSpokenLabelRef.current === currentPrediction.labelKey) return;
+
+      const synth = speechSynthesisRef.current ?? window.speechSynthesis;
+      if (!synth) return;
+
+      try {
+        synth.cancel();
+        const utterance = new SpeechSynthesisUtterance(label);
+        utterance.lang = "vi-VN";
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        utterance.volume = 1;
+
+        const voices = availableVoices.length > 0 ? availableVoices : synth.getVoices();
+        const voice = resolveSpeechVoice(voices, speechVoiceId);
+        if (voice) {
+          utterance.voice = voice;
+        }
+
+        utterance.onend = () => {
+          lastSpokenLabelRef.current = currentPrediction.labelKey;
+        };
+        utterance.onerror = () => {
+          lastSpokenLabelRef.current = null;
+        };
+        synth.speak(utterance);
+      } catch {
+        lastSpokenLabelRef.current = null;
+      } finally {
+        speechTimerRef.current = null;
+      }
+    }, 600);
+
+    return () => {
+      if (speechTimerRef.current !== null) {
+        window.clearTimeout(speechTimerRef.current);
+        speechTimerRef.current = null;
+      }
+    };
+  }, [prediction, running, speechEnabled, speechVoiceId, availableVoices, selectedLanguage]);
 
   const stopAll = useCallback(async () => {
     // Ensure start guard is released even if stop happens mid-init.
@@ -151,6 +328,16 @@ export default function RealtimeRuntime({
     // Clear semantic buffers.
     ringRef.current?.clear();
     smootherRef.current?.reset();
+
+    if (speechTimerRef.current !== null) {
+      window.clearTimeout(speechTimerRef.current);
+      speechTimerRef.current = null;
+    }
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
 
     // Status back to idle.
     setStatus("idle");
@@ -226,6 +413,7 @@ export default function RealtimeRuntime({
   useEffect(() => {
     if (!running) {
       void stopAll();
+      lastSpokenLabelRef.current = null;
       return;
     }
 
@@ -243,6 +431,7 @@ export default function RealtimeRuntime({
     }
 
     setError(null);
+    lastSpokenLabelRef.current = null;
 
     // Initialize utilities once per run.
     ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126 });
@@ -708,6 +897,50 @@ export default function RealtimeRuntime({
                 </div>
               )}
             </div>
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-slate-700">Đọc kết quả thành tiếng</div>
+                <div className="text-[11px] text-slate-500">Chỉ đọc khi độ tin cậy từ 80% trở lên</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSpeechEnabled((prev) => !prev)}
+                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
+                  speechEnabled ? "bg-emerald-500" : "bg-slate-300"
+                }`}
+                aria-pressed={speechEnabled}
+                aria-label={speechEnabled ? "Tắt đọc kết quả thành tiếng" : "Bật đọc kết quả thành tiếng"}
+              >
+                <span
+                  className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${
+                    speechEnabled ? "translate-x-7" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {speechEnabled && (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <label className="mb-1.5 block text-[11px] font-medium text-slate-700">Giọng đọc</label>
+                <select
+                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={speechVoiceId}
+                  onChange={(e) => setSpeechVoiceId(e.target.value)}
+                >
+                  <option value="auto">Tự động chọn giọng Việt tốt nhất</option>
+                  {availableVoices
+                    .filter((voice) => isVietnameseVoice(voice))
+                    .map((voice) => (
+                      <option key={voice.voiceURI} value={voice.voiceURI}>
+                        {voice.name} ({voice.lang})
+                      </option>
+                    ))}
+                </select>
+                <div className="mt-1 text-[11px] text-slate-500">
+                  Nếu máy không có voice Việt, trình duyệt sẽ dùng voice gần nhất có sẵn.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Status Indicator */}

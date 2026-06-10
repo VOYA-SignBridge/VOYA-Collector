@@ -116,9 +116,9 @@ export default function LabelsPage() {
       for (const c of classes) {
         // Client-side dialect filter if dialect is selected (use normalized forms)
         const cDialect = normalizeDialect(c.dialect);
-        if (dialect && cDialect && dialect !== '' && cDialect !== dialect) {
-          continue;
-        }
+          if (dialect && cDialect !== dialect) {
+            continue;
+          }
         raw.push({
           class_uid: c.class_uid,
           class_idx: typeof c.class_idx === 'string' ? parseInt(c.class_idx, 10) : Number(c.class_idx),
@@ -194,18 +194,17 @@ export default function LabelsPage() {
             console.warn('[LabelsPage] Stats fetch failed or empty:', statsRes);
           }
         } else {
-          console.warn('[LabelsPage] getClassesList failed, trying legacy endpoint. Error:', classesRes.error);
-          // fallback to legacy labels endpoint
-          const legacy = await getLabels();
-          if (!mounted) return;
-          if (legacy.ok) {
-            console.log('[LabelsPage] Legacy labels loaded:', legacy.data.length);
-            setLabels(legacy.data);
-          } else {
-            console.error('[LabelsPage] Legacy labels also failed:', legacy.error);
-            setError(legacy.error);
+            console.warn('[LabelsPage] getClassesList failed, trying legacy endpoint. Error:', classesRes.error);
+            setClasses(null);
+            setSampleCounts({});
+            const legacy = await getLabels();
+            if (!mounted) return;
+            if (legacy.ok) {
+              setLabels(legacy.data);
+            } else {
+              setError(legacy.error);
+            }
           }
-        }
       } catch (err: unknown) {
         console.error('[LabelsPage] Exception during fetch:', err);
         const msg = err instanceof Error ? err.message : String(err);
