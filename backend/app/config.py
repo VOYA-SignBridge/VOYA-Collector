@@ -146,6 +146,15 @@ class Settings(BaseSettings):
     realtime_max_concurrent: int = int(os.getenv("REALTIME_MAX_CONCURRENT", "8"))
     realtime_max_body_bytes: int = int(os.getenv("REALTIME_MAX_BODY_BYTES", str(1 * 1024 * 1024)))
 
+    # TTS (Text-to-Speech) configuration
+    tts_redis_url: str = os.getenv("TTS_REDIS_URL", "redis://redis:6379/0")
+    tts_cache_ttl_seconds: int = int(os.getenv("TTS_CACHE_TTL", "86400"))  # 24h
+    tts_default_voice: str = os.getenv("TTS_DEFAULT_VOICE", "vi-VN-HoaiMyNeural")
+    tts_max_text_length: int = int(os.getenv("TTS_MAX_TEXT_LENGTH", "200"))
+    tts_max_concurrent_synth: int = int(os.getenv("TTS_MAX_CONCURRENT_SYNTH", "5"))
+    tts_prewarm_on_startup: bool = bool(int(os.getenv("TTS_PREWARM_ON_STARTUP", "1")))
+    tts_prewarm_top_percent: float = float(os.getenv("TTS_PREWARM_TOP_PERCENT", "0.2"))  # 20%
+
     @validator("speed_variants", pre=True, always=True)
     def _parse_speed_variants(cls, v, values):
         raw = values.get("speed_variants_raw")

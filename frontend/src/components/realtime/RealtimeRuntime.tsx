@@ -15,6 +15,7 @@ import {
   type RealtimePredictResponse,
   type RealtimeModel,
 } from "../../api/realtime";
+import { fetchTTSAudio } from "../../api/tts";
 
 type Props = {
   /** Visual-only mirror for preview. Never affects payload semantics. */
@@ -36,42 +37,12 @@ const parseBoolEnv = (value: unknown, fallback: boolean) => {
 // Keep CDN asset version aligned with pinned dependency (matches capture modal).
 const MP_HANDS_VERSION = "0.4.1675469240";
 
-const isVietnameseVoice = (voice: SpeechSynthesisVoice) => {
-  const lang = voice.lang?.toLowerCase() || "";
-  const name = voice.name.toLowerCase();
-  return lang.startsWith("vi") || name.includes("viet") || name.includes("vietnam");
-};
-
-const getBestVietnameseVoice = (voices: SpeechSynthesisVoice[]) => {
-  if (voices.length === 0) return null;
-
-  const scoreVoice = (voice: SpeechSynthesisVoice) => {
-    const lang = voice.lang?.toLowerCase() || "";
-    const name = voice.name.toLowerCase();
-    let score = 0;
-
-    if (lang === "vi-vn") score += 100;
-    else if (lang.startsWith("vi")) score += 80;
-
-    if (name.includes("viet")) score += 50;
-    if (name.includes("vietnam")) score += 50;
-    if (name.includes("google")) score += 10;
-
-    return score;
-  };
-
-  return [...voices]
-    .filter(isVietnameseVoice)
-    .sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] ?? null;
-};
-
-const resolveSpeechVoice = (voices: SpeechSynthesisVoice[], preferredVoiceId: string) => {
-  if (preferredVoiceId !== "auto") {
-    const chosen = voices.find((voice) => voice.voiceURI === preferredVoiceId);
-    if (chosen) return chosen;
-  }
-  return getBestVietnameseVoice(voices);
-};
+// Server-side TTS voice options
+const TTS_VOICES = [
+  { id: "vi-VN-HoaiMyNeural", label: "HoaiMy (Nữ)", gender: "female" as const },
+  { id: "vi-VN-NamMinhNeural", label: "NamMinh (Nam)", gender: "male" as const },
+] as const;
+const TTS_DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
 
 export default function RealtimeRuntime({
   mirrorPreview = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true),
@@ -128,14 +99,13 @@ export default function RealtimeRuntime({
       return true;
     }
   });
-  const [speechVoiceId, setSpeechVoiceId] = useState<string>(() => {
+  const [ttsVoiceId, setTtsVoiceId] = useState<string>(() => {
     try {
-      return localStorage.getItem("realtimeSpeechVoiceId") || "auto";
+      return localStorage.getItem("realtimeTtsVoiceId") || TTS_DEFAULT_VOICE;
     } catch {
-      return "auto";
+      return TTS_DEFAULT_VOICE;
     }
   });
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const groupedModels = useMemo(() => {
     const groups = new Map<string, RealtimeModel[]>();
@@ -162,9 +132,13 @@ export default function RealtimeRuntime({
     return mirrorPreview ? ({ transform: "scaleX(-1)" } as const) : undefined;
   }, [mirrorPreview]);
 
-  const speechSynthesisRef = useRef<SpeechSynthesis | null>(null);
-  const speechTimerRef = useRef<number | null>(null);
+  // Server-side TTS refs
+  const ttsTimerRef = useRef<number | null>(null);
   const lastSpokenLabelRef = useRef<string | null>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Client-side blob cache: labelKey:voiceId → objectURL
+  const ttsBlobCacheRef = useRef<Map<string, string>>(new Map());
+  const ttsFetchingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     try {
@@ -176,46 +150,38 @@ export default function RealtimeRuntime({
 
   useEffect(() => {
     try {
-      localStorage.setItem("realtimeSpeechVoiceId", speechVoiceId);
+      localStorage.setItem("realtimeTtsVoiceId", ttsVoiceId);
     } catch {
       // ignore persistence errors
     }
-  }, [speechVoiceId]);
+  }, [ttsVoiceId]);
 
+  // Cleanup TTS resources on unmount
   useEffect(() => {
-    speechSynthesisRef.current = window.speechSynthesis;
-
-    const loadVoices = () => {
-      setAvailableVoices(window.speechSynthesis.getVoices());
-    };
-
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-
     return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-      if (speechTimerRef.current !== null) {
-        window.clearTimeout(speechTimerRef.current);
-        speechTimerRef.current = null;
+      // Revoke all cached blob URLs to prevent memory leaks
+      ttsBlobCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+      ttsBlobCacheRef.current.clear();
+      if (ttsTimerRef.current !== null) {
+        window.clearTimeout(ttsTimerRef.current);
+        ttsTimerRef.current = null;
       }
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current = null;
       }
     };
   }, []);
 
+  // Server-side TTS: fetch audio from backend and play
   useEffect(() => {
     if (!running || !speechEnabled || !prediction) {
-      if (speechTimerRef.current !== null) {
-        window.clearTimeout(speechTimerRef.current);
-        speechTimerRef.current = null;
+      if (ttsTimerRef.current !== null) {
+        window.clearTimeout(ttsTimerRef.current);
+        ttsTimerRef.current = null;
       }
-      try {
-        window.speechSynthesis.cancel();
-      } catch {
-        // ignore
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
       }
       return;
     }
@@ -224,9 +190,9 @@ export default function RealtimeRuntime({
     const shouldSpeak = normalizedLabel.length > 0 && prediction.confidence >= 0.8;
 
     if (!shouldSpeak) {
-      if (speechTimerRef.current !== null) {
-        window.clearTimeout(speechTimerRef.current);
-        speechTimerRef.current = null;
+      if (ttsTimerRef.current !== null) {
+        window.clearTimeout(ttsTimerRef.current);
+        ttsTimerRef.current = null;
       }
       return;
     }
@@ -235,55 +201,82 @@ export default function RealtimeRuntime({
       return;
     }
 
-    if (speechTimerRef.current !== null) {
-      window.clearTimeout(speechTimerRef.current);
+    if (ttsTimerRef.current !== null) {
+      window.clearTimeout(ttsTimerRef.current);
     }
 
-    speechTimerRef.current = window.setTimeout(() => {
+    ttsTimerRef.current = window.setTimeout(async () => {
       if (!speechEnabled || !running) return;
       const currentPrediction = prediction;
       const label = currentPrediction.label.trim();
       if (!label || currentPrediction.confidence < 0.8) return;
       if (lastSpokenLabelRef.current === currentPrediction.labelKey) return;
 
-      const synth = speechSynthesisRef.current ?? window.speechSynthesis;
-      if (!synth) return;
+      const cacheKey = `${currentPrediction.labelKey}:${ttsVoiceId}`;
 
       try {
-        synth.cancel();
-        const utterance = new SpeechSynthesisUtterance(label);
-        utterance.lang = "vi-VN";
-        utterance.rate = 1;
-        utterance.pitch = 1;
-        utterance.volume = 1;
-
-        const voices = availableVoices.length > 0 ? availableVoices : synth.getVoices();
-        const voice = resolveSpeechVoice(voices, speechVoiceId);
-        if (voice) {
-          utterance.voice = voice;
+        // Stop any currently playing audio
+        if (ttsAudioRef.current) {
+          ttsAudioRef.current.pause();
+          ttsAudioRef.current.currentTime = 0;
         }
 
-        utterance.onend = () => {
+        let audioUrl = ttsBlobCacheRef.current.get(cacheKey);
+
+        if (!audioUrl) {
+          // Prevent duplicate fetches for same key
+          if (ttsFetchingRef.current.has(cacheKey)) return;
+          ttsFetchingRef.current.add(cacheKey);
+
+          try {
+            const blob = await fetchTTSAudio(label, ttsVoiceId);
+            if (blob) {
+              audioUrl = URL.createObjectURL(blob);
+              ttsBlobCacheRef.current.set(cacheKey, audioUrl);
+
+              // Evict old entries if cache grows too large (keep last 100)
+              if (ttsBlobCacheRef.current.size > 100) {
+                const firstKey = ttsBlobCacheRef.current.keys().next().value;
+                if (firstKey) {
+                  const oldUrl = ttsBlobCacheRef.current.get(firstKey);
+                  if (oldUrl) URL.revokeObjectURL(oldUrl);
+                  ttsBlobCacheRef.current.delete(firstKey);
+                }
+              }
+            }
+          } finally {
+            ttsFetchingRef.current.delete(cacheKey);
+          }
+        }
+
+        if (!audioUrl) return;
+
+        const audio = new Audio(audioUrl);
+        audio.volume = 1;
+        ttsAudioRef.current = audio;
+
+        audio.onended = () => {
           lastSpokenLabelRef.current = currentPrediction.labelKey;
         };
-        utterance.onerror = () => {
+        audio.onerror = () => {
           lastSpokenLabelRef.current = null;
         };
-        synth.speak(utterance);
+
+        await audio.play();
       } catch {
         lastSpokenLabelRef.current = null;
       } finally {
-        speechTimerRef.current = null;
+        ttsTimerRef.current = null;
       }
     }, 600);
 
     return () => {
-      if (speechTimerRef.current !== null) {
-        window.clearTimeout(speechTimerRef.current);
-        speechTimerRef.current = null;
+      if (ttsTimerRef.current !== null) {
+        window.clearTimeout(ttsTimerRef.current);
+        ttsTimerRef.current = null;
       }
     };
-  }, [prediction, running, speechEnabled, speechVoiceId, availableVoices, selectedLanguage]);
+  }, [prediction, running, speechEnabled, ttsVoiceId, selectedLanguage]);
 
   const stopAll = useCallback(async () => {
     // Ensure start guard is released even if stop happens mid-init.
@@ -329,14 +322,13 @@ export default function RealtimeRuntime({
     ringRef.current?.clear();
     smootherRef.current?.reset();
 
-    if (speechTimerRef.current !== null) {
-      window.clearTimeout(speechTimerRef.current);
-      speechTimerRef.current = null;
+    if (ttsTimerRef.current !== null) {
+      window.clearTimeout(ttsTimerRef.current);
+      ttsTimerRef.current = null;
     }
-    try {
-      window.speechSynthesis.cancel();
-    } catch {
-      // ignore
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current = null;
     }
 
     // Status back to idle.
@@ -785,11 +777,10 @@ export default function RealtimeRuntime({
             <div>
               <label className="block text-[11px] font-medium text-slate-700 mb-1.5">Ngôn ngữ</label>
               <select
-                className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                  running && (isStarting || !canSwitchModel())
-                    ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
-                    : "border-slate-300 bg-white focus:ring-blue-500"
-                }`}
+                className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${running && (isStarting || !canSwitchModel())
+                  ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
+                  : "border-slate-300 bg-white focus:ring-blue-500"
+                  }`}
                 value={selectedLanguage || ""}
                 onChange={(e) => handleLanguageSelect(e.target.value)}
                 disabled={running && (isStarting || !canSwitchModel())}
@@ -817,11 +808,10 @@ export default function RealtimeRuntime({
                 </div>
               ) : (
                 <select
-                  className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                    running && (isStarting || !canSwitchModel())
-                      ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
-                      : "border-slate-300 bg-white focus:ring-blue-500"
-                  }`}
+                  className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${running && (isStarting || !canSwitchModel())
+                    ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
+                    : "border-slate-300 bg-white focus:ring-blue-500"
+                    }`}
                   value={selectedModelId || ""}
                   onChange={(e) => handleModelSelect(e.target.value)}
                   disabled={running && (isStarting || !canSwitchModel())}
@@ -900,21 +890,18 @@ export default function RealtimeRuntime({
             <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2">
               <div className="min-w-0">
                 <div className="text-xs font-medium text-slate-700">Đọc kết quả thành tiếng</div>
-                <div className="text-[11px] text-slate-500">Chỉ đọc khi độ tin cậy từ 80% trở lên</div>
               </div>
               <button
                 type="button"
                 onClick={() => setSpeechEnabled((prev) => !prev)}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
-                  speechEnabled ? "bg-emerald-500" : "bg-slate-300"
-                }`}
+                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${speechEnabled ? "bg-emerald-500" : "bg-slate-300"
+                  }`}
                 aria-pressed={speechEnabled}
                 aria-label={speechEnabled ? "Tắt đọc kết quả thành tiếng" : "Bật đọc kết quả thành tiếng"}
               >
                 <span
-                  className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${
-                    speechEnabled ? "translate-x-7" : "translate-x-1"
-                  }`}
+                  className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${speechEnabled ? "translate-x-7" : "translate-x-1"
+                    }`}
                 />
               </button>
             </div>
@@ -922,23 +909,28 @@ export default function RealtimeRuntime({
             {speechEnabled && (
               <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <label className="mb-1.5 block text-[11px] font-medium text-slate-700">Giọng đọc</label>
-                <select
-                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={speechVoiceId}
-                  onChange={(e) => setSpeechVoiceId(e.target.value)}
-                >
-                  <option value="auto">Tự động chọn giọng Việt tốt nhất</option>
-                  {availableVoices
-                    .filter((voice) => isVietnameseVoice(voice))
-                    .map((voice) => (
-                      <option key={voice.voiceURI} value={voice.voiceURI}>
-                        {voice.name} ({voice.lang})
-                      </option>
-                    ))}
-                </select>
-                <div className="mt-1 text-[11px] text-slate-500">
-                  Nếu máy không có voice Việt, trình duyệt sẽ dùng voice gần nhất có sẵn.
+                <div className="flex gap-2">
+                  {TTS_VOICES.map((voice) => (
+                    <button
+                      key={voice.id}
+                      type="button"
+                      onClick={() => {
+                        setTtsVoiceId(voice.id);
+                        lastSpokenLabelRef.current = null;
+                      }}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-xs sm:text-sm font-medium transition-all ${ttsVoiceId === voice.id
+                        ? "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                    >
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span>{voice.gender === "female" ? "👩" : "👨"}</span>
+                        <span>{voice.label}</span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
+
               </div>
             )}
           </div>
@@ -946,11 +938,10 @@ export default function RealtimeRuntime({
           {/* Status Indicator */}
           <div className="rounded-lg border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${
-                running && status === "in_flight" ? "bg-green-500" :
+              <div className={`w-2 h-2 rounded-full ${running && status === "in_flight" ? "bg-green-500" :
                 running && status === "debouncing" ? "bg-yellow-500" :
-                running ? "bg-blue-500" : "bg-slate-300"
-              }`} />
+                  running ? "bg-blue-500" : "bg-slate-300"
+                }`} />
               <div className="text-xs text-slate-600">{getFriendlyStatusMessage()}</div>
             </div>
           </div>
