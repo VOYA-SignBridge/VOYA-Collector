@@ -1,15 +1,28 @@
 import { useState, useEffect } from 'react';
 import Button from '../components/ui/Button';
+import ErrorBanner from '../components/ErrorBanner';
 import { uploadCamera } from '../api/upload';
 import type { CameraUploadPayload } from '../types';
 import { getRole } from '../utils/role';
+
+type Feedback = {
+  type: 'error' | 'warning' | 'info' | 'success';
+  message: string;
+};
 
 export default function PublicUploadPage() {
   const [label, setLabel] = useState('');
   const [user, setUser] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [role, setRole] = useState(getRole());
+
+  useEffect(() => {
+    if (!feedback) return;
+    if (feedback.type !== 'success' && feedback.type !== 'info') return;
+    const timer = window.setTimeout(() => setFeedback(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
 
   useEffect(() => {
     const onRole = () => setRole(getRole());
@@ -19,11 +32,11 @@ export default function PublicUploadPage() {
 
   const handleSubmit = async () => {
     if (!label || !user) {
-      setMessage('Please fill both name and label');
+      setFeedback({ type: 'warning', message: 'Vui lòng nhập đầy đủ tên và nhãn.' });
       return;
     }
     setLoading(true);
-    setMessage(null);
+    setFeedback(null);
 
     // Minimal payload: front-end will let user upload via camera flow; here we send a tiny sample marker.
     const payload: CameraUploadPayload = {
@@ -36,14 +49,17 @@ export default function PublicUploadPage() {
     try {
       const res = await uploadCamera(payload);
       if (res.ok) {
-        setMessage('Thanks — your sample was queued for processing.');
+        setFeedback({ type: 'success', message: 'Đã gửi mẫu thành công. Hệ thống đang xử lý.' });
         setLabel('');
         setUser('');
       } else {
-        setMessage(res.error || 'Upload failed');
+        setFeedback({ type: 'error', message: res.error || 'Không thể tải lên.' });
       }
     } catch (err: unknown) {
-      setMessage(err instanceof Error ? err.message : String(err));
+      setFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setLoading(false);
     }
@@ -54,6 +70,18 @@ export default function PublicUploadPage() {
       <div className="p-4 sm:p-6">
         <h2 className="text-xl font-semibold mb-2">Community Upload</h2>
         <p className="text-sm text-gray-600 mb-4">Quickly submit a labeled sample. Advanced options are reserved for admins.</p>
+
+        {feedback && (
+          <div className="mb-4">
+            <ErrorBanner
+              message={feedback.message}
+              type={feedback.type}
+              autoClose={feedback.type === 'success' || feedback.type === 'info'}
+              duration={2500}
+              onClose={() => setFeedback(null)}
+            />
+          </div>
+        )}
 
         <div className="space-y-4">
           <div>
@@ -70,10 +98,6 @@ export default function PublicUploadPage() {
             <div className="text-xs text-gray-500">Role: <strong>{role}</strong></div>
             <Button className="w-full sm:w-auto" onClick={handleSubmit} loading={loading} disabled={loading || !label || !user}>Submit</Button>
           </div>
-
-          {message && (
-            <div className="mt-4 text-sm text-gray-700">{message}</div>
-          )}
         </div>
       </div>
     </div>

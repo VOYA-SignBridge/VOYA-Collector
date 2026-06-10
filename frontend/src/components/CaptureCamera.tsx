@@ -11,9 +11,10 @@ import { me } from "../api/auth";
 
 type Props = {
   onError?: (msg: string) => void;
+  onSuccess?: (msg: string) => void;
 };
 
-export default function CaptureCamera({ onError }: Props) {
+export default function CaptureCamera({ onError, onSuccess }: Props) {
   // Removed frames state - now using only fullscreen capture
   const [label, setLabel] = useState("");
   const [user, setUser] = useState("");
@@ -134,6 +135,7 @@ export default function CaptureCamera({ onError }: Props) {
 
           setSamples(prev => [...prev, sample]);
           setSampleCounter(prev => prev + 1);
+          onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
           
           console.log(`Sample "${capturedLabel}" (${capturedFrames.length} frames) uploaded successfully! Total samples: ${samples.length + 1}`);
         } else {

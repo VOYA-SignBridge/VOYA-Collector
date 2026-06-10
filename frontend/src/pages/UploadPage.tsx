@@ -5,9 +5,15 @@ import PageHeader from "../components/ui/PageHeader";
 import Badge from "../components/ui/Badge";
 const CaptureCamera = lazy(() => import("../components/CaptureCamera"));
 
+type Feedback = {
+  type: 'error' | 'warning' | 'info' | 'success';
+  message: string;
+};
+
 export default function UploadPage() {
   const [tab, setTab] = useState<"video" | "camera">("camera"); // Start with camera for faster data collection
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [todayStats, setTodayStats] = useState({ samples: 0, sessions: 0 });
   const [quickLabels] = useState([
     "walking", "running", "sitting", "standing", 
@@ -21,6 +27,13 @@ export default function UploadPage() {
     const stats = JSON.parse(localStorage.getItem('todayStats') || '{"samples": 0, "sessions": 0}');
     setTodayStats(stats);
   }, []);
+
+  useEffect(() => {
+    if (!feedback) return;
+    if (feedback.type !== 'success' && feedback.type !== 'info') return;
+    const timer = window.setTimeout(() => setFeedback(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
 
   return (
     <div className="space-y-6">
@@ -45,6 +58,16 @@ export default function UploadPage() {
           onClose={() => setError(null)} 
           type="error"
           autoClose={false}
+        />
+      )}
+
+      {feedback && !error && (
+        <ErrorBanner
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+          type={feedback.type}
+          autoClose={feedback.type === 'success' || feedback.type === 'info'}
+          duration={2500}
         />
       )}
 
@@ -165,7 +188,10 @@ export default function UploadPage() {
             </div>
           </div>
         }>
-          <CaptureCamera onError={(m: string) => setError(m)} />
+          <CaptureCamera
+            onError={(m: string) => setError(m)}
+            onSuccess={(m: string) => setFeedback({ type: 'success', message: m })}
+          />
         </Suspense>
       )}
     </div>

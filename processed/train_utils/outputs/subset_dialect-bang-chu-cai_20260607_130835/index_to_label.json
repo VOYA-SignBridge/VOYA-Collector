@@ -1,0 +1,163 @@
+{
+  "0": {
+    "label_key": "vn/bang-chu-cai/d",
+    "label_slug": "d",
+    "label_original": "D",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "1": {
+    "label_key": "vn/bang-chu-cai/e",
+    "label_slug": "e",
+    "label_original": "E",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "2": {
+    "label_key": "vn/bang-chu-cai/m",
+    "label_slug": "m",
+    "label_original": "M",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "3": {
+    "label_key": "vn/bang-chu-cai/n",
+    "label_slug": "n",
+    "label_original": "N",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "4": {
+    "label_key": "vn/bang-chu-cai/o",
+    "label_slug": "o",
+    "label_original": "O",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "5": {
+    "label_key": "vn/bang-chu-cai/p",
+    "label_slug": "p",
+    "label_original": "P",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "6": {
+    "label_key": "vn/bang-chu-cai/q",
+    "label_slug": "q",
+    "label_original": "Q",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "7": {
+    "label_key": "vn/bang-chu-cai/r",
+    "label_slug": "r",
+    "label_original": "R",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "8": {
+    "label_key": "vn/bang-chu-cai/s",
+    "label_slug": "s",
+    "label_original": "S",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "9": {
+    "label_key": "vn/bang-chu-cai/t",
+    "label_slug": "t",
+    "label_original": "T",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "10": {
+    "label_key": "vn/bang-chu-cai/u",
+    "label_slug": "u",
+    "label_original": "U",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "11": {
+    "label_key": "vn/bang-chu-cai/v",
+    "label_slug": "v",
+    "label_original": "V",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "12": {
+    "label_key": "vn/bang-chu-cai/a",
+    "label_slug": "a",
+    "label_original": "A",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "13": {
+    "label_key": "vn/bang-chu-cai/b",
+    "label_slug": "b",
+    "label_original": "B",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "14": {
+    "label_key": "vn/bang-chu-cai/c",
+    "label_slug": "c",
+    "label_original": "C",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "15": {
+    "label_key": "vn/bang-chu-cai/g",
+    "label_slug": "g",
+    "label_original": "G",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "16": {
+    "label_key": "vn/bang-chu-cai/h",
+    "label_slug": "h",
+    "label_original": "H",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "17": {
+    "label_key": "vn/bang-chu-cai/i",
+    "label_slug": "i",
+    "label_original": "I",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "18": {
+    "label_key": "vn/bang-chu-cai/k",
+    "label_slug": "k",
+    "label_original": "K",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "19": {
+    "label_key": "vn/bang-chu-cai/l",
+    "label_slug": "l",
+    "label_original": "L",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "20": {
+    "label_key": "vn/bang-chu-cai/x",
+    "label_slug": "x",
+    "label_original": "X",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "21": {
+    "label_key": "vn/bang-chu-cai/y",
+    "label_slug": "y",
+    "label_original": "Y",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  },
+  "22": {
+    "label_key": "vn/bang-chu-cai/z",
+    "label_slug": "z",
+    "label_original": "Z",
+    "language": "vn",
+    "dialect": "bang-chu-cai"
+  }
+}

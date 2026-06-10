@@ -1,0 +1,39 @@
+{
+  "timestamp": "20260607_130922",
+  "subset": {
+    "languages": [],
+    "dialects": [
+      "bang-chu-cai"
+    ],
+    "language_default": "vn",
+    "tag": "dialect-bang-chu-cai"
+  },
+  "config": {
+    "train_csv": "processed\\train_utils\\outputs\\subset_dialect-bang-chu-cai_20260607_130835\\train.csv",
+    "val_csv": "processed\\train_utils\\outputs\\subset_dialect-bang-chu-cai_20260607_130835\\val.csv",
+    "test_csv": "processed\\train_utils\\outputs\\subset_dialect-bang-chu-cai_20260607_130835\\test.csv",
+    "batch_size": 32,
+    "epochs": 80,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "dropout": 0.3,
+    "channels": 64,
+    "levels": 3,
+    "kernel_size": 5,
+    "seed": 42,
+    "device": "cpu",
+    "num_workers": 0,
+    "out_dir": "processed\\train_utils\\outputs"
+  },
+  "in_dim": 126,
+  "feature_dim": 126,
+  "num_classes": 23,
+  "val_best_f1": 0.9367109162505582,
+  "test": {
+    "loss": 0.19645236072759342,
+    "acc": 0.9145299145299145,
+    "f1": 0.8934080173277913,
+    "scs": null
+  },
+  "checkpoint": "processed\\train_utils\\outputs\\tcn_dialect-bang-chu-cai_20260607_130922.pt"
+}
