@@ -68,3 +68,10 @@ gdrive/
 
 # Spreadsheet credentials
 SsheetAPI/
+
+#Trained Model
+processed/train_utils/outputs
+processed/analysis
+*.json
+processed/splits
+*.csv
