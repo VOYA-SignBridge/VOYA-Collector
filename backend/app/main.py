@@ -6,7 +6,7 @@ from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import dataset, upload, jobs, classes, inference, health, auth, realtime_proxy, tts
+from app.routers import dataset, upload, jobs, classes, inference, health, auth, realtime_proxy, experiments, tts
 from app.logging_config import configure_logging
 from app.db import init_db
 from app.services.tts_service import init_tts, close_tts
@@ -47,6 +47,22 @@ async def startup():
         "ready" if db_ready else "warning",
         (time.time() - started_at) * 1000,
     )
+
+    # Validate experiment tracking schema (non-blocking — server starts even if missing).
+    # TODO: Production deployments may choose to fail startup if the experiment
+    # tracking schema is missing (e.g., raise SystemExit here instead of warning).
+    if db_ready:
+        try:
+            from app.storage.experiment_tracking_api_revised import validate_schema
+            validate_schema()
+            logger.info("[STARTUP] Experiment tracking schema validated.")
+        except RuntimeError as schema_err:
+            logger.warning(
+                "[STARTUP] Experiment tracking schema missing — /api/v1/experiments "
+                "endpoints will fail until migration 002_mvp_schema.sql is applied. "
+                "Detail: %s",
+                schema_err,
+            )
 
     # Initialize dedicated httpx client for realtime proxy
     # Backend starts cleanly even if inference service is offline
@@ -96,6 +112,7 @@ api_v1.include_router(inference.router)
 api_v1.include_router(auth.router)
 api_v1.include_router(realtime_proxy.router)
 api_v1.include_router(tts.router)
+api_v1.include_router(experiments.router)
 app.include_router(api_v1)
 
 # test
