@@ -262,32 +262,52 @@ def find_existing(language: str, dialect: str, slug: str) -> Optional[Dict[str, 
     return None
 
 
+def _exists_in_locked(file_path: Path, target_row: Dict[str, Any]) -> bool:
+    """Read FRESH STATE directly from disk. MUST only be called while INSIDE a lock.
+
+    Checks the full uniqueness tuple (language, dialect, slug) — not just slug.
+    """
+    if not file_path.exists():
+        return False
+    target_lang = target_row.get("language", "")
+    target_dialect = target_row.get("dialect", "")
+    target_slug = target_row.get("slug", "")
+    if not target_slug:
+        return False
+    with open(file_path, "r", newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if (
+                r.get("language") == target_lang
+                and r.get("dialect") == target_dialect
+                and r.get("slug") == target_slug
+            ):
+                return True
+    return False
+
+
+def _load_labels_locked() -> List[Dict[str, str]]:
+    """Read labels from disk. MUST only be called while INSIDE a lock."""
+    if not MASTER_LABELS.exists():
+        return []
+    with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
 def append_label_row(row: Dict[str, Any]):
+    """Append a label row with TOCTOU-safe Check → Lock → Write."""
     _ensure_labels_file()
 
-    # Skip append if an identical label (language, dialect, slug) already exists
-    def _exists_in(path: Path) -> bool:
-        try:
-            if not path.exists():
-                return False
-            with open(path, newline="", encoding="utf-8") as f:
-                for r in csv.DictReader(f):
-                    if (
-                        r.get("language") == row.get("language")
-                        and r.get("dialect") == row.get("dialect")
-                        and r.get("slug") == row.get("slug")
-                    ):
-                        return True
-        except Exception:
-            return False
-        return False
-
-    # Only check/append to the canonical master labels file (dataset/labels.csv)
-    already = _exists_in(MASTER_LABELS)
-    if already:
-        return
     lock = FileLock(str(MASTER_LABELS) + ".lock")
     with lock:
+        # CHECK: read fresh state from disk while holding lock
+        if _exists_in_locked(MASTER_LABELS, row):
+            logger.debug(
+                "[CLASS] Label already exists, skipping: slug=%s lang=%s dialect=%s",
+                row.get("slug"), row.get("language"), row.get("dialect"),
+            )
+            return
+
+        # WRITE: append immediately after check
         file_exists = MASTER_LABELS.exists()
         with open(MASTER_LABELS, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS)
@@ -355,6 +375,36 @@ def regenerate_label_indexes():
                 writer.writerows(items)
 
 
+def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
+    """Construct ClassMetadata from a labels CSV row."""
+    return ClassMetadata(
+        class_uid=existing["class_uid"],
+        class_idx=int(existing.get("class_idx") or 0)
+        if existing.get("class_idx")
+        else None,
+        slug=existing["slug"],
+        label_original=existing["label_original"],
+        language=existing["language"],
+        dialect=existing["dialect"],
+        is_common_global=parse_bool(existing.get("is_common_global")),
+        is_common_language=parse_bool(existing.get("is_common_language")),
+        folder_override=existing.get("folder_name") or None,
+    )
+
+
+def _collect_indices(rows: List[Dict[str, str]]) -> List[int]:
+    """Extract all valid class_idx integers from label rows."""
+    out = []
+    for r in rows:
+        val = r.get("class_idx") or ""
+        if val.isdigit():
+            try:
+                out.append(int(val))
+            except Exception:
+                pass
+    return out
+
+
 def register_class(
     label_original: str,
     language: str,
@@ -362,13 +412,17 @@ def register_class(
     is_common_global: bool = False,
     is_common_language: bool = False,
 ) -> ClassMetadata:
-    """Register or fetch existing class. Considers common/global flags.
+    """Register or fetch existing class with TOCTOU-safe locking.
+
+    The entire Check → Allocate class_idx → Write sequence is wrapped
+    in a single FileLock to prevent race conditions.
 
     Rules:
     - global_common: is_common_global=True overrides other flags.
     - language common: is_common_language=True and dialect should be 'common'.
     - dialect specific: neither flag true.
     """
+    _ensure_labels_file()
     language = language.lower().strip()
     dialect = dialect.lower().strip()
 
@@ -384,60 +438,61 @@ def register_class(
         language_key = language
         dialect_key = dialect
 
-    existing = find_existing(language_key, dialect_key, slug)
-    if existing:
-        # Best-effort re-sync on existing class to recover from prior crash/retry gaps.
-        sync_master_labels_to_gdrive()
-        meta = ClassMetadata(
-            class_uid=existing["class_uid"],
-            class_idx=int(existing.get("class_idx") or 0)
-            if existing.get("class_idx")
-            else None,
-            slug=existing["slug"],
-            label_original=existing["label_original"],
-            language=existing["language"],
-            dialect=existing["dialect"],
-            is_common_global=parse_bool(existing.get("is_common_global")),
-            is_common_language=parse_bool(existing.get("is_common_language")),
-            folder_override=existing.get("folder_name") or None,
-        )
-        return meta
-
-    # allocate new class_idx and folder_name
-    # Determine next class_idx by scanning all known label files
-    rows_main = load_labels()
-
-    def _collect_indices(rows: List[Dict[str, str]]) -> List[int]:
-        out = []
+    lock = FileLock(str(MASTER_LABELS) + ".lock")
+    with lock:
+        # 1. CHECK — read fresh state from disk while holding lock
+        rows = _load_labels_locked()
         for r in rows:
-            val = r.get("class_idx") or ""
-            if val.isdigit():
-                try:
-                    out.append(int(val))
-                except Exception:
-                    pass
-        return out
+            if (
+                r.get("language") == language_key
+                and r.get("dialect") == dialect_key
+                and r.get("slug") == slug
+            ):
+                # Class already exists — return it
+                meta = _build_meta_from_row(r)
+                # Release lock before triggering sync
+                break
+        else:
+            # 2. ALLOCATE — compute next class_idx safely inside lock
+            indices = _collect_indices(rows)
+            next_idx = (max(indices) + 1) if indices else 1
 
-    next_idx = (max(_collect_indices(rows_main)) + 1) if _collect_indices(rows_main) else 1
+            class_uid = str(uuid.uuid4())
+            short_uid = class_uid[:8]
+            folder_name = f"class_{slug}_{short_uid}"
 
-    # create new
-    class_uid = str(uuid.uuid4())
-    # Generate folder_name from slug + first 8 chars of UUID (uses hyphens from slugify)
-    short_uid = class_uid[:8]
-    folder_name = f"class_{slug}_{short_uid}"
-    
-    meta = ClassMetadata(
-        class_uid=class_uid,
-        class_idx=next_idx,
-        slug=slug,
-        label_original=label_original,
-        language=language_key,
-        dialect=dialect_key,
-        is_common_global=is_common_global,
-        is_common_language=is_common_language and not is_common_global,
-        folder_override=folder_name,
-    )
-    append_label_row(meta.to_label_row())
+            meta = ClassMetadata(
+                class_uid=class_uid,
+                class_idx=next_idx,
+                slug=slug,
+                label_original=label_original,
+                language=language_key,
+                dialect=dialect_key,
+                is_common_global=is_common_global,
+                is_common_language=is_common_language and not is_common_global,
+                folder_override=folder_name,
+            )
+
+            # 3. WRITE — append immediately after allocate
+            label_row = meta.to_label_row()
+            with open(MASTER_LABELS, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS)
+                if os.path.getsize(MASTER_LABELS) == 0:
+                    writer.writeheader()
+                writer.writerow(label_row)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Still inside lock context — this is the new-class path
+            # We'll do post-lock work below using the `meta` object
+
+    # --- Post-lock work (safe to do outside lock) ---
+
+    # Regenerate derived index files
+    regenerate_label_indexes()
+
+    # Best-effort sync to Google Drive
+    sync_master_labels_to_gdrive()
 
     if getattr(settings, "use_google_drive", False):
         try:
@@ -449,7 +504,7 @@ def register_class(
         except Exception as exc:
             logger.warning("[CLASS] Drive folder ensure failed: %s", exc)
 
-    # create folder and metadata.json
+    # Create folder and metadata.json
     folder = meta.hierarchy_path()
     folder.mkdir(parents=True, exist_ok=True)
     meta.write_metadata_json()

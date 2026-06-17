@@ -3,8 +3,9 @@ import time
 import logging
 import numpy as np
 
+from typing import Dict, Any
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
 from app.processing import storage_utils as su
 from app.dataset_manager import get_or_register_class, normalize_dialect
@@ -20,6 +21,7 @@ from app.api_validation import (
     save_upload_with_limit,
 )
 from app.storage.gdrive_client import upload_to_gdrive
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -59,6 +61,7 @@ async def upload_video(
     language: str = Form("vn"),
     dialect: str = Form("common"),
     session_id: str = Form(None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     start = time.time()
     log = logging.getLogger("upload.video")
@@ -70,7 +73,7 @@ async def upload_video(
     language = validate_language(language)
     dialect = validate_dialect(normalize_dialect(dialect))
 
-    log.info("[UPLOAD][video] user=%s label=%s lang=%s dialect=%s filename=%s session=%s", user, label, language, dialect, getattr(file, 'filename', ''), session_id)
+    log.info("[UPLOAD][video] user=%s label=%s lang=%s dialect=%s filename=%s session=%s", user or current_user.get("username", ""), label, language, dialect, getattr(file, 'filename', ''), session_id)
     # Log pipeline-relevant settings for traceability
     try:
         seq_len = int(getattr(settings, "seq_len", 60))
@@ -133,7 +136,7 @@ async def upload_video(
         "language": class_meta.language,
         "dialect": class_meta.dialect,
         "source_type": "video",
-        "user_id": user,
+        "user_id": user or current_user.get("username", ""),
         "session_id": session_id,
         "original_filename": original_filename,
         "local_path": local_path_str,
@@ -150,7 +153,7 @@ async def upload_video(
     try:
         from app.storage.metadata_db import insert_raw_upload
 
-        insert_raw_upload({**raw_upload_row, "auth_user_id": None})
+        insert_raw_upload({**raw_upload_row, "auth_user_id": current_user["id"]})
     except Exception as e:
         if getattr(settings, "debug_logging", False):
             log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
@@ -174,12 +177,15 @@ async def upload_video(
 
 
 @router.post("/camera")
-async def upload_camera(payload: dict = Body(...)):
+async def upload_camera(
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     Accept frames (array of arrays) and metadata, save as npz via storage_utils.save_sample
     Payload example: { user: str, label: str, session_id: str, dialect: str, frames: [{timestamp, landmarks}, ...] }
     """
-    user = payload.get("user", "")
+    user = payload.get("user", "") or current_user.get("username", "")
     label = validate_label(payload.get("label"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "common")))
     language = validate_language(payload.get("language", "vn"))
@@ -341,6 +347,8 @@ async def upload_camera(payload: dict = Body(...)):
 
     meta = {
         "user": user,
+        "user_id": user,
+        "auth_user_id": current_user["id"],
         "session_id": session_id,
         "fps_original": None,
         "fps_processed": None,

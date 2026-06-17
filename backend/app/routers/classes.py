@@ -1,15 +1,16 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 import json
 import unicodedata
 from pathlib import Path
 from filelock import FileLock
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.dataset_manager import get_or_register_class, list_classes, normalize_dialect
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
 from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_update_class
 from app.config import settings
+from app.auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/classes", tags=["classes"])
 
@@ -222,7 +223,11 @@ def balance_plan(target: int | None = None):
 
 
 @router.put("/{class_ref}")
-def update_class(class_ref: str, payload: dict = Body(...)):
+def update_class(
+    class_ref: str,
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     try:
         result = sync_update_class(class_ref, payload)
         return {
@@ -242,7 +247,10 @@ def update_class(class_ref: str, payload: dict = Body(...)):
 
 
 @router.delete("/{class_ref}")
-def delete_class(class_ref: str):
+def delete_class(
+    class_ref: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
     try:
         result = sync_delete_class(class_ref)
         return {

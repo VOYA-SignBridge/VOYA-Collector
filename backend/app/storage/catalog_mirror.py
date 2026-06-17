@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import threading
 from pathlib import Path
 from typing import Any, List
 
@@ -122,41 +121,52 @@ def _sync_catalog_snapshots_sync(labels_csv: Path, samples_csv: Path) -> None:
     _sync_samples_snapshot_sync(Path(samples_csv))
 
 
+# ---------------------------------------------------------------------------
+# Public API — called by dataset_samples.py and dataset_manager.py after writes
+#
+# DESIGN DECISION (per user review):
+# These functions NO LONGER spawn daemon threads or call Google APIs directly.
+# Instead, they log the event and rely on:
+#   1. Postgres sheets_synced=FALSE column (the source of truth for pending sync)
+#   2. Celery periodic task (export_tasks.py) to batch-export to Google Sheets
+#
+# If Redis is down, we do NOT fallback to sync — Postgres holds the data safely,
+# and Celery will pick it up when it recovers. This prevents:
+#   - HTTP request blocking (daemon threads could stall requests)
+#   - Google API quota exhaustion from realtime per-upload API calls
+#   - 429 errors under concurrent upload load
+# ---------------------------------------------------------------------------
+
+
 def mirror_csv_to_gdrive(local_path: Path, remote_path: str) -> None:
-    """Best-effort background mirror for catalog CSV files after local updates."""
-    thread = threading.Thread(
-        target=_mirror_csv_to_gdrive_sync,
-        args=(Path(local_path), remote_path),
-        daemon=True,
+    """No-op: Google Sheets sync is now handled by Celery export task."""
+    logger.debug(
+        "[CATALOG_MIRROR] Sheets sync deferred to Celery worker: local=%s remote=%s",
+        local_path,
+        remote_path,
     )
-    thread.start()
 
 
 def mirror_labels_to_gdrive_and_sheets(labels_csv: Path) -> None:
-    """Best-effort background sync for labels.csv to Google Drive and Sheets."""
-    thread = threading.Thread(
-        target=_sync_labels_snapshot_sync,
-        args=(Path(labels_csv),),
-        daemon=True,
+    """No-op: labels sync is now handled by Celery export task."""
+    logger.debug(
+        "[CATALOG_MIRROR] Labels Sheets sync deferred to Celery worker: %s",
+        labels_csv,
     )
-    thread.start()
 
 
 def mirror_samples_to_gdrive_and_sheets(samples_csv: Path) -> None:
-    """Best-effort background sync for samples.csv to Google Drive and Sheets."""
-    thread = threading.Thread(
-        target=_sync_samples_snapshot_sync,
-        args=(Path(samples_csv),),
-        daemon=True,
+    """No-op: samples sync is now handled by Celery export task."""
+    logger.debug(
+        "[CATALOG_MIRROR] Samples Sheets sync deferred to Celery worker: %s",
+        samples_csv,
     )
-    thread.start()
 
 
 def mirror_catalog_to_gdrive_and_sheets(labels_csv: Path, samples_csv: Path) -> None:
-    """Best-effort background sync for labels.csv and samples.csv to Google Drive and Sheets."""
-    thread = threading.Thread(
-        target=_sync_catalog_snapshots_sync,
-        args=(Path(labels_csv), Path(samples_csv)),
-        daemon=True,
+    """No-op: catalog sync is now handled by Celery export task."""
+    logger.debug(
+        "[CATALOG_MIRROR] Catalog Sheets sync deferred to Celery worker: labels=%s samples=%s",
+        labels_csv,
+        samples_csv,
     )
-    thread.start()
