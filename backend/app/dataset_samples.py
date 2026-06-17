@@ -7,6 +7,7 @@ import tempfile
 import logging
 import time
 from typing import Dict, Any, List
+from pathlib import Path
 from filelock import FileLock
 from datetime import datetime
 from app.config import settings
@@ -81,6 +82,36 @@ def list_samples() -> List[Dict[str, str]]:
     with lock:
         with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
             return list(csv.DictReader(f))
+
+
+def update_sample_row(sample_uid: str, updates: Dict[str, Any]):
+    _ensure_samples_file()
+    lock = FileLock(str(SAMPLES_CSV) + ".lock")
+    with lock:
+        try:
+            with open(SAMPLES_CSV, "r", newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            
+            updated = False
+            for row in rows:
+                if row.get("sample_uid") == sample_uid:
+                    for k, v in updates.items():
+                        if k in row:
+                            row[k] = v
+                    updated = True
+                    break
+            
+            if updated:
+                tmp_path = str(SAMPLES_CSV) + ".tmp"
+                with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, SAMPLES_CSV)
+        except Exception as e:
+            logging.getLogger(__name__).error("[UPDATE_SAMPLE_ROW] failed: %s", e)
 
 
 def count_samples_for_class(class_uid: str) -> int:
@@ -168,42 +199,20 @@ def save_sequence_npz(
     use_google_drive = settings.use_google_drive
 
     if use_google_drive:
-        from app.storage.gdrive_client import upload_to_gdrive
-
-        log.info("[SAVE_SEQUENCE] Attempting Google Drive mirror")
-
         folder_name = class_meta.folder_name()
         storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-        log.info("[SAVE_SEQUENCE] Mirroring local NPZ to Google Drive with key: %s", storage_key)
-
-        last_error = None
-        for attempt in range(1, 4):
-            try:
-                storage_url = upload_to_gdrive(str(fpath), storage_key)
-                if storage_url:
-                    log.info("[SAVE_SEQUENCE] Google Drive mirror successful: %s", storage_url)
-                    metadata["storage_url"] = storage_url
-                    metadata["storage_key"] = storage_key
-                    metadata["storage_provider"] = "local+gdrive"
-                    try:
-                        atomic_write_json(sidecar, metadata, indent=2)
-                    except Exception as e:
-                        logging.getLogger(__name__).warning("[SIDECAR] drive update failed: %s", e)
-                    break
-                last_error = RuntimeError("Google Drive upload returned None")
-                log.warning("[SAVE_SEQUENCE] Google Drive upload returned None attempt=%s/3", attempt)
-            except Exception as e:
-                last_error = e
-                log.error("[SAVE_SEQUENCE] Google Drive mirror failed attempt=%s/3: %s", attempt, e)
-
-            if attempt < 3:
-                time.sleep(0.5 * attempt)
-
-        if not storage_url:
-            logging.getLogger(__name__).warning(
-                "[SAVE_SEQUENCE] Google Drive mirror failed after retries; keeping local copy only: %s",
-                last_error,
+        # Defer upload to Celery background task
+        try:
+            from app.export_tasks import upload_npz_to_gdrive_task
+            upload_npz_to_gdrive_task.delay(
+                sample_uid=sample_uid,
+                local_path=str(fpath),
+                storage_key=storage_key,
+                sidecar_path=str(sidecar)
             )
+            log.info("[SAVE_SEQUENCE] Google Drive upload deferred to Celery for key: %s", storage_key)
+        except Exception as e:
+            log.warning("[SAVE_SEQUENCE] Failed to dispatch Celery upload task: %s", e)
     else:
         log.info("[SAVE_SEQUENCE] Google Drive not enabled; keeping local copy only")
 
@@ -223,6 +232,12 @@ def save_sequence_npz(
     except Exception:
         pass
 
+    # Compute relative path for storage (portable across machines)
+    try:
+        relative_path = str(Path(result_path).relative_to(DATASET_ROOT))
+    except ValueError:
+        relative_path = result_path  # fallback: keep absolute if outside DATASET_ROOT
+
     append_sample_row(
         {
             "sample_uid": sample_uid,
@@ -239,7 +254,7 @@ def save_sequence_npz(
             "seq_len": str(sequence.shape[0]),
             "augment_id": str(augment_id),
             "completeness": str(meta.get("completeness", "")),
-            "file_path": result_path,
+            "file_path": relative_path,
             "storage_key": storage_key if storage_url else "",
             "storage_url": storage_url or "",
             "checksum": metadata.get("checksum", ""),
@@ -260,16 +275,18 @@ def save_sequence_npz(
             "dialect": class_meta.dialect,
             "source_type": source_type,
             "user_id": meta.get("user_id") or meta.get("user", ""),
+            "auth_user_id": meta.get("auth_user_id") or None,
             "session_id": meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
             "seq_len": int(sequence.shape[0]),
             "augment_id": int(augment_id),
             "completeness": float(meta.get("completeness") or 0.0),
-            "file_path": result_path,
-            "storage_url": metadata.get("storage_url"),
-            "checksum": metadata.get("checksum"),
+            "file_path": relative_path,
+            "storage_url": metadata.get("storage_url", ""),
+            "checksum": metadata.get("checksum", ""),
             "created_at": created_at,
+            "gdrive_synced": not use_google_drive,
         }
         insert_sample(db_row)
     except Exception as e:

@@ -100,6 +100,7 @@ class GoogleDriveClient:
         self.creds = None
         self._sheets_service = None
         self.service = None
+        self._folder_cache = {}
         self._authenticate()
         self.root_folder_id = self._resolve_root_folder(root_folder_id)
 
@@ -261,6 +262,11 @@ class GoogleDriveClient:
             raise RuntimeError(f"Sheet gid {sheet_gid} not found in spreadsheet {spreadsheet_id}")
 
     def replace_sheet_values(self, spreadsheet_id: str, sheet_gid: int, values: List[List[Any]]) -> None:
+        """⚠️ DESTRUCTIVE: Clears the entire sheet then writes all values.
+
+        Only use for maintenance/reconciliation tasks. For normal sync operations,
+        use append_sheet_values() instead.
+        """
         with self._request_lock:
             service = self.get_sheets_service()
             title = self.get_sheet_title(spreadsheet_id, sheet_gid)
@@ -276,6 +282,33 @@ class GoogleDriveClient:
                 body={"values": values},
             ).execute(num_retries=self.num_retries)
             logger.info("[GSheets] replace done: spreadsheet_id=%s sheet_gid=%s title=%s", spreadsheet_id, sheet_gid, title)
+
+    def append_sheet_values(self, spreadsheet_id: str, sheet_gid: int, values: List[List[Any]]) -> None:
+        """Append-only write to Google Sheets. NEVER clears existing data.
+
+        Safe for production use. Uses Sheets API values().append() with INSERT_ROWS
+        to add rows after existing content.
+        """
+        if not values:
+            return
+        with self._request_lock:
+            service = self.get_sheets_service()
+            title = self.get_sheet_title(spreadsheet_id, sheet_gid)
+            logger.info(
+                "[GSheets] append begin: spreadsheet_id=%s sheet_gid=%s title=%s new_rows=%s",
+                spreadsheet_id, sheet_gid, title, len(values),
+            )
+            service.spreadsheets().values().append(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{title}'!A1",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": values},
+            ).execute(num_retries=self.num_retries)
+            logger.info(
+                "[GSheets] append done: spreadsheet_id=%s sheet_gid=%s rows_added=%s",
+                spreadsheet_id, sheet_gid, len(values),
+            )
 
     def _resolve_root_folder(self, root_folder_id: Optional[str]) -> Optional[str]:
         """Resolve the configured Google Drive root folder ID."""
@@ -306,6 +339,10 @@ class GoogleDriveClient:
 
     def _get_or_create_folder(self, folder_name: str, parent_id: str) -> str:
         """Get existing folder or create new one."""
+        cache_key = f"{parent_id}/{folder_name}"
+        if cache_key in self._folder_cache:
+            return self._folder_cache[cache_key]
+
         # Search for existing folder
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         if parent_id != 'root':
@@ -321,6 +358,7 @@ class GoogleDriveClient:
         
         if files:
             logger.debug(f"[GDrive] Found existing folder: {folder_name} (ID: {files[0]['id']})")
+            self._folder_cache[cache_key] = files[0]['id']
             return files[0]['id']
         
         # Create new folder
@@ -332,10 +370,15 @@ class GoogleDriveClient:
         
         file = self.service.files().create(body=file_metadata, fields='id').execute(num_retries=self.num_retries)
         logger.info(f"[GDrive] Created folder: {folder_name} (ID: {file.get('id')})")
+        self._folder_cache[cache_key] = file.get('id')
         return file.get('id')
 
     def _get_folder_id(self, folder_name: str, parent_id: str) -> Optional[str]:
         """Return a child folder ID without creating it."""
+        cache_key = f"{parent_id}/{folder_name}"
+        if cache_key in self._folder_cache:
+            return self._folder_cache[cache_key]
+
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         if parent_id != 'root':
             query += f" and '{parent_id}' in parents"
@@ -346,7 +389,10 @@ class GoogleDriveClient:
             fields='files(id, name)'
         ).execute(num_retries=self.num_retries)
         files = results.get('files', [])
-        return files[0]['id'] if files else None
+        if files:
+            self._folder_cache[cache_key] = files[0]['id']
+            return files[0]['id']
+        return None
 
     def resolve_folder_path(self, path: str, *, create_missing: bool = True) -> Optional[str]:
         """Resolve a Drive folder path relative to the configured root folder."""

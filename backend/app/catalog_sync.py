@@ -284,34 +284,6 @@ def _sync_drive_catalog_snapshots() -> None:
     _sync_drive_catalog_csv(RAW_UPLOADS_CSV, "raw_uploads.csv")
 
 
-def _sync_drive_versioned_csv(local_path: Path, drive_file_name: str) -> None:
-    """Sync versioned CSV files (labels2.0.csv, samples2.0.csv) to Google Drive root."""
-    if not _google_drive_configured():
-        logger.info("[CATALOG][GDRIVE] versioned csv sync skipped: google drive not configured for %s", drive_file_name)
-        return
-
-    try:
-        if not local_path.exists():
-            logger.warning("[CATALOG][GDRIVE] local file not found for %s: %s", drive_file_name, local_path)
-            return
-
-        from app.storage.gdrive_client import get_gdrive_client
-
-        client = get_gdrive_client()
-        logger.info("[CATALOG][GDRIVE] versioned csv sync begin: local=%s remote=%s", local_path, drive_file_name)
-
-        # Upload to Google Drive
-        client.upload_file(
-            file_data=str(local_path),
-            remote_path=f"signbridge-storage/{drive_file_name}",
-            content_type="text/csv",
-            replace_existing=True
-        )
-        logger.info("[CATALOG][GDRIVE] versioned csv sync done: %s", drive_file_name)
-    except Exception as e:
-        logger.warning("[CATALOG][GDRIVE] versioned csv sync failed for %s: %s", drive_file_name, e)
-
-
 def _rows_to_matrix(fieldnames: Sequence[str], rows: Sequence[Dict[str, Any]]) -> List[List[Any]]:
     matrix: List[List[Any]] = [list(fieldnames)]
     for row in rows:
@@ -326,47 +298,6 @@ def _google_sheets_configured() -> bool:
         and getattr(settings, "google_sheets_samples_spreadsheet_id", "")
         and int(getattr(settings, "google_sheets_samples_sheet_gid", 0) or 0)
     )
-
-
-def _sync_google_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]], sample_rows: Sequence[Dict[str, Any]]) -> None:
-    labels_spreadsheet_id = str(getattr(settings, "google_sheets_labels_spreadsheet_id", "")).strip()
-    labels_sheet_gid = int(getattr(settings, "google_sheets_labels_sheet_gid", 0) or 0)
-    samples_spreadsheet_id = str(getattr(settings, "google_sheets_samples_spreadsheet_id", "")).strip()
-    samples_sheet_gid = int(getattr(settings, "google_sheets_samples_sheet_gid", 0) or 0)
-
-    if not labels_spreadsheet_id and not samples_spreadsheet_id:
-        logger.info("[CATALOG][SHEETS] versioned sheet sync skipped: spreadsheet ids not configured")
-        return
-
-    client = get_gdrive_client()
-
-    if labels_spreadsheet_id and labels_sheet_gid:
-        try:
-            label_values = _rows_to_matrix(LABEL_FIELDS, label_rows)
-            logger.info("[CATALOG][SHEETS] syncing labels spreadsheet_id=%s gid=%s", labels_spreadsheet_id, labels_sheet_gid)
-            client.replace_sheet_values(labels_spreadsheet_id, labels_sheet_gid, label_values)
-        except Exception as exc:
-            logger.warning("[CATALOG][SHEETS] labels sync failed: %s", exc)
-    else:
-        logger.info("[CATALOG][SHEETS] labels sync skipped: spreadsheet id or gid missing")
-
-    if samples_spreadsheet_id and samples_sheet_gid:
-        try:
-            sample_values = _rows_to_matrix(SAMPLE_FIELDS, sample_rows)
-            logger.info("[CATALOG][SHEETS] syncing samples spreadsheet_id=%s gid=%s", samples_spreadsheet_id, samples_sheet_gid)
-            client.replace_sheet_values(samples_spreadsheet_id, samples_sheet_gid, sample_values)
-        except Exception as exc:
-            logger.warning("[CATALOG][SHEETS] samples sync failed: %s", exc)
-    else:
-        logger.info("[CATALOG][SHEETS] samples sync skipped: spreadsheet id or gid missing")
-
-
-def _sync_drive_and_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]], sample_rows: Sequence[Dict[str, Any]]) -> None:
-    logger.info("[CATALOG][SYNC] versioned output sync begin")
-    _sync_drive_versioned_csv(MASTER_LABELS, "labels2.0.csv")
-    _sync_drive_versioned_csv(SAMPLES_CSV, "samples2.0.csv")
-    _sync_google_sheets_versioned_tables(label_rows, sample_rows)
-    logger.info("[CATALOG][SYNC] versioned output sync done")
 
 
 def _sync_drive_move_folder_pairs(pairs: Sequence[tuple[Path, Path]]) -> None:

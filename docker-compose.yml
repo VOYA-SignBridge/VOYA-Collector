@@ -62,22 +62,43 @@ services:
           - voya_backend
           - backend
 
-  # worker:
-  #   image: voya_backend:latest
-  #   container_name: voya_worker
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./dataset:/dataset
-  #     - ./gdrive:/gdrive
-  #   command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
-  #   depends_on:
-  #     - redis
-  #     - postgres
-  #     - backend
-  #   restart: unless-stopped
-  #   networks:
-  #     - voya_network
+  worker:
+    image: voya_backend:latest
+    container_name: voya_worker
+    env_file:
+      - .env
+    volumes:
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive
+    environment:
+      TTS_REDIS_URL: redis://redis:6379/0
+    command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
+    depends_on:
+      - redis
+      - postgres
+      - backend
+    restart: unless-stopped
+    networks:
+      - voya_network
+
+  celery-beat:
+    image: voya_backend:latest
+    container_name: voya_celery_beat
+    env_file:
+      - .env
+    volumes:
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive
+    environment:
+      TTS_REDIS_URL: redis://redis:6379/0
+    command: celery -A app.worker.celery_app beat --loglevel=${LOG_LEVEL:-INFO} --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      - redis
+      - postgres
+      - worker
+    restart: unless-stopped
+    networks:
+      - voya_network
 
   redis:
     image: redis:7-alpine

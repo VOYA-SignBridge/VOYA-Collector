@@ -94,6 +94,7 @@ DDL_STATEMENTS = [
         storage_url TEXT,
         checksum TEXT,
         created_at TIMESTAMP WITH TIME ZONE,
+        gdrive_synced BOOLEAN DEFAULT FALSE,
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
@@ -131,6 +132,26 @@ INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_raw_uploads_class_uid ON raw_uploads(class_uid)",
     "CREATE INDEX IF NOT EXISTS idx_raw_uploads_auth_user_id ON raw_uploads(auth_user_id)",
     "CREATE INDEX IF NOT EXISTS idx_raw_uploads_created_at ON raw_uploads(created_at DESC)",
+    # Partial index for Celery export: only indexes rows not yet synced to Sheets
+    "CREATE INDEX IF NOT EXISTS idx_samples_sheets_synced ON samples(sheets_synced) WHERE sheets_synced = FALSE",
+]
+
+MIGRATION_STATEMENTS = [
+    # Add sheets_synced column to samples (safe for existing data: defaults to FALSE)
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS sheets_synced BOOLEAN DEFAULT FALSE",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS gdrive_synced BOOLEAN DEFAULT TRUE",
+    # Sync status tracking table for Google Sheets auto-rotation
+    """
+    CREATE TABLE IF NOT EXISTS google_sheets_sync_status (
+        id SERIAL PRIMARY KEY,
+        table_name VARCHAR(50) UNIQUE NOT NULL,
+        current_spreadsheet_id VARCHAR(100) NOT NULL DEFAULT '',
+        current_sheet_index INT NOT NULL DEFAULT 1,
+        current_data_rows INT NOT NULL DEFAULT 0,
+        max_rows_per_sheet INT NOT NULL DEFAULT 500000,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
 ]
 
 def _column_exists(table: str, column: str) -> bool:
@@ -155,6 +176,13 @@ def ensure_tables():
             _execute(stmt)
         except Exception as exc:
             logger.warning("ensure_tables: DDL statement failed (ignored): %s : %s", getattr(exc, "pgerror", str(exc)), stmt[:120])
+
+    # Apply migration statements (ALTER TABLE, new tables for sync tracking)
+    for stmt in MIGRATION_STATEMENTS:
+        try:
+            _execute(stmt)
+        except Exception as exc:
+            logger.warning("ensure_tables: migration statement failed (ignored): %s : %s", getattr(exc, "pgerror", str(exc)), stmt[:120])
 
     # Create indexes safely: check referenced columns exist first.
     idx_re = re.compile(r"ON\s+([a-zA-Z_][\w]*)\s*\(([^)]+)\)", re.IGNORECASE)
@@ -224,12 +252,12 @@ SQL_UPSERT_SAMPLE = """
 INSERT INTO samples(
     sample_uid, class_uid, slug, label_original, language, dialect,
     source_type, user_id, auth_user_id, session_id, fps_original, fps_processed,
-    seq_len, augment_id, completeness, file_path, storage_url, checksum, created_at
+    seq_len, augment_id, completeness, file_path, storage_url, checksum, created_at, gdrive_synced
 )
 VALUES(
     %(sample_uid)s, %(class_uid)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
     %(source_type)s, %(user_id)s, %(auth_user_id)s, %(session_id)s, %(fps_original)s, %(fps_processed)s,
-    %(seq_len)s, %(augment_id)s, %(completeness)s, %(file_path)s, %(storage_url)s, %(checksum)s, %(created_at)s
+    %(seq_len)s, %(augment_id)s, %(completeness)s, %(file_path)s, %(storage_url)s, %(checksum)s, %(created_at)s, %(gdrive_synced)s
 )
 ON CONFLICT (sample_uid) DO UPDATE SET
     class_uid = EXCLUDED.class_uid,
@@ -249,7 +277,8 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     file_path = EXCLUDED.file_path,
     storage_url = EXCLUDED.storage_url,
     checksum = EXCLUDED.checksum,
-    created_at = EXCLUDED.created_at
+    created_at = EXCLUDED.created_at,
+    gdrive_synced = EXCLUDED.gdrive_synced
 """
 
 SQL_UPSERT_RAW_UPLOAD = """
@@ -302,6 +331,8 @@ def upsert_class(row: Dict[str, Any]):
 
 
 def insert_sample(row: Dict[str, Any]):
+    if "gdrive_synced" not in row:
+        row["gdrive_synced"] = True
     _execute(SQL_UPSERT_SAMPLE, row)
 
 
@@ -312,6 +343,13 @@ def upsert_sample(row: Dict[str, Any]):
 
 def delete_sample(sample_uid: str):
     _execute("DELETE FROM samples WHERE sample_uid = %s", (sample_uid,))
+
+
+def update_sample_gdrive_url(sample_uid: str, storage_url: str):
+    _execute(
+        "UPDATE samples SET storage_url = %s, gdrive_synced = TRUE WHERE sample_uid = %s",
+        (storage_url, sample_uid)
+    )
 
 
 def delete_samples_by_class(class_uid: str):
@@ -337,3 +375,107 @@ def delete_raw_uploads_by_class(class_uid: str):
 
 def delete_class(class_uid: str):
     _execute("DELETE FROM classes WHERE class_uid = %s", (class_uid,))
+
+
+def get_sample_owner(sample_uid: str):
+    """Return auth_user_id (str or None) for a sample. Used for ownership checks."""
+    try:
+        with _cursor() as cur:
+            cur.execute(
+                "SELECT auth_user_id FROM samples WHERE sample_uid = %s",
+                (sample_uid,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return str(row[0]) if row[0] is not None else None
+    except Exception:
+        return None
+
+
+def resolve_absolute_path(db_path_str: str) -> 'Path':
+    """Resolve a file path from the database to an absolute path.
+
+    Handles both absolute paths (legacy data) and relative paths (new data).
+    Relative paths are resolved relative to DATASET_ROOT.
+    """
+    from pathlib import Path
+    from app.config import settings
+    path = Path(db_path_str)
+    if path.is_absolute():
+        return path
+    return settings.dataset_root / path
+
+
+def mark_samples_synced(sample_uids: list) -> None:
+    """Mark a batch of samples as synced to Google Sheets."""
+    if not sample_uids:
+        return
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE samples SET sheets_synced = TRUE WHERE sample_uid = ANY(%s)",
+            (sample_uids,),
+        )
+
+
+def fetch_unsynced_samples(limit: int = 5000) -> list:
+    """Fetch samples not yet synced to Google Sheets, ordered by creation time."""
+    with _cursor() as cur:
+        cur.execute(
+            """
+            SELECT sample_uid, class_uid, slug, label_original, language, dialect,
+                   source_type, user_id, session_id, fps_original, fps_processed,
+                   seq_len, augment_id, completeness, file_path, storage_url,
+                   checksum, created_at
+            FROM samples
+            WHERE sheets_synced = FALSE AND gdrive_synced = TRUE
+            ORDER BY created_at ASC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        columns = [desc[0] for desc in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def get_sync_status(table_name: str) -> dict | None:
+    """Get Google Sheets sync pointer for a table."""
+    try:
+        with _cursor() as cur:
+            cur.execute(
+                "SELECT current_spreadsheet_id, current_sheet_index, current_data_rows, max_rows_per_sheet "
+                "FROM google_sheets_sync_status WHERE table_name = %s",
+                (table_name,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {
+                "current_spreadsheet_id": row[0],
+                "current_sheet_index": row[1],
+                "current_data_rows": row[2],
+                "max_rows_per_sheet": row[3],
+            }
+    except Exception:
+        return None
+
+
+def upsert_sync_status(table_name: str, spreadsheet_id: str, sheet_index: int, data_rows: int) -> None:
+    """Create or update Google Sheets sync pointer."""
+    _execute(
+        """
+        INSERT INTO google_sheets_sync_status (table_name, current_spreadsheet_id, current_sheet_index, current_data_rows, updated_at)
+        VALUES (%(table_name)s, %(spreadsheet_id)s, %(sheet_index)s, %(data_rows)s, NOW())
+        ON CONFLICT (table_name) DO UPDATE SET
+            current_spreadsheet_id = EXCLUDED.current_spreadsheet_id,
+            current_sheet_index = EXCLUDED.current_sheet_index,
+            current_data_rows = EXCLUDED.current_data_rows,
+            updated_at = NOW()
+        """,
+        {
+            "table_name": table_name,
+            "spreadsheet_id": spreadsheet_id,
+            "sheet_index": sheet_index,
+            "data_rows": data_rows,
+        },
+    )

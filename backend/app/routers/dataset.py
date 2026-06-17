@@ -12,9 +12,31 @@ from app.dataset_manager import load_labels, ClassMetadata
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
 from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_delete_sample, sync_update_class
-from app.auth import get_current_user_optional
+from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.storage.metadata_db import get_sample_owner
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
+
+
+def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
+    """Raise 403 if current_user is not the owner of the sample and is not admin.
+
+    Legacy samples with auth_user_id=NULL (guest uploads) can only be deleted by admin.
+    """
+    if current_user.get("is_admin"):
+        return  # Admin bypass
+    owner_id = get_sample_owner(sample_id)
+    if owner_id is None:
+        # Guest sample or sample not found in DB — only admin can touch
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ admin mới có thể xóa mẫu không có chủ sở hữu",
+        )
+    if str(owner_id) != str(current_user["id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn không có quyền thực hiện thao tác này trên mẫu này",
+        )
 
 # ---- Models ----
 class LabelOut(BaseModel):
@@ -135,7 +157,11 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
 
 
 @router.put("/labels/{class_ref}")
-def update_label(class_ref: str, label: str = Form(...)):
+def update_label(
+    class_ref: str,
+    label: str = Form(...),
+    admin_user: Dict[str, Any] = Depends(require_admin),
+):
     try:
         result = sync_update_class(class_ref, {"label_original": label})
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
@@ -144,7 +170,10 @@ def update_label(class_ref: str, label: str = Form(...)):
 
 
 @router.delete("/labels/{class_ref}")
-def delete_label(class_ref: str):
+def delete_label(
+    class_ref: str,
+    admin_user: Dict[str, Any] = Depends(require_admin),
+):
     try:
         result = sync_delete_class(class_ref)
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
@@ -201,7 +230,11 @@ def get_sample_data(sample_id: str):
 
 
 @router.delete("/samples/{sample_id}")
-def delete_sample(sample_id: str):
+def delete_sample(
+    sample_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _check_sample_ownership(sample_id, current_user)
     try:
         result = sync_delete_sample(sample_id)
         return {"success": True, **result}
@@ -217,7 +250,7 @@ def add_sample(
     duration: float = Form(0.0),
     source: str = Form("video"),
     file: UploadFile = File(...),
-    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     idx_to_meta = _class_idx_to_meta()
     meta = idx_to_meta.get(int(class_idx))
@@ -238,8 +271,9 @@ def add_sample(
         meta,
         seq.astype(np.float32),
         meta={
-            "user": user,
-            "user_id": current_user["id"] if current_user else "",
+            "user": user or current_user.get("username", ""),
+            "user_id": current_user["id"],
+            "auth_user_id": current_user["id"],
             "session_id": session_id,
             "fps_original": "",
             "fps_processed": "",
