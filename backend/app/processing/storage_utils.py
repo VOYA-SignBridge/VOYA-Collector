@@ -13,7 +13,7 @@ from filelock import FileLock
 DATASET_ROOT = "dataset"
 FEATURE_ROOT = os.path.join(DATASET_ROOT, "features")
 LABELS_CSV = os.path.join(DATASET_ROOT, "labels.csv")
-SAMPLES_CSV = os.path.join(DATASET_ROOT, "samples.csv")
+SAMPLES_CSV = os.path.join(DATASET_ROOT, "samples", "samples.csv")
 
 # ---- Utils ----
 def slugify(text: str, maxlen: int = 20) -> str:

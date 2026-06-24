@@ -26,7 +26,7 @@ slug_to_indices = defaultdict(list)
 with LABELS.open('r', encoding='utf-8') as f:
     reader = csv.DictReader(f)
     for row in reader:
-        idx = int(row['class_idx'])  # Convert to 0-based index
+        idx = int(row['class_idx']) - 1  # Convert to 0-based index
         slug = row['slug']
         orig = row['label_original']
 
