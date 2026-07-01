@@ -1,0 +1,258 @@
+/**
+ * Training API Hook
+ * Manages communication with backend training endpoints
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getClassesList } from '../api/dataset';
+
+export interface DatasetInfo {
+  total_samples: number;
+  total_classes: number;
+  languages: string[];
+  dialects: Record<string, string[]>;
+  class_distribution: Record<string, number>;
+  split_info?: { train: number; val: number; test: number };
+  // Optional mapping from class uid/slug -> human label
+  label_map?: Record<string, string>;
+}
+
+export interface TrainingConfig {
+  dialects: string[];
+  languages: string[];
+  epochs: number;
+  batch_size: number;
+  learning_rate: number;
+  dropout: number;
+  channels: number;
+  levels: number;
+  kernel_size: number;
+}
+
+export interface TrainingMetrics {
+  epoch: number;
+  train_loss: number;
+  train_acc: number;
+  val_loss: number;
+  val_acc: number;
+  val_f1: number;
+  learning_rate?: number;
+  handedness?: {
+    left_only_acc: number;
+    left_only_n: number;
+    right_only_acc: number;
+    right_only_n: number;
+    both_acc: number;
+    both_n: number;
+  };
+}
+
+export interface TrainingJob {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  config: TrainingConfig;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  current_epoch: number;
+  total_epochs: number;
+  checkpoint_path?: string;
+  test_acc?: number;
+  test_f1?: number;
+}
+
+// Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
+const API_URL = '/api/v1/training';
+
+export function useTrainingAPI() {
+  const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Tải dataset info
+  const loadDatasetInfo = useCallback(async (dialect?: string, language?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (dialect) params.append('dialect', dialect);
+      if (language) params.append('language', language);
+
+      const response = await fetch(`${API_URL}/dataset-info?${params}`);
+      if (!response.ok) {
+        throw new Error(`Failed to load dataset info: ${response.statusText}`);
+      }
+
+      // Ensure we received JSON; sometimes proxy/back-end misconfiguration returns HTML (index.html)
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from training dataset endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      const data = await response.json();
+      // Try to enrich dataset info with class labels (if available)
+      try {
+        const classesRes = await getClassesList();
+        if (classesRes.ok && classesRes.data && Array.isArray(classesRes.data.items)) {
+          const map: Record<string, string> = {};
+          for (const c of classesRes.data.items) {
+            const label = c.label_original || c.slug || '';
+            if (c.class_uid) map[c.class_uid] = label;
+            if (c.slug) map[c.slug] = label;
+            // also map numeric idx
+            if (c.class_idx !== undefined && c.class_idx !== null) map[String(c.class_idx)] = label;
+          }
+          setDatasetInfo({ ...(data as DatasetInfo), label_map: map });
+        } else {
+          setDatasetInfo(data);
+        }
+      } catch (err) {
+        // If classes fetch fails, still set dataset info
+        setDatasetInfo(data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Bắt đầu training
+  const startTraining = useCallback(async (config: TrainingConfig): Promise<TrainingJob | null> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_URL}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to start training: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from training start endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Lấy job status
+  const getJobStatus = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch job status: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from job status endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
+  // Lấy metrics
+  const getJobMetrics = useCallback(async (jobId: string): Promise<TrainingMetrics[]> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch metrics: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from job metrics endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return [];
+    }
+  }, []);
+
+  // Note: `useWebSocketProgress` is provided as a top-level hook below
+
+  return {
+    datasetInfo,
+    loading,
+    error,
+    loadDatasetInfo,
+    startTraining,
+    getJobStatus,
+    getJobMetrics,
+    useWebSocketProgress,
+  };
+}
+
+// Top-level hook for subscribing to training WebSocket progress.
+// Kept separate to avoid calling hooks inside callbacks returned from other hooks.
+export function useWebSocketProgress(
+  jobId: string | null,
+  onMetric: (m: TrainingMetrics) => void,
+  onStatus: (j: TrainingJob) => void,
+  onError?: (msg: string) => void,
+) {
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!jobId) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/training/ws/${jobId}`;
+
+    wsRef.current = new WebSocket(wsUrl);
+
+    wsRef.current.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'metric') {
+          onMetric(message.data);
+        } else if (message.type === 'status') {
+          onStatus(message.data);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('WebSocket message parse error:', err);
+      }
+    };
+
+    wsRef.current.onerror = () => {
+      if (onError) onError('WebSocket connection error');
+      else console.error('WebSocket connection error');
+    };
+
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
+    // Intentionally include callbacks as dependencies
+  }, [jobId, onMetric, onStatus, onError]);
+
+  return wsRef.current;
+}

@@ -8,8 +8,10 @@ import EmptyState from "../components/ui/EmptyState";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
+import { useAuth } from "../hooks/useAuth";
 
 export default function LabelsPage() {
+  const { loading: authLoading, isAdmin } = useAuth();
   const [labels, setLabels] = useState<Label[]>([]);
   const [classes, setClasses] = useState<ClassRow[] | null>(null);
   const [sampleCounts, setSampleCounts] = useState<Record<string, number>>({});
@@ -164,9 +166,9 @@ export default function LabelsPage() {
         setError(null); // Clear previous errors
         // Try modern classes endpoint first - KHÔNG gửi dialect để lấy TẤT CẢ
         console.log('[LabelsPage] Fetching classes list...');
-        const classesRes = await getClassesList(language, undefined);
+        const classesRes = await getClassesList(language, '');
         console.log('[LabelsPage] getClassesList result:', classesRes);
-        
+
         if (!mounted) return;
         if (classesRes.ok) {
           // Debug: log classes response received from backend
@@ -177,7 +179,7 @@ export default function LabelsPage() {
 
           // fetch stats and map counts by class_uid - cũng KHÔNG filter dialect
           console.log('[LabelsPage] Fetching classes stats...');
-          const statsRes = await getClassesStats(language, undefined);
+          const statsRes = await getClassesStats(language, '');
           console.log('[LabelsPage] getClassesStats result:', statsRes);
           
           if (statsRes.ok && statsRes.data) {
@@ -364,6 +366,11 @@ export default function LabelsPage() {
       setDeleteSaving(false);
     }
   };
+
+  // Show loading state while auth loads
+  if (authLoading) {
+    return <LoadingSpinner />;
+  }
 
 
 
@@ -651,24 +658,32 @@ export default function LabelsPage() {
                     </div>
                   )}
 
-                  <div className={`mt-3 grid grid-cols-2 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="w-full justify-center px-3 py-2 text-xs"
-                      onClick={() => openEdit(item)}
-                    >
-                      Chỉnh sửa
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      className="w-full justify-center px-3 py-2 text-xs"
-                      onClick={() => openDelete(item)}
-                    >
-                      Xóa
-                    </Button>
-                  </div>
+                  {isAdmin && (
+                    <div className={`mt-3 grid grid-cols-2 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="w-full justify-center px-3 py-2 text-xs"
+                        onClick={() => openEdit(item)}
+                      >
+                        Chỉnh sửa
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        className="w-full justify-center px-3 py-2 text-xs"
+                        onClick={() => openDelete(item)}
+                      >
+                        Xóa
+                      </Button>
+                    </div>
+                  )}
+
+                  {!isAdmin && (
+                    <div className="mt-3 text-xs text-gray-500 italic text-center">
+                      Chỉ quản trị viên có thể chỉnh sửa
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

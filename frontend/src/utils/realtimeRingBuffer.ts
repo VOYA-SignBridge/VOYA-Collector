@@ -15,14 +15,16 @@ import { REALTIME_FEATURE_DIM } from "./realtimeFlatten";
 export class RealtimeRingBuffer {
   readonly capacity: number;
   readonly featureDim: number;
+  readonly minReadyFrames: number;
 
   private readonly store: Float32Array;
   private writeIndex: number;
   private count: number;
 
-  constructor(options?: { capacity?: number; featureDim?: number }) {
+  constructor(options?: { capacity?: number; featureDim?: number; minReadyFrames?: number }) {
     const capacity = options?.capacity ?? 60;
     const featureDim = options?.featureDim ?? REALTIME_FEATURE_DIM;
+    const minReadyFrames = options?.minReadyFrames ?? capacity;
 
     if (!Number.isInteger(capacity) || capacity <= 0) {
       throw new Error(`Invalid capacity: ${capacity}`);
@@ -30,17 +32,21 @@ export class RealtimeRingBuffer {
     if (!Number.isInteger(featureDim) || featureDim <= 0) {
       throw new Error(`Invalid featureDim: ${featureDim}`);
     }
+    if (!Number.isInteger(minReadyFrames) || minReadyFrames <= 0 || minReadyFrames > capacity) {
+      throw new Error(`Invalid minReadyFrames: ${minReadyFrames} (must be 1..${capacity})`);
+    }
 
     this.capacity = capacity;
     this.featureDim = featureDim;
+    this.minReadyFrames = minReadyFrames;
     this.store = new Float32Array(this.capacity * this.featureDim);
     this.writeIndex = 0;
     this.count = 0;
   }
 
-  /** Returns true when at least `capacity` frames have been appended. */
+  /** Returns true when at least `minReadyFrames` frames have been appended. */
   isReady(): boolean {
-    return this.count >= this.capacity;
+    return this.count >= this.minReadyFrames;
   }
 
   /** Number of frames currently held (0..capacity). */

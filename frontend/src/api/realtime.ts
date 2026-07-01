@@ -3,6 +3,12 @@ import type { Result } from "./validators";
 
 /**
  * Realtime model metadata (from GET /api/v1/realtime/models)
+ *
+ * AI Studio NOTE: import this type directly — do NOT redefine it in types.ts or aiStudio.ts.
+ *   import type { RealtimeModel } from "../api/realtime";
+ *
+ * Join key to DB model_versions: model.dialect === realtimeModel.dialect
+ * Do NOT compare model_family against realtimeModel.id — they differ ("hoa-de-tcn" ≠ "hoa-de").
  */
 export interface RealtimeModel {
   id: string;

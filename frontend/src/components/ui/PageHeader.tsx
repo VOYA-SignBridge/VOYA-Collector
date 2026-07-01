@@ -1,10 +1,17 @@
+import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
+
+export type BreadcrumbItem = string | { label: string; href?: string };
 
 interface PageHeaderProps {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
-  breadcrumb?: string[];
+  breadcrumb?: BreadcrumbItem[];
+}
+
+function resolveBreadcrumb(item: BreadcrumbItem): { label: string; href?: string } {
+  return typeof item === "string" ? { label: item } : item;
 }
 
 export default function PageHeader({ title, subtitle, actions, breadcrumb }: PageHeaderProps) {
@@ -12,14 +19,24 @@ export default function PageHeader({ title, subtitle, actions, breadcrumb }: Pag
     <div className="mb-4 sm:mb-8">
       {breadcrumb && (
         <nav className="flex flex-wrap items-center gap-y-1 text-xs sm:text-sm text-slate-500 mb-2 sm:mb-3">
-          {breadcrumb.map((item, index) => (
-            <span key={index}>
-              {index > 0 && <span className="mx-2 text-slate-300">/</span>}
-              <span className={index === breadcrumb.length - 1 ? "text-slate-800 font-medium" : "hover:text-slate-700"}>
-                {item}
+          {breadcrumb.map((rawItem, index) => {
+            const item = resolveBreadcrumb(rawItem);
+            const isLast = index === breadcrumb.length - 1;
+            return (
+              <span key={index}>
+                {index > 0 && <span className="mx-2 text-slate-300">/</span>}
+                {item.href && !isLast ? (
+                  <Link to={item.href} className="hover:text-slate-700 hover:underline transition-colors">
+                    {item.label}
+                  </Link>
+                ) : (
+                  <span className={isLast ? "text-slate-800 font-medium" : "hover:text-slate-700"}>
+                    {item.label}
+                  </span>
+                )}
               </span>
-            </span>
-          ))}
+            );
+          })}
         </nav>
       )}
       

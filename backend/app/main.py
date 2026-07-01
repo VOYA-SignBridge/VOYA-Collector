@@ -6,7 +6,7 @@ from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import dataset, upload, jobs, classes, inference, health, auth, realtime_proxy, tts
+from app.routers import dataset, upload, jobs, classes, inference, health, auth, realtime_proxy, tts, training
 from app.logging_config import configure_logging
 from app.db import init_db
 from app.services.tts_service import init_tts, close_tts
@@ -84,6 +84,7 @@ app.include_router(classes.router)
 app.include_router(inference.router)
 app.include_router(realtime_proxy.router)
 app.include_router(tts.router)
+app.include_router(training.router)
 
 # Versioned API (do not remove unversioned endpoints; FE may depend on them)
 api_v1 = APIRouter(prefix="/api/v1")
@@ -96,6 +97,7 @@ api_v1.include_router(inference.router)
 api_v1.include_router(auth.router)
 api_v1.include_router(realtime_proxy.router)
 api_v1.include_router(tts.router)
+api_v1.include_router(training.router)
 app.include_router(api_v1)
 
 # test

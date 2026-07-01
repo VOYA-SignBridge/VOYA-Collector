@@ -1,0 +1,356 @@
+/**
+ * Step 7: Results & Insights - Professional Layout
+ * Displays final training results and recommendations
+ */
+
+import React, { useState } from 'react';
+import type { TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
+import TestTrainedModelModal from './TestTrainedModelModal';
+
+interface Props {
+  metrics: TrainingMetrics[];
+  job: TrainingJob | null;
+}
+
+const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
+  const [showTestModal, setShowTestModal] = useState(false);
+
+  if (!metrics || metrics.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <div className="text-5xl mb-4">📋</div>
+        <p className="text-slate-600">Chưa có dữ liệu kết quả. Bắt đầu huấn luyện để xem kết quả.</p>
+      </div>
+    );
+  }
+
+  const finalMetric = metrics[metrics.length - 1];
+  const bestMetric = metrics.reduce((best, m) => (m.val_f1 > best.val_f1 ? m : best), metrics[0]);
+
+  // Use test metrics from job (loaded from checkpoint), fallback to final validation metrics
+  const accuracy = job?.test_acc ?? finalMetric.val_acc ?? 0;
+  const f1 = job?.test_f1 ?? finalMetric.val_f1 ?? 0;
+  const isTestMetrics = !!job?.test_acc;
+
+  const getQualityLevel = (acc: number) => {
+    if (acc >= 0.95) return { level: 'Xuất Sắc', color: 'from-emerald-500 to-teal-500', bgColor: 'bg-emerald-50' };
+    if (acc >= 0.90) return { level: 'Rất Tốt', color: 'from-blue-500 to-cyan-500', bgColor: 'bg-blue-50' };
+    if (acc >= 0.80) return { level: 'Tốt', color: 'from-yellow-500 to-amber-500', bgColor: 'bg-yellow-50' };
+    return { level: 'Cần Cải Thiện', color: 'from-orange-500 to-red-500', bgColor: 'bg-orange-50' };
+  };
+
+  const quality = getQualityLevel(accuracy);
+
+  const getRecommendations = () => {
+    const recs: Array<{ type: 'success' | 'warning' | 'info'; emoji: string; text: string }> = [];
+
+    if (metrics.length > 5) {
+      const recentMetrics = metrics.slice(-5);
+      const recentImprovement =
+        recentMetrics[recentMetrics.length - 1].val_f1 - recentMetrics[0].val_f1;
+      if (recentImprovement > 0.02) {
+        recs.push({
+          type: 'success',
+          emoji: '✓',
+          text: 'Model đang cải thiện tốt trong các epoch gần đây',
+        });
+      } else if (recentImprovement < -0.02) {
+        recs.push({
+          type: 'warning',
+          emoji: '⚠️',
+          text: 'Model có dấu hiệu overfitting — xem xét giảm số epochs hoặc thêm regularization',
+        });
+      }
+    }
+
+    if (finalMetric.handedness) {
+      const { left_only_acc, right_only_acc } = finalMetric.handedness;
+      if (Math.abs(left_only_acc - right_only_acc) > 0.1) {
+        recs.push({
+          type: 'warning',
+          emoji: '⚠️',
+          text: 'Độ chính xác giữa tay trái/phải lệch nhau — cân nhắc thêm dữ liệu cân bằng',
+        });
+      } else {
+        recs.push({
+          type: 'success',
+          emoji: '✓',
+          text: 'Model hoạt động tốt và cân bằng cho cả tay trái và phải',
+        });
+      }
+    }
+
+    if (accuracy >= 0.9) {
+      recs.push({
+        type: 'success',
+        emoji: '🎉',
+        text: 'Model sẵn sàng để sử dụng trong thực tế!',
+      });
+    } else if (accuracy >= 0.8) {
+      recs.push({
+        type: 'info',
+        emoji: '💡',
+        text: 'Cân nhân xét huấn luyện lại với dữ liệu lớn hơn hoặc điều chỉnh hyperparameters',
+      });
+    } else {
+      recs.push({
+        type: 'warning',
+        emoji: '💡',
+        text: 'Cần cải thiện — thêm dữ liệu huấn luyện và thử các kiến trúc khác',
+      });
+    }
+
+    return recs;
+  };
+
+  const recommendations = getRecommendations();
+
+  return (
+    <div className="space-y-6">
+      {/* Overall Quality Banner */}
+      <div className={`rounded-2xl bg-gradient-to-r ${quality.color} p-8 text-white shadow-lg`}>
+        <div className="text-center">
+          <div className="text-5xl mb-3">🎉</div>
+          <h2 className="text-3xl font-bold">Huấn Luyện Hoàn Tất!</h2>
+          <p className="mt-2 text-lg opacity-90">{quality.level}</p>
+          <div className="mt-4 text-4xl font-bold">{(accuracy * 100).toFixed(1)}%</div>
+          <p className="mt-1 text-sm opacity-75">
+            {isTestMetrics ? 'Độ Chính Xác Trên Tập Test' : 'Độ Chính Xác Validation (Epoch Cuối)'}
+          </p>
+        </div>
+      </div>
+
+      {/* Key Metrics Grid */}
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
+          📊 Chỉ Số Hiệu Suất Chính
+        </h3>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard
+            label="Accuracy (Độ Chính Xác)"
+            value={(accuracy * 100).toFixed(1)}
+            unit="%"
+            description="Tỷ lệ dự đoán đúng"
+            color="indigo"
+          />
+          <MetricCard
+            label="F1 Score"
+            value={f1.toFixed(3)}
+            unit=""
+            description="Cân bằng Precision/Recall"
+            color="purple"
+          />
+          <MetricCard
+            label="Epochs Completed"
+            value={finalMetric.epoch.toString()}
+            unit=""
+            description={`Tổng cộng ${job?.total_epochs || 0} epochs`}
+            color="blue"
+          />
+          <MetricCard
+            label="Best F1 Score"
+            value={bestMetric.val_f1.toFixed(3)}
+            unit=""
+            description={`Epoch ${bestMetric.epoch}`}
+            color="emerald"
+          />
+        </div>
+      </div>
+
+      {/* Handedness Breakdown */}
+      {finalMetric.handedness && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6">
+          <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
+            🤚 Hiệu Suất Theo Tay
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <HandednessCard
+              emoji="👈"
+              label="Tay Trái"
+              accuracy={finalMetric.handedness.left_only_acc}
+              count={finalMetric.handedness.left_only_n}
+            />
+            <HandednessCard
+              emoji="👉"
+              label="Tay Phải"
+              accuracy={finalMetric.handedness.right_only_acc}
+              count={finalMetric.handedness.right_only_n}
+            />
+            <HandednessCard
+              emoji="👐"
+              label="Cả Hai Tay"
+              accuracy={finalMetric.handedness.both_acc}
+              count={finalMetric.handedness.both_n}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
+          💡 Khuyến Nghị
+        </h3>
+        {recommendations.map((rec, idx) => (
+          <div
+            key={idx}
+            className={`rounded-lg border-l-4 p-4 ${
+              rec.type === 'success'
+                ? 'border-l-emerald-500 bg-emerald-50 text-emerald-900'
+                : rec.type === 'warning'
+                ? 'border-l-amber-500 bg-amber-50 text-amber-900'
+                : 'border-l-blue-500 bg-blue-50 text-blue-900'
+            }`}
+          >
+            <p>
+              <span className="font-bold">{rec.emoji}</span> {rec.text}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Model Info */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+        <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-3">
+          📦 Thông Tin Model
+        </h4>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-600">Job ID:</span>
+            <code className="font-mono text-xs bg-white rounded px-2 py-1 border border-slate-200">
+              {job?.id}
+            </code>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-600">Trạng thái:</span>
+            <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+              {job?.status}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-slate-600">Thời gian tạo:</span>
+            <span className="text-slate-900">
+              {job?.created_at
+                ? new Date(job.created_at).toLocaleString('vi-VN', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  })
+                : 'N/A'}
+            </span>
+          </div>
+          {job?.checkpoint_path && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-start justify-between">
+                <span className="text-slate-600">Model Path:</span>
+                <code className="font-mono text-xs bg-white rounded px-2 py-1 border border-slate-200 break-all">
+                  {job.checkpoint_path}
+                </code>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    // Copy path to clipboard
+                    navigator.clipboard.writeText(job.checkpoint_path || '');
+                  }}
+                  className="text-xs px-3 py-1.5 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium transition"
+                >
+                  📋 Copy Path
+                </button>
+                <button
+                  onClick={() => setShowTestModal(true)}
+                  className="text-xs px-3 py-1.5 rounded bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-medium transition shadow-sm"
+                >
+                  🧪 Test Model Realtime
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Training Complete Message */}
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
+        <p className="text-sm text-emerald-900">
+          ✅ Model đã được lưu và sẵn sàng để test. Nhấp nút "Test Model Realtime" để kiểm tra hiệu suất.
+        </p>
+      </div>
+
+      {/* Test Trained Model Modal */}
+      {job && (
+        <TestTrainedModelModal
+          isOpen={showTestModal}
+          onClose={() => setShowTestModal(false)}
+          modelId={`training_${job.id}`}
+        />
+      )}
+    </div>
+  );
+};
+
+function MetricCard({
+  label,
+  value,
+  unit,
+  description,
+  color,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  description: string;
+  color: 'indigo' | 'purple' | 'blue' | 'emerald';
+}) {
+  const colorClasses = {
+    indigo: 'border-indigo-200 bg-indigo-50',
+    purple: 'border-purple-200 bg-purple-50',
+    blue: 'border-blue-200 bg-blue-50',
+    emerald: 'border-emerald-200 bg-emerald-50',
+  };
+
+  const valueClasses = {
+    indigo: 'text-indigo-600',
+    purple: 'text-purple-600',
+    blue: 'text-blue-600',
+    emerald: 'text-emerald-600',
+  };
+
+  return (
+    <div className={`rounded-xl border p-4 ${colorClasses[color]}`}>
+      <p className="text-xs text-slate-600 mb-2">{label}</p>
+      <div className="flex items-baseline gap-1">
+        <div className={`text-2xl font-bold ${valueClasses[color]}`}>{value}</div>
+        <span className={`text-sm font-semibold ${valueClasses[color]}`}>{unit}</span>
+      </div>
+      <p className="text-xs text-slate-600 mt-2">{description}</p>
+    </div>
+  );
+}
+
+function HandednessCard({
+  emoji,
+  label,
+  accuracy,
+  count,
+}: {
+  emoji: string;
+  label: string;
+  accuracy: number;
+  count: number;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center">
+      <div className="text-4xl mb-3">{emoji}</div>
+      <h4 className="font-semibold text-slate-900">{label}</h4>
+      <div className="mt-3">
+        <div className="text-2xl font-bold text-indigo-600">{(accuracy * 100).toFixed(1)}%</div>
+        <p className="text-xs text-slate-500 mt-1">{count} mẫu</p>
+      </div>
+    </div>
+  );
+}
+
+export default ResultsInsights;

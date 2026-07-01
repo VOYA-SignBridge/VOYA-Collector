@@ -1,8 +1,12 @@
 import { useState, Suspense, lazy, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import UploadVideoForm from "../components/UploadVideoForm";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
 import Badge from "../components/ui/Badge";
+import Button from "../components/ui/Button";
+import LoadingSpinner from "../components/ui/LoadingSpinner";
+import { useAuth } from "../hooks/useAuth";
 const CaptureCamera = lazy(() => import("../components/CaptureCamera"));
 
 type Feedback = {
@@ -11,6 +15,8 @@ type Feedback = {
 };
 
 export default function UploadPage() {
+  const navigate = useNavigate();
+  const { loading: authLoading, isAuthenticated } = useAuth();
   const [tab, setTab] = useState<"video" | "camera">("camera"); // Start with camera for faster data collection
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -34,6 +40,11 @@ export default function UploadPage() {
     const timer = window.setTimeout(() => setFeedback(null), 2500);
     return () => window.clearTimeout(timer);
   }, [feedback]);
+
+  // Show loading while auth is fetching
+  if (authLoading) {
+    return <LoadingSpinner />;
+  }
 
   return (
     <div className="space-y-6">
@@ -178,21 +189,40 @@ export default function UploadPage() {
       )}
 
       {/* Content Area */}
-      {tab === "video" && <UploadVideoForm onError={(m) => setError(m)} />}
-      {tab === "camera" && (
-        <Suspense fallback={
-          <div className="card">
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <span className="ml-3 text-gray-600">Đang tải giao diện camera...</span>
-            </div>
-          </div>
-        }>
-          <CaptureCamera
-            onError={(m: string) => setError(m)}
-            onSuccess={(m: string) => setFeedback({ type: 'success', message: m })}
-          />
-        </Suspense>
+      {!isAuthenticated && (
+        <div className="card p-6 text-center">
+          <h2 className="text-xl font-semibold mb-4">Cần đăng nhập để tải lên</h2>
+          <p className="text-gray-600 mb-6">
+            Vui lòng đăng nhập bằng tài khoản của bạn để bắt đầu gửi dữ liệu ký hiệu tay.
+          </p>
+          <Button
+            variant="primary"
+            onClick={() => navigate('/login')}
+          >
+            Đăng nhập
+          </Button>
+        </div>
+      )}
+
+      {isAuthenticated && (
+        <>
+          {tab === "video" && <UploadVideoForm onError={(m) => setError(m)} />}
+          {tab === "camera" && (
+            <Suspense fallback={
+              <div className="card">
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <span className="ml-3 text-gray-600">Đang tải giao diện camera...</span>
+                </div>
+              </div>
+            }>
+              <CaptureCamera
+                onError={(m: string) => setError(m)}
+                onSuccess={(m: string) => setFeedback({ type: 'success', message: m })}
+              />
+            </Suspense>
+          )}
+        </>
       )}
     </div>
   );

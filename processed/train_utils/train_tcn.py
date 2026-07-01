@@ -7,6 +7,8 @@ import math
 import os
 import random
 import re
+import shutil
+import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +29,38 @@ except Exception:  # pragma: no cover
     from processed.train_utils.metrics import sequence_consistency_score  # type: ignore
 
 try:
+    from .handedness_analysis import HandednessAnalyzer, detect_hand_presence  # type: ignore
+except Exception:  # pragma: no cover
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.train_utils.handedness_analysis import HandednessAnalyzer, detect_hand_presence  # type: ignore
+
+try:
+    from .signer_diversity_checker import check_signer_diversity  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.signer_diversity_checker import check_signer_diversity  # type: ignore
+    except Exception:
+        check_signer_diversity = None  # diagnostic optional
+
+try:
+    from .sequence_length_analyzer import check_sequence_length_bias  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.sequence_length_analyzer import check_sequence_length_bias  # type: ignore
+    except Exception:
+        check_sequence_length_bias = None  # diagnostic optional
+
+try:
+    from .imbalance_detector import detect_imbalance  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.imbalance_detector import detect_imbalance  # type: ignore
+    except Exception:
+        detect_imbalance = None  # diagnostic optional
+
+try:
     from .augmentation import build_train_augment
 except Exception:
     import sys
@@ -43,6 +77,14 @@ except Exception:  # pragma: no cover
     from pathlib import Path as _P
     sys.path.append(str(_P(__file__).resolve().parents[2]))
     from processed.train_utils.dataset_loader import NPZSignDataset # type: ignore
+
+try:
+    try:
+        from .tracking_client import TrackingClient as _TrackingClient  # type: ignore
+    except ImportError:
+        from processed.train_utils.tracking_client import TrackingClient as _TrackingClient  # type: ignore
+except Exception:
+    _TrackingClient = None  # type: ignore
 
 
 EXPECTED_FEATURE_DIM = 126
@@ -164,14 +206,19 @@ class TCNClassifier(nn.Module):
         if self.classifier.bias is not None:
             nn.init.zeros_(self.classifier.bias)
 
-    def forward(self, x_btd: torch.Tensor) -> torch.Tensor:
+    def encode(self, x_btd: torch.Tensor) -> torch.Tensor:
         """
-        x_btd: [B, T, D]
-        Expected:
-            T = 60
-            D = 126
-        """
+        Returns pooled backbone representation: [B, channels].
 
+        Backbone pooling contract: unmasked_gap_v1
+          - Unweighted mean over all T=60 time positions
+          - Front-padded zero frames are included in the mean
+          - Output shape is always [B, channels] regardless of input length
+
+        This output is numerically identical to the intermediate `pooled`
+        value that forward() produced internally before the classifier head.
+        DO NOT change pooling behavior here without also changing forward().
+        """
         if x_btd.ndim != 3:
             raise RuntimeError(
                 f"Expected 3D tensor [B,T,D], got {x_btd.shape}"
@@ -182,18 +229,22 @@ class TCNClassifier(nn.Module):
                 f"Expected feature_dim={EXPECTED_FEATURE_DIM}, got {x_btd.shape}"
             )
 
-        x = x_btd.transpose(1, 2)
+        x = x_btd.transpose(1, 2)   # [B, D, T]
 
-        x = self.proj(x)
+        x = self.proj(x)             # [B, proj_dim, T]
 
-        x = self.network(x)
+        x = self.network(x)          # [B, channels, T]
 
-        # Global average pooling over time
-        pooled = x.mean(dim=2)
+        return x.mean(dim=2)         # [B, channels] — unmasked GAP over T
 
-        logits = self.classifier(pooled)
-
-        return logits
+    def forward(self, x_btd: torch.Tensor) -> torch.Tensor:
+        """
+        x_btd: [B, T, D]
+        Expected:
+            T = 60
+            D = 126
+        """
+        return self.classifier(self.encode(x_btd))
 
 
 @dataclass
@@ -593,6 +644,85 @@ def evaluate(model: nn.Module, loader: DataLoader, device: str, num_classes: int
     mf1 = macro_f1(logits, targets, num_classes) if logits.numel() > 0 else 0.0
     return total_loss / n, total_acc / n, mf1
 
+
+@torch.no_grad()
+def evaluate_with_handedness(
+    model: nn.Module,
+    loader: DataLoader,
+    device: str,
+    num_classes: int,
+) -> Tuple[float, float, float, Dict[str, float]]:
+    """
+    Evaluate with per-hand accuracy tracking.
+
+    Returns:
+        (loss, accuracy, macro_f1, handedness_metrics)
+    """
+    model.eval()
+    criterion = nn.CrossEntropyLoss()
+    total_loss = 0.0
+    total_acc = 0.0
+    n = 0
+
+    # Per-hand tracking
+    left_only_acc = 0.0
+    left_only_n = 0
+    right_only_acc = 0.0
+    right_only_n = 0
+    both_acc = 0.0
+    both_n = 0
+
+    all_logits: List[torch.Tensor] = []
+    all_targets: List[torch.Tensor] = []
+
+    for X, y, meta in loader:
+        X = X.to(device)
+        y = y.to(device)
+        logits = model(X)
+        loss = criterion(logits, y)
+
+        preds = logits.argmax(1)
+        correct = (preds == y).float()
+
+        bs = y.size(0)
+        total_loss += loss.item() * bs
+        total_acc += correct.sum().item()
+        n += bs
+
+        # Analyze hand presence per sample
+        X_np = X.cpu().numpy()
+        for i in range(bs):
+            left_p, right_p = detect_hand_presence(X_np[i])
+            is_correct = bool(correct[i].item())
+
+            if left_p and not right_p:
+                left_only_acc += float(is_correct)
+                left_only_n += 1
+            elif right_p and not left_p:
+                right_only_acc += float(is_correct)
+                right_only_n += 1
+            elif left_p and right_p:
+                both_acc += float(is_correct)
+                both_n += 1
+
+        all_logits.append(logits.cpu())
+        all_targets.append(y.cpu())
+
+    logits = torch.cat(all_logits, dim=0) if all_logits else torch.empty(0, num_classes)
+    targets = torch.cat(all_targets, dim=0) if all_targets else torch.empty(0, dtype=torch.long)
+    mf1 = macro_f1(logits, targets, num_classes) if logits.numel() > 0 else 0.0
+
+    hand_metrics = {
+        'left_only_acc': left_only_acc / max(1, left_only_n),
+        'left_only_n': left_only_n,
+        'right_only_acc': right_only_acc / max(1, right_only_n),
+        'right_only_n': right_only_n,
+        'both_acc': both_acc / max(1, both_n),
+        'both_n': both_n,
+    }
+
+    return total_loss / n, total_acc / n, mf1, hand_metrics
+
 def build_checkpoint(
     *,
     model,
@@ -602,6 +732,7 @@ def build_checkpoint(
     label_map,
     te_acc=None,
     te_f1=None,
+    te_hand_metrics=None,
     stamp="",
 ):
     return {
@@ -648,6 +779,7 @@ def build_checkpoint(
         "metrics": {
             "test_acc": te_acc,
             "test_f1": te_f1,
+            "handedness": te_hand_metrics or {},
         },
 
         "created_at": stamp,
@@ -716,7 +848,26 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--out_dir", type=Path, default=Path("processed/train_utils/outputs"))
+    parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
+    parser.add_argument("--run_diagnostics", action="store_true", help="Run signer diversity, imbalance, and sequence length diagnostics after training")
+    parser.add_argument(
+        "--track",
+        action="store_true",
+        default=False,
+        help="Enable experiment tracking via the SignBridge API. Training is unaffected if the API is unavailable.",
+    )
+    parser.add_argument(
+        "--api-url",
+        type=str,
+        default="http://localhost:8000/api/v1",
+        help="Base URL for the SignBridge tracking API (default: http://localhost:8000/api/v1).",
+    )
+    parser.add_argument(
+        "--experiment-id",
+        type=int,
+        default=None,
+        help="Attach tracking to an existing experiment ID instead of creating a new one.",
+    )
     args = parser.parse_args()
 
     cfg = TrainConfig(
@@ -944,35 +1095,126 @@ def main() -> None:
     best_state = None
     patience = 10
     since_best = 0
+    _best_epoch_track = 0
+    _best_val_acc_track = 0.0
 
-    for epoch in range(1, cfg.epochs + 1):
-        tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, cfg.device)
-        va_loss, va_acc, va_f1 = evaluate(model, val_loader, cfg.device, num_classes)
-        scheduler.step()
-        improved = va_f1 > best_val_f1
-        if improved:
-            best_val_f1 = va_f1
-            best_state = {k: v.cpu() for k, v in model.state_dict().items()}
-            since_best = 0
-        else:
-            since_best += 1
+    # For handedness analysis
+    hand_analyzer = HandednessAnalyzer()
 
-        print(
-            f"epoch {epoch:03d} | train loss {tr_loss:.4f} acc {tr_acc:.4f} | val loss {va_loss:.4f} acc {va_acc:.4f} f1 {va_f1:.4f}"
-        )
-        if since_best >= patience:
-            print("Early stopping: no improvement in validation F1.")
-            break
+    # === EXPERIMENT TRACKING SETUP ===
+    # Active only when --track is passed. All failures are caught and logged.
+    # If the API is offline or returns errors, training continues unaffected.
+    tracker = None
+    experiment_id = None
+    if args.track and _TrackingClient is not None:
+        try:
+            tracker = _TrackingClient(args.api_url)
+            if args.experiment_id is not None:
+                # Attach to existing experiment — caller (e.g. run_training_job) already
+                # created the row and set status to "running". Skip create_experiment().
+                experiment_id = args.experiment_id
+                print(f"[TRACKING] Attached to existing experiment {experiment_id} at {args.api_url}")
+            else:
+                if subset_mode:
+                    _subset_path_track = str(subset_dir.resolve())
+                else:
+                    # Freeze a snapshot of the live splits so every tracked experiment
+                    # references an immutable directory, not the mutable splits folder.
+                    _snap_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    _snapshot_dir = cfg.out_dir / f"snapshot_{_snap_stamp}"
+                    _snapshot_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(cfg.train_csv, _snapshot_dir / "train.csv")
+                    shutil.copy2(cfg.val_csv,   _snapshot_dir / "val.csv")
+                    shutil.copy2(cfg.test_csv,  _snapshot_dir / "test.csv")
+                    _subset_path_track = str(_snapshot_dir.resolve())
+                _dialect_track = "+".join(dialects) if dialects else "all"
+                experiment_id = tracker.create_experiment(
+                    dialect=_dialect_track,
+                    subset_path=_subset_path_track,
+                    hyperparameters={
+                        "lr": cfg.lr,
+                        "batch_size": cfg.batch_size,
+                        "epochs": cfg.epochs,
+                        "dropout": cfg.dropout,
+                        "channels": cfg.channels,
+                        "levels": cfg.levels,
+                        "kernel_size": cfg.kernel_size,
+                        "seed": cfg.seed,
+                        "weight_decay": cfg.weight_decay,
+                    },
+                    split_manifest={
+                        "train_count": len(train_loader.dataset),
+                        "val_count": len(val_loader.dataset),
+                        "test_count": len(test_loader.dataset),
+                    },
+                )
+                if experiment_id is not None:
+                    tracker.update_status(experiment_id, "running")
+                    print(f"[TRACKING] Experiment {experiment_id} created at {args.api_url}")
+        except Exception as _te:
+            print(f"[TRACKING] Setup failed (tracking disabled for this run): {_te}")
+            tracker = None
+            experiment_id = None
+    elif args.track:
+        print("[TRACKING] tracking_client.py not available; --track disabled.")
+
+    try:
+        for epoch in range(1, cfg.epochs + 1):
+            tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, cfg.device)
+            va_loss, va_acc, va_f1, hand_metrics = evaluate_with_handedness(model, val_loader, cfg.device, num_classes)
+            _lr_logged = float(opt.param_groups[0]['lr'])
+            scheduler.step()
+            improved = va_f1 > best_val_f1
+            if improved:
+                best_val_f1 = va_f1
+                best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+                since_best = 0
+                _best_epoch_track = epoch
+                _best_val_acc_track = va_acc
+            else:
+                since_best += 1
+
+            hand_str = f"left_only:{hand_metrics['left_only_acc']:.3f}({hand_metrics['left_only_n']}) right_only:{hand_metrics['right_only_acc']:.3f}({hand_metrics['right_only_n']}) both:{hand_metrics['both_acc']:.3f}({hand_metrics['both_n']})"
+            print(
+                f"epoch {epoch:03d} | train loss {tr_loss:.4f} acc {tr_acc:.4f} | val loss {va_loss:.4f} acc {va_acc:.4f} f1 {va_f1:.4f}"
+            )
+            print(f"           | {hand_str}")
+
+            if tracker and experiment_id:
+                tracker.log_metric(
+                    experiment_id, epoch,
+                    tr_loss, tr_acc, va_loss, va_acc, va_f1, _lr_logged,
+                )
+
+            if since_best >= patience:
+                print("Early stopping: no improvement in validation F1.")
+                break
+    except BaseException:
+        if tracker and experiment_id:
+            tracker.update_status(experiment_id, "failed")
+        raise
 
     if best_state is not None:
         model.load_state_dict(best_state)  # type: ignore[arg-type]
 
-    te_loss, te_acc, te_f1 = evaluate(model, test_loader, cfg.device, num_classes)
+    te_loss, te_acc, te_f1, te_hand_metrics = evaluate_with_handedness(model, test_loader, cfg.device, num_classes)
     # Note: SCS (Sequence Consistency Score) pertains to stability across consecutive window predictions.
     # This trainer produces one prediction per sequence, not per sliding window, so SCS is not applicable here.
     # We include it as None in the summary for compatibility with realtime/windowed evaluation.
     te_scs = None
+    print(f"\n{'='*70}")
+    print("TEST METRICS")
+    print(f"{'='*70}")
     print(f"test loss {te_loss:.4f} acc {te_acc:.4f} f1 {te_f1:.4f}")
+    print(f"Handedness breakdown:")
+    print(f"  Left-hand-only:  {te_hand_metrics['left_only_acc']:.4f} ({te_hand_metrics['left_only_n']} samples)")
+    print(f"  Right-hand-only: {te_hand_metrics['right_only_acc']:.4f} ({te_hand_metrics['right_only_n']} samples)")
+    print(f"  Both hands:      {te_hand_metrics['both_acc']:.4f} ({te_hand_metrics['both_n']} samples)")
+    print(f"{'='*70}\n")
+
+    if tracker and experiment_id:
+        tracker.update_status(experiment_id, "completed")
+        tracker.update_summary(experiment_id, _best_epoch_track, _best_val_acc_track, best_val_f1)
 
     # save
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -984,12 +1226,39 @@ def main() -> None:
         label_map=label_map,
         te_acc=te_acc,
         te_f1=te_f1,
+        te_hand_metrics=te_hand_metrics,
         stamp=stamp,
     )
     prefix = f"tcn_{stamp}" if not subset_mode else f"tcn_{subset_tag}_{stamp}"
     out_ckpt = cfg.out_dir / f"{prefix}.pt"
 
     torch.save(final_checkpoint, out_ckpt)
+
+    if tracker and experiment_id:
+        _model_family_track = f"{subset_tag}-tcn" if subset_mode else "tcn"
+        _dialect_model_track = "+".join(dialects) if dialects else "all"
+        _runtime_env_track = {
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "pytorch_version": torch.__version__,
+            "cuda_version": torch.version.cuda or "none",
+            "device": cfg.device,
+        }
+        tracker.register_model(
+            experiment_id=experiment_id,
+            model_family=_model_family_track,
+            dialect=_dialect_model_track,
+            checkpoint_path=str(out_ckpt.resolve()),
+            feature_contract={
+                "extractor": "mediapipe_hands",
+                "input_shape": [60, 126],
+                "normalization": "hands126_v1",
+                "coordinate_order": "xyz",
+                "missing_hands": "zero_filled",
+            },
+            runtime_env=_runtime_env_track,
+            accuracy=te_acc,
+            f1_macro=te_f1,
+        )
 
     cfg_json = {
         k: (str(v) if isinstance(v, Path) else v)
@@ -1004,12 +1273,65 @@ def main() -> None:
         "feature_dim": in_dim,
         "num_classes": num_classes,
         "val_best_f1": best_val_f1,
-        "test": {"loss": te_loss, "acc": te_acc, "f1": te_f1, "scs": te_scs},
+        "test": {
+            "loss": te_loss,
+            "acc": te_acc,
+            "f1": te_f1,
+            "scs": te_scs,
+            "handedness": {
+                "left_only_acc": te_hand_metrics['left_only_acc'],
+                "left_only_n": te_hand_metrics['left_only_n'],
+                "right_only_acc": te_hand_metrics['right_only_acc'],
+                "right_only_n": te_hand_metrics['right_only_n'],
+                "both_acc": te_hand_metrics['both_acc'],
+                "both_n": te_hand_metrics['both_n'],
+            }
+        },
         "checkpoint": str(out_ckpt),
     }
 
     (cfg.out_dir / f"{prefix}.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Saved checkpoint and summary to {cfg.out_dir}")
+
+    # OPTIONAL: Run diagnostic tools (additive observability only)
+    if args.run_diagnostics:
+        print(f"\n{'='*80}")
+        print("RUNNING DIAGNOSTICS (ADDITIVE OBSERVABILITY)")
+        print(f"{'='*80}")
+
+        label_by_idx = {int(v): k for k, v in label_map.items()}
+
+        # Signer diversity check
+        if check_signer_diversity is not None:
+            try:
+                check_signer_diversity(cfg.train_csv, label_by_idx)
+            except Exception as e:
+                print(f"[WARN] Signer diversity check failed: {e}")
+
+        # Imbalance detection
+        if detect_imbalance is not None:
+            try:
+                detect_imbalance(cfg.train_csv, label_by_idx)
+            except Exception as e:
+                print(f"[WARN] Imbalance detection failed: {e}")
+
+        # Sequence length analysis
+        if check_sequence_length_bias is not None:
+            try:
+                features_root = _find_features_root_from_csv(cfg.train_csv)
+                if features_root is None:
+                    try:
+                        dataset_root = cfg.train_csv.resolve().parents[2]
+                        features_root = dataset_root / "dataset" / "features"
+                    except Exception:
+                        features_root = None
+
+                if features_root is not None and features_root.exists():
+                    check_sequence_length_bias(cfg.train_csv, features_root, label_by_idx)
+                else:
+                    print(f"[WARN] Features root not found for sequence length analysis")
+            except Exception as e:
+                print(f"[WARN] Sequence length analysis failed: {e}")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,15 @@ import Button from "./ui/Button";
 
 const AUTH_EVENT = "voya:auth-change";
 
+export type FlatNavItem = { name: string; href: string; icon: string; end?: boolean };
+export type NavSection = {
+  section: true;
+  name: string;
+  icon: string;
+  children: FlatNavItem[];
+};
+export type AnyNavItem = FlatNavItem | NavSection;
+
 export default function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
@@ -51,10 +60,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     };
   }, [hasToken]);
 
-  const navigation = [
-    { name: "Bảng điều khiển", href: "/upload", icon: "📊" },
+  const navigation: AnyNavItem[] = [
+    { name: "Trang chủ", href: "/", icon: "🏠", end: true },
+    { name: "Đóng góp dữ liệu", href: "/upload", icon: "📤" },
     { name: "Thư viện nhãn", href: "/labels", icon: "🏷️" },
-    { name: "Nhận dạng realtime", href: "/realtime", icon: "🖐️" }
+    { name: "Nhận dạng realtime", href: "/realtime", icon: "🖐️" },
+    { name: "Huấn luyện model", href: "/training", icon: "🚀" },
+    // AI Studio removed
   ];
 
   const handleNewSession = useCallback(() => {
@@ -69,9 +81,10 @@ export default function Layout({ children }: { children: ReactNode }) {
     navigate("/login");
   }, [navigate]);
 
-  const NavItem = ({ item }: { item: typeof navigation[0] }) => (
+  const NavItem = ({ item }: { item: FlatNavItem }) => (
     <NavLink
       to={item.href}
+      end={item.end}
       className={({ isActive }) =>
         `group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
           isActive
@@ -89,6 +102,39 @@ export default function Layout({ children }: { children: ReactNode }) {
         </svg>
       </div>
     </NavLink>
+  );
+
+  const SectionNavItem = ({ item }: { item: NavSection }) => (
+    <div className="mt-3">
+      <div className="px-4 py-2 flex items-center gap-2">
+        <div className="flex-1 h-px bg-slate-200" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0">
+          <span className="mr-1">{item.icon}</span>
+          {item.name}
+        </span>
+        <div className="flex-1 h-px bg-slate-200" />
+      </div>
+      <div className="space-y-1">
+        {item.children.map((child) => (
+          <NavLink
+            key={child.href}
+            to={child.href}
+            end={child.end}
+            className={({ isActive }) =>
+              `group flex items-center pl-8 pr-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
+                isActive
+                  ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-lg shadow-indigo-500/25"
+                  : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/60"
+              }`
+            }
+            onClick={() => setSidebarOpen(false)}
+          >
+            <span className="mr-3 text-base">{child.icon}</span>
+            {child.name}
+          </NavLink>
+        ))}
+      </div>
+    </div>
   );
 
   if (isAuthPage) {
@@ -172,9 +218,13 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
 
           <nav className="flex-1 px-4 py-6 space-y-2">
-            {navigation.map((item) => (
-              <NavItem key={item.name} item={item} />
-            ))}
+            {navigation.map((item) =>
+              "section" in item && item.section ? (
+                <SectionNavItem key={item.name} item={item} />
+              ) : (
+                <NavItem key={(item as FlatNavItem).name} item={item as FlatNavItem} />
+              )
+            )}
           </nav>
 
           <div className="mt-auto border-t border-slate-200/50 p-4">

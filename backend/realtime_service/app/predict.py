@@ -23,26 +23,26 @@ def _validate_model_available(app_state: Any, model_id: str) -> Any:
 
 
 def _normalize_frames(normalization_module: Any, frames: list) -> np.ndarray:
-    """Normalize each frame using processed/shared/normalization.py.
+    """Normalize frames efficiently using list comprehension.
 
     Validates shape BEFORE calling normalization to ensure semantic safety.
     Returns shape (60, 126) numpy array.
     """
-    normalized_frames = []
-    for i, frame in enumerate(frames):
-        # Validate frame size before normalization
-        frame_arr = np.asarray(frame, dtype=np.float32)
-        if frame_arr.size != 126:
-            raise ValueError(f"frame[{i}]: expected 126 elements, got {frame_arr.size}")
+    # Pre-validate input
+    if len(frames) != 60:
+        raise ValueError(f"expected 60 frames, got {len(frames)}")
 
-        norm_frame = normalization_module.normalize_hands_vector_126(frame_arr)
+    # Vectorized normalization using numpy array instead of Python loop
+    frames_array = np.asarray(frames, dtype=np.float32)
+    if frames_array.shape != (60, 126):
+        raise ValueError(f"expected shape (60, 126), got {frames_array.shape}")
 
-        # Verify output shape (defensive check)
-        if norm_frame.size != 126:
-            raise ValueError(f"frame[{i}]: normalization produced {norm_frame.size} elements, expected 126")
+    normalized_frames = np.array([
+        normalization_module.normalize_hands_vector_126(frame)
+        for frame in frames_array
+    ], dtype=np.float32)
 
-        normalized_frames.append(norm_frame)
-    return np.array(normalized_frames, dtype=np.float32)
+    return normalized_frames
 
 
 def _run_inference(model: torch.nn.Module, frames: np.ndarray) -> tuple:

@@ -4,6 +4,8 @@ import Layout from "./components/Layout";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { loadAuthToken } from "./api/axiosClient";
 import { me } from "./api/auth";
+import { ToastProvider } from "./hooks/useToast";
+import ToastContainer from "./components/ui/ToastContainer";
 
 // Minimal type for the debug interface exposed on window
 // interface DebuggerInterface {
@@ -11,9 +13,11 @@ import { me } from "./api/auth";
 //   setState?: (s: { enabled?: boolean }) => void;
 // }
 
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
 const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPage"));
+const TrainingPipeline = lazy(() => import("./pages/training/TrainingPipeline"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 
@@ -52,27 +56,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const [authToken, setAuthToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Kiểm tra token khi app startup
-    const token = loadAuthToken();
-    setAuthToken(token);
     setLoading(false);
-
-    // keep in sync with other tabs / auth changes
-    const handleAuthChange = () => {
-      setAuthToken(loadAuthToken());
-    };
-
-    window.addEventListener("voya:auth-change", handleAuthChange);
-    window.addEventListener("storage", handleAuthChange);
-
-    return () => {
-      window.removeEventListener("voya:auth-change", handleAuthChange);
-      window.removeEventListener("storage", handleAuthChange);
-    };
   }, []);
 
   // useEffect(() => {
@@ -98,52 +85,48 @@ function App() {
   }
 
   return (
-    <Router>
-      <Layout>
-        <Suspense fallback={<div className="p-6">Loading...</div>}>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+    <ToastProvider>
+      <Router>
+        <Layout>
+          <Suspense fallback={<div className="p-6">Loading...</div>}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
 
-            <Route
-              path="/upload"
-              element={
-                <ProtectedRoute>
-                  <UploadPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/labels"
-              element={
-                <ProtectedRoute>
-                  <LabelsPage />
-                </ProtectedRoute>
-              }
-            />
+              <Route path="/labels" element={<LabelsPage />} />
 
-            <Route
-              path="/realtime"
-              element={
-                <ProtectedRoute>
-                  <RealtimeRecognitionPage />
-                </ProtectedRoute>
-              }
-            />
+              <Route path="/realtime" element={<RealtimeRecognitionPage />} />
 
-            <Route
-              path="/"
-              element={<Navigate to={authToken ? "/upload" : "/login"} replace />}
-            />
-            <Route
-              path="*"
-              element={<Navigate to={authToken ? "/upload" : "/login"} replace />}
-            />
-          </Routes>
-        </Suspense>
-      </Layout>
-      {/* <DebugPanel /> */}
-    </Router>
+              <Route
+                path="/training"
+                element={
+                  <ProtectedRoute>
+                    <TrainingPipeline />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/upload"
+                element={
+                  <ProtectedRoute>
+                    <UploadPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* AI Studio removed */}
+
+              <Route path="/" element={<DashboardPage />} />
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </Layout>
+        {/* <DebugPanel /> */}
+        <ToastContainer />
+      </Router>
+    </ToastProvider>
   );
 }
 
