@@ -1,3 +1,22 @@
+/**
+ * RECHARTS LOADING CONVENTION — AI Studio must follow this pattern.
+ *
+ * Recharts is lazy-loaded into component state to keep the initial bundle small.
+ * Access chart components as namespace members: Recharts.ComposedChart, Recharts.Line, etc.
+ *
+ * Pattern:
+ *   const [Recharts, setRecharts] = useState<typeof import("recharts") | null>(null);
+ *   useEffect(() => {
+ *     let mounted = true;
+ *     import("recharts").then((mod) => { if (mounted) setRecharts(mod); });
+ *     return () => { mounted = false; };
+ *   }, []);
+ *   if (!Recharts) return <div>Loading chart…</div>;
+ *   // Then: <Recharts.ResponsiveContainer>, <Recharts.ComposedChart>, etc.
+ *
+ * Do NOT use static top-level imports:  import { ComposedChart } from "recharts"
+ * That would pull Recharts into the main bundle, defeating the chunk strategy.
+ */
 import { useEffect, useMemo, useState } from "react";
 import type { Session } from "../../types";
 

@@ -46,6 +46,7 @@ services:
     volumes:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
+      - .:/workspace
     env_file:
       - .env
     environment:
@@ -70,6 +71,7 @@ services:
     volumes:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
+      - .:/workspace
     environment:
       TTS_REDIS_URL: redis://redis:6379/0
     command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
@@ -89,6 +91,7 @@ services:
     volumes:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
+      - .:/workspace
     environment:
       TTS_REDIS_URL: redis://redis:6379/0
     command: celery -A app.worker.celery_app beat --loglevel=${LOG_LEVEL:-INFO} --schedule=/tmp/celerybeat-schedule
@@ -133,6 +136,7 @@ services:
       - "8001:8001"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx.conf.d:/etc/nginx/conf.d:ro
     depends_on:
       - frontend
       - backend

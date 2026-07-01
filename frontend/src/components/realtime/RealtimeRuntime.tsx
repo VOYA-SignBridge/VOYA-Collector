@@ -1,3 +1,26 @@
+/**
+ * AI Studio: DO NOT copy patterns from this file into new components.
+ *
+ * Anti-patterns present here (all replaced by shared primitives in src/components/ui/):
+ *
+ *  ❌ Raw <button> with full inline Tailwind string (lines ~503, ~532)
+ *     → Use: import Button from "../ui/Button"
+ *
+ *  ❌ Raw <w-2 h-2 rounded-full bg-green-500> status dots (lines ~550–555)
+ *     → Use: import Badge from "../ui/Badge" with variant="success"|"warning"|etc.
+ *
+ *  ❌ Inline bg-amber-50 / bg-red-50 error divs (lines ~465–480)
+ *     → Use: import ErrorBanner from "../ErrorBanner"
+ *
+ *  ❌ Plain text "Đang tải bộ nhận diện..." loading state (line ~490)
+ *     → Use: import LoadingSpinner from "../ui/LoadingSpinner"
+ *
+ *  ❌ Inline <select> with repeated conditional Tailwind classes (lines ~510–530)
+ *     → Use: import Select from "../ui/Select"
+ *
+ * These anti-patterns are retained here for backward compatibility only.
+ * All new AI Studio components must use the shared ui/ primitives.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hands } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
@@ -47,7 +70,7 @@ const TTS_DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
 export default function RealtimeRuntime({
   mirrorPreview = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true),
   autoStart = true,
-  debounceMs = 200,
+  debounceMs = 100,
 }: Props) {
   // DOM refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -426,8 +449,10 @@ export default function RealtimeRuntime({
     lastSpokenLabelRef.current = null;
 
     // Initialize utilities once per run.
-    ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126 });
-    smootherRef.current = new PredictionSmoother({ historySize: 5, emaAlpha: 0.5 });
+    // minReadyFrames: 40 allows inference to start after ~0.67s instead of 1s (60 frames)
+    // Ring buffer still stores full 60 frames with zero-padding for initial frames
+    ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126, minReadyFrames: 40 });
+    smootherRef.current = new PredictionSmoother({ historySize: 2, emaAlpha: 0.7 });
     frameScratchRef.current = new Float32Array(126);
 
     // MediaPipe Hands
@@ -438,10 +463,10 @@ export default function RealtimeRuntime({
 
     hands.setOptions({
       maxNumHands: 2,
-      modelComplexity: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.75,
+      modelComplexity: 0,
+      refineLandmarks: false,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.65,
     });
 
     hands.onResults((results: unknown) => {
@@ -563,8 +588,8 @@ export default function RealtimeRuntime({
           // hands.send can throw if closed mid-loop
         }
       },
-      width: 1280,
-      height: 720,
+      width: 960,
+      height: 540,
       facingMode: "user",
     });
 

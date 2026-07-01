@@ -102,7 +102,10 @@ class TCNClassifier(nn.Module):
         x = x_btd.transpose(1, 2)
         x = self.proj(x)
         x = self.network(x)
-        # masked GAP
+        # NOTE: lengths parameter is always set to args.window (hardcoded as 60 in the caller).
+        # This makes the masked GAP code mathematically equivalent to unmasked mean(dim=2).
+        # The masked pooling is semantically correct but operationally a no-op.
+        # Pooling contract: unmasked_gap_v1 (matches train_tcn.py).
         b, c, t = x.shape
         mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
         mask = mask.unsqueeze(1)

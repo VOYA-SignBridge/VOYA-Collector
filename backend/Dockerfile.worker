@@ -1,0 +1,33 @@
+# Training worker — extends the backend image, adds CPU PyTorch.
+#
+# Build order matters:
+#   docker compose build backend        (builds voya_backend:latest first)
+#   docker compose build voya_worker    (extends it here)
+#
+# Intentionally CPU-only: training runs are serial and device-gated by
+# cfg.device ("cpu" when torch.cuda.is_available() == False), so no CUDA
+# image is needed for the current single-GPU-absent environment.
+
+FROM voya_backend:latest
+
+USER root
+
+# Install CPU PyTorch from the official CPU wheel index.
+# Kept separate from backend/requirements.txt so the API server image stays
+# lightweight (no 800 MB torch wheel baked in).
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Writable directory for checkpoints, summary JSONs, and training snapshots.
+# train_tcn.py writes here when --out_dir=/checkpoints is passed by the task.
+RUN mkdir -p /checkpoints && chown appuser:appuser /checkpoints
+
+# Add the processed tree to the module search path so that
+# future train_task.py can do: from train_utils.train_tcn import main
+ENV PYTHONPATH=/processed
+
+USER appuser
+
+# Single-concurrency prefork worker.
+# Training is CPU-bound and serial by design; one slot prevents resource
+# contention between simultaneous training jobs until slot management is added.
+CMD ["celery", "-A", "app.worker.celery_app", "worker", "--loglevel=INFO", "--concurrency=1", "--hostname=voya_worker@%h"]

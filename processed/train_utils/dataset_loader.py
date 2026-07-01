@@ -299,6 +299,10 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             'label_slug': r.get('label_slug'),
             'label_original': r.get('label_original'),
             'file_path': str(path),
+            'class_uid': r.get('class_uid'),
+            'signer_id': r.get('user_id'),
+            'language': r.get('language'),
+            'dialect': r.get('dialect'),
         }
 
         if self.to_tensor and TORCH_AVAILABLE:

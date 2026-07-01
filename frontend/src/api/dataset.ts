@@ -179,10 +179,13 @@ export const updateClass = async (
     if (!validated.ok) return validated;
 
     // Return validated class row and pass through operation logs (if any)
-    const out: any = { ok: true, data: { ...validated.data } as ClassRow };
-    if (raw.operation_logs) out.operation_logs = raw.operation_logs;
-    if (raw.op_id) out.op_id = raw.op_id;
-    return out as Result<ClassRow> & { operation_logs?: string[]; op_id?: string };
+    const out: Result<ClassRow> & { operation_logs?: string[]; op_id?: string } = {
+      ok: true,
+      data: { ...validated.data } as ClassRow,
+    };
+    if (raw.operation_logs) out.operation_logs = Array.isArray(raw.operation_logs) ? raw.operation_logs.map(String) : undefined;
+    if (raw.op_id) out.op_id = String(raw.op_id);
+    return out;
   } catch (err) {
     return {
       ok: false,
