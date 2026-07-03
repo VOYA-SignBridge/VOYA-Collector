@@ -75,3 +75,12 @@ processed/analysis
 *.json
 processed/splits
 *.csv
+
+*.md
+*.txt
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.svg
