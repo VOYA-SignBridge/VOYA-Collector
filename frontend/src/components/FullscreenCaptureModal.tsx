@@ -1275,9 +1275,9 @@ export default function FullscreenCaptureModal({
       onFrame: async () => {
         if (videoRef.current) await hands.send({ image: videoRef.current });
       },
-      width: CAPTURE_FRAME_WIDTH,
-      height: CAPTURE_FRAME_HEIGHT,
-      facingMode: "user",
+      width: 1280,
+      height: 720,
+      facingMode: 'user'
     });
 
     cameraRef.current = camera;

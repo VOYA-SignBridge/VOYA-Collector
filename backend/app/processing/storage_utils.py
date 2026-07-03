@@ -172,14 +172,14 @@ def add_sample_record(filename, class_idx, folder_name, metadata):
         "folder_name": folder_name,
         "file": filename,
         "user": metadata.get("user", ""),
-        "session_id": metadata.get("session_id", ""),
+        "session_uid": metadata.get("session_uid") or metadata.get("session_id", ""),
         "frames": str(metadata.get("frames", "")),
         "duration": str(metadata.get("duration", "")),
         "source": metadata.get("source", ""),
         "dialect": metadata.get("dialect", ""),
         "created_at": metadata.get("created_at", now_str()),
     }
-    fieldnames = ["sample_id","class_idx","folder_name","file","user","session_id","frames","duration","source","dialect","created_at"]
+    fieldnames = ["sample_id","class_idx","folder_name","file","user","session_uid","frames","duration","source","dialect","created_at"]
     append_csv_row(SAMPLES_CSV, new_row, fieldnames)
 
 # ---- Label merge ----

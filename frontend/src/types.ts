@@ -2,6 +2,7 @@ export interface Label {
   class_idx: number;
   label_original: string;
   slug: string;
+  dialect?: string;
 }
 
 export interface SampleFrame {
@@ -16,7 +17,7 @@ export interface Sample {
   dialect?: string;
   file_path?: string;
   created_at?: string;
-  session_id?: string;
+  session_uid?: string;
   user?: string;
   uploaded?: boolean;
   frames?: number; // count of frames in the sample
@@ -53,7 +54,7 @@ export interface CameraUploadPayload {
   user: string;
   label: string;
   dialect?: string;
-  session_id: string;
+  session_uid: string;
   frames: Array<{
     timestamp: number;
     landmarks: {
@@ -90,7 +91,7 @@ export type JobStatus = {
 };
 
 export interface Session {
-  session_id: string;
+  session_uid: string;
   user: string;
   labels: string[];
   samples_count: number;

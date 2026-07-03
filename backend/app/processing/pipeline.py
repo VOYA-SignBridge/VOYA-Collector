@@ -23,7 +23,7 @@ def _window_activity_mean_abs_diff(seq_arr: np.ndarray) -> float:
     diffs = np.diff(seq_arr.astype(np.float32, copy=False), axis=0)
     return float(np.mean(np.abs(diffs)))
 
-def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
+def process_video_job(video_path: str, user: str, label: str, session_uid: str, dialect: str = "common", language: str = "vn"):
     """
     Synchronous function to process video without Celery decorator.
     This is called by the Celery task in tasks.py
@@ -169,7 +169,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
 
                     window_meta = {
                         "user": user,
-                        "session_id": session_id,
+                        "session_uid": session_uid,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,
                         "speed_factor": float(speed_factor),

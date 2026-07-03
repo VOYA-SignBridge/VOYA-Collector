@@ -66,7 +66,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { name: "Thư viện nhãn", href: "/labels", icon: "🏷️" },
     { name: "Nhận dạng realtime", href: "/realtime", icon: "🖐️" },
     { name: "Huấn luyện model", href: "/training", icon: "🚀" },
-    // AI Studio removed
+    { name: "Thùng rác", href: "/trash", icon: "🗑️" }
   ];
 
   const handleNewSession = useCallback(() => {

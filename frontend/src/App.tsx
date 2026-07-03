@@ -15,6 +15,7 @@ import ToastContainer from "./components/ui/ToastContainer";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
+const TrashPage = lazy(() => import("./pages/TrashPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
 const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPage"));
 const TrainingPipeline = lazy(() => import("./pages/training/TrainingPipeline"));
@@ -93,7 +94,22 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
 
-              <Route path="/labels" element={<LabelsPage />} />
+              <Route
+                path="/trash"
+                element={
+                  <ProtectedRoute>
+                    <TrashPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/labels"
+                element={
+                  <ProtectedRoute>
+                    <LabelsPage />
+                  </ProtectedRoute>
+                }
+              />
 
               <Route path="/realtime" element={<RealtimeRecognitionPage />} />
 

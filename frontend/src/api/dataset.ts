@@ -34,6 +34,25 @@ export const getSamples = async (): Promise<Result<Session[]>> => {
   return validateSessions(res.data);
 };
 
+export const fetchSampleVideo = async (sampleId: string): Promise<Blob> => {
+  const res = await axiosClient.get(`/dataset/samples/${sampleId}/video`, {
+    responseType: 'blob'
+  });
+  return res.data;
+};
+
+export const deleteSample = async (sampleId: string): Promise<Result<any>> => {
+  try {
+    const res = await axiosClient.delete(`/api/v1/trash/samples/${sampleId}`);
+    if (res.data?.success) {
+      return { ok: true, data: res.data };
+    }
+    return { ok: true, data: res.data };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+};
+
 export const getSampleData = async (sampleId: string) => {
   const res = await axiosClient.get(`/dataset/samples/${sampleId}/data`, {
     responseType: "arraybuffer", // để xử lý npz
@@ -41,9 +60,15 @@ export const getSampleData = async (sampleId: string) => {
   return res.data;
 };
 
-export const deleteSample = async (sampleId: string) => {
-  const res = await axiosClient.delete(`/dataset/samples/${sampleId}`);
-  return { ok: res.status >= 200 && res.status < 300, status: res.status, statusText: res.statusText };
+export const updateSample = async (sampleId: string, payload: Record<string, any>) => {
+  const res = await axiosClient.put(`/dataset/samples/${sampleId}`, payload);
+  return { ok: res.status >= 200 && res.status < 300, data: res.data };
+};
+
+export const listSamples = async (classUid?: string) => {
+  const url = classUid ? `/dataset/samples?class_uid=${classUid}` : "/dataset/samples";
+  const res = await axiosClient.get(url);
+  return { ok: res.status >= 200 && res.status < 300, data: res.data };
 };
 
 // --- New classes API wrappers (preferred modern endpoints) ---
@@ -196,14 +221,14 @@ export const updateClass = async (
 
 export const deleteClass = async (classRef: string): Promise<Result<{ message: string; deleted: boolean; class_uid: string; class_idx: number; sample_count: number; raw_upload_count: number; op_id?: string; operation_logs?: string[] }>> => {
   try {
-    const res = await axiosClient.delete(`/classes/${classRef}`);
+    const res = await axiosClient.delete(`/api/v1/trash/classes/${classRef}`);
     const data = res.data || {};
 
     if (data.success === true || data.deleted === true) {
       return {
         ok: true,
         data: {
-          message: data.message || "Nhãn được xóa thành công",
+          message: data.message || "Nhãn được xóa mềm thành công",
           deleted: true,
           class_uid: data.class_uid || "",
           class_idx: data.class_idx || 0,
@@ -216,8 +241,8 @@ export const deleteClass = async (classRef: string): Promise<Result<{ message: s
     }
 
     return { ok: false, error: data.message || data.error || res.statusText };
-  } catch (err) {
-    const errMessage = err instanceof Error ? err.message : "Unknown error";
+  } catch (err: any) {
+    const errMessage = err.response?.data?.detail || err.message || "Unknown error";
     return {
       ok: false,
       error: errMessage,

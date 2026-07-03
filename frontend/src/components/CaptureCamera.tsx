@@ -97,11 +97,10 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
     
     // Don't set uploading state to avoid blocking the modal
     try {
-      // Prepare data for backend API
       const payload: {
         user: string;
         label: string;
-        session_id: string;
+        session_uid: string;
         dialect?: string;
         frames: Array<{ timestamp: number; landmarks: {
           left_hand?: MediaPipeLandmark[];
@@ -110,7 +109,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       } = {
         user: capturedUser,
         label: capturedLabel,
-        session_id: sessionId,
+        session_uid: sessionId,
         frames: capturedFrames.map((frame, idx) => ({
           timestamp: idx,
           landmarks: frame
@@ -124,7 +123,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
         if (result.ok) {
           const sample: SampleT = {
             id: sampleCounter,
-            session_id: sessionId,
+            session_uid: sessionId,
             label: capturedLabel,
             user: capturedUser,
             frames: capturedFrames.length,

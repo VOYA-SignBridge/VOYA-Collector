@@ -36,7 +36,14 @@ def _row_to_user(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "password_hash": row["password_hash"] or "",
         "is_active": bool(row.get("is_active", True)),
         "is_admin": bool(row.get("is_admin", False)),
+        "role": row.get("role_name"),
         "created_at": row.get("created_at"),
+        "profile": {
+            "full_name": row.get("full_name") or "",
+            "avatar_url": row.get("avatar_url") or "",
+            "yob": row.get("yob"),
+            "gender": row.get("gender")
+        }
     }
 
 
@@ -101,9 +108,13 @@ def _fetch_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT id, username, email, password_hash, is_active, is_admin, created_at
-                    FROM users
-                    WHERE id = %s
+                    SELECT u.id, u.username, u.email, u.password_hash, u.is_active, u.is_admin, u.created_at,
+                           r.name as role_name,
+                           p.full_name, p.avatar_url, p.yob, p.gender
+                    FROM users u
+                    LEFT JOIN roles r ON u.role_id = r.id
+                    LEFT JOIN user_profiles p ON u.id = p.user_id
+                    WHERE u.id = %s AND u.deleted_at IS NULL
                     """,
                     (user_id,),
                 )
@@ -124,9 +135,13 @@ def _fetch_user_by_login(identifier: str) -> Optional[Dict[str, Any]]:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT id, username, email, password_hash, is_active, is_admin, created_at
-                    FROM users
-                    WHERE lower(username) = %s OR lower(email) = %s
+                    SELECT u.id, u.username, u.email, u.password_hash, u.is_active, u.is_admin, u.created_at,
+                           r.name as role_name,
+                           p.full_name, p.avatar_url, p.yob, p.gender
+                    FROM users u
+                    LEFT JOIN roles r ON u.role_id = r.id
+                    LEFT JOIN user_profiles p ON u.id = p.user_id
+                    WHERE (lower(u.username) = %s OR lower(u.email) = %s) AND u.deleted_at IS NULL
                     LIMIT 1
                     """,
                     (login, login),
@@ -231,9 +246,21 @@ def get_current_user(
 
 
 def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    if not current_user.get("is_admin", False):
+    if not current_user.get("is_admin", False) and current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
         )
     return current_user
+
+
+def require_role(allowed_roles: list[str]):
+    def role_checker(current_user: Dict[str, Any] = Depends(get_current_user)):
+        user_role = current_user.get("role")
+        if user_role not in allowed_roles and not current_user.get("is_admin", False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Require one of roles: {allowed_roles}"
+            )
+        return current_user
+    return role_checker

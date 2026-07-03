@@ -139,6 +139,9 @@ class Settings(BaseSettings):
         "",
     )
 
+    cors_origins: str = os.getenv("CORS_ORIGINS", "*")
+    rate_limit_login: str = os.getenv("RATE_LIMIT_LOGIN", "30/minute")
+
     # Realtime inference service proxy
     realtime_service_url: str = os.getenv("REALTIME_SERVICE_URL", "http://localhost:8010")
     realtime_connect_timeout: float = float(os.getenv("REALTIME_CONNECT_TIMEOUT", "5.0"))

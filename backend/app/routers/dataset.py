@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -23,7 +23,7 @@ def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> Non
 
     Legacy samples with auth_user_id=NULL (guest uploads) can only be deleted by admin.
     """
-    if current_user.get("is_admin"):
+    if current_user.get("is_admin") or current_user.get("role") == "admin":
         return  # Admin bypass
     owner_id = get_sample_owner(sample_id)
     if owner_id is None:
@@ -54,7 +54,7 @@ class SampleOut(BaseModel):
     folder_name: str
     file: str
     user: str
-    session_id: str
+    session_uid: str
     frames: str
     duration: str
     source: str
@@ -160,13 +160,44 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
 def update_label(
     class_ref: str,
     label: str = Form(...),
-    admin_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    try:
-        result = sync_update_class(class_ref, {"label_original": label})
-        return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
-    except CatalogSyncError as exc:
-        raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
+    from app.dataset_manager import load_labels
+    from app.dataset_samples import list_samples as list_samples_v2
+    from app.catalog_sync import _find_class_row_by_ref
+    
+    rows = load_labels()
+    target_class = _find_class_row_by_ref(rows, class_ref)
+    if not target_class:
+        raise HTTPException(status_code=404, detail="Class not found")
+        
+    class_uid = target_class.get("class_uid")
+    all_samples = list_samples_v2()
+    class_samples = [s for s in all_samples if s.get("class_uid") == class_uid and not s.get("deleted_at")]
+    
+    my_samples = [s for s in class_samples if s.get("user_id") == current_user["id"]]
+    other_samples = [s for s in class_samples if s.get("user_id") != current_user["id"]]
+    
+    is_admin = current_user.get("is_admin", False)
+    
+    if not is_admin and not my_samples:
+        raise HTTPException(status_code=403, detail="You do not own any samples in this class.")
+        
+    if is_admin or not other_samples:
+        # Direct update
+        try:
+            result = sync_update_class(class_ref, {"label_original": label})
+            return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
+        except CatalogSyncError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
+    else:
+        # Forking logic for normal user
+        from app.catalog_sync import sync_fork_class_for_user
+        try:
+            result = sync_fork_class_for_user(class_ref, {"label_original": label}, current_user["id"])
+            return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
+        except CatalogSyncError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
 
 
 @router.delete("/labels/{class_ref}")
@@ -182,13 +213,15 @@ def delete_label(
 
 
 @router.get("/samples", response_model=List[SampleOut])
-def list_samples():
+def list_samples(class_uid: Optional[str] = None):
     samples = list_samples_v2()
     labels_by_uid = _class_uid_to_label_row_map()
     out: List[Dict[str, Any]] = []
     for s in samples:
-        class_uid = s.get("class_uid")
-        label_row = labels_by_uid.get(class_uid) or {}
+        if class_uid and s.get("class_uid") != class_uid:
+            continue
+        c_uid = s.get("class_uid")
+        label_row = labels_by_uid.get(c_uid) or {}
         try:
             class_idx = int(label_row.get("class_idx") or 0)
         except Exception:
@@ -200,12 +233,14 @@ def list_samples():
             "class_idx": class_idx,
             "folder_name": folder_name,
             "file": Path(source_hint).name if source_hint else "",
-            "user": s.get("user_id") or "",
-            "session_id": s.get("session_id") or "",
+            "user": s.get("username") or s.get("user_id") or "",
+            "session_uid": s.get("session_uid") or s.get("session_id") or "",
             "frames": str(s.get("seq_len") or ""),
             "duration": "",
             "source": s.get("source_type") or "",
             "created_at": s.get("created_at") or "",
+            "storage_key": s.get("storage_key") or "",
+            "storage_url": s.get("storage_url") or "",
         })
     return out
 
@@ -241,11 +276,26 @@ def delete_sample(
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+
+@router.put("/samples/{sample_id}")
+def update_sample(
+    sample_id: str,
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    from app.catalog_sync import sync_update_sample
+    _check_sample_ownership(sample_id, current_user)
+    try:
+        result = sync_update_sample(sample_id, payload)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
 @router.post("/samples/add")
 def add_sample(
     class_idx: int = Form(...),
     user: str = Form(""),
-    session_id: str = Form(""),
+    session_uid: str = Form(""),
     frames: int = Form(0),
     duration: float = Form(0.0),
     source: str = Form("video"),
@@ -273,8 +323,7 @@ def add_sample(
         meta={
             "user": user or current_user.get("username", ""),
             "user_id": current_user["id"],
-            "auth_user_id": current_user["id"],
-            "session_id": session_id,
+            "session_uid": session_uid,
             "fps_original": "",
             "fps_processed": "",
             "completeness": "",
@@ -289,21 +338,21 @@ def add_sample(
 
 @router.get("/sessions")
 @router.get("/dataset/sessions")
-def list_sessions(user: str = "", session_id: str = ""):
+def list_sessions(user: str = "", session_uid: str = ""):
     """List capture sessions from the unified samples CSV."""
     samples = list_samples_v2()
     # lightweight grouping without pandas
     sessions: Dict[str, Dict[str, Any]] = {}
     for s in samples:
-        sid = s.get("session_id") or ""
-        if session_id and sid != session_id:
+        sid = s.get("session_uid") or s.get("session_id") or ""
+        if session_uid and sid != session_uid:
             continue
         uid = s.get("user_id") or ""
         if user and uid != user:
             continue
         if sid not in sessions:
             sessions[sid] = {
-                "session_id": sid,
+                "session_uid": sid,
                 "user": uid,
                 "samples_count": 0,
                 "created_at": s.get("created_at") or "",

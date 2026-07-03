@@ -37,6 +37,7 @@ LABEL_FIELDS = [
     "folder_name",
     "created_at",
     "migrated_at",
+    "deleted_at",
 ]
 
 
@@ -172,6 +173,7 @@ class ClassMetadata:
     is_common_language: bool
     folder_override: Optional[str] = None
     class_idx: Optional[int] = None
+    deleted_at: Optional[str] = None
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -201,6 +203,7 @@ class ClassMetadata:
             "folder_name": self.folder_name(),
             "created_at": now_str(),
             "migrated_at": now_str(),
+            "deleted_at": self.deleted_at or "",
         }
 
     def write_metadata_json(self):
@@ -216,6 +219,7 @@ class ClassMetadata:
             "is_common_global": self.is_common_global,
             "is_common_language": self.is_common_language,
             "folder_name": self.folder_name(),
+            "deleted_at": self.deleted_at,
         }
         atomic_write_json(path, data, indent=2)
 
@@ -389,6 +393,7 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         is_common_global=parse_bool(existing.get("is_common_global")),
         is_common_language=parse_bool(existing.get("is_common_language")),
         folder_override=existing.get("folder_name") or None,
+        deleted_at=existing.get("deleted_at") or None,
     )
 
 
@@ -523,6 +528,8 @@ def list_classes(
     rows = load_labels()
     out: List[ClassMetadata] = []
     for r in rows:
+        if r.get("deleted_at"):
+            continue
         if language and r["language"] != language:
             continue
         if dialect and r["dialect"] != dialect:
@@ -537,6 +544,7 @@ def list_classes(
                 dialect=r["dialect"],
                 is_common_global=parse_bool(r.get("is_common_global")),
                 is_common_language=parse_bool(r.get("is_common_language")),
+                deleted_at=r.get("deleted_at") or None,
             )
         )
     return out

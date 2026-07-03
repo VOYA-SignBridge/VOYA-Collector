@@ -26,7 +26,7 @@ RAW_UPLOAD_FIELDS = [
     "dialect",
     "source_type",
     "user_id",
-    "session_id",
+    "session_uid",
     "original_filename",
     "local_path",
     "storage_key",

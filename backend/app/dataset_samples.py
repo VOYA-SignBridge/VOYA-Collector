@@ -27,7 +27,8 @@ SAMPLE_FIELDS = [
     "dialect",
     "source_type",
     "user_id",
-    "session_id",
+    "username",
+    "session_uid",
     "fps_original",
     "fps_processed",
     "seq_len",
@@ -37,7 +38,10 @@ SAMPLE_FIELDS = [
     "storage_key",
     "storage_url",
     "checksum",
+    "status",
     "created_at",
+    "updated_at",
+    "deleted_at",
 ]
 
 
@@ -59,59 +63,65 @@ def _ensure_samples_file():
 
 
 def append_sample_row(row: Dict[str, Any]):
-    _ensure_samples_file()
-    lock = FileLock(str(SAMPLES_CSV) + ".lock")
-    with lock:
-        file_exists = SAMPLES_CSV.exists()
-        with open(SAMPLES_CSV, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
-            if not file_exists or os.path.getsize(SAMPLES_CSV) == 0:
-                writer.writeheader()
-            writer.writerow(row)
-            f.flush()
-            os.fsync(f.fileno())
-
-    from app.storage.catalog_mirror import mirror_samples_to_gdrive_and_sheets
-
-    mirror_samples_to_gdrive_and_sheets(SAMPLES_CSV)
-
+    from app.storage.metadata_db import insert_sample
+    try:
+        # Resolve username and user_id fields cleanly
+        if "user_id" in row and "username" not in row:
+            uid_val = str(row["user_id"])
+            if "-" in uid_val and len(uid_val) == 36: # is UUID
+                row["username"] = "" # backend will look it up or we can just leave empty
+            else:
+                row["username"] = uid_val
+                row["user_id"] = None
+        
+        insert_sample(row)
+    except Exception as e:
+        logging.getLogger(__name__).error("[APPEND_SAMPLE_ROW] DB insert failed: %s", e)
 
 def list_samples() -> List[Dict[str, str]]:
-    _ensure_samples_file()
-    lock = FileLock(str(SAMPLES_CSV) + ".lock")
-    with lock:
-        with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
-            return list(csv.DictReader(f))
-
+    from app.storage.metadata_db import _get_conn
+    from app.dataset_samples import SAMPLE_FIELDS
+    rows = []
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                fields_str = ", ".join(SAMPLE_FIELDS)
+                cur.execute(f"SELECT {fields_str} FROM samples WHERE deleted_at IS NULL ORDER BY created_at ASC")
+                for db_row in cur.fetchall():
+                    row_dict = dict(zip(SAMPLE_FIELDS, db_row))
+                    for k, v in row_dict.items():
+                        if v is None:
+                            row_dict[k] = ""
+                        elif hasattr(v, "isoformat"):
+                            val = v.isoformat()
+                            if val.endswith("+00:00"):
+                                val = val.replace("+00:00", "Z")
+                            elif not val.endswith("Z") and "+" not in val.split("T")[-1] and "-" not in val.split("T")[-1]:
+                                val += "Z"
+                            row_dict[k] = val
+                        else:
+                            row_dict[k] = str(v)
+                    rows.append(row_dict)
+    except Exception as e:
+        logging.getLogger(__name__).error("[LIST_SAMPLES] DB query failed: %s", e)
+    return rows
 
 def update_sample_row(sample_uid: str, updates: Dict[str, Any]):
-    _ensure_samples_file()
-    lock = FileLock(str(SAMPLES_CSV) + ".lock")
-    with lock:
-        try:
-            with open(SAMPLES_CSV, "r", newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            
-            updated = False
-            for row in rows:
-                if row.get("sample_uid") == sample_uid:
-                    for k, v in updates.items():
-                        if k in row:
-                            row[k] = v
-                    updated = True
-                    break
-            
-            if updated:
-                tmp_path = str(SAMPLES_CSV) + ".tmp"
-                with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
-                    writer.writeheader()
-                    writer.writerows(rows)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_path, SAMPLES_CSV)
-        except Exception as e:
-            logging.getLogger(__name__).error("[UPDATE_SAMPLE_ROW] failed: %s", e)
+    from app.storage.metadata_db import _execute
+    try:
+        if not updates:
+            return
+        set_clauses = []
+        values = []
+        for k, v in updates.items():
+            set_clauses.append(f"{k} = %s")
+            values.append(v)
+        values.append(sample_uid)
+        
+        sql = f"UPDATE samples SET {', '.join(set_clauses)} WHERE sample_uid = %s"
+        _execute(sql, tuple(values))
+    except Exception as e:
+        logging.getLogger(__name__).error("[UPDATE_SAMPLE_ROW] DB update failed: %s", e)
 
 
 def count_samples_for_class(class_uid: str) -> int:
@@ -248,7 +258,7 @@ def save_sequence_npz(
             "dialect": class_meta.dialect,
             "source_type": source_type,
             "user_id": meta.get("user_id") or meta.get("user", ""),
-            "session_id": meta.get("session_id", ""),
+            "session_uid": meta.get("session_uid") or meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
             "seq_len": str(sequence.shape[0]),
@@ -258,7 +268,10 @@ def save_sequence_npz(
             "storage_key": storage_key if storage_url else "",
             "storage_url": storage_url or "",
             "checksum": metadata.get("checksum", ""),
+            "status": "PENDING",
             "created_at": created_at,
+            "updated_at": "",
+            "deleted_at": "",
         }
     )
 
@@ -275,8 +288,8 @@ def save_sequence_npz(
             "dialect": class_meta.dialect,
             "source_type": source_type,
             "user_id": meta.get("user_id") or meta.get("user", ""),
-            "auth_user_id": meta.get("auth_user_id") or None,
-            "session_id": meta.get("session_id", ""),
+            "username": meta.get("user", ""),
+            "session_uid": meta.get("session_uid") or meta.get("session_id", ""),
             "fps_original": meta.get("fps_original", meta.get("fps", "")),
             "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
             "seq_len": int(sequence.shape[0]),

@@ -7,7 +7,7 @@ Log Format: [OPERATION][STATUS] key1=val1 key2=val2 ... duration_ms=X error_code
 Example:
   [STORAGE][RAW][SUCCESS] local_path=/app/dataset/raw_videos/... provider=local+gdrive duration_ms=1234
   [STORAGE][NPZ][SUCCESS] local_path=/app/dataset/features/... mirror_url=gdrive://file-id duration_ms=567
-  [UPLOAD][video][SUCCESS] job_id=abc123 session_id=xyz789 message=... duration_ms=2345
+  [UPLOAD][video][SUCCESS] job_id=abc123 session_uid=xyz789 message=... duration_ms=2345
 """
 
 import json
@@ -124,7 +124,7 @@ class StructuredLogger:
         self,
         endpoint: str,  # "video" or "camera"
         success: bool,
-        session_id: str,
+        session_uid: str,
         job_id: Optional[str] = None,
         duration_ms: Optional[float] = None,
         file_size_bytes: int = 0,
@@ -132,7 +132,7 @@ class StructuredLogger:
     ) -> None:
         """Convenience method for upload operations."""
         details = {
-            "session_id": session_id,
+            "session_uid": session_uid,
             "file_size_bytes": file_size_bytes,
         }
         if job_id:

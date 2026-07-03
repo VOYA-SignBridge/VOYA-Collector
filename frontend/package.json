@@ -17,6 +17,7 @@
     "@mediapipe/holistic": "0.5.1675471629",
     "autoprefixer": "^10.4.21",
     "axios": "^1.15.2",
+    "lucide-react": "^1.21.0",
     "postcss": "^8.5.8",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

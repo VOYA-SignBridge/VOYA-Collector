@@ -238,12 +238,7 @@ def update_class(
             **result,
         }
     except CatalogSyncError as exc:
-        return {
-            "success": False,
-            "message": f"L\u1ed7i c\u1eadp nh\u1eadt nh\u00e3n: {str(exc)}",
-            "error_code": exc.error_code,
-            "operation_logs": getattr(exc, "logs", None),
-        }
+        raise HTTPException(status_code=exc.status_code, detail=f"Lỗi cập nhật nhãn: {str(exc)}")
 
 
 @router.delete("/{class_ref}")
@@ -261,9 +256,4 @@ def delete_class(
             **result,
         }
     except CatalogSyncError as exc:
-        return {
-            "success": False,
-            "message": f"L\u1ed7i x\u00f3a nh\u00e3n: {str(exc)}",
-            "error_code": exc.error_code,
-            "operation_logs": getattr(exc, "logs", None),
-        }
+        raise HTTPException(status_code=exc.status_code, detail=f"Lỗi xóa nhãn: {str(exc)}")

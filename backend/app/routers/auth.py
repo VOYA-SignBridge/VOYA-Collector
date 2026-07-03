@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status, Depends  # pyright: ignore[reportMissingImports]
+from fastapi import APIRouter, HTTPException, status, Depends, Request  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
 from app.config import settings
+from app.limiter import limiter
 from app.auth import (
     authenticate_user,
     create_access_token,
@@ -26,12 +27,21 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+class UserProfileOut(BaseModel):
+    full_name: str
+    avatar_url: str
+    yob: Optional[int] = None
+    gender: Optional[str] = None
+
+
 class UserOut(BaseModel):
     id: str
     username: str
     email: str
     is_active: bool
     is_admin: bool
+    role: Optional[str] = None
+    profile: Optional[UserProfileOut] = None
     created_at: Optional[datetime] = None
 
 
@@ -42,7 +52,8 @@ class TokenOut(BaseModel):
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest):
+@limiter.limit(settings.rate_limit_login)
+def register(request: Request, payload: RegisterRequest):
     user = create_user(
         username=payload.username,
         email=payload.email,
@@ -53,7 +64,8 @@ def register(payload: RegisterRequest):
 
 
 @router.post("/login", response_model=TokenOut)
-def login(payload: LoginRequest):
+@limiter.limit(settings.rate_limit_login)
+def login(request: Request, payload: LoginRequest):
     user = authenticate_user(payload.identifier, payload.password)
     if not user:
         raise HTTPException(

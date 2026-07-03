@@ -22,7 +22,7 @@ def enqueue_process_video(
     video_path: str,
     user: str,
     label: str,
-    session_id: str,
+    session_uid: str,
     dialect: str = "common",
     language: str = "vn",
     user_id: str = "",
@@ -43,13 +43,13 @@ def enqueue_process_video(
             user,
             user_id=user_id,
             label=label,
-            session_id=session_id,
+            session_uid=session_uid,
             dialect=dialect,
             language=language,
         )
         return {"status": "done", "result": result}
     except Exception as e:
-        logging.getLogger(__name__).exception("[CELERY][FAIL] video_path=%s label=%s user=%s session_id=%s", video_path, label, user, session_id)
+        logging.getLogger(__name__).exception("[CELERY][FAIL] video_path=%s label=%s user=%s session_uid=%s", video_path, label, user, session_uid)
         raise
     finally:
         for f in temp_files_to_clean:

@@ -1,5 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
-import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass } from "../api/dataset";
+import { SmartLoader } from "../components/ui/SmartLoader";
+import type { SmartLoaderState } from "../components/ui/SmartLoader";
+import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass, listSamples, updateSample, deleteSample } from "../api/dataset";
+import { taxonomiesApi } from "../api/taxonomies";
+import type { Language, Dialect } from "../api/taxonomies";
 import type { Label, ClassRow } from "../types";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
@@ -9,10 +13,13 @@ import LoadingSpinner from "../components/ui/LoadingSpinner";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import { useAuth } from "../hooks/useAuth";
+import { Pagination } from "../components/ui/Pagination";
 
 export default function LabelsPage() {
   const { loading: authLoading, isAdmin } = useAuth();
   const [labels, setLabels] = useState<Label[]>([]);
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [dialectsList, setDialectsList] = useState<Dialect[]>([]);
   const [classes, setClasses] = useState<ClassRow[] | null>(null);
   const [sampleCounts, setSampleCounts] = useState<Record<string, number>>({});
   const [language, setLanguage] = useState<string>('vn');
@@ -22,6 +29,36 @@ export default function LabelsPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [operationLogs, setOperationLogs] = useState<string[] | null>(null);
   const [showOperationLogs, setShowOperationLogs] = useState(false);
+
+  const [search, setSearch] = useState<string>("");
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  // Responsive Labels Pagination
+  const [labelsPage, setLabelsPage] = useState(1);
+  const [labelsPerPage, setLabelsPerPage] = useState(12);
+
+  // Update labelsPerPage based on window size
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1280) setLabelsPerPage(24); // xl
+      else if (window.innerWidth >= 1024) setLabelsPerPage(18); // lg
+      else if (window.innerWidth >= 768) setLabelsPerPage(12); // md
+      else setLabelsPerPage(6); // sm and mobile
+    };
+    handleResize(); // Initial call
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    taxonomiesApi.getLanguages().then(setLanguages).catch(console.error);
+    taxonomiesApi.getDialects().then(setDialectsList).catch(console.error);
+  }, []);
+
+  // Reset page when search or filters change
+  useEffect(() => {
+    setLabelsPage(1);
+  }, [search, language, dialect, viewMode]);
 
   // Auto-dismiss status message after 2 seconds
   useEffect(() => {
@@ -46,23 +83,20 @@ export default function LabelsPage() {
   
   const getLanguageName = (lang?: string): string => {
     const l = (lang || language);
-    return l === 'vn' ? 'Tiếng Việt' : l === 'en' ? 'English' : l;
+    const found = languages.find(x => x.code === l);
+    return found ? found.name : (l === 'vn' ? 'Tiếng Việt' : l === 'en' ? 'English' : l);
   };
   
   const getDialectName = (dialect?: string): string => {
     const d = (dialect || 'common');
+    const found = dialectsList.find(x => x.code === d);
+    if (found) return found.name;
     const map: Record<string, string> = {
-      'common': 'Chung',
-      'bac': 'Miền Bắc',
-      'nam': 'Miền Nam',
-      'trung': 'Miền Trung',
-      'hoa-de': 'Hòa Đê',
-      'can-tho': 'Cần Thơ',
+      'common': 'Chung', 'bac': 'Miền Bắc', 'nam': 'Miền Nam', 'trung': 'Miền Trung',
+      'hoa-de': 'Hòa Đê', 'can-tho': 'Cần Thơ', 'bang-chu-cai': 'Bảng chữ cái', 'spa': 'Spa',
     };
     return map[d] || d;
   };
-  const [search, setSearch] = useState<string>("");
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [editTarget, setEditTarget] = useState<RenderItem | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const [editLanguage, setEditLanguage] = useState<string>("vn");
@@ -71,7 +105,133 @@ export default function LabelsPage() {
   const [deleteTarget, setDeleteTarget] = useState<RenderItem | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
 
+  // Samples Modal States
+  const [samplesModalTarget, setSamplesModalTarget] = useState<RenderItem | null>(null);
+  const [samplesList, setSamplesList] = useState<any[]>([]);
+  const [samplesLoading, setSamplesLoading] = useState(false);
+  const [samplesError, setSamplesError] = useState<string | null>(null);
+  const [samplesPage, setSamplesPage] = useState(1);
+  const [samplesSearch, setSamplesSearch] = useState("");
+  const SAMPLES_PER_PAGE = 10;
+  
+  const [editSampleTarget, setEditSampleTarget] = useState<any | null>(null);
+  const [editSampleUserId, setEditSampleUserId] = useState("");
+  const [editSampleSaving, setEditSampleSaving] = useState(false);
+  
+
+  
+  // SmartLoader State
+  const [loaderState, setLoaderState] = useState<SmartLoaderState>("hidden");
+  const [loaderProgress, setLoaderProgress] = useState({ current: 0, total: 0 });
+
+
+  // Load samples when modal opens
+  useEffect(() => {
+    if (samplesModalTarget) {
+      const classUid = samplesModalTarget.class_uid;
+      if (!classUid) return;
+      
+      setSamplesLoading(true);
+      setSamplesError(null);
+      setSamplesPage(1);
+      
+      listSamples(classUid)
+        .then(res => {
+          if (res.ok) {
+            setSamplesList(res.data || []);
+          } else {
+            setSamplesError("Failed to load samples");
+          }
+        })
+        .catch(err => {
+          setSamplesError(err.message || "Failed to load samples");
+        })
+        .finally(() => {
+          setSamplesLoading(false);
+        });
+      } else {
+        setSamplesList([]);
+        setEditSampleTarget(null);
+      }
+    }, [samplesModalTarget]);
+
+
+
+  const handleSaveSample = async () => {
+    if (!editSampleTarget || !editSampleUserId.trim()) return;
+    
+    setEditSampleSaving(true);
+    try {
+      const res = await updateSample(editSampleTarget.sample_id, {
+        user_id: editSampleUserId.trim()
+      });
+      
+      if (res.ok) {
+        setSamplesList(prev => prev.map(s => 
+          s.sample_id === editSampleTarget.sample_id
+            ? { ...s, user: editSampleUserId.trim() } 
+            : s
+        ));
+        setStatusMessage(`Đã cập nhật thông tin mẫu`);
+        setEditSampleTarget(null);
+      } else {
+        setSamplesError("Failed to update sample");
+      }
+    } catch (err: any) {
+      setSamplesError(err.message || "Failed to update sample");
+    } finally {
+      setEditSampleSaving(false);
+    }
+  };
+
+  const handleDeleteBySessionUid = async (sessionUid: string) => {
+    if (!sessionUid || sessionUid === '-') return;
+
+    let samplesToDelete = samplesList.filter(s => s.session_uid === sessionUid);
+    if (samplesToDelete.length === 0) return;
+
+    if (!window.confirm(`Bạn có chắc chắn muốn đưa toàn bộ ${samplesToDelete.length} mẫu của cụm/session này vào thùng rác không?`)) return;
+
+    setLoaderProgress({ current: 0, total: samplesToDelete.length });
+    setLoaderState("processing");
+    const successfulIds = new Set<string>();
+
+    try {
+      let i = 0;
+      while (i < samplesToDelete.length) {
+        const s = samplesToDelete[i];
+        try {
+          const res = await deleteSample(s.sample_id);
+          if (res.ok) {
+            successfulIds.add(s.sample_id);
+          }
+          i++; // Move to next sample
+          setLoaderProgress({ current: i, total: samplesToDelete.length });
+          await new Promise(r => setTimeout(r, 200)); // Small delay between requests
+        } catch (err: any) {
+          // If error is 429 or 5xx (failed to delete sample)
+          setLoaderState("paused");
+          await new Promise(r => setTimeout(r, 35000)); // Wait 35 seconds
+          setLoaderState("processing");
+          // Do NOT increment i, so it retries the same sample
+        }
+      }
+
+      setLoaderState("success");
+      await new Promise(r => setTimeout(r, 1500)); // Show success for 1.5s
+      
+      // Filter out deleted samples from list
+      setSamplesList(prev => prev.filter(s => !successfulIds.has(s.sample_id)));
+
+    } catch (err: any) {
+      setSamplesError(err.message || "Lỗi trong quá trình xóa dữ liệu");
+    } finally {
+      setLoaderState("hidden");
+    }
+  };
+
   // Dialect normalization helper: map various forms to canonical slugs used by BE
+
   const normalizeDialect = (d?: string) => {
     if (!d) return '';
     const s = String(d).toLowerCase().trim();
@@ -257,7 +417,7 @@ export default function LabelsPage() {
     setEditTarget(item);
     setEditValue(item.label_original || "");
     setEditLanguage(item.language || language || "vn");
-    setEditDialect(item.dialect || dialect || "common");
+    setEditDialect(item.dialect || "common");
   };
 
   const openDelete = (item: RenderItem) => {
@@ -367,15 +527,31 @@ export default function LabelsPage() {
     }
   };
 
+  const availableDialects = useMemo(() => {
+    const set = new Set<string>(['common', 'bac', 'nam', 'trung', 'can-tho', 'hoa-de', 'bang-chu-cai', 'spa']);
+    if (classes && classes.length > 0) {
+      classes.forEach(c => { if (c.dialect) set.add(c.dialect); });
+    } else {
+      labels.forEach(l => { if (l.dialect) set.add(l.dialect); });
+    }
+    // "common" (Chung) luôn nằm đầu tiên nếu có
+    const arr = Array.from(set);
+    return arr.sort((a, b) => {
+      if (a === 'common') return -1;
+      if (b === 'common') return 1;
+      return a.localeCompare(b);
+    });
+  }, [classes, labels]);
+
   // Show loading state while auth loads
   if (authLoading) {
     return <LoadingSpinner />;
   }
 
-
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      <SmartLoader state={loaderState} progress={loaderProgress} />
+      
       <PageHeader 
         title="Thư viện nhãn" 
         subtitle="Quản lý và tìm kiếm các nhãn ngôn ngữ ký hiệu."
@@ -467,6 +643,17 @@ export default function LabelsPage() {
             </h2>
             
             <div className="flex items-center gap-2">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => window.location.href = '/trash'}
+                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              >
+                <span className="flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  Thùng rác
+                </span>
+              </Button>
               {!loading && renderItems.length > 0 && (
                 <>
                   <Button variant="secondary" size="sm" onClick={exportJSON}>
@@ -490,12 +677,9 @@ export default function LabelsPage() {
             <div className="min-w-0">
               <select className="input text-sm py-2.5" value={dialect} onChange={(e) => setDialect(e.target.value)}>
                 <option value="">🗺️ Tất cả vùng</option>
-                <option value="common">Chung</option>
-                <option value="bac">Miền Bắc</option>
-                <option value="nam">Miền Nam</option>
-                <option value="can-tho">Cần Thơ</option>
-                <option value="trung">Miền Trung</option>
-                <option value="hoa-de">Hòa Đê</option>
+                {availableDialects.map(d => (
+                  <option key={d} value={d}>{getDialectName(d)}</option>
+                ))}
               </select>
             </div>
             
@@ -549,7 +733,7 @@ export default function LabelsPage() {
           />
         ) : (
           <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-4' : 'space-y-3'}>
-            {renderItems.map((item) => (
+            {renderItems.slice((labelsPage - 1) * labelsPerPage, labelsPage * labelsPerPage).map((item) => (
               <div 
                 key={item.class_uid ?? item.class_idx}
                 className={`${
@@ -615,6 +799,11 @@ export default function LabelsPage() {
                             Cần Thơ
                           </span>
                         )}
+                        {item.dialect && !(dialectsList.length > 0 ? dialectsList.map(d=>d.code) : ['common', 'bac', 'nam', 'trung', 'hoa-de', 'can-tho']).includes(item.dialect) && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-200 text-gray-800">
+                            {getDialectName(item.dialect)}
+                          </span>
+                        )}
                         {item.is_common_global && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800">
                             ⭐ Toàn cầu
@@ -651,6 +840,9 @@ export default function LabelsPage() {
                         {item.dialect === 'can-tho' && (
                           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800">Cần Thơ</span>
                         )}
+                        {item.dialect && !(dialectsList.length > 0 ? dialectsList.map(d=>d.code) : ['common', 'bac', 'nam', 'trung', 'hoa-de', 'can-tho']).includes(item.dialect) && (
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-800">{getDialectName(item.dialect)}</span>
+                        )}
                         {item.is_common_global && (
                           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">⭐ Toàn cầu</span>
                         )}
@@ -658,35 +850,58 @@ export default function LabelsPage() {
                     </div>
                   )}
 
-                  {isAdmin && (
-                    <div className={`mt-3 grid grid-cols-2 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="w-full justify-center px-3 py-2 text-xs"
-                        onClick={() => openEdit(item)}
-                      >
-                        Chỉnh sửa
-                      </Button>
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        className="w-full justify-center px-3 py-2 text-xs"
-                        onClick={() => openDelete(item)}
-                      >
-                        Xóa
-                      </Button>
-                    </div>
-                  )}
-
+                  <div className={`mt-3 grid ${isAdmin ? 'grid-cols-3' : 'grid-cols-1'} gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="w-full justify-center px-3 py-2 text-xs"
+                      onClick={() => setSamplesModalTarget(item)}
+                    >
+                      <span className="mr-1">🎥</span> {item.samples_count || 0}
+                    </Button>
+                    {isAdmin && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="w-full justify-center px-3 py-2 text-xs"
+                          onClick={() => openEdit(item)}
+                        >
+                          Sửa
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          className="w-full justify-center px-3 py-2 text-xs"
+                          onClick={() => openDelete(item)}
+                        >
+                          Xóa
+                        </Button>
+                      </>
+                    )}
+                  </div>
                   {!isAdmin && (
-                    <div className="mt-3 text-xs text-gray-500 italic text-center">
+                    <div className="mt-2 text-xs text-gray-500 italic text-center">
                       Chỉ quản trị viên có thể chỉnh sửa
                     </div>
                   )}
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        
+        {/* Labels Pagination Controls */}
+        {!loading && renderItems.length > labelsPerPage && (
+          <div className="flex flex-col sm:flex-row items-center justify-between mt-6 pt-4 border-t border-gray-100 gap-4">
+            <span className="text-sm text-gray-600">
+              Hiển thị <span className="font-semibold text-gray-900">{(labelsPage - 1) * labelsPerPage + 1}</span> đến <span className="font-semibold text-gray-900">{Math.min(labelsPage * labelsPerPage, renderItems.length)}</span> trong số <span className="font-semibold text-gray-900">{renderItems.length}</span> nhãn
+            </span>
+            <Pagination 
+              currentPage={labelsPage} 
+              totalPages={Math.ceil(renderItems.length / labelsPerPage)} 
+              onPageChange={setLabelsPage} 
+            />
           </div>
         )}
       </div>
@@ -732,12 +947,12 @@ export default function LabelsPage() {
                   onChange={(e) => setEditDialect(e.target.value)}
                   disabled={editSaving}
                 >
-                  <option value="common">Chung</option>
-                  <option value="bac">Miền Bắc</option>
-                  <option value="nam">Miền Nam</option>
-                  <option value="trung">Miền Trung</option>
-                  <option value="can-tho">Cần Thơ</option>
-                  <option value="hoa-de">Hòa Đê</option>
+                  {availableDialects.map(d => (
+                    <option key={d} value={d}>{getDialectName(d)}</option>
+                  ))}
+                  {editDialect && !availableDialects.includes(editDialect) && (
+                    <option value={editDialect}>{getDialectName(editDialect)}</option>
+                  )}
                 </select>
               </div>
             </div>
@@ -772,7 +987,7 @@ export default function LabelsPage() {
         {deleteTarget && (
           <div className="space-y-4">
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-              Xóa nhãn này sẽ xóa luôn các mẫu liên quan và cập nhật lại các mirror storage đã đồng bộ.
+              Bạn có chắc chắn muốn đưa mục này vào thùng rác không? Các dữ liệu liên quan cũng sẽ được chuyển vào thùng rác.
             </div>
             <div className="space-y-2 text-sm text-gray-700">
               <div><span className="font-medium">Nhãn:</span> {deleteTarget.label_original}</div>
@@ -787,6 +1002,184 @@ export default function LabelsPage() {
                 Xác nhận xóa
               </Button>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Samples Modal */}
+      <Modal
+        isOpen={Boolean(samplesModalTarget)}
+        onClose={() => setSamplesModalTarget(null)}
+        title={samplesModalTarget ? `Samples: ${samplesModalTarget.label_original}` : "Samples"}
+        size="lg"
+      >
+        {samplesLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <LoadingSpinner size="lg" className="text-indigo-400" />
+            <span className="ml-3 text-gray-600">Đang tải danh sách...</span>
+          </div>
+        ) : samplesError ? (
+          <div className="text-center py-8 text-red-500">
+            {samplesError}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <input
+                type="text"
+                placeholder="Tìm tên file, session, người thu thập..."
+                className="input w-full sm:w-1/2"
+                value={samplesSearch}
+                onChange={(e) => {
+                  setSamplesSearch(e.target.value);
+                  setSamplesPage(1);
+                }}
+              />
+              {/* Bulk delete removed for individual sample view */}
+            </div>
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm text-left text-gray-500">
+                <thead className="text-xs text-gray-700 uppercase bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-4 py-3">File / Sample ID</th>
+                    <th scope="col" className="px-4 py-3">Người thu thập</th>
+                    <th scope="col" className="px-4 py-3">Session</th>
+                    <th scope="col" className="px-4 py-3">Ngày tạo</th>
+                    <th scope="col" className="px-4 py-3 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const filteredSamples = samplesList.filter(s => {
+                      if (!samplesSearch) return true;
+                      const q = samplesSearch.toLowerCase();
+                      return (s.user || '').toLowerCase().includes(q) ||
+                             (s.file || '').toLowerCase().includes(q) ||
+                             (s.session_uid || '').toLowerCase().includes(q);
+                    });
+                    
+                    if (filteredSamples.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                            Chưa có mẫu nào phù hợp.
+                          </td>
+                        </tr>
+                      );
+                    }
+                    
+                    return filteredSamples
+                      .slice((samplesPage - 1) * SAMPLES_PER_PAGE, samplesPage * SAMPLES_PER_PAGE)
+                      .map((sample) => (
+                      <tr key={sample.sample_id || sample.file || Math.random()} className="border-b hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900 break-all max-w-[200px] truncate">
+                          {sample.file || sample.sample_id || '-'}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-gray-900 break-all">
+                          {editSampleTarget?.sample_id === sample.sample_id ? (
+                            <input 
+                              type="text" 
+                              className="input input-sm w-full"
+                              value={editSampleUserId}
+                              onChange={e => setEditSampleUserId(e.target.value)}
+                              disabled={editSampleSaving}
+                              placeholder="Tên người thu thập"
+                              autoFocus
+                            />
+                          ) : (
+                            sample.user || '-'
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-xs font-mono text-gray-600 truncate max-w-[150px]" title={sample.session_uid}>
+                            {sample.session_uid || '-'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs whitespace-nowrap">
+                          {sample.created_at ? new Date(sample.created_at).toLocaleString('vi-VN') : '-'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {editSampleTarget?.sample_id === sample.sample_id ? (
+                            <div className="flex justify-end gap-2">
+                              <Button variant="ghost" size="sm" onClick={() => setEditSampleTarget(null)} disabled={editSampleSaving}>Hủy</Button>
+                              <Button variant="primary" size="sm" onClick={handleSaveSample} loading={editSampleSaving}>Lưu</Button>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end gap-2">
+                              <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                onClick={() => {
+                                  setEditSampleTarget(sample);
+                                  setEditSampleUserId(sample.user || '');
+                                }}
+                              >
+                                Sửa
+                              </Button>
+                              <Button 
+                                variant="danger" 
+                                size="sm" 
+                                onClick={async () => {
+                                  if (confirm(`Bạn có chắc chắn muốn đưa mẫu này vào thùng rác không?`)) {
+                                    try {
+                                      const res = await deleteSample(sample.sample_id);
+                                      if (res.ok) {
+                                        setSamplesList(prev => prev.filter(s => s.sample_id !== sample.sample_id));
+                                        setStatusMessage(`Đã xóa mẫu vào thùng rác`);
+                                      } else {
+                                        setSamplesError(res.error || "Không thể xóa mẫu");
+                                      }
+                                    } catch (err: any) {
+                                      setSamplesError(err.message || "Lỗi xóa mẫu");
+                                    }
+                                  }
+                                }}
+                              >
+                                Xóa
+                              </Button>
+                              <Button 
+                                variant="danger" 
+                                size="sm" 
+                                className="bg-red-700 hover:bg-red-800"
+                                onClick={() => handleDeleteBySessionUid(sample.session_uid)}
+                              >
+                                Xóa Cụm
+                              </Button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
+            
+            {(() => {
+              const filteredSamples = samplesList.filter(s => {
+                if (!samplesSearch) return true;
+                const q = samplesSearch.toLowerCase();
+                return (s.user || '').toLowerCase().includes(q) ||
+                       (s.file || '').toLowerCase().includes(q) ||
+                       (s.session_uid || '').toLowerCase().includes(q);
+              });
+              const totalFiltered = filteredSamples.length;
+              if (totalFiltered > SAMPLES_PER_PAGE) {
+                return (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-4">
+                    <span className="text-sm text-gray-700 mb-2 sm:mb-0">
+                      Hiển thị <span className="font-semibold">{(samplesPage - 1) * SAMPLES_PER_PAGE + 1}</span> đến <span className="font-semibold">{Math.min(samplesPage * SAMPLES_PER_PAGE, totalFiltered)}</span> trong số <span className="font-semibold">{totalFiltered}</span> mẫu
+                    </span>
+                    <Pagination 
+                      currentPage={samplesPage} 
+                      totalPages={Math.ceil(totalFiltered / SAMPLES_PER_PAGE)} 
+                      onPageChange={setSamplesPage} 
+                    />
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
         )}
       </Modal>

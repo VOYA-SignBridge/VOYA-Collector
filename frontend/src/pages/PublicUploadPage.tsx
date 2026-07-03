@@ -42,7 +42,7 @@ export default function PublicUploadPage() {
     const payload: CameraUploadPayload = {
       user,
       label,
-      session_id: `public-${Date.now()}`,
+      session_uid: `public-${Date.now()}`,
       frames: [],
     };
 

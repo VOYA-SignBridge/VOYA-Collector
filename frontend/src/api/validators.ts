@@ -36,9 +36,9 @@ export function validateSessions(data: unknown): Result<Session[]> {
     const out = data.map((item) => {
       if (!isObject(item)) throw new Error("Invalid session item");
       const s = item as Partial<Session>;
-      if (typeof s.session_id !== "string") throw new Error("Session missing session_id");
+      if (typeof s.session_uid !== "string") throw new Error("Session missing session_uid");
       return {
-        session_id: s.session_id,
+        session_uid: s.session_uid,
         user: String(s.user ?? ""),
         labels: Array.isArray(s.labels) ? (s.labels as string[]) : [],
         samples_count: Number(s.samples_count ?? 0),

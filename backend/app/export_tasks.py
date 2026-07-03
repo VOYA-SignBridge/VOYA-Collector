@@ -39,20 +39,14 @@ def _rows_to_values(rows: List[Dict[str, Any]], fieldnames: List[str]) -> List[L
     return result
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+@celery_app.task(bind=True, max_retries=5, default_retry_delay=60)
 def export_samples_to_sheets(self):
-    """Batch export unsynced samples from Postgres to Google Sheets.
+    """Batch sync samples to Google Sheets using FULL REPLACE.
 
-    Called by Celery beat every 30 seconds.
-    Uses append_sheet_values() — never clears existing data.
+    Runs periodically to ensure the Google Sheet is an exact replica
+    of the active samples in Postgres (no duplicates, no deleted rows).
     """
-    from app.storage.metadata_db import (
-        ensure_tables,
-        fetch_unsynced_samples,
-        mark_samples_synced,
-        get_sync_status,
-        upsert_sync_status,
-    )
+    from app.storage.metadata_db import ensure_tables, _get_conn
     from app.dataset_samples import SAMPLE_FIELDS
 
     try:
@@ -65,60 +59,52 @@ def export_samples_to_sheets(self):
             logger.debug("[EXPORT] Samples Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        # Fetch unsynced rows
-        rows = fetch_unsynced_samples(limit=5000)
+        rows = []
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                fields_str = ", ".join(SAMPLE_FIELDS)
+                cur.execute(f"SELECT {fields_str} FROM samples WHERE deleted_at IS NULL ORDER BY created_at ASC")
+                for db_row in cur.fetchall():
+                    row_dict = dict(zip(SAMPLE_FIELDS, db_row))
+                    for k, v in row_dict.items():
+                        if isinstance(v, datetime):
+                            row_dict[k] = v.isoformat() + "Z"
+                        elif v is None:
+                            row_dict[k] = ""
+                    rows.append(row_dict)
+
         if not rows:
-            logger.debug("[EXPORT] No unsynced samples to export")
-            return {"status": "skipped", "reason": "no_pending_rows"}
+            logger.debug("[EXPORT] No samples to export")
+            return {"status": "skipped", "reason": "no_data"}
 
-        # Check rotation threshold
-        sync_status = get_sync_status("samples")
-        current_rows = sync_status["current_data_rows"] if sync_status else 0
-        max_rows = sync_status["max_rows_per_sheet"] if sync_status else 500_000
+        # Build full matrix with header
+        values = [list(SAMPLE_FIELDS)]
+        for row in rows:
+            values.append([str(row.get(field, "")) for field in SAMPLE_FIELDS])
 
-        batch_size = len(rows)
-        if current_rows + batch_size > max_rows:
-            logger.warning(
-                "[EXPORT] Sheet approaching limit: current=%d + batch=%d > max=%d. "
-                "Manual rotation needed (create new spreadsheet and update config).",
-                current_rows, batch_size, max_rows,
-            )
-            # Still proceed — Google Sheets will reject if truly full,
-            # and we'll retry on the next cycle.
-
-        # Convert to values matrix
-        values = _rows_to_values(rows, SAMPLE_FIELDS)
-
-        # Append to Google Sheets (1 API call for entire batch)
         from app.storage.gdrive_client import get_gdrive_client
         client = get_gdrive_client()
-        client.append_sheet_values(spreadsheet_id, sheet_gid, values)
+        client.replace_sheet_values(spreadsheet_id, sheet_gid, values)
 
-        # Mark as synced in Postgres
-        sample_uids = [r["sample_uid"] for r in rows]
-        mark_samples_synced(sample_uids)
-
-        # Update sync status counter
-        new_row_count = current_rows + batch_size
-        upsert_sync_status("samples", spreadsheet_id, 1, new_row_count)
-
-        logger.info(
-            "[EXPORT] ✅ Synced %d samples to Sheets (total rows now: %d)",
-            batch_size,
-            new_row_count,
-        )
+        logger.info("[EXPORT] ✅ Fully replaced Sheets with %d samples", len(rows))
         return {
             "status": "success",
-            "synced_count": batch_size,
-            "total_rows": new_row_count,
+            "synced_count": len(rows)
         }
 
     except Exception as exc:
         logger.error("[EXPORT] Samples Sheets export failed: %s", exc)
-        raise self.retry(exc=exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            logger.critical(
+                "[EXPORT][DLQ] Samples Sheets export PERMANENTLY FAILED after %d retries: %s",
+                self.max_retries, exc,
+            )
+            return {"status": "dead_letter", "error": str(exc)}
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(bind=True, max_retries=5, default_retry_delay=60)
 def export_labels_to_sheets(self):
     """Batch sync labels.csv to Google Sheets.
 
@@ -160,7 +146,68 @@ def export_labels_to_sheets(self):
 
     except Exception as exc:
         logger.error("[EXPORT] Labels Sheets export failed: %s", exc)
-        raise self.retry(exc=exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            logger.critical(
+                "[EXPORT][DLQ] Labels Sheets export PERMANENTLY FAILED after %d retries: %s",
+                self.max_retries, exc,
+            )
+            return {"status": "dead_letter", "error": str(exc)}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def export_samples_to_local_csv(self):
+    """Batch export samples from Postgres to local CSV file.
+    Runs every 60 seconds.
+    """
+    import csv
+    import tempfile
+    import os
+    from app.dataset_samples import SAMPLES_CSV, SAMPLE_FIELDS, _ensure_samples_file
+    from app.storage.metadata_db import _get_conn
+    from filelock import FileLock
+
+    try:
+        _ensure_samples_file()
+        rows = []
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                # Query all samples except hard-deleted
+                fields_str = ", ".join(SAMPLE_FIELDS)
+                cur.execute(f"SELECT {fields_str} FROM samples WHERE deleted_at IS NULL ORDER BY created_at ASC")
+                for db_row in cur.fetchall():
+                    row_dict = dict(zip(SAMPLE_FIELDS, db_row))
+                    # formatting dates
+                    for k, v in row_dict.items():
+                        if isinstance(v, datetime):
+                            row_dict[k] = v.isoformat() + "Z"
+                        elif v is None:
+                            row_dict[k] = ""
+                    rows.append(row_dict)
+
+        if not rows:
+            return {"status": "skipped", "reason": "no_data"}
+
+        lock = FileLock(str(SAMPLES_CSV) + ".lock")
+        with lock:
+            tmp_path = str(SAMPLES_CSV) + ".tmp"
+            with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
+                writer.writeheader()
+                writer.writerows(rows)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, SAMPLES_CSV)
+            
+        logger.info("[EXPORT] Dumped %d samples from DB to local CSV", len(rows))
+        return {"status": "success", "synced_count": len(rows)}
+    except Exception as exc:
+        logger.error("[EXPORT] Local CSV export failed: %s", exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            return {"status": "dead_letter", "error": str(exc)}
 
 
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=10)
@@ -210,4 +257,21 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
 
     except Exception as exc:
         logger.error("[GDRIVE_UPLOAD] Upload failed for %s: %s", sample_uid, exc)
-        raise self.retry(exc=exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            # DLQ: Mark sample as ERROR in Postgres, keep raw file on disk
+            logger.critical(
+                "[GDRIVE_UPLOAD][DLQ] Upload PERMANENTLY FAILED for sample_uid=%s after %d retries: %s",
+                sample_uid, self.max_retries, exc,
+            )
+            try:
+                from app.storage.metadata_db import update_sample_status
+                update_sample_status(
+                    sample_uid,
+                    status="ERROR",
+                    error_log=f"GDrive upload failed after {self.max_retries} retries: {exc}",
+                )
+            except Exception as db_exc:
+                logger.error("[GDRIVE_UPLOAD][DLQ] Failed to update DB status: %s", db_exc)
+            return {"status": "dead_letter", "sample_uid": sample_uid, "error": str(exc)}

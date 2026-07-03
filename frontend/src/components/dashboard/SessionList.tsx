@@ -17,8 +17,8 @@ export default function SessionList({ sessions }: { sessions: Session[] }) {
         </thead>
         <tbody>
           {sessions.map((s: Session) => (
-            <tr key={s.session_id} className="border-b hover:bg-gray-50">
-              <td className="p-2 font-mono">{s.session_id}</td>
+            <tr key={s.session_uid} className="border-b hover:bg-gray-50">
+              <td className="p-2 font-mono">{s.session_uid}</td>
               <td className="p-2">{s.user}</td>
               <td className="p-2">{(s.labels || []).join(", ")}</td>
               <td className="p-2">{s.samples_count}</td>

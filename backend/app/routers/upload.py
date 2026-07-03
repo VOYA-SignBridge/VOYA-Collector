@@ -60,20 +60,22 @@ async def upload_video(
     label: str = Form(...),
     language: str = Form("vn"),
     dialect: str = Form("common"),
-    session_id: str = Form(None),
+    session_uid: str = Form(None),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     start = time.time()
     log = logging.getLogger("upload.video")
-    if not session_id:
-        session_id = uuid.uuid4().hex
+    
+    import re
+    if not session_uid or not re.match(r"^(LC|UP)-\d{6}-\d{4}-[A-Z0-9a-z]{6}$", session_uid):
+        return {"success": False, "message": "Invalid or missing session_uid. Must match LC/UP format."}
 
     # Validate & normalize inputs
     label = validate_label(label)
     language = validate_language(language)
     dialect = validate_dialect(normalize_dialect(dialect))
 
-    log.info("[UPLOAD][video] user=%s label=%s lang=%s dialect=%s filename=%s session=%s", user or current_user.get("username", ""), label, language, dialect, getattr(file, 'filename', ''), session_id)
+    log.info("[UPLOAD][video] user=%s label=%s lang=%s dialect=%s filename=%s session=%s", user or current_user.get("username", ""), label, language, dialect, getattr(file, 'filename', ''), session_uid)
     # Log pipeline-relevant settings for traceability
     try:
         seq_len = int(getattr(settings, "seq_len", 60))
@@ -108,7 +110,7 @@ async def upload_video(
     storage_key = local_path.relative_to(settings.dataset_root).as_posix()
 
     bytes_written, local_path_str = save_upload_with_limit(file.file, local_path, max_bytes=max_bytes)
-    storage_url = local_path_str
+    storage_url = ""
     provider = "local"
 
     if getattr(settings, "use_google_drive", False):
@@ -136,10 +138,11 @@ async def upload_video(
         "language": class_meta.language,
         "dialect": class_meta.dialect,
         "source_type": "video",
-        "user_id": user or current_user.get("username", ""),
-        "session_id": session_id,
+        "user_id": current_user["id"],
+        "username": current_user["username"],
+        "session_uid": session_uid,
         "original_filename": original_filename,
-        "local_path": local_path_str,
+        "local_path": storage_key,  # Store relative path instead of absolute
         "storage_key": storage_key,
         "storage_url": storage_url,
         "created_at": created_at,
@@ -153,7 +156,7 @@ async def upload_video(
     try:
         from app.storage.metadata_db import insert_raw_upload
 
-        insert_raw_upload({**raw_upload_row, "auth_user_id": current_user["id"]})
+        insert_raw_upload({**raw_upload_row, "user_id": current_user["id"]})
     except Exception as e:
         if getattr(settings, "debug_logging", False):
             log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
@@ -168,7 +171,8 @@ async def upload_video(
     return {
         "success": True,
         "id": upload_uid,
-        "session_id": session_id,
+        "session_uid": session_uid,
+        "session_id": session_uid,
         "upload_uid": upload_uid,
         "storage_url": storage_url,
         "message": "raw video uploaded",
@@ -189,8 +193,12 @@ async def upload_camera(
     label = validate_label(payload.get("label"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "common")))
     language = validate_language(payload.get("language", "vn"))
-    session_id = payload.get("session_id", None) or uuid.uuid4().hex
+    session_uid = payload.get("session_uid") or payload.get("session_id", "")
     frames = payload.get("frames")
+
+    import re
+    if not session_uid or not re.match(r"^(LC|UP)-\d{6}-\d{4}-[A-Z0-9a-z]{6}$", session_uid):
+        return {"success": False, "message": "Invalid or missing session_uid. Must match LC/UP format."}
 
     if not frames:
         return {"success": False, "message": "Missing label or frames"}
@@ -347,9 +355,8 @@ async def upload_camera(
 
     meta = {
         "user": user,
-        "user_id": user,
-        "auth_user_id": current_user["id"],
-        "session_id": session_id,
+        "user_id": current_user["id"],
+        "session_uid": session_uid,
         "fps_original": None,
         "fps_processed": None,
         "completeness": None,
@@ -370,7 +377,7 @@ async def upload_camera(
 
     return {
         "success": True,
-        "id": session_id,
+        "id": session_uid,
         "paths": [path],
         "total_samples": 1,
         "message": "saved original sample",

@@ -267,21 +267,43 @@ class GoogleDriveClient:
         Only use for maintenance/reconciliation tasks. For normal sync operations,
         use append_sheet_values() instead.
         """
+        import time
+        from googleapiclient.errors import HttpError
+        
         with self._request_lock:
             service = self.get_sheets_service()
             title = self.get_sheet_title(spreadsheet_id, sheet_gid)
             logger.info("[GSheets] replace begin: spreadsheet_id=%s sheet_gid=%s title=%s rows=%s", spreadsheet_id, sheet_gid, title, len(values))
-            service.spreadsheets().values().clear(
-                spreadsheetId=spreadsheet_id,
-                range=title,
-            ).execute(num_retries=self.num_retries)
-            service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{title}'!A1",
-                valueInputOption="RAW",
-                body={"values": values},
-            ).execute(num_retries=self.num_retries)
-            logger.info("[GSheets] replace done: spreadsheet_id=%s sheet_gid=%s title=%s", spreadsheet_id, sheet_gid, title)
+            
+            max_retries = 3
+            base_delay = 30 # Base delay of 30 seconds for 429 errors
+            
+            for attempt in range(max_retries):
+                try:
+                    # Clear
+                    service.spreadsheets().values().clear(
+                        spreadsheetId=spreadsheet_id,
+                        range=title,
+                    ).execute(num_retries=self.num_retries)
+                    
+                    # Update
+                    service.spreadsheets().values().update(
+                        spreadsheetId=spreadsheet_id,
+                        range=f"'{title}'!A1",
+                        valueInputOption="RAW",
+                        body={"values": values},
+                    ).execute(num_retries=self.num_retries)
+                    
+                    logger.info("[GSheets] replace done: spreadsheet_id=%s sheet_gid=%s title=%s", spreadsheet_id, sheet_gid, title)
+                    break # Success
+                    
+                except HttpError as e:
+                    if e.resp.status == 429 and attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning("[GSheets] Rate limit hit (429) during replace. Retrying in %ss...", delay)
+                        time.sleep(delay)
+                        continue
+                    raise # Re-raise if not 429 or max retries reached
 
     def append_sheet_values(self, spreadsheet_id: str, sheet_gid: int, values: List[List[Any]]) -> None:
         """Append-only write to Google Sheets. NEVER clears existing data.
@@ -291,6 +313,10 @@ class GoogleDriveClient:
         """
         if not values:
             return
+            
+        import time
+        from googleapiclient.errors import HttpError
+        
         with self._request_lock:
             service = self.get_sheets_service()
             title = self.get_sheet_title(spreadsheet_id, sheet_gid)
@@ -298,17 +324,32 @@ class GoogleDriveClient:
                 "[GSheets] append begin: spreadsheet_id=%s sheet_gid=%s title=%s new_rows=%s",
                 spreadsheet_id, sheet_gid, title, len(values),
             )
-            service.spreadsheets().values().append(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{title}'!A1",
-                valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body={"values": values},
-            ).execute(num_retries=self.num_retries)
-            logger.info(
-                "[GSheets] append done: spreadsheet_id=%s sheet_gid=%s rows_added=%s",
-                spreadsheet_id, sheet_gid, len(values),
-            )
+            
+            max_retries = 3
+            base_delay = 30
+            
+            for attempt in range(max_retries):
+                try:
+                    service.spreadsheets().values().append(
+                        spreadsheetId=spreadsheet_id,
+                        range=f"'{title}'!A1",
+                        valueInputOption="RAW",
+                        insertDataOption="INSERT_ROWS",
+                        body={"values": values},
+                    ).execute(num_retries=self.num_retries)
+                    
+                    logger.info(
+                        "[GSheets] append done: spreadsheet_id=%s sheet_gid=%s rows_added=%s",
+                        spreadsheet_id, sheet_gid, len(values),
+                    )
+                    break
+                except HttpError as e:
+                    if e.resp.status == 429 and attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning("[GSheets] Rate limit hit (429) during append. Retrying in %ss...", delay)
+                        time.sleep(delay)
+                        continue
+                    raise
 
     def _resolve_root_folder(self, root_folder_id: Optional[str]) -> Optional[str]:
         """Resolve the configured Google Drive root folder ID."""

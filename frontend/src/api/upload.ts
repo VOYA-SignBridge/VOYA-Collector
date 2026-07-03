@@ -128,11 +128,11 @@ export const uploadVideo = async (file: File, user: string, label: string, diale
 
 export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result<UploadResult>> => {
   const startTime = Date.now();
-  const sessionId = payload.session_id || Math.random().toString(36).substring(7);
+  const sessionUid = payload.session_uid || Math.random().toString(36).substring(7);
 
   // Log start
   logDebugOperation('UPLOAD_CAMERA', 'IN_PROGRESS', {
-    session_id: sessionId,
+    session_uid: sessionUid,
     message: `Processing ${(payload.frames || []).length} camera frames`,
   });
 
@@ -146,7 +146,7 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
       if (result.ok) {
         const duration = Date.now() - startTime;
         logDebugOperation('UPLOAD_CAMERA', 'SUCCESS', {
-          session_id: sessionId,
+          session_uid: sessionUid,
           job_id: result.data?.id,
           message: result.data?.message,
           response: result.data,
@@ -154,7 +154,7 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
         });
       } else {
         logDebugOperation('UPLOAD_CAMERA', 'FAILURE', {
-          session_id: sessionId,
+          session_uid: sessionUid,
           error: result.error,
           duration_ms: Date.now() - startTime,
         });
@@ -164,7 +164,7 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
       if (attempt === maxAttempts) {
         const errorMsg = extractErrorMessage(err);
         logDebugOperation('UPLOAD_CAMERA', 'FAILURE', {
-          session_id: sessionId,
+          session_uid: sessionUid,
           error: errorMsg,
           duration_ms: Date.now() - startTime,
         });
@@ -173,7 +173,7 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
       const jitter = Math.random() * 100;
       const delay = baseDelay * 2 ** (attempt - 1) + jitter;
       logDebugOperation('UPLOAD_CAMERA', 'IN_PROGRESS', {
-        session_id: sessionId,
+        session_uid: sessionUid,
         message: `Retry attempt ${attempt}/${maxAttempts}`,
       });
       await new Promise((r) => setTimeout(r, delay));
