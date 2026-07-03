@@ -1,0 +1,157 @@
+% ==========================================================
+%  preample.tex
+%  COMPILER: pdfLaTeX  |  BIBLIOGRAPHY: BibTeX (NOT Biber)
+%  On Overleaf: Menu > Compiler = pdfLaTeX
+%               Menu > Bibliography = BibTeX
+% ==========================================================
+\usepackage[T1]{fontenc}   % standard encoding for English
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+% Auto-generated list headings -- uppercase to match thesis style
+\renewcommand{\contentsname}{TABLE OF CONTENTS}
+\renewcommand{\listfigurename}{LIST OF FIGURES}
+\renewcommand{\listtablename}{LIST OF TABLES}
+\usepackage[left=3.5cm, right=2cm, top=3.5cm, bottom=3cm]{geometry}
+\usepackage{graphicx,float}
+\usepackage{mathtools}
+\usepackage{amssymb,amsmath}
+\usepackage{newtxtext}
+\usepackage[varvw]{newtxmath}
+\usepackage{multicol}
+\usepackage{xcolor}
+\usepackage{titlesec,titletoc}
+\usepackage{indentfirst}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{tikzpagenodes}
+
+% -------------------------------------------------------------------
+% CHAPTER / SECTION TITLE FORMAT & SPACING
+% -------------------------------------------------------------------
+% Pull chapter title close to top margin (before=-20pt = subtract 20pt)
+\titleformat{\chapter}[block]
+  {\normalfont\large\bfseries\centering}
+  {\MakeUppercase{\chaptertitlename}\ \thechapter}{1em}{\large\MakeUppercase}
+\titlespacing*{\chapter}{0pt}{-20pt}{16pt}
+
+% Section: left-aligned, bold
+\titleformat{\section}[block]
+  {\normalfont\normalsize\bfseries}{\thesection}{1em}{}
+\titlespacing*{\section}{0pt}{10pt}{6pt}
+
+% Subsection
+\titleformat{\subsection}[block]
+  {\normalfont\normalsize\bfseries\itshape}{\thesubsection}{1em}{}
+\titlespacing*{\subsection}{0pt}{8pt}{4pt}
+
+% -------------------------------------------------------------------
+% PAGE STYLES
+% -------------------------------------------------------------------
+\usepackage{fancyhdr}
+\setlength{\headheight}{18pt}
+
+% Front-matter style: no header rule, roman page number at footer centre
+\fancypagestyle{frontmatter}{%
+  \fancyhf{}
+  \fancyfoot[C]{\small Trang \thepage}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+
+% Main-matter style: thin header rule, page number at right of header
+\fancypagestyle{mainmatter}{%
+  \fancyhf{}
+  \fancyhead[R]{\small\thepage}
+  \renewcommand{\headrulewidth}{0.4pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+
+\usepackage[fontsize=13]{scrextend}
+\renewcommand{\baselinestretch}{1.5}
+\setlength{\parindent}{1cm}
+\setlength{\parskip}{4pt}
+\allowdisplaybreaks
+\sloppy
+
+% --- TABLES ---
+\usepackage{array}
+\usepackage{diagbox}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+
+% --- CAPTIONS ---
+\usepackage{caption}
+\usepackage{subcaption}
+\captionsetup[figure]{labelfont=it,textfont=it}
+\captionsetup[table]{labelfont=it,textfont=it}
+\numberwithin{figure}{chapter}
+\numberwithin{table}{chapter}
+
+% --- TOC STYLE ---
+\usepackage{titletoc}
+\titlecontents{chapter}[0pt]{\bfseries\color{black}}{CHAPTER \thecontentslabel\quad}{}{\normalfont\dotfill\bfseries\contentspage}
+\titlecontents{section}[2.5ex]{\color{black}}{\thecontentslabel\quad}{}{\dotfill\contentspage}
+\titlecontents{subsection}[5ex]{\color{black}}{\thecontentslabel\quad}{}{\dotfill\contentspage}
+\titlecontents{figure}[0pt]{\color{black}}{\figurename\ \thecontentslabel:\quad}{}{\dotfill\contentspage}
+\titlecontents{table}[0pt]{\color{black}}{\tablename\ \thecontentslabel:\quad}{}{\dotfill\contentspage}
+
+% ============================================================
+%  CUSTOM VARIABLES  (fill in your real information here)
+% ============================================================
+\newcommand{\StudentName}{MAI NHAT MINH}
+\newcommand{\StudentID}{B2203567}
+\newcommand{\ClassCode}{DI2296F1}
+\newcommand{\MajorName}{High-Quality Software Engineering}
+\newcommand{\ThesisTitle}{CTU-SignBridge: A Multi-Tenant Platform for Vietnamese Sign Language Data Collection and Management}
+\newcommand{\SupervisorName}{Truong Minh Thai}
+\newcommand{\SupervisorTitle}{PhD.}
+
+% --- HYPERREF (must come AFTER custom variables are defined) ---
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=black,
+    pdftitle={\ThesisTitle},
+    pdfauthor={\StudentName}
+}
+
+% --- BIBTEX (Using built-in BibTeX for speed on Overleaf Free Tier) ---
+% On Overleaf: Menu > Compiler = pdfLaTeX
+
+% ============================================================
+%  PAGE BORDER MACRO
+% ============================================================
+\newcommand{\coverborder}{%
+\begin{tikzpicture}[remember picture,overlay]
+\draw[line width=0.8pt]
+  (current page text area.north west) rectangle (current page text area.south east);
+\draw[line width=2.8pt]
+  ($(current page text area.north west)+(0.15cm,-0.15cm)$)
+  rectangle
+  ($(current page text area.south east)+(-0.15cm,0.15cm)$);
+\end{tikzpicture}%
+}
+
+% ============================================================
+%  HELPER MACROS
+% ============================================================
+
+% Figure insertion macro.
+% When the image file is missing, shows a grey rule box (placeholder).
+% NOTE: do NOT use \texttt{#2} in the fallback -- image paths often
+%       contain underscores (_) which crash LaTeX in text mode.
+%
+% Usage:  \insertfigure{width_ratio}{path/to/image}{Caption text}{label}
+% Example:\insertfigure{0.8}{Pictures/erd}{ER Diagram}{erd}
+\newcommand{\insertfigure}[4]{%
+  \begin{figure}[H]\centering%
+  \IfFileExists{#2}%
+    {\includegraphics[width=#1\textwidth]{#2}}%
+    {\rule{#1\textwidth}{4cm}}%  <-- simple grey box, no special chars
+  \caption{#3}\label{fig:#4}%
+  \end{figure}%
+}

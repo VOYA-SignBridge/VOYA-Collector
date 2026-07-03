@@ -76,8 +76,6 @@ processed/analysis
 processed/splits
 *.csv
 
-*.md
-*.txt
 *.png
 *.jpg
 *.jpeg
@@ -87,3 +85,9 @@ processed/splits
 LuanVan_LaTex
 *.zip
 *.bib
+
+# GĐ 0 (Roadmap v2): documentation must be version-controlled.
+# Global *.md / *.txt ignores removed; docs/ re-included over remaining globals:
+!docs/**
+# ...but never the bulky thesis archives:
+docs/**/*.zip

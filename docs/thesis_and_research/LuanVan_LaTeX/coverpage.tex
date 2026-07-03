@@ -1,0 +1,75 @@
+% ==========================================================
+%  coverpage.tex  --  100% English
+% ==========================================================
+
+% --- COVER 1 (outer cover) ---
+\begin{titlepage}
+\thispagestyle{empty}
+\coverborder
+\begin{center}
+    {\small MINISTRY OF EDUCATION AND TRAINING}\\[2pt]
+    {\normalsize\bfseries CAN THO UNIVERSITY}\\[4pt]
+    {\small COLLEGE OF INFORMATION AND COMMUNICATION TECHNOLOGY}\\[4pt]
+    {\small DEPARTMENT OF SOFTWARE ENGINEERING}\\[24pt]
+
+    \IfFileExists{Pictures/logo}{%
+        \includegraphics[width=2.8cm]{Pictures/logo}\\[18pt]
+    }{%
+        \fbox{\begin{minipage}{2.8cm}\centering\vspace{0.5cm}%
+        {\footnotesize CTU Logo}\vspace{0.5cm}\end{minipage}}\\[18pt]%
+    }
+
+    {\large\bfseries \StudentName}\\[28pt]
+
+    \begin{minipage}{0.82\textwidth}
+        \centering
+        {\Large\bfseries \ThesisTitle}
+    \end{minipage}\\[30pt]
+
+    {\normalsize UNDERGRADUATE THESIS}\\[4pt]
+    {\normalsize MAJOR: \MajorName}\\
+
+    \vfill
+    {\normalsize Can Tho -- \the\year}
+\end{center}
+\end{titlepage}
+
+% --- COVER 2 (inner cover with supervisor) ---
+\begin{titlepage}
+\thispagestyle{empty}
+\coverborder
+\begin{center}
+    {\small MINISTRY OF EDUCATION AND TRAINING}\\[2pt]
+    {\normalsize\bfseries CAN THO UNIVERSITY}\\[4pt]
+    {\small COLLEGE OF INFORMATION AND COMMUNICATION TECHNOLOGY}\\[4pt]
+    {\small DEPARTMENT OF SOFTWARE ENGINEERING}\\[24pt]
+
+    \IfFileExists{Pictures/logo}{%
+        \includegraphics[width=2.8cm]{Pictures/logo}\\[18pt]
+    }{%
+        \fbox{\begin{minipage}{2.8cm}\centering\vspace{0.5cm}%
+        {\footnotesize CTU Logo}\vspace{0.5cm}\end{minipage}}\\[18pt]%
+    }
+
+    {\large\bfseries \StudentName}\\[28pt]
+
+    \begin{minipage}{0.82\textwidth}
+        \centering
+        {\Large\bfseries \ThesisTitle}
+    \end{minipage}\\[30pt]
+
+    {\normalsize UNDERGRADUATE THESIS}\\[4pt]
+    {\normalsize MAJOR: \MajorName}\\[22pt]
+
+    \begin{flushright}
+        \begin{minipage}{0.52\textwidth}
+            \centering
+            \textit{Supervisor}\\[6pt]
+            {\bfseries \SupervisorTitle{} \SupervisorName}
+        \end{minipage}
+    \end{flushright}
+
+    \vfill
+    {\normalsize Can Tho -- \the\year}
+\end{center}
+\end{titlepage}

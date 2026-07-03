@@ -1,3 +1,8 @@
+> [!WARNING]
+> **DEPRECATED (2026-07):** Cơ chế hậu tố `2.0` là giải pháp tạm để dev/prod không ghi đè nhau khi dùng chung Google Drive.
+> Nguyên nhân gốc đã được xử lý bằng **tách môi trường** (root folder Drive riêng per-environment + guard fail-fast) và **cấu trúc Drive v2** (versioning nằm ở path) — xem [`docs/database/erd_v2_unified_design.md`](database/erd_v2_unified_design.md) §11.2 & §12.
+> Thực hiện revert theo hướng dẫn bên dưới ở **GĐ 3** của Roadmap v2.
+
 # Google Drive suffix 2.0
 
 Temporary change: only Google Drive catalog snapshots use a `2.0` suffix on the final filename.
