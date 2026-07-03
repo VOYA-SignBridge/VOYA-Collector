@@ -91,3 +91,10 @@ LuanVan_LaTex
 !docs/**
 # ...but never the bulky thesis archives:
 docs/**/*.zip
+
+# Runtime/deploy artifacts (never commit)
+logs/
+_tmp/
+signbridge-prod/
+backend/secrets/
+backend/static/
