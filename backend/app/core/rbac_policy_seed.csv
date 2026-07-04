@@ -1,0 +1,39 @@
+# Seed policies — generated from the permission matrix (erd_v2 §9.4).
+# p-rules are defined ONCE per role with dom="*"; the g-rules that bind a
+# user to a role inside a concrete domain are created at runtime from the
+# membership tables (WORKSPACE_MEMBERS / PROJECT_MEMBERS / USERS.role_id).
+# Every blank cell in the §9.4 matrix == an authz test expecting 403.
+
+# ── System ─────────────────────────────────────────────────────────
+p, sys_admin, *, *, *
+
+# ── Workspace scope ────────────────────────────────────────────────
+p, ws_owner, *, workspace, update
+p, ws_owner, *, workspace, manage_members
+p, ws_owner, *, workspace, view_quota
+p, ws_owner, *, project, create
+p, ws_owner, *, project, delete
+p, ws_owner, *, trash, restore
+p, ws_owner, *, trash, hard_delete
+p, ws_member, *, workspace, view
+p, ws_member, *, classes, propose
+
+# ── Project scope ──────────────────────────────────────────────────
+p, prj_manager, *, project, manage_members
+p, prj_manager, *, sample, review
+p, prj_manager, *, dataset, create
+p, prj_manager, *, dataset, freeze
+p, prj_manager, *, model, create
+p, prj_manager, *, model, train
+p, prj_manager, *, model, upload_external
+p, prj_contributor, *, session, create
+p, prj_contributor, *, sample, upload
+p, prj_contributor, *, classes, propose
+p, prj_viewer, *, project, view
+p, prj_viewer, *, dataset, view
+p, prj_viewer, *, model, download
+
+# ── Role hierarchy (seeded once, dom="*") ──────────────────────────
+g, ws_owner, ws_member, *
+g, prj_manager, prj_contributor, *
+g, prj_contributor, prj_viewer, *

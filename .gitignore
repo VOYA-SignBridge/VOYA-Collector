@@ -98,3 +98,6 @@ _tmp/
 signbridge-prod/
 backend/secrets/
 backend/static/
+
+# Policy/config data files inside the app are code, not datasets:
+!backend/app/**/*.csv

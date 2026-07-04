@@ -23,3 +23,7 @@ torch==2.0.0
 scikit-learn==1.3.2
 matplotlib==3.8.2
 slowapi==0.1.9
+
+# v2 stack (Roadmap v2 - GD1)
+alembic==1.18.5
+loguru==0.7.3
