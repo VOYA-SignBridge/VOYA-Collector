@@ -3,42 +3,16 @@
 The `client` fixture serves the *legacy* FastAPI app for Characterization
 Tests: it deliberately does NOT run lifespan/startup events, so no DB
 init, TTS warm-up, or network calls happen at collection time.
-"""
-import socket
 
+GĐ 0 tests are infrastructure-free by design. Tests that need a real
+PostgreSQL/MinIO/Redis belong to GĐ 2+ (Roadmap v2 §7.5) and will run
+against the dev compose stack — there, missing infrastructure must FAIL,
+never silently skip.
+"""
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import settings
 from app.main import app
-
-
-def _db_reachable(timeout: float = 0.5) -> bool:
-    """True when the configured PostgreSQL is reachable from this host.
-
-    In the docker-compose stack Postgres is only exposed on the compose
-    network (host `postgres`), so host-side runs typically skip
-    `requires_db` tests unless a local Postgres is published.
-    """
-    try:
-        with socket.create_connection(
-            (settings.postgres_host, settings.postgres_port), timeout=timeout
-        ):
-            return True
-    except OSError:
-        return False
-
-
-DB_AVAILABLE = _db_reachable()
-
-
-def pytest_collection_modifyitems(config, items):
-    skip_db = pytest.mark.skip(
-        reason="PostgreSQL not reachable from host (see tests/conftest.py)"
-    )
-    for item in items:
-        if "requires_db" in item.keywords and not DB_AVAILABLE:
-            item.add_marker(skip_db)
 
 
 @pytest.fixture(scope="session")

@@ -4,8 +4,11 @@ Captures CURRENT behaviour of the legacy app as a safety net for the
 Strangler-Fig migration. If one of these fails after a refactor, the
 refactor changed observable behaviour — stop and check.
 Behaviour snapshot taken 2026-07 (see erd_v2_unified_design.md).
+
+NOTE: DB-dependent auth cases (e.g. "login sai mật khẩu → 401") do NOT
+belong here — they are GĐ 2 integration tests (Roadmap v2 §7.5), where a
+dev-stack PostgreSQL is guaranteed and its absence must FAIL, not skip.
 """
-import pytest
 
 
 class TestLoginValidation:
@@ -36,14 +39,3 @@ class TestAuthGuard:
             "/api/v1/auth/me", headers={"Authorization": "Bearer not-a-jwt"}
         )
         assert r.status_code == 401
-
-
-@pytest.mark.requires_db
-class TestLoginAgainstDatabase:
-    def test_login_with_wrong_credentials_returns_401(self, client):
-        r = client.post(
-            "/api/v1/auth/login",
-            json={"identifier": "no-such-user-xyz", "password": "wrong-pass-123"},
-        )
-        assert r.status_code == 401
-        assert "Invalid" in r.json()["detail"]
