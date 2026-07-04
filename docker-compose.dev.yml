@@ -1,0 +1,58 @@
+# ══════════════════════════════════════════════════════════════════
+# DEV STACK (Roadmap v2 §12.4 — erd_v2_unified_design.md)
+# Isolated per-environment resources: fresh v2 database, own Redis DB,
+# own MinIO. Ports are PUBLISHED to the host (unlike prod compose) so
+# pytest / alembic run natively on Windows against localhost.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Legacy prod stack (docker-compose.yml) is untouched — Strangler Fig.
+# ══════════════════════════════════════════════════════════════════
+services:
+  postgres_v2:
+    image: postgres:17
+    container_name: voya_dev_postgres_v2
+    environment:
+      POSTGRES_USER: signbridge
+      POSTGRES_PASSWORD: signbridge
+      POSTGRES_DB: signbridge_v2
+    ports:
+      - "5433:5432"
+    volumes:
+      - voya_dev_pg_v2:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signbridge -d signbridge_v2"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis_v2:
+    image: redis:7-alpine
+    container_name: voya_dev_redis_v2
+    ports:
+      - "6380:6379"
+    volumes:
+      - voya_dev_redis_v2:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: voya_dev_minio
+    command: server /data --console-address ":9101"
+    environment:
+      MINIO_ROOT_USER: signbridge
+      MINIO_ROOT_PASSWORD: signbridge-dev
+    ports:
+      - "9100:9000"   # S3 API
+      - "9101:9101"   # Web console
+    volumes:
+      - voya_dev_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  voya_dev_pg_v2:
+  voya_dev_redis_v2:
+  voya_dev_minio:
