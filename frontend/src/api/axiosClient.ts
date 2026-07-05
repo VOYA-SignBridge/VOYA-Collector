@@ -42,6 +42,10 @@ export function loadAuthToken() {
   return token;
 }
 
+export function getAuthToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
 export function saveAuthToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token);
   setAuthToken(token);

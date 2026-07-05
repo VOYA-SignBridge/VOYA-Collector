@@ -39,6 +39,8 @@ import {
   type RealtimeModel,
 } from "../../api/realtime";
 import { fetchTTSAudio } from "../../api/tts";
+import PageHeader from "../ui/PageHeader";
+import Button from "../ui/Button";
 
 type Props = {
   /** Visual-only mirror for preview. Never affects payload semantics. */
@@ -736,10 +738,11 @@ export default function RealtimeRuntime({
   return (
     <div className="w-full max-w-6xl mx-auto space-y-2.5 sm:space-y-4 p-2.5 sm:p-4 lg:p-5">
       {/* Header */}
-      <div className="space-y-2">
-        <h1 className="text-lg sm:text-3xl font-bold text-slate-900">Nhận diện ngôn ngữ kí hiệu</h1>
-        <p className="text-xs sm:text-base text-slate-600">Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực</p>
-      </div>
+      <PageHeader
+        title="Nhận diện ngôn ngữ kí hiệu"
+        subtitle="Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực"
+        breadcrumb={["Dashboard", "Nhận dạng realtime"]}
+      />
 
       {/* Model Selection */}
       <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-4 space-y-2 sm:space-y-3 shadow-sm">
@@ -756,8 +759,9 @@ export default function RealtimeRuntime({
         {modelsError && (
           <div className="space-y-2">
             <div className="text-sm text-red-700">Không thể tải danh sách bộ nhận diện</div>
-            <button
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => {
                 setModelsError(null);
                 setIsLoadingModels(true);
@@ -781,7 +785,7 @@ export default function RealtimeRuntime({
               type="button"
             >
               Thử lại
-            </button>
+            </Button>
           </div>
         )}
 
@@ -804,7 +808,7 @@ export default function RealtimeRuntime({
               <select
                 className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${running && (isStarting || !canSwitchModel())
                   ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
-                  : "border-slate-300 bg-white focus:ring-blue-500"
+                  : "border-slate-300 bg-white focus:ring-ctu-blue"
                   }`}
                 value={selectedLanguage || ""}
                 onChange={(e) => handleLanguageSelect(e.target.value)}
@@ -835,7 +839,7 @@ export default function RealtimeRuntime({
                 <select
                   className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${running && (isStarting || !canSwitchModel())
                     ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
-                    : "border-slate-300 bg-white focus:ring-blue-500"
+                    : "border-slate-300 bg-white focus:ring-ctu-blue"
                     }`}
                   value={selectedModelId || ""}
                   onChange={(e) => handleModelSelect(e.target.value)}
@@ -860,16 +864,53 @@ export default function RealtimeRuntime({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
         {/* Camera Preview (Left/Top) */}
         <div className="lg:col-span-2 space-y-3 sm:space-y-4">
-          <div className="rounded-2xl overflow-hidden border border-slate-200 bg-black shadow-sm aspect-[7/5] sm:aspect-[4/5] lg:aspect-video">
+          <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-black shadow-sm aspect-video">
             <video
               ref={videoRef}
               style={previewStyle}
-              className="w-full h-full object-cover sm:object-contain"
+              className="w-full h-full object-cover"
               autoPlay
               playsInline
               muted
             />
+
+            {/* Live caption: mirrors the result panel directly on the feed, so the
+                answer is visible without looking away from the camera. */}
+            {running && prediction && (
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-3 pb-3 pt-8 sm:px-5 sm:pb-4">
+                <div className="text-center text-lg font-bold text-white drop-shadow line-clamp-1 sm:text-3xl">
+                  {prediction.label}
+                </div>
+                <div className="mt-0.5 text-center text-[11px] text-white/80 sm:text-sm">
+                  {Math.round(prediction.confidence * 100)}%
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Status + Start/Stop: the primary controls live right under the video so
+              they're reachable without scrolling past the result panel on mobile. */}
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
+            <div className={`w-2 h-2 rounded-full shrink-0 ${running && status === "in_flight" ? "bg-green-500" :
+              running && status === "debouncing" ? "bg-yellow-500" :
+                running ? "bg-ctu-blue" : "bg-slate-300"
+              }`} />
+            <div className="text-xs text-slate-600">{getFriendlyStatusMessage()}</div>
+          </div>
+
+          <button
+            className={
+              "w-full py-2.5 rounded-xl text-sm sm:text-base font-semibold border transition-all " +
+              (running
+                ? "bg-red-600 text-white border-red-600 hover:bg-red-700 active:scale-95"
+                : "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 active:scale-95")
+            }
+            onClick={handleStartStop}
+            type="button"
+            disabled={isStarting}
+          >
+            {running ? "Dừng nhận diện" : isStarting ? "Đang khởi động..." : "Bắt đầu nhận diện"}
+          </button>
 
           {/* Error Message (if any) — only show when error stable */}
           {friendlyError && (
@@ -879,17 +920,17 @@ export default function RealtimeRuntime({
           )}
         </div>
 
-        {/* Right Panel: Prediction + Controls */}
+        {/* Right Panel: Prediction detail + speech settings */}
         <div className="space-y-2.5 sm:space-y-4">
-          {/* Prediction Display (PROMINENT) */}
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-3 sm:p-6 shadow-sm">
+          {/* Prediction Display (detail) */}
+          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-ctu-blue/5 to-white p-3 sm:p-6 shadow-sm">
             <div className="text-[11px] sm:text-xs font-medium text-slate-600 uppercase tracking-wide mb-2 sm:mb-3">
               Kết quả nhận diện
             </div>
             <div className="min-h-[88px] sm:min-h-[112px] flex flex-col justify-center">
               {prediction ? (
                 <div className="space-y-2 sm:space-y-3">
-                  <div className="text-2xl sm:text-4xl lg:text-5xl font-bold text-blue-600 text-center break-words line-clamp-2">
+                  <div className="text-2xl sm:text-4xl lg:text-5xl font-bold text-ctu-blue text-center break-words line-clamp-2">
                     {prediction.label}
                   </div>
                   <div className="space-y-2 text-center">
@@ -944,12 +985,11 @@ export default function RealtimeRuntime({
                         lastSpokenLabelRef.current = null;
                       }}
                       className={`flex-1 rounded-lg border px-3 py-2 text-xs sm:text-sm font-medium transition-all ${ttsVoiceId === voice.id
-                        ? "border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500"
+                        ? "border-ctu-blue bg-ctu-blue/10 text-ctu-blue ring-1 ring-ctu-blue"
                         : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                         }`}
                     >
                       <div className="flex items-center justify-center gap-1.5">
-                        <span>{voice.gender === "female" ? "👩" : "👨"}</span>
                         <span>{voice.label}</span>
                       </div>
                     </button>
@@ -960,41 +1000,16 @@ export default function RealtimeRuntime({
             )}
           </div>
 
-          {/* Status Indicator */}
-          <div className="rounded-lg border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${running && status === "in_flight" ? "bg-green-500" :
-                running && status === "debouncing" ? "bg-yellow-500" :
-                  running ? "bg-blue-500" : "bg-slate-300"
-                }`} />
-              <div className="text-xs text-slate-600">{getFriendlyStatusMessage()}</div>
-            </div>
-          </div>
-
-          {/* Start/Stop Button (LARGE & PROMINENT) */}
-          <button
-            className={
-              "w-full py-2.5 rounded-xl text-sm sm:text-base font-semibold border transition-all " +
-              (running
-                ? "bg-red-600 text-white border-red-600 hover:bg-red-700 active:scale-95"
-                : "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 active:scale-95")
-            }
-            onClick={handleStartStop}
-            type="button"
-            disabled={isStarting}
-          >
-            {running ? "Dừng nhận diện" : isStarting ? "Đang khởi động..." : "Bắt đầu nhận diện"}
-          </button>
-
           {/* Optional: Debug Toggle (DEV only) */}
           {import.meta.env.DEV && (
-            <button
-              className="w-full py-2 rounded-lg text-xs font-medium border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors"
+            <Button
+              variant="secondary"
+              className="w-full justify-center"
               onClick={() => setShowDebug(!showDebug)}
               type="button"
             >
               {showDebug ? "Ẩn thông tin kỹ thuật" : "Hiện thông tin kỹ thuật"}
-            </button>
+            </Button>
           )}
         </div>
       </div>

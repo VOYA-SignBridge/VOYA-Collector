@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSamples } from "../../api/dataset";
 import Button from "../ui/Button";
+import { CameraIcon, ChipIcon, HeartIcon, UploadIcon } from "../ui/Icons";
 import type { Session } from "../../types";
 
 interface MyContributionStats {
@@ -104,21 +105,27 @@ export default function MyContributionSection({ username }: MyContributionSectio
     return (
       <div className="space-y-6">
         <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Tham gia cộng đồng</h2>
-        <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl p-8 sm:p-10 border-2 border-indigo-200 shadow-md">
+        <div className="bg-gradient-to-br from-ctu-blue/10 to-ctu-navy/5 rounded-2xl p-8 sm:p-10 border-2 border-ctu-blue/30 shadow-md">
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="text-center">
-                <div className="text-3xl mb-3">📹</div>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-ctu-blue/10 text-ctu-blue">
+                  <CameraIcon className="h-6 w-6" />
+                </div>
                 <p className="font-semibold text-slate-900">Đóng góp dữ liệu VSL</p>
                 <p className="text-sm text-slate-600 mt-2">Ghi lại và tải lên mẫu Ngôn ngữ Ký hiệu Việt Nam</p>
               </div>
               <div className="text-center">
-                <div className="text-3xl mb-3">🤖</div>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-ctu-navy/10 text-ctu-navy">
+                  <ChipIcon className="h-6 w-6" />
+                </div>
                 <p className="font-semibold text-slate-900">Hỗ trợ nghiên cứu AI</p>
                 <p className="text-sm text-slate-600 mt-2">Giúp cải thiện hệ thống nhận dạng tự động</p>
               </div>
               <div className="text-center">
-                <div className="text-3xl mb-3">🤝</div>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-ctu-yellow/20 text-ctu-navy">
+                  <HeartIcon className="h-6 w-6" />
+                </div>
                 <p className="font-semibold text-slate-900">Hỗ trợ cộng đồng</p>
                 <p className="text-sm text-slate-600 mt-2">Cùng xây dựng tài nguyên cho người khiếm thính</p>
               </div>
@@ -130,14 +137,14 @@ export default function MyContributionSection({ username }: MyContributionSectio
                 className="justify-center px-8 py-3 text-base font-semibold"
                 variant="primary"
               >
-                🔓 Đăng nhập
+                Đăng nhập
               </Button>
               <Button
                 onClick={() => navigate("/register")}
                 className="justify-center px-8 py-3 text-base font-semibold"
                 variant="ghost"
               >
-                ✍️ Đăng ký tài khoản
+                Đăng ký tài khoản
               </Button>
             </div>
           </div>
@@ -169,8 +176,10 @@ export default function MyContributionSection({ username }: MyContributionSectio
       <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Đóng góp của bạn</h2>
 
       {stats.totalSamples === 0 ? (
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-8 sm:p-12 border border-blue-200 text-center">
-          <div className="text-5xl mb-4">🚀</div>
+        <div className="bg-gradient-to-br from-ctu-blue/10 to-ctu-navy/5 rounded-2xl p-8 sm:p-12 border border-ctu-blue/30 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-ctu-blue/10 text-ctu-blue">
+            <UploadIcon className="h-7 w-7" />
+          </div>
           <p className="text-xl font-bold text-slate-900 mb-2">Hãy bắt đầu đóng góp!</p>
           <p className="text-slate-600 mb-6">
             Bạn chưa có mẫu dữ liệu nào. Mỗi đóng góp giúp cải thiện hệ thống nhận dạng Ngôn ngữ Ký hiệu Việt Nam.
@@ -180,28 +189,28 @@ export default function MyContributionSection({ username }: MyContributionSectio
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
             {/* Total Samples */}
-            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-2xl p-6 sm:p-8 border border-indigo-200 shadow-md">
+            <div className="bg-gradient-to-br from-ctu-blue/10 to-blue-50 rounded-2xl p-6 sm:p-8 border border-ctu-blue/30 shadow-md">
               <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">Mẫu Dữ Liệu</div>
-              <div className="text-4xl sm:text-5xl font-bold text-indigo-600 mb-1">{stats.totalSamples}</div>
+              <div className="text-4xl sm:text-5xl font-bold text-ctu-blue mb-1">{stats.totalSamples}</div>
               <p className="text-sm text-slate-600">
                 Từ <strong>{stats.sessionsCount}</strong> phiên ghi
               </p>
             </div>
 
             {/* Labels */}
-            <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-2xl p-6 sm:p-8 border border-violet-200 shadow-md">
+            <div className="bg-gradient-to-br from-ctu-navy/10 to-slate-50 rounded-2xl p-6 sm:p-8 border border-ctu-navy/30 shadow-md">
               <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">Nhãn Được Ghi</div>
-              <div className="text-4xl sm:text-5xl font-bold text-violet-600 mb-1">{stats.labels.length}</div>
+              <div className="text-4xl sm:text-5xl font-bold text-ctu-navy mb-1">{stats.labels.length}</div>
               <p className="text-sm text-slate-600">Loại ngôn ngữ ký hiệu</p>
             </div>
 
             {/* Rank */}
-            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 sm:p-8 border border-amber-200 shadow-md">
+            <div className="bg-gradient-to-br from-ctu-yellow/20 to-amber-50 rounded-2xl p-6 sm:p-8 border border-ctu-yellow/40 shadow-md">
               <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">Xếp Hạng</div>
-              <div className="text-3xl sm:text-4xl font-bold mb-2">
+              <div className="text-3xl sm:text-4xl font-bold mb-2 text-ctu-navy">
                 {getRankMedal(stats.rank)} {stats.rank}/{stats.totalContributors}
               </div>
-              <p className="text-sm text-slate-600 font-semibold text-amber-700">{getRankText(stats.rank)}</p>
+              <p className="text-sm text-slate-600 font-semibold text-ctu-navy">{getRankText(stats.rank)}</p>
             </div>
           </div>
 
@@ -215,7 +224,7 @@ export default function MyContributionSection({ username }: MyContributionSectio
                 {stats.labels.slice(0, 12).map((label) => (
                   <span
                     key={label}
-                    className="inline-flex items-center rounded-full bg-indigo-50 px-4 py-2 text-sm font-medium text-indigo-700 border border-indigo-200"
+                    className="inline-flex items-center rounded-full bg-ctu-blue/10 px-4 py-2 text-sm font-medium text-ctu-blue border border-ctu-blue/30"
                   >
                     {label}
                   </span>

@@ -86,6 +86,14 @@ try:
 except Exception:
     _TrackingClient = None  # type: ignore
 
+try:
+    from .models import get_model_class  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.models import get_model_class  # type: ignore
+    except Exception:
+        get_model_class = None  # models not available yet
+
 
 EXPECTED_FEATURE_DIM = 126
 
@@ -108,143 +116,6 @@ def _seed_worker(worker_id: int) -> None:
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
-
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size: int):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, : x.size(2) - self.chomp_size]
-
-
-class TemporalBlock(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int,
-        dilation: int,
-        dropout: float,
-    ) -> None:
-        super().__init__()
-        pad = (kernel_size - 1) * dilation
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp1 = Chomp1d(pad)
-        self.relu1 = nn.ReLU()
-        self.drop1 = nn.Dropout(dropout)
-
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp2 = Chomp1d(pad)
-        self.relu2 = nn.ReLU()
-        self.drop2 = nn.Dropout(dropout)
-
-        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
-        self.out_relu = nn.ReLU()
-
-        # Kaiming initialization
-        for m in [self.conv1, self.conv2]:
-            nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-        if self.downsample is not None:
-            nn.init.kaiming_normal_(self.downsample.weight, nonlinearity="linear")
-            if self.downsample.bias is not None:
-                nn.init.zeros_(self.downsample.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.conv1(x)
-        out = self.chomp1(out)
-        out = self.relu1(out)
-        out = self.drop1(out)
-
-        out = self.conv2(out)
-        out = self.chomp2(out)
-        out = self.relu2(out)
-        out = self.drop2(out)
-
-        res = x if self.downsample is None else self.downsample(x)
-        return self.out_relu(out + res)
-
-
-class TCNClassifier(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        num_classes: int,
-        channels: int = 64,
-        levels: int = 3,
-        kernel_size: int = 5,
-        dropout: float = 0.3,
-        use_proj: bool = True,
-        proj_dim: Optional[int] = None,
-    ) -> None:
-        super().__init__()
-        proj_dim = proj_dim or channels
-        self.proj = nn.Identity()
-        current_in = in_dim
-        if use_proj and in_dim != proj_dim:
-            self.proj = nn.Conv1d(in_dim, proj_dim, kernel_size=1)
-            current_in = proj_dim
-
-        blocks: List[nn.Module] = []
-        for i in range(levels):
-            dilation = 2 ** i
-            blocks.append(
-                TemporalBlock(
-                    in_channels=current_in if i == 0 else channels,
-                    out_channels=channels,
-                    kernel_size=kernel_size,
-                    dilation=dilation,
-                    dropout=dropout,
-                )
-            )
-        self.network = nn.Sequential(*blocks)
-        self.classifier = nn.Linear(channels, num_classes)
-        nn.init.kaiming_uniform_(self.classifier.weight, a=math.sqrt(5))
-        if self.classifier.bias is not None:
-            nn.init.zeros_(self.classifier.bias)
-
-    def encode(self, x_btd: torch.Tensor) -> torch.Tensor:
-        """
-        Returns pooled backbone representation: [B, channels].
-
-        Backbone pooling contract: unmasked_gap_v1
-          - Unweighted mean over all T=60 time positions
-          - Front-padded zero frames are included in the mean
-          - Output shape is always [B, channels] regardless of input length
-
-        This output is numerically identical to the intermediate `pooled`
-        value that forward() produced internally before the classifier head.
-        DO NOT change pooling behavior here without also changing forward().
-        """
-        if x_btd.ndim != 3:
-            raise RuntimeError(
-                f"Expected 3D tensor [B,T,D], got {x_btd.shape}"
-            )
-
-        if x_btd.shape[-1] != EXPECTED_FEATURE_DIM:
-            raise RuntimeError(
-                f"Expected feature_dim={EXPECTED_FEATURE_DIM}, got {x_btd.shape}"
-            )
-
-        x = x_btd.transpose(1, 2)   # [B, D, T]
-
-        x = self.proj(x)             # [B, proj_dim, T]
-
-        x = self.network(x)          # [B, channels, T]
-
-        return x.mean(dim=2)         # [B, channels] — unmasked GAP over T
-
-    def forward(self, x_btd: torch.Tensor) -> torch.Tensor:
-        """
-        x_btd: [B, T, D]
-        Expected:
-            T = 60
-            D = 126
-        """
-        return self.classifier(self.encode(x_btd))
 
 
 @dataclass
@@ -723,6 +594,50 @@ def evaluate_with_handedness(
 
     return total_loss / n, total_acc / n, mf1, hand_metrics
 
+@torch.no_grad()
+def compute_test_evaluation(
+    model: nn.Module,
+    loader: DataLoader,
+    device: str,
+    num_classes: int,
+    label_map: Dict[str, int],
+) -> Dict[str, object]:
+    """Confusion matrix + per-class precision/recall/F1 on a loader.
+
+    Returned structure is JSON-serializable and goes into the metrics-file
+    "final" record so the trainer can persist it for the Step 7 UI.
+    """
+    model.eval()
+    cm = [[0] * num_classes for _ in range(num_classes)]
+    for X, y, _ in loader:
+        X = X.to(device)
+        preds = model(X).argmax(1).cpu().tolist()
+        for t, p in zip(y.tolist(), preds):
+            if 0 <= t < num_classes and 0 <= p < num_classes:
+                cm[t][p] += 1
+
+    idx_to_label = {int(v): str(k) for k, v in label_map.items()}
+    per_class = []
+    for c in range(num_classes):
+        tp = cm[c][c]
+        support = sum(cm[c])
+        pred_total = sum(cm[r][c] for r in range(num_classes))
+        precision = tp / pred_total if pred_total else 0.0
+        recall = tp / support if support else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+        per_class.append({
+            "class_idx": c,
+            "label_key": idx_to_label.get(c, f"class_{c}"),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "support": support,
+        })
+
+    labels = [idx_to_label.get(c, f"class_{c}") for c in range(num_classes)]
+    return {"labels": labels, "confusion_matrix": cm, "per_class": per_class}
+
+
 def build_checkpoint(
     *,
     model,
@@ -825,7 +740,23 @@ def main() -> None:
         default="",
         help="Optional output tag. If omitted, auto-generated from subset (e.g. dialect).",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="tcn",
+        choices=["tcn", "cnn", "lstm", "bigru_attention", "hdgcn"],
+        help="Model architecture to use. Default: tcn",
+    )
     parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument(
+        "--metrics_file",
+        type=str,
+        default="",
+        help=(
+            "Optional path to a JSONL file. One JSON object per epoch is appended "
+            "(structured metrics channel for the backend — more robust than stdout parsing)."
+        ),
+    )
     parser.add_argument(
         "--feature_dim",
         type=int,
@@ -1033,14 +964,34 @@ def main() -> None:
             label_set.add(int(y_i))
         num_classes = max(label_set) + 1 if label_set else 1
 
-    model = TCNClassifier(
-        in_dim=in_dim,
-        num_classes=num_classes,
-        channels=cfg.channels,
-        levels=cfg.levels,
-        kernel_size=cfg.kernel_size,
-        dropout=cfg.dropout,
-    ).to(cfg.device)
+    # Create model from registry (unified for all architectures)
+    if get_model_class is None:
+        raise RuntimeError("Models registry not available. Check processed/train_utils/models/__init__.py")
+
+    try:
+        model_class = get_model_class(args.model_type)
+        config = {
+            "channels": cfg.channels,
+            "levels": cfg.levels,
+            "kernel_size": cfg.kernel_size,
+            "dropout": cfg.dropout,
+        }
+        model = model_class.from_config(
+            input_dim=in_dim,
+            output_dim=num_classes,
+            config=config,
+        ).to(cfg.device)
+        model_name = model.get_model_name()
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load model '{args.model_type}': {e}\n"
+            f"Supported models: tcn, cnn, lstm, bigru_attention, handgcn (hdgcn)"
+        )
+
+    print(f"\n{'='*70}")
+    print(f"Model: {model_name}")
+    print(f"Input Dim: {in_dim} | Output Dim: {num_classes}")
+    print(f"{'='*70}")
 
     train_augment = build_train_augment()
 
@@ -1158,6 +1109,24 @@ def main() -> None:
     elif args.track:
         print("[TRACKING] tracking_client.py not available; --track disabled.")
 
+    # Structured metrics channel (JSONL) — appended per epoch, fsync'd so an
+    # external tailer (Celery trainer task) sees each line as soon as written.
+    metrics_file_path: Optional[Path] = None
+    if getattr(args, "metrics_file", ""):
+        metrics_file_path = Path(args.metrics_file)
+        metrics_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _append_metric_line(payload: Dict[str, object]) -> None:
+        if metrics_file_path is None:
+            return
+        try:
+            with open(metrics_file_path, "a", encoding="utf-8") as mf:
+                mf.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                mf.flush()
+                os.fsync(mf.fileno())
+        except Exception as _me:
+            print(f"[METRICS_FILE] write failed: {_me}")
+
     try:
         for epoch in range(1, cfg.epochs + 1):
             tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, cfg.device)
@@ -1176,9 +1145,21 @@ def main() -> None:
 
             hand_str = f"left_only:{hand_metrics['left_only_acc']:.3f}({hand_metrics['left_only_n']}) right_only:{hand_metrics['right_only_acc']:.3f}({hand_metrics['right_only_n']}) both:{hand_metrics['both_acc']:.3f}({hand_metrics['both_n']})"
             print(
-                f"epoch {epoch:03d} | train loss {tr_loss:.4f} acc {tr_acc:.4f} | val loss {va_loss:.4f} acc {va_acc:.4f} f1 {va_f1:.4f}"
+                f"[{model_name}] epoch {epoch:03d} | train loss {tr_loss:.4f} acc {tr_acc:.4f} | val loss {va_loss:.4f} acc {va_acc:.4f} f1 {va_f1:.4f}"
             )
             print(f"           | {hand_str}")
+
+            _append_metric_line({
+                "type": "epoch",
+                "epoch": epoch,
+                "total_epochs": cfg.epochs,
+                "train_loss": round(tr_loss, 6),
+                "train_acc": round(tr_acc, 6),
+                "val_loss": round(va_loss, 6),
+                "val_acc": round(va_acc, 6),
+                "val_f1": round(va_f1, 6),
+                "learning_rate": _lr_logged,
+            })
 
             if tracker and experiment_id:
                 tracker.log_metric(
@@ -1198,6 +1179,13 @@ def main() -> None:
         model.load_state_dict(best_state)  # type: ignore[arg-type]
 
     te_loss, te_acc, te_f1, te_hand_metrics = evaluate_with_handedness(model, test_loader, cfg.device, num_classes)
+
+    # Per-class breakdown + confusion matrix for the Step 7 results UI
+    test_evaluation = None
+    try:
+        test_evaluation = compute_test_evaluation(model, test_loader, cfg.device, num_classes, label_map)
+    except Exception as _ee:
+        print(f"[EVAL] confusion matrix computation failed (non-fatal): {_ee}")
     # Note: SCS (Sequence Consistency Score) pertains to stability across consecutive window predictions.
     # This trainer produces one prediction per sequence, not per sliding window, so SCS is not applicable here.
     # We include it as None in the summary for compatibility with realtime/windowed evaluation.
@@ -1229,13 +1217,33 @@ def main() -> None:
         te_hand_metrics=te_hand_metrics,
         stamp=stamp,
     )
-    prefix = f"tcn_{stamp}" if not subset_mode else f"tcn_{subset_tag}_{stamp}"
+    # Use actual model name instead of hardcoded "tcn"
+    # Clean up model name: remove special chars, normalize spaces
+    model_type = model_name.lower()
+    model_type = model_type.replace(" + ", "_").replace(" ", "_").replace("(legacy)", "").strip()
+    model_type = "".join(c for c in model_type if c.isalnum() or c == "_")  # Remove special chars
+
+    # Update checkpoint with actual model type
+    final_checkpoint["model_type"] = model_name
+
+    prefix = f"{model_type}_{stamp}" if not subset_mode else f"{model_type}_{subset_tag}_{stamp}"
     out_ckpt = cfg.out_dir / f"{prefix}.pt"
 
     torch.save(final_checkpoint, out_ckpt)
 
+    # Final line tells the tailer the EXACT checkpoint of this run
+    # (no more "latest file by mtime" guessing) + test metrics.
+    _append_metric_line({
+        "type": "final",
+        "checkpoint_path": str(out_ckpt.resolve()),
+        "test_acc": round(float(te_acc), 6),
+        "test_f1": round(float(te_f1), 6),
+        "model_type": model_name,
+        "evaluation": test_evaluation,  # confusion matrix + per-class (may be None)
+    })
+
     if tracker and experiment_id:
-        _model_family_track = f"{subset_tag}-tcn" if subset_mode else "tcn"
+        _model_family_track = f"{subset_tag}-{model_type}" if subset_mode else model_type
         _dialect_model_track = "+".join(dialects) if dialects else "all"
         _runtime_env_track = {
             "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",

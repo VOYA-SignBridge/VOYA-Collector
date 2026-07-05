@@ -60,13 +60,35 @@ const logDebugOperation = (operation: string, status: DebugStatus, data: DebugLo
   }
 };
 
-export const uploadVideo = async (file: File, user: string, label: string, dialect?: string): Promise<Result<UploadResult>> => {
+// Stable hex idempotency key — reused across retries of the same upload so
+// the backend can dedupe instead of storing the file twice.
+const genUploadUid = (): string => {
+  try {
+    return crypto.randomUUID().replace(/-/g, "");
+  } catch {
+    return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  }
+};
+
+// Video uploads can be large (backend allows up to 1GB) — the axios default
+// of 30s caused client timeouts mid-upload followed by full re-uploads.
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+export const uploadVideo = async (
+  file: File,
+  user: string,
+  label: string,
+  dialect?: string,
+  onProgress?: (percent: number) => void,
+): Promise<Result<UploadResult>> => {
   const startTime = Date.now();
   const sessionId = Math.random().toString(36).substring(7);
+  const uploadUid = genUploadUid();
   const formData = new FormData();
   formData.append("file", file);
   formData.append("user", user);
   formData.append("label", label);
+  formData.append("upload_uid", uploadUid);
   if (dialect) formData.append('dialect', dialect);
 
   // Log start
@@ -81,7 +103,14 @@ export const uploadVideo = async (file: File, user: string, label: string, diale
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       // Let the browser set Content-Type (with boundary). Setting it manually can break the request.
-      const res = await axiosClient.post("/upload/video", formData);
+      const res = await axiosClient.post("/upload/video", formData, {
+        timeout: UPLOAD_TIMEOUT_MS,
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        },
+      });
       const result = validateUploadResult(res.data);
       
       if (result.ok) {

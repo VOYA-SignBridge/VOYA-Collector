@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from typing import Dict, Any
 
+import redis
 from fastapi import APIRouter, HTTPException
 
 from app.config import settings
@@ -20,6 +21,14 @@ def _check_postgres() -> None:
             cur.fetchone()
     finally:
         conn.close()
+
+
+def _check_redis() -> None:
+    client = redis.from_url(settings.broker_url, socket_connect_timeout=3)
+    try:
+        client.ping()
+    finally:
+        client.close()
 
 
 @router.get("", tags=["health"])
@@ -42,30 +51,30 @@ async def readiness_check() -> Dict[str, Any]:
     Readiness probe: checks if service is ready to accept traffic.
     Verifies database connectivity and essential services.
     """
-    try:
-        # Check database connectivity
-        try:
-            _check_postgres()
-            db_status = "connected"
-        except Exception as e:
-            logger.error(f"Database connection failed: {e}")
-            db_status = f"error: {str(e)}"
+    checks: Dict[str, str] = {}
 
-        # All checks passed
-        if db_status == "connected":
-            return {
-                "status": "ready",
-                "timestamp": datetime.utcnow().isoformat(),
-                "checks": {
-                    "database": "ok",
-                    "redis": "ok",
-                },
-            }
-        else:
-            raise HTTPException(status_code=503, detail=f"Database unavailable: {db_status}")
+    try:
+        _check_postgres()
+        checks["database"] = "ok"
     except Exception as e:
-        logger.error(f"Readiness check failed: {e}")
-        raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
+        logger.error(f"Database connection failed: {e}")
+        checks["database"] = f"error: {str(e)}"
+
+    try:
+        _check_redis()
+        checks["redis"] = "ok"
+    except Exception as e:
+        logger.error(f"Redis connection failed: {e}")
+        checks["redis"] = f"error: {str(e)}"
+
+    if all(v == "ok" for v in checks.values()):
+        return {
+            "status": "ready",
+            "timestamp": datetime.utcnow().isoformat(),
+            "checks": checks,
+        }
+
+    raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
 
 
 @router.get("/live", tags=["health"])
@@ -182,6 +191,19 @@ async def dependencies_check() -> Dict[str, Any]:
         }
     except Exception as e:
         deps_status["dependencies"]["postgres"] = {
+            "status": "error",
+            "error": str(e),
+        }
+
+    # Redis
+    try:
+        _check_redis()
+        deps_status["dependencies"]["redis"] = {
+            "status": "ok",
+            "response_time_ms": 0,
+        }
+    except Exception as e:
+        deps_status["dependencies"]["redis"] = {
             "status": "error",
             "error": str(e),
         }

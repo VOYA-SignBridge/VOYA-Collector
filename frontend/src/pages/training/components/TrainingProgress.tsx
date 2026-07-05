@@ -6,14 +6,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
+import Button from '../../../components/ui/Button';
 
 interface Props {
   job: TrainingJob;
   metrics: TrainingMetrics[];
-  onNext?: () => void;
+  onCancel?: () => Promise<void> | void;
 }
 
-const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
+const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
+  const [cancelling, setCancelling] = useState(false);
   const [startTime] = useState<Date>(new Date(job.started_at || new Date()));
   const [elapsedTime, setElapsedTime] = useState('0m');
   const [eta, setEta] = useState('Tính toán...');
@@ -47,7 +49,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
   const latestMetric = metrics[metrics.length - 1];
   const progressPercent = latestMetric ? (latestMetric.epoch / Math.max(1, job.total_epochs)) * 100 : 0;
 
-  const renderSparkline = (values: number[], stroke = '#7c3aed') => {
+  const renderSparkline = (values: number[], stroke = '#1b2a57') => {
     if (!values || values.length === 0) return null;
     const w = 80;
     const h = 28;
@@ -69,9 +71,9 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
       <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">🚀 Đang Huấn Luyện Mô Hình</h3>
+            <h3 className="text-base font-semibold text-slate-900">Đang Huấn Luyện Mô Hình</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Trạng thái: <span className="font-medium text-indigo-600">{job.status}</span>
+              Trạng thái: <span className="font-medium text-ctu-blue">{job.status}</span>
             </p>
           </div>
           <div className="text-right">
@@ -87,13 +89,13 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
       <div>
         <div className="flex items-center justify-between mb-2">
           <h4 className="text-sm font-semibold text-slate-900">Tiến độ huấn luyện</h4>
-          <span className="text-sm font-bold text-indigo-600">
+          <span className="text-sm font-bold text-ctu-blue">
             {latestMetric ? `${latestMetric.epoch}/${job.total_epochs}` : '0/0'} epochs
           </span>
         </div>
         <div className="h-3 w-full bg-slate-200 rounded-full overflow-hidden">
           <div
-            className="h-3 bg-gradient-to-r from-indigo-500 to-cyan-500 transition-all duration-300"
+            className="h-3 bg-gradient-to-r from-ctu-navy to-ctu-blue transition-all duration-300"
             style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }}
           />
         </div>
@@ -128,7 +130,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
             label="Val Accuracy ⭐"
             value={`${(latestMetric.val_acc * 100).toFixed(1)}%`}
             trend="KPI Chính"
-            sparkline={renderSparkline(valAccSeries, '#06b6d4')}
+            sparkline={renderSparkline(valAccSeries, '#0e7bc2')}
             color="blue"
             description="Độ chính xác trên tập kiểm tra"
           />
@@ -143,37 +145,10 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
         </div>
       )}
 
-      {/* Handedness Breakdown */}
-      {latestMetric?.handedness && (
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h4 className="font-semibold text-slate-900 mb-4">🤚 Độ Chính Xác Theo Tay</h4>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <HandednessCard
-              emoji="👈"
-              label="Tay Trái"
-              accuracy={latestMetric.handedness.left_only_acc}
-              count={latestMetric.handedness.left_only_n}
-            />
-            <HandednessCard
-              emoji="👉"
-              label="Tay Phải"
-              accuracy={latestMetric.handedness.right_only_acc}
-              count={latestMetric.handedness.right_only_n}
-            />
-            <HandednessCard
-              emoji="👐"
-              label="Cả Hai Tay"
-              accuracy={latestMetric.handedness.both_acc}
-              count={latestMetric.handedness.both_n}
-            />
-          </div>
-        </div>
-      )}
-
       {/* Recent Epochs History */}
       {metrics.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h4 className="font-semibold text-slate-900 mb-4">📈 Lịch Sử Metrics (5 Epoch Gần Nhất)</h4>
+          <h4 className="font-semibold text-slate-900 mb-4">Lịch Sử Metrics (5 Epoch Gần Nhất)</h4>
           <div className="grid gap-3 sm:grid-cols-5">
             {metrics.slice(-5).map((m) => (
               <div key={m.epoch} className="rounded-lg bg-gradient-to-br from-slate-50 to-slate-100 p-3 text-center border border-slate-200">
@@ -183,7 +158,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
                     <span className="text-slate-500">Loss:</span> <span className="font-bold text-red-600">{m.train_loss.toFixed(3)}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500">Val:</span> <span className="font-bold text-indigo-600">{(m.val_acc * 100).toFixed(1)}%</span>
+                    <span className="text-slate-500">Val:</span> <span className="font-bold text-ctu-blue">{(m.val_acc * 100).toFixed(1)}%</span>
                   </div>
                   <div>
                     <span className="text-slate-500">F1:</span> <span className="font-bold text-emerald-600">{m.val_f1.toFixed(3)}</span>
@@ -196,47 +171,45 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onNext }) => {
       )}
 
       <div className="space-y-4">
-        <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900">
-          ℹ️ Mô hình sẽ được lưu tự động khi huấn luyện hoàn tất.
-        </div>
+        {(job?.status === 'cancelled' || job?.status === 'failed') ? (
+          <div className={`rounded-lg border p-4 text-sm ${
+            job.status === 'cancelled'
+              ? 'bg-amber-50 border-amber-300 text-amber-900'
+              : 'bg-red-50 border-red-300 text-red-900'
+          }`}>
+            {job.status === 'cancelled' ? '⏹️ Huấn luyện đã bị hủy' : '❌ Huấn luyện thất bại'}
+            {job.error_message ? ` — ${job.error_message}` : ''}
+          </div>
+        ) : (
+          <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
+            ℹ️ Mô hình sẽ được lưu tự động khi huấn luyện hoàn tất.
+          </div>
+        )}
 
-        {/* Manual next button - visible when training is running or completed */}
-        {(job?.status === 'running' || job?.status === 'completed') && onNext && (
-          <button
-            onClick={onNext}
-            className="w-full px-6 py-3 bg-gradient-to-r from-indigo-500 to-cyan-500 text-white font-semibold rounded-xl hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2"
+        {/* Cancel button - visible while queued/running */}
+        {(job?.status === 'running' || job?.status === 'queued') && onCancel && (
+          <Button
+            variant="danger"
+            size="lg"
+            disabled={cancelling}
+            className="w-full"
+            onClick={async () => {
+              if (!window.confirm('Bạn có chắc muốn hủy huấn luyện này?')) return;
+              setCancelling(true);
+              try {
+                await onCancel();
+              } finally {
+                setCancelling(false);
+              }
+            }}
           >
-            <span>✓ Lưu &amp; Tiếp Tục</span>
-            <span>→</span>
-          </button>
+            {cancelling ? 'Đang hủy...' : '⏹️ Hủy Huấn Luyện'}
+          </Button>
         )}
       </div>
     </div>
   );
 };
-
-function HandednessCard({
-  emoji,
-  label,
-  accuracy,
-  count,
-}: {
-  emoji: string;
-  label: string;
-  accuracy: number;
-  count: number;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center">
-      <div className="text-3xl mb-2">{emoji}</div>
-      <h5 className="font-semibold text-slate-900 text-sm">{label}</h5>
-      <div className="mt-2">
-        <div className="text-2xl font-bold text-indigo-600">{(accuracy * 100).toFixed(1)}%</div>
-        <div className="text-xs text-slate-500 mt-1">{count} mẫu</div>
-      </div>
-    </div>
-  );
-}
 
 function MetricCard({
   label,
@@ -256,14 +229,14 @@ function MetricCard({
   const colorClasses = {
     red: 'border-red-200 bg-red-50',
     green: 'border-emerald-200 bg-emerald-50',
-    blue: 'border-indigo-200 bg-indigo-50',
+    blue: 'border-ctu-blue/30 bg-ctu-blue/5',
     purple: 'border-purple-200 bg-purple-50',
   };
 
   const valueClasses = {
     red: 'text-red-600',
     green: 'text-emerald-600',
-    blue: 'text-indigo-600',
+    blue: 'text-ctu-blue',
     purple: 'text-purple-600',
   };
 

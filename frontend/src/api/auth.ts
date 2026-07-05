@@ -40,3 +40,20 @@ export async function me(): Promise<AuthUser> {
   const res = await axiosClient.get("/api/v1/auth/me");
   return res.data as AuthUser;
 }
+
+export type MessageResponse = {
+  message: string;
+};
+
+export async function forgotPassword(identifier: string): Promise<MessageResponse> {
+  const res = await axiosClient.post("/api/v1/auth/forgot-password", { identifier });
+  return res.data as MessageResponse;
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<MessageResponse> {
+  const res = await axiosClient.post("/api/v1/auth/reset-password", {
+    token,
+    new_password: newPassword,
+  });
+  return res.data as MessageResponse;
+}

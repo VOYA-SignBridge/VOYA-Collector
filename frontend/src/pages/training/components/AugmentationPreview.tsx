@@ -92,7 +92,7 @@ const AugmentationPreview: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={enableAll}
-            className="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100 transition-colors"
+            className="inline-flex items-center gap-1 rounded-lg bg-ctu-blue/10 px-3 py-2 text-sm font-medium text-ctu-blue hover:bg-ctu-blue/20 transition-colors"
           >
             ✓ Bật Hết
           </button>
@@ -106,8 +106,8 @@ const AugmentationPreview: React.FC = () => {
       </div>
 
       {/* Summary Indicator */}
-      <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
-        <p className="text-sm text-blue-900">
+      <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4">
+        <p className="text-sm text-ctu-navy">
           <strong>Đang sử dụng {enabledCount}/{augs.length} kỹ thuật</strong> — Mỗi mẫu sẽ tạo ra ~10 biến thể
         </p>
       </div>
@@ -120,7 +120,7 @@ const AugmentationPreview: React.FC = () => {
             onClick={() => toggle(aug.id)}
             className={`rounded-xl border-2 p-4 text-left transition-all duration-200 ${
               aug.enabled
-                ? 'border-indigo-300 bg-indigo-50 shadow-sm'
+                ? 'border-ctu-blue/40 bg-ctu-blue/5 shadow-sm'
                 : 'border-slate-200 bg-white hover:border-slate-300'
             }`}
           >
@@ -130,14 +130,14 @@ const AugmentationPreview: React.FC = () => {
                 <div className="flex-1 min-w-0">
                   <h4 className="font-semibold text-slate-900">{aug.name}</h4>
                   <p className="mt-0.5 text-xs text-slate-600">{aug.description}</p>
-                  <p className="mt-2 text-xs font-medium text-indigo-700">💡 {aug.benefit}</p>
+                  <p className="mt-2 text-xs font-medium text-ctu-blue">💡 {aug.benefit}</p>
                 </div>
               </div>
 
               <div
                 className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center ${
                   aug.enabled
-                    ? 'border-indigo-500 bg-indigo-500'
+                    ? 'border-ctu-blue bg-ctu-blue'
                     : 'border-slate-300 bg-white'
                 }`}
               >
@@ -165,7 +165,7 @@ const AugmentationPreview: React.FC = () => {
 
       {/* Info Section */}
       <div className="rounded-lg bg-slate-50 border border-slate-200 p-5">
-        <h4 className="font-semibold text-slate-900 mb-3">📌 Lợi Ích Của Tăng Cường</h4>
+        <h4 className="font-semibold text-slate-900 mb-3">Lợi Ích Của Tăng Cường</h4>
         <ul className="space-y-2 text-sm text-slate-700">
           <li className="flex gap-2">
             <span>✓</span>

@@ -5,14 +5,15 @@ import { me as fetchMe } from "../api/auth";
 import type { AuthUser } from "../api/auth";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
+import { ChipIcon, HandIcon, HomeIcon, RefreshIcon, TagIcon, UploadIcon } from "./ui/Icons";
 
 const AUTH_EVENT = "voya:auth-change";
 
-export type FlatNavItem = { name: string; href: string; icon: string; end?: boolean };
+export type FlatNavItem = { name: string; href: string; icon: ReactNode; end?: boolean };
 export type NavSection = {
   section: true;
   name: string;
-  icon: string;
+  icon: ReactNode;
   children: FlatNavItem[];
 };
 export type AnyNavItem = FlatNavItem | NavSection;
@@ -23,7 +24,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [hasToken, setHasToken] = useState<boolean>(() => !!loadAuthToken());
   const [user, setUser] = useState<AuthUser | null>(null);
-  const isAuthPage = location.pathname === "/login" || location.pathname === "/register";
+  const AUTH_PAGE_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
+  const isAuthPage = AUTH_PAGE_PATHS.includes(location.pathname);
 
   useEffect(() => {
     const syncAuthState = () => {
@@ -60,12 +62,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     };
   }, [hasToken]);
 
+  const navIconClass = "h-5 w-5";
   const navigation: AnyNavItem[] = [
-    { name: "Trang chủ", href: "/", icon: "🏠", end: true },
-    { name: "Đóng góp dữ liệu", href: "/upload", icon: "📤" },
-    { name: "Thư viện nhãn", href: "/labels", icon: "🏷️" },
-    { name: "Nhận dạng realtime", href: "/realtime", icon: "🖐️" },
-    { name: "Huấn luyện model", href: "/training", icon: "🚀" },
+    { name: "Trang chủ", href: "/", icon: <HomeIcon className={navIconClass} />, end: true },
+    { name: "Đóng góp dữ liệu", href: "/upload", icon: <UploadIcon className={navIconClass} /> },
+    { name: "Thư viện nhãn", href: "/labels", icon: <TagIcon className={navIconClass} /> },
+    { name: "Nhận dạng realtime", href: "/realtime", icon: <HandIcon className={navIconClass} /> },
+    { name: "Huấn luyện model", href: "/training", icon: <ChipIcon className={navIconClass} /> },
     // AI Studio removed
   ];
 
@@ -88,13 +91,13 @@ export default function Layout({ children }: { children: ReactNode }) {
       className={({ isActive }) =>
         `group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
           isActive
-            ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-lg shadow-indigo-500/25"
+            ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
             : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/60"
         }`
       }
       onClick={() => setSidebarOpen(false)}
     >
-      <span className="mr-3 text-lg">{item.icon}</span>
+      <span className="mr-3 flex items-center">{item.icon}</span>
       {item.name}
       <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -108,8 +111,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="mt-3">
       <div className="px-4 py-2 flex items-center gap-2">
         <div className="flex-1 h-px bg-slate-200" />
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0">
-          <span className="mr-1">{item.icon}</span>
+        <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0">
+          {item.icon}
           {item.name}
         </span>
         <div className="flex-1 h-px bg-slate-200" />
@@ -123,13 +126,13 @@ export default function Layout({ children }: { children: ReactNode }) {
             className={({ isActive }) =>
               `group flex items-center pl-8 pr-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
                 isActive
-                  ? "bg-gradient-to-r from-indigo-500 to-cyan-500 text-white shadow-lg shadow-indigo-500/25"
+                  ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
                   : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/60"
               }`
             }
             onClick={() => setSidebarOpen(false)}
           >
-            <span className="mr-3 text-base">{child.icon}</span>
+            <span className="mr-3 flex items-center">{child.icon}</span>
             {child.name}
           </NavLink>
         ))}
@@ -138,48 +141,14 @@ export default function Layout({ children }: { children: ReactNode }) {
   );
 
   if (isAuthPage) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 overflow-x-hidden">
-        <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-end border-b border-slate-200/60 bg-white/85 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
-          <nav className="flex items-center gap-2 rounded-full border border-slate-200/70 bg-slate-50/90 p-1 shadow-sm">
-            <NavLink
-              to="/login"
-              className={({ isActive }) =>
-                [
-                  "inline-flex items-center rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all duration-200 whitespace-nowrap",
-                  isActive
-                    ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-lg shadow-sky-500/25"
-                    : "border border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100",
-                ].join(" ")
-              }
-            >
-              Đăng nhập
-            </NavLink>
-            <NavLink
-              to="/register"
-              className={({ isActive }) =>
-                [
-                  "inline-flex items-center rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all duration-200 whitespace-nowrap",
-                  isActive
-                    ? "bg-gradient-to-r from-violet-600 to-cyan-500 text-white shadow-lg shadow-violet-500/25"
-                    : "border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
-                ].join(" ")
-              }
-            >
-              Đăng ký
-            </NavLink>
-          </nav>
-        </header>
-
-        <main className="min-h-[calc(100dvh-3.5rem)] pt-14">
-          {children}
-        </main>
-      </div>
-    );
+    // Auth pages (login/register/forgot-password/reset-password) render
+    // their own full-page shell (background, card, in-card links back to
+    // other auth pages) — no app chrome (sidebar/header) needed here.
+    return <>{children}</>;
   }
 
   return (
-    <div className="min-h-screen relative flex bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20 overflow-x-hidden">
+    <div className="min-h-screen relative flex bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20">
       <div
         className={`fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${
           sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
@@ -191,12 +160,12 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside
         className={`fixed inset-y-0 left-0 z-50 w-[min(18rem,82vw)] max-w-72 transform border-r border-slate-200/60 bg-white/80 shadow-xl backdrop-blur-xl transition-all duration-300 ease-in-out overflow-y-auto ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:static lg:translate-x-0 lg:overflow-hidden ${sidebarOpen ? "lg:w-72 lg:max-w-72" : "lg:w-0 lg:max-w-0"}`}
+        } lg:static lg:translate-x-0 lg:overflow-visible ${sidebarOpen ? "lg:w-72 lg:max-w-72" : "lg:w-0 lg:max-w-0"}`}
       >
-        <div className="flex h-dvh lg:h-full flex-col">
+        <div className="flex h-dvh lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto flex-col">
           <div className="flex items-center justify-between h-16 px-6 border-b border-slate-200/50">
             <div className="flex items-center min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-cyan-500 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
+              <div className="w-10 h-10 bg-gradient-to-br from-ctu-navy to-ctu-blue rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
                 {user?.username ? user.username.charAt(0).toUpperCase() : "C"}
               </div>
               <div className="ml-3 min-w-0">
@@ -230,11 +199,17 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="mt-auto border-t border-slate-200/50 p-4">
             <div className="space-y-3 lg:hidden">
               <div className="flex items-center gap-2 text-xs text-slate-500">
-                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-                <span>Đã kết nối</span>
+                <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-emerald-400 animate-pulse" : "bg-slate-300"}`} />
+                <span>{hasToken ? "Đã đăng nhập" : "Chế độ khách"}</span>
               </div>
 
-              <Button size="sm" onClick={handleNewSession} className="w-full justify-center px-3 py-2 text-xs sm:text-sm">
+              <Button
+                size="sm"
+                onClick={handleNewSession}
+                title="Tải lại trang và bắt đầu một phiên làm việc mới"
+                className="w-full justify-center gap-1.5 px-3 py-2 text-xs sm:text-sm"
+              >
+                <RefreshIcon className="h-4 w-4" />
                 Phiên mới
               </Button>
 
@@ -260,7 +235,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="hidden lg:block pt-4 text-xs text-slate-500 text-center">
-              Phiên bản 1.0.0 © 2024 Voya Inc.
+              © {new Date().getFullYear()} Đại học Cần Thơ · CTU.SignBridge
             </div>
           </div>
         </div>
@@ -280,17 +255,19 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent sm:text-base lg:text-xl">
-                CTU.SignBridge
+            <div className="flex min-w-0 items-center gap-2">
+              <img src="/logo.png" alt="Đại học Cần Thơ" className="h-8 w-8 shrink-0 object-contain" />
+              <h1 className="truncate text-sm font-semibold font-display sm:text-base lg:text-xl">
+                <span className="text-ctu-blue">CTU</span>
+                <span className="text-ctu-blue-light">.SignBridge</span>
               </h1>
             </div>
           </div>
 
           <div className="hidden md:flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap overflow-x-auto">
             <div className="hidden sm:flex items-center space-x-2">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              <span className="text-sm text-slate-600">Đã kết nối</span>
+              <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-emerald-400 animate-pulse" : "bg-slate-300"}`} />
+              <span className="text-sm text-slate-600">{hasToken ? "Đã đăng nhập" : "Chế độ khách"}</span>
             </div>
 
             {hasToken ? (
@@ -308,7 +285,13 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
             )}
 
-            <Button size="sm" onClick={handleNewSession} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
+            <Button
+              size="sm"
+              onClick={handleNewSession}
+              title="Tải lại trang và bắt đầu một phiên làm việc mới"
+              className="whitespace-nowrap gap-1.5 px-3 py-2 text-xs sm:text-sm"
+            >
+              <RefreshIcon className="h-4 w-4" />
               Phiên mới
             </Button>
           </div>

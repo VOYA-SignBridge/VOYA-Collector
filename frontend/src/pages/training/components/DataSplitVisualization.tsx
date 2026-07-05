@@ -5,6 +5,7 @@
 
 import React, { useMemo, useState } from 'react';
 import type { DatasetInfo } from '../../../hooks/useTrainingAPI';
+import { CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
 
 interface Props {
   datasetInfo: DatasetInfo | null;
@@ -43,9 +44,9 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="train-split" className="text-sm font-medium text-slate-900">
-                🎓 Tập Huấn Luyện
+                Tập Huấn Luyện
               </label>
-              <span className="text-sm font-semibold text-indigo-600">{clamp(trainPct)}%</span>
+              <span className="text-sm font-semibold text-ctu-blue">{clamp(trainPct)}%</span>
             </div>
             <input
               id="train-split"
@@ -54,7 +55,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
               max={100}
               value={trainPct}
               onChange={(e) => setTrainPct(Number(e.target.value))}
-              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-ctu-blue"
             />
             <p className="mt-1 text-xs text-slate-500">
               {trainCount.toLocaleString()} mẫu — dùng để dạy mô hình
@@ -65,7 +66,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="val-split" className="text-sm font-medium text-slate-900">
-                ✅ Tập Kiểm Tra (Validation)
+                Tập Kiểm Tra (Validation)
               </label>
               <span className="text-sm font-semibold text-emerald-600">{clamp(valPct)}%</span>
             </div>
@@ -87,7 +88,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium text-slate-900">
-                🔍 Tập Đánh Giá (Test)
+                Tập Đánh Giá (Test)
               </label>
               <span className="text-sm font-semibold text-amber-600">{Math.max(0, testPct)}%</span>
             </div>
@@ -111,7 +112,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
         </p>
         <div className="flex h-20 w-full overflow-hidden rounded-xl shadow-sm">
           <div
-            className="flex items-center justify-center bg-gradient-to-r from-indigo-500 to-indigo-600 text-white font-semibold text-sm text-center transition-all duration-300"
+            className="flex items-center justify-center bg-gradient-to-r from-ctu-blue to-ctu-navy text-white font-semibold text-sm text-center transition-all duration-300"
             style={{ width: `${clamp(trainPct)}%` }}
             title={`Train: ${trainCount.toLocaleString()} mẫu`}
           >
@@ -138,15 +139,15 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
       <div className="grid gap-3 sm:grid-cols-3">
         <SplitCard
           label="Huấn Luyện"
-          emoji="🎓"
+          icon={<GraduationCapIcon className="h-7 w-7" />}
           count={trainCount}
           percentage={clamp(trainPct)}
-          color="from-indigo-500 to-indigo-600"
+          color="from-ctu-blue to-ctu-navy"
           description="Dạy mô hình"
         />
         <SplitCard
           label="Kiểm Tra"
-          emoji="✅"
+          icon={<CheckCircleIcon className="h-7 w-7" />}
           count={valCount}
           percentage={clamp(valPct)}
           color="from-emerald-500 to-emerald-600"
@@ -154,7 +155,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
         />
         <SplitCard
           label="Đánh Giá"
-          emoji="🔍"
+          icon={<SearchIcon className="h-7 w-7" />}
           count={testCount}
           percentage={Math.max(0, testPct)}
           color="from-amber-500 to-orange-600"
@@ -163,7 +164,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
       </div>
 
       {/* Info */}
-      <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900">
+      <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
         <p className="font-medium">ℹ️ Hướng dẫn phân chia</p>
         <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
           <li>Train (70%): Dùng để huấn luyện mô hình</li>
@@ -177,14 +178,14 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
 
 function SplitCard({
   label,
-  emoji,
+  icon,
   count,
   percentage,
   color,
   description,
 }: {
   label: string;
-  emoji: string;
+  icon: React.ReactNode;
   count: number;
   percentage: number;
   color: string;
@@ -194,7 +195,7 @@ function SplitCard({
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-2xl">{emoji}</div>
+          <div className="text-slate-400">{icon}</div>
           <h4 className="mt-2 font-semibold text-slate-900">{label}</h4>
           <p className="text-xs text-slate-500">{description}</p>
         </div>

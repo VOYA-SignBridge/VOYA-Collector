@@ -3,11 +3,22 @@
  * 7-Step Training Workflow with Real-time Feedback
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useTrainingAPI, useWebSocketProgress } from '../../hooks/useTrainingAPI';
-import type { TrainingJob, TrainingConfig, TrainingMetrics } from '../../hooks/useTrainingAPI';
+import type { TrainingJob, TrainingConfig, TrainingJobListItem, TrainingMetrics } from '../../hooks/useTrainingAPI';
+import TrainingHistory from './components/TrainingHistory';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
+import {
+  ChipIcon,
+  ClipboardCheckIcon,
+  DatabaseIcon,
+  GearIcon,
+  GlobeIcon,
+  SparkleIcon,
+  SplitIcon,
+} from '../../components/ui/Icons';
 import DatasetInfo from './components/DatasetInfo';
 import DataSplitVisualization from './components/DataSplitVisualization';
 import AugmentationPreview from './components/AugmentationPreview';
@@ -18,22 +29,30 @@ import ResultsInsights from './components/ResultsInsights';
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-const STEP_LABELS: Record<number, { title: string; icon: string; description: string }> = {
-  1: { title: 'Dữ Liệu', icon: '📊', description: 'Xem thông tin dataset' },
-  2: { title: 'Chia Tập', icon: '📈', description: 'Phân tách train/val/test' },
-  3: { title: 'Tăng Cường', icon: '✨', description: 'Xem trước augmentation' },
-  4: { title: 'Chọn Dialect', icon: '🗣️', description: 'Lựa chọn phương ngữ' },
-  5: { title: 'Cấu Hình', icon: '⚙️', description: 'Điều chỉnh hyperparameters' },
-  6: { title: 'Huấn Luyện', icon: '🚀', description: 'Quá trình training' },
-  7: { title: 'Kết Quả', icon: '📋', description: 'Phân tích kết quả' },
+const STEP_ICON_CLASS = 'h-6 w-6 sm:h-7 sm:w-7';
+
+const STEP_LABELS: Record<number, { title: string; icon: ReactNode; description: string }> = {
+  1: { title: 'Dữ Liệu', icon: <DatabaseIcon className={STEP_ICON_CLASS} />, description: 'Xem thông tin dataset' },
+  2: { title: 'Chia Tập', icon: <SplitIcon className={STEP_ICON_CLASS} />, description: 'Phân tách train/val/test' },
+  3: { title: 'Tăng Cường', icon: <SparkleIcon className={STEP_ICON_CLASS} />, description: 'Xem trước augmentation' },
+  4: { title: 'Chọn Dialect', icon: <GlobeIcon className={STEP_ICON_CLASS} />, description: 'Lựa chọn phương ngữ' },
+  5: { title: 'Cấu Hình', icon: <GearIcon className={STEP_ICON_CLASS} />, description: 'Điều chỉnh hyperparameters' },
+  6: { title: 'Huấn Luyện', icon: <ChipIcon className={STEP_ICON_CLASS} />, description: 'Quá trình training' },
+  7: { title: 'Kết Quả', icon: <ClipboardCheckIcon className={STEP_ICON_CLASS} />, description: 'Phân tích kết quả' },
 };
 
+type View = 'landing' | 'wizard';
+
 const TrainingPipeline: React.FC = () => {
+  const [view, setView] = useState<View>('landing');
+  const [historyJobs, setHistoryJobs] = useState<TrainingJobListItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState<Step>(1);
   const [job, setJob] = useState<TrainingJob | null>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [selectedDialects, setSelectedDialects] = useState<string[]>([]);
   const [trainingConfig, setTrainingConfig] = useState<TrainingConfig>({
+    model_type: 'tcn',
     dialects: [],
     languages: [],
     epochs: 80,
@@ -46,21 +65,56 @@ const TrainingPipeline: React.FC = () => {
   });
 
   const api = useTrainingAPI();
-  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics } = api;
+  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs } = api;
 
   useEffect(() => {
     loadDatasetInfo();
   }, [loadDatasetInfo]);
 
-  // Setup WebSocket to stream training progress
+  // Load lịch sử jobs khi ở landing view
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      setHistoryJobs(await listJobs());
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [listJobs]);
+
+  useEffect(() => {
+    if (view === 'landing') {
+      refreshHistory();
+    }
+  }, [view, refreshHistory]);
+
+  // Mở một job từ lịch sử: completed → Kết Quả (7); còn lại → Tiến Độ (6)
+  const handleOpenJob = (item: TrainingJobListItem) => {
+    setJob(item);
+    setMetrics([]);
+    setCurrentStep(item.status === 'completed' ? 7 : 6);
+    setView('wizard');
+  };
+
+  // Bắt đầu run mới: reset toàn bộ state wizard
+  const handleNewTraining = () => {
+    setJob(null);
+    setMetrics([]);
+    setSelectedDialects([]);
+    setCurrentStep(1);
+    setView('wizard');
+  };
+
+  // Setup WebSocket to stream training progress.
+  // Dedupe theo epoch: server replay toàn bộ lịch sử mỗi khi (re)connect,
+  // nên chỉ thêm epoch chưa có — không bao giờ nhân bản card metrics.
   useWebSocketProgress(
     job?.id ?? null,
     (metric) => {
-      console.log('[METRIC]', metric);
-      setMetrics((prev) => [...prev, metric]);
+      setMetrics((prev) =>
+        prev.some((m) => m.epoch === metric.epoch) ? prev : [...prev, metric]
+      );
     },
     (updatedJob) => {
-      console.log('[STATUS]', updatedJob);
       setJob(updatedJob);
     },
     (msg) => console.error('[WS_ERROR]', msg)
@@ -78,7 +132,6 @@ const TrainingPipeline: React.FC = () => {
 
   const isTraining = job?.status === 'running';
   const progressRef = useRef<HTMLDivElement>(null);
-  const [savedSteps, setSavedSteps] = useState<Set<number>>(new Set());
 
   // Validation logic for each step
   const isStepValid = (): boolean => {
@@ -114,25 +167,12 @@ const TrainingPipeline: React.FC = () => {
     return 'Tiếp theo →';
   };
 
-  const handleSaveStep = () => {
+  const handleNext = () => {
     if (!isStepValid()) {
       return;
     }
-    // Mark step as saved
-    setSavedSteps(prev => new Set(prev).add(currentStep));
-  };
-
-  const handleSaveAndNext = () => {
-    if (!isStepValid()) {
-      return;
-    }
-    // Save current step
-    setSavedSteps(prev => new Set(prev).add(currentStep));
-    // Move to next step
     setCurrentStep((currentStep + 1) as Step);
   };
-
-  const isStepSaved = savedSteps.has(currentStep);
 
   // Scroll to top when step changes
   useEffect(() => {
@@ -159,6 +199,31 @@ const TrainingPipeline: React.FC = () => {
     }
   }, [currentStep, job?.id, getJobMetrics]);
 
+  if (view === 'landing') {
+    return (
+      <div className="space-y-8">
+        <PageHeader
+          title="Huấn Luyện Mô Hình"
+          subtitle="Lịch sử các lần huấn luyện, so sánh model và bắt đầu run mới"
+          breadcrumb={['Dashboard', 'Huấn luyện']}
+        />
+
+        <div className="flex justify-end">
+          <Button variant="primary" onClick={handleNewTraining}>
+            🚀 Bắt Đầu Huấn Luyện Mới
+          </Button>
+        </div>
+
+        <TrainingHistory
+          jobs={historyJobs}
+          loading={historyLoading}
+          onOpenJob={handleOpenJob}
+          onRefresh={refreshHistory}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -174,25 +239,25 @@ const TrainingPipeline: React.FC = () => {
           <div className="flex-1">
             <div className="h-3 bg-slate-200 rounded-full overflow-hidden shadow-sm">
               <div
-                className="h-full bg-gradient-to-r from-indigo-500 via-cyan-500 to-teal-600 transition-all duration-500 ease-out rounded-full"
+                className="h-full bg-gradient-to-r from-ctu-navy via-ctu-blue to-ctu-blue-light transition-all duration-500 ease-out rounded-full"
                 style={{ width: `${(currentStep / 7) * 100}%` }}
               />
             </div>
           </div>
           <button
             onClick={() => {}}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition-colors flex-shrink-0"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 hover:bg-ctu-blue/20 transition-colors flex-shrink-0"
             title="Hiển thị các bước"
           >
-            <span className="font-bold text-indigo-600 text-lg">{currentStep}</span>
+            <span className="font-bold text-ctu-blue text-lg">{currentStep}</span>
             <span className="text-slate-500">/</span>
             <span className="text-slate-600">7</span>
           </button>
         </div>
 
         {/* Step Info Header */}
-        <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-indigo-50 to-cyan-50 rounded-xl border border-indigo-100">
-          <div className="text-3xl flex-shrink-0">{STEP_LABELS[currentStep].icon}</div>
+        <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-ctu-blue/5 to-ctu-navy/5 rounded-xl border border-ctu-blue/20">
+          <div className="flex-shrink-0 text-ctu-blue">{STEP_LABELS[currentStep].icon}</div>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg sm:text-xl font-bold text-slate-900">
               {STEP_LABELS[currentStep].title}
@@ -233,15 +298,37 @@ const TrainingPipeline: React.FC = () => {
               <TrainingProgress
                 job={job}
                 metrics={metrics}
-                onNext={() => setCurrentStep(7)}
+                onCancel={async () => {
+                  const cancelled = await api.cancelTraining(job.id);
+                  if (cancelled) setJob(cancelled);
+                }}
               />
             )}
-            {currentStep === 7 && <ResultsInsights metrics={metrics} job={job} />}
+            {currentStep === 7 && (
+              <ResultsInsights
+                metrics={metrics}
+                job={job}
+                onPromote={async () => {
+                  if (!job) return null;
+                  const res = await api.promoteJob(job.id);
+                  if (res?.job) setJob(res.job);
+                  return res;
+                }}
+              />
+            )}
           </div>
 
           {/* Action Buttons */}
           <div className="border-t border-slate-100 px-6 py-4 sm:px-8 sm:py-5 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setView('landing')}
+                size="sm"
+                title="Quay về danh sách lịch sử training"
+              >
+                📋 Lịch sử
+              </Button>
               <Button
                 variant="secondary"
                 onClick={() => currentStep > 1 && setCurrentStep((currentStep - 1) as Step)}
@@ -254,26 +341,15 @@ const TrainingPipeline: React.FC = () => {
 
             <div className="flex items-center gap-2">
               {currentStep < 5 && (
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={handleSaveStep}
-                    disabled={!isStepValid()}
-                    size="sm"
-                    title="Lưu thông tin của bước hiện tại"
-                  >
-                    {isStepSaved ? '✓ Đã Lưu' : '💾 Lưu'}
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={handleSaveAndNext}
-                    disabled={!isStepValid()}
-                    size="sm"
-                    title={!isStepValid() ? 'Vui lòng hoàn thành bước hiện tại' : 'Lưu và chuyển sang bước tiếp theo'}
-                  >
-                    {getNextButtonText()} ✓
-                  </Button>
-                </>
+                <Button
+                  variant="primary"
+                  onClick={handleNext}
+                  disabled={!isStepValid()}
+                  size="sm"
+                  title={!isStepValid() ? 'Vui lòng hoàn thành bước hiện tại' : 'Chuyển sang bước tiếp theo'}
+                >
+                  {getNextButtonText()} ✓
+                </Button>
               )}
 
               {currentStep === 5 && (

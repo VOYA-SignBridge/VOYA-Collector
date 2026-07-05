@@ -1,12 +1,14 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { getClassesList, getSamples, getClassesStats } from "../../api/dataset";
+import { getClassesList, getSamples } from "../../api/dataset";
+import { FolderIcon, GlobeIcon, TagIcon, UsersIcon } from "../ui/Icons";
 import type { Session } from "../../types";
 
 interface StatItem {
   label: string;
   value: number;
   description: string;
-  icon: string;
+  icon: ReactNode;
 }
 
 export default function CommunityStatsSection() {
@@ -16,9 +18,17 @@ export default function CommunityStatsSection() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Fetch labels count
+        // Fetch labels count + unique dialects (regions) from class registry
         const labelsRes = await getClassesList();
         const labelsCount = labelsRes.ok ? labelsRes.data.count : 0;
+        const regions = new Set<string>();
+        if (labelsRes.ok) {
+          labelsRes.data.items.forEach((item) => {
+            if (item.dialect) {
+              regions.add(item.dialect);
+            }
+          });
+        }
 
         // Fetch samples count
         const samplesRes = await getSamples();
@@ -34,42 +44,30 @@ export default function CommunityStatsSection() {
           });
         }
 
-        // Fetch class stats to count regions
-        const statsRes = await getClassesStats();
-        const distribution = statsRes.ok ? statsRes.data.distribution : [];
-        const regions = new Set<string>();
-        if (distribution.length > 0) {
-          distribution.forEach((dist) => {
-            if (dist.label_original) {
-              regions.add(dist.label_original);
-            }
-          });
-        }
-
         const newStats: StatItem[] = [
           {
             label: "nhãn",
             value: labelsCount,
             description: "Ngôn ngữ ký hiệu được ghi nhận",
-            icon: "🏷️",
+            icon: <TagIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
             label: "mẫu",
             value: totalSamples,
             description: "Video hoặc ghi hình được tải lên",
-            icon: "📁",
+            icon: <FolderIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
             label: "người đóng góp",
             value: contributors.size,
             description: "Thành viên cộng đồng hoạt động",
-            icon: "👥",
+            icon: <UsersIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
             label: "khu vực/phương ngữ",
-            value: Math.max(regions.size, 2),
+            value: regions.size,
             description: "Vùng lãnh thổ được đại diện",
-            icon: "🌏",
+            icon: <GlobeIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
         ];
 
@@ -109,7 +107,7 @@ export default function CommunityStatsSection() {
             key={stat.label}
             className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-200 shadow-md hover:shadow-lg transition-all duration-200 text-center"
           >
-            <div className="text-4xl sm:text-5xl mb-3">{stat.icon}</div>
+            <div className="mb-3 flex justify-center text-ctu-blue">{stat.icon}</div>
             <div className="text-3xl sm:text-4xl font-bold text-slate-900 mb-2">
               {stat.value.toLocaleString()}
             </div>
@@ -123,7 +121,7 @@ export default function CommunityStatsSection() {
         <p className="text-sm sm:text-base text-slate-700">
           <strong>Đang phát triển bởi</strong>
           <br />
-          <span className="text-indigo-600 font-semibold">Đại học Cần Thơ (CTU)</span>
+          <span className="text-ctu-blue font-semibold">Đại học Cần Thơ (CTU)</span>
           <br />
           <span className="text-xs text-slate-500 mt-1 block">Vì một cộng đồng giao tiếp không rào cản</span>
         </p>

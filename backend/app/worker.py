@@ -24,9 +24,15 @@ celery_app.conf.update(
             "task": "app.export_tasks.export_labels_to_sheets",
             "schedule": 60.0,
         },
+        # Retention: prune old experimental checkpoints + job logs daily
+        "cleanup-training-artifacts-daily": {
+            "task": "app.training_tasks.cleanup_training_artifacts",
+            "schedule": 86400.0,
+        },
     },
 )
 
 # Import tasks to register them with Celery
 from app import tasks  # noqa: F401, E402
 from app import export_tasks  # noqa: F401, E402
+from app import training_tasks  # noqa: F401, E402

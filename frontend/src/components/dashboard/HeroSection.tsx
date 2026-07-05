@@ -40,15 +40,15 @@ export default function HeroSection({ username }: HeroSectionProps) {
   }, [username]);
 
   return (
-    <div className="relative bg-gradient-to-br from-indigo-50 via-white to-cyan-50 rounded-3xl px-6 py-12 sm:px-8 sm:py-16 lg:px-12 lg:py-20 border border-slate-100/50 shadow-lg overflow-hidden">
+    <div className="relative bg-gradient-to-br from-ctu-blue/5 via-white to-ctu-navy/5 rounded-3xl px-6 py-12 sm:px-8 sm:py-16 lg:px-12 lg:py-20 border border-slate-100/50 shadow-lg overflow-hidden">
       {/* Background decoration */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-100/20 rounded-full blur-3xl -z-10" />
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-100/20 rounded-full blur-3xl -z-10" />
+      <div className="absolute top-0 right-0 w-96 h-96 bg-ctu-blue/10 rounded-full blur-3xl -z-10" />
+      <div className="absolute bottom-0 left-0 w-96 h-96 bg-ctu-navy/10 rounded-full blur-3xl -z-10" />
 
       <div className="relative z-10 max-w-3xl">
         {username ? (
           <>
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-500 bg-clip-text text-transparent mb-4">
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent mb-4">
               Xin chào, {username}! 👋
             </h1>
 
@@ -58,7 +58,7 @@ export default function HeroSection({ username }: HeroSectionProps) {
                   <span className="text-slate-400">Đang tính toán đóng góp của bạn...</span>
                 ) : (
                   <>
-                    Bạn đã đóng góp <span className="text-indigo-600">{userSamples.toLocaleString()}</span> mẫu cho cộng đồng.
+                    Bạn đã đóng góp <span className="text-ctu-blue">{userSamples.toLocaleString()}</span> mẫu cho cộng đồng.
                   </>
                 )}
               </p>
@@ -75,20 +75,20 @@ export default function HeroSection({ username }: HeroSectionProps) {
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="primary"
               >
-                📤 Đóng góp thêm dữ liệu
+                Đóng góp thêm dữ liệu →
               </Button>
               <Button
                 onClick={() => navigate("/realtime")}
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="ghost"
               >
-                🖐️ Thử nhận dạng
+                Thử nhận dạng
               </Button>
             </div>
           </>
         ) : (
           <>
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-500 bg-clip-text text-transparent mb-4">
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent mb-4">
               Xin chào 👋
             </h1>
 
@@ -109,14 +109,14 @@ export default function HeroSection({ username }: HeroSectionProps) {
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="primary"
               >
-                🖐️ Thử nhận dạng ngay
+                Thử nhận dạng ngay →
               </Button>
               <Button
                 onClick={() => navigate("/register")}
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="ghost"
               >
-                ✍️ Đăng ký đóng góp
+                Đăng ký đóng góp
               </Button>
             </div>
           </>

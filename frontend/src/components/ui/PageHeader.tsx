@@ -42,7 +42,7 @@ export default function PageHeader({ title, subtitle, actions, breadcrumb }: Pag
       
       <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h1 className="text-xl sm:text-3xl font-bold bg-gradient-to-r from-slate-900 via-indigo-800 to-cyan-700 bg-clip-text text-transparent">
+          <h1 className="text-xl sm:text-3xl font-bold bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">
             {title}
           </h1>
           {subtitle && (

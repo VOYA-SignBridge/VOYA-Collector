@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Sample as SampleT, SessionStats, MediaPipeLandmark, QualityInfo, CameraInfo } from "../types";
 import { uploadCamera } from "../api/upload";
 import CaptureGuide from "./CaptureGuide";
@@ -30,6 +30,30 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [samples, setSamples] = useState<SampleT[]>([]);
   const [sampleCounter, setSampleCounter] = useState(1);
+  const [connectionIssue, setConnectionIssue] = useState<string | null>(null);
+
+  // Số mẫu đã thu thành công theo từng từ, dùng để hiển thị danh sách trong
+  // giao diện toàn màn hình (chỉ tính mẫu đã xử lý và lưu lên server).
+  const capturedSummary = useMemo(() => {
+    return samples.reduce((acc: Record<string, number>, s) => {
+      const lbl = s.label || "unknown";
+      acc[lbl] = (acc[lbl] || 0) + 1;
+      return acc;
+    }, {});
+  }, [samples]);
+
+  // Mất kết nối mạng ở cấp trình duyệt cũng được coi là sự cố — chặn thu tiếp
+  // để tránh mất dữ liệu đã ghi.
+  useEffect(() => {
+    const handleOffline = () => setConnectionIssue("Mất kết nối mạng.");
+    const handleOnline = () => setConnectionIssue(null);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, []);
 
   const sanitizeCollectorName = (value: string) =>
     value
@@ -135,17 +159,20 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
 
           setSamples(prev => [...prev, sample]);
           setSampleCounter(prev => prev + 1);
+          setConnectionIssue(null);
           onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
-          
+
           console.log(`Sample "${capturedLabel}" (${capturedFrames.length} frames) uploaded successfully! Total samples: ${samples.length + 1}`);
         } else {
           console.error('Upload failed:', result.error);
+          setConnectionIssue(result.error || 'Không thể lưu mẫu lên máy chủ.');
           if (onError) {
             onError(result.error || 'Upload failed. Please try again.');
           }
         }
       }).catch((error) => {
         console.error('Upload failed:', error);
+        setConnectionIssue('Không thể lưu mẫu lên máy chủ. Vui lòng kiểm tra kết nối.');
         if (onError) {
           onError('Upload failed. Please try again.');
         }
@@ -168,7 +195,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       {/* Quick Start Section */}
       <div className="card card-compact">
         <div className="text-center py-8 sm:py-10">
-          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-gradient-to-br from-green-400 to-blue-500 rounded-3xl flex items-center justify-center mx-auto mb-5 sm:mb-6 shadow-xl">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 bg-gradient-to-br from-ctu-blue to-ctu-navy rounded-3xl flex items-center justify-center mx-auto mb-5 sm:mb-6 shadow-xl">
             <svg className="w-10 h-10 sm:w-12 sm:h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
@@ -207,23 +234,23 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
 
           {/* Quick Features */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto text-xs sm:text-sm">
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-green-50 rounded-xl">
-              <svg className="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-blue/10 rounded-xl">
+              <svg className="w-5 h-5 text-ctu-blue mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              <span className="text-green-800 font-medium">Đếm ngược 3 giây</span>
+              <span className="text-ctu-blue font-medium">Đếm ngược 3 giây</span>
             </div>
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-blue-50 rounded-xl">
-              <svg className="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-navy/10 rounded-xl">
+              <svg className="w-5 h-5 text-ctu-navy mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="text-blue-800 font-medium">Phát hiện bàn tay bằng AI</span>
+              <span className="text-ctu-navy font-medium">Phát hiện bàn tay bằng AI</span>
             </div>
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-purple-50 rounded-xl">
-              <svg className="w-5 h-5 text-purple-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-yellow/15 rounded-xl">
+              <svg className="w-5 h-5 text-ctu-navy mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h4a1 1 0 011 1v2m-6 0h8m-6 0a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2m-6 0V4" />
               </svg>
-              <span className="text-purple-800 font-medium">Hỗ trợ phím tắt</span>
+              <span className="text-ctu-navy font-medium">Hỗ trợ phím tắt</span>
             </div>
           </div>
         </div>
@@ -233,7 +260,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       {SHOW_ADVANCED && (
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">📈 Tiến trình thu thập</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Tiến trình thu thập</h3>
             <div className="flex items-center space-x-2">
                 <button
                   onClick={() => {
@@ -249,27 +276,27 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center p-3 bg-blue-50 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600">{samples.length}</div>
-              <div className="text-xs text-blue-600">Số mẫu hôm nay</div>
+            <div className="text-center p-3 bg-ctu-blue/10 rounded-lg">
+              <div className="text-2xl font-bold text-ctu-blue">{samples.length}</div>
+              <div className="text-xs text-ctu-blue">Số mẫu hôm nay</div>
             </div>
-            <div className="text-center p-3 bg-green-50 rounded-lg">
-              <div className="text-2xl font-bold text-green-600">
+            <div className="text-center p-3 bg-ctu-navy/10 rounded-lg">
+              <div className="text-2xl font-bold text-ctu-navy">
                 {samples.length > 0 ? Math.round((samples.length / 60) * 100) / 100 : 0}
               </div>
-              <div className="text-xs text-green-600">Mẫu/phút</div>
+              <div className="text-xs text-ctu-navy">Mẫu/phút</div>
             </div>
-            <div className="text-center p-3 bg-purple-50 rounded-lg">
-              <div className="text-2xl font-bold text-purple-600">
+            <div className="text-center p-3 bg-ctu-yellow/15 rounded-lg">
+              <div className="text-2xl font-bold text-ctu-navy">
                 {samples.reduce((sum, s) => sum + (s.frames || 0), 0)}
               </div>
-              <div className="text-xs text-purple-600">Tổng khung hình</div>
+              <div className="text-xs text-ctu-navy">Tổng khung hình</div>
             </div>
-            <div className="text-center p-3 bg-yellow-50 rounded-lg">
-              <div className="text-2xl font-bold text-yellow-600">
+            <div className="text-center p-3 bg-ctu-blue/10 rounded-lg">
+              <div className="text-2xl font-bold text-ctu-blue">
                 {new Set(samples.map(s => s.label)).size}
               </div>
-              <div className="text-xs text-yellow-600">Nhãn khác nhau</div>
+              <div className="text-xs text-ctu-blue">Nhãn khác nhau</div>
             </div>
           </div>
 
@@ -328,6 +355,8 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           initialUser={user}
           targetFrames={targetFrames}
           captureCount={captureCount}
+          capturedSummary={capturedSummary}
+          connectionIssue={connectionIssue}
         />
       )}
 
@@ -344,20 +373,20 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       {/* Simple collection statistics (always shown for public UI) */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-gray-700">📋 Thống kê thu thập đơn giản</h3>
+          <h3 className="text-sm font-medium text-gray-700">Thống kê thu thập đơn giản</h3>
           <div className="text-xs text-gray-500">Cập nhật trực tiếp</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
-          <div className="p-3 bg-blue-50 rounded-lg text-center">
-            <div className="text-lg font-bold text-blue-600">{samples.length}</div>
+          <div className="p-3 bg-ctu-blue/10 rounded-lg text-center">
+            <div className="text-lg font-bold text-ctu-blue">{samples.length}</div>
             <div className="text-xs text-gray-600">Tổng lượt thu</div>
           </div>
-          <div className="p-3 bg-yellow-50 rounded-lg text-center">
-            <div className="text-lg font-bold text-yellow-600">{new Set(samples.map(s => s.label)).size}</div>
+          <div className="p-3 bg-ctu-yellow/15 rounded-lg text-center">
+            <div className="text-lg font-bold text-ctu-navy">{new Set(samples.map(s => s.label)).size}</div>
             <div className="text-xs text-gray-600">Số từ thu được</div>
           </div>
-          <div className="p-3 bg-green-50 rounded-lg text-center">
-            <div className="text-lg font-bold text-green-600">{samples.reduce((sum, s) => sum + (s.frames || 0), 0)}</div>
+          <div className="p-3 bg-ctu-navy/10 rounded-lg text-center">
+            <div className="text-lg font-bold text-ctu-navy">{samples.reduce((sum, s) => sum + (s.frames || 0), 0)}</div>
             <div className="text-xs text-gray-600">Tổng khung hình</div>
           </div>
         </div>

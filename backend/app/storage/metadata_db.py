@@ -1,6 +1,7 @@
 import psycopg2
+from psycopg2.extras import Json, RealDictCursor
 from contextlib import contextmanager
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 import logging
 import re
 
@@ -119,6 +120,40 @@ DDL_STATEMENTS = [
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS training_jobs (
+        job_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        model_type TEXT,
+        config JSONB,
+        auth_user_id UUID,
+        created_at TIMESTAMP WITH TIME ZONE,
+        started_at TIMESTAMP WITH TIME ZONE,
+        completed_at TIMESTAMP WITH TIME ZONE,
+        current_epoch INTEGER NOT NULL DEFAULT 0,
+        total_epochs INTEGER NOT NULL DEFAULT 0,
+        checkpoint_path TEXT,
+        test_acc REAL,
+        test_f1 REAL,
+        error_message TEXT,
+        promoted_at TIMESTAMP WITH TIME ZONE,
+        evaluation JSONB,
+        FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS training_metrics (
+        job_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        train_loss REAL,
+        train_acc REAL,
+        val_loss REAL,
+        val_acc REAL,
+        val_f1 REAL,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (job_id, epoch)
+    )
+    """,
 ]
 
 INDEX_STATEMENTS = [
@@ -132,14 +167,21 @@ INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_raw_uploads_class_uid ON raw_uploads(class_uid)",
     "CREATE INDEX IF NOT EXISTS idx_raw_uploads_auth_user_id ON raw_uploads(auth_user_id)",
     "CREATE INDEX IF NOT EXISTS idx_raw_uploads_created_at ON raw_uploads(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_training_jobs_created_at ON training_jobs(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_training_jobs_status ON training_jobs(status)",
     # Partial index for Celery export: only indexes rows not yet synced to Sheets
     "CREATE INDEX IF NOT EXISTS idx_samples_sheets_synced ON samples(sheets_synced) WHERE sheets_synced = FALSE",
+    "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)",
 ]
 
 MIGRATION_STATEMENTS = [
     # Add sheets_synced column to samples (safe for existing data: defaults to FALSE)
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS sheets_synced BOOLEAN DEFAULT FALSE",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS gdrive_synced BOOLEAN DEFAULT TRUE",
+    # Promotion timestamp for training jobs (admin promoted model to realtime)
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP WITH TIME ZONE",
+    # Test-set evaluation (confusion matrix + per-class metrics) for Step 7
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS evaluation JSONB",
     # Sync status tracking table for Google Sheets auto-rotation
     """
     CREATE TABLE IF NOT EXISTS google_sheets_sync_status (
@@ -150,6 +192,17 @@ MIGRATION_STATEMENTS = [
         current_data_rows INT NOT NULL DEFAULT 0,
         max_rows_per_sheet INT NOT NULL DEFAULT 500000,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    )
+    """,
+    # Forgot-password flow: stores a hash of the reset token (never the raw
+    # token) so a leaked DB dump can't be used to reset accounts directly.
+    """
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        used_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     )
     """,
 ]
@@ -358,6 +411,122 @@ def delete_samples_by_class(class_uid: str):
 
 def insert_raw_upload(row: Dict[str, Any]):
     _execute(SQL_UPSERT_RAW_UPLOAD, row)
+
+
+def update_raw_upload_gdrive_url(upload_uid: str, storage_url: str):
+    from datetime import datetime
+
+    _execute(
+        "UPDATE raw_uploads SET storage_url = %s, updated_at = %s WHERE upload_uid = %s",
+        (storage_url, datetime.utcnow().isoformat() + "Z", upload_uid),
+    )
+
+
+# ============================================================================
+# Training jobs persistence
+#
+# Source of truth for training job history — the in-memory dict in the
+# training router is only a hot cache. All writes are idempotent upserts so
+# the router can call them from any state transition without ordering bugs.
+# ============================================================================
+
+SQL_UPSERT_TRAINING_JOB = """
+INSERT INTO training_jobs(
+    job_id, status, model_type, config, auth_user_id,
+    created_at, started_at, completed_at,
+    current_epoch, total_epochs, checkpoint_path,
+    test_acc, test_f1, error_message, promoted_at, evaluation
+)
+VALUES(
+    %(job_id)s, %(status)s, %(model_type)s, %(config)s, %(auth_user_id)s,
+    %(created_at)s, %(started_at)s, %(completed_at)s,
+    %(current_epoch)s, %(total_epochs)s, %(checkpoint_path)s,
+    %(test_acc)s, %(test_f1)s, %(error_message)s, %(promoted_at)s, %(evaluation)s
+)
+ON CONFLICT (job_id) DO UPDATE SET
+    status = EXCLUDED.status,
+    started_at = EXCLUDED.started_at,
+    completed_at = EXCLUDED.completed_at,
+    current_epoch = EXCLUDED.current_epoch,
+    checkpoint_path = EXCLUDED.checkpoint_path,
+    test_acc = EXCLUDED.test_acc,
+    test_f1 = EXCLUDED.test_f1,
+    error_message = EXCLUDED.error_message,
+    promoted_at = EXCLUDED.promoted_at,
+    evaluation = COALESCE(EXCLUDED.evaluation, training_jobs.evaluation)
+"""
+
+
+def upsert_training_job(row: Dict[str, Any]):
+    payload = dict(row)
+    payload.setdefault("evaluation", None)
+    for jsonb_field in ("config", "evaluation"):
+        value = payload.get(jsonb_field)
+        if isinstance(value, (dict, list)):
+            payload[jsonb_field] = Json(value)
+    _execute(SQL_UPSERT_TRAINING_JOB, payload)
+
+
+def insert_training_metric(row: Dict[str, Any]):
+    _execute(
+        """
+        INSERT INTO training_metrics(job_id, epoch, train_loss, train_acc, val_loss, val_acc, val_f1)
+        VALUES(%(job_id)s, %(epoch)s, %(train_loss)s, %(train_acc)s, %(val_loss)s, %(val_acc)s, %(val_f1)s)
+        ON CONFLICT (job_id, epoch) DO NOTHING
+        """,
+        row,
+    )
+
+
+def _fetch_all(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(sql, params)
+                return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_training_job(job_id: str) -> Optional[Dict[str, Any]]:
+    rows = _fetch_all("SELECT * FROM training_jobs WHERE job_id = %s", (job_id,))
+    return rows[0] if rows else None
+
+
+def list_training_jobs(limit: int = 50) -> List[Dict[str, Any]]:
+    return _fetch_all(
+        "SELECT * FROM training_jobs ORDER BY created_at DESC LIMIT %s", (limit,)
+    )
+
+
+def list_training_jobs_with_user(limit: int = 100) -> List[Dict[str, Any]]:
+    """Job history rows + username of who started each job (for the history UI).
+
+    Excludes the heavy `evaluation` JSONB — the list view doesn't need
+    confusion matrices; the detail view fetches them per job.
+    """
+    return _fetch_all(
+        """
+        SELECT
+            t.job_id, t.status, t.model_type, t.config, t.auth_user_id,
+            t.created_at, t.started_at, t.completed_at,
+            t.current_epoch, t.total_epochs, t.checkpoint_path,
+            t.test_acc, t.test_f1, t.error_message, t.promoted_at,
+            u.username
+        FROM training_jobs t
+        LEFT JOIN users u ON u.id = t.auth_user_id
+        ORDER BY t.created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+
+def list_training_metrics(job_id: str) -> List[Dict[str, Any]]:
+    return _fetch_all(
+        "SELECT * FROM training_metrics WHERE job_id = %s ORDER BY epoch ASC", (job_id,)
+    )
 
 
 def upsert_raw_upload(row: Dict[str, Any]):

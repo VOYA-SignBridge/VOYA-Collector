@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import uuid
 
 import psycopg2
@@ -92,6 +94,23 @@ def _decode_token(token: str) -> Dict[str, Any]:
             detail="Token missing subject",
         )
     return payload
+
+
+def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
+    """Decode a raw JWT and fetch the user, returning None instead of raising.
+
+    Intended for WebSocket endpoints, where the token arrives as a query
+    param (browsers cannot set Authorization headers on WS connections)
+    rather than through the HTTPBearer dependency used by regular routes.
+    """
+    try:
+        payload = _decode_token(token)
+    except HTTPException:
+        return None
+    user = _fetch_user_by_id(str(payload.get("sub") or ""))
+    if not user or not user.get("is_active", True):
+        return None
+    return user
 
 
 def _fetch_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
@@ -237,3 +256,101 @@ def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> D
             detail="Admin privileges required",
         )
     return current_user
+
+
+# ============================================================================
+# Forgot / reset password
+# ============================================================================
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def request_password_reset(identifier: str) -> Optional[Tuple[Dict[str, Any], str]]:
+    """Look up the user and issue a reset token if the account exists and is active.
+
+    Returns (user, raw_token) or None if there's no matching active account.
+    Callers must respond with the same generic message either way, to avoid
+    leaking which identifiers correspond to real accounts.
+    """
+    user = _fetch_user_by_login(identifier)
+    if not user or not user.get("is_active", True):
+        return None
+
+    token = secrets.token_urlsafe(32)
+    token_hash = _hash_reset_token(token)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.password_reset_token_expire_minutes
+    )
+
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO password_reset_tokens (token_hash, user_id, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (token_hash, user["id"], expires_at),
+                )
+    finally:
+        conn.close()
+
+    return user, token
+
+
+def reset_password_with_token(token: str, new_password: str) -> None:
+    """Validate a reset token and set the new password. Raises HTTPException on failure."""
+    if len(new_password or "") < int(settings.min_password_length):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password must be at least {settings.min_password_length} characters",
+        )
+
+    token_hash = _hash_reset_token(token)
+    invalid = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn",
+    )
+
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT token_hash, user_id, expires_at, used_at
+                    FROM password_reset_tokens
+                    WHERE token_hash = %s
+                    """,
+                    (token_hash,),
+                )
+                row = cur.fetchone()
+
+                if not row or row["used_at"] is not None:
+                    raise invalid
+
+                expires_at = row["expires_at"]
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at < datetime.now(timezone.utc):
+                    raise invalid
+
+                password_hash = get_password_hash(new_password)
+                cur.execute(
+                    "UPDATE users SET password_hash = %s WHERE id = %s",
+                    (password_hash, row["user_id"]),
+                )
+                # Invalidate every outstanding reset token for this user,
+                # including the one just used, so old links can't be replayed.
+                cur.execute(
+                    """
+                    UPDATE password_reset_tokens
+                    SET used_at = NOW()
+                    WHERE user_id = %s AND used_at IS NULL
+                    """,
+                    (row["user_id"],),
+                )
+    finally:
+        conn.close()

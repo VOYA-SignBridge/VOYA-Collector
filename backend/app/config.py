@@ -17,6 +17,12 @@ def _default_dataset_root() -> Path:
 class Settings(BaseSettings):
     app_env: str = os.getenv("APP_ENV", "development")
 
+    # CORS: comma-separated list of allowed origins, e.g.
+    # "https://app.example.com,https://admin.example.com". Defaults to "*"
+    # for local development. The API authenticates via Bearer tokens (no
+    # cookies), so credentialed CORS is not required.
+    cors_allowed_origins_raw: str = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+
     # Postgres/PostgreSQL configuration
     postgres_user: str = os.getenv("POSTGRES_USER", "admin")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "admin")
@@ -139,6 +145,24 @@ class Settings(BaseSettings):
         "",
     )
 
+    # Password reset
+    password_reset_token_expire_minutes: int = int(
+        os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30")
+    )
+    # Base URL of the frontend app, used to build the reset-password link
+    # sent by email, e.g. "https://app.example.com".
+    frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+
+    # SMTP (outbound email for password reset, etc.)
+    # If smtp_host is empty, emails are logged instead of sent — safe default
+    # for local development.
+    smtp_host: str = os.getenv("SMTP_HOST", "")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user: str = os.getenv("SMTP_USER", "")
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    smtp_from: str = os.getenv("SMTP_FROM", "")
+    smtp_use_tls: bool = bool(int(os.getenv("SMTP_USE_TLS", "1")))
+
     # Realtime inference service proxy
     realtime_service_url: str = os.getenv("REALTIME_SERVICE_URL", "http://localhost:8010")
     realtime_connect_timeout: float = float(os.getenv("REALTIME_CONNECT_TIMEOUT", "5.0"))
@@ -152,6 +176,7 @@ class Settings(BaseSettings):
     tts_default_voice: str = os.getenv("TTS_DEFAULT_VOICE", "vi-VN-HoaiMyNeural")
     tts_max_text_length: int = int(os.getenv("TTS_MAX_TEXT_LENGTH", "200"))
     tts_max_concurrent_synth: int = int(os.getenv("TTS_MAX_CONCURRENT_SYNTH", "5"))
+    tts_synth_timeout_seconds: float = float(os.getenv("TTS_SYNTH_TIMEOUT", "10"))
     tts_prewarm_on_startup: bool = bool(int(os.getenv("TTS_PREWARM_ON_STARTUP", "1")))
     tts_prewarm_top_percent: float = float(os.getenv("TTS_PREWARM_TOP_PERCENT", "0.2"))  # 20%
 
@@ -165,6 +190,13 @@ class Settings(BaseSettings):
             except Exception:
                 return [1.0]
         return v or [1.0]
+
+    @property
+    def cors_allowed_origins(self) -> List[str]:
+        raw = self.cors_allowed_origins_raw.strip()
+        if raw == "*" or not raw:
+            return ["*"]
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
     def __init__(self, **values):
         super().__init__(**values)
