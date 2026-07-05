@@ -13,7 +13,11 @@ interface Props {
   loading: boolean;
   onOpenJob: (job: TrainingJobListItem) => void;
   onRefresh: () => void;
+  onDeleteJob: (job: TrainingJobListItem) => void;
 }
+
+// Chỉ job đã kết thúc mới xóa được — job đang chạy/đang chờ phải hủy trước.
+const isDeletable = (status: string) => !['pending', 'queued', 'running'].includes(status);
 
 const STATUS_BADGE: Record<string, { text: string; cls: string }> = {
   queued: { text: 'Đang chờ', cls: 'bg-slate-100 text-slate-700' },
@@ -47,7 +51,7 @@ const fmtDate = (iso?: string): string => {
   }
 };
 
-const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh }) => {
+const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh, onDeleteJob }) => {
   // So sánh model theo dialect: chỉ jobs completed có test_acc,
   // mỗi (dialect, model) giữ run tốt nhất
   const comparison = useMemo(() => {
@@ -124,7 +128,7 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh 
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-              Lịch Sử Training
+              Lịch Sử Huấn Luyện
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">{jobs.length} jobs gần nhất — bấm vào một dòng để xem chi tiết</p>
           </div>
@@ -138,7 +142,7 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh 
 
         {jobs.length === 0 ? (
           <div className="px-6 pb-8 pt-4 text-center text-sm text-slate-500">
-            Chưa có training job nào. Bấm "Bắt Đầu Training Mới" để chạy lần đầu.
+            Chưa có phiên huấn luyện nào. Bấm "Bắt Đầu Huấn Luyện Mới" để chạy lần đầu.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -153,11 +157,13 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh 
                   <th className="px-3 py-2.5 font-medium text-right">F1</th>
                   <th className="px-3 py-2.5 font-medium">Trạng thái</th>
                   <th className="px-6 py-2.5 font-medium">Người chạy</th>
+                  <th className="px-3 py-2.5 font-medium text-right">Xóa</th>
                 </tr>
               </thead>
               <tbody>
                 {jobs.map((job) => {
                   const badge = STATUS_BADGE[job.status] || STATUS_BADGE.queued;
+                  const deletable = isDeletable(job.status);
                   return (
                     <tr
                       key={job.id}
@@ -192,6 +198,23 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh 
                         </span>
                       </td>
                       <td className="px-6 py-3 text-slate-600">{job.username || '—'}</td>
+                      <td className="px-3 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!deletable) return;
+                            if (window.confirm(`Xóa phiên huấn luyện này khỏi lịch sử? Hành động này không thể hoàn tác.`)) {
+                              onDeleteJob(job);
+                            }
+                          }}
+                          disabled={!deletable}
+                          title={deletable ? 'Xóa khỏi lịch sử huấn luyện' : 'Hủy phiên đang chạy trước khi xóa'}
+                          className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                        >
+                          🗑️
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}

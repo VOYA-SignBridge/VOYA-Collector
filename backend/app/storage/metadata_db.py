@@ -529,6 +529,16 @@ def list_training_metrics(job_id: str) -> List[Dict[str, Any]]:
     )
 
 
+def delete_training_job(job_id: str) -> None:
+    """Xóa training job khỏi lịch sử (kèm metrics liên quan).
+
+    Không xóa checkpoint file trên đĩa — job đã promote có thể vẫn đang
+    được realtime service dùng; chỉ dọn bản ghi lịch sử.
+    """
+    _execute("DELETE FROM training_metrics WHERE job_id = %s", (job_id,))
+    _execute("DELETE FROM training_jobs WHERE job_id = %s", (job_id,))
+
+
 def upsert_raw_upload(row: Dict[str, Any]):
     # backward-compatible name expected by catalog_sync
     insert_raw_upload(row)

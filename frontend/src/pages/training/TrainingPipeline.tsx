@@ -87,6 +87,16 @@ const TrainingPipeline: React.FC = () => {
     }
   }, [view, refreshHistory]);
 
+  // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc)
+  const handleDeleteJob = async (item: TrainingJobListItem) => {
+    const ok = await api.deleteJob(item.id);
+    if (!ok) {
+      window.alert(api.error || 'Không thể xóa phiên huấn luyện này.');
+      return;
+    }
+    await refreshHistory();
+  };
+
   // Mở một job từ lịch sử: completed → Kết Quả (7); còn lại → Tiến Độ (6)
   const handleOpenJob = (item: TrainingJobListItem) => {
     setJob(item);
@@ -219,6 +229,7 @@ const TrainingPipeline: React.FC = () => {
           loading={historyLoading}
           onOpenJob={handleOpenJob}
           onRefresh={refreshHistory}
+          onDeleteJob={handleDeleteJob}
         />
       </div>
     );

@@ -299,6 +299,27 @@ export function useTrainingAPI() {
     }
   }, []);
 
+  // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc: completed/failed/cancelled)
+  const deleteJob = useCallback(async (jobId: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        const detail = contentType.includes('application/json')
+          ? (await response.json())?.detail
+          : undefined;
+        throw new Error(detail || `Failed to delete job: ${response.statusText}`);
+      }
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return false;
+    }
+  }, []);
+
   // Note: `useWebSocketProgress` is provided as a top-level hook below
 
   return {
@@ -313,6 +334,7 @@ export function useTrainingAPI() {
     cancelTraining,
     promoteJob,
     getJobEvaluation,
+    deleteJob,
     useWebSocketProgress,
   };
 }
