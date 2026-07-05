@@ -1053,6 +1053,40 @@ async def promote_training_job(
     )
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_training_job_endpoint(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Xóa một training job khỏi lịch sử huấn luyện.
+
+    Chỉ cho xóa job đã ở trạng thái kết thúc (completed/failed/cancelled) —
+    job đang chạy/đang chờ phải hủy trước, tránh trainer container ghi tiếp
+    vào một bản ghi đã bị xóa.
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+    if job.status not in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job đang ở trạng thái '{job.status}' — vui lòng hủy trước khi xóa",
+        )
+
+    try:
+        from app.storage.metadata_db import delete_training_job
+
+        await asyncio.to_thread(delete_training_job, job_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không xóa được training job: {e}")
+
+    training_jobs.pop(job_id, None)
+    print(f"[TRAINING {job_id}] Deleted from history by user={current_user.get('username')}")
+    return {"ok": True, "job_id": job_id}
+
+
 @router.websocket("/ws/{job_id}")
 async def websocket_training_progress(websocket: WebSocket, job_id: str, token: str = Query(default="")):
     """
