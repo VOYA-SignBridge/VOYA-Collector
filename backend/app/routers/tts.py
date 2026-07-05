@@ -14,7 +14,12 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
 from app.config import settings
-from app.services.tts_service import ALLOWED_VOICES, ALLOWED_VOICE_IDS, synthesize
+from app.services.tts_service import (
+    ALLOWED_VOICES,
+    ALLOWED_VOICE_IDS,
+    TTSSynthesisError,
+    synthesize,
+)
 
 logger = logging.getLogger("tts_router")
 
@@ -61,7 +66,12 @@ async def speak(
     try:
         mp3_bytes, cache_hit = await synthesize(clean_text, voice)
     except ValueError as exc:
+        # Input validation error (bad voice, empty/too-long text)
         raise HTTPException(status_code=400, detail=str(exc))
+    except TTSSynthesisError as exc:
+        # Upstream (Microsoft edge-tts) failure after retries — not the client's fault
+        logger.error("[TTS] upstream synthesis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="TTS service temporarily unavailable")
     except Exception as exc:
         logger.error("[TTS] synthesis error: %s", exc)
         raise HTTPException(status_code=500, detail="TTS synthesis failed")

@@ -9,8 +9,6 @@ import asyncio
 import csv
 import json
 import os
-import re
-import subprocess
 import uuid
 from collections import Counter
 from datetime import datetime
@@ -21,10 +19,125 @@ import httpx
 import torch
 import torch.nn as nn
 import numpy as np
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query
+import redis
+import sys
+from importlib.util import spec_from_file_location, module_from_spec
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 
+from app.auth import get_current_user, get_user_from_token, require_admin
+
 router = APIRouter(prefix="/training", tags=["training"])
+
+# ============================================================================
+# Redis (chỉ dùng để gửi tín hiệu cancel tới trainer container;
+# job execution đi qua Celery queue "training")
+# ============================================================================
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+try:
+    redis_client = redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_timeout=5,
+    )
+    redis_client.ping()
+    print("[TRAINING] Redis connected!")
+except Exception as e:
+    print(f"[TRAINING] Redis connection failed: {e}")
+    redis_client = None
+
+# ============================================================================
+# Model Loading Helper
+# ============================================================================
+
+# Map checkpoint model_type values (from model.get_model_name()) to registry keys
+_MODEL_NAME_TO_REGISTRY_KEY = {
+    "cnn": "cnn",
+    "lstm": "lstm",
+    "bigru + attention": "bigru_attention",
+    "bigru attention": "bigru_attention",
+    "bigru_attention": "bigru_attention",
+    "handgcn": "handgcn",
+    "hdgcn": "handgcn",
+    "tcn": "tcn",
+}
+
+
+def _import_models_registry():
+    """Import processed.train_utils.models as a real package.
+
+    Must use a normal package import (not spec_from_file_location on
+    __init__.py) because the package uses relative imports internally.
+    """
+    workspace = str(WORKSPACE_ROOT)
+    if workspace not in sys.path:
+        sys.path.insert(0, workspace)
+    import importlib
+
+    return importlib.import_module("processed.train_utils.models")
+
+
+def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Optional[str] = None) -> tuple[nn.Module, dict]:
+    """Load model from checkpoint with support for multiple architectures.
+
+    Returns: (model, ckpt)
+    """
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+    # Determine model type saved by train_tcn.py (e.g. "CNN", "BiGRU + Attention")
+    model_type = model_type_override or ckpt.get("model_type", "TCN")
+    model_config = ckpt.get("model_config", {}) or {}
+    num_classes = int(ckpt.get("num_classes", 7))
+    feature_dim = int(ckpt.get("feature_dim", 126))
+
+    model_type_lower = str(model_type).lower().replace(" (legacy)", "").strip()
+    registry_key = _MODEL_NAME_TO_REGISTRY_KEY.get(model_type_lower)
+
+    model: Optional[nn.Module] = None
+
+    if registry_key and registry_key != "tcn":
+        # Non-TCN checkpoint: must load the real architecture from the registry.
+        # Do NOT fall back to TCN here — mismatched weights would fail with a
+        # confusing state_dict error instead of a clear one.
+        try:
+            models_module = _import_models_registry()
+            model_class = models_module.get_model_class(registry_key)
+            model = model_class.from_config(
+                input_dim=feature_dim,
+                output_dim=num_classes,
+                config=model_config,
+            ).to("cpu")
+            print(f"[TRAINING] Loaded {registry_key} model from registry (checkpoint model_type={model_type})")
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to build '{model_type}' model from registry for checkpoint "
+                f"{checkpoint_path.name}: {e}"
+            ) from e
+    else:
+        # TCN (or legacy checkpoint without model_type): inline TCNClassifier
+        # matches the TCNModel state-dict layout.
+        model = TCNClassifier(
+            feature_dim=feature_dim,
+            num_classes=num_classes,
+            channels=model_config.get("channels", 64),
+            levels=model_config.get("levels", 3),
+            kernel_size=model_config.get("kernel_size", 5),
+            dropout=model_config.get("dropout", 0.3),
+        )
+        print(f"[TRAINING] Loaded TCN model (checkpoint model_type={model_type})")
+
+    try:
+        model.load_state_dict(ckpt["model_state_dict"])
+        model.eval()
+    except Exception as e:
+        print(f"[TRAINING] Error loading model state dict: {e}")
+        raise
+
+    return model, ckpt
+
 
 # ============================================================================
 # TCN Model Classes (for training model inference)
@@ -94,9 +207,9 @@ class TCNClassifier(nn.Module):
         return logits
 
 
-# Lưu trữ trạng thái training jobs
+# In-memory cache of job state. Postgres là source of truth (trainer container
+# ghi); cache chỉ giữ bản terminal để đỡ query lặp.
 training_jobs: Dict[str, Dict[str, Any]] = {}
-training_websockets: Dict[str, List[WebSocket]] = {}
 
 # Đường dẫn dataset - tính từ docker volume mount
 # In Docker: . mounts to /workspace (root directory)
@@ -109,6 +222,12 @@ SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
 OUTPUTS_DIR = WORKSPACE_ROOT / "processed" / "train_utils" / "outputs"
 CHECKPOINTS_DIR = WORKSPACE_ROOT / "checkpoints"
 REGISTRY_PATH = WORKSPACE_ROOT / "backend" / "realtime_service" / "config" / "models.json"
+
+# Realtime service reads checkpoints RELATIVE to its config dir
+# (mounted at /app/realtime_service/config inside the realtime container).
+REALTIME_CHECKPOINTS_DIR = REGISTRY_PATH.parent / "checkpoints"
+# Same dir as seen from INSIDE the realtime container (for /reload payload)
+REALTIME_CONTAINER_CHECKPOINTS = "/app/realtime_service/config/checkpoints"
 
 
 # ============================================================================
@@ -127,6 +246,7 @@ class DatasetInfo(BaseModel):
 
 class TrainingConfig(BaseModel):
     """Cấu hình training"""
+    model_type: str = "tcn"  # Supported: tcn, cnn, lstm, bigru_attention, hdgcn
     dialects: List[str] = []  # nếu rỗng = training all
     languages: List[str] = []  # nếu rỗng = training all
     epochs: int = 80
@@ -141,7 +261,7 @@ class TrainingConfig(BaseModel):
 class TrainingJob(BaseModel):
     """Thông tin training job"""
     id: str
-    status: str  # pending, running, completed, failed
+    status: str  # queued, running, completed, failed, cancelled
     config: TrainingConfig
     created_at: str
     started_at: Optional[str] = None
@@ -151,6 +271,8 @@ class TrainingJob(BaseModel):
     checkpoint_path: Optional[str] = None  # Path to saved model after training
     test_acc: Optional[float] = None  # Test accuracy from checkpoint
     test_f1: Optional[float] = None  # Test F1 score from checkpoint
+    error_message: Optional[str] = None  # Failure/cancellation reason
+    promoted_at: Optional[str] = None  # When admin promoted this model to realtime
 
 
 class TrainingMetrics(BaseModel):
@@ -162,7 +284,189 @@ class TrainingMetrics(BaseModel):
     val_acc: float
     val_f1: float
     learning_rate: Optional[float] = None
-    handedness: Optional[Dict[str, Any]] = None
+
+
+# ============================================================================
+# Persistence (Postgres is the source of truth; the in-memory dict is a cache)
+#
+# All persistence calls are best-effort: a DB outage must never kill a
+# running training job or block the API. Failures are logged and the
+# in-memory state keeps serving until the DB recovers.
+# ============================================================================
+
+def _persist_job_sync(job: TrainingJob, auth_user_id: Optional[str] = None) -> None:
+    try:
+        from app.storage.metadata_db import upsert_training_job
+
+        upsert_training_job({
+            "job_id": job.id,
+            "status": job.status,
+            "model_type": job.config.model_type,
+            "config": job.config.dict(),
+            "auth_user_id": auth_user_id,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "current_epoch": job.current_epoch,
+            "total_epochs": job.total_epochs,
+            "checkpoint_path": job.checkpoint_path,
+            "test_acc": job.test_acc,
+            "test_f1": job.test_f1,
+            "error_message": job.error_message,
+            "promoted_at": job.promoted_at,
+        })
+    except Exception as e:
+        print(f"[TRAINING][PERSIST] job {job.id} DB write failed (state kept in memory): {e}")
+
+
+async def _persist_job(job: TrainingJob, auth_user_id: Optional[str] = None) -> None:
+    await asyncio.to_thread(_persist_job_sync, job, auth_user_id)
+
+
+def _persist_metric_sync(job_id: str, metric: TrainingMetrics) -> None:
+    try:
+        from app.storage.metadata_db import insert_training_metric
+
+        insert_training_metric({
+            "job_id": job_id,
+            "epoch": metric.epoch,
+            "train_loss": metric.train_loss,
+            "train_acc": metric.train_acc,
+            "val_loss": metric.val_loss,
+            "val_acc": metric.val_acc,
+            "val_f1": metric.val_f1,
+        })
+    except Exception as e:
+        print(f"[TRAINING][PERSIST] metric epoch={metric.epoch} job={job_id} DB write failed: {e}")
+
+
+def _job_from_db_row(row: Dict[str, Any]) -> TrainingJob:
+    config_raw = row.get("config") or {}
+    try:
+        config = TrainingConfig(**config_raw)
+    except Exception:
+        config = TrainingConfig()
+
+    def _iso(v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
+    return TrainingJob(
+        id=str(row["job_id"]),
+        status=str(row.get("status") or "failed"),
+        config=config,
+        created_at=_iso(row.get("created_at")) or datetime.now().isoformat(),
+        started_at=_iso(row.get("started_at")),
+        completed_at=_iso(row.get("completed_at")),
+        current_epoch=int(row.get("current_epoch") or 0),
+        total_epochs=int(row.get("total_epochs") or 0),
+        checkpoint_path=row.get("checkpoint_path"),
+        test_acc=row.get("test_acc"),
+        test_f1=row.get("test_f1"),
+        error_message=row.get("error_message"),
+        promoted_at=_iso(row.get("promoted_at")),
+    )
+
+
+def _metrics_from_db_rows(rows: List[Dict[str, Any]]) -> List[TrainingMetrics]:
+    metrics: List[TrainingMetrics] = []
+    for r in rows:
+        try:
+            metrics.append(TrainingMetrics(
+                epoch=int(r["epoch"]),
+                train_loss=float(r.get("train_loss") or 0.0),
+                train_acc=float(r.get("train_acc") or 0.0),
+                val_loss=float(r.get("val_loss") or 0.0),
+                val_acc=float(r.get("val_acc") or 0.0),
+                val_f1=float(r.get("val_f1") or 0.0),
+            ))
+        except Exception:
+            continue
+    return metrics
+
+
+TERMINAL_STATUSES = ("completed", "failed", "cancelled")
+
+
+async def restore_jobs_from_db(limit: int = 50) -> None:
+    """Rehydrate recent jobs from Postgres into memory after a backend restart.
+
+    Training runs in the separate trainer container (Celery), so a backend
+    restart does NOT interrupt running jobs — leave them alone; the trainer
+    keeps updating Postgres. Queued jobs are re-dispatched to the Celery
+    queue; duplicates are safe because the trainer task skips any job whose
+    DB status is no longer "queued".
+    """
+    try:
+        from app.storage.metadata_db import list_training_jobs
+
+        rows = await asyncio.to_thread(list_training_jobs, limit)
+    except Exception as e:
+        print(f"[TRAINING][RESTORE] Cannot read jobs from DB (starting empty): {e}")
+        return
+
+    restored = 0
+    requeued = 0
+
+    # Oldest first so re-queued jobs keep their original order
+    for row in reversed(rows):
+        try:
+            job = _job_from_db_row(row)
+        except Exception as e:
+            print(f"[TRAINING][RESTORE] Skipping malformed job row: {e}")
+            continue
+
+        if job.id in training_jobs:
+            continue
+
+        if job.status == "queued":
+            try:
+                from app.training_tasks import run_training_job
+
+                run_training_job.apply_async(args=[job.id], queue="training")
+                requeued += 1
+            except Exception as e:
+                print(f"[TRAINING][RESTORE] Requeue failed for {job.id}: {e}")
+
+        training_jobs[job.id] = {
+            "job": job,
+            "progress": [],  # per-epoch metrics load lazily from DB on demand
+        }
+        restored += 1
+
+    print(f"[TRAINING][RESTORE] restored={restored} requeued={requeued}")
+
+
+async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
+    """Return job_info, refreshing from Postgres unless the cached copy is terminal.
+
+    Postgres is the source of truth: the trainer container updates job rows
+    while the backend only reads them. Terminal jobs are immutable (except
+    promotion, which the backend itself writes), so the cache is safe there.
+    """
+    cached = training_jobs.get(job_id)
+    if cached and cached["job"].status in TERMINAL_STATUSES:
+        return cached
+
+    try:
+        from app.storage.metadata_db import get_training_job
+
+        row = await asyncio.to_thread(get_training_job, job_id)
+    except Exception as e:
+        print(f"[TRAINING] DB lookup failed for job {job_id}: {e}")
+        return cached  # degrade to possibly-stale cache instead of erroring
+    if not row:
+        return cached
+
+    job = _job_from_db_row(row)
+    if cached:
+        cached["job"] = job
+        return cached
+
+    job_info = {"job": job, "progress": []}
+    training_jobs[job_id] = job_info
+    return job_info
 
 
 # ============================================================================
@@ -224,15 +528,16 @@ def _count_samples_by_class() -> Dict[str, int]:
     return class_counts
 
 
-def _copy_checkpoint_to_deployment(src_path: Path, model_id: str) -> Optional[str]:
-    """Copy model từ outputs/ tới checkpoints/ cho realtime service"""
+def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optional[Path] = None) -> Optional[str]:
+    """Copy checkpoint (+ JSON sidecar) sang thư mục deployment."""
     try:
-        CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+        target_dir = dst_dir or CHECKPOINTS_DIR
+        target_dir.mkdir(parents=True, exist_ok=True)
 
         # Tên model mới
         stem = src_path.stem  # "tcn_18_20260606_052123"
         new_name = f"{stem}.pt"
-        dst_path = CHECKPOINTS_DIR / new_name
+        dst_path = target_dir / new_name
 
         # Copy file
         if src_path.exists():
@@ -252,8 +557,13 @@ def _copy_checkpoint_to_deployment(src_path: Path, model_id: str) -> Optional[st
     return None
 
 
-def _update_registry(model_id: str, checkpoint_path: str, model_meta: Dict[str, Any]) -> bool:
-    """Update models.json registry để realtime service load model mới"""
+def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
+                     ckpt: Dict[str, Any], dialect: str, language: str) -> bool:
+    """Update models.json registry để realtime service load model mới.
+
+    Entry được build từ chính checkpoint để pass validate_checkpoint_vs_registry
+    của realtime service (normalization_version, seq_len, feature_dim phải khớp).
+    """
     try:
         if not REGISTRY_PATH.exists():
             print(f"[TRAINING] Registry not found: {REGISTRY_PATH}")
@@ -262,16 +572,19 @@ def _update_registry(model_id: str, checkpoint_path: str, model_meta: Dict[str, 
         # Load existing registry
         registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
 
-        # Thêm/update model entry with required fields for realtime service
+        seq_len = int(ckpt.get("seq_len", 60))
+        feature_dim = int(ckpt.get("feature_dim", 126))
+
         model_entry = {
             "id": model_id,
-            "name": f"Training {model_meta.get('training_job_id', model_id)[-8:]}",
-            "checkpoint_path": checkpoint_path,
-            "language": "vn",
-            "dialect": model_meta.get("config", {}).get("dialects", ["multi"])[0] if model_meta.get("config", {}).get("dialects") else "multi",
-            "seq_len": 60,
-            "feature_dim": 126,
-            "normalization_version": "v1",
+            "name": display_name,
+            "checkpoint_path": checkpoint_rel_path,  # relative to config dir, e.g. "checkpoints/x.pt"
+            "language": language,
+            "dialect": dialect,
+            "seq_len": seq_len,
+            "feature_dim": feature_dim,
+            "normalization_version": str(ckpt.get("normalization_version", "hands126_v1")),
+            "expected_contract_hash": None,
             "preprocess_contract": {
                 "feature_layout": {
                     "type": "hands_126",
@@ -282,7 +595,7 @@ def _update_registry(model_id: str, checkpoint_path: str, model_meta: Dict[str, 
                     "frontend_mirroring": "visual_only",
                     "missing_hands_policy": "zero_filled_by_frontend"
                 },
-                "expects_strict_shape": [60, 126]
+                "expects_strict_shape": [seq_len, feature_dim]
             }
         }
 
@@ -340,6 +653,7 @@ def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version
 async def get_dataset_info(
     dialect: Optional[str] = Query(None, description="Filter by dialect"),
     language: Optional[str] = Query("vn", description="Filter by language"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> DatasetInfo:
     """
     Lấy thông tin dataset hiện tại
@@ -373,11 +687,14 @@ async def get_dataset_info(
 
 
 @router.post("/start", response_model=TrainingJob)
-async def start_training(config: TrainingConfig) -> TrainingJob:
+async def start_training(
+    config: TrainingConfig,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
     """
-    Bắt đầu training job
+    Bắt đầu training job (enqueue to queue)
 
-    Tạo job ID, setup subprocess, return job info
+    Tạo job ID, thêm vào queue, return job info
     """
     try:
         job_id = str(uuid.uuid4())[:8]
@@ -385,7 +702,7 @@ async def start_training(config: TrainingConfig) -> TrainingJob:
 
         job = TrainingJob(
             id=job_id,
-            status="pending",
+            status="queued",  # ✓ Changed from "pending" to "queued"
             config=config,
             created_at=now,
             total_epochs=config.epochs,
@@ -393,27 +710,76 @@ async def start_training(config: TrainingConfig) -> TrainingJob:
 
         training_jobs[job_id] = {
             "job": job,
-            "process": None,
             "progress": [],
-            "latest_metrics": None,
         }
 
-        # Bắt đầu training trong background
-        asyncio.create_task(_run_training_subprocess(job_id, config))
+        # Persist BEFORE enqueue: if the backend dies right after, the job
+        # is recoverable instead of silently vanishing.
+        await _persist_job(job, auth_user_id=str(current_user.get("id") or "") or None)
+
+        # Dispatch to the dedicated trainer container (Celery queue "training",
+        # concurrency 1 — jobs execute strictly one at a time, off the API CPU)
+        try:
+            from app.training_tasks import run_training_job
+
+            await asyncio.to_thread(
+                run_training_job.apply_async, kwargs={"job_id": job_id}, queue="training"
+            )
+            print(f"[TRAINING {job_id}] ✓ Dispatched to trainer by user={current_user.get('username')}")
+        except Exception as dispatch_err:
+            job.status = "failed"
+            job.completed_at = datetime.now().isoformat()
+            job.error_message = f"Không gửi được job tới trainer (Redis/Celery down?): {dispatch_err}"
+            await _persist_job(job)
+            raise HTTPException(
+                status_code=503,
+                detail="Hàng đợi training tạm thời không khả dụng — thử lại sau",
+            )
 
         return job
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi bắt đầu training: {str(e)}")
 
 
+@router.get("/jobs")
+async def list_jobs(
+    limit: int = Query(100, ge=1, le=500),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    """Lịch sử training jobs (mới nhất trước), kèm username người chạy."""
+    try:
+        from app.storage.metadata_db import list_training_jobs_with_user
+
+        rows = await asyncio.to_thread(list_training_jobs_with_user, limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không đọc được lịch sử training: {e}")
+
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        try:
+            job = _job_from_db_row(row)
+        except Exception:
+            continue
+        item = job.dict()
+        item["username"] = row.get("username")
+        items.append(item)
+    return items
+
+
 @router.get("/jobs/{job_id}", response_model=TrainingJob)
-async def get_job_status(job_id: str) -> TrainingJob:
-    """Lấy trạng thái training job"""
-    if job_id not in training_jobs:
+async def get_job_status(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
+    """Lấy trạng thái training job (fallback sang DB nếu không có trong memory)"""
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
-    job = training_jobs[job_id]["job"]
+    job = job_info["job"]
 
     # Load test metrics from checkpoint if job is completed
     if job.status == "completed" and job.checkpoint_path:
@@ -423,12 +789,16 @@ async def get_job_status(job_id: str) -> TrainingJob:
                 ckpt_path = Path(job.checkpoint_path)
                 print(f"[JOB {job_id}] Loading checkpoint from {ckpt_path}, exists={ckpt_path.exists()}")
                 if ckpt_path.exists():
-                    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+                    # In thread — torch.load on a large checkpoint would block the event loop
+                    ckpt = await asyncio.to_thread(
+                        torch.load, ckpt_path, map_location="cpu", weights_only=False
+                    )
                     metrics = ckpt.get("metrics", {})
                     print(f"[JOB {job_id}] Checkpoint metrics keys: {list(metrics.keys())}")
                     job.test_acc = float(metrics.get("test_acc", 0)) if metrics.get("test_acc") is not None else None
                     job.test_f1 = float(metrics.get("test_f1", 0)) if metrics.get("test_f1") is not None else None
                     print(f"[JOB {job_id}] ✓ Loaded test metrics: acc={job.test_acc:.4f}, f1={job.test_f1:.4f}")
+                    await _persist_job(job)
                 else:
                     print(f"[JOB {job_id}] ✗ Checkpoint file not found")
             except Exception as e:
@@ -440,330 +810,309 @@ async def get_job_status(job_id: str) -> TrainingJob:
 
 
 @router.get("/jobs/{job_id}/metrics", response_model=List[TrainingMetrics])
-async def get_job_metrics(job_id: str) -> List[TrainingMetrics]:
-    """Lấy metrics của training job"""
-    if job_id not in training_jobs:
+async def get_job_metrics(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[TrainingMetrics]:
+    """Lấy metrics của training job (fallback sang DB nếu không có trong memory)"""
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
-    return training_jobs[job_id]["progress"]
+    # Metrics live in Postgres (written by the trainer container). Cache only
+    # once the job is terminal; while running, read fresh each poll.
+    is_terminal = job_info["job"].status in TERMINAL_STATUSES
+    if not job_info["progress"] or not is_terminal:
+        try:
+            from app.storage.metadata_db import list_training_metrics
+
+            rows = await asyncio.to_thread(list_training_metrics, job_id)
+            job_info["progress"] = _metrics_from_db_rows(rows)
+        except Exception as e:
+            print(f"[TRAINING] Metrics DB load failed for {job_id}: {e}")
+
+    return job_info["progress"]
+
+
+@router.get("/jobs/{job_id}/evaluation")
+async def get_job_evaluation(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Per-class breakdown + confusion matrix trên test set (Step 7).
+
+    Trả về {"available": false} thay vì 404 khi job cũ chưa có dữ liệu này
+    (các job train trước khi tính năng evaluation được thêm).
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    try:
+        from app.storage.metadata_db import get_training_job
+
+        row = await asyncio.to_thread(get_training_job, job_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không đọc được evaluation: {e}")
+
+    evaluation = (row or {}).get("evaluation")
+    if not isinstance(evaluation, dict) or not evaluation.get("per_class"):
+        return {"available": False, "job_id": job_id}
+
+    return {"available": True, "job_id": job_id, **evaluation}
+
+
+@router.get("/queue/status")
+async def get_queue_status(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> dict:
+    """Get training queue status (từ Postgres — trainer container ghi trạng thái)"""
+    try:
+        from app.storage.metadata_db import list_training_jobs
+
+        rows = await asyncio.to_thread(list_training_jobs, 100)
+    except Exception as e:
+        return {"queue_enabled": False, "message": f"DB unavailable: {e}"}
+
+    queued = [r for r in rows if str(r.get("status")) == "queued"]
+    running = [r for r in rows if str(r.get("status")) == "running"]
+    return {
+        "queue_enabled": True,
+        "queue_length": len(queued),
+        "current_job": str(running[0]["job_id"]) if running else None,
+        "worker_running": True,  # executor là container trainer riêng (celery -Q training)
+    }
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=TrainingJob)
+async def cancel_training_job(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
+    """Hủy training job.
+
+    Training chạy trong container trainer riêng, nên hủy = set Redis key
+    ``training:cancel:{job_id}`` — vòng giám sát của trainer thấy key này
+    trong ≤2s và terminate subprocess (SIGKILL sau 30s nếu lì).
+    DB được đánh dấu cancelled ngay để UI phản hồi tức thì.
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+
+    if job.status in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job đã ở trạng thái kết thúc ({job.status}), không thể hủy",
+        )
+
+    print(f"[TRAINING {job_id}] Cancel requested by user={current_user.get('username')}")
+
+    # Signal the trainer (works for both queued — pre-start check — and running)
+    if redis_client:
+        try:
+            await asyncio.to_thread(
+                redis_client.set, f"training:cancel:{job_id}", "1", ex=86400
+            )
+        except Exception as e:
+            print(f"[TRAINING {job_id}] Cancel signal to Redis failed: {e}")
+
+    job.status = "cancelled"
+    job.completed_at = datetime.now().isoformat()
+    job.error_message = f"Bị hủy bởi {current_user.get('username', 'user')}"
+    await _persist_job(job)
+    return job
+
+
+class PromoteResponse(BaseModel):
+    """Kết quả promote model lên realtime"""
+    job: TrainingJob
+    model_id: str
+    deployed_checkpoint: str
+    registry_updated: bool
+    realtime_reloaded: bool
+    message: str
+
+
+@router.post("/jobs/{job_id}/promote", response_model=PromoteResponse)
+async def promote_training_job(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+) -> PromoteResponse:
+    """Promote model của job lên tab nhận diện realtime (ADMIN ONLY).
+
+    Luồng: copy đúng checkpoint của job → config/checkpoints của realtime
+    service → ghi entry vào models.json (bền qua restart) → gọi /reload để
+    hot-swap → ghi promoted_at vào DB.
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+
+    if job.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chỉ promote được job đã hoàn thành (trạng thái hiện tại: {job.status})",
+        )
+
+    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
+        raise HTTPException(status_code=404, detail="Không tìm thấy checkpoint của job này")
+
+    # Load checkpoint để validate model type — realtime service hiện chỉ
+    # hỗ trợ kiến trúc TCN (model_loader từ chối model_type khác)
+    src_path = Path(job.checkpoint_path)
+    try:
+        ckpt = await asyncio.to_thread(
+            torch.load, str(src_path), map_location="cpu", weights_only=False
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không đọc được checkpoint: {e}")
+
+    model_type = str(ckpt.get("model_type", "TCN")).replace(" (legacy)", "").strip()
+    if model_type.lower() != "tcn":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Realtime service hiện chỉ hỗ trợ kiến trúc TCN — model này là '{model_type}'. "
+                "Model vẫn dùng được qua nút Test Model ở Step 7."
+            ),
+        )
+
+    model_id = f"training_{job_id}"
+
+    # 1. Copy đúng checkpoint của job vào thư mục realtime service đọc được
+    deployed_path = await asyncio.to_thread(
+        _copy_checkpoint_to_deployment, src_path, model_id, REALTIME_CHECKPOINTS_DIR
+    )
+    if not deployed_path:
+        raise HTTPException(status_code=500, detail="Copy checkpoint sang realtime service thất bại")
+
+    fname = Path(deployed_path).name
+
+    # 2. Ghi models.json (bền vững — realtime restart vẫn load được)
+    dialect = (job.config.dialects[0] if job.config.dialects else "multi")
+    language = (job.config.languages[0] if job.config.languages else "vn")
+    display_name = f"{model_type.upper()} {dialect} ({job_id})"
+    registry_updated = await asyncio.to_thread(
+        _update_registry,
+        model_id,
+        f"checkpoints/{fname}",  # relative to realtime config dir
+        display_name,
+        ckpt,
+        dialect,
+        language,
+    )
+
+    # 3. Hot-swap: báo realtime service load model ngay (path TRONG container realtime)
+    realtime_reloaded = await asyncio.to_thread(
+        _notify_realtime_service_reload,
+        model_id,
+        f"{REALTIME_CONTAINER_CHECKPOINTS}/{fname}",
+        f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+    )
+
+    # 4. Ghi nhận promotion. checkpoint_path trỏ sang bản deployed để:
+    #    - retention sweep dọn outputs/ không thể phá model đã promote
+    #    - Step 7 test modal vẫn hoạt động sau khi outputs/ bị dọn
+    job.promoted_at = datetime.now().isoformat()
+    job.checkpoint_path = deployed_path
+    await _persist_job(job)
+
+    # 5. Backup bản promoted lên Google Drive (background, best-effort)
+    try:
+        from app.training_tasks import backup_promoted_checkpoint_task
+
+        backup_promoted_checkpoint_task.delay(job_id=job_id, checkpoint_path=deployed_path)
+        print(f"[TRAINING {job_id}] GDrive backup dispatched for promoted model")
+    except Exception as e:
+        print(f"[TRAINING {job_id}] GDrive backup dispatch failed (promotion vẫn OK): {e}")
+
+    print(
+        f"[TRAINING {job_id}] ✓ PROMOTED by admin={current_user.get('username')} "
+        f"registry={registry_updated} reload={realtime_reloaded}"
+    )
+
+    if realtime_reloaded:
+        message = "Model đã được đưa vào realtime và sẵn sàng sử dụng ngay"
+    elif registry_updated:
+        message = "Model đã ghi vào registry — sẽ hoạt động sau khi realtime service khởi động lại"
+    else:
+        message = "Checkpoint đã copy nhưng cập nhật registry thất bại — kiểm tra log backend"
+
+    return PromoteResponse(
+        job=job,
+        model_id=model_id,
+        deployed_checkpoint=deployed_path,
+        registry_updated=registry_updated,
+        realtime_reloaded=realtime_reloaded,
+        message=message,
+    )
 
 
 @router.websocket("/ws/{job_id}")
-async def websocket_training_progress(websocket: WebSocket, job_id: str):
+async def websocket_training_progress(websocket: WebSocket, job_id: str, token: str = Query(default="")):
     """
     WebSocket để stream real-time training progress
 
-    Gửi metrics, epoch progress, handedness breakdowns
+    Gửi metrics, epoch progress.
+    Auth: browsers cannot set headers on WS — FE gửi JWT qua ?token=.
     """
-    if job_id not in training_jobs:
+    user = await asyncio.to_thread(get_user_from_token, token) if token else None
+    if not user:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
         await websocket.close(code=4004, reason="Job not found")
         return
 
     await websocket.accept()
 
-    if job_id not in training_websockets:
-        training_websockets[job_id] = []
-
-    training_websockets[job_id].append(websocket)
-
+    # Training chạy trong container trainer và ghi tiến độ vào Postgres —
+    # backend poll DB mỗi 2s và đẩy phần MỚI cho client (message shape giữ
+    # nguyên như cũ nên FE không cần đổi).
     try:
-        # Gửi job status hiện tại trước tiên
-        await websocket.send_json({
-            "type": "status",
-            "data": training_jobs[job_id]["job"].dict(),
-        })
+        from app.storage.metadata_db import list_training_metrics
 
-        # Gửi metrics cũ đã có
-        for metric in training_jobs[job_id]["progress"]:
-            await websocket.send_json({
-                "type": "metric",
-                "data": metric.dict(),
-            })
+        last_epoch = 0
+        last_status: Optional[str] = None
 
-        # Chờ new updates
         while True:
-            data = await websocket.receive_text()
-            # Client có thể gửi heartbeat hoặc commands
-            if data == "ping":
-                await websocket.send_json({"type": "pong"})
+            job_info = await _ensure_job_loaded(job_id)
+            if not job_info:
+                break
+            job = job_info["job"]
+
+            try:
+                rows = await asyncio.to_thread(list_training_metrics, job_id)
+                for metric in _metrics_from_db_rows(rows):
+                    if metric.epoch > last_epoch:
+                        await websocket.send_json({"type": "metric", "data": metric.dict()})
+                        last_epoch = metric.epoch
+            except Exception as e:
+                print(f"[TRAINING][WS] metrics poll failed for {job_id}: {e}")
+
+            if job.status != last_status:
+                await websocket.send_json({"type": "status", "data": job.dict()})
+                last_status = job.status
+
+            if job.status in TERMINAL_STATUSES:
+                break
+
+            await asyncio.sleep(2)
 
     except WebSocketDisconnect:
-        training_websockets[job_id].remove(websocket)
+        pass
     except Exception as e:
         print(f"WebSocket error: {e}")
-
-
-# ============================================================================
-# Background Tasks
-# ============================================================================
-
-async def _run_training_subprocess(job_id: str, config: TrainingConfig):
-    """Chạy train_tcn.py subprocess"""
-    job_info = training_jobs[job_id]
-    job_info["job"].status = "running"
-    job_info["job"].started_at = datetime.now().isoformat()
-
-    # Save event loop for use in background threads
-    loop = asyncio.get_running_loop()
-
-    # Broadcast status update immediately
-    await _broadcast_status(job_id, job_info["job"])
-
-    try:
-        # Xây dựng command
-        cmd = [
-            "python",
-            "-m",
-            "processed.train_utils.train_tcn",
-            f"--epochs={config.epochs}",
-            f"--batch_size={config.batch_size}",
-            f"--lr={config.learning_rate}",
-            f"--dropout={config.dropout}",
-            f"--channels={config.channels}",
-            f"--levels={config.levels}",
-            f"--kernel_size={config.kernel_size}",
-            "--run_diagnostics",
-        ]
-
-        # Thêm dialect/language filters nếu có
-        if config.dialects:
-            for dialect in config.dialects:
-                cmd.append(f"--dialect={dialect}")
-        if config.languages:
-            for language in config.languages:
-                cmd.append(f"--filter_language={language}")
-
-        # Debug
-        # CWD phải là /workspace (project root mount point trong Docker)
-        cwd_path = "/workspace"
-        print(f"[TRAINING {job_id}] Starting subprocess")
-        print(f"[TRAINING {job_id}] CWD: {cwd_path}")
-        print(f"[TRAINING {job_id}] CMD: {' '.join(cmd)}")
-
-        # Chạy subprocess
-        env = os.environ.copy()
-        env['PYTHONPATH'] = str(WORKSPACE_ROOT)
-        env['PYTHONUNBUFFERED'] = '1'
-        process = subprocess.Popen(
-            cmd,
-            cwd=cwd_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=env,
-        )
-
-        print(f"[TRAINING {job_id}] Process started with PID {process.pid}")
-
-        job_info["process"] = process
-
-        # Read subprocess output in background thread to avoid deadlock
-        import threading
-
-        def read_process_output():
-            """Threaded function to read and parse subprocess output"""
-            handedness_data = {}
-            try:
-                print(f"[TRAINING {job_id}] Starting to read stdout...")
-                for line in process.stdout:
-                    if not line:
-                        continue
-                    line = line.strip()
-                    # Log all output lines
-                    print(f"[TRAINING {job_id}] OUT: {line}")
-
-                    # Parse handedness: "left_only:0.85(150) right_only:0.90(120) both:0.88(200)"
-                    if "left_only:" in line and "right_only:" in line:
-                        try:
-                            handedness_data = {}
-                            left_match = re.search(r'left_only:([\d.]+)\((\d+)\)', line)
-                            if left_match:
-                                handedness_data['left_only_acc'] = float(left_match.group(1))
-                                handedness_data['left_only_n'] = int(left_match.group(2))
-
-                            right_match = re.search(r'right_only:([\d.]+)\((\d+)\)', line)
-                            if right_match:
-                                handedness_data['right_only_acc'] = float(right_match.group(1))
-                                handedness_data['right_only_n'] = int(right_match.group(2))
-
-                            both_match = re.search(r'both:([\d.]+)\((\d+)\)', line)
-                            if both_match:
-                                handedness_data['both_acc'] = float(both_match.group(1))
-                                handedness_data['both_n'] = int(both_match.group(2))
-                        except Exception as e:
-                            print(f"[TRAINING {job_id}] Error parsing handedness: {e}")
-
-                    # Parse epoch output: "epoch 001 | train loss 0.1234 acc 0.9234 | val loss ..."
-                    if "epoch" in line and "train loss" in line:
-                        try:
-                            parts = line.split("|")
-                            epoch_str = parts[0].split()[-1]  # "001"
-                            epoch = int(epoch_str)
-                            job_info["job"].current_epoch = epoch
-
-                            train_part = parts[1]
-                            val_part = parts[2] if len(parts) > 2 else ""
-
-                            train_loss = float(train_part.split("loss")[1].split("acc")[0].strip())
-                            train_acc = float(train_part.split("acc")[1].strip())
-                            val_loss = float(val_part.split("loss")[1].split("acc")[0].strip())
-                            val_acc = float(val_part.split("acc")[1].split("f1")[0].strip())
-                            val_f1 = float(val_part.split("f1")[1].strip())
-
-                            metric = TrainingMetrics(
-                                epoch=epoch,
-                                train_loss=train_loss,
-                                train_acc=train_acc,
-                                val_loss=val_loss,
-                                val_acc=val_acc,
-                                val_f1=val_f1,
-                                handedness=handedness_data if handedness_data else None,
-                            )
-
-                            job_info["progress"].append(metric)
-                            job_info["latest_metrics"] = metric
-
-                            # Broadcast asynchronously
-                            asyncio.run_coroutine_threadsafe(
-                                _broadcast_metric(job_id, metric),
-                                loop
-                            )
-
-                        except Exception as parse_error:
-                            print(f"[TRAINING {job_id}] Error parsing training output: {parse_error}")
-            except Exception as e:
-                print(f"[TRAINING {job_id}] Error reading stdout: {e}")
-
-        # Start background thread to read output
-        output_thread = threading.Thread(target=read_process_output, daemon=True)
-        output_thread.start()
-
-        # Also capture stderr for debugging
-        def read_stderr():
-            try:
-                for line in process.stderr:
-                    if line:
-                        print(f"[TRAINING {job_id}] STDERR: {line.strip()}")
-            except Exception as e:
-                print(f"[TRAINING {job_id}] Error reading stderr: {e}")
-
-        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
-        stderr_thread.start()
-
-        # Wait for process in background thread (non-blocking for asyncio)
+    finally:
         try:
-            await asyncio.to_thread(process.wait)
-        except Exception as wait_err:
-            print(f"[TRAINING {job_id}] Error waiting for process: {wait_err}")
-
-        print(f"[TRAINING {job_id}] Process exited with returncode: {process.returncode}")
-        if process.returncode == 0:
-            job_info["job"].status = "completed"
-
-            # ✅ Find & deploy checkpoint
-            try:
-                # Find latest .pt file in outputs
-                output_files = sorted(OUTPUTS_DIR.glob("*.pt"), key=lambda x: x.stat().st_mtime, reverse=True)
-                print(f"[TRAINING {job_id}] Found {len(output_files)} checkpoint files in {OUTPUTS_DIR}")
-                if output_files:
-                    latest_checkpoint = output_files[0]
-                    model_id = f"training_{job_id}"
-
-                    # Copy to checkpoints & update registry
-                    deployed_path = _copy_checkpoint_to_deployment(latest_checkpoint, model_id)
-                    if deployed_path:
-                        job_info["job"].checkpoint_path = deployed_path
-
-                        # Load test metrics from checkpoint immediately
-                        try:
-                            ckpt = torch.load(deployed_path, map_location="cpu", weights_only=False)
-                            metrics = ckpt.get("metrics", {})
-                            if metrics:
-                                job_info["job"].test_acc = float(metrics.get("test_acc", 0))
-                                job_info["job"].test_f1 = float(metrics.get("test_f1", 0))
-                                print(f"[TRAINING {job_id}] ✓ Test metrics loaded: acc={job_info['job'].test_acc:.4f}, f1={job_info['job'].test_f1:.4f}")
-                        except Exception as e:
-                            print(f"[TRAINING {job_id}] Error loading test metrics: {e}")
-
-                        # Note: Training models are NOT added to registry
-                        # They're served via /api/v1/training/jobs/{job_id}/predict endpoint
-                        # which loads checkpoints directly without registry requirement
-
-                        print(f"[TRAINING] Model deployed: {deployed_path}")
-            except Exception as e:
-                print(f"[TRAINING] Checkpoint deployment error: {e}")
-        else:
-            job_info["job"].status = "failed"
-
-        job_info["job"].completed_at = datetime.now().isoformat()
-
-        # Broadcast final status
-        await _broadcast_status(job_id, job_info["job"])
-
-    except Exception as e:
-        job_info["job"].status = "failed"
-        job_info["job"].completed_at = datetime.now().isoformat()
-        print(f"Training subprocess error: {e}")
-        await _broadcast_error(job_id, str(e))
-
-
-async def _broadcast_metric(job_id: str, metric: TrainingMetrics):
-    """Gửi metric đến tất cả WebSocket clients"""
-    if job_id not in training_websockets:
-        return
-
-    disconnected = []
-    for ws in training_websockets[job_id]:
-        try:
-            await ws.send_json({
-                "type": "metric",
-                "data": metric.dict(),
-            })
-        except Exception:
-            disconnected.append(ws)
-
-    # Cleanup disconnected
-    for ws in disconnected:
-        try:
-            training_websockets[job_id].remove(ws)
-        except:
-            pass
-
-
-async def _broadcast_status(job_id: str, job: TrainingJob):
-    """Gửi status update"""
-    if job_id not in training_websockets:
-        return
-
-    disconnected = []
-    for ws in training_websockets[job_id]:
-        try:
-            await ws.send_json({
-                "type": "status",
-                "data": job.dict(),
-            })
-        except Exception:
-            disconnected.append(ws)
-
-    for ws in disconnected:
-        try:
-            training_websockets[job_id].remove(ws)
-        except:
-            pass
-
-
-async def _broadcast_error(job_id: str, error_msg: str):
-    """Gửi error message"""
-    if job_id not in training_websockets:
-        return
-
-    for ws in training_websockets[job_id]:
-        try:
-            await ws.send_json({
-                "type": "error",
-                "message": error_msg,
-            })
+            await websocket.close()
         except Exception:
             pass
 
@@ -785,16 +1134,20 @@ class TrainedModelPredictResponse(BaseModel):
 
 
 @router.post("/jobs/{job_id}/predict", response_model=TrainedModelPredictResponse)
-async def predict_trained_model(job_id: str, request_data: TrainedModelPredictRequest) -> TrainedModelPredictResponse:
+async def predict_trained_model(
+    job_id: str,
+    request_data: TrainedModelPredictRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainedModelPredictResponse:
     """Predict using trained model checkpoint (for Step 7 test modal).
 
     Load checkpoint locally and run inference without requiring registry entry.
     """
-    # Validate job exists
-    if job_id not in training_jobs:
+    # Validate job exists (fallback sang DB — job vẫn test được sau khi backend restart)
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} not found")
 
-    job_info = training_jobs[job_id]
     job = job_info.get("job")
     if not job:
         raise HTTPException(status_code=404, detail="Job object not found")
@@ -805,16 +1158,14 @@ async def predict_trained_model(job_id: str, request_data: TrainedModelPredictRe
 
     try:
         # Setup sys.path for imports
-        import importlib.util
-        import sys
         processed_root = str(WORKSPACE_ROOT / "processed")
         if processed_root not in sys.path:
             sys.path.insert(0, processed_root)
 
         # Import normalization from shared
         normalization_path = WORKSPACE_ROOT / "processed" / "shared" / "normalization.py"
-        spec = importlib.util.spec_from_file_location("normalization", normalization_path)
-        norm_module = importlib.util.module_from_spec(spec)
+        spec = spec_from_file_location("normalization", normalization_path)
+        norm_module = module_from_spec(spec)
         spec.loader.exec_module(norm_module)
         normalize_hands_vector_126 = norm_module.normalize_hands_vector_126
 
@@ -827,30 +1178,28 @@ async def predict_trained_model(job_id: str, request_data: TrainedModelPredictRe
             normalize_hands_vector_126(frame) for frame in frames_array
         ], dtype=np.float32)
 
-        # Load checkpoint
-        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        # Load checkpoint with dynamic model support
+        # In thread — checkpoint load + inference are disk/CPU heavy and would
+        # stall every other request if run directly on the event loop
+        checkpoint_path_obj = Path(checkpoint_path)
+        model, ckpt = await asyncio.to_thread(_load_model_from_checkpoint, checkpoint_path_obj)
 
-        # Get model config from checkpoint
-        config = ckpt.get("config", {})
-        num_classes = ckpt.get("num_classes", 7)
-
-        # Build model using inline TCNClassifier
-        print(f"[TRAINING {job_id}] Building TCN model: classes={num_classes}")
-        model = TCNClassifier(
-            feature_dim=126,
-            num_classes=num_classes,
-            channels=config.get("channels", 64),
-            levels=config.get("levels", 3),
-            kernel_size=config.get("kernel_size", 5),
-            dropout=config.get("dropout", 0.3),
-        )
-        model.load_state_dict(ckpt["model_state_dict"])
-        model.eval()
+        # Log model type
+        model_type = ckpt.get("model_type", "Unknown")
+        print(f"[TRAINING {job_id}] Loaded model: {model_type}")
 
         # Run inference
-        x = torch.from_numpy(normalized_frames).unsqueeze(0).to(dtype=torch.float32)
-        with torch.no_grad():
-            logits = model(x, torch.tensor([60]))
+        def _run_inference() -> torch.Tensor:
+            x = torch.from_numpy(normalized_frames).unsqueeze(0).to(dtype=torch.float32)
+            with torch.no_grad():
+                # Check if model accepts lengths parameter (old BE TCNClassifier)
+                # or just input (new models from registry)
+                try:
+                    return model(x, torch.tensor([60]))
+                except TypeError:
+                    return model(x)
+
+        logits = await asyncio.to_thread(_run_inference)
 
         probs = torch.softmax(logits, dim=-1).detach().cpu().numpy().squeeze()
         pred_idx = int(np.argmax(probs))

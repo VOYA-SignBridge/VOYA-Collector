@@ -44,10 +44,12 @@ services:
     volumes:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
+      - .:/workspace
     env_file:
       - .env
     environment:
       REALTIME_SERVICE_URL: http://realtime_service:8010
+      TTS_REDIS_URL: redis://redis:6379/0
     depends_on:
       - postgres
       - redis
@@ -59,22 +61,65 @@ services:
           - voya_backend
           - backend
 
-  # worker:
-  #   image: voya_backend:latest
-  #   container_name: voya_worker
-  #   env_file:
-  #     - .env
-  #   volumes:
-  #     - ./dataset:/dataset
-  #     - ./gdrive:/gdrive
-  #   command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
-  #   depends_on:
-  #     - redis
-  #     - postgres
-  #     - backend
-  #   restart: unless-stopped
-  #   networks:
-  #     - voya_network
+  worker:
+    image: voya_backend:latest
+    container_name: voya_worker
+    env_file:
+      - .env
+    volumes:
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive
+      - .:/workspace
+    environment:
+      TTS_REDIS_URL: redis://redis:6379/0
+    command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
+    depends_on:
+      - redis
+      - postgres
+      - backend
+    restart: unless-stopped
+    networks:
+      - voya_network
+
+  # Dedicated training executor — consumes ONLY the "training" queue with
+  # concurrency 1 (jobs stay strictly serialized). Isolates CPU-heavy
+  # training from the API container so requests stay responsive.
+  trainer:
+    image: voya_backend:latest
+    container_name: voya_trainer
+    env_file:
+      - .env
+    volumes:
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive
+      - .:/workspace
+    command: celery -A app.worker.celery_app worker -Q training -c 1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - voya_network
+
+  celery-beat:
+    image: voya_backend:latest
+    container_name: voya_celery_beat
+    env_file:
+      - .env
+    volumes:
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive
+      - .:/workspace
+    environment:
+      TTS_REDIS_URL: redis://redis:6379/0
+    command: celery -A app.worker.celery_app beat --loglevel=${LOG_LEVEL:-INFO} --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      - redis
+      - postgres
+      - worker
+    restart: unless-stopped
+    networks:
+      - voya_network
 
   redis:
     image: redis:7-alpine

@@ -93,6 +93,27 @@ def write_raw_upload_rows(rows: List[Dict[str, Any]]) -> None:
     mirror_csv_to_gdrive(RAW_UPLOADS_CSV, "raw_uploads.csv")
 
 
+def update_raw_upload_row(upload_uid: str, updates: Dict[str, Any]) -> bool:
+    """Update fields of one raw upload row by upload_uid.
+
+    Used by the Celery GDrive mirror task to fill in storage_url after
+    the background upload completes. Returns True if the row was found.
+    """
+    if not upload_uid:
+        return False
+    rows = list_raw_uploads()
+    found = False
+    for row in rows:
+        if row.get("upload_uid") == upload_uid:
+            row.update({k: str(v) for k, v in updates.items() if k in RAW_UPLOAD_FIELDS})
+            row["updated_at"] = now_str()
+            found = True
+            break
+    if found:
+        write_raw_upload_rows(rows)
+    return found
+
+
 def find_raw_upload(upload_uid: str) -> Optional[Dict[str, str]]:
     if not upload_uid:
         return None

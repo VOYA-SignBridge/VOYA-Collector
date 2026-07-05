@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
+import { getAuthToken } from '../api/axiosClient';
 
 export interface DatasetInfo {
   total_samples: number;
@@ -17,7 +18,10 @@ export interface DatasetInfo {
   label_map?: Record<string, string>;
 }
 
+export type ModelType = 'tcn' | 'cnn' | 'lstm' | 'bigru_attention' | 'hdgcn';
+
 export interface TrainingConfig {
+  model_type: ModelType;
   dialects: string[];
   languages: string[];
   epochs: number;
@@ -37,19 +41,11 @@ export interface TrainingMetrics {
   val_acc: number;
   val_f1: number;
   learning_rate?: number;
-  handedness?: {
-    left_only_acc: number;
-    left_only_n: number;
-    right_only_acc: number;
-    right_only_n: number;
-    both_acc: number;
-    both_n: number;
-  };
 }
 
 export interface TrainingJob {
   id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   config: TrainingConfig;
   created_at: string;
   started_at?: string;
@@ -59,10 +55,51 @@ export interface TrainingJob {
   checkpoint_path?: string;
   test_acc?: number;
   test_f1?: number;
+  error_message?: string;
+  promoted_at?: string;
+}
+
+// GET /training/jobs — lịch sử jobs kèm username người chạy
+export interface TrainingJobListItem extends TrainingJob {
+  username?: string | null;
+}
+
+// GET /training/jobs/{id}/evaluation — per-class breakdown + confusion matrix (test set)
+export interface JobEvaluationClass {
+  class_idx: number;
+  label_key: string;
+  precision: number;
+  recall: number;
+  f1: number;
+  support: number;
+}
+
+export interface JobEvaluation {
+  available: boolean;
+  job_id?: string;
+  per_class?: JobEvaluationClass[];
+  confusion_matrix?: number[][];
+  labels?: string[];
+}
+
+// POST /training/jobs/{id}/promote
+export interface PromoteResponse {
+  job: TrainingJob;
+  model_id: string;
+  deployed_checkpoint: string;
+  registry_updated: boolean;
+  realtime_reloaded: boolean;
+  message: string;
 }
 
 // Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
 const API_URL = '/api/v1/training';
+
+// Training endpoints require authentication; attach the stored bearer token.
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export function useTrainingAPI() {
   const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null);
@@ -78,7 +115,9 @@ export function useTrainingAPI() {
       if (dialect) params.append('dialect', dialect);
       if (language) params.append('language', language);
 
-      const response = await fetch(`${API_URL}/dataset-info?${params}`);
+      const response = await fetch(`${API_URL}/dataset-info?${params}`, {
+        headers: authHeaders(),
+      });
       if (!response.ok) {
         throw new Error(`Failed to load dataset info: ${response.statusText}`);
       }
@@ -127,7 +166,7 @@ export function useTrainingAPI() {
     try {
       const response = await fetch(`${API_URL}/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(config),
       });
 
@@ -155,7 +194,7 @@ export function useTrainingAPI() {
   // Lấy job status
   const getJobStatus = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}`);
+      const response = await fetch(`${API_URL}/jobs/${jobId}`, { headers: authHeaders() });
       if (!response.ok) {
         throw new Error(`Failed to fetch job status: ${response.statusText}`);
       }
@@ -178,7 +217,7 @@ export function useTrainingAPI() {
   // Lấy metrics
   const getJobMetrics = useCallback(async (jobId: string): Promise<TrainingMetrics[]> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`);
+      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`, { headers: authHeaders() });
       if (!response.ok) {
         throw new Error(`Failed to fetch metrics: ${response.statusText}`);
       }
@@ -198,6 +237,68 @@ export function useTrainingAPI() {
     }
   }, []);
 
+  // Lịch sử jobs (mới nhất trước), kèm username người chạy
+  const listJobs = useCallback(async (limit = 100): Promise<TrainingJobListItem[]> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs?limit=${limit}`, { headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to list jobs: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return [];
+    }
+  }, []);
+
+  // Hủy training job đang chạy/đang chờ
+  const cancelTraining = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}/cancel`, {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to cancel job: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
+  // Promote model của job lên realtime (admin only)
+  const promoteJob = useCallback(async (jobId: string): Promise<PromoteResponse | null> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}/promote`, {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to promote job: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
+  // Per-class breakdown + confusion matrix trên test set (Step 7)
+  const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}/evaluation`, { headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch evaluation: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
   // Note: `useWebSocketProgress` is provided as a top-level hook below
 
   return {
@@ -208,6 +309,10 @@ export function useTrainingAPI() {
     startTraining,
     getJobStatus,
     getJobMetrics,
+    listJobs,
+    cancelTraining,
+    promoteJob,
+    getJobEvaluation,
     useWebSocketProgress,
   };
 }
@@ -225,7 +330,8 @@ export function useWebSocketProgress(
   useEffect(() => {
     if (!jobId) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/v1/training/ws/${jobId}`;
+    const token = getAuthToken();
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
 
     wsRef.current = new WebSocket(wsUrl);
 

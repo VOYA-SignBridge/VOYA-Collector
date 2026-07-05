@@ -305,8 +305,12 @@ def list_sessions(user: str = "", session_id: str = ""):
             sessions[sid] = {
                 "session_id": sid,
                 "user": uid,
+                "labels": [],
                 "samples_count": 0,
                 "created_at": s.get("created_at") or "",
             }
         sessions[sid]["samples_count"] += 1
+        label = s.get("label_original") or ""
+        if label and label not in sessions[sid]["labels"]:
+            sessions[sid]["labels"].append(label)
     return list(sessions.values())

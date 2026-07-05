@@ -3,22 +3,49 @@
  * Displays final training results and recommendations
  */
 
-import React, { useState } from 'react';
-import type { TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
+import React, { useEffect, useState } from 'react';
+import { useTrainingAPI } from '../../../hooks/useTrainingAPI';
+import type { JobEvaluation, PromoteResponse, TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
 import TestTrainedModelModal from './TestTrainedModelModal';
+import { ClipboardCheckIcon } from '../../../components/ui/Icons';
+import { useAuth } from '../../../hooks/useAuth';
 
 interface Props {
   metrics: TrainingMetrics[];
   job: TrainingJob | null;
+  onPromote?: () => Promise<PromoteResponse | null>;
 }
 
-const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
+/** "vn/hoa-de/rang-muoi" → "rang-muoi" */
+const prettyLabel = (labelKey: string): string => {
+  const parts = String(labelKey || '').replace(/\\/g, '/').split('/');
+  return parts[parts.length - 1] || labelKey;
+};
+
+const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
   const [showTestModal, setShowTestModal] = useState(false);
+  const { isAdmin } = useAuth();
+  const { getJobEvaluation } = useTrainingAPI();
+  const [promoting, setPromoting] = useState(false);
+  const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
+  const [evaluation, setEvaluation] = useState<JobEvaluation | null>(null);
+
+  useEffect(() => {
+    let stale = false;
+    if (job?.id && job.status === 'completed') {
+      getJobEvaluation(job.id).then((ev) => {
+        if (!stale && ev?.available) setEvaluation(ev);
+      });
+    }
+    return () => {
+      stale = true;
+    };
+  }, [job?.id, job?.status, getJobEvaluation]);
 
   if (!metrics || metrics.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <div className="text-5xl mb-4">📋</div>
+        <ClipboardCheckIcon className="h-12 w-12 mb-4 text-slate-300" />
         <p className="text-slate-600">Chưa có dữ liệu kết quả. Bắt đầu huấn luyện để xem kết quả.</p>
       </div>
     );
@@ -34,7 +61,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
 
   const getQualityLevel = (acc: number) => {
     if (acc >= 0.95) return { level: 'Xuất Sắc', color: 'from-emerald-500 to-teal-500', bgColor: 'bg-emerald-50' };
-    if (acc >= 0.90) return { level: 'Rất Tốt', color: 'from-blue-500 to-cyan-500', bgColor: 'bg-blue-50' };
+    if (acc >= 0.90) return { level: 'Rất Tốt', color: 'from-ctu-blue to-ctu-navy', bgColor: 'bg-ctu-blue/5' };
     if (acc >= 0.80) return { level: 'Tốt', color: 'from-yellow-500 to-amber-500', bgColor: 'bg-yellow-50' };
     return { level: 'Cần Cải Thiện', color: 'from-orange-500 to-red-500', bgColor: 'bg-orange-50' };
   };
@@ -59,23 +86,6 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
           type: 'warning',
           emoji: '⚠️',
           text: 'Model có dấu hiệu overfitting — xem xét giảm số epochs hoặc thêm regularization',
-        });
-      }
-    }
-
-    if (finalMetric.handedness) {
-      const { left_only_acc, right_only_acc } = finalMetric.handedness;
-      if (Math.abs(left_only_acc - right_only_acc) > 0.1) {
-        recs.push({
-          type: 'warning',
-          emoji: '⚠️',
-          text: 'Độ chính xác giữa tay trái/phải lệch nhau — cân nhắc thêm dữ liệu cân bằng',
-        });
-      } else {
-        recs.push({
-          type: 'success',
-          emoji: '✓',
-          text: 'Model hoạt động tốt và cân bằng cho cả tay trái và phải',
         });
       }
     }
@@ -123,7 +133,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
       {/* Key Metrics Grid */}
       <div>
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-          📊 Chỉ Số Hiệu Suất Chính
+          Chỉ Số Hiệu Suất Chính
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
@@ -157,39 +167,65 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
         </div>
       </div>
 
-      {/* Handedness Breakdown */}
-      {finalMetric.handedness && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-            🤚 Hiệu Suất Theo Tay
-          </h3>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <HandednessCard
-              emoji="👈"
-              label="Tay Trái"
-              accuracy={finalMetric.handedness.left_only_acc}
-              count={finalMetric.handedness.left_only_n}
-            />
-            <HandednessCard
-              emoji="👉"
-              label="Tay Phải"
-              accuracy={finalMetric.handedness.right_only_acc}
-              count={finalMetric.handedness.right_only_n}
-            />
-            <HandednessCard
-              emoji="👐"
-              label="Cả Hai Tay"
-              accuracy={finalMetric.handedness.both_acc}
-              count={finalMetric.handedness.both_n}
-            />
+      {/* Per-class evaluation + confusion matrix (test set) */}
+      {evaluation?.per_class && evaluation.per_class.length > 0 && (
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6">
+            <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-1">
+              Hiệu Suất Theo Lớp (Test Set)
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Sắp xếp từ yếu nhất — các lớp F1 thấp cần thu thêm dữ liệu hoặc kiểm tra chất lượng mẫu.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs text-slate-500 uppercase">
+                    <th className="py-2 pr-3 font-medium">Lớp</th>
+                    <th className="py-2 px-3 font-medium text-right">Precision</th>
+                    <th className="py-2 px-3 font-medium text-right">Recall</th>
+                    <th className="py-2 px-3 font-medium text-right">F1</th>
+                    <th className="py-2 pl-3 font-medium text-right">Mẫu test</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...evaluation.per_class]
+                    .sort((a, b) => a.f1 - b.f1)
+                    .map((c) => {
+                      const weak = c.f1 < 0.5;
+                      return (
+                        <tr
+                          key={c.class_idx}
+                          className={`border-b border-slate-100 ${weak ? 'bg-amber-50' : ''}`}
+                        >
+                          <td className="py-2 pr-3 font-medium text-slate-800">
+                            {weak && <span title="F1 dưới 0.5 — lớp yếu">⚠️ </span>}
+                            {prettyLabel(c.label_key)}
+                          </td>
+                          <td className="py-2 px-3 text-right tabular-nums text-slate-700">{(c.precision * 100).toFixed(1)}%</td>
+                          <td className="py-2 px-3 text-right tabular-nums text-slate-700">{(c.recall * 100).toFixed(1)}%</td>
+                          <td className={`py-2 px-3 text-right tabular-nums font-semibold ${weak ? 'text-amber-700' : 'text-slate-900'}`}>
+                            {c.f1.toFixed(3)}
+                          </td>
+                          <td className="py-2 pl-3 text-right tabular-nums text-slate-500">{c.support}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {evaluation.confusion_matrix && evaluation.labels && (
+            <ConfusionMatrixHeatmap labels={evaluation.labels} matrix={evaluation.confusion_matrix} />
+          )}
         </div>
       )}
 
       {/* Recommendations */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-          💡 Khuyến Nghị
+          Khuyến Nghị
         </h3>
         {recommendations.map((rec, idx) => (
           <div
@@ -199,7 +235,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
                 ? 'border-l-emerald-500 bg-emerald-50 text-emerald-900'
                 : rec.type === 'warning'
                 ? 'border-l-amber-500 bg-amber-50 text-amber-900'
-                : 'border-l-blue-500 bg-blue-50 text-blue-900'
+                : 'border-l-ctu-blue bg-ctu-blue/10 text-ctu-navy'
             }`}
           >
             <p>
@@ -212,7 +248,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
       {/* Model Info */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
         <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-3">
-          📦 Thông Tin Model
+          Thông Tin Model
         </h4>
         <div className="space-y-2 text-sm">
           <div className="flex items-center justify-between">
@@ -250,7 +286,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
                   {job.checkpoint_path}
                 </code>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => {
                     // Copy path to clipboard
@@ -262,11 +298,41 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job }) => {
                 </button>
                 <button
                   onClick={() => setShowTestModal(true)}
-                  className="text-xs px-3 py-1.5 rounded bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white font-medium transition shadow-sm"
+                  className="text-xs px-3 py-1.5 rounded bg-gradient-to-r from-ctu-blue to-ctu-navy hover:from-ctu-navy hover:to-ctu-navy-mid text-white font-medium transition shadow-sm"
                 >
                   🧪 Test Model Realtime
                 </button>
+                {isAdmin && onPromote && job.status === 'completed' && !job.promoted_at && (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm('Đưa model này vào tab nhận diện realtime? Model sẽ hiển thị cho tất cả người dùng.')) return;
+                      setPromoting(true);
+                      setPromoteMessage(null);
+                      try {
+                        const res = await onPromote();
+                        setPromoteMessage(res ? res.message : 'Promote thất bại — kiểm tra quyền admin hoặc log backend');
+                      } finally {
+                        setPromoting(false);
+                      }
+                    }}
+                    disabled={promoting}
+                    className="text-xs px-3 py-1.5 rounded bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-medium transition shadow-sm disabled:opacity-60"
+                  >
+                    {promoting ? 'Đang đưa vào Realtime...' : '🚀 Đưa vào Realtime'}
+                  </button>
+                )}
               </div>
+              {job.promoted_at && (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+                  ✅ Đã đưa vào Realtime lúc{' '}
+                  {new Date(job.promoted_at).toLocaleString('vi-VN')}
+                </div>
+              )}
+              {promoteMessage && !job.promoted_at && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                  {promoteMessage}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -305,16 +371,16 @@ function MetricCard({
   color: 'indigo' | 'purple' | 'blue' | 'emerald';
 }) {
   const colorClasses = {
-    indigo: 'border-indigo-200 bg-indigo-50',
+    indigo: 'border-ctu-blue/30 bg-ctu-blue/5',
     purple: 'border-purple-200 bg-purple-50',
-    blue: 'border-blue-200 bg-blue-50',
+    blue: 'border-ctu-navy/30 bg-ctu-navy/5',
     emerald: 'border-emerald-200 bg-emerald-50',
   };
 
   const valueClasses = {
-    indigo: 'text-indigo-600',
+    indigo: 'text-ctu-blue',
     purple: 'text-purple-600',
-    blue: 'text-blue-600',
+    blue: 'text-ctu-navy',
     emerald: 'text-emerald-600',
   };
 
@@ -330,24 +396,77 @@ function MetricCard({
   );
 }
 
-function HandednessCard({
-  emoji,
-  label,
-  accuracy,
-  count,
-}: {
-  emoji: string;
-  label: string;
-  accuracy: number;
-  count: number;
-}) {
+/**
+ * Confusion matrix heatmap.
+ * Sequential single-hue (ctu-blue) — intensity = share of the TRUE class's
+ * samples predicted as each column (row-normalized). The diagonal (correct
+ * predictions) is marked structurally with a ring, not a different hue.
+ */
+function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: number[][] }) {
+  const n = labels.length;
+  if (n === 0) return null;
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-4 text-center">
-      <div className="text-4xl mb-3">{emoji}</div>
-      <h4 className="font-semibold text-slate-900">{label}</h4>
-      <div className="mt-3">
-        <div className="text-2xl font-bold text-indigo-600">{(accuracy * 100).toFixed(1)}%</div>
-        <p className="text-xs text-slate-500 mt-1">{count} mẫu</p>
+    <div className="rounded-2xl border border-slate-200 bg-white p-6">
+      <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-1">
+        Confusion Matrix (Test Set)
+      </h3>
+      <p className="text-xs text-slate-500 mb-4">
+        Hàng = lớp thật, cột = lớp dự đoán (theo số thứ tự). Màu đậm = tỷ lệ cao trong hàng;
+        ô viền đen trên đường chéo là dự đoán đúng. Di chuột lên ô để xem chi tiết.
+      </p>
+      <div className="overflow-x-auto pb-2">
+        <table className="border-collapse">
+          <thead>
+            <tr>
+              <th className="pr-2" />
+              {labels.map((_, j) => (
+                <th key={j} className="w-8 px-0.5 pb-1 text-center text-[10px] font-normal text-slate-500">
+                  {j}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.map((row, i) => {
+              const rowTotal = row.reduce((s, v) => s + v, 0);
+              return (
+                <tr key={i}>
+                  <th className="pr-2 py-0.5 text-right text-[11px] font-normal text-slate-600 whitespace-nowrap">
+                    <span className="text-slate-400">{i}</span> · {prettyLabel(labels[i])}
+                  </th>
+                  {row.map((v, j) => {
+                    const share = rowTotal > 0 ? v / rowTotal : 0;
+                    const isDiag = i === j;
+                    return (
+                      <td
+                        key={j}
+                        title={`Thật: ${prettyLabel(labels[i])} → Dự đoán: ${prettyLabel(labels[j])}\n${v} mẫu (${(share * 100).toFixed(0)}% của lớp thật)`}
+                        className={`h-8 w-8 min-w-8 text-center align-middle text-[10px] tabular-nums ${
+                          isDiag ? 'ring-1 ring-inset ring-slate-500' : ''
+                        }`}
+                        style={{
+                          backgroundColor: v === 0 ? 'transparent' : `rgba(14, 123, 194, ${0.12 + 0.78 * share})`,
+                          color: share > 0.55 ? '#ffffff' : '#334155',
+                        }}
+                      >
+                        {v > 0 ? v : ''}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
+        <span>0%</span>
+        <div
+          className="h-2 w-28 rounded"
+          style={{ background: 'linear-gradient(to right, rgba(14,123,194,0.12), rgba(14,123,194,0.9))' }}
+        />
+        <span>100% của lớp thật</span>
       </div>
     </div>
   );

@@ -58,7 +58,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
       {/* Dataset Distribution */}
       <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 p-6">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-          🗺️ Phân Bố Theo Phương Ngữ
+          Phân Bố Theo Phương Ngữ
         </h3>
         <div className="space-y-3">
           {Object.entries(datasetInfo.dialects).map(([lang, dialects]) => (
@@ -86,7 +86,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
       <div className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-            📈 Phân Bố Lớp (Top 10)
+            Phân Bố Lớp (Top 10)
           </h3>
           <span className="text-xs text-slate-500">
             Tổng: {datasetInfo.total_samples} mẫu
@@ -111,7 +111,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
                       </span>
                     </label>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-indigo-600 w-12 text-right">
+                      <span className="text-xs font-semibold text-ctu-blue w-12 text-right">
                         {percentage.toFixed(1)}%
                       </span>
                       <span className="text-xs text-slate-500 w-10 text-right">
@@ -121,7 +121,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
                   </div>
                   <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-indigo-500 to-cyan-500 transition-all duration-300"
+                      className="h-full bg-gradient-to-r from-ctu-navy to-ctu-blue transition-all duration-300"
                       style={{ width: `${percentage}%` }}
                     />
                   </div>
@@ -132,7 +132,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
       </div>
 
       {/* Info Message */}
-      <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900">
+      <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
         <p className="font-medium">ℹ️ Dữ liệu sẵn sàng</p>
         <p className="mt-1">Dataset đã được tải thành công. Hãy tiếp tục để xem chi tiết phân chia tập dữ liệu.</p>
       </div>
@@ -151,7 +151,7 @@ function MetricCard({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 text-center shadow-sm hover:shadow-md transition-shadow">
-      <div className="text-2xl font-bold text-transparent bg-gradient-to-br from-indigo-600 to-cyan-600 bg-clip-text">
+      <div className="text-2xl font-bold text-transparent bg-gradient-to-br from-ctu-navy to-ctu-blue bg-clip-text">
         {typeof value === 'number' ? value.toLocaleString() : value}
       </div>
       <div className="mt-1 text-sm font-semibold text-slate-900">{label}</div>

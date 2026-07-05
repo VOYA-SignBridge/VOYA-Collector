@@ -20,6 +20,8 @@ const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPa
 const TrainingPipeline = lazy(() => import("./pages/training/TrainingPipeline"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/RegisterPage"));
+const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
+const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 
 
 // Protected Route Wrapper
@@ -92,6 +94,8 @@ function App() {
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
 
               <Route path="/labels" element={<LabelsPage />} />
 

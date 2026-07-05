@@ -55,6 +55,13 @@ ALLOWED_VOICE_IDS = {v["id"] for v in ALLOWED_VOICES}
 CACHE_KEY_PREFIX = "tts"
 
 
+class TTSSynthesisError(Exception):
+    """Raised when edge-tts synthesis fails after all retry attempts.
+
+    Upstream (Microsoft) failure — callers should map this to 502, not 400.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
@@ -85,12 +92,6 @@ async def close_tts() -> None:
         await _redis_pool.aclose()
         _redis_pool = None
     logger.info("[TTS] Redis pool closed")
-
-
-def _get_redis() -> aioredis.Redis:
-    if _redis_pool is None:
-        raise RuntimeError("TTS Redis not initialized — call init_tts() at startup")
-    return _redis_pool
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,69 @@ async def _synthesize_to_bytes(text: str, voice: str) -> bytes:
     return mp3_bytes
 
 
+async def _synthesize_with_retry(text: str, voice: str) -> bytes:
+    """Synthesize with timeout + one retry.
+
+    edge-tts is an unofficial Microsoft service: calls can hang or fail
+    transiently. A timeout keeps the per-key lock and semaphore from being
+    held forever (5 hung calls would otherwise exhaust the semaphore and
+    freeze TTS for the whole app until restart).
+
+    Raises TTSSynthesisError after both attempts fail.
+    """
+    last_exc: Optional[BaseException] = None
+    for attempt in (1, 2):
+        try:
+            return await asyncio.wait_for(
+                _synthesize_to_bytes(text, voice),
+                timeout=settings.tts_synth_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            last_exc = exc
+            logger.warning(
+                "[TTS] synth attempt %d/2 timed out after %.0fs (voice=%s, text='%s')",
+                attempt, settings.tts_synth_timeout_seconds, voice, text[:30],
+            )
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "[TTS] synth attempt %d/2 failed (voice=%s, text='%s'): %s",
+                attempt, voice, text[:30], exc,
+            )
+        if attempt == 1:
+            await asyncio.sleep(0.5)  # brief backoff before retry
+
+    raise TTSSynthesisError(f"edge-tts synthesis failed after 2 attempts: {last_exc}")
+
+
+# ---------------------------------------------------------------------------
+# Redis-safe cache helpers (graceful degradation)
+#
+# If Redis is down, TTS must still work — we skip the cache and synthesize
+# directly instead of returning 500 while edge-tts is perfectly healthy.
+# ---------------------------------------------------------------------------
+
+async def _cache_get(key: str) -> Optional[bytes]:
+    if _redis_pool is None:
+        return None
+    try:
+        return await _redis_pool.get(key)
+    except Exception as exc:
+        logger.warning("[TTS] Redis GET failed (degraded: no cache): %s", exc)
+        return None
+
+
+async def _cache_set(key: str, value: bytes) -> bool:
+    if _redis_pool is None:
+        return False
+    try:
+        await _redis_pool.set(key, value, ex=settings.tts_cache_ttl_seconds)
+        return True
+    except Exception as exc:
+        logger.warning("[TTS] Redis SET failed (audio not cached): %s", exc)
+        return False
+
+
 async def synthesize(
     text: str,
     voice: Optional[str] = None,
@@ -170,10 +234,9 @@ async def synthesize(
         raise ValueError(f"Text too long ({len(clean_text)} > {settings.tts_max_text_length})")
 
     key = _cache_key(voice, clean_text)
-    r = _get_redis()
 
-    # 1. Fast path: cache HIT
-    cached = await r.get(key)
+    # 1. Fast path: cache HIT (Redis failure degrades to miss, not error)
+    cached = await _cache_get(key)
     if cached is not None:
         return cached, True
 
@@ -182,18 +245,18 @@ async def synthesize(
     try:
         async with lock:
             # Double-check after acquiring lock (another coroutine may have populated)
-            cached = await r.get(key)
+            cached = await _cache_get(key)
             if cached is not None:
                 return cached, True
 
-            # Actual synthesis (bounded by semaphore)
+            # Actual synthesis (bounded by semaphore, with timeout + retry)
             async with _synth_semaphore:  # type: ignore[union-attr]
                 logger.info("[TTS] MISS key=%s voice=%s text='%s'", key, voice, clean_text[:50])
-                mp3_bytes = await _synthesize_to_bytes(clean_text, voice)
+                mp3_bytes = await _synthesize_with_retry(clean_text, voice)
 
-            # Store in Redis
-            await r.set(key, mp3_bytes, ex=settings.tts_cache_ttl_seconds)
-            logger.info("[TTS] cached key=%s size=%d ttl=%ds", key, len(mp3_bytes), settings.tts_cache_ttl_seconds)
+            # Store in Redis (best-effort; failure only means no caching)
+            if await _cache_set(key, mp3_bytes):
+                logger.info("[TTS] cached key=%s size=%d ttl=%ds", key, len(mp3_bytes), settings.tts_cache_ttl_seconds)
 
             return mp3_bytes, False
     finally:
@@ -201,8 +264,16 @@ async def synthesize(
 
 
 async def cache_exists(text: str, voice: Optional[str] = None) -> bool:
-    """Check if audio for given text+voice is already cached."""
+    """Check if audio for given text+voice is already cached.
+
+    Returns False (instead of raising) when Redis is unavailable.
+    """
     voice = voice or settings.tts_default_voice
     key = _cache_key(voice, text.strip())
-    r = _get_redis()
-    return await r.exists(key) > 0
+    if _redis_pool is None:
+        return False
+    try:
+        return await _redis_pool.exists(key) > 0
+    except Exception as exc:
+        logger.warning("[TTS] Redis EXISTS failed (treated as miss): %s", exc)
+        return False

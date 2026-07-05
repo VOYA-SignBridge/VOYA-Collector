@@ -377,13 +377,13 @@ export default function TestTrainedModelModal({
           </div>
 
           {/* Prediction Display */}
-          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-blue-50 to-white p-4">
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-ctu-blue/10 to-white p-4">
             <div className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-3">
               Kết quả nhận diện
             </div>
             {prediction ? (
               <div className="space-y-2">
-                <div className="text-3xl font-bold text-blue-600 break-words">
+                <div className="text-3xl font-bold text-ctu-blue break-words">
                   {prediction.label}
                 </div>
                 <div className="text-sm text-slate-600">
@@ -409,7 +409,7 @@ export default function TestTrainedModelModal({
                   : running && status === 'debouncing'
                     ? 'bg-yellow-500'
                     : running
-                      ? 'bg-blue-500'
+                      ? 'bg-ctu-blue'
                       : 'bg-slate-300'
               }`}
             />

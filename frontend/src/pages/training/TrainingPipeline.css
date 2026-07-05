@@ -1077,55 +1077,6 @@
   color: #666;
 }
 
-.handedness-section {
-  margin: 2rem 0;
-  padding: 1.5rem;
-  background: #f9f9f9;
-  border-radius: 8px;
-}
-
-.handedness-section h3 {
-  margin-top: 0;
-}
-
-.handedness-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-}
-
-.handedness-card {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 8px;
-  border: 2px solid #e0e0e0;
-  text-align: center;
-  transition: all 0.3s ease;
-}
-
-.handedness-card:hover {
-  border-color: #667eea;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
-}
-
-.handedness-name {
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 0.5rem;
-}
-
-.handedness-value {
-  font-size: 1.6rem;
-  font-weight: 700;
-  color: #667eea;
-  margin-bottom: 0.5rem;
-}
-
-.handedness-count {
-  font-size: 0.85rem;
-  color: #666;
-}
-
 .metrics-history {
   margin-top: 2rem;
 }
@@ -1285,72 +1236,6 @@
 .best-performance p {
   margin: 0;
   color: #bf360c;
-}
-
-.handedness-analysis {
-  margin: 2rem 0;
-  padding: 1.5rem;
-  background: #f9f9f9;
-  border-radius: 8px;
-}
-
-.handedness-analysis h3 {
-  margin-top: 0;
-}
-
-.hand-results {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 1rem;
-}
-
-.hand-card {
-  background: white;
-  padding: 1.5rem;
-  border-radius: 8px;
-  text-align: center;
-  border: 2px solid #e0e0e0;
-  transition: all 0.3s ease;
-}
-
-.hand-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.hand-card.left {
-  border-color: #2196f3;
-}
-
-.hand-card.right {
-  border-color: #f44336;
-}
-
-.hand-card.both {
-  border-color: #4caf50;
-}
-
-.hand-icon {
-  font-size: 2rem;
-  margin-bottom: 0.5rem;
-}
-
-.hand-accuracy {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #667eea;
-  margin-bottom: 0.5rem;
-}
-
-.hand-count {
-  font-size: 0.85rem;
-  color: #666;
-  margin-bottom: 0.5rem;
-}
-
-.hand-label {
-  font-weight: 600;
-  color: #333;
 }
 
 .recommendations {

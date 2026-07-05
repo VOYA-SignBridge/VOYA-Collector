@@ -1,3 +1,5 @@
+import asyncio
+import re
 import uuid
 import time
 import logging
@@ -12,7 +14,7 @@ from app.dataset_manager import get_or_register_class, normalize_dialect
 from app.processing.utils import normalize_hands_vector_126
 from app.processing.utils import normalize_sequence
 from app.dataset_samples import save_sequence_npz
-from app.raw_uploads import append_raw_upload_row, now_str as raw_upload_now_str
+from app.raw_uploads import append_raw_upload_row, find_raw_upload, now_str as raw_upload_now_str
 from app.config import settings
 from app.api_validation import (
     validate_label,
@@ -20,7 +22,6 @@ from app.api_validation import (
     validate_dialect,
     save_upload_with_limit,
 )
-from app.storage.gdrive_client import upload_to_gdrive
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -61,12 +62,32 @@ async def upload_video(
     language: str = Form("vn"),
     dialect: str = Form("common"),
     session_id: str = Form(None),
+    upload_uid: str = Form(None),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     start = time.time()
     log = logging.getLogger("upload.video")
     if not session_id:
         session_id = uuid.uuid4().hex
+
+    # Idempotency key: client sends a stable upload_uid so a client-side
+    # timeout + retry does not create duplicate records + duplicate mirrors.
+    if upload_uid and re.fullmatch(r"[a-fA-F0-9]{8,64}", upload_uid):
+        upload_uid = upload_uid.lower()
+        existing = await asyncio.to_thread(find_raw_upload, upload_uid)
+        if existing:
+            log.info("[UPLOAD][video] duplicate upload_uid=%s — returning existing record", upload_uid)
+            return {
+                "success": True,
+                "id": upload_uid,
+                "session_id": existing.get("session_id") or session_id,
+                "upload_uid": upload_uid,
+                "storage_url": existing.get("storage_url") or existing.get("local_path", ""),
+                "message": "already uploaded (duplicate ignored)",
+                "duplicate": True,
+            }
+    else:
+        upload_uid = uuid.uuid4().hex[:8]
 
     # Validate & normalize inputs
     label = validate_label(label)
@@ -94,38 +115,26 @@ async def upload_video(
     except Exception:
         pass
 
-    # Register / fetch class in new hierarchy
-    class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+    # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
+    class_meta = await asyncio.to_thread(
+        get_or_register_class, label_original=label, language=language, dialect=dialect or ""
+    )
 
     max_mb = int(getattr(settings, "max_upload_mb", 1024))
     max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
     upload_size = _measure_upload_size(file.file, max_bytes=max_bytes)
     log.info("[UPLOAD][video] bytes_received=%s max_bytes=%s", upload_size, max_bytes)
 
-    upload_uid = uuid.uuid4().hex[:8]
     original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
     local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
     storage_key = local_path.relative_to(settings.dataset_root).as_posix()
 
-    bytes_written, local_path_str = save_upload_with_limit(file.file, local_path, max_bytes=max_bytes)
+    # In thread — large file write + fsync would block the event loop
+    bytes_written, local_path_str = await asyncio.to_thread(
+        save_upload_with_limit, file.file, local_path, max_bytes=max_bytes
+    )
     storage_url = local_path_str
     provider = "local"
-
-    if getattr(settings, "use_google_drive", False):
-        credentials_path = Path(str(getattr(settings, "google_drive_credentials", "")))
-        if credentials_path.exists():
-            try:
-                storage_url = upload_to_gdrive(
-                    local_path_str,
-                    storage_key,
-                    content_type=file.content_type or "application/octet-stream",
-                )
-                provider = "local+gdrive"
-                log.info("[UPLOAD][video] raw video mirrored to Google Drive key=%s url=%s", storage_key, storage_url)
-            except Exception as exc:
-                log.warning("[UPLOAD][video] Google Drive mirror failed, keeping local copy only: %s", exc)
-        else:
-            log.warning("[UPLOAD][video] Google Drive credentials missing at %s; keeping local copy only", credentials_path)
 
     created_at = raw_upload_now_str()
     raw_upload_row = {
@@ -146,23 +155,44 @@ async def upload_video(
         "updated_at": created_at,
     }
     try:
-        append_raw_upload_row(raw_upload_row)
+        await asyncio.to_thread(append_raw_upload_row, raw_upload_row)
     except Exception as e:
         log.warning("[UPLOAD][video] raw upload CSV metadata failed: %s", e)
 
     try:
         from app.storage.metadata_db import insert_raw_upload
 
-        insert_raw_upload({**raw_upload_row, "auth_user_id": current_user["id"]})
+        await asyncio.to_thread(insert_raw_upload, {**raw_upload_row, "auth_user_id": current_user["id"]})
     except Exception as e:
         if getattr(settings, "debug_logging", False):
             log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
 
+    # Defer Google Drive mirror to Celery (same pattern as npz samples).
+    # The user gets a response immediately after the local save; the worker
+    # transfers the video to Drive and updates storage_url when done.
+    gdrive_mirror = "disabled"
+    if getattr(settings, "use_google_drive", False):
+        try:
+            from app.export_tasks import upload_raw_video_to_gdrive_task
+
+            upload_raw_video_to_gdrive_task.delay(
+                upload_uid=upload_uid,
+                local_path=local_path_str,
+                storage_key=storage_key,
+                content_type=file.content_type or "application/octet-stream",
+            )
+            gdrive_mirror = "queued"
+            log.info("[UPLOAD][video] Google Drive mirror deferred to Celery key=%s", storage_key)
+        except Exception as e:
+            gdrive_mirror = "dispatch_failed"
+            log.warning("[UPLOAD][video] Failed to dispatch GDrive mirror task (local copy kept): %s", e)
+
     log.info(
-        "[UPLOAD][video] stored raw video provider=%s path=%s bytes_written=%s elapsed=%.3fs",
+        "[UPLOAD][video] stored raw video provider=%s path=%s bytes_written=%s gdrive_mirror=%s elapsed=%.3fs",
         provider,
         local_path_str,
         bytes_written,
+        gdrive_mirror,
         time.time() - start,
     )
     return {
@@ -171,6 +201,7 @@ async def upload_video(
         "session_id": session_id,
         "upload_uid": upload_uid,
         "storage_url": storage_url,
+        "gdrive_mirror": gdrive_mirror,
         "message": "raw video uploaded",
     }
     

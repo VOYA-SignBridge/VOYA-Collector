@@ -3,6 +3,29 @@
 @theme {
   --color-primary: #3b82f6;
   --color-primary-foreground: #ffffff;
+
+  /* CTU brand palette — sampled directly from the official seal (public/logo.png) */
+  --color-ctu-navy: #1b2a57;
+  --color-ctu-navy-mid: #273e87;
+  --color-ctu-blue: #0e7bc2;
+  --color-ctu-blue-light: #4fa8db;
+  --color-ctu-yellow: #fbd91a;
+  --color-ctu-red: #ea3137;
+
+  --font-display: "Be Vietnam Pro", system-ui, sans-serif;
+
+  --animate-auth-rise: authRise 0.5s ease-out both;
+}
+
+@keyframes authRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 :root {
@@ -13,21 +36,21 @@
 
   --surface-primary: #ffffff;
   --surface-secondary: rgba(255, 255, 255, 0.8);
-  --surface-hover: rgba(79, 70, 229, 0.04);
+  --surface-hover: rgba(14, 123, 194, 0.04);
 
   --text-primary: #1a202c;
   --text-secondary: #4a5568;
   --text-muted: #718096;
   --text-disabled: #a0aec0;
 
-  --brand-primary: #4f46e5;
-  --brand-secondary: #7c3aed;
-  --brand-accent: #06b6d4;
+  --brand-primary: #0e7bc2;
+  --brand-secondary: #1b2a57;
+  --brand-accent: #4fa8db;
   --brand-gradient: linear-gradient(
     135deg,
-    #4f46e5 0%,
-    #7c3aed 50%,
-    #06b6d4 100%
+    #1b2a57 0%,
+    #0e7bc2 50%,
+    #4fa8db 100%
   );
 
   --success: #059669;
@@ -54,17 +77,24 @@
 html,
 body,
 #root {
-  height: 100%;
+  /* min-height (not height) — a hard height:100% here combined with
+     overflow-x: hidden below makes the browser infer overflow-y: auto on
+     body, turning it into its own one-viewport-tall scroll container. That
+     breaks position:sticky (e.g. the sidebar), since it starts resolving
+     scroll offsets against body's inner scroll instead of the real page
+     scroll. min-height keeps short pages full-bleed without creating that
+     extra scroll box. */
+  min-height: 100%;
 }
 
 body {
   margin: 0;
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial;
+  font-family: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial;
   background: linear-gradient(
       135deg,
-      rgba(79, 70, 229, 0.02) 0%,
-      rgba(6, 182, 212, 0.02) 100%
+      rgba(27, 42, 87, 0.025) 0%,
+      rgba(14, 123, 194, 0.025) 100%
     ),
     var(--bg-primary);
   color: var(--text-primary);
@@ -119,7 +149,7 @@ body {
 
 .card:hover {
   box-shadow: var(--shadow-lg);
-  border-color: rgba(79, 70, 229, 0.1);
+  border-color: rgba(14, 123, 194, 0.1);
 }
 
 .card-compact {
@@ -137,19 +167,19 @@ body {
 }
 
 .btn-primary {
-  @apply bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg focus:ring-blue-500;
+  @apply bg-ctu-blue hover:bg-ctu-navy-mid text-white shadow-md hover:shadow-lg focus:ring-ctu-blue;
 }
 
 .btn-secondary {
-  @apply bg-gray-100 hover:bg-gray-200 text-gray-900 border border-gray-300 focus:ring-gray-500;
+  @apply bg-gray-100 hover:bg-gray-200 text-gray-900 border border-gray-300 focus:ring-ctu-blue;
 }
 
 .btn-ghost {
-  @apply text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:ring-gray-500;
+  @apply text-ctu-blue hover:text-ctu-navy hover:bg-ctu-blue/10 focus:ring-ctu-blue;
 }
 
 .btn-danger {
-  @apply bg-red-600 hover:bg-red-700 text-white shadow-md hover:shadow-lg focus:ring-red-500;
+  @apply bg-ctu-red hover:bg-red-700 text-white shadow-md hover:shadow-lg focus:ring-ctu-red;
 }
 
 /* Input styles */
@@ -167,7 +197,7 @@ body {
 .input:focus {
   outline: none;
   border-color: var(--brand-primary);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+  box-shadow: 0 0 0 3px rgba(14, 123, 194, 0.1);
 }
 
 .input::placeholder {

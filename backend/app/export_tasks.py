@@ -163,6 +163,54 @@ def export_labels_to_sheets(self):
         raise self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, max_retries=5, default_retry_delay=15)
+def upload_raw_video_to_gdrive_task(
+    self,
+    upload_uid: str,
+    local_path: str,
+    storage_key: str,
+    content_type: str = "application/octet-stream",
+):
+    """Mirror a raw uploaded video to Google Drive in the background.
+
+    Dispatched by /upload/video after the local save + metadata write.
+    Keeps the HTTP request fast: the user never waits for the Drive transfer.
+    On success, updates uploads.csv and Postgres so the record points at
+    the Drive mirror instead of only the local path.
+    """
+    from app.storage.gdrive_client import upload_to_gdrive
+    from app.storage.metadata_db import update_raw_upload_gdrive_url
+    from app.raw_uploads import update_raw_upload_row
+    import os
+
+    try:
+        if not os.path.exists(local_path):
+            logger.warning("[GDRIVE_RAW_VIDEO] Local file not found: %s", local_path)
+            return {"status": "skipped", "reason": "file_not_found"}
+
+        logger.info("[GDRIVE_RAW_VIDEO] Uploading %s to GDrive key %s", local_path, storage_key)
+        storage_url = upload_to_gdrive(local_path, storage_key, content_type=content_type)
+        if not storage_url:
+            raise RuntimeError("upload_to_gdrive returned None")
+
+        # Point the metadata records at the Drive mirror (best-effort each)
+        try:
+            update_raw_upload_row(upload_uid, {"storage_url": storage_url})
+        except Exception as e:
+            logger.warning("[GDRIVE_RAW_VIDEO] CSV update failed for %s: %s", upload_uid, e)
+        try:
+            update_raw_upload_gdrive_url(upload_uid, storage_url)
+        except Exception as e:
+            logger.warning("[GDRIVE_RAW_VIDEO] DB update failed for %s: %s", upload_uid, e)
+
+        logger.info("[GDRIVE_RAW_VIDEO] Mirror complete: %s -> %s", upload_uid, storage_url)
+        return {"status": "success", "storage_url": storage_url}
+
+    except Exception as exc:
+        logger.error("[GDRIVE_RAW_VIDEO] Upload failed for %s: %s", upload_uid, exc)
+        raise self.retry(exc=exc)
+
+
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=10)
 def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_key: str, sidecar_path: str):
     from app.storage.gdrive_client import upload_to_gdrive

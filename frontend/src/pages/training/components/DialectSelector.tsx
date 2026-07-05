@@ -76,7 +76,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               isAllSelected
                 ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                : 'bg-ctu-blue/10 text-ctu-blue hover:bg-ctu-blue/20'
             }`}
           >
             {isAllSelected ? '✕ Bỏ chọn tất cả' : `✓ Chọn tất cả (${allDialects.length})`}
@@ -115,7 +115,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                         ✓ Đã chọn hết
                       </span>
                     ) : groupSelected > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-xs font-medium text-blue-700">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-ctu-blue/10 text-xs font-medium text-ctu-blue">
                         ◐ {groupSelected} mục
                       </span>
                     ) : null}
@@ -139,7 +139,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                         onClick={() => toggleDialect(dialect)}
                         className={`rounded-lg border-2 p-3 text-left transition-all ${
                           isSelected
-                            ? 'border-indigo-300 bg-indigo-50 shadow-sm'
+                            ? 'border-ctu-blue/40 bg-ctu-blue/5 shadow-sm'
                             : 'border-slate-200 bg-white hover:border-slate-300'
                         }`}
                       >
@@ -151,7 +151,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                           <div
                             className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
                               isSelected
-                                ? 'border-indigo-500 bg-indigo-500'
+                                ? 'border-ctu-blue bg-ctu-blue'
                                 : 'border-slate-300 bg-white'
                             }`}
                           >
@@ -213,7 +213,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                         onClick={() => toggleDialect(dialect)}
                         className={`rounded-lg border-2 p-3 text-left transition-all ${
                           isSelected
-                            ? 'border-indigo-300 bg-indigo-50 shadow-sm'
+                            ? 'border-ctu-blue/40 bg-ctu-blue/5 shadow-sm'
                             : 'border-slate-200 bg-white hover:border-slate-300'
                         }`}
                       >
@@ -225,7 +225,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                           <div
                             className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
                               isSelected
-                                ? 'border-indigo-500 bg-indigo-500'
+                                ? 'border-ctu-blue bg-ctu-blue'
                                 : 'border-slate-300 bg-white'
                             }`}
                           >

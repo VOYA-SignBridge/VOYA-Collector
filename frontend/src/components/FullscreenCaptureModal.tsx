@@ -269,6 +269,48 @@ function SearchableSelect({
 }
 
 // ---------------------------------------------------------------------------
+// CapturedWordsSummary — collapsed-by-default list of words saved this
+// session; expands on click so it never eats screen space by default.
+// ---------------------------------------------------------------------------
+function CapturedWordsSummary({ summary }: { summary: Record<string, number> }) {
+  const [open, setOpen] = useState(false);
+  const entries = Object.entries(summary).sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+
+  return (
+    <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-gray-200 hover:bg-gray-700/50 transition-colors"
+      >
+        <span className="flex items-center gap-2 text-xs sm:text-sm font-medium truncate">
+          <span>📋</span>
+          <span className="truncate">Đã lưu phiên này: {total} mẫu · {entries.length} từ</span>
+        </span>
+        <span className="text-xs text-gray-400 flex-shrink-0">{open ? "🔽" : "▶️"}</span>
+      </button>
+      {open && (
+        <div className="max-h-32 sm:max-h-40 overflow-y-auto border-t border-gray-700">
+          {entries.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-gray-500 text-center">Chưa có mẫu nào được lưu</div>
+          ) : (
+            <ul className="divide-y divide-gray-800">
+              {entries.map(([word, count]) => (
+                <li key={word} className="flex items-center justify-between px-3 py-1.5 text-xs sm:text-sm">
+                  <span className="text-gray-100 truncate">{word}</span>
+                  <span className="text-gray-400 flex-shrink-0 ml-2">{count}×</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 interface FullscreenCaptureModalProps {
@@ -284,6 +326,10 @@ interface FullscreenCaptureModalProps {
   initialUser?: string;
   targetFrames?: number;
   captureCount?: number;
+  /** Số mẫu đã lưu thành công lên server trong phiên hiện tại, theo từng từ. */
+  capturedSummary?: Record<string, number>;
+  /** Thông báo lỗi kết nối/lưu server hiện tại; khi có giá trị, tạm chặn bắt đầu thu mới. */
+  connectionIssue?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +343,8 @@ export default function FullscreenCaptureModal({
   initialUser = "",
   targetFrames = 60,
   captureCount = 1,
+  capturedSummary = {},
+  connectionIssue = null,
 }: FullscreenCaptureModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -357,6 +405,7 @@ export default function FullscreenCaptureModal({
   const dialectRef = useRef(dialect);
   const targetFramesRef = useRef(targetFrames);
   const onSampleCaptureRef = useRef(onSampleCapture);
+  const connectionIssueRef = useRef(connectionIssue);
   const handleCloseRef = useRef<() => void>(() => { });
   const completedCapturesRef = useRef(0);
   const lastFrameTimeRef = useRef(0);
@@ -389,6 +438,7 @@ export default function FullscreenCaptureModal({
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
+  useEffect(() => { connectionIssueRef.current = connectionIssue; }, [connectionIssue]);
   useEffect(() => { completedCapturesRef.current = completedCaptures; }, [completedCaptures]);
   useEffect(() => { targetFramesRef.current = FIXED_TARGET_FRAMES; }, [targetFrames]);
 
@@ -788,7 +838,7 @@ export default function FullscreenCaptureModal({
   // Capture handlers
   // -------------------------------------------------------------------------
   const handleQuickCapture = useCallback(() => {
-    if (!labelRef.current || !userRef.current) return;
+    if (!labelRef.current || !userRef.current || connectionIssueRef.current) return;
     setFrames([]); framesRef.current = [];
     expectedHandsRef.current = expectedHandsOptionRef.current;
     setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
@@ -1359,7 +1409,7 @@ export default function FullscreenCaptureModal({
 
       if (e.code === "Enter") {
         e.preventDefault();
-        if (!recordingRef.current && labelRef.current && userRef.current) {
+        if (!recordingRef.current && labelRef.current && userRef.current && !connectionIssueRef.current) {
           setFrames([]); framesRef.current = [];
           expectedHandsRef.current = expectedHandsOptionRef.current;
           setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
@@ -1434,7 +1484,7 @@ export default function FullscreenCaptureModal({
             <h3 className="text-xl font-bold text-white mb-3">Lỗi Camera</h3>
             <p className="text-red-100 mb-6 leading-relaxed">{cameraError}</p>
             <div className="flex gap-3 flex-col sm:flex-row">
-              <button onClick={() => { setCameraError(null); window.location.reload(); }} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-lg transition-colors">Làm mới Trang</button>
+              <button onClick={() => { setCameraError(null); window.location.reload(); }} className="flex-1 bg-ctu-blue hover:bg-ctu-navy-mid text-white font-semibold py-3 px-4 rounded-lg transition-colors">Làm mới Trang</button>
               <button onClick={handleClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors">Thoát</button>
             </div>
             <p className="text-xs text-red-200/70 mt-4">Nếu vấn đề tiếp tục, vui lòng kiểm tra quyền truy cập camera trong cài đặt trình duyệt.</p>
@@ -1633,6 +1683,20 @@ export default function FullscreenCaptureModal({
         {/* Control Panel */}
         <div className="w-full lg:w-96 bg-gray-900 border-l border-gray-700 flex flex-col max-h-[60%] lg:max-h-none flex-shrink-0">
           <div className="flex-1 p-2.5 sm:p-4 lg:p-5 space-y-2 sm:space-y-3 overflow-y-auto">
+            {/* Connectivity / save warning — blocks new captures while shown */}
+            {connectionIssue && (
+              <div className="flex items-start gap-2 bg-red-900/40 border border-red-500/50 rounded-lg px-3 py-2 text-xs sm:text-sm text-red-100">
+                <span className="text-base leading-none">⚠️</span>
+                <div>
+                  <div className="font-semibold">Kết nối/lưu server đang gặp sự cố</div>
+                  <div className="text-red-200/90 mt-0.5">{connectionIssue} Vui lòng tạm ngưng thu để tránh mất dữ liệu.</div>
+                </div>
+              </div>
+            )}
+
+            {/* Session capture list — collapsed by default */}
+            <CapturedWordsSummary summary={capturedSummary} />
+
             {/* --- Compact Settings Card --- */}
             <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-2.5 sm:p-4 border border-blue-500/20 space-y-2 sm:space-y-3">
               {/* Label input */}
@@ -1752,7 +1816,13 @@ export default function FullscreenCaptureModal({
             {countdown > 0 ? (
               <div className="w-full py-3 bg-yellow-600 text-white rounded-lg text-center font-medium text-sm sm:text-base">Bắt đầu sau {countdown}...</div>
             ) : !recording ? (
-              <Button onClick={handleQuickCapture} disabled={!label || !user || !isReady} className="w-full py-3 sm:py-4 text-sm sm:text-base font-medium" variant="primary">
+              <Button
+                onClick={handleQuickCapture}
+                disabled={!label || !user || !isReady || !!connectionIssue}
+                className="w-full py-3 sm:py-4 text-sm sm:text-base font-medium"
+                variant="primary"
+                title={connectionIssue ? "Đang gặp sự cố kết nối/lưu server — tạm ngưng thu" : undefined}
+              >
                 <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 {FIXED_CAPTURE_COUNT > 1 ? `Bắt đầu chụp (${FIXED_CAPTURE_COUNT}x)` : "Bắt đầu chụp"} (Enter)
               </Button>

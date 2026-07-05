@@ -1,11 +1,13 @@
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { HandIcon, TagIcon, UploadIcon } from "../ui/Icons";
 
 interface ActionCard {
   title: string;
   description: string;
   href: string;
-  icon: string;
-  color: "indigo" | "violet" | "cyan";
+  icon: ReactNode;
+  color: "blue" | "navy" | "gold";
   highlight?: string;
 }
 
@@ -15,52 +17,52 @@ export default function QuickActionsSection() {
   const actions: ActionCard[] = [
     {
       title: "Đóng góp dữ liệu",
-      icon: "📤",
+      icon: <UploadIcon className="h-7 w-7" />,
       description: "Ghi lại các mẫu ngôn ngữ ký hiệu và tải lên hệ thống",
       highlight: "Tạo ra tác động",
       href: "/upload",
-      color: "indigo",
+      color: "blue",
     },
     {
       title: "Thư viện nhãn",
-      icon: "🏷️",
+      icon: <TagIcon className="h-7 w-7" />,
       description: "Quản lý và tổ chức các nhãn ký hiệu trong cộng đồng",
       highlight: "Khám phá & quản lý",
       href: "/labels",
-      color: "violet",
+      color: "navy",
     },
     {
       title: "Nhận dạng realtime",
-      icon: "🖐️",
+      icon: <HandIcon className="h-7 w-7" />,
       description: "Kiểm tra các mô hình nhận dạng trực tiếp trong thời gian thực",
       highlight: "Thử nghiệm ngay",
       href: "/realtime",
-      color: "cyan",
+      color: "gold",
     },
   ];
 
   const colorClasses = {
-    indigo: "from-indigo-50 via-white to-blue-50 border-indigo-200 hover:shadow-indigo-200/60",
-    violet: "from-violet-50 via-white to-purple-50 border-violet-200 hover:shadow-violet-200/60",
-    cyan: "from-cyan-50 via-white to-sky-50 border-cyan-200 hover:shadow-cyan-200/60",
+    blue: "from-ctu-blue/10 via-white to-blue-50 border-ctu-blue/30 hover:shadow-ctu-blue/20",
+    navy: "from-ctu-navy/10 via-white to-slate-50 border-ctu-navy/30 hover:shadow-ctu-navy/20",
+    gold: "from-ctu-yellow/15 via-white to-amber-50 border-ctu-yellow/40 hover:shadow-ctu-yellow/30",
   };
 
   const iconBgClasses = {
-    indigo: "bg-indigo-100 text-indigo-700",
-    violet: "bg-violet-100 text-violet-700",
-    cyan: "bg-cyan-100 text-cyan-700",
+    blue: "bg-ctu-blue/10 text-ctu-blue",
+    navy: "bg-ctu-navy/10 text-ctu-navy",
+    gold: "bg-ctu-yellow/20 text-ctu-navy",
   };
 
   const textColorClasses = {
-    indigo: "text-indigo-900",
-    violet: "text-violet-900",
-    cyan: "text-cyan-900",
+    blue: "text-ctu-navy",
+    navy: "text-ctu-navy",
+    gold: "text-ctu-navy",
   };
 
   const buttonColorClasses = {
-    indigo: "bg-indigo-600 hover:bg-indigo-700 text-white",
-    violet: "bg-violet-600 hover:bg-violet-700 text-white",
-    cyan: "bg-cyan-600 hover:bg-cyan-700 text-white",
+    blue: "bg-ctu-blue hover:bg-ctu-navy-mid text-white",
+    navy: "bg-ctu-navy hover:bg-ctu-navy-mid text-white",
+    gold: "bg-ctu-yellow hover:bg-amber-400 text-ctu-navy",
   };
 
   return (
@@ -74,7 +76,7 @@ export default function QuickActionsSection() {
             className={`group bg-gradient-to-br ${colorClasses[action.color]} border-2 rounded-2xl p-8 sm:p-10 text-left transition-all duration-300 hover:shadow-2xl hover:-translate-y-2 active:translate-y-0`}
           >
             <div
-              className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5 ${iconBgClasses[action.color]} text-2xl transition-transform group-hover:scale-110 group-hover:rotate-6`}
+              className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5 ${iconBgClasses[action.color]} transition-transform group-hover:scale-110 group-hover:rotate-6`}
             >
               {action.icon}
             </div>

@@ -14,11 +14,14 @@ from app.services.tts_prewarm import prewarm_tts_cache
 
 app = FastAPI(title="Sign Dataset Backend")
 
-# Enable CORS for local dev (adjust origins as needed)
+# CORS: origins configurable via CORS_ALLOWED_ORIGINS (comma-separated).
+# Auth uses Bearer tokens (no cookies), so credentialed CORS isn't needed —
+# allow_credentials=True combined with a wildcard origin is invalid per spec
+# and browsers reject it anyway.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -58,6 +61,14 @@ async def startup():
     # Spawn TTS prewarm as background task (non-blocking)
     if settings.tts_prewarm_on_startup:
         asyncio.create_task(_run_prewarm())
+
+    # Restore training jobs from Postgres. Training execution runs in the
+    # dedicated trainer container (Celery queue "training") — the backend
+    # only dispatches jobs and reads progress from Postgres.
+    try:
+        await training.restore_jobs_from_db()
+    except Exception as exc:
+        logger.warning("[STARTUP][TRAINING_RESTORE] failed: %s", exc)
 
 
 async def _run_prewarm() -> None:
