@@ -36,3 +36,4 @@ celery_app.conf.update(
 from app import tasks  # noqa: F401, E402
 from app import export_tasks  # noqa: F401, E402
 from app import training_tasks  # noqa: F401, E402
+from app import sync_tasks  # noqa: F401, E402
