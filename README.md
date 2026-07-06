@@ -77,6 +77,56 @@ docker-compose up --build -d
 docker-compose logs -f backend worker
 ```
 
+### Production Deployment (docker-compose.prod.yml)
+
+```bash
+# 1. Copy the template and fill in real values — do NOT deploy with the
+#    placeholder secrets/passwords as-is (see .env.example comments)
+cp .env.example .env
+
+# 2. Build and start
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+Before going live, make sure `.env` has:
+- Real `SECRET_KEY` / `AUTH_TOKEN_SECRET_KEY` (`python -c "import secrets; print(secrets.token_hex(32))"`)
+- A real `POSTGRES_PASSWORD` / `ADMIN_PASSWORD` (not `admin`/`change-me`)
+- `FRONTEND_BASE_URL` set to the server's real domain/IP
+- `VITE_API_URL` left **empty** unless the frontend is served from a different origin than the nginx gateway (empty = same-origin, proxied by `nginx.conf`)
+
+#### GPU (training on a CUDA machine)
+
+`processed/train_utils/train_tcn.py` already auto-selects `cuda` when available — no code or `requirements.txt` change needed, `torch` from PyPI ships CUDA support by default. `docker-compose.prod.yml`'s `trainer` service reserves a GPU:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+```
+
+For this to work, the **host** (school server) needs, one-time:
+
+1. An up-to-date NVIDIA driver (`nvidia-smi` must work on the host itself).
+2. The [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed and Docker restarted:
+   ```bash
+   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+   curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+3. Verify before trusting compose: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi` should print the GPU info.
+
+If the toolkit isn't installed yet, `docker compose -f docker-compose.prod.yml up` will fail to start `trainer` with a device-request error — that's expected; install the toolkit above, or remove the `deploy:` block from the `trainer` service in `docker-compose.prod.yml` to fall back to CPU-only training.
+
+Only `trainer` requests a GPU (training is CPU/GPU-heavy and runs one job at a time). `backend`'s real-time inference endpoint intentionally stays on CPU (single-sequence prediction is cheap, and this avoids VRAM contention with an in-progress training job).
+
 ### Frontend Development
 ```bash
 cd voya-frontend
