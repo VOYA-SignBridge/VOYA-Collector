@@ -3,7 +3,11 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        # Empty = same-origin relative API paths, proxied by the nginx
+        # gateway (nginx.conf) to the backend on the same domain/port.
+        # Only set this if the frontend is served from a different
+        # origin than the nginx gateway.
+        VITE_API_URL: ${VITE_API_URL:-}
     image: voya_frontend:latest
     container_name: voya_frontend
     expose:
@@ -82,8 +86,14 @@ services:
       - voya_network
 
   # Dedicated training executor — consumes ONLY the "training" queue with
-  # concurrency 1 (jobs stay strictly serialized). Isolates CPU-heavy
+  # concurrency 1 (jobs stay strictly serialized). Isolates heavy
   # training from the API container so requests stay responsive.
+  # GPU: train_tcn.py auto-selects cuda when torch.cuda.is_available(),
+  # so no code/requirements change is needed — this reservation is what
+  # actually exposes the host GPU to the container. Requires the NVIDIA
+  # driver + NVIDIA Container Toolkit installed on the host; verify with
+  # `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`
+  # before relying on it. Remove this block to fall back to CPU-only.
   trainer:
     image: voya_backend:latest
     container_name: voya_trainer
@@ -93,6 +103,13 @@ services:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
       - .:/workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     command: celery -A app.worker.celery_app worker -Q training -c 1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
     depends_on:
       - redis
