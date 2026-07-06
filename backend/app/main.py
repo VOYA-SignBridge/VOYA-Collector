@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import (
+    admin,
     auth,
     classes,
     dataset,
@@ -19,9 +20,13 @@ from app.routers import (
     training,
     tts,
     upload,
-    admin,
 )
 from app.logging_config import configure_logging
+
+# Configure logging before importing routers — some (e.g. training) connect
+# to Redis and log the result at module import time, which would otherwise
+# run before the root logger is configured and get silently dropped.
+configure_logging()
 from app.db import init_db
 from app.services.tts_service import init_tts, close_tts
 from app.services.tts_prewarm import prewarm_tts_cache
@@ -43,7 +48,6 @@ app.add_middleware(
 # init DB tables (dev). In prod, use migrations (alembic).
 @app.on_event("startup")
 async def startup():
-    configure_logging()
     logger = logging.getLogger("startup")
     logger.setLevel(logging.INFO)
     started_at = time.time()

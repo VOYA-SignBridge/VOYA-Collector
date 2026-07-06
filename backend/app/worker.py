@@ -8,6 +8,29 @@ celery_app = Celery(
     backend=settings.result_backend,
 )
 
+# Only schedule the Google Sheets export beats when a spreadsheet is
+# actually configured — otherwise celery-beat fires them every 30s/60s
+# forever just to have export_tasks.py no-op with "not_configured".
+beat_schedule = {
+    # Retention: prune old experimental checkpoints + job logs daily
+    "cleanup-training-artifacts-daily": {
+        "task": "app.training_tasks.cleanup_training_artifacts",
+        "schedule": 86400.0,
+    },
+}
+
+if str(settings.google_sheets_samples_spreadsheet_id).strip():
+    beat_schedule["export-samples-every-30s"] = {
+        "task": "app.export_tasks.export_samples_to_sheets",
+        "schedule": 30.0,
+    }
+
+if str(settings.google_sheets_labels_spreadsheet_id).strip():
+    beat_schedule["export-labels-every-60s"] = {
+        "task": "app.export_tasks.export_labels_to_sheets",
+        "schedule": 60.0,
+    }
+
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
@@ -15,21 +38,7 @@ celery_app.conf.update(
     result_expires=3600,
     timezone="Asia/Ho_Chi_Minh",
     enable_utc=True,
-    beat_schedule={
-        "export-samples-every-30s": {
-            "task": "app.export_tasks.export_samples_to_sheets",
-            "schedule": 30.0,
-        },
-        "export-labels-every-60s": {
-            "task": "app.export_tasks.export_labels_to_sheets",
-            "schedule": 60.0,
-        },
-        # Retention: prune old experimental checkpoints + job logs daily
-        "cleanup-training-artifacts-daily": {
-            "task": "app.training_tasks.cleanup_training_artifacts",
-            "schedule": 86400.0,
-        },
-    },
+    beat_schedule=beat_schedule,
 )
 
 # Import tasks to register them with Celery
