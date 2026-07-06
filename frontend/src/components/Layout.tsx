@@ -6,6 +6,7 @@ import type { AuthUser } from "../api/auth";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
 import { ChipIcon, HandIcon, HomeIcon, RefreshIcon, TagIcon, UploadIcon } from "./ui/Icons";
+import Footer from "./Footer";
 
 const AUTH_EVENT = "voya:auth-change";
 
@@ -63,14 +64,26 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, [hasToken]);
 
   const navIconClass = "h-5 w-5";
-  const navigation: AnyNavItem[] = [
+  const baseNavigation: AnyNavItem[] = [
     { name: "Trang chủ", href: "/", icon: <HomeIcon className={navIconClass} />, end: true },
     { name: "Đóng góp dữ liệu", href: "/upload", icon: <UploadIcon className={navIconClass} /> },
     { name: "Thư viện nhãn", href: "/labels", icon: <TagIcon className={navIconClass} /> },
     { name: "Nhận dạng realtime", href: "/realtime", icon: <HandIcon className={navIconClass} /> },
     { name: "Huấn luyện model", href: "/training", icon: <ChipIcon className={navIconClass} /> },
-    // AI Studio removed
   ];
+
+  const adminNavigation: AnyNavItem[] = [
+    {
+      section: true,
+      name: "Quản trị",
+      icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>,
+      children: [
+        { name: "Quản lý người dùng", href: "/admin/users", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
+      ]
+    }
+  ];
+
+  const navigation = user?.is_admin ? [...baseNavigation, ...adminNavigation] : baseNavigation;
 
   const handleNewSession = useCallback(() => {
     setSidebarOpen(false);
@@ -81,7 +94,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     setSidebarOpen(false);
     clearAuthToken();
     setHasToken(false);
-    navigate("/login");
+    navigate("/");
   }, [navigate]);
 
   const NavItem = ({ item }: { item: FlatNavItem }) => (
@@ -89,10 +102,9 @@ export default function Layout({ children }: { children: ReactNode }) {
       to={item.href}
       end={item.end}
       className={({ isActive }) =>
-        `group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
-          isActive
-            ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
-            : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/60"
+        `group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${isActive
+          ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
+          : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/60"
         }`
       }
       onClick={() => setSidebarOpen(false)}
@@ -124,10 +136,9 @@ export default function Layout({ children }: { children: ReactNode }) {
             to={child.href}
             end={child.end}
             className={({ isActive }) =>
-              `group flex items-center pl-8 pr-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${
-                isActive
-                  ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
-                  : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/60"
+              `group flex items-center pl-8 pr-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${isActive
+                ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
+                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/60"
               }`
             }
             onClick={() => setSidebarOpen(false)}
@@ -149,20 +160,21 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen relative flex bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20">
-      <div
-        className={`fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${
-          sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={() => setSidebarOpen(false)}
-        aria-hidden="true"
-      />
+      {hasToken && (
+        <div
+          className={`fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
 
-      <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[min(18rem,82vw)] max-w-72 transform border-r border-slate-200/60 bg-white/80 shadow-xl backdrop-blur-xl transition-all duration-300 ease-in-out overflow-y-auto ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:static lg:translate-x-0 lg:overflow-visible ${sidebarOpen ? "lg:w-72 lg:max-w-72" : "lg:w-0 lg:max-w-0"}`}
-      >
-        <div className="flex h-dvh lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto flex-col">
+      {hasToken && (
+        <aside
+          className={`fixed inset-y-0 left-0 z-50 w-[min(18rem,82vw)] max-w-72 transform border-r border-slate-200/60 bg-white/80 shadow-xl backdrop-blur-xl transition-all duration-300 ease-in-out overflow-y-auto ${sidebarOpen ? "translate-x-0" : "-translate-x-full"
+            } lg:static lg:translate-x-0 lg:overflow-visible ${sidebarOpen ? "lg:w-72 lg:max-w-72" : "lg:w-0 lg:max-w-0"}`}
+        >
+          <div className="flex h-dvh lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto flex-col">
           <div className="flex items-center justify-between h-16 px-6 border-b border-slate-200/50">
             <div className="flex items-center min-w-0">
               <div className="w-10 h-10 bg-gradient-to-br from-ctu-navy to-ctu-blue rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
@@ -235,29 +247,32 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="hidden lg:block pt-4 text-xs text-slate-500 text-center">
-              © {new Date().getFullYear()} Đại học Cần Thơ · CTU.SignBridge
+              Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông
             </div>
           </div>
         </div>
-      </aside>
+        </aside>
+      )}
 
       <div className="flex-1 flex flex-col min-w-0 pt-14">
         <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-slate-200/60 bg-white/80 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen((current) => !current)}
-              className="btn btn-ghost p-2 text-slate-600 hover:text-slate-900"
-              aria-label="Toggle sidebar"
-              aria-expanded={sidebarOpen}
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <div className="flex min-w-0 items-center gap-2">
-              <img src="/logo.png" alt="Đại học Cần Thơ" className="h-8 w-8 shrink-0 object-contain" />
-              <h1 className="truncate text-sm font-semibold font-display sm:text-base lg:text-xl">
+            {hasToken && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen((current) => !current)}
+                className="btn btn-ghost p-2 text-slate-600 hover:text-slate-900"
+                aria-label="Toggle sidebar"
+                aria-expanded={sidebarOpen}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            )}
+            <div className="flex min-w-0 items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
+              <img src="/logo.png" alt="Đại học Cần Thơ" className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 object-contain" />
+              <h1 className="truncate text-sm font-bold font-display sm:text-base lg:text-lg">
                 <span className="text-ctu-blue">CTU</span>
                 <span className="text-ctu-blue-light">.SignBridge</span>
               </h1>
@@ -302,6 +317,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             {children}
           </div>
         </main>
+        <Footer />
       </div>
     </div>
   );

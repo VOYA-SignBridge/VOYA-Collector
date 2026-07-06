@@ -48,8 +48,8 @@ export default function HeroSection({ username }: HeroSectionProps) {
       <div className="relative z-10 max-w-3xl">
         {username ? (
           <>
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent mb-4">
-              Xin chào, {username}! 👋
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4">
+              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">Xin chào, {username}!</span> 👋
             </h1>
 
             <div className="mb-8 space-y-3">
@@ -88,8 +88,8 @@ export default function HeroSection({ username }: HeroSectionProps) {
           </>
         ) : (
           <>
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent mb-4">
-              Xin chào 👋
+            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4">
+              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">Xin chào</span> 👋
             </h1>
 
             <div className="mb-8 space-y-3">

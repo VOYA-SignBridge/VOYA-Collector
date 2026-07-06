@@ -343,7 +343,7 @@ const TrainingPipeline: React.FC = () => {
               <Button
                 variant="secondary"
                 onClick={() => currentStep > 1 && setCurrentStep((currentStep - 1) as Step)}
-                disabled={currentStep === 1}
+                disabled={currentStep === 1 || currentStep >= 6}
                 size="sm"
               >
                 ← Quay lại
@@ -383,6 +383,17 @@ const TrainingPipeline: React.FC = () => {
                   title="Xem kết quả chi tiết của huấn luyện"
                 >
                   Xem Kết Quả →
+                </Button>
+              )}
+
+              {currentStep === 7 && (
+                <Button
+                  variant="primary"
+                  onClick={() => setView('landing')}
+                  size="sm"
+                  title="Hoàn tất và quay về màn hình chính"
+                >
+                  Hoàn tất ✓
                 </Button>
               )}
 

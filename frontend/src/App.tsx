@@ -22,6 +22,7 @@ const LoginPage = lazy(() => import("./pages/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
+const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"));
 
 
 // Protected Route Wrapper
@@ -119,7 +120,14 @@ function App() {
                 }
               />
 
-              {/* AI Studio removed */}
+              <Route
+                path="/admin/users"
+                element={
+                  <ProtectedRoute>
+                    <AdminUsersPage />
+                  </ProtectedRoute>
+                }
+              />
 
               <Route path="/" element={<DashboardPage />} />
 

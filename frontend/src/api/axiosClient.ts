@@ -102,7 +102,8 @@ axiosClient.interceptors.response.use(
     } else if (err?.response?.status === 401) {
       // Phân biệt 401 từ auth endpoints (sai mật khẩu) vs protected routes (hết token)
       const url = err?.config?.url || "";
-      const isAuthEndpoint = url.includes("/auth/login") || url.includes("/auth/register") || url.includes("/auth/me");
+      // Only login and register should preserve token state on 401 (e.g. wrong password)
+      const isAuthEndpoint = url.includes("/auth/login") || url.includes("/auth/register");
       
       if (!isAuthEndpoint) {
         // 401 từ protected routes = hết token, redirect login
