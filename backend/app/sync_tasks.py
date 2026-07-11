@@ -11,6 +11,19 @@ from app.storage.gdrive_client import download_from_gdrive
 
 logger = logging.getLogger(__name__)
 
+
+def _is_present(path: Path) -> bool:
+    """A local file counts as present only if it exists AND is non-empty.
+
+    A 0-byte file is the signature of a download that failed midway; treating
+    it as present would skip re-download forever and leave a corrupt artifact.
+    """
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
 @celery_app.task(bind=True)
 def download_missing_files_to_local(self):
     """
@@ -83,8 +96,11 @@ def download_missing_files_to_local(self):
                         continue
                         
                     local_abs_path = Path(settings.dataset_root) / file_path
-                    
-                    if local_abs_path.exists():
+
+                    # A 0-byte local file is a FAILED prior download, not a real
+                    # copy. Checking only .exists() would skip it forever, leaving
+                    # a corrupt npz that crashes training. Require size > 0.
+                    if _is_present(local_abs_path):
                         skipped_count += 1
                     else:
                         try:
@@ -122,7 +138,7 @@ def download_missing_files_to_local(self):
                     if not local_abs_path.is_absolute():
                          local_abs_path = Path(settings.dataset_root) / local_path
                          
-                    if local_abs_path.exists():
+                    if _is_present(local_abs_path):
                         skipped_count += 1
                     else:
                         try:
