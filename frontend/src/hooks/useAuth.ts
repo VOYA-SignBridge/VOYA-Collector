@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { me as getMe } from "../api/auth";
 import type { AuthUser } from "../api/auth";
+import { loadAuthToken } from "../api/axiosClient";
 
 const AUTH_EVENT = "voya:auth-change";
 
@@ -15,6 +16,14 @@ export function useAuth() {
 
   useEffect(() => {
     const loadUser = async () => {
+      // Guests have no token — skip the /auth/me round-trip entirely. It used
+      // to always fire (even for guests) and, because `loading` gates the
+      // dashboard render, a guest's landing page waited on a pointless 401.
+      if (!loadAuthToken()) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const userData = await getMe();

@@ -18,8 +18,10 @@ export default function CommunityStatsSection() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Fetch labels count + unique dialects (regions) from class registry
-        const labelsRes = await getClassesList();
+        // Fetch labels and samples in PARALLEL — they are independent, so the
+        // old sequential `await` … `await` doubled the wait for no reason.
+        const [labelsRes, samplesRes] = await Promise.all([getClassesList(), getSamples()]);
+
         const labelsCount = labelsRes.ok ? labelsRes.data.count : 0;
         const regions = new Set<string>();
         if (labelsRes.ok) {
@@ -30,8 +32,6 @@ export default function CommunityStatsSection() {
           });
         }
 
-        // Fetch samples count
-        const samplesRes = await getSamples();
         const totalSamples = samplesRes.ok
           ? samplesRes.data.reduce((sum: number, s: Session) => sum + s.samples_count, 0)
           : 0;

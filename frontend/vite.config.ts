@@ -59,6 +59,16 @@ export default defineConfig({
             if (id.includes('@mediapipe')) return 'vendor_mediapipe';
             if (id.includes('recharts')) return 'vendor_recharts';
             if (id.includes('axios')) return 'vendor_axios';
+            // Split the stable React runtime into its own chunk so that
+            // shipping app-code changes doesn't invalidate the (large,
+            // rarely-changing) React bundle in users' caches.
+            if (
+              id.includes('/node_modules/react/') ||
+              id.includes('/node_modules/react-dom/') ||
+              id.includes('/node_modules/scheduler/') ||
+              id.includes('/node_modules/react-is/')
+            ) return 'vendor_react';
+            if (id.includes('/node_modules/react-router')) return 'vendor_router';
             return 'vendor';
           }
         },
