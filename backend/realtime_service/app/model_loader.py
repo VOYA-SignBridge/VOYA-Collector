@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import math
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,25 @@ from .contracts import validate_labels
 
 
 logger = logging.getLogger("realtime_service.model_loader")
+
+
+def resolve_device() -> str:
+    """Pick inference device from REALTIME_DEVICE env.
+
+    Default 'cpu' — deliberately safe when a training job holds the GPU
+    (VRAM contention would otherwise stall/crash both). Set REALTIME_DEVICE=cuda
+    to move realtime inference onto the GPU when it is free.
+    Falls back to CPU if cuda is requested but unavailable.
+    """
+    want = (os.getenv("REALTIME_DEVICE", "cpu") or "cpu").strip().lower()
+    if want in ("cuda", "gpu"):
+        try:
+            if torch.cuda.is_available():
+                return "cuda"
+            logger.warning("[DEVICE] REALTIME_DEVICE=%s but CUDA unavailable — using cpu", want)
+        except Exception:
+            logger.warning("[DEVICE] CUDA probe failed — using cpu")
+    return "cpu"
 
 
 @dataclass(frozen=True)
@@ -366,9 +386,11 @@ def build_bundle(
         registry_dialect=dialect,
     )
 
-    # Warmup lifecycle (fail-fast)
+    # Warmup lifecycle (fail-fast). Device chosen from REALTIME_DEVICE env;
+    # the model stays resident on that device for inference.
     warmup_ok = False
-    warmup(model, seq_len=int(ckpt["seq_len"]), feature_dim=int(ckpt["feature_dim"]), device="cpu")
+    device = resolve_device()
+    warmup(model, seq_len=int(ckpt["seq_len"]), feature_dim=int(ckpt["feature_dim"]), device=device)
     warmup_ok = True
 
     loaded_at = datetime.now(timezone.utc).isoformat()

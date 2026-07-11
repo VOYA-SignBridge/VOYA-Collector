@@ -10,8 +10,8 @@ COPY requirements.txt /tmp/requirements.txt
 
 RUN python -m pip install --no-cache-dir --upgrade pip && \
     python -c "from pathlib import Path; src = Path('/tmp/requirements.txt').read_text().splitlines(); Path('/tmp/requirements.base.txt').write_text('\n'.join(line for line in src if not line.strip().startswith('torch')) + '\n')" && \
-    python -m pip install --no-cache-dir -r /tmp/requirements.base.txt && \
-    python -m pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch
+    python -m pip install --no-cache-dir --retries 10 --timeout 180 -r /tmp/requirements.base.txt && \
+    python -m pip install --no-cache-dir --retries 10 --timeout 180 --index-url https://download.pytorch.org/whl/cpu torch
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

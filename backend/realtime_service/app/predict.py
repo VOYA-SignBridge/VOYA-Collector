@@ -54,14 +54,18 @@ def _run_inference(model: torch.nn.Module, frames: np.ndarray) -> tuple:
 
     ASSUMES: model is already in eval mode (set at startup).
     """
-    # Build input tensor: (1, 60, 126)
-    x = torch.from_numpy(frames).unsqueeze(0).to(dtype=torch.float32)
+    # Build input tensor on the same device as the model (CPU or CUDA).
+    try:
+        model_device = next(model.parameters()).device
+    except StopIteration:
+        model_device = torch.device("cpu")
+    x = torch.from_numpy(frames).unsqueeze(0).to(dtype=torch.float32, device=model_device)
 
     # Explicit shape assertion: model expects (B, T, D) or (B, D, T)
     assert x.ndim == 3, f"expected 3D tensor, got shape={tuple(x.shape)}"
     assert x.shape == (1, 60, 126), f"expected (1, 60, 126), got {tuple(x.shape)}"
 
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = model(x)
 
     # Use torch.softmax for numerical stability
