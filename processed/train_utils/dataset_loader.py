@@ -133,6 +133,32 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         if np is None:
             raise RuntimeError('numpy is required to load .npz files but is not installed.')
 
+        # Drop rows whose feature file is missing or 0-byte BEFORE training.
+        # A single corrupt/empty npz (e.g. a download that failed midway) used
+        # to raise EOFError inside __getitem__ and kill the entire run. Pruning
+        # here is a cheap stat() per row and keeps split counts self-consistent
+        # (each split is its own CSV/dataset, so length changes don't misalign).
+        self._prune_unreadable_rows()
+
+    def _prune_unreadable_rows(self) -> None:
+        kept: List[Dict[str, str]] = []
+        dropped = 0
+        for r in self.rows:
+            try:
+                path = self._resolve_feature_path(r)
+                if path.stat().st_size > 0:
+                    kept.append(r)
+                else:
+                    dropped += 1
+            except Exception:
+                dropped += 1
+        if dropped:
+            print(
+                f"[DATASET] Pruned {dropped} unreadable/empty feature file(s) "
+                f"from {self.csv_path.name}; {len(kept)} usable samples remain."
+            )
+        self.rows = kept
+
         # normalize labels to 0-based if inputs are 1-based
         self._label_offset = 0
         try:
@@ -261,8 +287,27 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
     def __getitem__(self, idx: int):
         r = self.rows[idx]
         path = self._resolve_feature_path(r)
-        with np.load(path, allow_pickle=False) as data:  # type: ignore[attr-defined]
-            arr = self._choose_array_from_npz(data)
+        try:
+            with np.load(path, allow_pickle=False) as data:  # type: ignore[attr-defined]
+                arr = self._choose_array_from_npz(data)
+        except Exception as e:
+            # Size-prefilter catches 0-byte files; this catches the rarer case
+            # of a non-empty but truncated/corrupt archive. Fall back to a
+            # neighbouring sample rather than crashing the whole training run.
+            n = len(self.rows)
+            print(f"[DATASET] Skipping corrupt feature {path} ({e}); using neighbour.")
+            for step in range(1, n):
+                alt = self.rows[(idx + step) % n]
+                try:
+                    alt_path = self._resolve_feature_path(alt)
+                    with np.load(alt_path, allow_pickle=False) as data:  # type: ignore[attr-defined]
+                        arr = self._choose_array_from_npz(data)
+                    r, path = alt, alt_path
+                    break
+                except Exception:
+                    continue
+            else:
+                raise RuntimeError(f"No readable feature file found near index {idx}") from e
         x = np.asarray(arr, dtype=self.dtype)
         # enforce expected temporal-first shape (T, D) without modifying dimensions
         if x.ndim != 2:

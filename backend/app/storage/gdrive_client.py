@@ -58,27 +58,20 @@ class _NoRedirectHttp(httplib2.Http):
     """Let googleapiclient handle Drive upload status codes itself.
 
     Google Drive resumable uploads use HTTP 308 as "resume incomplete".
-    Recent httplib2 versions can treat a 308 without a Location header as a
-    redirect error before googleapiclient sees it.
+    httplib2 treats 308 as a redirect: with follow_redirects=True it either
+    follows it or — when the redirection budget is exhausted — raises
+    RedirectLimit ("Redirected more times than redirection_limit allows"),
+    which broke every resumable (>threshold) upload.
+
+    Setting follow_redirects=False makes httplib2 RETURN the 3xx/308 response
+    untouched, so googleapiclient's next_chunk() can interpret it correctly.
+    (The previous implementation forced redirections=0, which *raises* on 308
+    instead of returning it — that was the bug.)
     """
 
-    def request(
-        self,
-        uri,
-        method="GET",
-        body=None,
-        headers=None,
-        redirections=0,
-        connection_type=None,
-    ):
-        return super().request(
-            uri,
-            method=method,
-            body=body,
-            headers=headers,
-            redirections=0,
-            connection_type=connection_type,
-        )
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.follow_redirects = False
 
 
 class GoogleDriveClient:
@@ -88,13 +81,15 @@ class GoogleDriveClient:
                  timeout_seconds: int = 120,
                  num_retries: int = 5,
                  chunk_mb: int = 8,
-                 simple_upload_threshold_mb: int = 64):
+                 simple_upload_threshold_mb: int = 64,
+                 download_chunk_mb: int = 10):
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.root_folder_id = root_folder_id
         self.timeout_seconds = max(30, int(timeout_seconds or 120))
         self.num_retries = max(0, int(num_retries or 0))
         self.chunk_size_bytes = max(1, int(chunk_mb or 1)) * 1024 * 1024
+        self.download_chunk_size_bytes = max(1, int(download_chunk_mb or 1)) * 1024 * 1024
         self.simple_upload_threshold_bytes = max(0, int(simple_upload_threshold_mb or 0)) * 1024 * 1024
         self._request_lock = threading.RLock()
         self.creds = None
@@ -797,39 +792,61 @@ class GoogleDriveClient:
         return files[0]['id'] if files else None
 
     def download_file(self, file_id_or_url: str, local_path: str) -> str:
-        """Download file from Google Drive."""
-        try:
-            # Extract file ID from URL if needed
-            if 'drive.google.com' in file_id_or_url:
-                import re
-                match = re.search(r'/d/([a-zA-Z0-9_-]+)', file_id_or_url)
-                if match:
-                    file_id = match.group(1)
-                else:
-                    raise ValueError("Invalid Google Drive URL")
+        """Download file from Google Drive.
+
+        Writes to a temporary file in the SAME directory and atomically
+        renames it into place only after the transfer completes. A download
+        that fails midway (network drop, 404, permission) therefore never
+        leaves a 0-byte or truncated file at ``local_path`` — the old failure
+        mode that produced corrupt npz which then crashed training and were
+        skipped forever by the size-blind sync task.
+        """
+        # Extract file ID from URL if needed
+        if 'drive.google.com' in file_id_or_url:
+            import re
+            match = re.search(r'/d/([a-zA-Z0-9_-]+)', file_id_or_url)
+            if match:
+                file_id = match.group(1)
             else:
-                file_id = file_id_or_url
-                if file_id.startswith("gdrive://"):
-                    file_id = file_id.replace("gdrive://", "", 1)
-            
+                raise ValueError("Invalid Google Drive URL")
+        else:
+            file_id = file_id_or_url
+            if file_id.startswith("gdrive://"):
+                file_id = file_id.replace("gdrive://", "", 1)
+
+        dest = Path(local_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(prefix=".dl_", suffix=dest.suffix or ".tmp", dir=str(dest.parent))
+        os.close(fd)
+        try:
             request = self.service.files().get_media(fileId=file_id)
-            
-            fh = io.FileIO(local_path, 'wb')
-            downloader = MediaIoBaseDownload(fh, request, chunksize=1024*1024*10)
-            
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-                if status:
-                    logger.debug(f"[GDrive] Download progress: {int(status.progress() * 100)}%")
-            
-            fh.close()
+            fh = io.FileIO(tmp_path, 'wb')
+            try:
+                downloader = MediaIoBaseDownload(fh, request, chunksize=self.download_chunk_size_bytes)
+                done = False
+                while not done:
+                    status, done = downloader.next_chunk()
+                    if status:
+                        logger.debug(f"[GDrive] Download progress: {int(status.progress() * 100)}%")
+            finally:
+                fh.close()
+
+            if os.path.getsize(tmp_path) == 0:
+                raise IOError(f"Downloaded 0 bytes for file_id={file_id}")
+
+            os.replace(tmp_path, local_path)
             logger.info(f"[GDrive] Downloaded to: {local_path}")
             return local_path
-            
+
         except Exception as e:
             logger.error(f"[GDrive] Download failed: {str(e)}", exc_info=True)
             raise
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
 
 # Singleton instance
@@ -862,6 +879,7 @@ def get_gdrive_client() -> GoogleDriveClient:
                     num_retries=int(getattr(settings, "google_drive_num_retries", 5)),
                     chunk_mb=int(getattr(settings, "google_drive_chunk_mb", 8)),
                     simple_upload_threshold_mb=int(getattr(settings, "google_drive_simple_upload_threshold_mb", 64)),
+                    download_chunk_mb=int(getattr(settings, "google_drive_download_chunk_mb", 10)),
                 )
     return _gdrive_client
 
