@@ -378,9 +378,11 @@ async def start_training_endpoint(experiment_id: int):
             detail=f"Experiment {experiment_id} could not be started — status changed concurrently",
         )
 
-    # Step 4: enqueue; roll back to 'pending' if broker is unreachable
+    # Step 4: enqueue; roll back to 'pending' if broker is unreachable.
+    # Route to the dedicated "training" queue so heavy GPU training runs on
+    # the trainer container, not the general video worker (RAM isolation).
     try:
-        task = run_training_job.delay(experiment_id)
+        task = run_training_job.apply_async(args=[experiment_id], queue="training")
     except Exception as exc:
         try:
             update_experiment_status(experiment_id, "pending")

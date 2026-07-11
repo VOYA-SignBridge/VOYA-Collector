@@ -23,10 +23,13 @@ def _window_activity_mean_abs_diff(seq_arr: np.ndarray) -> float:
     diffs = np.diff(seq_arr.astype(np.float32, copy=False), axis=0)
     return float(np.mean(np.abs(diffs)))
 
-def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn"):
+def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn", user_id: str = ""):
     """
     Synchronous function to process video without Celery decorator.
     This is called by the Celery task in tasks.py
+
+    ``user`` is the display name; ``user_id`` is the authenticated user id
+    (mirrors the camera path meta), threaded into each window's metadata.
     """
     try:
         fps_target = int(settings.fps_target)
@@ -93,6 +96,9 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
         global_rejected = 0
         global_windows = 0
         saved_total = 0
+        # Collect Drive upload descriptors from every saved npz so we can dispatch
+        # ONE batch upload task at the end instead of one Celery task per file.
+        upload_items: list = []
         # Track best candidate windows so we can optionally top-up to a minimum sample count.
         # Each entry: (completeness, activity, seq_arr, window_meta)
         best_windows = []
@@ -169,6 +175,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
 
                     window_meta = {
                         "user": user,
+                        "user_id": user_id,
                         "session_id": session_id,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,
@@ -193,9 +200,13 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                         augmented_seq_list = generate_augmented_sequences(seq_arr, config={"n": aug_n})
                         for aug_id, aseq in enumerate(augmented_seq_list):
                             # Re-check global cap (best-effort) before each save.
-                            if max_per_class > 0 and count_samples_for_class(class_meta.class_uid) >= max_per_class:
+                            # Use a running counter (existing_total read once at job
+                            # start + saved_total) instead of re-parsing samples.csv on
+                            # every save — the old per-save count made this O(N^2) I/O
+                            # under a file lock for a video that yields many samples.
+                            if max_per_class > 0 and (existing_total + saved_total) >= max_per_class:
                                 break
-                            path = save_sequence_npz(class_meta, aseq, meta=window_meta, augment_id=aug_id, source_type="video")
+                            path = save_sequence_npz(class_meta, aseq, meta=window_meta, augment_id=aug_id, source_type="video", upload_collector=upload_items)
                             saved_paths.append(path)
                             saved_total += 1
                             if remaining_quota is not None and saved_total >= remaining_quota:
@@ -263,22 +274,40 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                         break
                     if remaining_quota is not None and saved_total >= remaining_quota:
                         break
-                    if max_per_class > 0 and count_samples_for_class(class_meta.class_uid) >= max_per_class:
+                    if max_per_class > 0 and (existing_total + saved_total) >= max_per_class:
                         break
                     meta = dict(best_meta)
                     meta["rescue_fill"] = True
                     meta["rescue_from_completeness"] = float(round(best_comp, 4))
                     meta["rescue_from_activity"] = float(round(best_act, 6))
-                    path = save_sequence_npz(class_meta, aseq, meta=meta, augment_id=base_aug_id + i, source_type="video")
+                    path = save_sequence_npz(class_meta, aseq, meta=meta, augment_id=base_aug_id + i, source_type="video", upload_collector=upload_items)
                     all_saved_paths.append(path)
                     saved_total += 1
+
+        # Dispatch Drive uploads for the whole video as a few batch tasks
+        # (instead of one task per npz). Chunk to bound each task's size.
+        batches_dispatched = 0
+        if upload_items:
+            try:
+                from app.export_tasks import upload_npz_batch_to_gdrive_task
+                batch_size = int(getattr(settings, "npz_upload_batch_size", 50) or 50)
+                for i in range(0, len(upload_items), batch_size):
+                    upload_npz_batch_to_gdrive_task.delay(items=upload_items[i:i + batch_size])
+                    batches_dispatched += 1
+                logger.info(
+                    "[UPLOAD_BATCH] dispatched %s batch task(s) for %s npz (batch_size=%s)",
+                    batches_dispatched, len(upload_items), batch_size,
+                )
+            except Exception as e:
+                logger.warning("[UPLOAD_BATCH] failed to dispatch batch upload tasks: %s", e)
 
         logger.info("[SEQ] total_windows=%s kept=%s rejected=%s", global_windows, global_kept, global_rejected)
         logger.info("[SAVE] class=%s saved=%s augmented=%s per_seq=%s output=%s",
                 label, len(all_saved_paths), global_kept * aug_n, aug_n, class_meta.hierarchy_path())
 
-        return {"status": "success", "saved": all_saved_paths, "windows": global_windows, 
-                "kept": global_kept, "rejected": global_rejected, "variants": total_variants}
+        return {"status": "success", "saved": all_saved_paths, "windows": global_windows,
+                "kept": global_kept, "rejected": global_rejected, "variants": total_variants,
+                "upload_batches": batches_dispatched, "npz_uploads": len(upload_items)}
 
     except Exception as e:
         raise Exception(f"Pipeline processing failed: {str(e)}")
