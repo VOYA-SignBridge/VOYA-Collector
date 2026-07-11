@@ -81,3 +81,5 @@ processed/splits
 
 *.md
 *.txt
+# TLS certs (self-signed for HTTP/2; use a real cert in prod)
+certs/
