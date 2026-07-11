@@ -29,10 +29,25 @@ export const deleteLabel = async (class_idx: number): Promise<Result<null>> => {
   return { ok: res.status >= 200 && res.status < 300, data: null, error: res.statusText } as Result<null>;
 };
 
-export const getSamples = async (): Promise<Result<Session[]>> => {
-  const res = await axiosClient.get("/dataset/sessions");
-  return validateSessions(res.data);
-};
+// Tiny in-flight + TTL cache so widgets that mount together (e.g. two
+// dashboard sections both needing sessions) share ONE network request instead
+// of each firing its own. A rejected request is evicted so the next call retries.
+const _reqCache: Record<string, { t: number; p: Promise<unknown> }> = {};
+function cachedRequest<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = _reqCache[key];
+  if (hit && now - hit.t < ttlMs) return hit.p as Promise<T>;
+  const p = fn();
+  _reqCache[key] = { t: now, p };
+  p.catch(() => { if (_reqCache[key]?.p === p) delete _reqCache[key]; });
+  return p;
+}
+
+export const getSamples = async (): Promise<Result<Session[]>> =>
+  cachedRequest("dataset/sessions", 5000, async () => {
+    const res = await axiosClient.get("/dataset/sessions");
+    return validateSessions(res.data);
+  });
 
 export const getSampleData = async (sampleId: string) => {
   const res = await axiosClient.get(`/dataset/samples/${sampleId}/data`, {
