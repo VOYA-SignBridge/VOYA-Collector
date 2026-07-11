@@ -249,6 +249,24 @@ export const purgeClass = async (classUid: string): Promise<Result<null>> => {
   }
 };
 
+export interface BulkResult { ok_count: number; failed_count: number }
+
+const bulkCall = async (url: string, body: Record<string, unknown>): Promise<Result<BulkResult>> => {
+  try {
+    const res = await axiosClient.post(url, body);
+    return { ok: true, data: { ok_count: res.data?.ok_count ?? 0, failed_count: res.data?.failed_count ?? 0 } };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Thao tác thất bại" };
+  }
+};
+
+export const bulkRestoreClasses = (classUids: string[]) => bulkCall("/classes/trash/restore", { class_uids: classUids });
+export const bulkPurgeClasses = (classUids: string[]) => bulkCall("/classes/trash/purge", { class_uids: classUids });
+export const emptyClassTrash = () => bulkCall("/classes/trash/purge", { all: true });
+export const bulkRestoreSamples = (sampleUids: string[]) => bulkCall("/dataset/samples/trash/restore", { sample_uids: sampleUids });
+export const bulkPurgeSamples = (sampleUids: string[]) => bulkCall("/dataset/samples/trash/purge", { sample_uids: sampleUids });
+export const emptySampleTrash = () => bulkCall("/dataset/samples/trash/purge", { all: true });
+
 export const getSampleTrash = async (): Promise<Result<TrashSample[]>> => {
   try {
     const res = await axiosClient.get("/dataset/samples/trash");

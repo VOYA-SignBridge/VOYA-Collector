@@ -1136,6 +1136,49 @@ def list_trash_samples() -> List[Dict[str, Any]]:
     return db_list_deleted_samples()
 
 
+# ===========================================================================
+# Bulk trash actions (multi-select + empty trash)
+# ===========================================================================
+
+def _bulk(fn, ids: Sequence[str]) -> Dict[str, Any]:
+    ok: List[str] = []
+    failed: List[Dict[str, str]] = []
+    for i in ids or []:
+        try:
+            fn(i)
+            ok.append(i)
+        except Exception as exc:
+            logger.warning("[CATALOG][BULK] %s(%s) failed: %s", getattr(fn, "__name__", fn), i, exc)
+            failed.append({"id": i, "error": str(exc)})
+    return {"ok": ok, "failed": failed, "ok_count": len(ok), "failed_count": len(failed)}
+
+
+def bulk_restore_classes(class_uids: Sequence[str]) -> Dict[str, Any]:
+    return _bulk(sync_restore_class, class_uids)
+
+
+def bulk_purge_classes(class_uids: Sequence[str]) -> Dict[str, Any]:
+    return _bulk(sync_purge_class, class_uids)
+
+
+def bulk_restore_samples(sample_uids: Sequence[str]) -> Dict[str, Any]:
+    return _bulk(sync_restore_sample, sample_uids)
+
+
+def bulk_purge_samples(sample_uids: Sequence[str]) -> Dict[str, Any]:
+    return _bulk(sync_purge_sample, sample_uids)
+
+
+def empty_class_trash() -> Dict[str, Any]:
+    """Permanently delete every soft-deleted class."""
+    return bulk_purge_classes([c["class_uid"] for c in list_trash_classes()])
+
+
+def empty_sample_trash() -> Dict[str, Any]:
+    """Permanently delete every soft-deleted sample (whose class is active)."""
+    return bulk_purge_samples([s["sample_uid"] for s in list_trash_samples()])
+
+
 def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
     """Permanently delete a soft-deleted sample: remove the .npz (+ sidecar),
     hard-delete the DB row, and delete the Drive copy. Irreversible."""

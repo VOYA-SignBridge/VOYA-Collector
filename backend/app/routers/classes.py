@@ -15,6 +15,9 @@ from app.catalog_sync import (
     sync_restore_class,
     sync_purge_class,
     list_trash_classes,
+    bulk_restore_classes,
+    bulk_purge_classes,
+    empty_class_trash,
 )
 from app.config import settings
 from app.auth import get_current_user, require_admin
@@ -261,6 +264,31 @@ def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Kh\u00f4ng \u0111\u1ecdc \u0111\u01b0\u1ee3c th\u00f9ng r\u00e1c: {exc}")
+
+
+@router.post("/trash/restore")
+def bulk_restore_classes_endpoint(
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Restore several soft-deleted classes at once. Body: {class_uids: [...]}."""
+    uids = payload.get("class_uids") or []
+    result = bulk_restore_classes(uids)
+    return {"success": True, "message": f"\u0110\u00e3 kh\u00f4i ph\u1ee5c {result['ok_count']} nh\u00e3n.", **result}
+
+
+@router.post("/trash/purge")
+def bulk_purge_classes_endpoint(
+    payload: dict = Body(default={}),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Permanently delete classes. Body: {class_uids: [...]} for a selection, or
+    {all: true} to empty the whole class trash. Irreversible."""
+    if payload.get("all"):
+        result = empty_class_trash()
+    else:
+        result = bulk_purge_classes(payload.get("class_uids") or [])
+    return {"success": True, "message": f"\u0110\u00e3 x\u00f3a v\u0129nh vi\u1ec5n {result['ok_count']} nh\u00e3n.", **result}
 
 
 @router.delete("/{class_ref}")
