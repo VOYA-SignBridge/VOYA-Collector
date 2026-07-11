@@ -101,20 +101,24 @@ axiosClient.interceptors.response.use(
       err.userMessage = "Request timeout. Backend may be slow or offline.";
     } else if (err?.response?.status === 401) {
       // Phân biệt 401 từ auth endpoints (sai mật khẩu) vs protected routes (hết token)
-      const url = err?.config?.url || "";
+      const reqUrl = err?.config?.url || "";
       // Only login and register should preserve token state on 401 (e.g. wrong password)
-      const isAuthEndpoint = url.includes("/auth/login") || url.includes("/auth/register");
-      
-      if (!isAuthEndpoint) {
-        // 401 từ protected routes = hết token, redirect login
+      const isAuthEndpoint = reqUrl.includes("/auth/login") || reqUrl.includes("/auth/register");
+
+      if (isAuthEndpoint) {
+        // 401 từ auth endpoints = sai mật khẩu, chỉ set message, không redirect
+        err.userMessage = "Username, email hoặc mật khẩu không đúng.";
+      } else if (getAuthToken()) {
+        // Đã từng có token => phiên hết hạn thật: xoá token và về trang login.
         clearAuthToken();
         err.userMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
         setTimeout(() => {
           window.location.href = "/login";
         }, 500);
       } else {
-        // 401 từ auth endpoints = sai mật khẩu, chỉ set message, không redirect
-        err.userMessage = "Username, email hoặc mật khẩu không đúng.";
+        // Khách (chưa đăng nhập) gọi API cần auth (vd /auth/me trên Dashboard).
+        // KHÔNG đá về /login — cho phép guest xem các trang công khai.
+        err.userMessage = "Bạn cần đăng nhập để thực hiện thao tác này.";
       }
     } else if (err?.response?.status === 403) {
       err.userMessage = "Bạn không có quyền truy cập tài nguyên này.";

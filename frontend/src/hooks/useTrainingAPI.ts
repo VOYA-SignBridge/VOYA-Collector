@@ -349,21 +349,32 @@ export function useWebSocketProgress(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Keep the latest callbacks in a ref. Callers usually pass inline arrow
+  // functions (new identity every render); if the socket effect depended on
+  // them it would tear down + reopen the WebSocket on EVERY render, so the
+  // connection never stayed up long enough to receive data (UI stuck at 0/0,
+  // server logging a flood of "1005 no status received").
+  const callbacksRef = useRef({ onMetric, onStatus, onError });
+  useEffect(() => {
+    callbacksRef.current = { onMetric, onStatus, onError };
+  }, [onMetric, onStatus, onError]);
+
   useEffect(() => {
     if (!jobId) return;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = getAuthToken();
     const wsUrl = `${protocol}//${window.location.host}/api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
 
-    wsRef.current = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
-    wsRef.current.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'metric') {
-          onMetric(message.data);
+          callbacksRef.current.onMetric(message.data);
         } else if (message.type === 'status') {
-          onStatus(message.data);
+          callbacksRef.current.onStatus(message.data);
         }
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -371,16 +382,17 @@ export function useWebSocketProgress(
       }
     };
 
-    wsRef.current.onerror = () => {
-      if (onError) onError('WebSocket connection error');
+    ws.onerror = () => {
+      const { onError: cb } = callbacksRef.current;
+      if (cb) cb('WebSocket connection error');
       else console.error('WebSocket connection error');
     };
 
     return () => {
-      if (wsRef.current) wsRef.current.close();
+      ws.close();
     };
-    // Intentionally include callbacks as dependencies
-  }, [jobId, onMetric, onStatus, onError]);
+    // Only reconnect when the job actually changes — callbacks are read via ref.
+  }, [jobId]);
 
   return wsRef.current;
 }
