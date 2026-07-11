@@ -1,32 +1,7 @@
-import cv2
 import numpy as np
 from app.processing.augmentations import augment_n
 from app.config import settings
 
-
-# -------- Stage A: Frame-level augment --------
-def flip_frames(frames):
-    return [cv2.flip(f, 1) for f in frames]
-
-def add_gaussian_noise(frames, mean=0, sigma=10):
-    noisy_frames = []
-    for f in frames:
-        noise = np.random.normal(mean, sigma, f.shape).astype(np.float32)
-        noisy = np.clip(f.astype(np.float32) + noise, 0, 255).astype(np.uint8)
-        noisy_frames.append(noisy)
-    return noisy_frames
-
-def adjust_brightness(frames, factor=1.2):
-    return [cv2.convertScaleAbs(f, alpha=factor, beta=0) for f in frames]
-
-def stage_a_frame_level(frames):
-    # apply a set of augmentations
-    return {
-        "original": frames,
-        "flipped": flip_frames(frames),
-        "bright": adjust_brightness(frames, 1.3),
-        "noisy": add_gaussian_noise(frames, sigma=15)
-    }
 
 # -------- Stage B: Keypoint-level augment --------
 def scale_sequence(seq: np.ndarray, scale_factor=1.1):

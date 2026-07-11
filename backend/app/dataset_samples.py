@@ -45,6 +45,26 @@ def now_str() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
+def _samples_fieldnames() -> List[str]:
+    """Return samples.csv's ACTUAL header.
+
+    The on-disk schema drifted wider than SAMPLE_FIELDS (extra DB-mirror columns
+    like username/session_uid/status/updated_at/deleted_at). Writers MUST respect
+    the real header, otherwise rows misalign against the header and
+    csv.DictWriter raises "dict contains fields not in fieldnames". Falls back to
+    SAMPLE_FIELDS when the file does not exist yet.
+    """
+    try:
+        if SAMPLES_CSV.exists():
+            with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
+                header = next(csv.reader(f), None)
+            if header:
+                return header
+    except Exception:
+        pass
+    return list(SAMPLE_FIELDS)
+
+
 def _ensure_samples_file():
     SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     if not SAMPLES_CSV.exists():
@@ -62,10 +82,14 @@ def append_sample_row(row: Dict[str, Any]):
     _ensure_samples_file()
     lock = FileLock(str(SAMPLES_CSV) + ".lock")
     with lock:
-        file_exists = SAMPLES_CSV.exists()
+        file_exists = SAMPLES_CSV.exists() and os.path.getsize(SAMPLES_CSV) > 0
+        # Match the real on-disk header (may be wider than SAMPLE_FIELDS);
+        # extrasaction="ignore" drops keys the header lacks (e.g. session_id),
+        # restval="" fills header columns the row dict doesn't provide.
+        fieldnames = _samples_fieldnames() if file_exists else list(SAMPLE_FIELDS)
         with open(SAMPLES_CSV, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
-            if not file_exists or os.path.getsize(SAMPLES_CSV) == 0:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
+            if not file_exists:
                 writer.writeheader()
             writer.writerow(row)
             f.flush()
@@ -90,8 +114,10 @@ def update_sample_row(sample_uid: str, updates: Dict[str, Any]):
     with lock:
         try:
             with open(SAMPLES_CSV, "r", newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            
+                reader = csv.DictReader(f)
+                fieldnames = list(reader.fieldnames or SAMPLE_FIELDS)
+                rows = list(reader)
+
             updated = False
             for row in rows:
                 if row.get("sample_uid") == sample_uid:
@@ -100,11 +126,11 @@ def update_sample_row(sample_uid: str, updates: Dict[str, Any]):
                             row[k] = v
                     updated = True
                     break
-            
+
             if updated:
                 tmp_path = str(SAMPLES_CSV) + ".tmp"
                 with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=SAMPLE_FIELDS)
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
                     writer.writeheader()
                     writer.writerows(rows)
                     f.flush()
@@ -112,6 +138,48 @@ def update_sample_row(sample_uid: str, updates: Dict[str, Any]):
                 os.replace(tmp_path, SAMPLES_CSV)
         except Exception as e:
             logging.getLogger(__name__).error("[UPDATE_SAMPLE_ROW] failed: %s", e)
+
+
+def update_sample_rows_bulk(updates: Dict[str, Dict[str, Any]]):
+    """Apply updates to many sample rows in ONE read+write of samples.csv.
+
+    updates: {sample_uid: {field: value, ...}, ...}
+
+    Replaces N calls to update_sample_row() (each of which rewrote the WHOLE
+    file under a lock — O(N^2) for a video that produces hundreds of npz).
+    Only fields present in SAMPLE_FIELDS are applied.
+    """
+    if not updates:
+        return
+    _ensure_samples_file()
+    lock = FileLock(str(SAMPLES_CSV) + ".lock")
+    with lock:
+        try:
+            with open(SAMPLES_CSV, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                fieldnames = list(reader.fieldnames or SAMPLE_FIELDS)
+                rows = list(reader)
+
+            changed = False
+            for row in rows:
+                upd = updates.get(row.get("sample_uid", ""))
+                if upd:
+                    for k, v in upd.items():
+                        if k in fieldnames:
+                            row[k] = v
+                    changed = True
+
+            if changed:
+                tmp_path = str(SAMPLES_CSV) + ".tmp"
+                with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
+                    writer.writeheader()
+                    writer.writerows(rows)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, SAMPLES_CSV)
+        except Exception as e:
+            logging.getLogger(__name__).error("[UPDATE_SAMPLE_ROWS_BULK] failed: %s", e)
 
 
 def count_samples_for_class(class_uid: str) -> int:
@@ -134,15 +202,22 @@ def count_samples_for_class(class_uid: str) -> int:
 
 
 def save_sequence_npz(
-    class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str
+    class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str,
+    upload_collector: "list | None" = None,
 ) -> str:
     """Save a (T,D) sequence locally first, then mirror to Google Drive when enabled.
 
     Returns the local file path. If Drive upload succeeds, the Drive URL is also stored
     in the sample metadata, but the local NPZ remains the canonical on-disk artifact.
+
+    upload_collector: when provided (a list), the Drive upload is NOT dispatched
+    per-file. Instead the upload descriptor is appended to this list so the caller
+    (e.g. the video pipeline generating hundreds of npz) can dispatch ONE batch
+    task — avoiding one Celery task + one GDrive session per file. When None
+    (default, e.g. camera capture = 1 file), a single upload task is dispatched
+    immediately as before.
     """
     import numpy as np
-    import io
 
     log = logging.getLogger(__name__)
 
@@ -160,11 +235,6 @@ def save_sequence_npz(
         "created_at": created_at,
         **meta,
     }
-
-    # Create in-memory buffer for npz
-    buffer = io.BytesIO()
-    np.savez_compressed(buffer, sequence=sequence.astype("float32"), meta=metadata)
-    buffer.seek(0)
 
     class_dir = class_meta.hierarchy_path()
     class_dir.mkdir(parents=True, exist_ok=True)
@@ -201,18 +271,23 @@ def save_sequence_npz(
     if use_google_drive:
         folder_name = class_meta.folder_name()
         storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
-        # Defer upload to Celery background task
-        try:
-            from app.export_tasks import upload_npz_to_gdrive_task
-            upload_npz_to_gdrive_task.delay(
-                sample_uid=sample_uid,
-                local_path=str(fpath),
-                storage_key=storage_key,
-                sidecar_path=str(sidecar)
-            )
-            log.info("[SAVE_SEQUENCE] Google Drive upload deferred to Celery for key: %s", storage_key)
-        except Exception as e:
-            log.warning("[SAVE_SEQUENCE] Failed to dispatch Celery upload task: %s", e)
+        upload_item = {
+            "sample_uid": sample_uid,
+            "local_path": str(fpath),
+            "storage_key": storage_key,
+            "sidecar_path": str(sidecar),
+        }
+        if upload_collector is not None:
+            # Batch mode: caller dispatches ONE task for all collected items.
+            upload_collector.append(upload_item)
+        else:
+            # Single mode (e.g. camera): dispatch immediately as before.
+            try:
+                from app.export_tasks import upload_npz_to_gdrive_task
+                upload_npz_to_gdrive_task.delay(**upload_item)
+                log.info("[SAVE_SEQUENCE] Google Drive upload deferred to Celery for key: %s", storage_key)
+            except Exception as e:
+                log.warning("[SAVE_SEQUENCE] Failed to dispatch Celery upload task: %s", e)
     else:
         log.info("[SAVE_SEQUENCE] Google Drive not enabled; keeping local copy only")
 
@@ -255,7 +330,10 @@ def save_sequence_npz(
             "augment_id": str(augment_id),
             "completeness": str(meta.get("completeness", "")),
             "file_path": relative_path,
-            "storage_key": storage_key if storage_url else "",
+            # storage_url is always None here (Drive upload is deferred to Celery),
+            # so the old `if storage_url` guard dropped the key entirely. Persist the
+            # computed storage_key immediately; the async task fills storage_url later.
+            "storage_key": storage_key or "",
             "storage_url": storage_url or "",
             "checksum": metadata.get("checksum", ""),
             "created_at": created_at,

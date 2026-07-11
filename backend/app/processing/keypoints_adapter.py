@@ -1,39 +1,11 @@
 import cv2
 import numpy as np
 import mediapipe as mp
-from typing import List, Tuple, Generator
+from typing import Tuple, Generator
 from app.config import settings
 
 # constants for hands only
 N_HAND = 21
-
-def extract_sequence_from_frames(frames: List[np.ndarray], config: dict = None):
-    """
-    frames: list of BGR images
-    return: np.ndarray shape (T, D) where D = 2 hands * 21 landmarks * 3 coords = 126
-    """
-    mp_hands = mp.solutions.hands
-    seq = []
-    with mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        model_complexity=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    ) as hands:
-        for frame in frames:
-            # Optionally mirror input frames (some frontends/cameras mirror preview)
-            if getattr(settings, "mirror_input", False):
-                frame = cv2.flip(frame, 1)
-            img_rgb = frame[:, :, ::-1]
-            results = hands.process(img_rgb)
-            kp_dict = extract_keypoints_from_results(results)
-            vec = flatten_keypoints(kp_dict)
-            seq.append(vec)
-    if len(seq) == 0:
-        return np.zeros((0, 126), dtype=np.float32)  # 2 hands * 21 * 3 = 126
-    return np.stack(seq, axis=0)
-
 
 def detect_and_vectorize(frame: np.ndarray) -> Tuple[np.ndarray, bool]:
     """

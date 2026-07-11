@@ -163,6 +163,41 @@ def export_labels_to_sheets(self):
         raise self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def mirror_catalog_csvs_to_drive(self):
+    """Periodically mirror local catalog CSV snapshots to Google Drive.
+
+    Why: the per-append Drive mirror was removed (it hammered the API on every
+    sample), which silently left the Drive copies of samples.csv / labels.csv /
+    raw_uploads.csv frozen. This batch task refreshes them on a beat schedule.
+    replace_existing=True updates each file IN PLACE, so existing share links
+    keep pointing at fresh content.
+    """
+    from app.storage.catalog_mirror import _mirror_csv_to_gdrive_sync
+    from app.dataset_samples import SAMPLES_CSV
+    from app.dataset_manager import MASTER_LABELS
+    from app.raw_uploads import RAW_UPLOADS_CSV
+
+    if not getattr(settings, "use_google_drive", False):
+        return {"status": "skipped", "reason": "gdrive_disabled"}
+
+    results = {}
+    for local_path, remote_name in [
+        (SAMPLES_CSV, "samples.csv"),
+        (MASTER_LABELS, "labels.csv"),
+        (RAW_UPLOADS_CSV, "raw_uploads.csv"),
+    ]:
+        try:
+            _mirror_csv_to_gdrive_sync(local_path, remote_name)
+            results[remote_name] = "ok"
+        except Exception as exc:  # per-file: one failure must not block the rest
+            logger.warning("[CSV_MIRROR] %s failed: %s", remote_name, exc)
+            results[remote_name] = f"failed: {exc}"
+
+    logger.info("[CSV_MIRROR] snapshot mirror done: %s", results)
+    return {"status": "done", "results": results}
+
+
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=15)
 def upload_raw_video_to_gdrive_task(
     self,
@@ -259,3 +294,82 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
     except Exception as exc:
         logger.error("[GDRIVE_UPLOAD] Upload failed for %s: %s", sample_uid, exc)
         raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def upload_npz_batch_to_gdrive_task(self, items: list):
+    """Upload MANY npz files in one task (video pipeline batches its output here).
+
+    Why: dispatching one task per npz meant hundreds of Celery tasks + hundreds
+    of Drive sessions per video (429 risk, queue flooding). This uploads the
+    whole batch reusing the singleton Drive client, then updates samples.csv
+    ONCE for the batch instead of rewriting the whole file per file.
+
+    Failed items are retried as a smaller batch (successful uploads are not
+    repeated). The local npz stays canonical, so nothing is lost on failure.
+    """
+    from app.storage.gdrive_client import upload_to_gdrive
+    from app.processing.utils import atomic_write_json
+    from app.storage.metadata_db import update_sample_gdrive_url
+    from app.dataset_samples import update_sample_rows_bulk
+    import json
+    import os
+
+    if not items:
+        return {"status": "skipped", "reason": "empty_batch"}
+
+    csv_updates: Dict[str, Dict[str, Any]] = {}
+    failed: List[Dict[str, Any]] = []
+    ok = 0
+
+    for it in items:
+        sample_uid = it.get("sample_uid", "")
+        local_path = it.get("local_path", "")
+        storage_key = it.get("storage_key", "")
+        sidecar_path = it.get("sidecar_path", "")
+        try:
+            if not local_path or not os.path.exists(local_path):
+                logger.warning("[GDRIVE_BATCH] file not found, skipping: %s", local_path)
+                continue
+
+            storage_url = upload_to_gdrive(local_path, storage_key)
+            if not storage_url:
+                raise RuntimeError("upload_to_gdrive returned None")
+
+            # sidecar (best-effort, per item)
+            try:
+                if sidecar_path and os.path.exists(sidecar_path):
+                    with open(sidecar_path, "r", encoding="utf-8") as f:
+                        metadata = json.load(f)
+                    metadata["storage_url"] = storage_url
+                    metadata["storage_key"] = storage_key
+                    metadata["storage_provider"] = "local+gdrive"
+                    atomic_write_json(sidecar_path, metadata, indent=2)
+            except Exception as e:
+                logger.warning("[GDRIVE_BATCH] sidecar update failed for %s: %s", sample_uid, e)
+
+            # DB per-item (pooled connection → cheap)
+            try:
+                update_sample_gdrive_url(sample_uid, storage_url)
+            except Exception as e:
+                logger.warning("[GDRIVE_BATCH] DB update failed for %s: %s", sample_uid, e)
+
+            csv_updates[sample_uid] = {"storage_url": storage_url, "storage_key": storage_key}
+            ok += 1
+        except Exception as e:
+            logger.warning("[GDRIVE_BATCH] upload failed for %s: %s", sample_uid, e)
+            failed.append(it)
+
+    # ONE csv rewrite for the whole batch (T3.2)
+    try:
+        update_sample_rows_bulk(csv_updates)
+    except Exception as e:
+        logger.error("[GDRIVE_BATCH] bulk csv update failed: %s", e)
+
+    logger.info("[GDRIVE_BATCH] done: uploaded=%d failed=%d total=%d", ok, len(failed), len(items))
+
+    if failed and self.request.retries < self.max_retries:
+        # Retry ONLY the failed items so successful uploads aren't repeated.
+        raise self.retry(args=[failed], countdown=30)
+
+    return {"status": "done", "uploaded": ok, "failed": len(failed)}

@@ -5,29 +5,6 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def sample_frames_from_video(video_path: str, target_fps: float = 5.0):
-    """
-    Decode video and sample frames roughly at target_fps.
-    Returns list of BGR numpy arrays.
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError("Cannot open video file")
-    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    sample_rate = max(1, int(video_fps / target_fps))
-    frames = []
-    idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if idx % sample_rate == 0:
-            frames.append(frame)
-        idx += 1
-    cap.release()
-    return frames
-
-
 def ffmpeg_resample(input_path: str, fps_target: int) -> Tuple[str, float, float]:
     """
     If ffmpeg is available, resample video to fixed fps before processing.
@@ -113,11 +90,13 @@ def frame_generator(video_path: str,
                 pass
 
 
-def temporal_speed_variants(video_path: str, speeds=[1.0, 1.2, 0.8]) -> list:
+def temporal_speed_variants(video_path: str, speeds=None) -> list:
     """
     Create temporal speed variants of video using ffmpeg setpts filter.
     Returns list of (speed_factor, temp_video_path).
     """
+    if speeds is None:
+        speeds = [1.0, 1.2, 0.8]
     variants = []
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
