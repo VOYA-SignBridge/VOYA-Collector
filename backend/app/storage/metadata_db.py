@@ -616,6 +616,89 @@ def delete_class(class_uid: str):
     _execute("DELETE FROM classes WHERE class_uid = %s", (class_uid,))
 
 
+# ---------------------------------------------------------------------------
+# Soft delete / restore (Trash) — sets deleted_at instead of removing the row.
+# Files and Drive content are kept; a purge (hard delete) removes them later.
+# ---------------------------------------------------------------------------
+
+def soft_delete_class(class_uid: str):
+    _execute("UPDATE classes SET deleted_at = NOW() WHERE class_uid = %s AND deleted_at IS NULL", (class_uid,))
+
+
+def soft_delete_samples_by_class(class_uid: str):
+    _execute("UPDATE samples SET deleted_at = NOW() WHERE class_uid = %s AND deleted_at IS NULL", (class_uid,))
+
+
+def soft_delete_raw_uploads_by_class(class_uid: str):
+    _execute("UPDATE raw_uploads SET deleted_at = NOW() WHERE class_uid = %s AND deleted_at IS NULL", (class_uid,))
+
+
+def restore_class(class_uid: str):
+    _execute("UPDATE classes SET deleted_at = NULL WHERE class_uid = %s", (class_uid,))
+
+
+def restore_samples_by_class(class_uid: str):
+    _execute("UPDATE samples SET deleted_at = NULL WHERE class_uid = %s", (class_uid,))
+
+
+def restore_raw_uploads_by_class(class_uid: str):
+    _execute("UPDATE raw_uploads SET deleted_at = NULL WHERE class_uid = %s", (class_uid,))
+
+
+def soft_delete_sample(sample_uid: str):
+    _execute("UPDATE samples SET deleted_at = NOW() WHERE sample_uid = %s AND deleted_at IS NULL", (sample_uid,))
+
+
+def restore_sample(sample_uid: str):
+    _execute("UPDATE samples SET deleted_at = NULL WHERE sample_uid = %s", (sample_uid,))
+
+
+def list_deleted_classes() -> List[Dict[str, Any]]:
+    """Soft-deleted classes for the Trash view, with their live sample counts."""
+    return _fetch_all(
+        """
+        SELECT c.class_uid, c.class_idx, c.slug, c.label_original, c.language,
+               c.dialect, c.is_common_global, c.is_common_language, c.folder_name,
+               c.created_at, c.migrated_at, c.deleted_at,
+               (SELECT COUNT(*) FROM samples s WHERE s.class_uid = c.class_uid) AS sample_count
+        FROM classes c
+        WHERE c.deleted_at IS NOT NULL
+        ORDER BY c.deleted_at DESC
+        """
+    )
+
+
+def get_deleted_class(class_uid: str) -> Optional[Dict[str, Any]]:
+    rows = _fetch_all("SELECT * FROM classes WHERE class_uid = %s AND deleted_at IS NOT NULL", (class_uid,))
+    return rows[0] if rows else None
+
+
+def list_samples_by_class(class_uid: str, include_deleted: bool = True) -> List[Dict[str, Any]]:
+    where = "class_uid = %s" if include_deleted else "class_uid = %s AND deleted_at IS NULL"
+    return _fetch_all(f"SELECT * FROM samples WHERE {where}", (class_uid,))
+
+
+def list_deleted_samples() -> List[Dict[str, Any]]:
+    """Soft-deleted samples whose CLASS is still active (class-level trash lists
+    classes separately, so this avoids double-listing a whole deleted class)."""
+    return _fetch_all(
+        """
+        SELECT s.sample_uid, s.class_uid, s.slug, s.label_original, s.language,
+               s.dialect, s.source_type, s.user_id, s.username, s.file_path,
+               s.storage_url, s.seq_len, s.created_at, s.deleted_at
+        FROM samples s
+        JOIN classes c ON c.class_uid = s.class_uid
+        WHERE s.deleted_at IS NOT NULL AND c.deleted_at IS NULL
+        ORDER BY s.deleted_at DESC
+        """
+    )
+
+
+def get_deleted_sample(sample_uid: str) -> Optional[Dict[str, Any]]:
+    rows = _fetch_all("SELECT * FROM samples WHERE sample_uid = %s AND deleted_at IS NOT NULL", (sample_uid,))
+    return rows[0] if rows else None
+
+
 def get_sample_owner(sample_uid: str):
     """Return auth_user_id (str or None) for a sample. Used for ownership checks."""
     try:

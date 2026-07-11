@@ -23,6 +23,7 @@ const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"));
+const TrashPage = lazy(() => import("./pages/TrashPage"));
 
 
 // Protected Route Wrapper
@@ -125,6 +126,15 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <AdminUsersPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/trash"
+                element={
+                  <ProtectedRoute>
+                    <TrashPage />
                   </ProtectedRoute>
                 }
               />

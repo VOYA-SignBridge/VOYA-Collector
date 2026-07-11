@@ -11,7 +11,15 @@ from app.config import settings
 from app.dataset_manager import load_labels, ClassMetadata
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
-from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_delete_sample, sync_update_class
+from app.catalog_sync import (
+    CatalogSyncError,
+    sync_update_class,
+    sync_soft_delete_class,
+    sync_soft_delete_sample,
+    sync_restore_sample,
+    sync_purge_sample,
+    list_trash_samples,
+)
 from app.auth import get_current_user, get_current_user_optional, require_admin
 from app.storage.metadata_db import get_sample_owner
 
@@ -175,7 +183,7 @@ def delete_label(
     admin_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
-        result = sync_delete_class(class_ref)
+        result = sync_soft_delete_class(class_ref)
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
@@ -229,14 +237,53 @@ def get_sample_data(sample_id: str):
     return FileResponse(str(resolved[0]), media_type="application/octet-stream")
 
 
+@router.get("/samples/trash")
+def list_sample_trash(current_user: Dict[str, Any] = Depends(require_admin)):
+    """List soft-deleted samples (whose class is still active). Admin only."""
+    try:
+        items = list_trash_samples()
+        return {"count": len(items), "items": items}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Không đọc được thùng rác mẫu: {exc}")
+
+
 @router.delete("/samples/{sample_id}")
 def delete_sample(
     sample_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
+    """Soft-delete a sample to Trash (restorable)."""
     _check_sample_ownership(sample_id, current_user)
     try:
-        result = sync_delete_sample(sample_id)
+        result = sync_soft_delete_sample(sample_id)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post("/samples/{sample_id}/restore")
+def restore_sample_endpoint(
+    sample_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Restore a soft-deleted sample from Trash."""
+    _check_sample_ownership(sample_id, current_user)
+    try:
+        result = sync_restore_sample(sample_id)
+        return {"success": True, **result}
+    except CatalogSyncError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.delete("/samples/{sample_id}/purge")
+def purge_sample_endpoint(
+    sample_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Permanently delete a sample (file + Drive + DB). Irreversible."""
+    _check_sample_ownership(sample_id, current_user)
+    try:
+        result = sync_purge_sample(sample_id)
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

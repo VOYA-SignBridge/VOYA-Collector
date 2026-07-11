@@ -8,7 +8,14 @@ from app.dataset_manager import get_or_register_class, list_classes, normalize_d
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
-from app.catalog_sync import CatalogSyncError, sync_delete_class, sync_update_class
+from app.catalog_sync import (
+    CatalogSyncError,
+    sync_update_class,
+    sync_soft_delete_class,
+    sync_restore_class,
+    sync_purge_class,
+    list_trash_classes,
+)
 from app.config import settings
 from app.auth import get_current_user, require_admin
 
@@ -246,16 +253,27 @@ def update_class(
         }
 
 
+@router.get("/trash")
+def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
+    """List soft-deleted classes (Trash). Admin only."""
+    try:
+        items = list_trash_classes()
+        return {"count": len(items), "items": items}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Kh\u00f4ng \u0111\u1ecdc \u0111\u01b0\u1ee3c th\u00f9ng r\u00e1c: {exc}")
+
+
 @router.delete("/{class_ref}")
 def delete_class(
     class_ref: str,
     current_user: Dict[str, Any] = Depends(require_admin),
 ):
+    """Soft-delete a class to Trash (restorable). Files/Drive are kept until purge."""
     try:
-        result = sync_delete_class(class_ref)
+        result = sync_soft_delete_class(class_ref)
         return {
             "success": True,
-            "message": f"Nh\u00e3n \u0111\u01b0\u1ee3c x\u00f3a th\u00e0nh c\u00f4ng. \u0110\u00e3 x\u00f3a {result.get('sample_count', 0)} m\u1eabu v\u00e0 {result.get('raw_upload_count', 0)} video g\u1ed1c.",
+            "message": f"\u0110\u00e3 chuy\u1ec3n nh\u00e3n v\u00e0o th\u00f9ng r\u00e1c ({result.get('sample_count', 0)} m\u1eabu). C\u00f3 th\u1ec3 kh\u00f4i ph\u1ee5c.",
             "op_id": result.get("op_id"),
             "operation_logs": result.get("operation_logs"),
             **result,
@@ -267,3 +285,29 @@ def delete_class(
             "error_code": exc.error_code,
             "operation_logs": getattr(exc, "logs", None),
         }
+
+
+@router.post("/{class_uid}/restore")
+def restore_class_endpoint(
+    class_uid: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Restore a soft-deleted class from Trash."""
+    try:
+        result = sync_restore_class(class_uid)
+        return {"success": True, "message": "\u0110\u00e3 kh\u00f4i ph\u1ee5c nh\u00e3n t\u1eeb th\u00f9ng r\u00e1c.", **result}
+    except CatalogSyncError as exc:
+        return {"success": False, "message": f"L\u1ed7i kh\u00f4i ph\u1ee5c nh\u00e3n: {str(exc)}", "error_code": exc.error_code}
+
+
+@router.delete("/{class_uid}/purge")
+def purge_class_endpoint(
+    class_uid: str,
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Permanently delete a class (files + Drive + DB). Irreversible."""
+    try:
+        result = sync_purge_class(class_uid)
+        return {"success": True, "message": "\u0110\u00e3 x\u00f3a v\u0129nh vi\u1ec5n nh\u00e3n.", **result}
+    except CatalogSyncError as exc:
+        return {"success": False, "message": f"L\u1ed7i x\u00f3a v\u0129nh vi\u1ec5n: {str(exc)}", "error_code": exc.error_code}
