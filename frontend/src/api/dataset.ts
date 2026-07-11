@@ -194,6 +194,89 @@ export const updateClass = async (
   }
 };
 
+// --- Trash (soft delete) API ---
+export interface TrashClass {
+  class_uid: string;
+  class_idx?: number | string;
+  slug?: string;
+  label_original?: string;
+  language?: string;
+  dialect?: string;
+  sample_count?: number;
+  deleted_at?: string;
+}
+
+export interface TrashSample {
+  sample_uid: string;
+  class_uid?: string;
+  slug?: string;
+  label_original?: string;
+  language?: string;
+  dialect?: string;
+  user_id?: string;
+  username?: string;
+  seq_len?: number | string;
+  deleted_at?: string;
+}
+
+export const getClassTrash = async (): Promise<Result<TrashClass[]>> => {
+  try {
+    const res = await axiosClient.get("/classes/trash");
+    const items = Array.isArray(res.data?.items) ? (res.data.items as TrashClass[]) : [];
+    return { ok: true, data: items };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Không đọc được thùng rác" };
+  }
+};
+
+export const restoreClass = async (classUid: string): Promise<Result<null>> => {
+  try {
+    const res = await axiosClient.post(`/classes/${classUid}/restore`);
+    if (res.data?.success === false) return { ok: false, error: res.data?.message || "Lỗi khôi phục" };
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Lỗi khôi phục" };
+  }
+};
+
+export const purgeClass = async (classUid: string): Promise<Result<null>> => {
+  try {
+    const res = await axiosClient.delete(`/classes/${classUid}/purge`);
+    if (res.data?.success === false) return { ok: false, error: res.data?.message || "Lỗi xóa vĩnh viễn" };
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Lỗi xóa vĩnh viễn" };
+  }
+};
+
+export const getSampleTrash = async (): Promise<Result<TrashSample[]>> => {
+  try {
+    const res = await axiosClient.get("/dataset/samples/trash");
+    const items = Array.isArray(res.data?.items) ? (res.data.items as TrashSample[]) : [];
+    return { ok: true, data: items };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Không đọc được thùng rác mẫu" };
+  }
+};
+
+export const restoreSample = async (sampleId: string): Promise<Result<null>> => {
+  try {
+    await axiosClient.post(`/dataset/samples/${sampleId}/restore`);
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Lỗi khôi phục mẫu" };
+  }
+};
+
+export const purgeSample = async (sampleId: string): Promise<Result<null>> => {
+  try {
+    await axiosClient.delete(`/dataset/samples/${sampleId}/purge`);
+    return { ok: true, data: null };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Lỗi xóa vĩnh viễn mẫu" };
+  }
+};
+
 export const deleteClass = async (classRef: string): Promise<Result<{ message: string; deleted: boolean; class_uid: string; class_idx: number; sample_count: number; raw_upload_count: number; op_id?: string; operation_logs?: string[] }>> => {
   try {
     const res = await axiosClient.delete(`/classes/${classRef}`);
