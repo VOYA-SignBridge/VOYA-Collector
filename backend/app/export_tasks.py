@@ -198,6 +198,67 @@ def mirror_catalog_csvs_to_drive(self):
     return {"status": "done", "results": results}
 
 
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def delete_gdrive_paths_task(self, rel_paths: list):
+    """Delete Drive folders/files by dataset-relative path (async cleanup).
+
+    Catalog class delete now removes local files + DB rows synchronously and
+    defers Drive cleanup to this task, so the HTTP request never blocks on — or
+    fails because of — Drive I/O. Best-effort: a Drive delete failure is logged
+    and retried, never rolled back into the (already committed) local delete.
+    """
+    if not getattr(settings, "use_google_drive", False):
+        return {"status": "skipped", "reason": "gdrive_disabled"}
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    results = {}
+    for rel in rel_paths or []:
+        if not rel:
+            continue
+        try:
+            client.delete_path(rel)
+            results[rel] = "ok"
+        except Exception as exc:  # per-path: one failure must not block the rest
+            logger.warning("[GDRIVE_DELETE] %s failed: %s", rel, exc)
+            results[rel] = f"failed: {exc}"
+    logger.info("[GDRIVE_DELETE] done: %s", results)
+    return {"status": "done", "results": results}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def move_gdrive_paths_task(self, pairs: list):
+    """Move Drive folders by (old_rel, new_rel) path pairs (async, after a
+    local class rename). Tolerant of a missing source folder — many classes
+    have features on Drive but never uploaded raw videos — so a missing folder
+    is skipped, never raised. Best-effort: failures are logged, not rolled back
+    into the committed local rename."""
+    if not getattr(settings, "use_google_drive", False):
+        return {"status": "skipped", "reason": "gdrive_disabled"}
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    results = {}
+    for pair in pairs or []:
+        try:
+            old_rel, new_rel = pair[0], pair[1]
+        except (TypeError, IndexError):
+            continue
+        key = f"{old_rel} -> {new_rel}"
+        try:
+            client.move_folder_path(old_rel, new_rel)
+            results[key] = "ok"
+        except FileNotFoundError:
+            results[key] = "skipped (source missing)"
+        except Exception as exc:
+            logger.warning("[GDRIVE_MOVE] %s failed: %s", key, exc)
+            results[key] = f"failed: {exc}"
+    logger.info("[GDRIVE_MOVE] done: %s", results)
+    return {"status": "done", "results": results}
+
+
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=15)
 def upload_raw_video_to_gdrive_task(
     self,

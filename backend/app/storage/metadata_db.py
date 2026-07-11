@@ -44,7 +44,27 @@ def _bool_value(value: Any) -> bool:
 
 def _int_or_none(value: Any) -> int | None:
     text = str(value).strip() if value is not None else ""
-    return int(text) if text else None
+    try:
+        return int(text) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    text = str(value).strip() if value is not None else ""
+    try:
+        return float(text) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ts_or_none(value: Any) -> Any:
+    """Empty string -> NULL for timestamp columns (CSV mirror leaves them blank,
+    which Postgres rejects as 'invalid input syntax for type timestamp')."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 DDL_STATEMENTS = [
@@ -320,7 +340,7 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     dialect = EXCLUDED.dialect,
     source_type = EXCLUDED.source_type,
     user_id = EXCLUDED.user_id,
-    auth_user_id = EXCLUDED.auth_user_id,
+    auth_user_id = COALESCE(EXCLUDED.auth_user_id, samples.auth_user_id),
     session_id = EXCLUDED.session_id,
     fps_original = EXCLUDED.fps_original,
     fps_processed = EXCLUDED.fps_processed,
@@ -353,7 +373,7 @@ ON CONFLICT (upload_uid) DO UPDATE SET
     dialect = EXCLUDED.dialect,
     source_type = EXCLUDED.source_type,
     user_id = EXCLUDED.user_id,
-    auth_user_id = EXCLUDED.auth_user_id,
+    auth_user_id = COALESCE(EXCLUDED.auth_user_id, raw_uploads.auth_user_id),
     session_id = EXCLUDED.session_id,
     original_filename = EXCLUDED.original_filename,
     local_path = EXCLUDED.local_path,
@@ -379,14 +399,38 @@ def upsert_class(row: Dict[str, Any]):
         "class_idx": _int_or_none(row.get("class_idx")),
         "is_common_global": _bool_value(row.get("is_common_global")),
         "is_common_language": _bool_value(row.get("is_common_language")),
+        "created_at": _ts_or_none(row.get("created_at")),
+        "migrated_at": _ts_or_none(row.get("migrated_at")),
     }
     _execute(SQL_UPSERT_CLASS, payload)
 
 
+_SAMPLE_DB_KEYS = (
+    "sample_uid", "class_uid", "slug", "label_original", "language", "dialect",
+    "source_type", "user_id", "auth_user_id", "session_id", "fps_original", "fps_processed",
+    "seq_len", "augment_id", "completeness", "file_path", "storage_url", "checksum",
+    "created_at", "gdrive_synced",
+)
+
+
 def insert_sample(row: Dict[str, Any]):
-    if "gdrive_synced" not in row:
-        row["gdrive_synced"] = True
-    _execute(SQL_UPSERT_SAMPLE, row)
+    # Rows can arrive from the CSV mirror, which lacks DB-only columns
+    # (auth_user_id) and names the session column differently (session_uid).
+    # Build the payload defensively so a missing key never raises KeyError
+    # mid-CRUD; ON CONFLICT COALESCEs auth_user_id so a lossy mirror upsert
+    # doesn't wipe the real value.
+    payload = {k: row.get(k) for k in _SAMPLE_DB_KEYS}
+    if not payload.get("session_id"):
+        payload["session_id"] = row.get("session_id") or row.get("session_uid") or ""
+    # Numeric columns are empty strings in the CSV mirror; coerce "" -> NULL so
+    # Postgres doesn't reject them ("invalid input syntax for type real/integer").
+    payload["seq_len"] = _int_or_none(payload.get("seq_len"))
+    payload["augment_id"] = _int_or_none(payload.get("augment_id"))
+    payload["completeness"] = _float_or_none(payload.get("completeness"))
+    payload["created_at"] = _ts_or_none(payload.get("created_at"))
+    if payload.get("gdrive_synced") is None:
+        payload["gdrive_synced"] = True
+    _execute(SQL_UPSERT_SAMPLE, payload)
 
 
 def upsert_sample(row: Dict[str, Any]):
@@ -409,8 +453,20 @@ def delete_samples_by_class(class_uid: str):
     _execute("DELETE FROM samples WHERE class_uid = %s", (class_uid,))
 
 
+_RAW_UPLOAD_DB_KEYS = (
+    "upload_uid", "class_uid", "slug", "label_original", "language", "dialect",
+    "source_type", "user_id", "auth_user_id", "session_id", "original_filename",
+    "local_path", "storage_key", "storage_url", "created_at", "updated_at",
+)
+
+
 def insert_raw_upload(row: Dict[str, Any]):
-    _execute(SQL_UPSERT_RAW_UPLOAD, row)
+    payload = {k: row.get(k) for k in _RAW_UPLOAD_DB_KEYS}
+    if not payload.get("session_id"):
+        payload["session_id"] = row.get("session_id") or row.get("session_uid") or ""
+    payload["created_at"] = _ts_or_none(payload.get("created_at"))
+    payload["updated_at"] = _ts_or_none(payload.get("updated_at"))
+    _execute(SQL_UPSERT_RAW_UPLOAD, payload)
 
 
 def update_raw_upload_gdrive_url(upload_uid: str, storage_url: str):
