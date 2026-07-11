@@ -37,6 +37,21 @@ class Settings(BaseSettings):
     broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
     result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
+    # Postgres connection pool (used by the high-frequency metadata_db path).
+    # Per-process pool; keep pool_max small so backend+worker+trainer combined
+    # stay well under Postgres max_connections (default 100).
+    db_pool_min: int = int(os.getenv("DB_POOL_MIN", "1"))
+    db_pool_max: int = int(os.getenv("DB_POOL_MAX", "8"))
+    db_connect_timeout: int = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
+
+    # Celery memory hygiene: recycle prefork children to release native
+    # memory held by MediaPipe/OpenCV. Tune per host RAM.
+    worker_max_tasks_per_child: int = int(os.getenv("WORKER_MAX_TASKS_PER_CHILD", "15"))
+    # KB. Child restarts when it exceeds this (van an toàn chống OOM).
+    worker_max_memory_per_child_kb: int = int(
+        os.getenv("WORKER_MAX_MEMORY_PER_CHILD_KB", "1200000")
+    )
+
     # Parallel download tuning for batch export / training materialization
     storage_download_workers: int = int(os.getenv("STORAGE_DOWNLOAD_WORKERS", "4"))
     storage_download_timeout_seconds: int = int(os.getenv("STORAGE_DOWNLOAD_TIMEOUT_SECONDS", "120"))
@@ -56,6 +71,7 @@ class Settings(BaseSettings):
     google_drive_timeout_seconds: int = int(os.getenv("GOOGLE_DRIVE_TIMEOUT_SECONDS", "180"))
     google_drive_num_retries: int = int(os.getenv("GOOGLE_DRIVE_NUM_RETRIES", "5"))
     google_drive_chunk_mb: int = int(os.getenv("GOOGLE_DRIVE_CHUNK_MB", "8"))
+    google_drive_download_chunk_mb: int = int(os.getenv("GOOGLE_DRIVE_DOWNLOAD_CHUNK_MB", "10"))
     google_drive_simple_upload_threshold_mb: int = int(os.getenv("GOOGLE_DRIVE_SIMPLE_UPLOAD_THRESHOLD_MB", "64"))
     gdrive_filename_suffix: str = os.getenv("GDRIVE_FILENAME_SUFFIX", "")
     google_sheets_labels_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_LABELS_SPREADSHEET_ID", "")
@@ -110,7 +126,9 @@ class Settings(BaseSettings):
     # Comma-separated list of speed variants (e.g., "1.0,1.2,0.8")
     speed_variants_raw: str = os.getenv("SPEED_VARIANTS", "1.0")
     # Maximum number of saved samples per class per job
-    max_samples_per_class: int = int(os.getenv("MAX_SAMPLES_PER_CLASS", 80))
+    max_samples_per_class: int = int(os.getenv("MAX_SAMPLES_PER_CLASS", 200))
+    # How many npz per batched Drive-upload Celery task (video pipeline).
+    npz_upload_batch_size: int = int(os.getenv("NPZ_UPLOAD_BATCH_SIZE", 50))
     # Parsed list of speed variants; populated in __init__
     speed_variants: List[float] = [1.0, 1.2, 0.8]
 

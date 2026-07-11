@@ -6,27 +6,27 @@ import logging
 import re
 
 from app.config import settings
-from app.storage.postgres_connection import connect_postgres
+from app.storage.postgres_connection import get_pooled_conn, put_pooled_conn
 
 logger = logging.getLogger(__name__)
-
-def _get_conn():
-    # connect_timeout + application_name giúp dễ quan sát và fail fast hơn trong production
-    return connect_postgres(
-        connect_timeout=5,
-        application_name="voya_backend_metadata_db",
-    )
 
 
 @contextmanager
 def _cursor():
-    conn = _get_conn()
+    # Borrow from the process-local pool instead of opening a fresh connection
+    # per query (hot path: hundreds of insert/update during npz upload).
+    conn = get_pooled_conn()
+    broken = False
     try:
-        with conn:
+        with conn:  # commits on success, rolls back on exception
             with conn.cursor() as cur:
                 yield cur
+    except Exception:
+        # A rolled-back connection stays reusable; only discard if truly dead.
+        broken = bool(getattr(conn, "closed", 0))
+        raise
     finally:
-        conn.close()
+        put_pooled_conn(conn, close=broken)
 
 
 def _execute(sql: str, params: Dict[str, Any] | tuple | None = None) -> None:
@@ -479,14 +479,18 @@ def insert_training_metric(row: Dict[str, Any]):
 
 
 def _fetch_all(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
-    conn = _get_conn()
+    conn = get_pooled_conn()
+    broken = False
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(sql, params)
                 return [dict(r) for r in cur.fetchall()]
+    except Exception:
+        broken = bool(getattr(conn, "closed", 0))
+        raise
     finally:
-        conn.close()
+        put_pooled_conn(conn, close=broken)
 
 
 def get_training_job(job_id: str) -> Optional[Dict[str, Any]]:

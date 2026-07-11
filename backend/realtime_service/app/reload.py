@@ -97,11 +97,27 @@ def reload_model(req: ReloadRequest, request: Request) -> ReloadResponse:
         raise HTTPException(status_code=422, detail=str(exc))
 
     # Atomic swap — old bundle stays live until this assignment completes
+    old_bundle = request.app.state.model_bundles.get(model_id)
     request.app.state.model_bundles[model_id] = bundle
     logger.info(
         "[RELOAD] swapped model_id=%s warmup_ok=%s loaded_at=%s",
         model_id, bundle.warmup_ok, bundle.loaded_at,
     )
+
+    # Free the replaced model explicitly — otherwise its weights linger until
+    # the next GC pass, accumulating across retrains.
+    if old_bundle is not None:
+        del old_bundle
+        import gc
+
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     return ReloadResponse(
         dialect=dialect,

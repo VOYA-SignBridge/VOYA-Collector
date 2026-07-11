@@ -6,6 +6,7 @@ sqlalchemy==1.4.50
 psycopg2-binary==2.9.7
 celery==5.3.1
 redis[hiredis]==4.5.1
+psutil==5.9.8
 python-dotenv==1.0.0
 numpy==1.26.2
 opencv-python-headless==4.11.0.86

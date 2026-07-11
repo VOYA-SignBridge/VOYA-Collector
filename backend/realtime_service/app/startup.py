@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import importlib.util
 import logging
+import os
 import time
 import urllib.request
 from pathlib import Path
@@ -15,6 +16,25 @@ from .model_loader import build_bundle, compute_file_sha256, load_checkpoint
 from .registry import load_registry
 
 logger = logging.getLogger("realtime_service.startup")
+
+
+def _configure_torch_runtime() -> None:
+    """Constrain torch runtime for a low-footprint inference service.
+
+    - Disable autograd globally (inference only) → no graph/metadata overhead.
+    - Cap CPU threads (default 1) so many small requests don't spawn a thread
+      storm that inflates RSS. Override with REALTIME_TORCH_THREADS.
+    """
+    try:
+        import torch
+
+        torch.set_grad_enabled(False)
+        threads = int(os.getenv("REALTIME_TORCH_THREADS", "1") or "1")
+        if threads > 0:
+            torch.set_num_threads(threads)
+        logger.info("[STARTUP] torch runtime: grad=off cpu_threads=%d", threads)
+    except Exception as exc:  # torch must exist, but never block startup on tuning
+        logger.warning("[STARTUP] torch runtime config skipped: %s", exc)
 
 
 def _load_normalization_module(normalization_py_path: str) -> Any:
@@ -210,6 +230,8 @@ def initialize_app_state(
     builds bundles from those checkpoints. Falls back to models.json if the
     backend is unreachable or returns no loadable models.
     """
+    _configure_torch_runtime()
+
     logger.info("[STARTUP] loading normalization module path=%s", normalization_py_path)
     normalization_module = _load_normalization_module(normalization_py_path)
 

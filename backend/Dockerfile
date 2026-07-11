@@ -9,8 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+# --retries/--timeout make the install resilient to slow mirrors and the
+# IncompleteRead/"Connection broken" errors seen when large wheels
+# (opencv, numpy, torch) get interrupted mid-download.
 RUN python -m pip install --no-cache-dir --upgrade pip && \
-    python -m pip install --no-cache-dir --user -r requirements.txt
+    python -m pip install --no-cache-dir --user \
+        --retries 10 --timeout 180 \
+        -r requirements.txt
 
 # Runtime stage
 FROM python:3.11-slim
