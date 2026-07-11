@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -19,6 +19,9 @@ from app.catalog_sync import (
     sync_restore_sample,
     sync_purge_sample,
     list_trash_samples,
+    bulk_restore_samples,
+    bulk_purge_samples,
+    empty_sample_trash,
 )
 from app.auth import get_current_user, get_current_user_optional, require_admin
 from app.storage.metadata_db import get_sample_owner
@@ -245,6 +248,30 @@ def list_sample_trash(current_user: Dict[str, Any] = Depends(require_admin)):
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Không đọc được thùng rác mẫu: {exc}")
+
+
+@router.post("/samples/trash/restore")
+def bulk_restore_samples_endpoint(
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Restore several soft-deleted samples. Body: {sample_uids: [...]}."""
+    result = bulk_restore_samples(payload.get("sample_uids") or [])
+    return {"success": True, "message": f"Đã khôi phục {result['ok_count']} mẫu.", **result}
+
+
+@router.post("/samples/trash/purge")
+def bulk_purge_samples_endpoint(
+    payload: dict = Body(default={}),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Permanently delete samples. Body: {sample_uids: [...]} for a selection, or
+    {all: true} to empty the whole sample trash. Irreversible."""
+    if payload.get("all"):
+        result = empty_sample_trash()
+    else:
+        result = bulk_purge_samples(payload.get("sample_uids") or [])
+    return {"success": True, "message": f"Đã xóa vĩnh viễn {result['ok_count']} mẫu.", **result}
 
 
 @router.delete("/samples/{sample_id}")
