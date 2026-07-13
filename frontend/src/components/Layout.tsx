@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { clearAuthToken, loadAuthToken } from "../api/axiosClient";
-import { me as fetchMe } from "../api/auth";
-import type { AuthUser } from "../api/auth";
+import { clearAuthToken } from "../api/axiosClient";
+import { logout as apiLogout } from "../api/auth";
+import { useAuth, hasSessionHint } from "../contexts/AuthContext";
+import { usePresence } from "../hooks/usePresence";
+import { useIdleLogout } from "../hooks/useIdleLogout";
+import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
 import { ChipIcon, HandIcon, HomeIcon, RefreshIcon, TagIcon, UploadIcon } from "./ui/Icons";
@@ -23,14 +26,22 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const [hasToken, setHasToken] = useState<boolean>(() => !!loadAuthToken());
-  const [user, setUser] = useState<AuthUser | null>(null);
+  // User comes from the single shared AuthProvider (no duplicate /auth/me here).
+  const { user } = useAuth();
+  // Presence heartbeat + opt-in precise geolocation for the admin monitor.
+  usePresence(!!user);
+  // Inactivity auto-logout (default 90 min of no real interaction → sign out).
+  useIdleLogout(!!user);
+  // Synchronous session hint just for instant chrome painting (sidebar/header)
+  // so a logged-in reload doesn't flash the guest layout while /auth/me is in
+  // flight. No network — reads the token/cookie hint and updates on auth events.
+  const [hasToken, setHasToken] = useState<boolean>(() => hasSessionHint());
   const AUTH_PAGE_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
   const isAuthPage = AUTH_PAGE_PATHS.includes(location.pathname);
 
   useEffect(() => {
     const syncAuthState = () => {
-      setHasToken(!!loadAuthToken());
+      setHasToken(hasSessionHint());
     };
 
     window.addEventListener(AUTH_EVENT, syncAuthState);
@@ -41,27 +52,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       window.removeEventListener("storage", syncAuthState);
     };
   }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    async function loadUser() {
-      if (!hasToken) {
-        setUser(null);
-        return;
-      }
-      try {
-        const u = await fetchMe();
-        if (mounted) setUser(u);
-      } catch (err) {
-        if (mounted) setUser(null);
-      }
-    }
-
-    loadUser();
-    return () => {
-      mounted = false;
-    };
-  }, [hasToken]);
 
   const navIconClass = "h-5 w-5";
   const baseNavigation: AnyNavItem[] = [
@@ -78,7 +68,10 @@ export default function Layout({ children }: { children: ReactNode }) {
       name: "Quản trị",
       icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>,
       children: [
+        { name: "Quản lý dữ liệu", href: "/admin/data", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2 1.5 3 5 3s5-1 5-3V7M4 7c0 2 1.5 3 5 3s5-1 5-3M4 7c0-2 1.5-3 5-3s5 1 5 3m0 5c0 2 1.5 3 5 3s5-1 5-3V7c0-2-1.5-3-5-3s-5 1-5 3" /></svg> },
         { name: "Quản lý người dùng", href: "/admin/users", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
+        { name: "Giám sát tài nguyên", href: "/admin/resources", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
+        { name: "Phiên hoạt động", href: "/admin/activity", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-3.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-3-3" /></svg> },
         { name: "Thùng rác", href: "/trash", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> },
       ]
     }
@@ -88,11 +81,16 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const handleNewSession = useCallback(() => {
     setSidebarOpen(false);
-    navigate(0);
-  }, [navigate]);
+    // Hard reload for a clean, reliable fresh start (navigate(0) can no-op inside
+    // Suspense/lazy boundaries — window.location.reload always works).
+    window.location.reload();
+  }, []);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
     setSidebarOpen(false);
+    // Revoke the refresh token + clear the httpOnly cookies server-side, then
+    // clear local state (also emits AUTH_EVENT so AuthProvider drops the user).
+    await apiLogout();
     clearAuthToken();
     setHasToken(false);
     navigate("/");
@@ -161,6 +159,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen relative flex bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/20">
+      {user && <WarningBanner key={user.id} />}
       {hasToken && (
         <div
           className={`fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm transition-opacity duration-300 lg:hidden ${sidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"

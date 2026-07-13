@@ -38,7 +38,7 @@ import {
   type RealtimePredictResponse,
   type RealtimeModel,
 } from "../../api/realtime";
-import { fetchTTSAudio } from "../../api/tts";
+import { fetchTTSAudio, prewarmTTS } from "../../api/tts";
 import PageHeader from "../ui/PageHeader";
 import Button from "../ui/Button";
 
@@ -68,6 +68,17 @@ const TTS_VOICES = [
   { id: "vi-VN-NamMinhNeural", label: "NamMinh (Nam)", gender: "male" as const },
 ] as const;
 const TTS_DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
+
+// Speak once the smoothed confidence reaches this bar (user-chosen: 85%).
+const SPEAK_CONFIDENCE_THRESHOLD = 0.85;
+// Warm the TTS audio cache as soon as a label is this likely — well before it
+// crosses the speak threshold — so playback is instant instead of waiting
+// ~780ms for edge-tts synthesis on the first utterance of a word.
+const TTS_PREFETCH_THRESHOLD = 0.5;
+// Debounce between a stable prediction and speaking. Was 600ms (felt laggy);
+// prefetch now hides synthesis latency, so a short debounce is enough to avoid
+// speaking on transient flicker.
+const TTS_DEBOUNCE_MS = 200;
 
 export default function RealtimeRuntime({
   mirrorPreview = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true),
@@ -163,7 +174,9 @@ export default function RealtimeRuntime({
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
   // Client-side blob cache: labelKey:voiceId → objectURL
   const ttsBlobCacheRef = useRef<Map<string, string>>(new Map());
-  const ttsFetchingRef = useRef<Set<string>>(new Set());
+  // In-flight fetches keyed by cacheKey → promise, so a prefetch and the actual
+  // speak share ONE network request (and speak can await an in-flight prefetch).
+  const ttsFetchingRef = useRef<Map<string, Promise<void>>>(new Map());
 
   useEffect(() => {
     try {
@@ -198,6 +211,38 @@ export default function RealtimeRuntime({
     };
   }, []);
 
+  // Fetch + cache the TTS audio for a label (no playback). Deduplicates
+  // concurrent requests so a prefetch and the actual speak share one fetch;
+  // callers can await the returned promise to be sure the blob is cached.
+  const warmTts = useCallback((labelKey: string, label: string): Promise<void> => {
+    const cacheKey = `${labelKey}:${ttsVoiceId}`;
+    if (ttsBlobCacheRef.current.has(cacheKey)) return Promise.resolve();
+    const inflight = ttsFetchingRef.current.get(cacheKey);
+    if (inflight) return inflight;
+
+    const p = (async () => {
+      const blob = await fetchTTSAudio(label, ttsVoiceId);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        ttsBlobCacheRef.current.set(cacheKey, url);
+        // Evict oldest entry if the cache grows past 100.
+        if (ttsBlobCacheRef.current.size > 100) {
+          const firstKey = ttsBlobCacheRef.current.keys().next().value;
+          if (firstKey) {
+            const oldUrl = ttsBlobCacheRef.current.get(firstKey);
+            if (oldUrl) URL.revokeObjectURL(oldUrl);
+            ttsBlobCacheRef.current.delete(firstKey);
+          }
+        }
+      }
+    })().finally(() => {
+      ttsFetchingRef.current.delete(cacheKey);
+    });
+
+    ttsFetchingRef.current.set(cacheKey, p);
+    return p;
+  }, [ttsVoiceId]);
+
   // Server-side TTS: fetch audio from backend and play
   useEffect(() => {
     if (!running || !speechEnabled || !prediction) {
@@ -212,7 +257,14 @@ export default function RealtimeRuntime({
     }
 
     const normalizedLabel = prediction.label.trim();
-    const shouldSpeak = normalizedLabel.length > 0 && prediction.confidence >= 0.8;
+
+    // Prefetch: warm the audio cache as soon as a label is reasonably likely,
+    // BEFORE it crosses the speak threshold, so playback is instant when it does.
+    if (normalizedLabel.length > 0 && prediction.confidence >= TTS_PREFETCH_THRESHOLD) {
+      void warmTts(prediction.labelKey, normalizedLabel);
+    }
+
+    const shouldSpeak = normalizedLabel.length > 0 && prediction.confidence >= SPEAK_CONFIDENCE_THRESHOLD;
 
     if (!shouldSpeak) {
       if (ttsTimerRef.current !== null) {
@@ -234,7 +286,7 @@ export default function RealtimeRuntime({
       if (!speechEnabled || !running) return;
       const currentPrediction = prediction;
       const label = currentPrediction.label.trim();
-      if (!label || currentPrediction.confidence < 0.8) return;
+      if (!label || currentPrediction.confidence < SPEAK_CONFIDENCE_THRESHOLD) return;
       if (lastSpokenLabelRef.current === currentPrediction.labelKey) return;
 
       const cacheKey = `${currentPrediction.labelKey}:${ttsVoiceId}`;
@@ -246,34 +298,12 @@ export default function RealtimeRuntime({
           ttsAudioRef.current.currentTime = 0;
         }
 
-        let audioUrl = ttsBlobCacheRef.current.get(cacheKey);
-
-        if (!audioUrl) {
-          // Prevent duplicate fetches for same key
-          if (ttsFetchingRef.current.has(cacheKey)) return;
-          ttsFetchingRef.current.add(cacheKey);
-
-          try {
-            const blob = await fetchTTSAudio(label, ttsVoiceId);
-            if (blob) {
-              audioUrl = URL.createObjectURL(blob);
-              ttsBlobCacheRef.current.set(cacheKey, audioUrl);
-
-              // Evict old entries if cache grows too large (keep last 100)
-              if (ttsBlobCacheRef.current.size > 100) {
-                const firstKey = ttsBlobCacheRef.current.keys().next().value;
-                if (firstKey) {
-                  const oldUrl = ttsBlobCacheRef.current.get(firstKey);
-                  if (oldUrl) URL.revokeObjectURL(oldUrl);
-                  ttsBlobCacheRef.current.delete(firstKey);
-                }
-              }
-            }
-          } finally {
-            ttsFetchingRef.current.delete(cacheKey);
-          }
+        // Usually already warmed by the prefetch above; await guarantees the
+        // blob is cached (joining any in-flight prefetch, not double-fetching).
+        if (!ttsBlobCacheRef.current.has(cacheKey)) {
+          await warmTts(currentPrediction.labelKey, label);
         }
-
+        const audioUrl = ttsBlobCacheRef.current.get(cacheKey);
         if (!audioUrl) return;
 
         const audio = new Audio(audioUrl);
@@ -293,7 +323,7 @@ export default function RealtimeRuntime({
       } finally {
         ttsTimerRef.current = null;
       }
-    }, 600);
+    }, TTS_DEBOUNCE_MS);
 
     return () => {
       if (ttsTimerRef.current !== null) {
@@ -301,7 +331,19 @@ export default function RealtimeRuntime({
         ttsTimerRef.current = null;
       }
     };
-  }, [prediction, running, speechEnabled, ttsVoiceId, selectedLanguage]);
+  }, [prediction, running, speechEnabled, ttsVoiceId, selectedLanguage, warmTts]);
+
+  // Prewarm the backend TTS cache for the WHOLE selected model's vocabulary so
+  // the first utterance of each sign is a cache hit (~105ms) instead of a cold
+  // ~780ms synthesis — for every user. Fires on model/voice change (covers the
+  // auto-selected model too); the backend skips already-cached labels, so
+  // repeat calls are cheap.
+  useEffect(() => {
+    if (!selectedModelId) return;
+    const model = models.find((m) => m.id === selectedModelId);
+    if (!model) return;
+    void prewarmTTS(model.language, model.dialect, [ttsVoiceId]);
+  }, [selectedModelId, ttsVoiceId, models]);
 
   const stopAll = useCallback(async () => {
     // Ensure start guard is released even if stop happens mid-init.

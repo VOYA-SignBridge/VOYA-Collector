@@ -1,7 +1,7 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { login } from "../api/auth";
-import { saveAuthToken } from "../api/axiosClient";
+import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
 import AuthInput, { LockIcon, UserIcon } from "../components/auth/AuthInput";
 
@@ -30,12 +30,14 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const res = await login({
+      // Login sets the httpOnly auth cookies server-side; just tell the
+      // AuthProvider to (re)load the user, then go to the app.
+      await login({
         identifier: form.identifier.trim(),
         password: form.password,
       });
 
-      saveAuthToken(res.access_token);
+      notifyAuthChange();
       navigate("/upload", { replace: true });
     } catch (err: unknown) {
       const error = err as Record<string, unknown> | null;

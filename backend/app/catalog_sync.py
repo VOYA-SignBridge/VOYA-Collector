@@ -362,6 +362,18 @@ def _write_samples_csv(rows: Sequence[Dict[str, Any]]) -> None:
     _write_csv(SAMPLES_CSV, _samples_fieldnames(), rows)
 
 
+def _invalidate_tts_cache(label_text: str) -> None:
+    """Best-effort: drop the cached TTS audio for a label whose text is being
+    renamed away or deleted, so realtime playback never serves the stale clip.
+    Purely a cache cleanup — never affects the catalog mutation."""
+    try:
+        from app.services.tts_service import invalidate_text_cache_sync
+
+        invalidate_text_cache_sync(label_text)
+    except Exception as exc:
+        logger.debug("[CATALOG] TTS cache invalidate skipped for '%s': %s", label_text, exc)
+
+
 def _rows_to_matrix(fieldnames: Sequence[str], rows: Sequence[Dict[str, Any]]) -> List[List[Any]]:
     matrix: List[List[Any]] = [list(fieldnames)]
     for row in rows:
@@ -704,6 +716,42 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
             _sync_db_samples([row for row in sample_rows_after if row.get("class_uid") == new_meta.class_uid])
             _sync_db_raw_uploads([row for row in raw_rows_after if row.get("class_uid") == new_meta.class_uid])
 
+            # Trashed (soft-deleted) samples of this class live only in the DB,
+            # not in samples.csv, so the loop above never touched them. Relabel
+            # them here (new name + moved feature path) so restoring one later
+            # brings it back consistent with the renamed class. deleted_at is
+            # preserved — the upsert's ON CONFLICT clause never sets it.
+            try:
+                for dbrow in db_list_samples_by_class(old_meta.class_uid, include_deleted=True):
+                    if not dbrow.get("deleted_at"):
+                        continue  # active rows already handled above
+                    updated = dict(dbrow)
+                    old_fp = _resolve_sample_file_path(updated)
+                    if old_fp is not None:
+                        new_fp = _sample_new_path(old_fp, old_feature_dir, new_feature_dir)
+                        updated["file_path"] = str(new_fp)
+                        updated["storage_url"] = str(new_fp)
+                    updated.update(
+                        {
+                            "class_uid": new_meta.class_uid,
+                            "slug": new_meta.slug,
+                            "label_original": new_meta.label_original,
+                            "language": new_meta.language,
+                            "dialect": new_meta.dialect,
+                        }
+                    )
+                    db_upsert_sample(updated)
+            except Exception as exc:
+                logger.warning(
+                    "[CATALOG] relabel of trashed samples failed for class_uid=%s: %s",
+                    old_meta.class_uid, exc,
+                )
+
+            # If the spoken text changed, drop the old label's cached TTS audio
+            # so realtime doesn't read the stale clip.
+            if old_meta.label_original != new_meta.label_original:
+                _invalidate_tts_cache(old_meta.label_original)
+
             # Drive folder move + catalog mirror run async (best-effort). The
             # rename is already committed locally + in Postgres; Google being out
             # of sync — e.g. a raw-videos folder that was never uploaded to Drive
@@ -829,6 +877,9 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
             db_delete_class(old_meta.class_uid)
             db_delete_samples_by_class(old_meta.class_uid)
             db_delete_raw_uploads_by_class(old_meta.class_uid)
+
+            # The label is gone — drop its cached TTS audio.
+            _invalidate_tts_cache(old_meta.label_original)
 
             # Async, best-effort Drive cleanup + catalog mirror (never blocks
             # or fails the delete the user just confirmed).
@@ -1057,6 +1108,8 @@ def sync_purge_class(class_uid: str) -> Dict[str, Any]:
         db_delete_samples_by_class(class_uid)
         db_delete_raw_uploads_by_class(class_uid)
         db_delete_class(class_uid)
+
+        _invalidate_tts_cache(old_meta.label_original)
 
         _dispatch_gdrive_folder_delete([feature_dir, raw_dir])
         _sync_drive_and_sheets_versioned_tables(None, None)

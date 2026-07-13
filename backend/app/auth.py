@@ -8,16 +8,24 @@ import uuid
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.config import settings
+from app.cookie_auth import ACCESS_COOKIE
 from app.storage.postgres_connection import connect_postgres
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
+
+# Precomputed bcrypt hash used to equalize login response time when the account
+# does not exist. Without it, a missing user returns immediately (no bcrypt)
+# while a real user with a wrong password pays the bcrypt cost — an attacker can
+# measure that gap to enumerate valid usernames. Verifying against this dummy on
+# the "no such user" path makes both branches take the same time.
+_DUMMY_PASSWORD_HASH = pwd_context.hash("voya-timing-equalizer-not-a-real-secret")
 
 
 def _get_conn():
@@ -211,9 +219,10 @@ def create_user(
 
 def authenticate_user(identifier: str, password: str) -> Optional[Dict[str, Any]]:
     user = _fetch_user_by_login(identifier)
-    if not user:
-        return None
-    if not user.get("is_active", True):
+    if not user or not user.get("is_active", True):
+        # Run a dummy verify so this path costs the same as a real "wrong
+        # password" — defeats username enumeration via timing side-channel.
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         return None
     if not verify_password(password, user["password_hash"]):
         return None
@@ -221,13 +230,36 @@ def authenticate_user(identifier: str, password: str) -> Optional[Dict[str, Any]
 
 
 def get_current_user_optional(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> Optional[Dict[str, Any]]:
-    if credentials is None:
+    # Prefer the Authorization: Bearer header (API clients / legacy), then fall
+    # back to the httpOnly access cookie used by the browser SPA.
+    token = credentials.credentials if credentials is not None else None
+    if not token:
+        token = request.cookies.get(ACCESS_COOKIE)
+    if not token:
         return None
 
-    payload = _decode_token(credentials.credentials)
+    payload = _decode_token(token)
     user_id = str(payload.get("sub") or "")
+
+    # Force-logout: an admin can invalidate a user's live sessions. Tokens
+    # issued before the force-logout marker are rejected; a fresh login works.
+    try:
+        from app import activity
+
+        if activity.is_user_denied(user_id, payload.get("iat")):
+            fl = activity.get_force_logout(user_id) or {}
+            msg = "Phiên đã bị đăng xuất bởi quản trị viên"
+            if fl.get("reason"):
+                msg += f": {fl['reason']}"
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=msg)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     user = _fetch_user_by_id(user_id)
     if not user:
         raise HTTPException(
@@ -238,9 +270,10 @@ def get_current_user_optional(
 
 
 def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> Dict[str, Any]:
-    user = get_current_user_optional(credentials)
+    user = get_current_user_optional(request, credentials)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -352,5 +385,118 @@ def reset_password_with_token(token: str, new_password: str) -> None:
                     """,
                     (row["user_id"],),
                 )
+    finally:
+        conn.close()
+
+
+# ============================================================================
+# Refresh tokens (cookie session flow)
+# ============================================================================
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_refresh_token(user_id: str) -> str:
+    """Issue a new opaque refresh token, storing only its hash. Returns the raw
+    token (to be set as an httpOnly cookie)."""
+    raw = secrets.token_urlsafe(48)
+    token_hash = _hash_token(raw)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.refresh_token_expire_minutes
+    )
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO refresh_tokens (token_hash, user_id, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (token_hash, user_id, expires_at),
+                )
+    finally:
+        conn.close()
+    return raw
+
+
+def rotate_refresh_token(raw_token: str) -> Optional[Tuple[Dict[str, Any], str]]:
+    """Validate a refresh token, revoke it, and mint a replacement.
+
+    Returns (user, new_raw_token) or None if the token is missing / expired /
+    revoked / belongs to an inactive user. Rotation means a stolen refresh
+    token stops working the moment the legitimate client next refreshes.
+    """
+    if not raw_token:
+        return None
+    token_hash = _hash_token(raw_token)
+
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT token_hash, user_id, expires_at, revoked_at
+                    FROM refresh_tokens
+                    WHERE token_hash = %s
+                    """,
+                    (token_hash,),
+                )
+                row = cur.fetchone()
+                if not row or row["revoked_at"] is not None:
+                    return None
+
+                expires_at = row["expires_at"]
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at < datetime.now(timezone.utc):
+                    return None
+
+                user = _fetch_user_by_id(str(row["user_id"]))
+                if not user or not user.get("is_active", True):
+                    return None
+
+                new_raw = secrets.token_urlsafe(48)
+                new_hash = _hash_token(new_raw)
+                new_expires = datetime.now(timezone.utc) + timedelta(
+                    minutes=settings.refresh_token_expire_minutes
+                )
+                cur.execute(
+                    "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = %s",
+                    (token_hash,),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO refresh_tokens (token_hash, user_id, expires_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (new_hash, row["user_id"], new_expires),
+                )
+                return user, new_raw
+    finally:
+        conn.close()
+
+
+def revoke_refresh_token(raw_token: str) -> None:
+    """Mark a refresh token revoked (logout). Best-effort; never raises."""
+    if not raw_token:
+        return
+    token_hash = _hash_token(raw_token)
+    conn = _get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE refresh_tokens
+                    SET revoked_at = NOW()
+                    WHERE token_hash = %s AND revoked_at IS NULL
+                    """,
+                    (token_hash,),
+                )
+    except Exception:
+        pass
     finally:
         conn.close()

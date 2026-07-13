@@ -91,11 +91,33 @@ services:
     container_name: voya_trainer
     env_file:
       - .env
+    environment:
+      # train_tcn.py enables torch.use_deterministic_algorithms(True); on
+      # CUDA >= 10.2 CuBLAS needs this workspace config or every conv/matmul
+      # raises RuntimeError and the job dies at epoch 1.
+      CUBLAS_WORKSPACE_CONFIG: ":4096:8"
     volumes:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
       - .:/workspace
-    command: celery -A app.worker.celery_app worker -Q training -c 1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
+    # GPU: train_tcn.py auto-selects cuda when torch.cuda.is_available(), so no
+    # code/requirements change is needed — this reservation is what exposes the
+    # host GPU to the container. Requires the NVIDIA driver + NVIDIA Container
+    # Toolkit on the host; verify with
+    # `docker run --rm --gpus all voya_backend:latest python -c "import torch;print(torch.cuda.is_available())"`.
+    # Remove this block (and CUBLAS_WORKSPACE_CONFIG above) to fall back to CPU-only.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # --max-tasks-per-child=1: recycle the supervisor child after every training
+    # job so any memory it touched is returned to the OS immediately ("trả liền").
+    # The GPU is already freed by the training subprocess exiting; this covers the
+    # Python supervisor process too.
+    command: celery -A app.worker.celery_app worker -Q training -c 1 --max-tasks-per-child=1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
     depends_on:
       - redis
       - postgres

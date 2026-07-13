@@ -49,6 +49,22 @@ export const getSamples = async (): Promise<Result<Session[]>> =>
     return validateSessions(res.data);
   });
 
+export type CommunityStats = {
+  labels_count: number;
+  total_samples: number;
+  contributors_count: number;
+  regions_count: number;
+};
+
+// Server-side aggregate for the dashboard "Cộng đồng" block. Replaces the old
+// pattern of downloading the whole class list + every session and reducing them
+// in the browser — one small request (~120B), cached 30s.
+export const getCommunityStats = async (): Promise<CommunityStats> =>
+  cachedRequest("classes/community-stats", 30000, async () => {
+    const res = await axiosClient.get("/classes/community-stats");
+    return res.data as CommunityStats;
+  });
+
 export const getSampleData = async (sampleId: string) => {
   const res = await axiosClient.get(`/dataset/samples/${sampleId}/data`, {
     responseType: "arraybuffer", // để xử lý npz

@@ -4,7 +4,7 @@ import apiClient from "../api/axiosClient";
 import { me } from "../api/auth";
 import type { AuthUser } from "../api/auth";
 import { CheckIcon, XIcon, UsersIcon } from "../components/ui/Icons";
-import SyncGDriveModal from "../components/SyncGDriveModal";
+import LockUserModal, { type LockPayload } from "../components/LockUserModal";
 
 interface UserData {
   id: string;
@@ -13,21 +13,24 @@ interface UserData {
   is_active: boolean;
   is_admin: boolean;
   created_at: string;
+  locked?: boolean;
+  lock_reason?: string;
+  lock_until?: number;
+  has_warning?: boolean;
 }
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [lockTarget, setLockTarget] = useState<UserData | null>(null);
   const { toast } = useToast();
-
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
   useEffect(() => {
     me()
       .then((user) => setCurrentUser(user))
       .catch(() => setCurrentUser(null));
-      
+
     fetchUsers();
   }, []);
 
@@ -40,6 +43,38 @@ export default function AdminUsersPage() {
       toast.error(error.response?.data?.detail || "Không thể tải danh sách người dùng");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const doLock = async (userId: string, payload: LockPayload) => {
+    try {
+      await apiClient.post(`/api/v1/admin/users/${userId}/lock`, payload);
+      toast.success("Đã khóa tài khoản");
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Khóa tài khoản thất bại");
+    }
+  };
+
+  const unlockUser = async (userId: string) => {
+    try {
+      await apiClient.post(`/api/v1/admin/users/${userId}/unlock`);
+      toast.success("Đã mở khóa tài khoản");
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Mở khóa thất bại");
+    }
+  };
+
+  const warnUser = async (userId: string, name: string) => {
+    const message = window.prompt(`Nội dung cảnh báo gửi tới "${name}" (người dùng sẽ thấy khi đăng nhập):`, "");
+    if (message === null || !message.trim()) return;
+    try {
+      await apiClient.post(`/api/v1/admin/users/${userId}/warn`, { message: message.trim() });
+      toast.success(`Đã gửi cảnh báo tới ${name}`);
+      fetchUsers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || "Gửi cảnh báo thất bại");
     }
   };
 
@@ -70,15 +105,8 @@ export default function AdminUsersPage() {
             </div>
             Quản lý hệ thống
           </h2>
-          <p className="text-slate-600">Quản trị danh sách người dùng và đồng bộ dữ liệu hệ thống</p>
+          <p className="text-slate-600">Quản trị danh sách người dùng và phân quyền</p>
         </div>
-        
-        <button
-          onClick={() => setIsSyncModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-ctu-blue text-white font-medium rounded-lg hover:bg-ctu-navy transition-colors"
-        >
-          ☁️ Đồng bộ GDrive
-        </button>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -114,17 +142,27 @@ export default function AdminUsersPage() {
                     </td>
                     <td className="py-4 px-6 text-slate-600">{user.email}</td>
                     <td className="py-4 px-6">
-                      {user.is_active ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                          Hoạt động
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-                          Bị khóa
-                        </span>
-                      )}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {user.locked ? (
+                          <span title={user.lock_reason || ""} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                            {user.lock_until ? "Khóa tạm" : "Bị khóa"}
+                          </span>
+                        ) : user.is_active ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                            Hoạt động
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                            Vô hiệu
+                          </span>
+                        )}
+                        {user.has_warning && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">⚠️ Đã cảnh báo</span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-4 px-6">
                       {user.is_admin ? (
@@ -138,26 +176,49 @@ export default function AdminUsersPage() {
                         </span>
                       )}
                     </td>
-                    <td className="py-4 px-6 text-right">
-                      <button
-                        onClick={() => handleToggleAdmin(user.id, user.is_admin)}
-                        disabled={currentUser?.id === user.id}
-                        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                          user.is_admin 
-                            ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200" 
-                            : "bg-ctu-blue/10 text-ctu-blue hover:bg-ctu-blue/20 border border-ctu-blue/20"
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
-                      >
-                        {user.is_admin ? (
+                    <td className="py-4 px-6">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {currentUser?.id !== user.id && (
                           <>
-                            <XIcon className="w-4 h-4" /> Gỡ quyền Admin
-                          </>
-                        ) : (
-                          <>
-                            <CheckIcon className="w-4 h-4" /> Cấp quyền Admin
+                            <button
+                              onClick={() => warnUser(user.id, user.username)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+                            >
+                              ⚠️ Cảnh báo
+                            </button>
+                            {user.locked ? (
+                              <button
+                                onClick={() => unlockUser(user.id)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                              >
+                                🔓 Mở khóa
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setLockTarget(user)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors"
+                              >
+                                🔒 Khóa
+                              </button>
+                            )}
                           </>
                         )}
-                      </button>
+                        <button
+                          onClick={() => handleToggleAdmin(user.id, user.is_admin)}
+                          disabled={currentUser?.id === user.id}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                            user.is_admin
+                              ? "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                              : "bg-ctu-blue/10 text-ctu-blue hover:bg-ctu-blue/20 border border-ctu-blue/20"
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                          {user.is_admin ? (
+                            <><XIcon className="w-4 h-4" /> Gỡ Admin</>
+                          ) : (
+                            <><CheckIcon className="w-4 h-4" /> Cấp Admin</>
+                          )}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -166,10 +227,12 @@ export default function AdminUsersPage() {
           </table>
         </div>
       </div>
-      
-      <SyncGDriveModal 
-        isOpen={isSyncModalOpen} 
-        onClose={() => setIsSyncModalOpen(false)} 
+
+      <LockUserModal
+        username={lockTarget?.username || null}
+        open={!!lockTarget}
+        onClose={() => setLockTarget(null)}
+        onConfirm={(payload) => lockTarget ? doLock(lockTarget.id, payload) : undefined}
       />
     </div>
   );

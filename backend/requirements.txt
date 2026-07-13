@@ -8,6 +8,10 @@ celery==5.3.1
 redis[hiredis]==4.5.1
 psutil==5.9.8
 python-dotenv==1.0.0
+# Used by monitoring.py to parse docker-compose mem_limits. Was only present
+# transitively via uvicorn[standard]; pin it so the resource monitor never
+# breaks if that transitive dep changes.
+pyyaml==6.0.1
 numpy==1.26.2
 opencv-python-headless==4.11.0.86
 mediapipe==0.10.21

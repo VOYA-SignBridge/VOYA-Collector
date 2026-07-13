@@ -1,22 +1,22 @@
-"""Celery periodic tasks for batch-exporting data to Google Sheets.
+"""Celery periodic tasks for mirroring catalog data to Google Sheets.
 
 Design:
-    - Samples and labels are written to local CSV + Postgres immediately during upload.
-    - Postgres column `sheets_synced = FALSE` marks rows pending sync.
-    - Every 30 seconds, Celery beat triggers `export_samples_to_sheets()`:
-        1. Query Postgres for unsynced rows (LIMIT 5000, ordered by created_at)
-        2. Format as [[col1, col2, ...], ...] matrix
-        3. Call `append_sheet_values()` — a single Sheets API call (append, not clear)
-        4. UPDATE `sheets_synced = TRUE` for the batch
-        5. Update `google_sheets_sync_status` row counter
-    - If the sheet approaches 10M cells, a new spreadsheet can be created (rotation).
-    - If Redis or Celery is down, data stays in Postgres with sheets_synced=FALSE.
-      No data is lost; the next worker cycle picks up from where it left off.
+    - Labels and samples are written to local CSV + Postgres immediately during
+      upload / edit / delete (see catalog_sync.py). The CSVs are the source of
+      truth for what the sheets should contain.
+    - Both `export_labels_to_sheets()` and `export_samples_to_sheets()` do a
+      FULL REPLACE of their sheet from the current CSV (clear + write), so
+      deletes and renames propagate — an append-only samples export used to
+      leave stale rows on the sheet forever even though the CSV/DB were correct.
+    - A content hash guards the (whole-sheet) rewrite so the 30s beat only calls
+      the Sheets API when the CSV actually changed.
+    - If Sheets/Drive is unreachable the task retries; the local CSV + Postgres
+      remain the authoritative copy, so no data is lost.
 
-Maximum rows per sheet:
-    Google Sheets limit = 10,000,000 cells.
-    With 19 columns: 10,000,000 / 19 ≈ 526,315 rows.
-    We use max_rows_per_sheet = 500,000 for safety margin.
+Scale note:
+    Google Sheets limit is 10,000,000 cells (~500k rows at 19 cols). Full
+    replace is fine well within that; a dataset that large would need a
+    different (paginated / multi-sheet) strategy.
 """
 
 from __future__ import annotations
@@ -41,23 +41,20 @@ def _rows_to_values(rows: List[Dict[str, Any]], fieldnames: List[str]) -> List[L
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def export_samples_to_sheets(self):
-    """Batch export unsynced samples from Postgres to Google Sheets.
+    """Mirror samples.csv to Google Sheets via FULL REPLACE.
 
-    Called by Celery beat every 30 seconds.
-    Uses append_sheet_values() — never clears existing data.
+    Called by Celery beat every 30s and on every catalog mutation.
+
+    Previously this only APPENDED newly-uploaded (unsynced) rows and never
+    cleared the sheet, so deleting or renaming a sample/class left stale rows on
+    the sheet forever — the local samples.csv and Postgres were corrected, only
+    the sheet drifted. A full replace (same approach as labels) keeps the sheet
+    an exact mirror of samples.csv, so deletes and renames propagate. A content
+    hash guards against needlessly rewriting the sheet when nothing changed.
     """
-    from app.storage.metadata_db import (
-        ensure_tables,
-        fetch_unsynced_samples,
-        mark_samples_synced,
-        get_sync_status,
-        upsert_sync_status,
-    )
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
 
     try:
-        ensure_tables()
-
         spreadsheet_id = str(getattr(settings, "google_sheets_samples_spreadsheet_id", "")).strip()
         sheet_gid = int(getattr(settings, "google_sheets_samples_sheet_gid", 0) or 0)
 
@@ -65,53 +62,39 @@ def export_samples_to_sheets(self):
             logger.debug("[EXPORT] Samples Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        # Fetch unsynced rows
-        rows = fetch_unsynced_samples(limit=5000)
-        if not rows:
-            logger.debug("[EXPORT] No unsynced samples to export")
-            return {"status": "skipped", "reason": "no_pending_rows"}
+        rows = list_samples()
 
-        # Check rotation threshold
-        sync_status = get_sync_status("samples")
-        current_rows = sync_status["current_data_rows"] if sync_status else 0
-        max_rows = sync_status["max_rows_per_sheet"] if sync_status else 500_000
+        # Full matrix: header + every current row, in the sheet's column order.
+        values = [list(SAMPLE_FIELDS)]
+        for row in rows:
+            values.append([str(row.get(field, "") or "") for field in SAMPLE_FIELDS])
 
-        batch_size = len(rows)
-        if current_rows + batch_size > max_rows:
-            logger.warning(
-                "[EXPORT] Sheet approaching limit: current=%d + batch=%d > max=%d. "
-                "Manual rotation needed (create new spreadsheet and update config).",
-                current_rows, batch_size, max_rows,
-            )
-            # Still proceed — Google Sheets will reject if truly full,
-            # and we'll retry on the next cycle.
+        # Skip the (whole-sheet) rewrite when samples.csv is unchanged since the
+        # last successful sync — keeps the 30s beat from churning the API.
+        import hashlib
+        import json as _json
+        digest = hashlib.sha256(
+            _json.dumps(values, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        guard = SAMPLES_CSV.parent / ".samples_sheet.synced"
+        try:
+            if guard.exists() and guard.read_text(encoding="utf-8").strip() == digest:
+                logger.debug("[EXPORT] Samples sheet already up-to-date; skipping rewrite")
+                return {"status": "skipped", "reason": "unchanged", "rows": len(rows)}
+        except Exception:
+            pass
 
-        # Convert to values matrix
-        values = _rows_to_values(rows, SAMPLE_FIELDS)
-
-        # Append to Google Sheets (1 API call for entire batch)
         from app.storage.gdrive_client import get_gdrive_client
         client = get_gdrive_client()
-        client.append_sheet_values(spreadsheet_id, sheet_gid, values)
+        client.replace_sheet_values(spreadsheet_id, sheet_gid, values)
 
-        # Mark as synced in Postgres
-        sample_uids = [r["sample_uid"] for r in rows]
-        mark_samples_synced(sample_uids)
+        try:
+            guard.write_text(digest, encoding="utf-8")
+        except Exception:
+            pass
 
-        # Update sync status counter
-        new_row_count = current_rows + batch_size
-        upsert_sync_status("samples", spreadsheet_id, 1, new_row_count)
-
-        logger.info(
-            "[EXPORT] ✅ Synced %d samples to Sheets (total rows now: %d)",
-            batch_size,
-            new_row_count,
-        )
-        return {
-            "status": "success",
-            "synced_count": batch_size,
-            "total_rows": new_row_count,
-        }
+        logger.info("[EXPORT] ✅ Mirrored %d samples to Sheets (full replace)", len(rows))
+        return {"status": "success", "synced_count": len(rows)}
 
     except Exception as exc:
         logger.error("[EXPORT] Samples Sheets export failed: %s", exc)

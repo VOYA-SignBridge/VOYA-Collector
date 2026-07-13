@@ -32,6 +32,33 @@ export async function fetchTTSVoices(): Promise<TTSVoicesResponse | null> {
 }
 
 /**
+ * POST /api/v1/tts/prewarm
+ *
+ * Ask the backend to pre-synthesize + cache TTS for every label of a
+ * language/dialect (the selected realtime model's vocabulary), so the first
+ * utterance of each sign is a Redis cache hit (~105ms) instead of a cold
+ * edge-tts synthesis (~780ms). Fire-and-forget; safe to call repeatedly.
+ */
+export async function prewarmTTS(
+  language: string | null,
+  dialect: string | null,
+  voices?: string[],
+): Promise<void> {
+  try {
+    await axiosClient.post("/api/v1/tts/prewarm", {
+      language: language ?? undefined,
+      dialect: dialect ?? undefined,
+      voices,
+    });
+  } catch (e: unknown) {
+    if (import.meta.env.DEV) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[tts] prewarm failed:", msg);
+    }
+  }
+}
+
+/**
  * GET /api/v1/tts/speak?text=...&voice=...
  *
  * Fetch synthesized audio (MP3) from backend TTS service.

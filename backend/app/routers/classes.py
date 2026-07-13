@@ -42,11 +42,14 @@ def _load_prefs() -> dict:
 
 
 def _save_prefs(data: dict) -> None:
+    # Callers MUST already hold the prefs FileLock (set_preference does). This
+    # helper deliberately does NOT re-acquire it: FileLock is not reentrant
+    # across instances in the same process, so a nested acquire self-deadlocks
+    # (the request hangs forever, leaking a thread-pool worker + poisoning the
+    # lock for every later preference write).
     _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lock = FileLock(_PREFS_LOCK)
-    with lock:
-        with open(_PREFS_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(_PREFS_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +226,35 @@ def stats(language: Optional[str] = None, dialect: Optional[str] = None):
         "total_classes": len(metas),
         "max_count": max_count,
         "distribution": distribution,
+    }
+
+
+@router.get("/community-stats")
+def community_stats():
+    """Lightweight aggregate for the public dashboard's "Cộng đồng" block.
+
+    Returns just the four scalars the UI shows so the client no longer has to
+    download the full class list (~14KB) + every session and reduce them in the
+    browser. Aggregation happens server-side; response is ~120 bytes.
+    """
+    metas = list_classes()
+    samples = list_samples()
+
+    contributors = {
+        (s.get("user_id") or "").strip() for s in samples
+    }
+    contributors.discard("")
+
+    regions = {
+        (getattr(m, "dialect", "") or "").strip() for m in metas
+    }
+    regions.discard("")
+
+    return {
+        "labels_count": len(metas),
+        "total_samples": len(samples),
+        "contributors_count": len(contributors),
+        "regions_count": len(regions),
     }
 
 

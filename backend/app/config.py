@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     storage_download_workers: int = int(os.getenv("STORAGE_DOWNLOAD_WORKERS", "4"))
     storage_download_timeout_seconds: int = int(os.getenv("STORAGE_DOWNLOAD_TIMEOUT_SECONDS", "120"))
 
+    # Support/appeal contact shown to users on a block/force-logout notice.
+    support_email: str = os.getenv("SUPPORT_EMAIL", "")
+    # Periodic Drive->local pull (download_missing). 0 = disabled (default);
+    # set to e.g. 72 to auto-restore missing local files every 3 days.
+    drive_pull_interval_hours: int = int(os.getenv("DRIVE_PULL_INTERVAL_HOURS", "0"))
+
     # Upload limits
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "1024"))
     max_camera_frames: int = int(os.getenv("MAX_CAMERA_FRAMES", "600"))
@@ -144,6 +150,29 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = int(
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
     )
+
+    # Idle session cap. The refresh token is rotated on every use and lives this
+    # long since its LAST rotation, so a session that goes this many minutes with
+    # no refresh is dead server-side — the backstop behind the client-side
+    # inactivity logout (both default to 90 min). Deliberately in *minutes*, not
+    # days, so an idle-but-open browser can't hold a session alive overnight.
+    # The short access token above is auto-renewed against it, so a stolen access
+    # token is only useful for at most access_token_expire_minutes.
+    refresh_token_expire_minutes: int = int(
+        os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "90")
+    )
+
+    # ===== AUTH COOKIES =====
+    # Tokens are delivered as httpOnly cookies (JS cannot read them → XSS can't
+    # steal them). `Secure` requires HTTPS; keep it OFF for plain-HTTP dev and
+    # turn it ON (COOKIE_SECURE=1) once served exclusively over TLS.
+    cookie_secure: bool = bool(int(os.getenv("COOKIE_SECURE", "0")))
+    # SameSite=Lax already blocks cross-site POST cookie sending (baseline CSRF
+    # defense); the double-submit CSRF token is defense-in-depth on top.
+    cookie_samesite: str = os.getenv("COOKIE_SAMESITE", "lax")
+    # Leave empty to scope cookies to the exact host; set to share across
+    # subdomains (e.g. ".voya.local").
+    cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
 
     # Optional auth behavior
     allow_guest_upload: bool = bool(

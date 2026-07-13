@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 
 from app.auth import get_current_user, get_user_from_token, require_admin
+from app.cookie_auth import ACCESS_COOKIE
 
 logger = logging.getLogger(__name__)
 
@@ -1065,8 +1066,12 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     WebSocket để stream real-time training progress
 
     Gửi metrics, epoch progress.
-    Auth: browsers cannot set headers on WS — FE gửi JWT qua ?token=.
+    Auth: browsers cannot set headers on WS. Same-origin WS handshakes DO send
+    cookies, so we read the httpOnly access cookie; the ?token= query param is
+    kept as a fallback for legacy Bearer clients.
     """
+    if not token:
+        token = websocket.cookies.get(ACCESS_COOKIE, "")
     user = await asyncio.to_thread(get_user_from_token, token) if token else None
     if not user:
         await websocket.close(code=4001, reason="Unauthorized")

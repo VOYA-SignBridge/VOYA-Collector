@@ -15,6 +15,12 @@ services:
       - "80"
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:80/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     networks:
       voya_network:
@@ -27,6 +33,7 @@ services:
     image: voya_realtime_service:latest
     container_name: voya_realtime_service
     mem_limit: 800m
+    stop_grace_period: 20s
     expose:
       - "8010"
     environment:
@@ -43,6 +50,12 @@ services:
       - ./backend/realtime_service:/app/realtime_service
       - ./processed/shared:/app/processed/shared:ro
       - ./processed/analysis:/app/processed/analysis:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8010/health',timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 40s
     restart: unless-stopped
     networks:
       voya_network:
@@ -54,6 +67,9 @@ services:
     image: voya_backend:latest
     container_name: voya_backend
     mem_limit: 1200m
+    # Drain in-flight HTTP requests on SIGTERM before SIGKILL — an update never
+    # cuts off an active user mid-request (uvicorn shuts down gracefully).
+    stop_grace_period: 30s
     expose:
       - "8000"
     volumes:
@@ -68,10 +84,19 @@ services:
       MALLOC_ARENA_MAX: "2"
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=4).status==200 else 1)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 60s
     depends_on:
-      - postgres
-      - redis
-      - realtime_service
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      realtime_service:
+        condition: service_started
     restart: unless-stopped
     networks:
       voya_network:
@@ -85,6 +110,9 @@ services:
     # Hard RAM ceiling: isolates the video worker so a leak/spike can never
     # starve the parallel GPU trainer or the DB (12GB host budget).
     mem_limit: 2500m
+    # Celery warm shutdown: finish the current video task before exiting so an
+    # update doesn't discard in-progress processing.
+    stop_grace_period: 60s
     env_file:
       - .env
     volumes:
@@ -109,10 +137,19 @@ services:
       --max-tasks-per-child=15
       --max-memory-per-child=1200000
       --loglevel=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=8 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 12s
+      retries: 5
+      start_period: 60s
     depends_on:
-      - redis
-      - postgres
-      - backend
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
     restart: unless-stopped
     networks:
       - voya_network
@@ -133,6 +170,10 @@ services:
     # for training. GPU holds the model/activations; host RAM holds the data.
     # Threads left at default — training data loading benefits from them.
     mem_limit: 3500m
+    # A training job can run for many minutes; don't kill it on a stray stop.
+    # Best practice: only update the trainer when no job is running (jobs are
+    # serialized, so the admin can drain it first). This grace covers cleanup.
+    stop_grace_period: 45s
     env_file:
       - .env
     environment:
@@ -152,10 +193,25 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    command: celery -A app.worker.celery_app worker -Q training -c 1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
+    # --max-tasks-per-child=1: recycle the supervisor child after every training
+    # job so any memory it touched is returned to the OS immediately ("trả liền").
+    # The GPU is already freed by the training subprocess exiting; this covers the
+    # Python supervisor process too.
+    command: celery -A app.worker.celery_app worker -Q training -c 1 --max-tasks-per-child=1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
+    # Ping is answered by the worker's control thread even mid-training (training
+    # runs in a subprocess), so a long job won't flap this. Health never triggers
+    # a restart in plain Compose, so it can't kill a running job either.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=8 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 12s
+      retries: 5
+      start_period: 60s
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - voya_network
@@ -173,10 +229,21 @@ services:
     environment:
       TTS_REDIS_URL: redis://redis:6379/0
     command: celery -A app.worker.celery_app beat --loglevel=${LOG_LEVEL:-INFO} --schedule=/tmp/celerybeat-schedule
+    # Beat has no worker to inspect — verify it can reach the Redis broker it
+    # publishes schedules to (that is the only thing that can break it).
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import redis,os; redis.from_url(os.environ.get('CELERY_BROKER_URL','redis://redis:6379/0')).ping()\" || exit 1"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
     depends_on:
-      - redis
-      - postgres
-      - worker
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      worker:
+        condition: service_started
     restart: unless-stopped
     networks:
       - voya_network
@@ -191,6 +258,12 @@ services:
     command: redis-server --maxmemory 400mb --maxmemory-policy volatile-lru
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     networks:
       - voya_network
@@ -199,12 +272,21 @@ services:
     image: postgres:17
     container_name: voya_postgres
     mem_limit: 768m
+    # Give Postgres time for a clean shutdown (flush + checkpoint) before
+    # SIGKILL — protects data integrity on stop/update.
+    stop_grace_period: 60s
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
     networks:
       voya_network:
@@ -223,9 +305,19 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
+    # Check the plain-HTTP listener (:80 serves 200); the :443 HTTP/2+TLS vhost
+    # rejects a localhost handshake (no SNI/cert match) so it's not a usable probe.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://localhost:80/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
     restart: unless-stopped
     networks:
       voya_network:
