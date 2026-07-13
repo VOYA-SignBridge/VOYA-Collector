@@ -1,6 +1,6 @@
 import logging
 from celery import Celery
-from celery.signals import task_postrun
+from celery.signals import task_postrun, worker_ready
 from app.config import settings
 from app.mem_utils import release_memory
 
@@ -45,6 +45,15 @@ if settings.use_google_drive:
         "schedule": 300.0,
     }
 
+# Optional periodic Drive->local pull: restores any samples/raw uploads whose
+# local file is missing (fresh deploy, failed download, or another node added
+# data to the shared DB). Disabled by default; set DRIVE_PULL_INTERVAL_MINUTES.
+if settings.use_google_drive and int(getattr(settings, "drive_pull_interval_hours", 0)) > 0:
+    beat_schedule["pull-missing-files-from-drive"] = {
+        "task": "app.sync_tasks.download_missing_files_to_local",
+        "schedule": float(settings.drive_pull_interval_hours) * 3600.0,
+    }
+
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
@@ -77,6 +86,22 @@ def _release_memory_after_task(sender=None, **_kwargs):
         release_memory(context=name)
     except Exception:  # never let cleanup break the worker
         logger.exception("[MEM] release_memory failed after %s", name)
+
+
+@worker_ready.connect
+def _start_resource_monitor(**_kwargs):
+    """Launch the GPU sampler once the worker is up.
+
+    Fires in every worker's MainProcess (survives child recycling). Self-gates:
+    on the CPU-only video worker nvidia-smi is absent, so it no-ops — only the
+    GPU trainer actually samples and publishes to Redis.
+    """
+    try:
+        from app.monitoring import start_gpu_monitor
+
+        start_gpu_monitor()
+    except Exception:  # monitoring must never break the worker
+        logger.exception("[MONITOR] failed to start GPU sampler")
 
 # Import tasks to register them with Celery
 from app import tasks  # noqa: F401, E402

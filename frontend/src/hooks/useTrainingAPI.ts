@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
-import { getAuthToken } from '../api/axiosClient';
+import { getAuthToken, getCsrfToken } from '../api/axiosClient';
 
 export interface DatasetInfo {
   total_samples: number;
@@ -95,10 +95,18 @@ export interface PromoteResponse {
 // Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
 const API_URL = '/api/v1/training';
 
-// Training endpoints require authentication; attach the stored bearer token.
+// Training endpoints require authentication. These raw fetch() calls send the
+// httpOnly auth cookie automatically (same-origin), but must attach the CSRF
+// token themselves on state-changing methods since they bypass the axios
+// interceptor. A legacy Bearer token (if any) is still forwarded. The CSRF
+// header is harmless on GETs, so we add it unconditionally.
 function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
   const token = getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const csrf = getCsrfToken();
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  return headers;
 }
 
 export function useTrainingAPI() {

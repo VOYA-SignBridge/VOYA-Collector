@@ -15,6 +15,8 @@
   --font-display: "Be Vietnam Pro", system-ui, sans-serif;
 
   --animate-auth-rise: authRise 0.5s ease-out both;
+  --animate-logo-fill: logoFill 2s ease-in-out infinite;
+  --animate-loader-bar: loaderBar 1.15s ease-in-out infinite;
 }
 
 @keyframes authRise {
@@ -26,6 +28,19 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Loading screen: colour fills the CTU logo bottom→top like liquid, then drains
+   — a smooth breathing loop over a dimmed base logo. */
+@keyframes logoFill {
+  0%, 100% { clip-path: inset(100% 0 0 0); }
+  50%      { clip-path: inset(0 0 0 0); }
+}
+
+/* Indeterminate progress sliver under the logo. */
+@keyframes loaderBar {
+  0%   { transform: translateX(-130%); }
+  100% { transform: translateX(360%); }
 }
 
 :root {

@@ -1,0 +1,88 @@
+"""Cookie-based auth delivery.
+
+Access + refresh tokens ride in httpOnly cookies so JavaScript (and therefore
+any XSS) can't read them. Two companion non-httpOnly cookies let the SPA work:
+  - HINT_COOKIE  : presence lets the client skip a pointless /auth/me for guests
+  - CSRF_COOKIE  : echoed back in an X-CSRF-Token header (double-submit CSRF)
+
+`Secure` is config-gated (COOKIE_SECURE) so this works on plain-HTTP dev and can
+be tightened to HTTPS-only in production. SameSite=Lax already stops cross-site
+POSTs from sending these cookies; the CSRF token is defense-in-depth.
+"""
+
+from __future__ import annotations
+
+import secrets
+from typing import Optional
+
+from fastapi import Response
+
+from app.config import settings
+
+ACCESS_COOKIE = "voya_access"
+REFRESH_COOKIE = "voya_refresh"
+HINT_COOKIE = "voya_auth"
+CSRF_COOKIE = "voya_csrf"
+
+# Refresh cookie is only sent to the auth endpoints that need it (login sets it,
+# refresh rotates it, logout clears it) — never to ordinary API calls.
+REFRESH_COOKIE_PATH = "/api/v1/auth"
+
+
+def generate_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _domain() -> Optional[str]:
+    return settings.cookie_domain or None
+
+
+def _access_max_age() -> int:
+    return int(settings.access_token_expire_minutes) * 60
+
+
+def _refresh_max_age() -> int:
+    return int(settings.refresh_token_expire_minutes) * 60
+
+
+def set_auth_cookies(
+    response: Response,
+    *,
+    access_token: str,
+    refresh_token: str,
+    csrf_token: str,
+) -> None:
+    secure = settings.cookie_secure
+    samesite = settings.cookie_samesite
+    domain = _domain()
+    access_max = _access_max_age()
+    refresh_max = _refresh_max_age()
+
+    response.set_cookie(
+        ACCESS_COOKIE, access_token,
+        max_age=access_max, httponly=True, secure=secure,
+        samesite=samesite, domain=domain, path="/",
+    )
+    response.set_cookie(
+        REFRESH_COOKIE, refresh_token,
+        max_age=refresh_max, httponly=True, secure=secure,
+        samesite=samesite, domain=domain, path=REFRESH_COOKIE_PATH,
+    )
+    response.set_cookie(
+        HINT_COOKIE, "1",
+        max_age=refresh_max, httponly=False, secure=secure,
+        samesite=samesite, domain=domain, path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE, csrf_token,
+        max_age=refresh_max, httponly=False, secure=secure,
+        samesite=samesite, domain=domain, path="/",
+    )
+
+
+def clear_auth_cookies(response: Response) -> None:
+    domain = _domain()
+    response.delete_cookie(ACCESS_COOKIE, path="/", domain=domain)
+    response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH, domain=domain)
+    response.delete_cookie(HINT_COOKIE, path="/", domain=domain)
+    response.delete_cookie(CSRF_COOKIE, path="/", domain=domain)

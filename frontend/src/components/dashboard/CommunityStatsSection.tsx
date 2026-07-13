@@ -1,8 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { getClassesList, getSamples } from "../../api/dataset";
+import { getCommunityStats } from "../../api/dataset";
 import { FolderIcon, GlobeIcon, TagIcon, UsersIcon } from "../ui/Icons";
-import type { Session } from "../../types";
 
 interface StatItem {
   label: string;
@@ -18,54 +17,32 @@ export default function CommunityStatsSection() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        // Fetch labels and samples in PARALLEL — they are independent, so the
-        // old sequential `await` … `await` doubled the wait for no reason.
-        const [labelsRes, samplesRes] = await Promise.all([getClassesList(), getSamples()]);
-
-        const labelsCount = labelsRes.ok ? labelsRes.data.count : 0;
-        const regions = new Set<string>();
-        if (labelsRes.ok) {
-          labelsRes.data.items.forEach((item) => {
-            if (item.dialect) {
-              regions.add(item.dialect);
-            }
-          });
-        }
-
-        const totalSamples = samplesRes.ok
-          ? samplesRes.data.reduce((sum: number, s: Session) => sum + s.samples_count, 0)
-          : 0;
-
-        // Count unique contributors (users) from samples
-        const contributors = new Set<string>();
-        if (samplesRes.ok) {
-          samplesRes.data.forEach((session: Session) => {
-            contributors.add(session.user);
-          });
-        }
+        // One server-aggregated request instead of downloading the full class
+        // list + every session and reducing them here on the main thread.
+        const s = await getCommunityStats();
 
         const newStats: StatItem[] = [
           {
             label: "nhãn",
-            value: labelsCount,
+            value: s.labels_count,
             description: "Ngôn ngữ ký hiệu được ghi nhận",
             icon: <TagIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
             label: "mẫu",
-            value: totalSamples,
+            value: s.total_samples,
             description: "Video hoặc ghi hình được tải lên",
             icon: <FolderIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
             label: "người đóng góp",
-            value: contributors.size,
+            value: s.contributors_count,
             description: "Thành viên cộng đồng hoạt động",
             icon: <UsersIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
             label: "khu vực/phương ngữ",
-            value: regions.size,
+            value: s.regions_count,
             description: "Vùng lãnh thổ được đại diện",
             icon: <GlobeIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },

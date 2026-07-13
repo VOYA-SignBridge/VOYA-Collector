@@ -263,6 +263,35 @@ async def synthesize(
         await _release_key_lock(key)
 
 
+def invalidate_text_cache_sync(text: str) -> int:
+    """Best-effort SYNC purge of one label's cached audio across all voices.
+
+    Called from the (synchronous) catalog mutation path when a label is renamed
+    or deleted, so stale clips don't linger until TTL. Uses a short-lived sync
+    Redis client (the module's async pool can't be awaited here). Never raises;
+    returns the number of keys deleted (0 on any failure).
+    """
+    clean = (text or "").strip()
+    if not clean:
+        return 0
+    try:
+        import redis as _sync_redis
+
+        client = _sync_redis.from_url(
+            settings.tts_redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=3,
+        )
+        keys = [_cache_key(v["id"], clean) for v in ALLOWED_VOICES]
+        deleted = int(client.delete(*keys)) if keys else 0
+        if deleted:
+            logger.info("[TTS] invalidated %d cached clip(s) for '%s'", deleted, clean[:40])
+        return deleted
+    except Exception as exc:  # pragma: no cover - infra dependent
+        logger.warning("[TTS] cache invalidate failed for '%s': %s", clean[:40], exc)
+        return 0
+
+
 async def cache_exists(text: str, voice: Optional[str] = None) -> bool:
     """Check if audio for given text+voice is already cached.
 

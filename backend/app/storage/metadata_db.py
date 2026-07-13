@@ -192,6 +192,7 @@ INDEX_STATEMENTS = [
     # Partial index for Celery export: only indexes rows not yet synced to Sheets
     "CREATE INDEX IF NOT EXISTS idx_samples_sheets_synced ON samples(sheets_synced) WHERE sheets_synced = FALSE",
     "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id)",
 ]
 
 MIGRATION_STATEMENTS = [
@@ -222,6 +223,18 @@ MIGRATION_STATEMENTS = [
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
         used_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    )
+    """,
+    # Refresh tokens for the cookie session flow. Only a sha256 hash of the
+    # token is stored (a leaked DB dump can't be replayed). Rotated on every
+    # refresh (old row gets revoked_at) and revoked on logout.
+    """
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        revoked_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     )
     """,

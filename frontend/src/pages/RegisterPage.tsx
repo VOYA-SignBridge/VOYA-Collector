@@ -1,7 +1,7 @@
 import { type FormEvent, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { register, login } from "../api/auth";
-import { saveAuthToken } from "../api/axiosClient";
+import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
 import AuthInput, { LockIcon, MailIcon, UserIcon } from "../components/auth/AuthInput";
 
@@ -69,12 +69,13 @@ export default function RegisterPage() {
         password: form.password,
       });
 
-      const res = await login({
+      // Auto-login after register: sets the auth cookies, then notify + go.
+      await login({
         identifier: form.email.trim(),
         password: form.password,
       });
 
-      saveAuthToken(res.access_token);
+      notifyAuthChange();
       navigate("/upload", { replace: true });
     } catch (err: unknown) {
       const errorObj = err as {

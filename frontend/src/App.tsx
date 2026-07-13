@@ -2,10 +2,12 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Layout from "./components/Layout";
 // import DebugPanel from "./components/DebugPanel";
 import { Suspense, lazy, useEffect, useState } from "react";
-import { loadAuthToken } from "./api/axiosClient";
-import { me } from "./api/auth";
 import { ToastProvider } from "./hooks/useToast";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import ToastContainer from "./components/ui/ToastContainer";
+import SecurityNotices from "./components/SecurityNotices";
+import LoadingScreen from "./components/LoadingScreen";
+import NotAuthorizedPage from "./pages/NotAuthorizedPage";
 
 // Minimal type for the debug interface exposed on window
 // interface DebuggerInterface {
@@ -23,39 +25,29 @@ const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const AdminUsersPage = lazy(() => import("./pages/AdminUsersPage"));
+const AdminResourcesPage = lazy(() => import("./pages/AdminResourcesPage"));
+const AdminActivityPage = lazy(() => import("./pages/AdminActivityPage"));
+const AdminDataPage = lazy(() => import("./pages/AdminDataPage"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
 
 
-// Protected Route Wrapper
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<"loading" | "authed" | "unauth">("loading");
-  const [tokenVersion, setTokenVersion] = useState(0);
+// Protected Route Wrapper — reads the shared AuthProvider instead of firing its
+// own /auth/me. The provider already reloads on login/logout (AUTH_EVENT) and
+// cross-tab storage changes, so no local listeners are needed here.
+function ProtectedRoute({
+  children,
+  requireAdmin = false,
+}: {
+  children: React.ReactNode;
+  requireAdmin?: boolean;
+}) {
+  const { loading, isAuthenticated, isAdmin } = useAuth();
 
-  useEffect(() => {
-    const onAuthChange = () => setTokenVersion((v) => v + 1);
-    window.addEventListener("voya:auth-change", onAuthChange);
-    window.addEventListener("storage", onAuthChange);
-    return () => {
-      window.removeEventListener("voya:auth-change", onAuthChange);
-      window.removeEventListener("storage", onAuthChange);
-    };
-  }, []);
-
-  useEffect(() => {
-    const token = loadAuthToken();
-    if (!token) {
-      setStatus("unauth");
-      return;
-    }
-
-    setStatus("loading");
-    me()
-      .then(() => setStatus("authed"))
-      .catch(() => setStatus("unauth"));
-  }, [tokenVersion]);
-
-  if (status === "loading") return <div className="p-6">Loading...</div>;
-  if (status === "unauth") return <Navigate to="/login" replace />;
+  if (loading) return <LoadingScreen />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Signed in but lacking admin rights → show a proper 403 page instead of
+  // leaking the admin shell (which would render empty and look broken).
+  if (requireAdmin && !isAdmin) return <NotAuthorizedPage />;
   return <>{children}</>;
 }
 
@@ -85,14 +77,15 @@ function App() {
   // }, []);
 
   if (loading) {
-    return <div className="p-6">Loading...</div>;
+    return <LoadingScreen />;
   }
 
   return (
     <ToastProvider>
-      <Router>
-        <Layout>
-          <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <AuthProvider>
+        <Router>
+          <Layout>
+          <Suspense fallback={<LoadingScreen />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
@@ -124,8 +117,35 @@ function App() {
               <Route
                 path="/admin/users"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireAdmin>
                     <AdminUsersPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin/resources"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <AdminResourcesPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin/activity"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <AdminActivityPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin/data"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <AdminDataPage />
                   </ProtectedRoute>
                 }
               />
@@ -133,7 +153,7 @@ function App() {
               <Route
                 path="/trash"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireAdmin>
                     <TrashPage />
                   </ProtectedRoute>
                 }
@@ -144,10 +164,12 @@ function App() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
-        </Layout>
-        {/* <DebugPanel /> */}
-        <ToastContainer />
-      </Router>
+          </Layout>
+          {/* <DebugPanel /> */}
+          <ToastContainer />
+          <SecurityNotices />
+        </Router>
+      </AuthProvider>
     </ToastProvider>
   );
 }

@@ -14,7 +14,7 @@ from .tcn import TCNModel
 from .cnn import CNNModel
 from .lstm import LSTMModel
 from .bigru_attention import BiGRUAttentionModel
-from .handgcn import HandGCNModel
+from .hd_gcn import HandGCNModel
 
 __all__ = [
     "SignLanguageModel",
@@ -32,6 +32,7 @@ MODEL_REGISTRY = {
     "bigru_attention": BiGRUAttentionModel,
     "handgcn": HandGCNModel,
     "hdgcn": HandGCNModel,  # Backward compatibility alias
+    "hd_gcn": HandGCNModel,
 }
 
 

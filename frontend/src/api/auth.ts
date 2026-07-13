@@ -20,20 +20,25 @@ export type LoginPayload = {
   password: string;
 };
 
-export type LoginResponse = {
-  access_token: string;
-  token_type: "bearer";
-  user: AuthUser;
-};
-
 export async function register(payload: RegisterPayload): Promise<AuthUser> {
   const res = await axiosClient.post("/api/v1/auth/register", payload);
   return res.data as AuthUser;
 }
 
-export async function login(payload: LoginPayload): Promise<LoginResponse> {
+/** Login sets httpOnly auth cookies server-side and returns the user profile
+ *  (no token in the body — the browser can't read the httpOnly cookies). */
+export async function login(payload: LoginPayload): Promise<AuthUser> {
   const res = await axiosClient.post("/api/v1/auth/login", payload);
-  return res.data as LoginResponse;
+  return res.data as AuthUser;
+}
+
+/** Revoke the refresh token server-side and clear all auth cookies. */
+export async function logout(): Promise<void> {
+  try {
+    await axiosClient.post("/api/v1/auth/logout");
+  } catch {
+    // Best-effort: even if the call fails, the client clears local state.
+  }
 }
 
 export async function me(): Promise<AuthUser> {
