@@ -105,8 +105,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
       {/* Metrics Cards */}
       {!latestMetric ? (
         <div className="flex items-center justify-center py-12 text-slate-500">
-          <LoadingSpinner size="md" />
-          <span className="ml-3">Đang chờ epoch đầu tiên...</span>
+          <LoadingSpinner size="md" label="Đang chờ epoch đầu tiên..." />
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

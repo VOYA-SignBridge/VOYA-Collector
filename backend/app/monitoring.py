@@ -44,6 +44,8 @@ RAM_ALERT_PCT = 90
 CPU_ALERT_PCT = 92
 VRAM_ALERT_PCT = 90
 REDIS_ALERT_PCT = 90
+DISK_WARN_PCT = 85     # Soft limit — cảnh báo admin
+DISK_CRIT_PCT = 95     # Hard limit — chặn Sync, bảo vệ DB
 # VRAM (MB) held by compute processes with NO active training job before we
 # flag a possible leak. A margin above 0 avoids false positives from a job that
 # is a few seconds into tearing down.
@@ -265,6 +267,28 @@ def redis_snapshot() -> Dict[str, Any]:
             pass
 
 
+def disk_snapshot() -> Dict[str, Any]:
+    """Disk usage for the dataset volume.  shutil.disk_usage is a single
+    syscall (statvfs) — essentially free, safe to call every poll cycle."""
+    try:
+        usage = shutil.disk_usage(str(settings.dataset_root))
+        total_gb = round(usage.total / 1e9, 2)
+        used_gb = round(usage.used / 1e9, 2)
+        free_gb = round(usage.free / 1e9, 2)
+        used_pct = round(100.0 * usage.used / usage.total, 1) if usage.total else 0.0
+        return {
+            "available": True,
+            "total_gb": total_gb,
+            "used_gb": used_gb,
+            "free_gb": free_gb,
+            "used_pct": used_pct,
+            "mount": str(settings.dataset_root),
+        }
+    except OSError as e:
+        logger.debug("[MONITOR] disk_usage failed: %s", e)
+        return {"available": False, "reason": str(e)}
+
+
 def training_snapshot() -> Dict[str, Any]:
     """The currently running training job (if any), from Postgres."""
     try:
@@ -400,7 +424,8 @@ def resource_config() -> Dict[str, Any]:
 
 
 def _build_alerts(host: Dict[str, Any], gpu: Dict[str, Any],
-                  training: Dict[str, Any], rds: Dict[str, Any]) -> List[Dict[str, str]]:
+                  training: Dict[str, Any], rds: Dict[str, Any],
+                  disk: Dict[str, Any] | None = None) -> List[Dict[str, str]]:
     alerts: List[Dict[str, str]] = []
 
     if host.get("ram_pct", 0) >= RAM_ALERT_PCT:
@@ -426,6 +451,17 @@ def _build_alerts(host: Dict[str, Any], gpu: Dict[str, Any],
         alerts.append({"level": "warning",
                        "message": f"Redis {rds['used_pct']}% ≥ {REDIS_ALERT_PCT}%"})
 
+    # Disk watermark alerts
+    if disk and disk.get("available"):
+        dpct = disk.get("used_pct", 0)
+        if dpct >= DISK_CRIT_PCT:
+            alerts.append({"level": "critical",
+                           "message": f"Ổ cứng {dpct}% ≥ {DISK_CRIT_PCT}% — Sync GDrive "
+                                      "tạm dừng, cần giải phóng dung lượng ngay"})
+        elif dpct >= DISK_WARN_PCT:
+            alerts.append({"level": "warning",
+                           "message": f"Ổ cứng {dpct}% ≥ {DISK_WARN_PCT}% — sắp đầy"})
+
     return alerts
 
 
@@ -435,12 +471,14 @@ def collect_resources() -> Dict[str, Any]:
     gpu = read_gpu_snapshot()
     training = training_snapshot()
     rds = redis_snapshot()
+    disk = disk_snapshot()
     return {
         "timestamp": _iso_now(),
         "host": host,
         "gpu": gpu,
         "training": training,
         "redis": rds,
+        "disk": disk,
         "config": resource_config(),
-        "alerts": _build_alerts(host, gpu, training, rds),
+        "alerts": _build_alerts(host, gpu, training, rds, disk),
     }

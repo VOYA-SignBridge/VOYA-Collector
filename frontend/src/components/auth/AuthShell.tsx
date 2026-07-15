@@ -31,7 +31,7 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
                 <img
                   src="/logo.png"
                   alt="Đại học Cần Thơ"
-                  className="h-16 w-16 object-contain drop-shadow-sm sm:h-20 sm:w-20"
+                  className="h-16 w-16 sm:h-20 sm:w-20 object-contain drop-shadow-sm"
                 />
                 <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-ctu-blue">
                   Đại học Cần Thơ

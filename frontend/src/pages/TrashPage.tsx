@@ -255,8 +255,7 @@ export default function TrashPage() {
       <div className="card p-0 overflow-hidden">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
-            <LoadingSpinner size="lg" />
-            <span className="text-sm">Đang tải thùng rác…</span>
+            <LoadingSpinner size="lg" label="Đang tải thùng rác…" />
           </div>
         ) : count === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center px-6">

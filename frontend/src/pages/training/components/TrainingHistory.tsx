@@ -76,8 +76,7 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
   if (loading && jobs.length === 0) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-500">
-        <LoadingSpinner size="md" />
-        <span className="ml-3">Đang tải lịch sử training...</span>
+        <LoadingSpinner size="md" label="Đang tải lịch sử training..." />
       </div>
     );
   }

@@ -6,6 +6,7 @@ import PageHeader from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
 import EmptyState from "../components/ui/EmptyState";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
+import LoadingScreen from "../components/LoadingScreen";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import { SearchIcon, TagIcon } from "../components/ui/Icons";
@@ -370,7 +371,7 @@ export default function LabelsPage() {
 
   // Show loading state while auth loads
   if (authLoading) {
-    return <LoadingSpinner />;
+    return <LoadingScreen />;
   }
 
 
@@ -541,8 +542,7 @@ export default function LabelsPage() {
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <LoadingSpinner size="lg" className="text-ctu-blue" />
-            <span className="ml-3 text-gray-600">Loading labels...</span>
+            <LoadingSpinner size="lg" label="Đang tải danh sách nhãn..." />
           </div>
         ) : renderItems.length === 0 ? (
           <EmptyState 

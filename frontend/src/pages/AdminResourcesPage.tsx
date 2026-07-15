@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import apiClient from "../api/axiosClient";
+import LoadingSpinner from "../components/ui/LoadingSpinner";
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend app/monitoring.py :: collect_resources()
@@ -41,6 +42,15 @@ interface RedisInfo {
   maxmemory_mb?: number;
   used_pct?: number;
 }
+interface DiskInfo {
+  available: boolean;
+  total_gb?: number;
+  used_gb?: number;
+  free_gb?: number;
+  used_pct?: number;
+  mount?: string;
+  reason?: string;
+}
 interface ServiceAlloc {
   name: string;
   role: string;
@@ -62,11 +72,12 @@ interface ResourceReport {
   gpu: GpuInfo;
   training: TrainingInfo;
   redis: RedisInfo;
+  disk: DiskInfo;
   config: ConfigInfo;
   alerts: Alert[];
 }
 
-const REFRESH_MS = 3000;
+const REFRESH_MS = 5000;
 
 // ---------------------------------------------------------------------------
 // formatting + status color (4-step; always paired with a numeric label so
@@ -81,7 +92,7 @@ function statusBar(pct: number): string {
   if (pct >= 95) return "bg-red-500";
   if (pct >= 90) return "bg-orange-500";
   if (pct >= 75) return "bg-amber-400";
-  return "bg-emerald-500";
+  return "bg-ctu-blue";
 }
 
 function Meter({ pct }: { pct: number }) {
@@ -152,6 +163,7 @@ export default function AdminResourcesPage() {
   const gpu = data?.gpu;
   const training = data?.training;
   const redis = data?.redis;
+  const disk = data?.disk;
   const config = data?.config;
   const alerts = data?.alerts ?? [];
 
@@ -174,7 +186,7 @@ export default function AdminResourcesPage() {
             </div>
             Giám sát tài nguyên
           </h2>
-          <p className="text-slate-600">Tình trạng CPU · RAM · GPU và cấu hình phân phối tài nguyên hệ thống</p>
+          <p className="text-slate-600">Tình trạng CPU · RAM · GPU · Ổ cứng và cấu hình phân phối tài nguyên hệ thống</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-400 tabular-nums">
@@ -183,11 +195,11 @@ export default function AdminResourcesPage() {
           <button
             onClick={() => setLive((v) => !v)}
             className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-              live ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              live ? "bg-ctu-blue/10 text-ctu-blue border-ctu-blue/20"
                    : "bg-slate-50 text-slate-600 border-slate-200"
             }`}
           >
-            <span className={`w-2 h-2 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
+            <span className={`w-2 h-2 rounded-full ${live ? "bg-ctu-blue animate-pulse" : "bg-slate-400"}`} />
             {live ? "Trực tiếp" : "Tạm dừng"}
           </button>
         </div>
@@ -197,7 +209,13 @@ export default function AdminResourcesPage() {
         <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">{error}</div>
       )}
 
-      {/* Alerts */}
+      {!data && !error ? (
+        <div className="py-20">
+          <LoadingSpinner size="lg" label="Đang tải số liệu tài nguyên..." />
+        </div>
+      ) : (
+        <>
+          {/* Alerts */}
       {alerts.length > 0 ? (
         <div className="space-y-2">
           {alerts.map((a, i) => (
@@ -210,13 +228,13 @@ export default function AdminResourcesPage() {
           ))}
         </div>
       ) : data ? (
-        <div className="rounded-lg px-4 py-3 text-sm font-medium border bg-emerald-50 border-emerald-200 text-emerald-700 flex items-center gap-2">
+        <div className="rounded-lg px-4 py-3 text-sm font-medium border bg-ctu-blue/10 border-ctu-blue/20 text-ctu-blue flex items-center gap-2">
           <span>🟢</span> Tài nguyên bình thường — không có cảnh báo
         </div>
       ) : null}
 
       {/* KPI row — current usage as used / total */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         <StatTile
           label="CPU"
           pct={host?.cpu_pct}
@@ -244,6 +262,15 @@ export default function AdminResourcesPage() {
           value={gpu?.available ? `${(gpu?.util_pct ?? 0).toFixed(0)}%` : "—"}
           meta={gpu?.available ? `🌡️ ${gpu?.temp_c ?? "—"}°C · ⚡ ${gpu?.power_w ?? "—"} W · ${gpu?.processes?.length ?? 0} tiến trình` : undefined}
           muted={!gpu?.available}
+        />
+        <StatTile
+          label="Ổ cứng (Dataset)"
+          pct={disk?.available ? disk?.used_pct : undefined}
+          value={disk?.available ? `${(disk?.used_gb ?? 0).toFixed(1)} / ${(disk?.total_gb ?? 0).toFixed(1)} GB` : "—"}
+          meta={disk?.available
+            ? `Còn trống ${(disk?.free_gb ?? 0).toFixed(1)} GB`
+            : `Không đọc được${disk?.reason ? ` (${disk.reason})` : ""}`}
+          muted={!disk?.available}
         />
       </div>
 
@@ -273,7 +300,7 @@ export default function AdminResourcesPage() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500">Đang tải…</p>
+          <p className="text-sm text-slate-500">Chưa có dữ liệu CPU theo nhân</p>
         )}
       </div>
 
@@ -281,7 +308,6 @@ export default function AdminResourcesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-lg">🏋️</span>
             <h3 className="font-semibold text-slate-700">Huấn luyện</h3>
           </div>
           {training?.active ? (
@@ -301,7 +327,12 @@ export default function AdminResourcesPage() {
                   {training.total_epochs ? Math.round((100 * (training.current_epoch ?? 0)) / training.total_epochs) : 0}%
                 </span>
               </div>
-              <Meter pct={training.total_epochs ? (100 * (training.current_epoch ?? 0)) / training.total_epochs : 0} />
+              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-ctu-blue transition-all duration-700"
+                  style={{ width: `${Math.max(0, Math.min(100, training.total_epochs ? (100 * (training.current_epoch ?? 0)) / training.total_epochs : 0))}%` }}
+                />
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
@@ -321,8 +352,14 @@ export default function AdminResourcesPage() {
               <div className="text-2xl font-bold tabular-nums text-slate-900">
                 {fmtMem(redis.used_mb)}{redis.maxmemory_mb ? <span className="text-slate-400"> / {fmtMem(redis.maxmemory_mb)}</span> : null}
               </div>
-              <Meter pct={redis.used_pct ?? 0} />
-              <div className="text-xs text-slate-500">{redis.maxmemory_mb ? "Cache / broker" : "Không giới hạn"}</div>
+              {redis.maxmemory_mb ? (
+                <Meter pct={redis.used_pct ?? 0} />
+              ) : (
+                <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                  <div className="h-full rounded-full bg-ctu-blue/40" style={{ width: '100%' }} />
+                </div>
+              )}
+              <div className="text-xs text-slate-500">{redis.maxmemory_mb ? `Cache / broker · ${(redis.used_pct ?? 0).toFixed(0)}%` : "Không giới hạn — chỉ hiển thị dung lượng tuyệt đối"}</div>
             </div>
           ) : <p className="text-sm text-slate-500">—</p>}
         </div>
@@ -375,7 +412,7 @@ export default function AdminResourcesPage() {
                     />
                   </div>
                   {s.gpu && (
-                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">GPU</span>
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold bg-ctu-blue/10 text-ctu-blue">GPU</span>
                   )}
                   <div className="w-16 shrink-0 text-right text-sm font-semibold tabular-nums text-slate-700">
                     {s.mem_limit_mb ? fmtMem(s.mem_limit_mb) : "∞"}
@@ -402,6 +439,8 @@ export default function AdminResourcesPage() {
           <p className="text-sm text-slate-500">Không đọc được cấu hình tài nguyên từ compose.</p>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
