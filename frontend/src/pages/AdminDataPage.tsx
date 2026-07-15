@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import apiClient from "../api/axiosClient";
 import SyncGDriveModal from "../components/SyncGDriveModal";
+import LoadingSpinner from "../components/ui/LoadingSpinner";
 import {
   TagIcon, CameraIcon, UsersIcon, GlobeIcon, DatabaseIcon, ClockIcon, CloudDownloadIcon,
 } from "../components/ui/Icons";
@@ -58,16 +59,20 @@ function BarList({ title, icon, rows }: { title: string; icon: ReactNode; rows: 
 
 export default function AdminDataPage() {
   const [data, setData] = useState<DataReport | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncOpen, setSyncOpen] = useState(false);
 
   const load = async () => {
+    setLoading(true);
     try {
       const res = await apiClient.get<DataReport>("/api/v1/admin/data-report");
       setData(res.data);
       setError(null);
     } catch (e: any) {
       setError(e?.response?.data?.detail || "Không tải được báo cáo dữ liệu");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -97,52 +102,60 @@ export default function AdminDataPage() {
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">{error}</div>}
 
-      {/* Totals */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Nhãn" value={data?.labels_count ?? 0} icon={<TagIcon className="w-5 h-5" />} />
-        <StatCard label="Mẫu dữ liệu" value={data?.total_samples ?? 0} icon={<CameraIcon className="w-5 h-5" />} />
-        <StatCard label="Người đóng góp" value={data?.contributors_count ?? 0} icon={<UsersIcon className="w-5 h-5" />} />
-        <StatCard label="Vùng miền" value={data?.regions_count ?? 0} icon={<GlobeIcon className="w-5 h-5" />} />
-      </div>
-
-      {/* Breakdowns */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <BarList title="Top nhãn theo số mẫu" icon={<TagIcon className="w-5 h-5" />} rows={(data?.top_labels ?? []).map((r) => ({ name: r.label, count: r.count }))} />
-        <BarList title="Phân bố theo vùng" icon={<GlobeIcon className="w-5 h-5" />} rows={(data?.by_region ?? []).map((r) => ({ name: r.region, count: r.count }))} />
-        <BarList title="Người đóng góp nhiều nhất" icon={<UsersIcon className="w-5 h-5" />} rows={(data?.top_contributors ?? []).map((r) => ({ name: r.username, count: r.count }))} />
-        <BarList title="Theo nguồn" icon={<DatabaseIcon className="w-5 h-5" />} rows={(data?.by_source ?? []).map((r) => ({ name: r.source, count: r.count }))} />
-      </div>
-
-      {/* Recent */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-        <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><span className="text-ctu-blue"><ClockIcon className="w-5 h-5" /></span>Mẫu mới nhất</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="text-slate-500 border-b border-slate-200">
-                <th className="py-2 px-3 font-semibold">Nhãn</th>
-                <th className="py-2 px-3 font-semibold">Vùng</th>
-                <th className="py-2 px-3 font-semibold">Nguồn</th>
-                <th className="py-2 px-3 font-semibold">Thời gian</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.recent ?? []).length === 0 ? (
-                <tr><td colSpan={4} className="py-6 text-center text-slate-400">Chưa có mẫu nào.</td></tr>
-              ) : (
-                data!.recent.map((r, i) => (
-                  <tr key={i} className="border-b border-slate-50">
-                    <td className="py-2 px-3 font-medium text-slate-800">{r.label || "—"}</td>
-                    <td className="py-2 px-3 text-slate-600">{r.dialect || "—"}</td>
-                    <td className="py-2 px-3 text-slate-600">{r.source || "—"}</td>
-                    <td className="py-2 px-3 text-slate-400 tabular-nums">{r.created_at ? r.created_at.slice(0, 19).replace("T", " ") : "—"}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {loading ? (
+        <div className="py-20">
+          <LoadingSpinner size="lg" label="Đang tải báo cáo dữ liệu..." />
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Totals */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Nhãn" value={data?.labels_count ?? 0} icon={<TagIcon className="w-5 h-5" />} />
+            <StatCard label="Mẫu dữ liệu" value={data?.total_samples ?? 0} icon={<CameraIcon className="w-5 h-5" />} />
+            <StatCard label="Người đóng góp" value={data?.contributors_count ?? 0} icon={<UsersIcon className="w-5 h-5" />} />
+            <StatCard label="Vùng miền" value={data?.regions_count ?? 0} icon={<GlobeIcon className="w-5 h-5" />} />
+          </div>
+
+          {/* Breakdowns */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <BarList title="Top nhãn theo số mẫu" icon={<TagIcon className="w-5 h-5" />} rows={(data?.top_labels ?? []).map((r) => ({ name: r.label, count: r.count }))} />
+            <BarList title="Phân bố theo vùng" icon={<GlobeIcon className="w-5 h-5" />} rows={(data?.by_region ?? []).map((r) => ({ name: r.region, count: r.count }))} />
+            <BarList title="Người đóng góp nhiều nhất" icon={<UsersIcon className="w-5 h-5" />} rows={(data?.top_contributors ?? []).map((r) => ({ name: r.username, count: r.count }))} />
+            <BarList title="Theo nguồn" icon={<DatabaseIcon className="w-5 h-5" />} rows={(data?.by_source ?? []).map((r) => ({ name: r.source, count: r.count }))} />
+          </div>
+
+          {/* Recent */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <h3 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><span className="text-ctu-blue"><ClockIcon className="w-5 h-5" /></span>Mẫu mới nhất</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="text-slate-500 border-b border-slate-200">
+                    <th className="py-2 px-3 font-semibold">Nhãn</th>
+                    <th className="py-2 px-3 font-semibold">Vùng</th>
+                    <th className="py-2 px-3 font-semibold">Nguồn</th>
+                    <th className="py-2 px-3 font-semibold">Thời gian</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.recent ?? []).length === 0 ? (
+                    <tr><td colSpan={4} className="py-6 text-center text-slate-400">Chưa có mẫu nào.</td></tr>
+                  ) : (
+                    data!.recent.map((r, i) => (
+                      <tr key={i} className="border-b border-slate-50">
+                        <td className="py-2 px-3 font-medium text-slate-800">{r.label || "—"}</td>
+                        <td className="py-2 px-3 text-slate-600">{r.dialect || "—"}</td>
+                        <td className="py-2 px-3 text-slate-600">{r.source || "—"}</td>
+                        <td className="py-2 px-3 text-slate-400 tabular-nums">{r.created_at ? r.created_at.slice(0, 19).replace("T", " ") : "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
       <SyncGDriveModal isOpen={syncOpen} onClose={() => setSyncOpen(false)} />
     </div>

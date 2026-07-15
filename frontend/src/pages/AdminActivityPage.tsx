@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import apiClient from "../api/axiosClient";
 import { useToast } from "../hooks/useToast";
+import LoadingSpinner from "../components/ui/LoadingSpinner";
 import BlockIpModal, { type BlockPayload } from "../components/BlockIpModal";
 
 interface SecurityEvent {
@@ -184,7 +185,13 @@ export default function AdminActivityPage() {
         <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-4 py-3 text-sm">{error}</div>
       )}
 
-      {/* Summary */}
+      {!data && !error ? (
+        <div className="py-20">
+          <LoadingSpinner size="lg" label="Đang tải phiên hoạt động..." />
+        </div>
+      ) : (
+        <>
+          {/* Summary */}
       <div className="flex flex-wrap gap-2">
         <Chip label="Đang online" value={data?.online_count ?? 0} tone="bg-emerald-50 border-emerald-200 text-emerald-700" />
         <Chip label="Tổng phiên" value={sessions.length} />
@@ -346,6 +353,8 @@ export default function AdminActivityPage() {
             ))}
           </div>
         </div>
+      )}
+      </>
       )}
 
       <BlockIpModal ip={blockTarget} open={!!blockTarget} onClose={() => setBlockTarget(null)} onConfirm={doBlock} />

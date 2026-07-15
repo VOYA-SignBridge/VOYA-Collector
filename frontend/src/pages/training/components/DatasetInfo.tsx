@@ -18,8 +18,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <LoadingSpinner size="lg" />
-        <p className="mt-4 text-slate-600">Đang tải thông tin dataset...</p>
+        <LoadingSpinner size="lg" label="Đang tải thông tin dataset..." />
       </div>
     );
   }

@@ -80,10 +80,14 @@ function App() {
     return <LoadingScreen />;
   }
 
+// Lấy thư mục gốc động từ cấu hình Runtime Nginx tiêm vào
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const basename = (window as any).__ENV__?.VITE_BASE_PATH || "/";
+
   return (
     <ToastProvider>
       <AuthProvider>
-        <Router>
+        <Router basename={basename}>
           <Layout>
           <Suspense fallback={<LoadingScreen />}>
             <Routes>

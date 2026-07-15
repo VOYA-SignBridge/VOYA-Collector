@@ -91,7 +91,8 @@ DDL_STATEMENTS = [
         is_common_language BOOLEAN,
         folder_name TEXT,
         created_at TIMESTAMP WITH TIME ZONE,
-        migrated_at TIMESTAMP WITH TIME ZONE
+        migrated_at TIMESTAMP WITH TIME ZONE,
+        deleted_at TIMESTAMP WITH TIME ZONE
     )
     """,
     """
@@ -116,6 +117,7 @@ DDL_STATEMENTS = [
         checksum TEXT,
         created_at TIMESTAMP WITH TIME ZONE,
         gdrive_synced BOOLEAN DEFAULT FALSE,
+        deleted_at TIMESTAMP WITH TIME ZONE,
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
@@ -137,6 +139,7 @@ DDL_STATEMENTS = [
         storage_url TEXT,
         created_at TIMESTAMP WITH TIME ZONE,
         updated_at TIMESTAMP WITH TIME ZONE,
+        deleted_at TIMESTAMP WITH TIME ZONE,
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
@@ -196,6 +199,10 @@ INDEX_STATEMENTS = [
 ]
 
 MIGRATION_STATEMENTS = [
+    # Soft delete trash
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE raw_uploads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
     # Add sheets_synced column to samples (safe for existing data: defaults to FALSE)
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS sheets_synced BOOLEAN DEFAULT FALSE",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS gdrive_synced BOOLEAN DEFAULT TRUE",

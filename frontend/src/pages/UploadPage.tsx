@@ -5,7 +5,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
-import LoadingSpinner from "../components/ui/LoadingSpinner";
+import LoadingScreen from "../components/LoadingScreen";
 import { useAuth } from "../hooks/useAuth";
 const CaptureCamera = lazy(() => import("../components/CaptureCamera"));
 
@@ -43,7 +43,7 @@ export default function UploadPage() {
 
   // Show loading while auth is fetching
   if (authLoading) {
-    return <LoadingSpinner />;
+    return <LoadingScreen />;
   }
 
   return (

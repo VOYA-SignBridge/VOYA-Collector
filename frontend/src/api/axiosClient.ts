@@ -19,11 +19,20 @@ const emitAuthChange = () => {
   window.dispatchEvent(new Event(AUTH_EVENT));
 };
 
-const getApiBaseURL = (): string => {
+export const getApiBaseURL = (): string => {
+  // 1. Lấy từ cấu hình Runtime Nginx tiêm vào
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const runtimeUrl = (window as any).__ENV__?.VITE_API_URL;
+  if (runtimeUrl && runtimeUrl !== "api" && runtimeUrl !== "api/") {
+    return runtimeUrl;
+  }
+
+  // 2. Dự phòng (Fallback): Lấy từ biến môi trường lúc Build (phục vụ cho dev mode)
   const envUrl = import.meta.env.VITE_API_URL;
-  if (envUrl) {
+  if (envUrl && envUrl !== "api" && envUrl !== "api/") {
     return envUrl;
   }
+
   return "";
 };
 

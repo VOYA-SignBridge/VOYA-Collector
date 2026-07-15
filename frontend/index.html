@@ -1,6 +1,26 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Injected by Nginx at runtime (12-Factor App) -->
+    <script>
+      (function() {
+        var basePath = "__VITE_BASE_PATH__";
+        // Fallback for dev mode
+        if (basePath === "__VI" + "TE_BASE_PATH__") basePath = "/";
+        
+        var base = document.createElement('base');
+        base.href = basePath;
+        document.head.appendChild(base);
+
+        var apiUrl = "__VITE_API_URL__";
+        if (apiUrl === "__VI" + "TE_API_URL__") apiUrl = "";
+        
+        window.__ENV__ = {
+          VITE_API_URL: apiUrl,
+          VITE_BASE_PATH: basePath
+        };
+      })();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

@@ -1,4 +1,5 @@
 import os
+import shutil
 import logging
 from pathlib import Path
 from typing import List, Dict, Any
@@ -10,6 +11,21 @@ from psycopg2.extras import RealDictCursor
 from app.storage.gdrive_client import download_from_gdrive
 
 logger = logging.getLogger(__name__)
+
+DISK_HIGH_WATERMARK = 0.95  # 95% — stop downloading to protect DB & filesystem
+
+
+def _disk_over_watermark() -> bool:
+    """Return True when the dataset volume is ≥ 95% full.
+
+    shutil.disk_usage is a single statvfs syscall (< 1µs), so calling it once
+    per download-loop iteration adds no measurable overhead.  On OSError (e.g.
+    a missing mount) we err on the side of caution and report "over"."""
+    try:
+        usage = shutil.disk_usage(str(settings.dataset_root))
+        return (usage.used / usage.total) >= DISK_HIGH_WATERMARK if usage.total else False
+    except OSError:
+        return True
 
 
 def _is_present(path: Path) -> bool:
@@ -37,6 +53,7 @@ def download_missing_files_to_local(self):
         skipped_count = 0
         error_count = 0
         current_progress = 0
+        disk_stopped = False
 
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -95,6 +112,12 @@ def download_missing_files_to_local(self):
                         report_progress()
                         continue
                         
+                    if not (storage_url.startswith("http") or storage_url.startswith("gdrive://")):
+                        skipped_count += 1
+                        current_progress += 1
+                        report_progress()
+                        continue
+                        
                     local_abs_path = Path(settings.dataset_root) / file_path
 
                     # A 0-byte local file is a FAILED prior download, not a real
@@ -102,6 +125,11 @@ def download_missing_files_to_local(self):
                     # a corrupt npz that crashes training. Require size > 0.
                     if _is_present(local_abs_path):
                         skipped_count += 1
+                    elif _disk_over_watermark():
+                        logger.warning("[SYNC] Disk ≥ %.0f%% — stopping downloads (backpressure)",
+                                       DISK_HIGH_WATERMARK * 100)
+                        disk_stopped = True
+                        break
                     else:
                         try:
                             logger.info(f"[SYNC] Downloading feature for {sample['sample_uid']} from {storage_url}")
@@ -116,7 +144,8 @@ def download_missing_files_to_local(self):
                     report_progress()
 
                 # Process Raw Videos
-                for raw in raw_uploads:
+                if not disk_stopped:
+                  for raw in raw_uploads:
                     storage_url = raw["storage_url"]
                     local_path = raw["local_path"]
                     
@@ -134,12 +163,23 @@ def download_missing_files_to_local(self):
                         report_progress()
                         continue
                         
+                    if not (storage_url.startswith("http") or storage_url.startswith("gdrive://")):
+                        skipped_count += 1
+                        current_progress += 1
+                        report_progress()
+                        continue
+                        
                     local_abs_path = Path(local_path)
                     if not local_abs_path.is_absolute():
                          local_abs_path = Path(settings.dataset_root) / local_path
                          
                     if _is_present(local_abs_path):
                         skipped_count += 1
+                    elif _disk_over_watermark():
+                        logger.warning("[SYNC] Disk ≥ %.0f%% — stopping downloads (backpressure)",
+                                       DISK_HIGH_WATERMARK * 100)
+                        disk_stopped = True
+                        break
                     else:
                         try:
                             logger.info(f"[SYNC] Downloading raw video for {raw['upload_uid']} from {storage_url}")
@@ -153,14 +193,16 @@ def download_missing_files_to_local(self):
                     current_progress += 1
                     report_progress()
 
-        logger.info(f"[SYNC] Finished. Downloaded: {downloaded_count}, Skipped: {skipped_count}, Errors: {error_count}")
+        status = "stopped_disk_full" if disk_stopped else "completed"
+        logger.info(f"[SYNC] Finished ({status}). Downloaded: {downloaded_count}, Skipped: {skipped_count}, Errors: {error_count}")
         return {
-            "status": "completed",
+            "status": status,
             "current": current_progress,
             "total": total_items,
             "downloaded": downloaded_count,
             "skipped": skipped_count,
-            "errors": error_count
+            "errors": error_count,
+            "disk_stopped": disk_stopped,
         }
 
     except Exception as e:

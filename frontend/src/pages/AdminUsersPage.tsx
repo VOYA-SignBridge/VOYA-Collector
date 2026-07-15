@@ -5,6 +5,7 @@ import { me } from "../api/auth";
 import type { AuthUser } from "../api/auth";
 import { CheckIcon, XIcon, UsersIcon } from "../components/ui/Icons";
 import LockUserModal, { type LockPayload } from "../components/LockUserModal";
+import LoadingSpinner from "../components/ui/LoadingSpinner";
 
 interface UserData {
   id: string;
@@ -124,8 +125,8 @@ export default function AdminUsersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-500">
-                    Đang tải dữ liệu...
+                  <td colSpan={5} className="py-12">
+                    <LoadingSpinner size="lg" label="Đang tải danh sách người dùng..." />
                   </td>
                 </tr>
               ) : !Array.isArray(users) || users.length === 0 ? (

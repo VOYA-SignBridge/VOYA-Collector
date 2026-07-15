@@ -25,11 +25,55 @@ def init_db():
         from app.storage.metadata_db import ensure_tables
         ensure_tables()
         logger.info("[DB_INIT][SUCCESS] duration_ms=%.1f", (time.time() - started_at) * 1000)
+        
+        # Check and sync missing data (Idempotent seed)
+        sync_missing_data_on_startup()
+        
         return True
     except Exception:
         # Best-effort: DB is optional
         logger.exception("[DB_INIT][FAILURE] schema initialization failed")
         return False
+
+def sync_missing_data_on_startup():
+    """Sync missing records from CSV to PostgreSQL on startup.
+    Ensures Foreign Key safety by inserting parents first, and Idempotency
+    by using ON CONFLICT DO UPDATE which preserves deleted_at.
+    """
+    from app.dataset_manager import load_labels
+    from app.dataset_samples import list_samples
+    from app.raw_uploads import list_raw_uploads
+    from app.storage.metadata_db import _fetch_all, upsert_class, upsert_sample, upsert_raw_upload
+    
+    try:
+        # 1. Classes (Parent table)
+        labels = load_labels()
+        if labels:
+            db_classes_count = _fetch_all("SELECT COUNT(*) as c FROM classes")[0]["c"]
+            if db_classes_count < len(labels):
+                logger.info("[STARTUP_SYNC] Syncing classes. DB: %d, CSV: %d", db_classes_count, len(labels))
+                for label in labels:
+                    upsert_class(label)
+                    
+        # 2. Samples (Child table)
+        samples = list_samples()
+        if samples:
+            db_samples_count = _fetch_all("SELECT COUNT(*) as c FROM samples")[0]["c"]
+            if db_samples_count < len(samples):
+                logger.info("[STARTUP_SYNC] Syncing samples. DB: %d, CSV: %d", db_samples_count, len(samples))
+                for sample in samples:
+                    upsert_sample(sample)
+                    
+        # 3. Raw Uploads (Child table)
+        uploads = list_raw_uploads()
+        if uploads:
+            db_uploads_count = _fetch_all("SELECT COUNT(*) as c FROM raw_uploads")[0]["c"]
+            if db_uploads_count < len(uploads):
+                logger.info("[STARTUP_SYNC] Syncing raw_uploads. DB: %d, CSV: %d", db_uploads_count, len(uploads))
+                for upload in uploads:
+                    upsert_raw_upload(upload)
+    except Exception as exc:
+        logger.error("[STARTUP_SYNC] Failed to sync missing data: %s", exc)
 
 def bootstrap_admin_user():
     """Create admin user from .env if not already exists.

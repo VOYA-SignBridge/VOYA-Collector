@@ -2,12 +2,9 @@ services:
   frontend:
     build:
       context: ./frontend
-      args:
-        # Empty = same-origin relative API paths, proxied by the nginx
-        # gateway (nginx.conf) to the backend on the same domain/port.
-        # Only set this if the frontend is served from a different
-        # origin than the nginx gateway.
-        VITE_API_URL: ${VITE_API_URL:-}
+    environment:
+      - VITE_BASE_PATH=${VITE_BASE_PATH:-/}
+      - VITE_API_URL=${VITE_API_URL:-}
     image: voya_frontend:latest
     container_name: voya_frontend
     mem_limit: 128m
