@@ -93,6 +93,7 @@ DDL_STATEMENTS = [
         created_at TIMESTAMP WITH TIME ZONE,
         migrated_at TIMESTAMP WITH TIME ZONE,
         deleted_at TIMESTAMP WITH TIME ZONE
+        hands_required INTEGER
     )
     """,
     """
@@ -118,6 +119,11 @@ DDL_STATEMENTS = [
         created_at TIMESTAMP WITH TIME ZONE,
         gdrive_synced BOOLEAN DEFAULT FALSE,
         deleted_at TIMESTAMP WITH TIME ZONE,
+        left_hand_ratio REAL,
+        right_hand_ratio REAL,
+        both_hands_ratio REAL,
+        jitter REAL,
+        quality_flags TEXT,
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
@@ -210,6 +216,13 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP WITH TIME ZONE",
     # Test-set evaluation (confusion matrix + per-class metrics) for Step 7
     "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS evaluation JSONB",
+    # Live-capture QC: per-class hand requirement + per-sample quality metrics
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS hands_required INTEGER",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS left_hand_ratio REAL",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS right_hand_ratio REAL",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS both_hands_ratio REAL",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS jitter REAL",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS quality_flags TEXT",
     # Sync status tracking table for Google Sheets auto-rotation
     """
     CREATE TABLE IF NOT EXISTS google_sheets_sync_status (
@@ -322,11 +335,13 @@ ON CONFLICT (id) DO UPDATE SET
 SQL_UPSERT_CLASS = """
 INSERT INTO classes(
     class_uid, class_idx, slug, label_original, language, dialect,
-    is_common_global, is_common_language, folder_name, created_at, migrated_at
+    is_common_global, is_common_language, folder_name, created_at, migrated_at,
+    hands_required
 )
 VALUES(
     %(class_uid)s, %(class_idx)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
-    %(is_common_global)s, %(is_common_language)s, %(folder_name)s, %(created_at)s, %(migrated_at)s
+    %(is_common_global)s, %(is_common_language)s, %(folder_name)s, %(created_at)s, %(migrated_at)s,
+    %(hands_required)s
 )
 ON CONFLICT (class_uid) DO UPDATE SET
     class_idx = EXCLUDED.class_idx,
@@ -338,19 +353,22 @@ ON CONFLICT (class_uid) DO UPDATE SET
     is_common_language = EXCLUDED.is_common_language,
     folder_name = EXCLUDED.folder_name,
     created_at = EXCLUDED.created_at,
-    migrated_at = EXCLUDED.migrated_at
+    migrated_at = EXCLUDED.migrated_at,
+    hands_required = COALESCE(EXCLUDED.hands_required, classes.hands_required)
 """
 
 SQL_UPSERT_SAMPLE = """
 INSERT INTO samples(
     sample_uid, class_uid, slug, label_original, language, dialect,
     source_type, user_id, auth_user_id, session_id, fps_original, fps_processed,
-    seq_len, augment_id, completeness, file_path, storage_url, checksum, created_at, gdrive_synced
+    seq_len, augment_id, completeness, file_path, storage_url, checksum, created_at, gdrive_synced,
+    left_hand_ratio, right_hand_ratio, both_hands_ratio, jitter, quality_flags
 )
 VALUES(
     %(sample_uid)s, %(class_uid)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
     %(source_type)s, %(user_id)s, %(auth_user_id)s, %(session_id)s, %(fps_original)s, %(fps_processed)s,
-    %(seq_len)s, %(augment_id)s, %(completeness)s, %(file_path)s, %(storage_url)s, %(checksum)s, %(created_at)s, %(gdrive_synced)s
+    %(seq_len)s, %(augment_id)s, %(completeness)s, %(file_path)s, %(storage_url)s, %(checksum)s, %(created_at)s, %(gdrive_synced)s,
+    %(left_hand_ratio)s, %(right_hand_ratio)s, %(both_hands_ratio)s, %(jitter)s, %(quality_flags)s
 )
 ON CONFLICT (sample_uid) DO UPDATE SET
     class_uid = EXCLUDED.class_uid,
@@ -371,7 +389,12 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     storage_url = EXCLUDED.storage_url,
     checksum = EXCLUDED.checksum,
     created_at = EXCLUDED.created_at,
-    gdrive_synced = EXCLUDED.gdrive_synced
+    gdrive_synced = EXCLUDED.gdrive_synced,
+    left_hand_ratio = COALESCE(EXCLUDED.left_hand_ratio, samples.left_hand_ratio),
+    right_hand_ratio = COALESCE(EXCLUDED.right_hand_ratio, samples.right_hand_ratio),
+    both_hands_ratio = COALESCE(EXCLUDED.both_hands_ratio, samples.both_hands_ratio),
+    jitter = COALESCE(EXCLUDED.jitter, samples.jitter),
+    quality_flags = COALESCE(EXCLUDED.quality_flags, samples.quality_flags)
 """
 
 SQL_UPSERT_RAW_UPLOAD = """
@@ -421,6 +444,9 @@ def upsert_class(row: Dict[str, Any]):
         "is_common_language": _bool_value(row.get("is_common_language")),
         "created_at": _ts_or_none(row.get("created_at")),
         "migrated_at": _ts_or_none(row.get("migrated_at")),
+        # CSV-derived rows may lack the column entirely or carry "" -> NULL;
+        # ON CONFLICT COALESCEs so a lossy mirror upsert never wipes the value.
+        "hands_required": _int_or_none(row.get("hands_required")),
     }
     _execute(SQL_UPSERT_CLASS, payload)
 
@@ -430,6 +456,7 @@ _SAMPLE_DB_KEYS = (
     "source_type", "user_id", "auth_user_id", "session_id", "fps_original", "fps_processed",
     "seq_len", "augment_id", "completeness", "file_path", "storage_url", "checksum",
     "created_at", "gdrive_synced",
+    "left_hand_ratio", "right_hand_ratio", "both_hands_ratio", "jitter", "quality_flags",
 )
 
 
@@ -447,6 +474,10 @@ def insert_sample(row: Dict[str, Any]):
     payload["seq_len"] = _int_or_none(payload.get("seq_len"))
     payload["augment_id"] = _int_or_none(payload.get("augment_id"))
     payload["completeness"] = _float_or_none(payload.get("completeness"))
+    for qc_key in ("left_hand_ratio", "right_hand_ratio", "both_hands_ratio", "jitter"):
+        payload[qc_key] = _float_or_none(payload.get(qc_key))
+    if payload.get("quality_flags") == "":
+        payload["quality_flags"] = None
     payload["created_at"] = _ts_or_none(payload.get("created_at"))
     if payload.get("gdrive_synced") is None:
         payload["gdrive_synced"] = True
