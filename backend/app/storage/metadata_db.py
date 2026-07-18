@@ -92,7 +92,7 @@ DDL_STATEMENTS = [
         folder_name TEXT,
         created_at TIMESTAMP WITH TIME ZONE,
         migrated_at TIMESTAMP WITH TIME ZONE,
-        deleted_at TIMESTAMP WITH TIME ZONE
+        deleted_at TIMESTAMP WITH TIME ZONE,
         hands_required INTEGER
     )
     """,

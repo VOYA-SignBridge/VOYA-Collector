@@ -398,5 +398,25 @@
     "class_uid": "82efff3d-e049-4a29-bd9c-382ef49f9d57",
     "folder_name": "class_vao-lop_82efff3d",
     "label_key": "vn/can-tho/vao-lop"
+  },
+  "41": {
+    "slug": "nan-mun",
+    "label_original": "nặn mụn",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 41,
+    "class_uid": "7fa33e1f-6925-4732-a14d-b79d2ecdb92c",
+    "folder_name": "class_nan-mun_7fa33e1f",
+    "label_key": "vn/spa/nan-mun"
+  },
+  "42": {
+    "slug": "up-mong",
+    "label_original": "úp móng",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 42,
+    "class_uid": "d8d5a551-b869-42e7-9250-37668f0c6b92",
+    "folder_name": "class_up-mong_d8d5a551",
+    "label_key": "vn/spa/up-mong"
   }
 }

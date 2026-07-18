@@ -29,6 +29,24 @@ export interface SessionStats {
   labelsCount: Record<string, number>;
 }
 
+export interface QualityWarning {
+  code: string;
+  message?: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface UploadQuality {
+  completeness?: number;
+  left_hand_ratio?: number;
+  right_hand_ratio?: number;
+  both_hands_ratio?: number;
+  any_hand_ratio?: number;
+  jitter_p95?: number;
+  hands_required?: number | null;
+  warnings?: QualityWarning[];
+  [k: string]: unknown;
+}
+
 export type UploadResult = {
   success: boolean;
   id?: string | number;
@@ -38,6 +56,7 @@ export type UploadResult = {
   filename?: string;
   total_frames?: number;
   detail?: string;
+  quality?: UploadQuality;
   [k: string]: unknown;
 };
 
@@ -53,7 +72,12 @@ export interface CameraUploadPayload {
   user: string;
   label: string;
   dialect?: string;
+  language?: string;
   session_id: string;
+  /** 1 | 2 — persisted on the class at first capture (first-capture-wins). */
+  hands_required?: number;
+  /** Client-side quality snapshot; informational only, server recomputes. */
+  quality_info?: QualityInfo;
   frames: Array<{
     timestamp: number;
     landmarks: {
@@ -76,6 +100,7 @@ export interface QualityInfo {
   framesAccepted?: number; // after simple client-side filter
   avgPoseLandmarksPerFrame?: number;
   percentFramesWithHands?: number;
+  percentFramesWithBothHands?: number;
   confidenceSummary?: { min?: number; max?: number; avg?: number };
 }
 
@@ -110,6 +135,7 @@ export interface ClassRow {
   folder_name?: string;
   created_at?: string;
   migrated_at?: string | null;
+  hands_required?: number | string | null; // BE returns ""/"1"/"2" strings, FE normalizes
 }
 
 export interface ClassesListResponse {

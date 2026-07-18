@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     enable_live_aug: bool = bool(int(os.getenv("ENABLE_LIVE_AUG", 1)))
     enable_live_smoothing: bool = bool(int(os.getenv("ENABLE_LIVE_SMOOTHING", 0)))
     live_completeness_threshold: float = float(os.getenv("LIVE_COMPLETENESS", 0.5))
+    # Live-capture QC, two-tier: WARN (strict, sample saved + flagged) vs
+    # REJECT (lenient, sample refused with 422). Jitter values are in
+    # image-normalized coordinates (0..1): p95 wrist displacement per frame.
+    qc_enabled: bool = bool(int(os.getenv("QC_ENABLED", 1)))
+    qc_warn_hands_ratio: float = float(os.getenv("QC_WARN_HANDS_RATIO", 0.80))
+    qc_reject_hands_ratio: float = float(os.getenv("QC_REJECT_HANDS_RATIO", 0.30))
+    qc_warn_jitter: float = float(os.getenv("QC_WARN_JITTER", 0.12))
+    qc_reject_jitter: float = float(os.getenv("QC_REJECT_JITTER", 0.35))
+    qc_min_valid_ratio: float = float(os.getenv("QC_MIN_VALID_RATIO", 0.7))
     # Carry-forward missing hand frames vs zero-fill
     carry_forward_missing: bool = bool(int(os.getenv("CARRY_FORWARD_MISSING", 1)))
     # Debug logging toggle

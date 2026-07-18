@@ -27,7 +27,6 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 
 from app.auth import get_current_user, get_user_from_token, require_admin
-from app.cookie_auth import ACCESS_COOKIE
 
 logger = logging.getLogger(__name__)
 
@@ -933,6 +932,40 @@ async def cancel_training_job(
     return job
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_training_job_endpoint(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Xóa training job khỏi lịch sử huấn luyện.
+
+    Chỉ cho phép xóa job đã kết thúc (completed/failed/cancelled) — job đang
+    chạy/đang chờ phải hủy trước (xem cancel_training_job). Không xóa
+    checkpoint file trên đĩa (xem delete_training_job trong metadata_db.py).
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+    if job.status not in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chỉ xóa được job đã kết thúc (trạng thái hiện tại: {job.status}). Hãy hủy job trước.",
+        )
+
+    try:
+        from app.storage.metadata_db import delete_training_job
+
+        await asyncio.to_thread(delete_training_job, job_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không xóa được job: {e}")
+
+    training_jobs.pop(job_id, None)
+    logger.info("job=%s deleted from history by user=%s", job_id, current_user.get("username"))
+    return {"success": True, "job_id": job_id}
+
+
 class PromoteResponse(BaseModel):
     """Kết quả promote model lên realtime"""
     job: TrainingJob
@@ -1066,12 +1099,8 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     WebSocket để stream real-time training progress
 
     Gửi metrics, epoch progress.
-    Auth: browsers cannot set headers on WS. Same-origin WS handshakes DO send
-    cookies, so we read the httpOnly access cookie; the ?token= query param is
-    kept as a fallback for legacy Bearer clients.
+    Auth: browsers cannot set headers on WS — FE gửi JWT qua ?token=.
     """
-    if not token:
-        token = websocket.cookies.get(ACCESS_COOKIE, "")
     user = await asyncio.to_thread(get_user_from_token, token) if token else None
     if not user:
         await websocket.close(code=4001, reason="Unauthorized")

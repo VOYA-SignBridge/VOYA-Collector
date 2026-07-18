@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers via a shebang (#!/bin/sh); CRLF
+# line endings break that shebang and Docker reports it as the script itself
+# being "not found". Force LF regardless of core.autocrlf on Windows checkouts.
+*.sh text eol=lf

@@ -38,6 +38,11 @@ SAMPLE_FIELDS = [
     "storage_url",
     "checksum",
     "created_at",
+    "left_hand_ratio",
+    "right_hand_ratio",
+    "both_hands_ratio",
+    "jitter",
+    "quality_flags",
 ]
 
 
@@ -337,6 +342,11 @@ def save_sequence_npz(
             "storage_url": storage_url or "",
             "checksum": metadata.get("checksum", ""),
             "created_at": created_at,
+            "left_hand_ratio": str(meta.get("left_hand_ratio", "")),
+            "right_hand_ratio": str(meta.get("right_hand_ratio", "")),
+            "both_hands_ratio": str(meta.get("both_hands_ratio", "")),
+            "jitter": str(meta.get("jitter", "")),
+            "quality_flags": str(meta.get("quality_flags", "") or ""),
         }
     )
 
@@ -365,6 +375,11 @@ def save_sequence_npz(
             "checksum": metadata.get("checksum", ""),
             "created_at": created_at,
             "gdrive_synced": not use_google_drive,
+            "left_hand_ratio": meta.get("left_hand_ratio"),
+            "right_hand_ratio": meta.get("right_hand_ratio"),
+            "both_hands_ratio": meta.get("both_hands_ratio"),
+            "jitter": meta.get("jitter"),
+            "quality_flags": meta.get("quality_flags") or None,
         }
         insert_sample(db_row)
     except Exception as e:

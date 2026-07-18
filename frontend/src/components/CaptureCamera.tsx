@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Sample as SampleT, SessionStats, MediaPipeLandmark, QualityInfo, CameraInfo } from "../types";
+import type { Sample as SampleT, SessionStats, MediaPipeLandmark, QualityInfo, CameraInfo, CameraUploadPayload } from "../types";
 import { uploadCamera } from "../api/upload";
+import { qcMessage } from "../utils/qualityMessages";
 import CaptureGuide from "./CaptureGuide";
 import SessionPanel from "./SessionPanel";
 import SessionSummary from "./SessionSumary";
@@ -31,6 +32,9 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   const [samples, setSamples] = useState<SampleT[]>([]);
   const [sampleCounter, setSampleCounter] = useState(1);
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null);
+  // Thông báo QC hiển thị TRONG modal fullscreen (toast global bị element-fullscreen che).
+  // `key` tăng dần để modal re-trigger auto-dismiss cho từng thông báo mới.
+  const [qualityNotice, setQualityNotice] = useState<{ kind: "warning" | "error"; message: string; key: number } | null>(null);
 
   // Số mẫu đã thu thành công theo từng từ, dùng để hiển thị danh sách trong
   // giao diện toàn màn hình (chỉ tính mẫu đã xử lý và lưu lên server).
@@ -116,22 +120,13 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   const handleFullscreenCapture = async (capturedFrames: Array<{
     left_hand: MediaPipeLandmark[];
     right_hand: MediaPipeLandmark[];
-  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string }) => {
+  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string; language?: string; hands_used?: number | null }) => {
     console.log(`Parent received capture: ${capturedLabel} with ${capturedFrames.length} frames`);
-    
+
     // Don't set uploading state to avoid blocking the modal
     try {
       // Prepare data for backend API
-      const payload: {
-        user: string;
-        label: string;
-        session_id: string;
-        dialect?: string;
-        frames: Array<{ timestamp: number; landmarks: {
-          left_hand?: MediaPipeLandmark[];
-          right_hand?: MediaPipeLandmark[];
-        } }>;
-      } = {
+      const payload: CameraUploadPayload = {
         user: capturedUser,
         label: capturedLabel,
         session_id: sessionId,
@@ -141,11 +136,16 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
         }))
       };
       if (meta?.dialect) payload.dialect = meta.dialect;
+      if (meta?.language) payload.language = meta.language;
+      if (meta?.hands_used === 1 || meta?.hands_used === 2) payload.hands_required = meta.hands_used;
+      if (meta?.quality_info) payload.quality_info = meta.quality_info;
 
       console.log('Uploading payload to backend...');
       // Call real API in background
       uploadCamera(payload).then((result) => {
-        if (result.ok) {
+        // HTTP 200 nhưng success=false (payload lỗi) trước đây bị coi là
+        // thành công — giờ xử lý như thất bại.
+        if (result.ok && result.data.success !== false) {
           const sample: SampleT = {
             id: sampleCounter,
             session_id: sessionId,
@@ -160,14 +160,29 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           setSamples(prev => [...prev, sample]);
           setSampleCounter(prev => prev + 1);
           setConnectionIssue(null);
-          onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
+
+          const warning = result.data.quality?.warnings?.[0];
+          if (warning) {
+            // Mẫu được lưu nhưng bị đánh dấu — cảnh báo không chặn phiên quay.
+            const message = qcMessage(warning.code, warning.detail);
+            setQualityNotice(prev => ({ kind: "warning", message, key: (prev?.key ?? 0) + 1 }));
+          } else {
+            onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
+          }
 
           console.log(`Sample "${capturedLabel}" (${capturedFrames.length} frames) uploaded successfully! Total samples: ${samples.length + 1}`);
+        } else if (!result.ok && result.errorCode) {
+          // QC reject (422): lỗi dữ liệu chứ không phải lỗi mạng — hiện toast
+          // đỏ trong modal, KHÔNG set connectionIssue (sẽ đóng băng phiên quay).
+          console.error('Upload rejected by QC:', result.errorCode, result.error);
+          const message = qcMessage(result.errorCode);
+          setQualityNotice(prev => ({ kind: "error", message, key: (prev?.key ?? 0) + 1 }));
         } else {
-          console.error('Upload failed:', result.error);
-          setConnectionIssue(result.error || 'Không thể lưu mẫu lên máy chủ.');
+          const errorMsg = result.ok ? (result.data.message || 'Không thể lưu mẫu lên máy chủ.') : result.error;
+          console.error('Upload failed:', errorMsg);
+          setConnectionIssue(errorMsg || 'Không thể lưu mẫu lên máy chủ.');
           if (onError) {
-            onError(result.error || 'Upload failed. Please try again.');
+            onError(errorMsg || 'Upload failed. Please try again.');
           }
         }
       }).catch((error) => {
@@ -357,6 +372,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           captureCount={captureCount}
           capturedSummary={capturedSummary}
           connectionIssue={connectionIssue}
+          qualityNotice={qualityNotice}
         />
       )}
 

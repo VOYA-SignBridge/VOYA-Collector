@@ -12,6 +12,7 @@ from filelock import FileLock
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from app.processing.utils import atomic_write_json
+from app.processing.quality import parse_hands_required  # re-exported for callers
 
 from app.config import settings
 
@@ -37,6 +38,7 @@ LABEL_FIELDS = [
     "folder_name",
     "created_at",
     "migrated_at",
+    "hands_required",
 ]
 
 
@@ -172,6 +174,7 @@ class ClassMetadata:
     is_common_language: bool
     folder_override: Optional[str] = None
     class_idx: Optional[int] = None
+    hands_required: Optional[int] = None  # 1 | 2 | None (unknown)
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -201,6 +204,7 @@ class ClassMetadata:
             "folder_name": self.folder_name(),
             "created_at": now_str(),
             "migrated_at": now_str(),
+            "hands_required": str(self.hands_required or ""),
         }
 
     def write_metadata_json(self):
@@ -216,8 +220,42 @@ class ClassMetadata:
             "is_common_global": self.is_common_global,
             "is_common_language": self.is_common_language,
             "folder_name": self.folder_name(),
+            "hands_required": self.hands_required,
         }
         atomic_write_json(path, data, indent=2)
+
+
+def _upgrade_labels_header_locked():
+    """Rewrite labels.csv with the current LABEL_FIELDS header if the on-disk
+    header is missing columns. MUST be called while holding the MASTER_LABELS
+    lock. All label writers use LABEL_FIELDS directly, so appending new-schema
+    rows to an old-header file would silently misalign columns.
+    Old rows get "" for the new columns (DictReader restval)."""
+    with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f, restval="")
+        on_disk = reader.fieldnames or []
+        if all(col in on_disk for col in LABEL_FIELDS):
+            return
+        rows = list(reader)
+    tmp = MASTER_LABELS.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, MASTER_LABELS)
+    logger.info("[CLASS] Upgraded labels.csv header to %s (%d rows preserved)", LABEL_FIELDS, len(rows))
+
+
+def _labels_header_outdated() -> bool:
+    """Cheap lock-free peek at the on-disk header (first line only)."""
+    try:
+        with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), [])
+    except (OSError, StopIteration):
+        return False
+    return bool(header) and any(col not in header for col in LABEL_FIELDS)
 
 
 def _ensure_labels_file():
@@ -231,6 +269,10 @@ def _ensure_labels_file():
                 with open(MASTER_LABELS, "w", newline="", encoding="utf-8") as f:
                     writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS)
                     writer.writeheader()
+    elif _labels_header_outdated():
+        lock = FileLock(str(MASTER_LABELS) + ".lock")
+        with lock:
+            _upgrade_labels_header_locked()
     # ensure derivative label indexes exist (generated lazily)
     for path, fields in [
         (
@@ -375,6 +417,58 @@ def regenerate_label_indexes():
                 writer.writerows(items)
 
 
+def set_class_hands_required(class_uid: str, hands_required: int) -> bool:
+    """Persist hands_required (1|2) for a class, first-capture-wins.
+
+    Only writes when the class has no value yet. Mutates ONLY the
+    hands_required cell of the matching row (rebuilding rows via
+    to_label_row() would clobber created_at/migrated_at), then atomically
+    rewrites labels.csv. Returns True if the value was written.
+    """
+    hands_required = parse_hands_required(hands_required)
+    if hands_required is None:
+        return False
+    _ensure_labels_file()
+
+    updated_row: Optional[Dict[str, str]] = None
+    lock = FileLock(str(MASTER_LABELS) + ".lock")
+    with lock:
+        rows = _load_labels_locked()
+        for r in rows:
+            if r.get("class_uid") == class_uid:
+                if parse_hands_required(r.get("hands_required")) is not None:
+                    return False  # already set — first capture wins
+                r["hands_required"] = str(hands_required)
+                updated_row = dict(r)
+                break
+        else:
+            logger.warning("[CLASS] set_class_hands_required: class_uid=%s not found", class_uid)
+            return False
+
+        tmp = MASTER_LABELS.with_suffix(".csv.tmp")
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
+            writer.writeheader()
+            writer.writerows(rows)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, MASTER_LABELS)
+
+    logger.info("[CLASS] hands_required=%s persisted for class_uid=%s", hands_required, class_uid)
+
+    # Best-effort mirrors — never fail the caller for these
+    try:
+        from app.storage.metadata_db import upsert_class
+        upsert_class(updated_row)
+    except Exception as exc:
+        logger.warning("[CLASS] hands_required DB mirror failed: %s", exc)
+    try:
+        sync_master_labels_to_gdrive()
+    except Exception as exc:
+        logger.warning("[CLASS] hands_required Drive mirror failed: %s", exc)
+    return True
+
+
 def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
     """Construct ClassMetadata from a labels CSV row."""
     return ClassMetadata(
@@ -389,6 +483,7 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         is_common_global=parse_bool(existing.get("is_common_global")),
         is_common_language=parse_bool(existing.get("is_common_language")),
         folder_override=existing.get("folder_name") or None,
+        hands_required=parse_hands_required(existing.get("hands_required")),
     )
 
 
@@ -537,6 +632,7 @@ def list_classes(
                 dialect=r["dialect"],
                 is_common_global=parse_bool(r.get("is_common_global")),
                 is_common_language=parse_bool(r.get("is_common_language")),
+                hands_required=parse_hands_required(r.get("hands_required")),
             )
         )
     return out

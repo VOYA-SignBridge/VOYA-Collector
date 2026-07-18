@@ -47,6 +47,24 @@ const extractErrorMessage = (err: unknown, fallback = "Upload failed"): string =
   return fallback;
 };
 
+// 4xx responses (validation / QC reject) are deterministic — retrying would
+// re-POST the same bad payload. Returns the failure Result to short-circuit
+// the retry loop with, or null when the error is retryable (network / 5xx).
+const clientErrorResult = (err: unknown): { ok: false; error: string; errorCode?: string } | null => {
+  type AxiosLikeError = { response?: { status?: number; data?: unknown } };
+  const status = (err as AxiosLikeError)?.response?.status;
+  if (typeof status !== "number" || status < 400 || status >= 500) return null;
+  const data = (err as AxiosLikeError).response?.data;
+  let errorCode: string | undefined;
+  if (data && typeof data === "object") {
+    const detail = (data as { detail?: unknown }).detail;
+    if (detail && typeof detail === "object" && typeof (detail as { code?: unknown }).code === "string") {
+      errorCode = (detail as { code: string }).code;
+    }
+  }
+  return { ok: false, error: extractErrorMessage(err), errorCode };
+};
+
 // Helper to log to debug panel
 const logDebugOperation = (operation: string, status: DebugStatus, data: DebugLogData) => {
   const debugWindow = window as DebugWindow;
@@ -131,15 +149,17 @@ export const uploadVideo = async (
       }
       return result;
     } catch (err: unknown) {
-      // If this is the last attempt, return a helpful error message
-      if (attempt === maxAttempts) {
-        const errorMsg = extractErrorMessage(err);
+      const clientErr = clientErrorResult(err);
+      // If 4xx or this is the last attempt, return a helpful error message
+      if (clientErr || attempt === maxAttempts) {
+        const failure = clientErr ?? { ok: false as const, error: extractErrorMessage(err) };
         logDebugOperation('UPLOAD_VIDEO', 'FAILURE', {
           session_id: sessionId,
-          error: errorMsg,
+          error: failure.error,
+          error_code: failure.errorCode,
           duration_ms: Date.now() - startTime,
         });
-        return { ok: false, error: errorMsg };
+        return failure;
       }
       // exponential backoff with jitter
       const jitter = Math.random() * 100;
@@ -190,14 +210,16 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
       }
       return result;
     } catch (err: unknown) {
-      if (attempt === maxAttempts) {
-        const errorMsg = extractErrorMessage(err);
+      const clientErr = clientErrorResult(err);
+      if (clientErr || attempt === maxAttempts) {
+        const failure = clientErr ?? { ok: false as const, error: extractErrorMessage(err) };
         logDebugOperation('UPLOAD_CAMERA', 'FAILURE', {
           session_id: sessionId,
-          error: errorMsg,
+          error: failure.error,
+          error_code: failure.errorCode,
           duration_ms: Date.now() - startTime,
         });
-        return { ok: false, error: errorMsg };
+        return failure;
       }
       const jitter = Math.random() * 100;
       const delay = baseDelay * 2 ** (attempt - 1) + jitter;

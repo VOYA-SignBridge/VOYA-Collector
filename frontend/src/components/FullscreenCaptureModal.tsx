@@ -320,7 +320,14 @@ interface FullscreenCaptureModalProps {
     frames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>,
     label: string,
     user: string,
-    meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string }
+    meta?: {
+      camera_info?: CameraInfo;
+      quality_info?: QualityInfo;
+      dialect?: string;
+      language?: string;
+      /** Số tay dùng khi thu: lựa chọn thủ công 1/2, hoặc số suy ra từ warmup ở chế độ Auto. */
+      hands_used?: number | null;
+    }
   ) => void;
   initialLabel?: string;
   initialUser?: string;
@@ -330,6 +337,12 @@ interface FullscreenCaptureModalProps {
   capturedSummary?: Record<string, number>;
   /** Thông báo lỗi kết nối/lưu server hiện tại; khi có giá trị, tạm chặn bắt đầu thu mới. */
   connectionIssue?: string | null;
+  /**
+   * Thông báo QC sau khi upload (warning = mẫu được lưu nhưng bị đánh dấu,
+   * error = mẫu bị từ chối). Phải render BÊN TRONG modal vì element-fullscreen
+   * che toàn bộ ToastContainer global. `key` tăng dần để re-trigger auto-dismiss.
+   */
+  qualityNotice?: { kind: "warning" | "error"; message: string; key: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +358,7 @@ export default function FullscreenCaptureModal({
   captureCount = 1,
   capturedSummary = {},
   connectionIssue = null,
+  qualityNotice = null,
 }: FullscreenCaptureModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -403,6 +417,7 @@ export default function FullscreenCaptureModal({
   const labelRef = useRef(label);
   const userRef = useRef(user);
   const dialectRef = useRef(dialect);
+  const languageRef = useRef(language);
   const targetFramesRef = useRef(targetFrames);
   const onSampleCaptureRef = useRef(onSampleCapture);
   const connectionIssueRef = useRef(connectionIssue);
@@ -435,6 +450,7 @@ export default function FullscreenCaptureModal({
   useEffect(() => { framesRef.current = frames; }, [frames]);
   useEffect(() => { labelRef.current = label; }, [label]);
   useEffect(() => { dialectRef.current = dialect; }, [dialect]);
+  useEffect(() => { languageRef.current = language; }, [language]);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
@@ -513,6 +529,7 @@ export default function FullscreenCaptureModal({
   const computeQuality = useCallback((capturedFrames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>) => {
     let totalHandLandmarks = 0;
     let framesWithHands = 0;
+    let framesWithBothHands = 0;
     let framesAccepted = 0;
     let confidenceSum = 0;
     let confidenceCount = 0;
@@ -523,6 +540,7 @@ export default function FullscreenCaptureModal({
       const handCount = leftCount + rightCount;
       totalHandLandmarks += handCount;
       if (handCount > 0) { framesWithHands++; framesAccepted++; }
+      if (leftCount > 0 && rightCount > 0) framesWithBothHands++;
 
       for (const lm of [...(f.left_hand || []), ...(f.right_hand || [])]) {
         if (typeof lm.visibility === "number") { confidenceSum += lm.visibility; confidenceCount++; }
@@ -534,6 +552,7 @@ export default function FullscreenCaptureModal({
       framesAccepted,
       avgPoseLandmarksPerFrame: capturedFrames.length ? totalHandLandmarks / capturedFrames.length : 0,
       percentFramesWithHands: capturedFrames.length ? (framesWithHands / capturedFrames.length) * 100 : 0,
+      percentFramesWithBothHands: capturedFrames.length ? (framesWithBothHands / capturedFrames.length) * 100 : 0,
       confidenceSummary: confidenceCount ? { avg: confidenceSum / confidenceCount } : undefined,
     };
     return quality;
@@ -834,6 +853,25 @@ export default function FullscreenCaptureModal({
   const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0;
   const currentCatalogLabelCount = selectedDialectRows.length;
 
+  // Nhãn đã có hands_required trên class (đã chuẩn hoá thành 1|2|null ở
+  // getClassesList) → khoá selector theo giá trị của class.
+  const lockedHands = typeof matchingCatalogRow?.hands_required === "number"
+    ? matchingCatalogRow.hands_required
+    : null;
+
+  useEffect(() => {
+    if (lockedHands !== null) handleSetExpectedHands(lockedHands);
+  }, [lockedHands, handleSetExpectedHands]);
+
+  // In-modal QC toast: auto-dismiss sau 5s, re-trigger theo notice.key
+  const [visibleNotice, setVisibleNotice] = useState<typeof qualityNotice>(null);
+  useEffect(() => {
+    if (!qualityNotice) return;
+    setVisibleNotice(qualityNotice);
+    const timer = setTimeout(() => setVisibleNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [qualityNotice]);
+
   // -------------------------------------------------------------------------
   // Capture handlers
   // -------------------------------------------------------------------------
@@ -873,7 +911,12 @@ export default function FullscreenCaptureModal({
     setPaused(false); pausedRef.current = false;
     if (framesRef.current.length > 0) {
       const quality = computeQuality(framesRef.current);
-      onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
+      onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, {
+        quality_info: quality,
+        dialect: dialectRef.current,
+        language: languageRef.current,
+        hands_used: expectedHandsOptionRef.current ?? expectedHandsRef.current,
+      });
       setFrames([]); framesRef.current = [];
       expectedHandsRef.current = expectedHandsOptionRef.current;
     }
@@ -1251,7 +1294,10 @@ export default function FullscreenCaptureModal({
         const newCompleted = completedCapturesRef.current + 1;
 
         onSampleCaptureRef.current(capturedFrames, labelRef.current, userRef.current, {
-          quality_info: quality, dialect: dialectRef.current,
+          quality_info: quality,
+          dialect: dialectRef.current,
+          language: languageRef.current,
+          hands_used: expectedHandsOptionRef.current ?? expectedHandsRef.current,
         });
 
         completedCapturesRef.current = newCompleted;
@@ -1474,6 +1520,32 @@ export default function FullscreenCaptureModal({
 
   return (
     <div ref={rootRef} className="fixed inset-0 h-[100dvh] w-screen z-[9999] bg-black flex flex-col overflow-hidden">
+      {/* QC notice — phải nằm TRONG root vì element-fullscreen che toast global */}
+      {visibleNotice && (
+        <div className="fixed bottom-4 right-4 z-[10001] max-w-sm pointer-events-none">
+          <div
+            className={`pointer-events-auto rounded-lg border px-4 py-3 text-sm shadow-xl backdrop-blur-md ${
+              visibleNotice.kind === "error"
+                ? "bg-red-900/85 border-red-500 text-red-100"
+                : "bg-yellow-900/85 border-yellow-500 text-yellow-100"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-2">
+              <span>{visibleNotice.kind === "error" ? "⛔" : "⚠️"}</span>
+              <span className="leading-snug">{visibleNotice.message}</span>
+              <button
+                onClick={() => setVisibleNotice(null)}
+                className="ml-auto -mr-1 -mt-1 p-1 opacity-70 hover:opacity-100"
+                aria-label="Đóng thông báo"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Camera Error */}
       {cameraError && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -1509,13 +1581,18 @@ export default function FullscreenCaptureModal({
                   <button
                     key={String(v)}
                     onClick={() => handleSetExpectedHands(v)}
-                    disabled={recording}
-                    className={`px-3 py-1 text-sm ${expectedHandsOption === v ? "bg-gray-700 text-white" : "text-gray-300 hover:bg-gray-700"}`}
+                    disabled={recording || lockedHands !== null}
+                    className={`px-3 py-1 text-sm ${expectedHandsOption === v ? "bg-gray-700 text-white" : "text-gray-300 hover:bg-gray-700"} ${lockedHands !== null ? "opacity-60 cursor-not-allowed" : ""}`}
                   >
                     {v === null ? "Auto" : v}
                   </button>
                 ))}
               </div>
+              {lockedHands !== null && (
+                <span className="text-xs text-ctu-yellow" title="Nhãn này đã được ghi nhận cần số tay cố định — không thể thay đổi khi thu.">
+                  🔒 Cố định theo nhãn ({lockedHands} tay)
+                </span>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
