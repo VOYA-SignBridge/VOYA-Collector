@@ -223,6 +223,32 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS both_hands_ratio REAL",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS jitter REAL",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS quality_flags TEXT",
+    # Vocabulary schema v2 (dialect is deprecated as a semantic field)
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS semantic_label TEXT",
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS vocabulary_scope TEXT",
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS recognition_profile TEXT",
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS vocabulary_group TEXT",
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS collection_campaign TEXT",
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS signer_id TEXT",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS collection_campaign TEXT",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS raw_landmarks_available BOOLEAN",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS normalization_version TEXT",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS preprocess_contract_version TEXT",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS sequence_length_original INTEGER",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS quality_status TEXT",
+    # Normalized signer registry (signer_id is the ONLY key for signer-disjoint splits)
+    """
+    CREATE TABLE IF NOT EXISTS signers (
+        signer_id TEXT PRIMARY KEY,
+        display_name TEXT,
+        regional_group TEXT,
+        external_user_id TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP WITH TIME ZONE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_samples_signer_id ON samples(signer_id)",
     # Sync status tracking table for Google Sheets auto-rotation
     """
     CREATE TABLE IF NOT EXISTS google_sheets_sync_status (
@@ -336,12 +362,14 @@ SQL_UPSERT_CLASS = """
 INSERT INTO classes(
     class_uid, class_idx, slug, label_original, language, dialect,
     is_common_global, is_common_language, folder_name, created_at, migrated_at,
-    hands_required
+    hands_required,
+    semantic_label, vocabulary_scope, recognition_profile, vocabulary_group, collection_campaign, is_active
 )
 VALUES(
     %(class_uid)s, %(class_idx)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
     %(is_common_global)s, %(is_common_language)s, %(folder_name)s, %(created_at)s, %(migrated_at)s,
-    %(hands_required)s
+    %(hands_required)s,
+    %(semantic_label)s, %(vocabulary_scope)s, %(recognition_profile)s, %(vocabulary_group)s, %(collection_campaign)s, %(is_active)s
 )
 ON CONFLICT (class_uid) DO UPDATE SET
     class_idx = EXCLUDED.class_idx,
@@ -354,7 +382,23 @@ ON CONFLICT (class_uid) DO UPDATE SET
     folder_name = EXCLUDED.folder_name,
     created_at = EXCLUDED.created_at,
     migrated_at = EXCLUDED.migrated_at,
-    hands_required = COALESCE(EXCLUDED.hands_required, classes.hands_required)
+    hands_required = COALESCE(EXCLUDED.hands_required, classes.hands_required),
+    semantic_label = COALESCE(EXCLUDED.semantic_label, classes.semantic_label),
+    vocabulary_scope = COALESCE(EXCLUDED.vocabulary_scope, classes.vocabulary_scope),
+    recognition_profile = COALESCE(EXCLUDED.recognition_profile, classes.recognition_profile),
+    vocabulary_group = COALESCE(EXCLUDED.vocabulary_group, classes.vocabulary_group),
+    collection_campaign = COALESCE(EXCLUDED.collection_campaign, classes.collection_campaign),
+    is_active = COALESCE(EXCLUDED.is_active, classes.is_active)
+"""
+
+SQL_UPSERT_SIGNER = """
+INSERT INTO signers(signer_id, display_name, regional_group, external_user_id, is_active, created_at)
+VALUES(%(signer_id)s, %(display_name)s, %(regional_group)s, %(external_user_id)s, %(is_active)s, %(created_at)s)
+ON CONFLICT (signer_id) DO UPDATE SET
+    display_name = COALESCE(EXCLUDED.display_name, signers.display_name),
+    regional_group = COALESCE(EXCLUDED.regional_group, signers.regional_group),
+    external_user_id = COALESCE(EXCLUDED.external_user_id, signers.external_user_id),
+    is_active = EXCLUDED.is_active
 """
 
 SQL_UPSERT_SAMPLE = """
@@ -362,13 +406,17 @@ INSERT INTO samples(
     sample_uid, class_uid, slug, label_original, language, dialect,
     source_type, user_id, auth_user_id, session_id, fps_original, fps_processed,
     seq_len, augment_id, completeness, file_path, storage_url, checksum, created_at, gdrive_synced,
-    left_hand_ratio, right_hand_ratio, both_hands_ratio, jitter, quality_flags
+    left_hand_ratio, right_hand_ratio, both_hands_ratio, jitter, quality_flags,
+    signer_id, collection_campaign, raw_landmarks_available, normalization_version,
+    preprocess_contract_version, sequence_length_original, quality_status
 )
 VALUES(
     %(sample_uid)s, %(class_uid)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
     %(source_type)s, %(user_id)s, %(auth_user_id)s, %(session_id)s, %(fps_original)s, %(fps_processed)s,
     %(seq_len)s, %(augment_id)s, %(completeness)s, %(file_path)s, %(storage_url)s, %(checksum)s, %(created_at)s, %(gdrive_synced)s,
-    %(left_hand_ratio)s, %(right_hand_ratio)s, %(both_hands_ratio)s, %(jitter)s, %(quality_flags)s
+    %(left_hand_ratio)s, %(right_hand_ratio)s, %(both_hands_ratio)s, %(jitter)s, %(quality_flags)s,
+    %(signer_id)s, %(collection_campaign)s, %(raw_landmarks_available)s, %(normalization_version)s,
+    %(preprocess_contract_version)s, %(sequence_length_original)s, %(quality_status)s
 )
 ON CONFLICT (sample_uid) DO UPDATE SET
     class_uid = EXCLUDED.class_uid,
@@ -394,7 +442,14 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     right_hand_ratio = COALESCE(EXCLUDED.right_hand_ratio, samples.right_hand_ratio),
     both_hands_ratio = COALESCE(EXCLUDED.both_hands_ratio, samples.both_hands_ratio),
     jitter = COALESCE(EXCLUDED.jitter, samples.jitter),
-    quality_flags = COALESCE(EXCLUDED.quality_flags, samples.quality_flags)
+    quality_flags = COALESCE(EXCLUDED.quality_flags, samples.quality_flags),
+    signer_id = COALESCE(EXCLUDED.signer_id, samples.signer_id),
+    collection_campaign = COALESCE(EXCLUDED.collection_campaign, samples.collection_campaign),
+    raw_landmarks_available = COALESCE(EXCLUDED.raw_landmarks_available, samples.raw_landmarks_available),
+    normalization_version = COALESCE(EXCLUDED.normalization_version, samples.normalization_version),
+    preprocess_contract_version = COALESCE(EXCLUDED.preprocess_contract_version, samples.preprocess_contract_version),
+    sequence_length_original = COALESCE(EXCLUDED.sequence_length_original, samples.sequence_length_original),
+    quality_status = COALESCE(EXCLUDED.quality_status, samples.quality_status)
 """
 
 SQL_UPSERT_RAW_UPLOAD = """
@@ -447,8 +502,26 @@ def upsert_class(row: Dict[str, Any]):
         # CSV-derived rows may lack the column entirely or carry "" -> NULL;
         # ON CONFLICT COALESCEs so a lossy mirror upsert never wipes the value.
         "hands_required": _int_or_none(row.get("hands_required")),
+        "semantic_label": (str(row.get("semantic_label") or "").strip() or None),
+        "vocabulary_scope": (str(row.get("vocabulary_scope") or "").strip() or None),
+        "recognition_profile": (str(row.get("recognition_profile") or "").strip() or None),
+        "vocabulary_group": (str(row.get("vocabulary_group") or "").strip() or None),
+        "collection_campaign": (str(row.get("collection_campaign") or "").strip() or None),
+        "is_active": _bool_value(row.get("is_active", True)) if str(row.get("is_active", "")).strip() != "" else None,
     }
     _execute(SQL_UPSERT_CLASS, payload)
+
+
+def upsert_signer(row: Dict[str, Any]):
+    payload = {
+        "signer_id": row.get("signer_id"),
+        "display_name": row.get("display_name"),
+        "regional_group": (str(row.get("regional_group") or "").strip() or None),
+        "external_user_id": (str(row.get("external_user_id") or "").strip() or None),
+        "is_active": _bool_value(row.get("is_active", True)),
+        "created_at": _ts_or_none(row.get("created_at")),
+    }
+    _execute(SQL_UPSERT_SIGNER, payload)
 
 
 _SAMPLE_DB_KEYS = (
@@ -457,6 +530,8 @@ _SAMPLE_DB_KEYS = (
     "seq_len", "augment_id", "completeness", "file_path", "storage_url", "checksum",
     "created_at", "gdrive_synced",
     "left_hand_ratio", "right_hand_ratio", "both_hands_ratio", "jitter", "quality_flags",
+    "signer_id", "collection_campaign", "raw_landmarks_available", "normalization_version",
+    "preprocess_contract_version", "sequence_length_original", "quality_status",
 )
 
 
@@ -478,6 +553,14 @@ def insert_sample(row: Dict[str, Any]):
         payload[qc_key] = _float_or_none(payload.get(qc_key))
     if payload.get("quality_flags") == "":
         payload["quality_flags"] = None
+    payload["sequence_length_original"] = _int_or_none(payload.get("sequence_length_original"))
+    raw_avail = payload.get("raw_landmarks_available")
+    payload["raw_landmarks_available"] = (
+        None if raw_avail is None or str(raw_avail).strip() == "" else _bool_value(raw_avail)
+    )
+    for txt_key in ("signer_id", "collection_campaign", "normalization_version",
+                    "preprocess_contract_version", "quality_status"):
+        payload[txt_key] = (str(payload.get(txt_key) or "").strip() or None)
     payload["created_at"] = _ts_or_none(payload.get("created_at"))
     if payload.get("gdrive_synced") is None:
         payload["gdrive_synced"] = True

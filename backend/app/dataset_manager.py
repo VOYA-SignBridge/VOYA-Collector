@@ -26,19 +26,30 @@ LANGUAGE_LABELS = LABELS_DIR / "labels_language.csv"
 DIALECT_LABELS = LABELS_DIR / "labels_dialect.csv"
 
 # Field order for labels_master.csv (extended to include class_idx, folder_name, timestamps)
+# NOTE: `dialect` is DEPRECATED as a semantic field (it conflated region /
+# vocabulary domain / collection campaign). It is kept because it still names
+# the physical storage directory. New code must use the vocabulary schema v2
+# columns below (see processed/shared/vocabulary.py + docs/VOCABULARY_SCHEMA_V2.md).
 LABEL_FIELDS = [
     "class_uid",
     "class_idx",
     "slug",
     "label_original",
     "language",
-    "dialect",
+    "dialect",  # deprecated semantics — physical storage dir only
     "is_common_global",
     "is_common_language",
     "folder_name",
     "created_at",
     "migrated_at",
     "hands_required",
+    # --- vocabulary schema v2 ---
+    "semantic_label",
+    "vocabulary_scope",
+    "recognition_profile",
+    "vocabulary_group",
+    "collection_campaign",
+    "is_active",
 ]
 
 
@@ -175,6 +186,13 @@ class ClassMetadata:
     folder_override: Optional[str] = None
     class_idx: Optional[int] = None
     hands_required: Optional[int] = None  # 1 | 2 | None (unknown)
+    # --- vocabulary schema v2 (empty string = unassigned / needs review) ---
+    semantic_label: str = ""
+    vocabulary_scope: str = ""       # "common" | "profile_specific" | ""
+    recognition_profile: str = ""    # north|central|south|hoa_de|legacy_unassigned|""
+    vocabulary_group: str = ""
+    collection_campaign: str = ""
+    is_active: bool = True
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -205,6 +223,12 @@ class ClassMetadata:
             "created_at": now_str(),
             "migrated_at": now_str(),
             "hands_required": str(self.hands_required or ""),
+            "semantic_label": self.semantic_label or "",
+            "vocabulary_scope": self.vocabulary_scope or "",
+            "recognition_profile": self.recognition_profile or "",
+            "vocabulary_group": self.vocabulary_group or "",
+            "collection_campaign": self.collection_campaign or "",
+            "is_active": "1" if self.is_active else "0",
         }
 
     def write_metadata_json(self):
@@ -484,6 +508,12 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         is_common_language=parse_bool(existing.get("is_common_language")),
         folder_override=existing.get("folder_name") or None,
         hands_required=parse_hands_required(existing.get("hands_required")),
+        semantic_label=(existing.get("semantic_label") or "").strip(),
+        vocabulary_scope=(existing.get("vocabulary_scope") or "").strip(),
+        recognition_profile=(existing.get("recognition_profile") or "").strip(),
+        vocabulary_group=(existing.get("vocabulary_group") or "").strip(),
+        collection_campaign=(existing.get("collection_campaign") or "").strip(),
+        is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
     )
 
 
