@@ -207,6 +207,21 @@ def migrate_signers(signers_csv: Path, name_counts: Counter, signer_mapping_path
 
     name_to_id = {name: r["signer_id"] for name, r in by_display.items()}
 
+    # Confirmed merges (apply_signer_merges.py) must survive re-migration:
+    # entries already present in the mapping file WIN over the registry-derived
+    # defaults, so re-running migration never un-merges identities.
+    if signer_mapping_path.exists():
+        try:
+            existing = json.loads(signer_mapping_path.read_text(encoding="utf-8"))
+            existing_names = existing.get("legacy_name_to_signer_id", {})
+            name_to_id.update(existing_names)
+            merge_candidates = [
+                mc for mc in merge_candidates
+                if len({existing_names.get(n) for n in mc["names"]} - {None}) != 1
+            ]
+        except Exception:
+            pass
+
     if not dry_run:
         if signers_csv.exists():
             _backup(signers_csv, backup_dir)

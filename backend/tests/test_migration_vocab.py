@@ -90,11 +90,16 @@ def main() -> int:
               by_uid["u1"]["vocabulary_scope"] == "profile_specific"
               and by_uid["u1"]["recognition_profile"] == "hoa_de")
         check("hoa-de semantic_label", by_uid["u1"]["semantic_label"] == "rang_muoi")
-        check("bang-chu-cai NOT declared common (needs review)",
-              by_uid["u2"]["vocabulary_scope"] == "" and by_uid["u2"]["vocabulary_group"] == "alphabet")
-        check("can-tho NOT mapped to south",
-              by_uid["u3"]["vocabulary_scope"] == ""
-              and by_uid["u3"]["recognition_profile"] == "legacy_unassigned")
+        # Owner-confirmed decisions (2026-07-19): bang-chu-cai IS common,
+        # can-tho IS the 'south' profile. The mapping file is the single source
+        # of truth — the script itself still never infers anything.
+        check("bang-chu-cai -> common (owner-confirmed via mapping)",
+              by_uid["u2"]["vocabulary_scope"] == "common"
+              and by_uid["u2"]["vocabulary_group"] == "alphabet"
+              and by_uid["u2"]["recognition_profile"] == "")
+        check("can-tho -> profile_specific/south (owner-confirmed via mapping)",
+              by_uid["u3"]["vocabulary_scope"] == "profile_specific"
+              and by_uid["u3"]["recognition_profile"] == "south")
         check("unknown dialect reported, untouched", by_uid["u4"]["vocabulary_scope"] == "")
         check("backup created", any((ws / "backups").glob("labels_*.csv")))
         signers = _read(ws / "signers.csv")

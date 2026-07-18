@@ -119,15 +119,36 @@ EXPECTED_FEATURE_DIM = 126
 
 
 def _git_commit_hash() -> str:
-    """Best-effort HEAD commit for the checkpoint contract ('' if unavailable)."""
+    """Best-effort HEAD commit for the checkpoint contract ('' if unavailable).
+
+    Falls back to parsing .git/HEAD directly — training containers usually
+    have the repo mounted but no git binary installed.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
     try:
         import subprocess
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-            cwd=str(Path(__file__).resolve().parents[2]),
+            capture_output=True, text=True, timeout=5, cwd=str(repo_root),
         )
-        return out.stdout.strip() if out.returncode == 0 else ""
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    try:
+        head = (repo_root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(None, 1)[1].strip()
+            ref_file = repo_root / ".git" / ref
+            if ref_file.exists():
+                return ref_file.read_text(encoding="utf-8").strip()
+            packed = repo_root / ".git" / "packed-refs"
+            if packed.exists():
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    if line.endswith(ref):
+                        return line.split()[0]
+            return ""
+        return head
     except Exception:
         return ""
 
@@ -939,6 +960,7 @@ def main() -> None:
     subset_dir: Optional[Path] = None
     common_labels: List[str] = []
     profile_specific_labels: List[str] = []
+    manifest_checksum = ""
 
     if profile_mode:
         # ------------------------------------------------------------------
@@ -963,6 +985,9 @@ def main() -> None:
                    args.split_version / args.model_type / f"seed_{args.seed}")
         run_dir.mkdir(parents=True, exist_ok=True)
         subset_dir = run_dir
+        # Capture the manifest checksum from the ORIGINAL split dir before
+        # cfg.train_csv is repointed at the filtered copy in run_dir.
+        manifest_checksum = _read_split_manifest_checksum(cfg.train_csv)
 
         def _prep_profile_csv(src_csv: Path, name: str) -> Path:
             rows, fieldnames = _read_csv_rows(src_csv)
@@ -1429,7 +1454,7 @@ def main() -> None:
         "git_commit": _git_commit_hash(),
         "training_config": {**cfg_json_for_ckpt, "model_type": args.model_type,
                             "augmentation": augmentation_config},
-        "dataset_manifest_checksum": _read_split_manifest_checksum(cfg.train_csv),
+        "dataset_manifest_checksum": manifest_checksum or _read_split_manifest_checksum(cfg.train_csv),
     }
     final_checkpoint = build_checkpoint(
         model=model,

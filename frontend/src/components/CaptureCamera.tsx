@@ -59,10 +59,15 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
     };
   }, []);
 
+  // Giữ đồng bộ với FullscreenCaptureModal: viết hoa chữ cái đầu mỗi từ
+  // (locale vi) để tên người thu nhất quán, tránh biến thể signer trùng người.
   const sanitizeCollectorName = (value: string) =>
     value
       .replace(/[^\p{L}\s]/gu, " ")
       .replace(/\s+/g, " ")
+      .split(" ")
+      .map((w) => (w ? w.charAt(0).toLocaleUpperCase("vi") + w.slice(1) : w))
+      .join(" ")
       .trim();
 
   useEffect(() => {

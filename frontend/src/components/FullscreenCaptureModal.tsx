@@ -80,10 +80,21 @@ const LANGUAGE_LABELS: Record<string, string> = {
   en: "English",
 };
 
-const sanitizeCollectorName = (value: string) =>
+// Chuẩn hóa tên người thu: bỏ ký tự lạ, gộp khoảng trắng, và tự viết hoa
+// chữ cái đầu mỗi từ (theo locale vi) — để "trân"/"Trân"/"TRÂN" đều nhập ra
+// cùng một dạng hiển thị, tránh tạo thêm biến thể signer trùng người.
+const titleCaseVi = (value: string) =>
   value
-    .replace(/[^\p{L}\s]/gu, " ")
-    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => (w ? w.charAt(0).toLocaleUpperCase("vi") + w.slice(1) : w))
+    .join(" ");
+
+const sanitizeCollectorName = (value: string) =>
+  titleCaseVi(
+    value
+      .replace(/[^\p{L}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+  )
     .trim();
 
 const normalizeText = (value: string) =>
@@ -1806,7 +1817,7 @@ export default function FullscreenCaptureModal({
               <div>
                 <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">👤 Người thực hiện *</label>
                 <div className="relative">
-                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder="tên người thu thập" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder="Ví dụ: Trân" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
                   <div className="absolute inset-y-0 right-1.5 flex items-center">
                     <SpeechInputButton onText={(text) => setUser(text)} title="Giọng nói" className="h-7 w-7" />
                   </div>

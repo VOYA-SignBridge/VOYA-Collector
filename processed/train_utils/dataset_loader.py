@@ -339,15 +339,18 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
     
         y = self._resolve_target(r)
 
+        # All-string meta: torch default_collate rejects None values, and
+        # manifest-era CSVs carry signer_id (normalized) instead of the legacy
+        # free-text user_id — prefer it, fall back for old split CSVs.
         meta = {
-            'sample_id': r.get('sample_id'),
-            'label_slug': r.get('label_slug'),
-            'label_original': r.get('label_original'),
+            'sample_id': r.get('sample_id') or '',
+            'label_slug': r.get('label_slug') or '',
+            'label_original': r.get('label_original') or '',
             'file_path': str(path),
-            'class_uid': r.get('class_uid'),
-            'signer_id': r.get('user_id'),
-            'language': r.get('language'),
-            'dialect': r.get('dialect'),
+            'class_uid': r.get('class_uid') or '',
+            'signer_id': r.get('signer_id') or r.get('user_id') or '',
+            'language': r.get('language') or '',
+            'dialect': r.get('dialect') or '',
         }
 
         if self.to_tensor and TORCH_AVAILABLE:
