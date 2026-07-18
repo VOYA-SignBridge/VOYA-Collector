@@ -43,6 +43,13 @@ SAMPLE_FIELDS = [
     "both_hands_ratio",
     "jitter",
     "quality_flags",
+    "signer_id",
+    "collection_campaign",
+    "raw_landmarks_available",
+    "normalization_version",
+    "preprocess_contract_version",
+    "sequence_length_original",
+    "quality_status",
 ]
 
 
@@ -209,6 +216,10 @@ def count_samples_for_class(class_uid: str) -> int:
 def save_sequence_npz(
     class_meta, sequence, meta: Dict[str, Any], augment_id: int, source_type: str,
     upload_collector: "list | None" = None,
+    raw_sequence=None,
+    frame_valid_mask=None,
+    left_hand_valid_mask=None,
+    right_hand_valid_mask=None,
 ) -> str:
     """Save a (T,D) sequence locally first, then mirror to Google Drive when enabled.
 
@@ -221,6 +232,18 @@ def save_sequence_npz(
     task — avoiding one Celery task + one GDrive session per file. When None
     (default, e.g. camera capture = 1 file), a single upload task is dispatched
     immediately as before.
+
+    Preprocess contract v2 (optional, backward compatible): when raw_sequence
+    and the masks are provided, the npz additionally stores
+      landmarks_raw          float32 [T_original, 126]  (BEFORE wrist centering/scaling)
+      landmarks_normalized   float32 [60, 126]          (same array as legacy 'sequence')
+      frame_valid_mask       bool    [60]
+      left_hand_valid_mask   bool    [60]
+      right_hand_valid_mask  bool    [60]
+    The legacy 'sequence' key is ALWAYS written so existing loaders
+    (dataset_loader.py feature_key_priority) keep working unchanged. Legacy
+    samples without raw landmarks are marked raw_landmarks_available=false —
+    raw data is never synthesized from normalized data.
     """
     import numpy as np
 
@@ -246,13 +269,28 @@ def save_sequence_npz(
     fpath = class_dir / fname
     sidecar = class_dir / f"sample_{sample_uid}.json"
 
+    # Preprocess contract v2: raw + masks alongside the legacy 'sequence' key.
+    raw_available = raw_sequence is not None
+    metadata.setdefault("raw_landmarks_available", bool(raw_available))
+    npz_arrays: Dict[str, Any] = {
+        "sequence": sequence.astype("float32"),          # legacy key (loaders)
+        "landmarks_normalized": sequence.astype("float32"),
+        "meta": metadata,
+    }
+    if raw_available:
+        npz_arrays["landmarks_raw"] = np.asarray(raw_sequence, dtype=np.float32)
+    if frame_valid_mask is not None:
+        npz_arrays["frame_valid_mask"] = np.asarray(frame_valid_mask, dtype=bool)
+    if left_hand_valid_mask is not None:
+        npz_arrays["left_hand_valid_mask"] = np.asarray(left_hand_valid_mask, dtype=bool)
+    if right_hand_valid_mask is not None:
+        npz_arrays["right_hand_valid_mask"] = np.asarray(right_hand_valid_mask, dtype=bool)
+
     fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=str(class_dir))
     os.close(fd)
     try:
         with open(tmp, "wb") as f:
-            np.savez_compressed(
-                f, sequence=sequence.astype("float32"), meta=metadata
-            )
+            np.savez_compressed(f, **npz_arrays)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, fpath)
@@ -347,6 +385,13 @@ def save_sequence_npz(
             "both_hands_ratio": str(meta.get("both_hands_ratio", "")),
             "jitter": str(meta.get("jitter", "")),
             "quality_flags": str(meta.get("quality_flags", "") or ""),
+            "signer_id": str(meta.get("signer_id", "") or ""),
+            "collection_campaign": str(meta.get("collection_campaign", "") or ""),
+            "raw_landmarks_available": "1" if metadata.get("raw_landmarks_available") else "0",
+            "normalization_version": str(meta.get("normalization_version", "") or ""),
+            "preprocess_contract_version": str(meta.get("preprocess_contract_version", "") or ""),
+            "sequence_length_original": str(meta.get("sequence_length_original", "") or ""),
+            "quality_status": str(meta.get("quality_status", "") or ""),
         }
     )
 
@@ -380,6 +425,13 @@ def save_sequence_npz(
             "both_hands_ratio": meta.get("both_hands_ratio"),
             "jitter": meta.get("jitter"),
             "quality_flags": meta.get("quality_flags") or None,
+            "signer_id": meta.get("signer_id"),
+            "collection_campaign": meta.get("collection_campaign"),
+            "raw_landmarks_available": metadata.get("raw_landmarks_available"),
+            "normalization_version": meta.get("normalization_version"),
+            "preprocess_contract_version": meta.get("preprocess_contract_version"),
+            "sequence_length_original": meta.get("sequence_length_original"),
+            "quality_status": meta.get("quality_status"),
         }
         insert_sample(db_row)
     except Exception as e:

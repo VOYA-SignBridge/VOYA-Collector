@@ -466,12 +466,24 @@ async def upload_camera(
         log.error("[LANDMARKS][ERROR] %s", e)
         return {"success": False, "message": f"Invalid frames payload: {e}"}
     
+    # Preprocess contract v2: keep the RAW landmark sequence (image-normalized
+    # MediaPipe coordinates, BEFORE wrist centering/scaling and BEFORE temporal
+    # padding) so future preprocessing experiments stay possible. Legacy
+    # samples never get a synthesized raw copy.
+    seq_raw = seq.astype(np.float32, copy=True)
+    sequence_length_original = int(seq.shape[0])
+
     # Ensure sequence has proper shape (pad/truncate to settings.seq_len)
     seq_padded, info = normalize_sequence(
         seq,
         expected_T=int(getattr(settings, "seq_len", 60)),
         expected_D=int(getattr(settings, "feature_dim", 126)),
     )
+
+    # Validity masks, computed BEFORE per-hand normalization (zero block = absent)
+    left_hand_valid_mask = np.any(seq_padded[:, :63] != 0.0, axis=1)
+    right_hand_valid_mask = np.any(seq_padded[:, 63:] != 0.0, axis=1)
+    frame_valid_mask = left_hand_valid_mask | right_hand_valid_mask
 
     # QC metrics must be computed BEFORE per-hand normalization: coordinates
     # are still image-normalized (0..1) so jitter has a physical scale, and a
@@ -500,11 +512,34 @@ async def upload_camera(
             seq_padded[t]
         )
 
+    # Vocabulary schema v2: normalized signer identity (never free text) +
+    # provenance + preprocess contract. Class-level v2 fields ride along so
+    # samples are self-describing even before the class is fully migrated.
+    try:
+        from app.signers import resolve_signer_for_user
+        signer_id = resolve_signer_for_user(current_user)
+    except Exception as exc:
+        log.warning("[SIGNER] resolution failed (sample saved without signer_id): %s", exc)
+        signer_id = ""
+
     meta = {
         "user": user,
         "user_id": user,
         "auth_user_id": current_user["id"],
+        "signer_id": signer_id,
         "session_id": session_id,
+        "collection_campaign": getattr(settings, "collection_campaign", "") or "",
+        "vocabulary_scope": class_meta.vocabulary_scope or "",
+        "recognition_profile": class_meta.recognition_profile or "",
+        "vocabulary_group": class_meta.vocabulary_group or "",
+        "semantic_label": class_meta.semantic_label or "",
+        "normalization_version": "hands126_v1",
+        "preprocess_contract_version": "v2",
+        "coordinate_space": "mediapipe_normalized",
+        "target_sequence_length": int(getattr(settings, "seq_len", 60)),
+        "feature_dimension": int(getattr(settings, "feature_dim", 126)),
+        "sequence_length_original": sequence_length_original,
+        "quality_status": "flagged" if verdict.warning_codes else "ok",
         "fps_original": None,
         "fps_processed": None,
         "completeness": round(metrics.completeness, 4),
@@ -525,7 +560,11 @@ async def upload_camera(
             seq_padded,
             meta=meta,
             augment_id=0,
-            source_type="camera"
+            source_type="camera",
+            raw_sequence=seq_raw,
+            frame_valid_mask=frame_valid_mask,
+            left_hand_valid_mask=left_hand_valid_mask,
+            right_hand_valid_mask=right_hand_valid_mask,
         )
     except Exception as e:
         log.error("[UPLOAD][camera][ERROR] sample save failed: %s", e)

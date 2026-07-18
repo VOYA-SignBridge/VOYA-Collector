@@ -117,6 +117,11 @@ class Settings(BaseSettings):
     qc_warn_jitter: float = float(os.getenv("QC_WARN_JITTER", 0.12))
     qc_reject_jitter: float = float(os.getenv("QC_REJECT_JITTER", 0.35))
     qc_min_valid_ratio: float = float(os.getenv("QC_MIN_VALID_RATIO", 0.7))
+    # --- Vocabulary schema v2 ---
+    # Allow-list of realtime recognition profiles (comma-separated env override).
+    recognition_profiles_raw: str = os.getenv("RECOGNITION_PROFILES", "north,central,south,hoa_de")
+    # Campaign stamped on newly collected samples (lock per collection drive).
+    collection_campaign: str = os.getenv("COLLECTION_CAMPAIGN", "isds2026_v1")
     # Carry-forward missing hand frames vs zero-fill
     carry_forward_missing: bool = bool(int(os.getenv("CARRY_FORWARD_MISSING", 1)))
     # Debug logging toggle
