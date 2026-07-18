@@ -25,10 +25,12 @@ class SignAugment:
     - realtime-compatible training
 
     IMPORTANT:
-    - DOES NOT swap left/right hands
-    - DOES NOT mirror semantics
+    - _mirror_handedness (p=mirror_prob) DOES mirror X and swap the two hand
+      slots TOGETHER — a deliberate, semantics-preserving transform given this
+      project's swapped-handedness convention (see its docstring). No other
+      transform touches hand identity.
     - DOES NOT change feature dimensionality
-    - ONLY used in train loader
+    - ONLY used in the train loader (never validation/test)
     """
 
     def __init__(
@@ -279,18 +281,65 @@ class SignAugment:
         return np.roll(x, shift, axis=0)
 
 
-def build_train_augment() -> SignAugment:
-    """
-    Default augmentation pipeline for training.
-    """
+# Named augmentation profiles for ablation studies. "full" is the historical
+# default; "none" disables augmentation entirely (returns None).
+AUGMENTATION_PROFILES = {
+    "full": dict(p=0.9, noise_std=0.008, scale_range=(0.97, 1.03), translation_std=0.01,
+                 mirror_prob=0.5, dropout_prob=0.015,
+                 temporal_mask_prob=0.15, temporal_jitter_prob=0.25, max_temporal_shift=2),
+    "spatial": dict(p=0.9, noise_std=0.008, scale_range=(0.97, 1.03), translation_std=0.01,
+                    mirror_prob=0.5, dropout_prob=0.015,
+                    temporal_mask_prob=0.0, temporal_jitter_prob=0.0, max_temporal_shift=0),
+    "temporal": dict(p=0.9, noise_std=0.0, scale_range=(1.0, 1.0), translation_std=0.0,
+                     mirror_prob=0.0, dropout_prob=0.0,
+                     temporal_mask_prob=0.15, temporal_jitter_prob=0.25, max_temporal_shift=2),
+    "none": None,
+}
 
-    return SignAugment(
-        p=0.9,
-        noise_std=0.008,
-        scale_range=(0.97, 1.03),
-        translation_std=0.01,
-        dropout_prob=0.015,
-        temporal_mask_prob=0.15,
-        temporal_jitter_prob=0.25,
-        max_temporal_shift=2,
-    )
+# CLI override name -> SignAugment kwarg (spec-facing names differ slightly).
+AUG_OVERRIDE_KEYS = {
+    "noise_sigma": "noise_std",
+    "scale_range": "scale_range",
+    "translation_sigma": "translation_std",
+    "mirror_probability": "mirror_prob",
+    "landmark_dropout_probability": "dropout_prob",
+    "temporal_mask_probability": "temporal_mask_prob",
+    "temporal_roll_probability": "temporal_jitter_prob",
+}
+
+
+def build_train_augment(profile: str = "full", overrides: Optional[dict] = None):
+    """Build the train-time augmentation for a named profile.
+
+    Returns None for profile "none" (no augmentation). Overrides use the
+    spec-facing names in AUG_OVERRIDE_KEYS. Validation/test loaders must
+    always pass augment_fn=None — never wire this into eval.
+    """
+    if profile not in AUGMENTATION_PROFILES:
+        raise ValueError(f"Unknown augmentation profile '{profile}'. "
+                         f"Available: {sorted(AUGMENTATION_PROFILES)}")
+    base = AUGMENTATION_PROFILES[profile]
+    if base is None:
+        if overrides:
+            raise ValueError("augmentation profile 'none' does not accept overrides")
+        return None
+    params = dict(base)
+    for key, value in (overrides or {}).items():
+        if key not in AUG_OVERRIDE_KEYS:
+            raise ValueError(f"Unknown augmentation override '{key}'. "
+                             f"Available: {sorted(AUG_OVERRIDE_KEYS)}")
+        params[AUG_OVERRIDE_KEYS[key]] = value
+    return SignAugment(**params)
+
+
+def augment_config_dict(profile: str, overrides: Optional[dict] = None) -> dict:
+    """Serializable snapshot of the effective augmentation config (for the
+    checkpoint contract and result summaries)."""
+    base = AUGMENTATION_PROFILES.get(profile)
+    if base is None:
+        return {"profile": profile, "enabled": False}
+    params = dict(base)
+    for key, value in (overrides or {}).items():
+        params[AUG_OVERRIDE_KEYS[key]] = value
+    params["scale_range"] = list(params["scale_range"])
+    return {"profile": profile, "enabled": True, **params}

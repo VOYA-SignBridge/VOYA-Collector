@@ -669,13 +669,205 @@ def _assert_no_overlap(a, b):
             f"Split leakage detected: {len(overlap)} overlapping samples"
         )
 
+# ---------------------------------------------------------------------------
+# Vocabulary schema v2: manifest-based, profile-filtered, signer-disjoint splits
+# ---------------------------------------------------------------------------
+
+def _load_manifest_rows(manifest_path: Path):
+    with Path(manifest_path).open('r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        return list(reader), list(reader.fieldnames or [])
+
+
+def _assert_signer_disjoint(train, val, test, group_col='signer_id'):
+    """Hard requirement for strict_signer_disjoint mode."""
+    def _g(rows_):
+        return {(r.get(group_col) or '').strip() for r in rows_ if (r.get(group_col) or '').strip()}
+    train_signers, val_signers, test_signers = _g(train), _g(val), _g(test)
+    assert train_signers.isdisjoint(val_signers), f"signer leakage train/val: {train_signers & val_signers}"
+    assert train_signers.isdisjoint(test_signers), f"signer leakage train/test: {train_signers & test_signers}"
+    assert val_signers.isdisjoint(test_signers), f"signer leakage val/test: {val_signers & test_signers}"
+    return train_signers, val_signers, test_signers
+
+
+def split_from_manifest(
+    manifest_rows,
+    *,
+    split_mode: str,
+    recognition_profile: str = '',
+    include_common: bool = True,
+    unified: bool = False,
+    seed: int = 42,
+    group_col: str = 'signer_id',
+    fail_on_missing_eval: bool = False,
+    exclude_unresolved_signers: bool = False,
+):
+    """Profile-filtered split over an immutable dataset manifest.
+
+    Returns (train, val, test, report). Raises SystemExit on hard failures
+    (empty subset, class with no train sample, signer leakage in strict mode,
+    unresolved signer_id in strict mode).
+    """
+    import sys as _sys
+    _repo_root = Path(__file__).resolve().parents[2]
+    if str(_repo_root) not in _sys.path:
+        _sys.path.insert(0, str(_repo_root))
+    from processed.shared.vocabulary import (
+        check_label_collisions, label_key_v2, select_rows_for_profile,
+    )
+
+    # 1. Profile subset (v2 rule: common + selected profile, or unified)
+    if unified or recognition_profile:
+        rows = select_rows_for_profile(
+            manifest_rows,
+            recognition_profile=recognition_profile or None,
+            include_common=include_common,
+            unified=unified,
+        )
+    else:
+        rows = list(manifest_rows)
+    if not rows:
+        raise SystemExit("Profile subset is empty — nothing to split. "
+                         "(Are vocabulary_scope/recognition_profile assigned in the manifest?)")
+
+    collisions = check_label_collisions(rows)
+    if collisions:
+        raise SystemExit(f"Label collision between common and profile-specific sets: {collisions}. "
+                         f"Resolve (rename/reassign) before splitting.")
+
+    # 2. Stable v2 label keys + synthetic class ids for the split machinery
+    for r in rows:
+        r['label_key'] = label_key_v2(
+            r.get('language') or 'vn', r.get('vocabulary_scope') or '',
+            r.get('recognition_profile') or '', r.get('slug') or r.get('label_slug') or '')
+        if not (r.get('sample_id') or '').strip():
+            r['sample_id'] = (r.get('sample_uid') or '').strip()
+        if not (r.get('label_slug') or '').strip():
+            r['label_slug'] = (r.get('slug') or '').strip()
+    unique_keys = sorted({r['label_key'] for r in rows})
+    key_to_idx = {k: i + 1 for i, k in enumerate(unique_keys)}
+    for r in rows:
+        r['class_idx'] = str(key_to_idx[r['label_key']])
+
+    # 3. Split
+    excluded_unresolved = []
+    if split_mode == 'strict_signer_disjoint':
+        unresolved = [r['sample_id'] for r in rows if not (r.get(group_col) or '').strip()]
+        if unresolved and exclude_unresolved_signers:
+            print(f"[WARN] excluding {len(unresolved)} sample(s) with no {group_col} "
+                  f"(explicit --exclude_unresolved_signers): {unresolved[:10]}")
+            excluded_unresolved = unresolved
+            rows = [r for r in rows if (r.get(group_col) or '').strip()]
+        elif unresolved:
+            raise SystemExit(
+                f"{len(unresolved)} sample(s) have no {group_col} — strict signer-disjoint "
+                f"splitting is impossible until signer migration resolves them "
+                f"(or pass --exclude_unresolved_signers to drop them explicitly). "
+                f"Examples: {unresolved[:5]}")
+        train, val, test = stratified_group_split_by(rows, group_col)
+        train_s, val_s, test_s = _assert_signer_disjoint(train, val, test, group_col)
+    elif split_mode == 'sample':
+        train, val, test = stratified_split(rows)
+        train_s = val_s = test_s = set()
+    else:
+        raise SystemExit(f"split_mode '{split_mode}' not supported in manifest mode "
+                         f"(use 'sample' or 'strict_signer_disjoint').")
+
+    _assert_no_overlap(train, val)
+    _assert_no_overlap(train, test)
+    _assert_no_overlap(val, test)
+
+    # 4. Coverage rules: every class MUST have train samples; val/test configurable
+    def _classes(rows_):
+        return {r['label_key'] for r in rows_}
+    all_c, tr_c, va_c, te_c = _classes(rows), _classes(train), _classes(val), _classes(test)
+    missing_train = sorted(all_c - tr_c)
+    if missing_train:
+        raise SystemExit(f"{len(missing_train)} class(es) have no TRAIN sample: {missing_train}")
+    missing_eval = sorted((all_c - va_c) | (all_c - te_c))
+    if missing_eval:
+        msg = f"{len(missing_eval)} class(es) missing from val and/or test: {missing_eval}"
+        if fail_on_missing_eval:
+            raise SystemExit(msg)
+        print(f"[WARN] {msg}")
+
+    report = {
+        'split_mode': split_mode,
+        'recognition_profile': recognition_profile or ('unified' if unified else 'all'),
+        'include_common': include_common,
+        'seed': seed,
+        'group_col': group_col,
+        'num_classes': len(unique_keys),
+        'label_keys': unique_keys,
+        'counts': {'train': len(train), 'val': len(val), 'test': len(test)},
+        'signers': {'train': sorted(train_s), 'val': sorted(val_s), 'test': sorted(test_s)},
+        'class_coverage': {
+            'train': len(tr_c) / max(1, len(all_c)),
+            'val': len(va_c) / max(1, len(all_c)),
+            'test': len(te_c) / max(1, len(all_c)),
+        },
+        'profile_composition': {
+            'common': sum(1 for r in rows if (r.get('vocabulary_scope') or '') == 'common'),
+            'profile_specific': sum(1 for r in rows if (r.get('vocabulary_scope') or '') == 'profile_specific'),
+        },
+        'excluded_unresolved_signers': excluded_unresolved,
+    }
+    return train, val, test, report
+
+
+def run_manifest_mode(args) -> None:
+    """Manifest-based versioned split. NEVER touches the frozen legacy split
+    files at processed/splits/{train,val,test}.csv."""
+    global RANDOM_SEED
+    RANDOM_SEED = args.seed
+    manifest_rows, fieldnames = _load_manifest_rows(args.dataset_manifest)
+    for col in ('sample_id', 'class_idx', 'label_key', 'label_slug'):
+        if col not in fieldnames:
+            fieldnames.append(col)
+
+    train, val, test, report = split_from_manifest(
+        manifest_rows,
+        split_mode=args.split_mode,
+        recognition_profile=(args.recognition_profile or ''),
+        include_common=args.include_common,
+        unified=args.unified,
+        seed=args.seed,
+        group_col=args.group_col,
+        fail_on_missing_eval=args.fail_on_missing_eval,
+        exclude_unresolved_signers=args.exclude_unresolved_signers,
+    )
+
+    out_dir = OUT_DIR / 'versions' / args.output_version
+    if out_dir.exists() and any(out_dir.iterdir()):
+        raise SystemExit(f"Split version already exists: {out_dir} — split versions are "
+                         f"immutable; choose a new --output_version.")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, rows_ in (('train', train), ('val', val), ('test', test)):
+        write_split_to_dir(out_dir, name, rows_, fieldnames)
+
+    import hashlib
+    manifest_bytes = Path(args.dataset_manifest).read_bytes()
+    report['dataset_manifest'] = str(args.dataset_manifest)
+    report['dataset_manifest_checksum'] = hashlib.sha256(manifest_bytes).hexdigest()
+    report['output_version'] = args.output_version
+    (out_dir / 'split_metadata.json').write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    print(f"Split '{args.output_version}' -> {out_dir}")
+    print(f"  mode={report['split_mode']} profile={report['recognition_profile']} "
+          f"classes={report['num_classes']} counts={report['counts']}")
+    print(f"  signers: train={len(report['signers']['train'])} "
+          f"val={len(report['signers']['val'])} test={len(report['signers']['test'])}")
+    print(f"  coverage: {report['class_coverage']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Make dataset splits')
     parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits')
-    parser.add_argument('--group_col', type=str, default='user_id', help='Grouping column to keep disjoint (e.g., user_id, dialect)')
+    parser.add_argument('--group_col', type=str, default='user_id', help='Grouping column to keep disjoint (e.g., user_id, dialect, signer_id)')
     parser.add_argument(
         '--split_mode', type=str, default='sample',
-        choices=['sample', 'coverage_preserving', 'strict_user_disjoint'],
+        choices=['sample', 'coverage_preserving', 'strict_user_disjoint', 'strict_signer_disjoint'],
         help=(
             'Split strategy. '
             '"sample": sample-level stratified (default, no signer constraints). '
@@ -684,13 +876,43 @@ def main():
             'for singleton-signer classes. Recommended for live-capture classifiers. '
             '"strict_user_disjoint": maximises signer isolation; may break coverage '
             'for singleton-signer classes. Equivalent to --user_disjoint. '
-            'Recommended for embedding/representation-learning experiments.'
+            '"strict_signer_disjoint": manifest mode only — group-disjoint on the '
+            'normalized signer_id with hard disjointness asserts.'
         ),
     )
+    # --- Vocabulary schema v2 (manifest mode) ---
+    parser.add_argument('--dataset_manifest', type=Path, default=None,
+                        help='Immutable dataset manifest CSV. Enables v2 manifest mode '
+                             '(splits reference sample_id; legacy split files untouched).')
+    parser.add_argument('--recognition_profile', type=str, default='',
+                        help='Profile subset: north|central|south|hoa_de (manifest mode)')
+    parser.add_argument('--include_common', dest='include_common', action='store_true', default=True,
+                        help='Include common vocabulary in the profile subset (default true)')
+    parser.add_argument('--no_include_common', dest='include_common', action='store_false')
+    parser.add_argument('--unified', action='store_true',
+                        help='Unified baseline: common + every validly-assigned profile')
+    parser.add_argument('--output_version', type=str, default='',
+                        help='Version name for the split (written under processed/splits/versions/<name>/)')
+    parser.add_argument('--fail_on_missing_eval', action='store_true',
+                        help='Fail (instead of warn) when a class has no val/test sample')
+    parser.add_argument('--exclude_unresolved_signers', action='store_true',
+                        help='Explicitly drop samples whose signer_id is unresolved '
+                             '(otherwise strict mode fails). Exclusions are recorded in split_metadata.json')
     parser.add_argument('--by_language', action='store_true', help='Write separate split CSVs per language under splits/<language>/')
     parser.add_argument('--languages', type=str, default='', help='Optional comma-separated whitelist of languages when using --by_language')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
+
+    # v2 manifest mode: fully separate path; never touches legacy split files.
+    if args.dataset_manifest is not None:
+        if not args.output_version:
+            raise SystemExit('--dataset_manifest requires --output_version')
+        if args.split_mode == 'strict_signer_disjoint' and args.group_col == 'user_id':
+            args.group_col = 'signer_id'
+        run_manifest_mode(args)
+        return
+    if args.split_mode == 'strict_signer_disjoint':
+        raise SystemExit('strict_signer_disjoint requires --dataset_manifest (v2 mode).')
 
     global RANDOM_SEED
     RANDOM_SEED = args.seed

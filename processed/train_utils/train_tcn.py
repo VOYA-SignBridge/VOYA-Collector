@@ -61,12 +61,32 @@ except Exception:
         detect_imbalance = None  # diagnostic optional
 
 try:
-    from .augmentation import build_train_augment
+    from .augmentation import build_train_augment, augment_config_dict
 except Exception:
     import sys
     from pathlib import Path as _P
     sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from processed.train_utils.augmentation import build_train_augment
+    from processed.train_utils.augmentation import build_train_augment, augment_config_dict
+
+try:
+    from processed.shared.vocabulary import (
+        RECOGNITION_PROFILES,
+        check_label_collisions,
+        label_key_v2,
+        select_rows_for_profile,
+        split_common_and_profile_labels,
+    )
+except Exception:
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.shared.vocabulary import (
+        RECOGNITION_PROFILES,
+        check_label_collisions,
+        label_key_v2,
+        select_rows_for_profile,
+        split_common_and_profile_labels,
+    )
 
 try:
     # When run as module: python -m processed.train_utils.train_tcn
@@ -96,6 +116,33 @@ except Exception:
 
 
 EXPECTED_FEATURE_DIM = 126
+
+
+def _git_commit_hash() -> str:
+    """Best-effort HEAD commit for the checkpoint contract ('' if unavailable)."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(Path(__file__).resolve().parents[2]),
+        )
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _read_split_manifest_checksum(train_csv: Path) -> str:
+    """Read dataset_manifest_checksum from split_metadata.json next to the
+    split CSVs (written by make_splits manifest mode). '' when absent."""
+    try:
+        meta_path = Path(train_csv).resolve().parent / "split_metadata.json"
+        if meta_path.exists():
+            return str(json.loads(meta_path.read_text(encoding="utf-8")).get(
+                "dataset_manifest_checksum", ""))
+    except Exception:
+        pass
+    return ""
 
 
 def set_seed(seed: int) -> None:
@@ -649,8 +696,9 @@ def build_checkpoint(
     te_f1=None,
     te_hand_metrics=None,
     stamp="",
+    contract_extra: Optional[Dict[str, object]] = None,
 ):
-    return {
+    ckpt = {
         "schema_version": "1.0",
 
         "model_state_dict": {
@@ -699,6 +747,9 @@ def build_checkpoint(
 
         "created_at": stamp,
     }
+    if contract_extra:
+        ckpt.update(contract_extra)
+    return ckpt
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a TCN classifier on NPZ sign-sequence features.")
@@ -720,7 +771,39 @@ def main() -> None:
         "--dialect",
         action="append",
         default=None,
-        help="Optional: filter to one or more dialects (can repeat or comma-separate). Example: --dialect bac",
+        help="[DEPRECATED — legacy experiments only] filter by legacy dialect column. "
+             "New experiments must use --recognition_profile / --unified.",
+    )
+    # --- Vocabulary schema v2: recognition-profile training ---
+    parser.add_argument(
+        "--recognition_profile",
+        type=str,
+        default="",
+        choices=["", *RECOGNITION_PROFILES],
+        help="Train a profile model: common vocabulary + this profile's vocabulary. "
+             "One of: " + ", ".join(RECOGNITION_PROFILES),
+    )
+    parser.add_argument(
+        "--include_common", dest="include_common", action="store_true", default=True,
+        help="Include common vocabulary in the profile model (default: true)",
+    )
+    parser.add_argument("--no_include_common", dest="include_common", action="store_false")
+    parser.add_argument(
+        "--unified", action="store_true",
+        help="Unified baseline: common + every validly-assigned profile (mutually exclusive with --recognition_profile)",
+    )
+    parser.add_argument("--dataset_version", type=str, default="unversioned",
+                        help="Dataset manifest version this run trains on (goes into output path + checkpoint)")
+    parser.add_argument("--split_version", type=str, default="unversioned",
+                        help="Split version identifier (goes into output path + checkpoint)")
+    parser.add_argument(
+        "--augmentation_profile", type=str, default="full",
+        choices=["none", "spatial", "temporal", "full"],
+        help="Train-time augmentation profile (validation/test are never augmented)",
+    )
+    parser.add_argument(
+        "--aug_set", action="append", default=None, metavar="KEY=VALUE",
+        help="Override an augmentation parameter, e.g. --aug_set mirror_probability=0.0 (repeatable)",
     )
     parser.add_argument(
         "--filter_language",
@@ -824,6 +907,28 @@ def main() -> None:
 
     dialects = _parse_multi_values(args.dialect)
     languages = _parse_multi_values(args.filter_language)
+
+    profile_mode = bool(args.recognition_profile or args.unified)
+    if args.unified and args.recognition_profile:
+        raise SystemExit("--unified and --recognition_profile are mutually exclusive.")
+    if profile_mode and (dialects or languages):
+        raise SystemExit("--recognition_profile/--unified cannot be combined with the "
+                         "deprecated --dialect/--filter_language flags.")
+    if dialects:
+        print("[DEPRECATED] --dialect is a legacy-compatibility flag. New experiments "
+              "must use --recognition_profile or --unified (vocabulary schema v2).")
+
+    # Parse augmentation overrides (KEY=VALUE)
+    aug_overrides: Dict[str, object] = {}
+    for kv in (args.aug_set or []):
+        if "=" not in kv:
+            raise SystemExit(f"--aug_set expects KEY=VALUE, got '{kv}'")
+        k, v = kv.split("=", 1)
+        try:
+            aug_overrides[k.strip()] = float(v)
+        except ValueError:
+            raise SystemExit(f"--aug_set value must be numeric: '{kv}'")
+
     subset_mode = bool(dialects or languages)
 
     # For subset runs, create a filtered copy of split CSVs and a local label mapping.
@@ -831,7 +936,108 @@ def main() -> None:
     features_root: Optional[Path] = None
     label_to_index_json: Optional[Path] = None
     subset_tag = ""
-    if subset_mode:
+    subset_dir: Optional[Path] = None
+    common_labels: List[str] = []
+    profile_specific_labels: List[str] = []
+
+    if profile_mode:
+        # ------------------------------------------------------------------
+        # Vocabulary schema v2: common + selected profile (or unified).
+        # Split CSVs must carry vocabulary_scope/recognition_profile columns
+        # (produced by make_splits --dataset_manifest ...).
+        # ------------------------------------------------------------------
+        features_root = (args.features_root if args.features_root is not None
+                         else _find_features_root_from_csv(cfg.train_csv))
+        if features_root is None:
+            try:
+                dataset_root = cfg.train_csv.resolve().parents[2]
+                features_root = dataset_root / "dataset" / "features"
+            except Exception:
+                features_root = None
+        if features_root is None or not features_root.exists():
+            raise SystemExit("Profile mode requires locating the 'features' folder.")
+
+        profile_tag = "unified" if args.unified else args.recognition_profile
+        subset_tag = profile_tag
+        run_dir = (args.out_dir / args.dataset_version / profile_tag /
+                   args.split_version / args.model_type / f"seed_{args.seed}")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        subset_dir = run_dir
+
+        def _prep_profile_csv(src_csv: Path, name: str) -> Path:
+            rows, fieldnames = _read_csv_rows(src_csv)
+            if rows and "vocabulary_scope" not in rows[0]:
+                raise SystemExit(
+                    f"{name} split CSV has no vocabulary schema v2 columns "
+                    f"(vocabulary_scope/recognition_profile). Generate splits with "
+                    f"make_splits.py --dataset_manifest ... first: {src_csv}")
+            rows = select_rows_for_profile(
+                rows,
+                recognition_profile=(args.recognition_profile or None),
+                include_common=args.include_common,
+                unified=args.unified,
+            )
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split empty after filtering.")
+            for r in rows:
+                r["label_key"] = label_key_v2(
+                    r.get("language") or "vn", r.get("vocabulary_scope") or "",
+                    r.get("recognition_profile") or "",
+                    r.get("slug") or r.get("label_slug") or "")
+                if not (r.get("label_slug") or "").strip():
+                    r["label_slug"] = (r.get("slug") or "").strip()
+            collisions = check_label_collisions(rows)
+            if collisions:
+                raise SystemExit(f"Label collision between common and profile-specific "
+                                 f"vocabulary: {collisions} — resolve before training.")
+            fieldnames = _ensure_cols(fieldnames, ["label_key", "label_slug", "label_original"])
+            rows = _filter_rows_with_existing_features(
+                rows, features_root=features_root, default_language="vn", label=f"{name} split")
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split empty after "
+                                 f"removing missing feature files.")
+            out_csv = run_dir / f"{name}.csv"
+            _write_csv_rows(out_csv, rows, fieldnames)
+            return out_csv
+
+        sub_train = _prep_profile_csv(cfg.train_csv, "train")
+        sub_val = _prep_profile_csv(cfg.val_csv, "val")
+        sub_test = _prep_profile_csv(cfg.test_csv, "test")
+
+        train_rows, _ = _read_csv_rows(sub_train)
+        l2i, i2l = _build_subset_label_maps(train_rows, default_language="vn")
+        if len(l2i) < 2:
+            raise SystemExit(f"Profile '{profile_tag}': need at least 2 classes, got {len(l2i)}.")
+        common_labels, profile_specific_labels = split_common_and_profile_labels(list(l2i.keys()))
+
+        def _filter_profile_known(src_csv: Path, name: str) -> None:
+            rows, fieldnames = _read_csv_rows(src_csv)
+            before = len(rows)
+            rows = [r for r in rows if (r.get("label_key") or "").strip() in l2i]
+            if before - len(rows) > 0:
+                print(f"Profile '{profile_tag}': removed {before - len(rows)} rows "
+                      f"from {name} due to labels unseen in train.")
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split became empty.")
+            _write_csv_rows(src_csv, rows, fieldnames)
+
+        _filter_profile_known(sub_val, "val")
+        _filter_profile_known(sub_test, "test")
+
+        label_to_index_json = run_dir / "label_to_index.json"
+        (run_dir / "label_to_index.json").write_text(
+            json.dumps(l2i, indent=2, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "index_to_label.json").write_text(
+            json.dumps({str(k): v for k, v in i2l.items()}, indent=2, ensure_ascii=False),
+            encoding="utf-8")
+
+        cfg.train_csv, cfg.val_csv, cfg.test_csv = sub_train, sub_val, sub_test
+        cfg.out_dir = run_dir
+        subset_mode = True  # reuse downstream subset bookkeeping (tag/summary/tracking)
+        print(f"[PROFILE] {profile_tag}: common={len(common_labels)} "
+              f"profile_specific={len(profile_specific_labels)} classes={len(l2i)}")
+
+    if subset_mode and not profile_mode:
         # Determine an absolute features root so generated CSVs can live anywhere.
         features_root = ( args.features_root if args.features_root is not None else _find_features_root_from_csv(cfg.train_csv) )
         if features_root is None:
@@ -993,7 +1199,9 @@ def main() -> None:
     print(f"Input Dim: {in_dim} | Output Dim: {num_classes}")
     print(f"{'='*70}")
 
-    train_augment = build_train_augment()
+    train_augment = build_train_augment(args.augmentation_profile, aug_overrides)
+    augmentation_config = augment_config_dict(args.augmentation_profile, aug_overrides)
+    print(f"[AUGMENT] profile={args.augmentation_profile} overrides={aug_overrides or '{}'}")
 
     train_loader = build_loader(
         cfg.train_csv,
@@ -1206,6 +1414,23 @@ def main() -> None:
 
     # save
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cfg_json_for_ckpt = {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(cfg).items()}
+    contract_extra = {
+        "vocabulary_schema_version": "v2" if profile_mode else "v1_legacy",
+        "recognition_profile": (args.recognition_profile or ("unified" if args.unified else "")),
+        "include_common": bool(args.include_common),
+        "unified": bool(args.unified),
+        "dataset_version": args.dataset_version,
+        "split_version": args.split_version,
+        "preprocess_contract_version": "v2",
+        "common_labels": common_labels,
+        "profile_specific_labels": profile_specific_labels,
+        "seed": int(cfg.seed),
+        "git_commit": _git_commit_hash(),
+        "training_config": {**cfg_json_for_ckpt, "model_type": args.model_type,
+                            "augmentation": augmentation_config},
+        "dataset_manifest_checksum": _read_split_manifest_checksum(cfg.train_csv),
+    }
     final_checkpoint = build_checkpoint(
         model=model,
         cfg=cfg,
@@ -1216,6 +1441,7 @@ def main() -> None:
         te_f1=te_f1,
         te_hand_metrics=te_hand_metrics,
         stamp=stamp,
+        contract_extra=contract_extra,
     )
     # Use actual model name instead of hardcoded "tcn"
     # Clean up model name: remove special chars, normalize spaces
@@ -1275,6 +1501,13 @@ def main() -> None:
 
     summary = {
         "timestamp": stamp,
+        "vocabulary_schema_version": contract_extra["vocabulary_schema_version"],
+        "recognition_profile": contract_extra["recognition_profile"],
+        "dataset_version": args.dataset_version,
+        "split_version": args.split_version,
+        "git_commit": contract_extra["git_commit"],
+        "augmentation": augmentation_config,
+        "dataset_manifest_checksum": contract_extra["dataset_manifest_checksum"],
         "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
         "config": cfg_json,
         "in_dim": in_dim,

@@ -18,7 +18,7 @@ Sign language data collection and processing system for Vietnamese Sign Language
 ## Project Overview
 
 VOYA-Collector captures sign language gesture data from:
-- **Live camera** (MediaPipe Holistic hand tracking)
+- **Live camera** (MediaPipe Hands landmark tracking, client-side)
 - **Video files** (MP4, MOV)
 
 Processed data is stored for training sign language recognition models.
@@ -31,7 +31,7 @@ Processed data is stored for training sign language recognition models.
 - **React 19** + TypeScript
 - **Vite** (build tool)
 - **Tailwind CSS v4**
-- **MediaPipe Holistic** (client-side hand tracking)
+- **MediaPipe Hands** (client-side hand tracking)
 - **Axios** (API client)
 
 ### Backend
