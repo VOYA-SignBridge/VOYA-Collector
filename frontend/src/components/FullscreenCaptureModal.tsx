@@ -62,16 +62,21 @@ const DEBUG_HANDS = parseBoolEnv(import.meta.env.VITE_DEBUG_HANDS, false);
 const MP_HANDS_VERSION = "0.4.1675469240";
 const CAPTURE_FRAME_WIDTH = 1280;
 const CAPTURE_FRAME_HEIGHT = 720;
-const DEFAULT_DIALECTS = ["Bắc", "Trung", "Nam", "Cần Thơ"];
+// Thứ tự khớp recognition profiles v2: Bảng chữ cái là nhóm độc lập, các miền
+// hiển thị đầy đủ "Miền ..." cho rõ nghĩa. Danh sách này chỉ là fallback khi
+// chưa tải được catalog từ server.
+const DEFAULT_DIALECTS = ["Bảng chữ cái", "Miền Bắc", "Miền Trung", "Miền Nam", "Hòa Đê"];
 const DEFAULT_LANGUAGES = ["vn", "en"];
 
 const DIALECT_LABELS: Record<string, string> = {
   common: "Chung",
-  bac: "Bắc",
-  trung: "Trung",
-  nam: "Nam",
+  "bang-chu-cai": "Bảng chữ cái",
+  bac: "Miền Bắc",
+  trung: "Miền Trung",
+  nam: "Miền Nam",
   "hoa-de": "Hòa Đê",
   "can-tho": "Cần Thơ",
+  spa: "Spa",
 };
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -130,6 +135,8 @@ const normalizeDialectKey = (value?: string) => {
     "can tho": "can-tho",
     cantho: "can-tho",
     "can-tho": "can-tho",
+    "bang chu cai": "bang-chu-cai",
+    "bang-chu-cai": "bang-chu-cai",
     chung: "common",
     common: "common",
   };
@@ -381,7 +388,7 @@ export default function FullscreenCaptureModal({
   const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState(initialUser);
   const [language, setLanguage] = useState<string>("vn");
-  const [dialect, setDialect] = useState<string>("Bắc");
+  const [dialect, setDialect] = useState<string>("Miền Bắc");
   const [languageList, setLanguageList] = useState<string[]>(DEFAULT_LANGUAGES);
   const [dialectList, setDialectList] = useState<string[]>(DEFAULT_DIALECTS);
   const [catalogRows, setCatalogRows] = useState<ClassRow[]>([]);

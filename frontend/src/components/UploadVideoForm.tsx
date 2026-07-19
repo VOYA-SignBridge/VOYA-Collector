@@ -43,8 +43,8 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
   const [defaultLabel, setDefaultLabel] = useState("");
   const [defaultClassUid, setDefaultClassUid] = useState<string | undefined>(undefined);
   const [defaultUser, setDefaultUser] = useState(() => localStorage.getItem('lastUser') || '');
-  const [defaultDialect, setDefaultDialect] = useState<string>(() => 
-    localStorage.getItem('dialectSelected') || 'Bắc'
+  const [defaultDialect, setDefaultDialect] = useState<string>(() =>
+    localStorage.getItem('dialectSelected') || 'Miền Bắc'
   );
   const [dialectList, setDialectList] = useState<string[]>(() => {
     try {
@@ -59,7 +59,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     } catch (err) {
       void err;
     }
-    const defaultList = ['Bắc', 'Trung', 'Nam', 'Cần Thơ'];
+    const defaultList = ['Bảng chữ cái', 'Miền Bắc', 'Miền Trung', 'Miền Nam', 'Hòa Đê'];
     localStorage.setItem('dialectList', JSON.stringify(defaultList));
     return defaultList;
   });

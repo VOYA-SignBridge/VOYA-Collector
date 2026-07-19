@@ -164,6 +164,8 @@ def normalize_dialect(dialect: Optional[str]) -> str:
         "can tho": "can-tho",
         "cantho": "can-tho",
         "can-tho": "can-tho",
+        "bang chu cai": "bang-chu-cai",
+        "bang-chu-cai": "bang-chu-cai",
         "chung": "common",
         "common": "common",
     }
