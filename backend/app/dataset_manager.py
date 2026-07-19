@@ -94,46 +94,12 @@ def parse_bool(value) -> bool:
 
 
 def normalize_dialect(dialect: Optional[str]) -> str:
-    """Normalize frontend dialect names to canonical slugs.
-    Examples: "Bắc"->"bac", "Trung"->"trung", "Nam"->"nam", "Hòa Đê"/"Hoa De"->"hoa-de".
-    Also accepts already-normalized values.
+    """ASCII-safe normalization for dialect values received from the API.
+
+    (A second, older normalize_dialect + DIALECT_MAPPING used to sit above this
+    one and was silently shadowed — removed 2026-07-19; this is the only
+    implementation.)
     """
-    if not dialect:
-        return ""
-    d = str(dialect).strip().lower()
-    # Remove diacritics and extra spaces to match mapping better
-    base = "".join([c for c in d if not unicodedata.combining(c)])
-    base = re.sub(r"\s+", " ", base).strip()
-    # Try exact and base
-    return DIALECT_MAPPING.get(d, DIALECT_MAPPING.get(base, d))
-
-
-# Module-level mapping constant for reuse and testability
-DIALECT_MAPPING = {
-    "bac": "bac",
-    "bắc": "bac",
-    "mien bac": "bac",
-    "miền bắc": "bac",
-    "north": "bac",
-    "trung": "trung",
-    "miền trung": "trung",
-    "mien trung": "trung",
-    "central": "trung",
-    "nam": "nam",
-    "miền nam": "nam",
-    "mien nam": "nam",
-    "south": "nam",
-    "hoa de": "hoa-de",
-    "hòa đê": "hoa-de",
-    "hoa đê": "hoa-de",
-    "hoade": "hoa-de",
-    "hoa-de": "hoa-de",
-    "chung": "common",
-}
-
-
-def normalize_dialect(dialect: Optional[str]) -> str:
-    """ASCII-safe normalization for dialect values received from the API."""
     if not dialect:
         return ""
 

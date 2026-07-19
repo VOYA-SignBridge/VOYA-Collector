@@ -250,6 +250,8 @@ MIGRATION_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_samples_signer_id ON samples(signer_id)",
+    # Parity with samples/raw_uploads: per-user training history queries
+    "CREATE INDEX IF NOT EXISTS idx_training_jobs_auth_user_id ON training_jobs(auth_user_id)",
     # Sync status tracking table for Google Sheets auto-rotation
     """
     CREATE TABLE IF NOT EXISTS google_sheets_sync_status (

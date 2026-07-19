@@ -21,6 +21,12 @@ campaign; re-run on the full campaign before create_dataset_manifest.
 
 from __future__ import annotations
 
+import sys as _sys
+sys_path_dir = __import__('pathlib').Path(__file__).resolve().parent
+if str(sys_path_dir) not in _sys.path:
+    _sys.path.insert(0, str(sys_path_dir))
+import _console  # noqa: F401  (force UTF-8 console on Windows)
+
 import argparse
 import csv
 import json
