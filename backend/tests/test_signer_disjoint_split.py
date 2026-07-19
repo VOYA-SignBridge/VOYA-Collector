@@ -99,11 +99,19 @@ def main() -> int:
         "vocabulary_scope": "profile_specific", "recognition_profile": "hoa_de",
         "signer_id": "S001", "session_id": "x", "file_path": "fx.npz"}]
     try:
+        # collision is only reachable when common is explicitly included
         split_from_manifest(collide, split_mode="strict_signer_disjoint",
-                            recognition_profile="hoa_de", seed=42)
+                            recognition_profile="hoa_de", include_common=True, seed=42)
         check("common/profile collision fails", False)
     except SystemExit as e:
         check("common/profile collision fails", "collision" in str(e), str(e))
+
+    # New default policy: without include_common the subset is profile-only.
+    _, _, _, rep_def = split_from_manifest(
+        _mk_manifest_rows(), split_mode="strict_signer_disjoint",
+        recognition_profile="hoa_de", seed=42)
+    check("default excludes common (2 hoa_de classes only)",
+          rep_def["num_classes"] == 2, rep_def["label_keys"])
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     for n, d in FAILED:
