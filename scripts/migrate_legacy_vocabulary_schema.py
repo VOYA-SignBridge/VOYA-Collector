@@ -85,44 +85,85 @@ def migrate_labels(labels_csv: Path, mapping: dict, *, dry_run: bool, backup_dir
     default_campaign = mapping.get("default_collection_campaign", "legacy_2026")
 
     stats_before = Counter((r.get("vocabulary_scope") or "<empty>").strip() or "<empty>" for r in rows)
-    updated, skipped_already, needs_review, unmapped = 0, 0, [], []
+    updated, skipped_already = 0, 0
+    needs_review, unmapped, reassigned, reverted = [], [], [], []
 
     for r in rows:
-        # Idempotency: a row that already carries a scope is left untouched.
-        if (r.get("vocabulary_scope") or "").strip():
-            skipped_already += 1
-            continue
-
         dialect = (r.get("dialect") or "").strip()
         entry = dialect_map.get(dialect)
         slug = (r.get("slug") or "").strip()
+        scope_now = (r.get("vocabulary_scope") or "").strip()
 
+        # Supplementary fields fill even on already-migrated rows — but never
+        # overwrite a non-empty value.
         if not (r.get("semantic_label") or "").strip():
             r["semantic_label"] = semantic_label_from_slug(slug)
         if not (r.get("is_active") or "").strip():
             r["is_active"] = "1"
         if not (r.get("collection_campaign") or "").strip():
             r["collection_campaign"] = (entry or {}).get("collection_campaign", default_campaign)
+        if entry is not None:
+            if not (r.get("vocabulary_group") or "").strip():
+                r["vocabulary_group"] = entry.get("vocabulary_group", "")
+            if not (r.get("motion_type") or "").strip():
+                r["motion_type"] = entry.get("motion_type", "")
 
         if entry is None:
-            unmapped.append({"class_uid": r.get("class_uid"), "slug": slug, "dialect": dialect})
+            if not scope_now:
+                unmapped.append({"class_uid": r.get("class_uid"), "slug": slug, "dialect": dialect})
+            else:
+                skipped_already += 1
             continue
 
-        if not (r.get("vocabulary_group") or "").strip():
-            r["vocabulary_group"] = entry.get("vocabulary_group", "")
-
-        if entry.get("status") == "confirmed":
-            r["vocabulary_scope"] = entry.get("vocabulary_scope", "")
-            r["recognition_profile"] = entry.get("recognition_profile", "")
+        status = entry.get("status")
+        if status == "confirmed":
+            new_scope = entry.get("vocabulary_scope", "")
+            new_profile = entry.get("recognition_profile", "")
+            if scope_now:
+                same = (scope_now == new_scope
+                        and (r.get("recognition_profile") or "").strip() == new_profile)
+                if same or not entry.get("force_reassign"):
+                    skipped_already += 1
+                    continue
+                reassigned.append({
+                    "class_uid": r.get("class_uid"), "slug": slug, "dialect": dialect,
+                    "old": {"vocabulary_scope": scope_now,
+                            "recognition_profile": (r.get("recognition_profile") or "").strip()},
+                    "new": {"vocabulary_scope": new_scope, "recognition_profile": new_profile},
+                })
+            r["vocabulary_scope"] = new_scope
+            r["recognition_profile"] = new_profile
+            # vocabulary_group may change on reassignment (e.g. alphabet -> fingerspelling_alphabet)
+            if entry.get("force_reassign") and entry.get("vocabulary_group"):
+                r["vocabulary_group"] = entry["vocabulary_group"]
             errs = validate_label_v2(r)
             if errs:
-                unmapped.append({"class_uid": r.get("class_uid"), "slug": slug, "dialect": dialect, "errors": errs})
+                unmapped.append({"class_uid": r.get("class_uid"), "slug": slug,
+                                 "dialect": dialect, "errors": errs})
                 r["vocabulary_scope"] = ""
                 r["recognition_profile"] = ""
             else:
                 updated += 1
+        elif status == "unassign":
+            # Owner explicitly reverted an earlier assignment: clear scope,
+            # set profile to the entry's placeholder (e.g. legacy_unassigned).
+            if scope_now:
+                reverted.append({
+                    "class_uid": r.get("class_uid"), "slug": slug, "dialect": dialect,
+                    "old": {"vocabulary_scope": scope_now,
+                            "recognition_profile": (r.get("recognition_profile") or "").strip()},
+                })
+            r["vocabulary_scope"] = ""
+            r["recognition_profile"] = entry.get("recognition_profile", "")
+            needs_review.append({
+                "class_uid": r.get("class_uid"), "slug": slug, "dialect": dialect,
+                "note": entry.get("note", ""),
+            })
         else:
             # needs_review: fill non-semantic fields only; scope stays unassigned.
+            if scope_now:
+                skipped_already += 1
+                continue
             if not (r.get("recognition_profile") or "").strip():
                 r["recognition_profile"] = entry.get("recognition_profile", "")
             needs_review.append({
@@ -140,6 +181,8 @@ def migrate_labels(labels_csv: Path, mapping: dict, *, dry_run: bool, backup_dir
         "labels_total": len(rows),
         "labels_updated_confirmed": updated,
         "labels_already_migrated": skipped_already,
+        "labels_reassigned": reassigned,
+        "labels_reverted_to_unassigned": reverted,
         "labels_needs_review": needs_review,
         "labels_unmapped": unmapped,
         "scope_stats_before": dict(stats_before),
@@ -282,8 +325,14 @@ def main() -> int:
     print(f"labels: total={label_report['labels_total']} "
           f"confirmed-updated={label_report['labels_updated_confirmed']} "
           f"already-migrated={label_report['labels_already_migrated']} "
+          f"reassigned={len(label_report['labels_reassigned'])} "
+          f"reverted={len(label_report['labels_reverted_to_unassigned'])} "
           f"needs_review={len(label_report['labels_needs_review'])} "
           f"unmapped={len(label_report['labels_unmapped'])}")
+    for ra in label_report["labels_reassigned"][:5]:
+        print(f"  [REASSIGN] {ra['dialect']}/{ra['slug']}: {ra['old']} -> {ra['new']}")
+    for rv in label_report["labels_reverted_to_unassigned"][:5]:
+        print(f"  [REVERT] {rv['dialect']}/{rv['slug']}: was {rv['old']}")
     print(f"scope before: {label_report['scope_stats_before']}")
     print(f"scope after:  {label_report['scope_stats_after']}")
     print(f"signers: total={signer_report['signers_total']} created={signer_report['signers_created']} "

@@ -50,6 +50,7 @@ LABEL_FIELDS = [
     "vocabulary_group",
     "collection_campaign",
     "is_active",
+    "motion_type",  # static | dynamic | mixed | "" (unknown)
 ]
 
 
@@ -193,6 +194,7 @@ class ClassMetadata:
     vocabulary_group: str = ""
     collection_campaign: str = ""
     is_active: bool = True
+    motion_type: str = ""  # static | dynamic | mixed | "" (unknown)
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -229,6 +231,7 @@ class ClassMetadata:
             "vocabulary_group": self.vocabulary_group or "",
             "collection_campaign": self.collection_campaign or "",
             "is_active": "1" if self.is_active else "0",
+            "motion_type": self.motion_type or "",
         }
 
     def write_metadata_json(self):
@@ -514,6 +517,7 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         vocabulary_group=(existing.get("vocabulary_group") or "").strip(),
         collection_campaign=(existing.get("collection_campaign") or "").strip(),
         is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
+        motion_type=(existing.get("motion_type") or "").strip(),
     )
 
 

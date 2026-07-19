@@ -695,7 +695,7 @@ def split_from_manifest(
     *,
     split_mode: str,
     recognition_profile: str = '',
-    include_common: bool = True,
+    include_common: bool = False,
     unified: bool = False,
     seed: int = 42,
     group_col: str = 'signer_id',
@@ -886,9 +886,11 @@ def main():
                              '(splits reference sample_id; legacy split files untouched).')
     parser.add_argument('--recognition_profile', type=str, default='',
                         help='Profile subset: north|central|south|hoa_de (manifest mode)')
-    parser.add_argument('--include_common', dest='include_common', action='store_true', default=True,
-                        help='Include common vocabulary in the profile subset (default true)')
-    parser.add_argument('--no_include_common', dest='include_common', action='store_false')
+    parser.add_argument('--include_common', dest='include_common', action='store_true', default=False,
+                        help='EXPLICITLY include common vocabulary in the profile subset '
+                             '(default false — profiles train independently)')
+    parser.add_argument('--no_include_common', dest='include_common', action='store_false',
+                        help='[compatibility no-op — default is already false]')
     parser.add_argument('--unified', action='store_true',
                         help='Unified baseline: common + every validly-assigned profile')
     parser.add_argument('--output_version', type=str, default='',

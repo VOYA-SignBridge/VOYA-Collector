@@ -71,17 +71,39 @@ def main() -> int:
     }
 
     print(f"=== Dataset coverage — {args.version} ({len(rows)} samples) ===\n")
-    print(f"{'profile':<14}{'samples':>8}{'labels':>8}{'signers':>8}{'sessions':>9}{'raw':>6}")
+    print(f"{'profile':<14}{'samples':>8}{'labels':>8}{'signers':>8}{'sessions':>9}{'raw':>6}"
+          f"{'motion(st/dy/mx/?)':>20}{'disjoint-ready':>15}")
     for p, prows in sorted(by_profile.items()):
         signers = {(r.get('signer_id') or '').strip() for r in prows} - {""}
         sessions = {(r.get('session_id') or '').strip() for r in prows} - {""}
         labels = {r['label_key'] for r in prows}
         raw = sum(1 for r in prows if r.get("raw_landmarks_available") == "1")
+        motion = Counter((r.get("motion_type") or "").strip() or "unknown" for r in prows)
+        # Signer-disjoint readiness: EVERY label in the profile needs >= 2
+        # distinct signers, otherwise a strict group split cannot cover it.
+        label_signers = defaultdict(set)
+        for r in prows:
+            s = (r.get('signer_id') or '').strip()
+            if s:
+                label_signers[r['label_key']].add(s)
+        blocking = sorted(lk for lk in labels if len(label_signers.get(lk, set())) < 2)
+        # A 3-way (train/val/test) group-disjoint split additionally needs at
+        # least 3 distinct signers overall — 2 signers can only fill train.
+        disjoint_ready = (not blocking) and len(signers) >= 3
         report["profiles"][p] = {
             "samples": len(prows), "labels": len(labels),
             "signers": sorted(signers), "sessions": len(sessions), "raw_samples": raw,
+            "motion_types": dict(motion),
+            "signer_disjoint_ready": disjoint_ready,
+            "signer_disjoint_blocking_labels": blocking,
         }
-        print(f"{p:<14}{len(prows):>8}{len(labels):>8}{len(signers):>8}{len(sessions):>9}{raw:>6}")
+        mo = f"{motion.get('static',0)}/{motion.get('dynamic',0)}/{motion.get('mixed',0)}/{motion.get('unknown',0)}"
+        print(f"{p:<14}{len(prows):>8}{len(labels):>8}{len(signers):>8}{len(sessions):>9}{raw:>6}"
+              f"{mo:>20}{('YES' if disjoint_ready else 'no'):>15}")
+        if blocking:
+            print(f"{'':<14}  blocked by {len(blocking)} label(s) with <2 signers, e.g. {blocking[:3]}")
+        elif not disjoint_ready:
+            print(f"{'':<14}  blocked: only {len(signers)} distinct signer(s) — a 3-way split needs >= 3")
 
     warn = report["warnings"].append
     counts = {k: len(v) for k, v in by_label.items()}

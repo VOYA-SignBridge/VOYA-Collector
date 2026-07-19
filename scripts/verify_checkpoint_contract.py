@@ -38,7 +38,7 @@ REQUIRED_V2_KEYS = [
     "seq_len", "feature_dim", "label_to_idx", "idx_to_label",
     "common_labels", "profile_specific_labels", "num_classes", "seed",
     "git_commit", "training_config", "dataset_manifest_checksum",
-    "preprocess_contract_version",
+    "preprocess_contract_version", "storage_contract_version", "motion_types_present",
 ]
 
 

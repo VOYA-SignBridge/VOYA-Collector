@@ -49,7 +49,7 @@ from processed.shared.vocabulary import (  # noqa: E402
 MANIFEST_FIELDS = [
     "sample_id", "file_path", "file_checksum",
     "label_key", "semantic_label", "vocabulary_scope", "recognition_profile",
-    "vocabulary_group", "collection_campaign",
+    "vocabulary_group", "collection_campaign", "motion_type",
     "signer_id", "session_id", "source_type",
     "raw_landmarks_available", "normalization_version", "quality_status",
     # physical-location columns kept so the existing dataset_loader keeps working
@@ -163,6 +163,7 @@ def build_manifest(features_root: Path, labels_rows: list, signer_name_to_id: di
             "recognition_profile": profile,
             "vocabulary_group": (label_row.get("vocabulary_group") or "").strip(),
             "collection_campaign": str(side.get("collection_campaign") or label_row.get("collection_campaign") or "").strip(),
+            "motion_type": (label_row.get("motion_type") or "").strip(),
             "signer_id": signer_id,
             "session_id": str(side.get("session_id") or "").strip(),
             "source_type": str(side.get("source_type") or "camera").strip(),

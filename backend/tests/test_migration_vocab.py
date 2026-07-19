@@ -42,6 +42,8 @@ def _mk_workspace() -> Path:
                     "language": "vn", "dialect": "can-tho", "created_at": "t", "migrated_at": "t"})
         w.writerow({"class_uid": "u4", "class_idx": "4", "slug": "la", "label_original": "lạ",
                     "language": "vn", "dialect": "unknown-dialect", "created_at": "t", "migrated_at": "t"})
+        w.writerow({"class_uid": "u5", "class_idx": "5", "slug": "hue-word", "label_original": "từ Huế",
+                    "language": "vn", "dialect": "trung", "created_at": "t", "migrated_at": "t"})
     src = ws / "split.csv"
     with src.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["sample_uid", "user_id"])
@@ -90,16 +92,25 @@ def main() -> int:
               by_uid["u1"]["vocabulary_scope"] == "profile_specific"
               and by_uid["u1"]["recognition_profile"] == "hoa_de")
         check("hoa-de semantic_label", by_uid["u1"]["semantic_label"] == "rang_muoi")
-        # Owner-confirmed decisions (2026-07-19): bang-chu-cai IS common,
-        # can-tho IS the 'south' profile. The mapping file is the single source
-        # of truth — the script itself still never infers anything.
-        check("bang-chu-cai -> common (owner-confirmed via mapping)",
-              by_uid["u2"]["vocabulary_scope"] == "common"
-              and by_uid["u2"]["vocabulary_group"] == "alphabet"
-              and by_uid["u2"]["recognition_profile"] == "")
-        check("can-tho -> profile_specific/south (owner-confirmed via mapping)",
-              by_uid["u3"]["vocabulary_scope"] == "profile_specific"
-              and by_uid["u3"]["recognition_profile"] == "south")
+        # Owner-confirmed decisions (2026-07-19, rev.2): bang-chu-cai is the
+        # standalone 'alphabet' profile (static fingerspelling); trung is
+        # 'central'; can-tho REVERTED to unassigned (never auto-south).
+        # The mapping file is the single source of truth — the script itself
+        # still never infers anything.
+        check("bang-chu-cai -> profile_specific/alphabet + static",
+              by_uid["u2"]["vocabulary_scope"] == "profile_specific"
+              and by_uid["u2"]["recognition_profile"] == "alphabet"
+              and by_uid["u2"]["vocabulary_group"] == "fingerspelling_alphabet"
+              and by_uid["u2"]["motion_type"] == "static", dict(by_uid["u2"]))
+        check("trung -> profile_specific/central",
+              by_uid["u5"]["vocabulary_scope"] == "profile_specific"
+              and by_uid["u5"]["recognition_profile"] == "central"
+              and by_uid["u5"]["vocabulary_group"] == "central_vocabulary", dict(by_uid["u5"]))
+        check("can-tho stays unassigned (reverted, never auto-south)",
+              by_uid["u3"]["vocabulary_scope"] == ""
+              and by_uid["u3"]["recognition_profile"] == "legacy_unassigned", dict(by_uid["u3"]))
+        check("hoa-de gets motion_type dynamic", by_uid["u1"]["motion_type"] == "dynamic",
+              by_uid["u1"].get("motion_type"))
         check("unknown dialect reported, untouched", by_uid["u4"]["vocabulary_scope"] == "")
         check("backup created", any((ws / "backups").glob("labels_*.csv")))
         signers = _read(ws / "signers.csv")

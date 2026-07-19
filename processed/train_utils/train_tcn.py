@@ -805,10 +805,12 @@ def main() -> None:
              "One of: " + ", ".join(RECOGNITION_PROFILES),
     )
     parser.add_argument(
-        "--include_common", dest="include_common", action="store_true", default=True,
-        help="Include common vocabulary in the profile model (default: true)",
+        "--include_common", dest="include_common", action="store_true", default=False,
+        help="EXPLICITLY include common vocabulary in the profile model. "
+             "Default: false — profiles (including the standalone 'alphabet') train independently.",
     )
-    parser.add_argument("--no_include_common", dest="include_common", action="store_false")
+    parser.add_argument("--no_include_common", dest="include_common", action="store_false",
+                        help="[kept for compatibility — no-op now that the default is false]")
     parser.add_argument(
         "--unified", action="store_true",
         help="Unified baseline: common + every validly-assigned profile (mutually exclusive with --recognition_profile)",
@@ -961,6 +963,7 @@ def main() -> None:
     common_labels: List[str] = []
     profile_specific_labels: List[str] = []
     manifest_checksum = ""
+    motion_types_present: List[str] = []
 
     if profile_mode:
         # ------------------------------------------------------------------
@@ -1034,6 +1037,20 @@ def main() -> None:
         if len(l2i) < 2:
             raise SystemExit(f"Profile '{profile_tag}': need at least 2 classes, got {len(l2i)}.")
         common_labels, profile_specific_labels = split_common_and_profile_labels(list(l2i.keys()))
+
+        # Hard cross-profile guard: a profile checkpoint must never contain
+        # another profile's labels (alphabet vs regional vs hoa_de isolation).
+        if not args.unified:
+            allowed = {f"vn/{args.recognition_profile}/"}
+            if args.include_common:
+                allowed.add("vn/common/")
+            foreign = [k for k in l2i if not any(k.startswith(p) for p in allowed)]
+            assert not foreign, (
+                f"Cross-profile label leak into '{profile_tag}' label space: {foreign[:5]}")
+
+        # Motion types present in this label space (checkpoint contract field).
+        motion_types_present = sorted(
+            {(r.get("motion_type") or "").strip() or "unknown" for r in train_rows})
 
         def _filter_profile_known(src_csv: Path, name: str) -> None:
             rows, fieldnames = _read_csv_rows(src_csv)
@@ -1448,6 +1465,8 @@ def main() -> None:
         "dataset_version": args.dataset_version,
         "split_version": args.split_version,
         "preprocess_contract_version": "v2",
+        "storage_contract_version": "npz_v2",
+        "motion_types_present": motion_types_present,
         "common_labels": common_labels,
         "profile_specific_labels": profile_specific_labels,
         "seed": int(cfg.seed),

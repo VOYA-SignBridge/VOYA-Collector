@@ -230,6 +230,7 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS vocabulary_group TEXT",
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS collection_campaign TEXT",
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS motion_type TEXT",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS signer_id TEXT",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS collection_campaign TEXT",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS raw_landmarks_available BOOLEAN",
@@ -363,13 +364,15 @@ INSERT INTO classes(
     class_uid, class_idx, slug, label_original, language, dialect,
     is_common_global, is_common_language, folder_name, created_at, migrated_at,
     hands_required,
-    semantic_label, vocabulary_scope, recognition_profile, vocabulary_group, collection_campaign, is_active
+    semantic_label, vocabulary_scope, recognition_profile, vocabulary_group, collection_campaign, is_active,
+    motion_type
 )
 VALUES(
     %(class_uid)s, %(class_idx)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
     %(is_common_global)s, %(is_common_language)s, %(folder_name)s, %(created_at)s, %(migrated_at)s,
     %(hands_required)s,
-    %(semantic_label)s, %(vocabulary_scope)s, %(recognition_profile)s, %(vocabulary_group)s, %(collection_campaign)s, %(is_active)s
+    %(semantic_label)s, %(vocabulary_scope)s, %(recognition_profile)s, %(vocabulary_group)s, %(collection_campaign)s, %(is_active)s,
+    %(motion_type)s
 )
 ON CONFLICT (class_uid) DO UPDATE SET
     class_idx = EXCLUDED.class_idx,
@@ -388,7 +391,8 @@ ON CONFLICT (class_uid) DO UPDATE SET
     recognition_profile = COALESCE(EXCLUDED.recognition_profile, classes.recognition_profile),
     vocabulary_group = COALESCE(EXCLUDED.vocabulary_group, classes.vocabulary_group),
     collection_campaign = COALESCE(EXCLUDED.collection_campaign, classes.collection_campaign),
-    is_active = COALESCE(EXCLUDED.is_active, classes.is_active)
+    is_active = COALESCE(EXCLUDED.is_active, classes.is_active),
+    motion_type = COALESCE(EXCLUDED.motion_type, classes.motion_type)
 """
 
 SQL_UPSERT_SIGNER = """
@@ -508,6 +512,7 @@ def upsert_class(row: Dict[str, Any]):
         "vocabulary_group": (str(row.get("vocabulary_group") or "").strip() or None),
         "collection_campaign": (str(row.get("collection_campaign") or "").strip() or None),
         "is_active": _bool_value(row.get("is_active", True)) if str(row.get("is_active", "")).strip() != "" else None,
+        "motion_type": (str(row.get("motion_type") or "").strip() or None),
     }
     _execute(SQL_UPSERT_CLASS, payload)
 

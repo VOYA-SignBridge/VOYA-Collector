@@ -38,6 +38,14 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 def test_scope_profile_rules():
     print("[V1 scope/profile rules]")
+    check("alphabet is a recognition profile", "alphabet" in RECOGNITION_PROFILES,
+          RECOGNITION_PROFILES)
+    check("profile order starts with alphabet", RECOGNITION_PROFILES[0] == "alphabet")
+    check("motion_type static valid",
+          validate_label_v2({"vocabulary_scope": "profile_specific",
+                             "recognition_profile": "alphabet", "motion_type": "static"}) == [])
+    errs = validate_label_v2({"vocabulary_scope": "common", "motion_type": "wiggly"})
+    check("invalid motion_type rejected", len(errs) == 1, errs)
     check("common + no profile: valid",
           validate_label_v2({"vocabulary_scope": "common", "recognition_profile": ""}) == [])
     errs = validate_label_v2({"vocabulary_scope": "common", "recognition_profile": "hoa_de"})
@@ -60,6 +68,7 @@ def test_label_key_generation():
     check("common key", label_key_v2("vn", "common", "", "cam-on") == "vn/common/cam-on")
     check("profile key", label_key_v2("vn", "profile_specific", "hoa_de", "rang-muoi") == "vn/hoa_de/rang-muoi")
     check("north key", label_key_v2("vn", "profile_specific", "north", "tu-mien-bac") == "vn/north/tu-mien-bac")
+    check("alphabet key", label_key_v2("vn", "profile_specific", "alphabet", "a") == "vn/alphabet/a")
     try:
         label_key_v2("vn", "", "", "x")
         check("unassigned row raises", False)
@@ -79,6 +88,7 @@ def _rows():
         {"vocabulary_scope": "common", "recognition_profile": "", "label_slug": "xin-chao"},
         {"vocabulary_scope": "profile_specific", "recognition_profile": "hoa_de", "label_slug": "rang-muoi"},
         {"vocabulary_scope": "profile_specific", "recognition_profile": "north", "label_slug": "tu-bac"},
+        {"vocabulary_scope": "profile_specific", "recognition_profile": "alphabet", "label_slug": "a-letter"},
         {"vocabulary_scope": "", "recognition_profile": "legacy_unassigned", "label_slug": "can-tho-word"},
         {"vocabulary_scope": "", "recognition_profile": "", "label_slug": "a"},
     ]
@@ -87,16 +97,22 @@ def _rows():
 def test_profile_selection():
     print("[V3 subset selection]")
     rows = _rows()
+    # Policy 2026-07-19: include_common DEFAULTS TO FALSE — profiles train independently.
+    sel = select_rows_for_profile(rows, "hoa_de")
+    check("DEFAULT: hoa_de only, NO common", [r["label_slug"] for r in sel] == ["rang-muoi"],
+          [r["label_slug"] for r in sel])
+    sel = select_rows_for_profile(rows, "alphabet")
+    check("DEFAULT: alphabet only, NO common/regional",
+          [r["label_slug"] for r in sel] == ["a-letter"], [r["label_slug"] for r in sel])
     sel = select_rows_for_profile(rows, "hoa_de", include_common=True)
     slugs = sorted(r["label_slug"] for r in sel)
-    check("hoa_de = common + hoa_de only", slugs == ["cam-on", "rang-muoi", "xin-chao"], slugs)
-    check("hoa_de excludes north", all(r.get("recognition_profile") != "north" for r in sel))
-    sel = select_rows_for_profile(rows, "hoa_de", include_common=False)
-    check("no-common: only hoa_de", [r["label_slug"] for r in sel] == ["rang-muoi"])
+    check("explicit include_common: common + hoa_de", slugs == ["cam-on", "rang-muoi", "xin-chao"], slugs)
+    check("hoa_de excludes north + alphabet",
+          all(r.get("recognition_profile") not in ("north", "alphabet") for r in sel))
     sel = select_rows_for_profile(rows, unified=True)
     slugs = sorted(r["label_slug"] for r in sel)
-    check("unified = common + all valid profiles, NO legacy_unassigned",
-          slugs == ["cam-on", "rang-muoi", "tu-bac", "xin-chao"], slugs)
+    check("unified = common + ALL valid profiles (incl. alphabet), NO legacy_unassigned",
+          slugs == ["a-letter", "cam-on", "rang-muoi", "tu-bac", "xin-chao"], slugs)
     try:
         select_rows_for_profile(rows, "south_east")
         check("invalid profile raises", False)

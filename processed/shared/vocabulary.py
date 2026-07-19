@@ -24,7 +24,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 VOCABULARY_SCHEMA_VERSION = "v2"
 
 # Profiles a realtime model can be built/routed for. Order is display order.
-RECOGNITION_PROFILES: Tuple[str, ...] = ("north", "central", "south", "hoa_de")
+# "alphabet" is a standalone profile (static fingerspelling) — it is trained
+# and deployed independently and is NOT auto-included in regional models.
+RECOGNITION_PROFILES: Tuple[str, ...] = ("alphabet", "north", "central", "south", "hoa_de")
+
+# Optional per-label motion characteristic (informational + contract field).
+MOTION_TYPES: Tuple[str, ...] = ("static", "dynamic", "mixed")
 
 # Sentinel for legacy rows whose regional assignment is NOT confirmed.
 # Never a valid training/routing profile; excluded from profile models.
@@ -42,6 +47,7 @@ LABEL_V2_FIELDS: Tuple[str, ...] = (
     "vocabulary_group",
     "collection_campaign",
     "is_active",
+    "motion_type",  # static | dynamic | mixed | "" (unknown)
 )
 
 
@@ -80,6 +86,9 @@ def validate_label_v2(row: Dict[str, str]) -> List[str]:
             )
     if not scope and profile and profile not in (LEGACY_UNASSIGNED,) + RECOGNITION_PROFILES:
         errors.append(f"unknown recognition_profile '{profile}' on unassigned row")
+    motion = (row.get("motion_type") or "").strip()
+    if motion and motion not in MOTION_TYPES:
+        errors.append(f"invalid motion_type '{motion}' (allowed: {MOTION_TYPES} or empty)")
     return errors
 
 
@@ -120,12 +129,15 @@ def is_row_selectable(row: Dict[str, str]) -> bool:
 def select_rows_for_profile(
     rows: Iterable[Dict[str, str]],
     recognition_profile: Optional[str] = None,
-    include_common: bool = True,
+    include_common: bool = False,
     unified: bool = False,
 ) -> List[Dict[str, str]]:
     """Core subset rule for profile training.
 
-    profile model:  common (if include_common) + profile_specific(selected profile)
+    profile model:  profile_specific(selected profile) ONLY by default;
+                    common vocabulary is added only with an EXPLICIT
+                    include_common=True (policy since 2026-07-19: profiles —
+                    including the standalone 'alphabet' — train independently)
     unified model:  common + every profile_specific row with a VALID profile
                     (legacy_unassigned rows are excluded from all models)
     """
