@@ -233,11 +233,15 @@ def get_current_user_optional(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> Optional[Dict[str, Any]]:
-    # Prefer the Authorization: Bearer header (API clients / legacy), then fall
-    # back to the httpOnly access cookie used by the browser SPA.
-    token = credentials.credentials if credentials is not None else None
-    if not token:
-        token = request.cookies.get(ACCESS_COOKIE)
+    # Prefer the httpOnly access COOKIE (the SPA's session), then fall back to
+    # the Authorization: Bearer header (API clients / WS fallback). Order
+    # matters: browsers migrated from the legacy localStorage flow may still
+    # send a STALE Bearer header on every request — if that were preferred, a
+    # perfectly valid fresh cookie session would 401 forever (login -> bounce
+    # loop). Pure API clients send no cookies, so they are unaffected.
+    token = request.cookies.get(ACCESS_COOKIE)
+    if not token and credentials is not None:
+        token = credentials.credentials
     if not token:
         return None
 
