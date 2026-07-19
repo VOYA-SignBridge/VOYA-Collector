@@ -86,7 +86,8 @@ def main() -> int:
 
     print("[S5 hard failures]")
     bad = _mk_manifest_rows()
-    bad[0]["signer_id"] = ""
+    # blank a row that is INSIDE the default (profile-only) subset
+    next(r for r in bad if r["recognition_profile"] == "hoa_de")["signer_id"] = ""
     try:
         split_from_manifest(bad, split_mode="strict_signer_disjoint",
                             recognition_profile="hoa_de", seed=42)
