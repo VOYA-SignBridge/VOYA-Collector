@@ -65,6 +65,8 @@ _MODEL_NAME_TO_REGISTRY_KEY = {
     "bigru_attention": "bigru_attention",
     "handgcn": "handgcn",
     "hdgcn": "handgcn",
+    "hd-gcn": "handgcn",   # model.get_model_name() returns "HD-GCN"
+    "hd_gcn": "handgcn",
     "tcn": "tcn",
 }
 
@@ -120,17 +122,24 @@ def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Opti
                 f"{checkpoint_path.name}: {e}"
             ) from e
     else:
-        # TCN (or legacy checkpoint without model_type): inline TCNClassifier
-        # matches the TCNModel state-dict layout.
-        model = TCNClassifier(
-            feature_dim=feature_dim,
-            num_classes=num_classes,
-            channels=model_config.get("channels", 64),
-            levels=model_config.get("levels", 3),
-            kernel_size=model_config.get("kernel_size", 5),
-            dropout=model_config.get("dropout", 0.3),
-        )
-        logger.info("Loaded TCN model (checkpoint model_type=%s)", model_type)
+        # TCN (or legacy checkpoint without model_type): build from the SAME
+        # training registry so the Step 7 test modal always matches the trained
+        # architecture — including the temporal_pool head (gap/attention/mean_max).
+        # The old inline TCNClassifier was gap-only and broke on attention models.
+        try:
+            models_module = _import_models_registry()
+            model = models_module.get_model_class("tcn").from_config(
+                input_dim=feature_dim,
+                output_dim=num_classes,
+                config=model_config,  # carries temporal_pool; absent -> "gap"
+            ).to("cpu")
+            logger.info("Loaded TCN model from registry (temporal_pool=%s)",
+                        model_config.get("temporal_pool", "gap"))
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to build TCN model from registry for checkpoint "
+                f"{checkpoint_path.name}: {e}"
+            ) from e
 
     try:
         model.load_state_dict(ckpt["model_state_dict"])
@@ -145,6 +154,11 @@ def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Opti
 # ============================================================================
 # TCN Model Classes (for training model inference)
 # ============================================================================
+# DEPRECATED / UNUSED (2026-07-20): the inline Chomp1d/TemporalBlock/TCNClassifier
+# below are a legacy gap-only copy. The Step 7 test loader now builds the TCN
+# from the training registry (processed/train_utils/models/tcn.py) so it always
+# matches the trained architecture — including the temporal_pool head. Do NOT
+# reintroduce a fourth TCN implementation here; extend the registry model.
 
 class Chomp1d(nn.Module):
     def __init__(self, chomp_size: int):
@@ -244,6 +258,7 @@ class DatasetInfo(BaseModel):
     languages: List[str]
     dialects: Dict[str, List[str]]  # language -> dialects
     class_distribution: Dict[str, int]  # class_name -> count
+    samples_by_dialect: Dict[str, int] = {}  # dialect -> sample count (for split viz)
     split_info: Optional[Dict[str, int]] = None  # train, val, test counts
 
 
@@ -518,6 +533,33 @@ def _get_dialects_by_language() -> Dict[str, List[str]]:
     return {lang: sorted(list(dialects)) for lang, dialects in dialects_map.items()}
 
 
+def _trainable_dialects_from_splits() -> Dict[str, int]:
+    """Đọc split train.csv hiện tại, trả về {dialect: số_class}.
+
+    Legacy training lọc frozen splits theo cột `dialect`; một dialect chỉ train
+    được khi có >= 2 class trong split. Dialect có trong labels.csv nhưng KHÔNG
+    có mẫu trong split (chưa chia lại sau khi thu) sẽ không xuất hiện ở đây —
+    dùng để chặn sớm với thông báo rõ ràng thay vì để subprocess fail rc=1.
+    """
+    import csv as _csv
+
+    train_csv = SPLITS_DIR / "train.csv"
+    counts: Dict[str, set] = {}
+    if not train_csv.exists():
+        return {}
+    try:
+        with open(train_csv, newline="", encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                dialect = (row.get("dialect") or "").strip()
+                cls = (row.get("class_idx") or row.get("label_key") or "").strip()
+                if dialect and cls:
+                    counts.setdefault(dialect, set()).add(cls)
+    except Exception as exc:
+        logger.warning("[TRAIN_VALIDATE] không đọc được train split: %s", exc)
+        return {}
+    return {d: len(classes) for d, classes in counts.items()}
+
+
 def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optional[Path] = None) -> Optional[str]:
     """Copy checkpoint (+ JSON sidecar) sang thư mục deployment."""
     try:
@@ -683,12 +725,26 @@ async def get_dataset_info(
             if class_uid:
                 class_counts[class_uid] = class_counts.get(class_uid, 0) + 1
 
+        # Per-dialect sample counts so the split step can show numbers for the
+        # SELECTED dialects instead of the whole dataset.
+        uid_to_dialect = {
+            (lb.get("class_uid", "").strip()): (lb.get("dialect", "").strip())
+            for lb in labels
+            if lb.get("class_uid", "").strip()
+        }
+        samples_by_dialect: Dict[str, int] = {}
+        for sample in samples:
+            d = uid_to_dialect.get(sample.get("class_uid", "").strip(), "")
+            if d:
+                samples_by_dialect[d] = samples_by_dialect.get(d, 0) + 1
+
         return DatasetInfo(
             total_samples=len(samples),
             total_classes=len(class_counts),
             languages=list(dialects_map.keys()),
             dialects=dialects_map,
             class_distribution=class_counts,
+            samples_by_dialect=samples_by_dialect,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
@@ -705,6 +761,23 @@ async def start_training(
     Tạo job ID, thêm vào queue, return job info
     """
     try:
+        # Chặn sớm: lựa chọn dialect không có đủ dữ liệu trong split hiện tại sẽ
+        # khiến subprocess train fail âm thầm (rc=1). Báo lỗi rõ ràng ngay đây.
+        selected_dialects = list(config.dialects or [])
+        if selected_dialects:
+            trainable = _trainable_dialects_from_splits()
+            empty = [d for d in selected_dialects if trainable.get(d, 0) < 2]
+            if empty:
+                available = sorted(d for d, n in trainable.items() if n >= 2)
+                detail = (
+                    f"Các phương ngữ đã chọn không đủ dữ liệu để huấn luyện "
+                    f"(cần ≥2 lớp có mẫu trong tập chia): {empty}. "
+                    f"Phương ngữ đang huấn luyện được: {available or 'chưa có'}. "
+                    f"Nếu bạn vừa thu dữ liệu mới, hãy chia lại tập "
+                    f"(processed/splits/make_splits.py) trước khi huấn luyện."
+                )
+                raise HTTPException(status_code=400, detail=detail)
+
         job_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
 
@@ -1099,9 +1172,14 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     WebSocket để stream real-time training progress
 
     Gửi metrics, epoch progress.
-    Auth: browsers cannot set headers on WS — FE gửi JWT qua ?token=.
+    Auth: browsers cannot set headers on WS. Cookie-auth SPA has no JS-readable
+    token (httpOnly), so prefer the access COOKIE the browser sends on the WS
+    handshake; fall back to ?token= for legacy/API clients.
     """
-    user = await asyncio.to_thread(get_user_from_token, token) if token else None
+    from app.cookie_auth import ACCESS_COOKIE
+
+    effective_token = token or websocket.cookies.get(ACCESS_COOKIE, "")
+    user = await asyncio.to_thread(get_user_from_token, effective_token) if effective_token else None
     if not user:
         await websocket.close(code=4001, reason="Unauthorized")
         return

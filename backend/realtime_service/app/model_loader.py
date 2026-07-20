@@ -171,8 +171,14 @@ class TCNClassifier(nn.Module):
         dropout: float = 0.3,
         use_proj: bool = True,
         proj_dim: Optional[int] = None,
+        temporal_pool: str = "gap",
     ) -> None:
         super().__init__()
+        # MUST mirror processed/train_utils/models/tcn.py exactly (same submodule
+        # names + feature widths) so a trained state_dict loads with strict=True.
+        if temporal_pool not in ("gap", "attention", "mean_max"):
+            raise ValueError(f"temporal_pool must be gap|attention|mean_max, got {temporal_pool}")
+        self.temporal_pool = temporal_pool
         proj_dim = int(proj_dim or channels)
         self.proj: nn.Module = nn.Identity()
         current_in = int(in_dim)
@@ -193,7 +199,22 @@ class TCNClassifier(nn.Module):
                 )
             )
         self.network = nn.Sequential(*blocks)
-        self.classifier = nn.Linear(int(channels), int(num_classes))
+
+        if temporal_pool == "attention":
+            self.attn: Optional[nn.Module] = nn.Sequential(
+                nn.Linear(int(channels), int(channels) // 2),
+                nn.Tanh(),
+                nn.Linear(int(channels) // 2, 1),
+            )
+            feat_dim = int(channels)
+        elif temporal_pool == "mean_max":
+            self.attn = None
+            feat_dim = int(channels) * 3
+        else:
+            self.attn = None
+            feat_dim = int(channels)
+
+        self.classifier = nn.Linear(feat_dim, int(num_classes))
         nn.init.kaiming_uniform_(self.classifier.weight, a=math.sqrt(5))
         if self.classifier.bias is not None:
             nn.init.zeros_(self.classifier.bias)
@@ -209,7 +230,14 @@ class TCNClassifier(nn.Module):
         x = self.proj(x)
         x = self.network(x)
 
-        pooled = x.mean(dim=2)
+        if self.temporal_pool == "attention" and self.attn is not None:
+            h = x.transpose(1, 2)                    # [B, T, channels]
+            w = torch.softmax(self.attn(h), dim=1)   # [B, T, 1]
+            pooled = (h * w).sum(dim=1)
+        elif self.temporal_pool == "mean_max":
+            pooled = torch.cat([x.mean(dim=2), x.max(dim=2).values, x[:, :, -1]], dim=1)
+        else:
+            pooled = x.mean(dim=2)
         logits = self.classifier(pooled)
         return logits
 
@@ -250,6 +278,8 @@ def build_model_from_checkpoint(ckpt: Dict[str, Any]) -> nn.Module:
         dropout=dropout,
         use_proj=bool(cfg.get("use_proj", True)),
         proj_dim=proj_dim,
+        # Old checkpoints have no temporal_pool -> "gap" (unchanged behaviour).
+        temporal_pool=str(cfg.get("temporal_pool", "gap")),
     )
 
 

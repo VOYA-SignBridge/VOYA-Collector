@@ -15,8 +15,12 @@ from app.processing.utils import atomic_write_json
 
 
 DATASET_ROOT = settings.dataset_root
-SAMPLES_DIR = DATASET_ROOT / "samples"
-SAMPLES_CSV = SAMPLES_DIR / "samples.csv"
+SAMPLES_DIR = DATASET_ROOT
+# Canonical catalog file is dataset/samples.csv (repo-root layout, matches the
+# historical file and the Drive mirror). A stray dataset/samples/samples.csv
+# from an interim layout was merged back on 2026-07-20 and retired
+# (renamed *.pre_merge_bak) — do NOT resurrect the subdirectory path.
+SAMPLES_CSV = DATASET_ROOT / "samples.csv"
 
 SAMPLE_FIELDS = [
     "sample_uid",

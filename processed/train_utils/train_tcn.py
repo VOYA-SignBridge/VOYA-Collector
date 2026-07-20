@@ -734,6 +734,8 @@ def build_checkpoint(
             "levels": cfg.levels,
             "kernel_size": cfg.kernel_size,
             "dropout": cfg.dropout,
+            # Persist the temporal pooling so realtime rebuilds the exact head.
+            "temporal_pool": getattr(model, "temporal_pool", "gap"),
         },
 
         "feature_dim": EXPECTED_FEATURE_DIM,
@@ -882,6 +884,13 @@ def main() -> None:
     parser.add_argument("--channels", type=int, default=64)
     parser.add_argument("--levels", type=int, default=3)
     parser.add_argument("--kernel_size", type=int, default=5)
+    parser.add_argument(
+        "--temporal_pool", type=str, default="attention",
+        choices=["gap", "attention", "mean_max"],
+        help="TCN time-axis aggregation. 'attention' (default) keeps temporal "
+             "order — better for dynamic multi-action phrases; 'gap' is the legacy "
+             "order-agnostic average (only for reproducing old runs).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=0)
@@ -1223,6 +1232,7 @@ def main() -> None:
             "levels": cfg.levels,
             "kernel_size": cfg.kernel_size,
             "dropout": cfg.dropout,
+            "temporal_pool": args.temporal_pool,  # TCN only; others ignore it
         }
         model = model_class.from_config(
             input_dim=in_dim,

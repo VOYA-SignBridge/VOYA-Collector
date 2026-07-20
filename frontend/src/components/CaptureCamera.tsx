@@ -251,28 +251,6 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
               Xem hướng dẫn
             </Button>
           </div>
-
-          {/* Quick Features */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto text-xs sm:text-sm">
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-blue/10 rounded-xl">
-              <svg className="w-5 h-5 text-ctu-blue mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="text-ctu-blue font-medium">Đếm ngược 3 giây</span>
-            </div>
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-navy/10 rounded-xl">
-              <svg className="w-5 h-5 text-ctu-navy mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-ctu-navy font-medium">Phát hiện bàn tay bằng AI</span>
-            </div>
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-yellow/15 rounded-xl">
-              <svg className="w-5 h-5 text-ctu-navy mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h4a1 1 0 011 1v2m-6 0h8m-6 0a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2m-6 0V4" />
-              </svg>
-              <span className="text-ctu-navy font-medium">Hỗ trợ phím tắt</span>
-            </div>
-          </div>
         </div>
       </div>
 

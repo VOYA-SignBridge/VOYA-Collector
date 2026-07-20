@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
-import axiosClient, { getAuthToken, getApiBaseURL } from '../api/axiosClient';
+import { getAuthToken, getCsrfToken } from '../api/axiosClient';
 
 export interface DatasetInfo {
   total_samples: number;
@@ -13,6 +13,7 @@ export interface DatasetInfo {
   languages: string[];
   dialects: Record<string, string[]>;
   class_distribution: Record<string, number>;
+  samples_by_dialect?: Record<string, number>;
   split_info?: { train: number; val: number; test: number };
   // Optional mapping from class uid/slug -> human label
   label_map?: Record<string, string>;
@@ -93,8 +94,25 @@ export interface PromoteResponse {
 }
 
 // Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
-// When using axiosClient, we just need the path prefix since baseURL is already set
-const API_PREFIX = `/api/v1/training`;
+const API_URL = '/api/v1/training';
+
+// Training endpoints require authentication. These calls use raw fetch (not the
+// axios client), so they must attach BOTH the legacy Bearer token (if any) and,
+// for cookie-authenticated sessions, the CSRF double-submit token — otherwise
+// state-changing requests (start/cancel/promote/delete) are rejected 403 by the
+// CSRF middleware once an access cookie is present.
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const csrf = getCsrfToken();
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  return headers;
+}
+
+// Raw fetch defaults to credentials:'same-origin'. Be explicit so the auth +
+// CSRF cookies are always sent, including if the API base URL ever differs.
+const FETCH_OPTS: RequestInit = { credentials: 'include' };
 
 export function useTrainingAPI() {
   const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null);
@@ -110,8 +128,23 @@ export function useTrainingAPI() {
       if (dialect) params.append('dialect', dialect);
       if (language) params.append('language', language);
 
-      const response = await axiosClient.get(`${API_PREFIX}/dataset-info`, { params });
-      const data = response.data;
+      const response = await fetch(`${API_URL}/dataset-info?${params}`, {
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to load dataset info: ${response.statusText}`);
+      }
+
+      // Ensure we received JSON; sometimes proxy/back-end misconfiguration returns HTML (index.html)
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from training dataset endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      const data = await response.json();
       // Try to enrich dataset info with class labels (if available)
       try {
         const classesRes = await getClassesList();
@@ -144,8 +177,33 @@ export function useTrainingAPI() {
     setLoading(true);
     setError(null);
     try {
-      const response = await axiosClient.post(`${API_PREFIX}/start`, config);
-      return response.data;
+      const response = await fetch(`${API_URL}/start`, {
+        ...FETCH_OPTS,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        // Surface the backend's detail (e.g. the "phương ngữ không đủ dữ liệu"
+        // guidance, or a CSRF/auth message) instead of a bare status text.
+        let detail = response.statusText;
+        try {
+          const body = await response.json();
+          if (body?.detail) detail = body.detail;
+        } catch { /* non-JSON error body */ }
+        throw new Error(`Failed to start training: ${detail}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from training start endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return null;
@@ -157,8 +215,20 @@ export function useTrainingAPI() {
   // Lấy job status
   const getJobStatus = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
-      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}`);
-      return response.data;
+      const response = await fetch(`${API_URL}/jobs/${jobId}`, { ...FETCH_OPTS, headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch job status: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from job status endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return null;
@@ -168,8 +238,20 @@ export function useTrainingAPI() {
   // Lấy metrics
   const getJobMetrics = useCallback(async (jobId: string): Promise<TrainingMetrics[]> => {
     try {
-      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/metrics`);
-      return response.data;
+      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`, { ...FETCH_OPTS, headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch metrics: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(
+          `Unexpected non-JSON response from job metrics endpoint. Response begins with: ${text.slice(0, 200)}`
+        );
+      }
+
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return [];
@@ -179,8 +261,11 @@ export function useTrainingAPI() {
   // Lịch sử jobs (mới nhất trước), kèm username người chạy
   const listJobs = useCallback(async (limit = 100): Promise<TrainingJobListItem[]> => {
     try {
-      const response = await axiosClient.get(`${API_PREFIX}/jobs`, { params: { limit } });
-      return response.data;
+      const response = await fetch(`${API_URL}/jobs?limit=${limit}`, { ...FETCH_OPTS, headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to list jobs: ${response.statusText}`);
+      }
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return [];
@@ -190,8 +275,15 @@ export function useTrainingAPI() {
   // Hủy training job đang chạy/đang chờ
   const cancelTraining = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
-      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/cancel`);
-      return response.data;
+      const response = await fetch(`${API_URL}/jobs/${jobId}/cancel`, {
+        ...FETCH_OPTS,
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to cancel job: ${response.statusText}`);
+      }
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return null;
@@ -201,8 +293,15 @@ export function useTrainingAPI() {
   // Promote model của job lên realtime (admin only)
   const promoteJob = useCallback(async (jobId: string): Promise<PromoteResponse | null> => {
     try {
-      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/promote`);
-      return response.data;
+      const response = await fetch(`${API_URL}/jobs/${jobId}/promote`, {
+        ...FETCH_OPTS,
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to promote job: ${response.statusText}`);
+      }
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return null;
@@ -212,8 +311,11 @@ export function useTrainingAPI() {
   // Per-class breakdown + confusion matrix trên test set (Step 7)
   const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
     try {
-      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/evaluation`);
-      return response.data;
+      const response = await fetch(`${API_URL}/jobs/${jobId}/evaluation`, { ...FETCH_OPTS, headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch evaluation: ${response.statusText}`);
+      }
+      return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       return null;
@@ -223,7 +325,18 @@ export function useTrainingAPI() {
   // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc: completed/failed/cancelled)
   const deleteJob = useCallback(async (jobId: string): Promise<boolean> => {
     try {
-      await axiosClient.delete(`${API_PREFIX}/jobs/${jobId}`);
+      const response = await fetch(`${API_URL}/jobs/${jobId}`, {
+        ...FETCH_OPTS,
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        const detail = contentType.includes('application/json')
+          ? (await response.json())?.detail
+          : undefined;
+        throw new Error(detail || `Failed to delete job: ${response.statusText}`);
+      }
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -260,43 +373,21 @@ export function useWebSocketProgress(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Keep the latest callbacks in a ref. Callers usually pass inline arrow
-  // functions (new identity every render); if the socket effect depended on
-  // them it would tear down + reopen the WebSocket on EVERY render, so the
-  // connection never stayed up long enough to receive data (UI stuck at 0/0,
-  // server logging a flood of "1005 no status received").
-  const callbacksRef = useRef({ onMetric, onStatus, onError });
-  useEffect(() => {
-    callbacksRef.current = { onMetric, onStatus, onError };
-  }, [onMetric, onStatus, onError]);
-
   useEffect(() => {
     if (!jobId) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const token = getAuthToken();
-    
-    let wsUrl = '';
-    const apiBase = getApiBaseURL();
-    if (apiBase && (apiBase.startsWith('http://') || apiBase.startsWith('https://'))) {
-      const wsProtocol = apiBase.startsWith('https') ? 'wss:' : 'ws:';
-      const hostPath = apiBase.replace(/^https?:\/\//, '');
-      wsUrl = `${wsProtocol}//${hostPath}/api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const pathPrefix = apiBase ? apiBase.replace(/^\//, '') + '/' : '';
-      wsUrl = `${protocol}//${host}/${pathPrefix}api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
-    }
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    wsRef.current = new WebSocket(wsUrl);
 
-    ws.onmessage = (event) => {
+    wsRef.current.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'metric') {
-          callbacksRef.current.onMetric(message.data);
+          onMetric(message.data);
         } else if (message.type === 'status') {
-          callbacksRef.current.onStatus(message.data);
+          onStatus(message.data);
         }
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -304,17 +395,16 @@ export function useWebSocketProgress(
       }
     };
 
-    ws.onerror = () => {
-      const { onError: cb } = callbacksRef.current;
-      if (cb) cb('WebSocket connection error');
+    wsRef.current.onerror = () => {
+      if (onError) onError('WebSocket connection error');
       else console.error('WebSocket connection error');
     };
 
     return () => {
-      ws.close();
+      if (wsRef.current) wsRef.current.close();
     };
-    // Only reconnect when the job actually changes — callbacks are read via ref.
-  }, [jobId]);
+    // Intentionally include callbacks as dependencies
+  }, [jobId, onMetric, onStatus, onError]);
 
   return wsRef.current;
 }

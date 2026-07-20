@@ -5,15 +5,18 @@
 
 import React, { useMemo, useState } from 'react';
 import type { DatasetInfo } from '../../../hooks/useTrainingAPI';
+import DIALECT_LABELS from '../../../config/dialectLabels';
 import { CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
 
 interface Props {
   datasetInfo: DatasetInfo | null;
+  // Phương ngữ đã chọn ở bước trước — split chỉ áp dụng cho các phương ngữ này.
+  selectedDialects?: string[];
 }
 
 const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 
-const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
+const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects = [] }) => {
   if (!datasetInfo) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -22,7 +25,13 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
     );
   }
 
-  const total = datasetInfo.total_samples;
+  // Số mẫu để chia: nếu đã chọn phương ngữ, chỉ tính các phương ngữ đó
+  // (khớp đúng dữ liệu sẽ được huấn luyện); nếu chưa chọn, dùng toàn dataset.
+  const byDialect = datasetInfo.samples_by_dialect || {};
+  const total =
+    selectedDialects.length > 0
+      ? selectedDialects.reduce((sum, d) => sum + (byDialect[d] || 0), 0)
+      : datasetInfo.total_samples;
   const [trainPct, setTrainPct] = useState<number>(70);
   const [valPct, setValPct] = useState<number>(15);
 
@@ -33,6 +42,16 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
 
   return (
     <div className="space-y-6">
+      {/* Ngữ cảnh: split áp dụng cho các phương ngữ đã chọn ở bước trước */}
+      {selectedDialects.length > 0 && (
+        <div className="rounded-lg bg-ctu-blue/5 border border-ctu-blue/20 px-4 py-3 text-sm">
+          <span className="text-slate-600">Chia tập cho phương ngữ đã chọn: </span>
+          <span className="font-semibold text-ctu-blue">
+            {selectedDialects.map((d) => DIALECT_LABELS[d] ?? d).join(', ')}
+          </span>
+        </div>
+      )}
+
       {/* Controls */}
       <div className="rounded-xl border border-slate-200 bg-white p-6">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-6">

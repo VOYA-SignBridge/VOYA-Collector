@@ -576,6 +576,22 @@ export default function FullscreenCaptureModal({
     return quality;
   }, []);
 
+  const deriveHandsUsed = useCallback((capturedFrames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>) => {
+    const counts = new Set<number>();
+
+    for (const frame of capturedFrames) {
+      const handCount = (frame.left_hand?.length ? 1 : 0) + (frame.right_hand?.length ? 1 : 0);
+      if (handCount > 0) counts.add(handCount);
+    }
+
+    if (counts.size === 1) {
+      const [singleCount] = Array.from(counts);
+      return singleCount === 1 || singleCount === 2 ? singleCount : null;
+    }
+
+    return null;
+  }, []);
+
   // -------------------------------------------------------------------------
   // Canvas / render helpers
   // -------------------------------------------------------------------------
@@ -871,15 +887,11 @@ export default function FullscreenCaptureModal({
   const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0;
   const currentCatalogLabelCount = selectedDialectRows.length;
 
-  // Nhãn đã có hands_required trên class (đã chuẩn hoá thành 1|2|null ở
-  // getClassesList) → khoá selector theo giá trị của class.
-  const lockedHands = typeof matchingCatalogRow?.hands_required === "number"
+  // `hands_required` chỉ là gợi ý từ catalog, không được khóa cứng vì cùng
+  // một nhãn có thể xuất hiện 1 tay ở đầu và 2 tay ở đoạn sau.
+  const suggestedHands = typeof matchingCatalogRow?.hands_required === "number"
     ? matchingCatalogRow.hands_required
     : null;
-
-  useEffect(() => {
-    if (lockedHands !== null) handleSetExpectedHands(lockedHands);
-  }, [lockedHands, handleSetExpectedHands]);
 
   // In-modal QC toast: auto-dismiss sau 5s, re-trigger theo notice.key
   const [visibleNotice, setVisibleNotice] = useState<typeof qualityNotice>(null);
@@ -897,6 +909,8 @@ export default function FullscreenCaptureModal({
     if (!labelRef.current || !userRef.current || connectionIssueRef.current) return;
     setFrames([]); framesRef.current = [];
     expectedHandsRef.current = expectedHandsOptionRef.current;
+    // If user explicitly selected 1/2 hands, skip warmup and accept frames immediately
+    if (expectedHandsOptionRef.current != null) initializationCompleteRef.current = true;
     setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
     lastFrameTimeRef.current = 0; setCountdown(3); setMode("COUNTDOWN");
     setTimeout(() => {
@@ -1137,8 +1151,10 @@ export default function FullscreenCaptureModal({
       const userChoice = expectedHandsOptionRef.current;
 
       // =====================================================================
-      // PHASE 1A: TEMPORAL STABILIZATION
-      // Majority voting (init) + grace period + recovery with no auto-switching
+      // PHASE 1A: Unified stabilization
+      // Handles: manual selection (userChoice), explicit expectation (expectedHandsRef),
+      // and auto-inference warmup. Grace + recovery logic is shared so manual
+      // 2-hand mode will pause then resume correctly when hands reappear.
       // =====================================================================
       const INIT_WINDOW = 5;
       const INIT_MAJORITY_THRESHOLD = 0.60;
@@ -1147,15 +1163,13 @@ export default function FullscreenCaptureModal({
       const RECOVERY_CONFIRM = 3;
       const HISTORY_SIZE = 7;
 
+      // Effective expected hand count: manual override (userChoice) else the inferred/locked expectation
+      const effectiveExpected = (userChoice != null) ? userChoice : expectedHandsRef.current;
+
+      // If no hands at all, skip
       if (detectedHandsCountRaw === 0) {
-        // No hands detected at all
         accept = false;
-      } else if (userChoice != null) {
-        // Manual mode: user selected 1 or 2 hands explicitly
-        if (userChoice === 2) accept = presentLeftRaw && presentRightRaw;
-        else if (userChoice === 1) accept = presentLeftRaw !== presentRightRaw;
-        else accept = true;
-      } else if (expectedHandsRef.current == null) {
+      } else if (effectiveExpected == null) {
         // AUTO MODE: INITIALIZATION PHASE (warmup-only, no append to dataset)
         initFrameCountRef.current++;
 
@@ -1187,54 +1201,44 @@ export default function FullscreenCaptureModal({
             recentCounts,
           });
         }
-      } else if (initializationCompleteRef.current && expectedHandsRef.current !== null) {
-        // AUTO MODE: TRACKING / GRACE / RECOVERY PHASES
+      } else {
+        // TRACKING / GRACE / RECOVERY for a known expectation (manual or inferred)
+        // Ensure expectedHandsRef reflects manual override so telemetry/debug use a single source
+        if (userChoice != null && expectedHandsRef.current !== userChoice) expectedHandsRef.current = userChoice;
 
         // Update history ring buffer (for debug/telemetry only)
         detectionHistoryRef.current[historyIndexRef.current] = detectedHandsCountRaw;
         historyIndexRef.current = (historyIndexRef.current + 1) % HISTORY_SIZE;
 
         const currentHandCount = detectedHandsCountRaw;
-        const isMatching = currentHandCount === expectedHandsRef.current;
+        const isMatching = currentHandCount === effectiveExpected;
 
         if (isMatching) {
           // TRACKING: Hand count matches expectation
-          // Reset all grace/recovery counters
           graceCounterRef.current = 0;
           isRecoveringRef.current = false;
           recoveryTimeoutRef.current = 0;
           recoveryConfirmRef.current = 0;
           accept = true;
         } else if (!isRecoveringRef.current) {
-          // GRACE PERIOD: Mismatch & not in recovery yet
+          // GRACE PERIOD: give user a short window before pausing
           graceCounterRef.current++;
-
           if (graceCounterRef.current <= GRACE_FRAMES) {
-            // Still in grace period: don't accept, but don't pause
             accept = false;
             if (DEBUG_HANDS) console.debug("Grace period", graceCounterRef.current, "/", GRACE_FRAMES);
           } else {
-            // Grace period exceeded: enter recovery state, pause capture
             isRecoveringRef.current = true;
             recoveryTimeoutRef.current = 0;
             recoveryConfirmRef.current = 0;
             accept = false;
             if (DEBUG_HANDS) console.warn("Grace period exceeded, entering recovery");
           }
-        } else if (isRecoveringRef.current) {
-          // RECOVERY: Wait for hands to return
-          // Track two separate counts:
-          // - recoveryTimeoutRef: total frames in recovery (for timeout detection)
-          // - recoveryConfirmRef: CONSECUTIVE matching frames (for resume confirmation)
-
+        } else {
+          // RECOVERY: wait for RECOVERY_CONFIRM consecutive matching frames
           recoveryTimeoutRef.current++;
-
-          if (currentHandCount === expectedHandsRef.current) {
-            // Hands match this frame!
+          if (currentHandCount === effectiveExpected) {
             recoveryConfirmRef.current++;
-
             if (recoveryConfirmRef.current >= RECOVERY_CONFIRM) {
-              // Confirmed! Resume capture (3 consecutive matching frames)
               isRecoveringRef.current = false;
               graceCounterRef.current = 0;
               recoveryTimeoutRef.current = 0;
@@ -1242,29 +1246,19 @@ export default function FullscreenCaptureModal({
               accept = true;
               if (DEBUG_HANDS) console.log("Recovery successful, resuming capture");
             } else {
-              // Still building up consecutive matches
               accept = false;
               if (DEBUG_HANDS) console.debug("Recovery progress", recoveryConfirmRef.current, "/", RECOVERY_CONFIRM);
             }
           } else {
-            // Hands DON'T match this frame
-            recoveryConfirmRef.current = 0; // RESET consecutive match counter on mismatch
-
+            recoveryConfirmRef.current = 0;
             if (recoveryTimeoutRef.current >= RECOVERY_TIMEOUT) {
-              // Recovery timeout exceeded (hands missing for 3+ frames)
-              // DO NOT auto-switch expectations (prevents mode drift from temporary occlusion)
-              // Remain in recovery state, pause capture
               accept = false;
               if (DEBUG_HANDS) console.warn("Recovery timeout exceeded, waiting for hands to reappear");
             } else {
-              // Still within recovery window, waiting for hands
               accept = false;
             }
           }
         }
-      } else {
-        // Fallback (should not reach here in normal operation)
-        accept = false;
       }
 
       // Auto mode should not stall on transient hand-count drops.
@@ -1315,7 +1309,7 @@ export default function FullscreenCaptureModal({
           quality_info: quality,
           dialect: dialectRef.current,
           language: languageRef.current,
-          hands_used: expectedHandsOptionRef.current ?? expectedHandsRef.current,
+          hands_used: deriveHandsUsed(capturedFrames),
         });
 
         completedCapturesRef.current = newCompleted;
@@ -1338,6 +1332,7 @@ export default function FullscreenCaptureModal({
           setTimeout(() => {
             setCountdown(3); setMode("COUNTDOWN");
             setTimeout(() => {
+              if (expectedHandsOptionRef.current != null) initializationCompleteRef.current = true;
               setRecording(true); recordingRef.current = true;
               setMode("RECORD"); lastFrameTimeRef.current = Date.now();
             }, 3000);
@@ -1411,7 +1406,7 @@ export default function FullscreenCaptureModal({
     // FIX: `expectedHandsOption` removed — would restart MediaPipe on every
     //       hands-mode toggle.  Use `expectedHandsOptionRef` inside callback.
     // FIX: `filterLandmarks` removed — it is not used inside this effect.
-  }, [isOpen, renderLandmarks, computeQuality, getRenderLandmarks, mirrorLandmarkX, stopCameraResources]);
+  }, [isOpen, renderLandmarks, computeQuality, deriveHandsUsed, getRenderLandmarks, mirrorLandmarkX, stopCameraResources]);
 
   // -------------------------------------------------------------------------
   // Countdown effect
@@ -1478,7 +1473,10 @@ export default function FullscreenCaptureModal({
           expectedHandsRef.current = expectedHandsOptionRef.current;
           setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
           setCountdown(3); setMode("COUNTDOWN");
-          setTimeout(() => { setRecording(true); recordingRef.current = true; setMode("RECORD"); }, 3000);
+          setTimeout(() => {
+            if (expectedHandsOptionRef.current != null) initializationCompleteRef.current = true;
+            setRecording(true); recordingRef.current = true; setMode("RECORD");
+          }, 3000);
         } else if (recordingRef.current) {
           const collected = framesRef.current.length || 0;
           const required = targetFramesRef.current || 0;
@@ -1488,7 +1486,11 @@ export default function FullscreenCaptureModal({
             setRecording(false); recordingRef.current = false;
             if (framesRef.current.length > 0) {
               const quality = computeQuality(framesRef.current);
-              onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
+              onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, {
+                quality_info: quality,
+                dialect: dialectRef.current,
+                hands_used: deriveHandsUsed(framesRef.current),
+              });
               setFrames([]); framesRef.current = [];
               expectedHandsRef.current = expectedHandsOptionRef.current;
             }
@@ -1514,7 +1516,7 @@ export default function FullscreenCaptureModal({
     };
     document.addEventListener("keydown", handleKeyPress);
     return () => document.removeEventListener("keydown", handleKeyPress);
-  }, [isOpen, computeQuality, handlePause, handleResume]);
+  }, [isOpen, computeQuality, deriveHandsUsed, handlePause, handleResume]);
 
   useEffect(() => {
     // Chặn cuộn trên body
@@ -1599,16 +1601,16 @@ export default function FullscreenCaptureModal({
                   <button
                     key={String(v)}
                     onClick={() => handleSetExpectedHands(v)}
-                    disabled={recording || lockedHands !== null}
-                    className={`px-3 py-1 text-sm ${expectedHandsOption === v ? "bg-gray-700 text-white" : "text-gray-300 hover:bg-gray-700"} ${lockedHands !== null ? "opacity-60 cursor-not-allowed" : ""}`}
+                    disabled={recording}
+                    className={`px-3 py-1 text-sm ${expectedHandsOption === v ? "bg-gray-700 text-white" : "text-gray-300 hover:bg-gray-700"}`}
                   >
                     {v === null ? "Auto" : v}
                   </button>
                 ))}
               </div>
-              {lockedHands !== null && (
-                <span className="text-xs text-ctu-yellow" title="Nhãn này đã được ghi nhận cần số tay cố định — không thể thay đổi khi thu.">
-                  🔒 Cố định theo nhãn ({lockedHands} tay)
+              {suggestedHands !== null && (
+                <span className="text-xs text-ctu-yellow" title="Nhãn này có số tay gợi ý từ catalog, nhưng vẫn cho phép thu linh hoạt 1 hoặc 2 tay.">
+                  Gợi ý catalog: {suggestedHands} tay
                 </span>
               )}
             </div>

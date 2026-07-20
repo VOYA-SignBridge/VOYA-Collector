@@ -20,8 +20,8 @@ DATA_ROOT = get_data_root() if get_data_root else ROOT
 if get_samples_csv:
     SAMPLES_CSV = get_samples_csv(DATA_ROOT)
 else:
-    # Backward-compat: older layout used <data_root>/samples.csv
-    # Current app layout uses <data_root>/samples/samples.csv
+    # Canonical layout: <repo>/dataset/samples.csv (the interim
+    # dataset/samples/samples.csv path was retired 2026-07-20)
     cand = DATA_ROOT / 'samples.csv'
     SAMPLES_CSV = cand if cand.exists() else (DATA_ROOT / 'dataset' / 'samples.csv')
 OUT_DIR = get_splits_dir() if get_splits_dir else ROOT / 'processed' / 'splits'
