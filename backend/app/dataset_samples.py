@@ -276,6 +276,13 @@ def save_sequence_npz(
     # Preprocess contract v2: raw + masks alongside the legacy 'sequence' key.
     raw_available = raw_sequence is not None
     metadata.setdefault("raw_landmarks_available", bool(raw_available))
+    # Stamped by the WRITER (not the caller) so it always describes what was
+    # actually put in the archive. scripts/validate_pilot_samples.py gates new
+    # campaigns on this; the checkpoint contract records the same token.
+    metadata.setdefault(
+        "storage_contract_version",
+        "npz_v2" if raw_available else "npz_v1_legacy",
+    )
     npz_arrays: Dict[str, Any] = {
         "sequence": sequence.astype("float32"),          # legacy key (loaders)
         "landmarks_normalized": sequence.astype("float32"),

@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import os
+import platform
 import random
 import re
 import shutil
@@ -166,7 +167,22 @@ def _read_split_manifest_checksum(train_csv: Path) -> str:
     return ""
 
 
-def set_seed(seed: int) -> None:
+CUBLAS_DETERMINISTIC_CONFIG = ":4096:8"
+
+
+def set_seed(seed: int, *, strict: bool = False) -> dict:
+    """Seed every RNG and request deterministic kernels.
+
+    Returns a report describing what was actually achieved, so callers (and the
+    checkpoint) can record whether the run was genuinely deterministic instead
+    of assuming it. With strict=True a failure to enable deterministic
+    algorithms raises instead of degrading silently.
+
+    NOTE: on CUDA, torch requires CUBLAS_WORKSPACE_CONFIG to be set BEFORE the
+    CUDA context is created. Setting it here is already too late if a tensor
+    has been allocated; scripts/verify_determinism.py sets it in the child
+    environment before launching.
+    """
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
     random.seed(seed)
     np.random.seed(seed)
@@ -174,10 +190,41 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+    cublas_cfg = os.environ.get("CUBLAS_WORKSPACE_CONFIG", "")
+    using_cuda = torch.cuda.is_available()
+    report = {
+        "seed": int(seed),
+        "cudnn_deterministic": True,
+        "cublas_workspace_config": cublas_cfg,
+        "deterministic_algorithms": False,
+        "warnings": [],
+    }
+
+    if using_cuda and cublas_cfg not in (":4096:8", ":16:8"):
+        msg = (
+            "CUDA is available but CUBLAS_WORKSPACE_CONFIG is not set to "
+            f"'{CUBLAS_DETERMINISTIC_CONFIG}' (got {cublas_cfg!r}); cuBLAS matmuls "
+            "may be non-deterministic across runs."
+        )
+        if strict:
+            raise RuntimeError(msg)
+        report["warnings"].append(msg)
+        print(f"[DETERMINISM][WARN] {msg}")
+
     try:
         torch.use_deterministic_algorithms(True)
-    except Exception:
-        pass
+        report["deterministic_algorithms"] = True
+    except Exception as exc:
+        msg = f"torch.use_deterministic_algorithms(True) failed: {exc}"
+        if strict:
+            raise RuntimeError(msg) from exc
+        report["warnings"].append(msg)
+        # Loud, not silent: a swallowed failure here silently invalidates any
+        # reproducibility claim made about the run.
+        print(f"[DETERMINISM][WARN] {msg}")
+
+    return report
 
 
 def _seed_worker(worker_id: int) -> None:
@@ -934,7 +981,7 @@ def main() -> None:
         out_dir=args.out_dir,
     )
 
-    set_seed(cfg.seed)
+    determinism_report = set_seed(cfg.seed)
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
     dialects = _parse_multi_values(args.dialect)
@@ -1480,6 +1527,16 @@ def main() -> None:
         "common_labels": common_labels,
         "profile_specific_labels": profile_specific_labels,
         "seed": int(cfg.seed),
+        "determinism": determinism_report,
+        "runtime_env": {
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "pytorch_version": torch.__version__,
+            "numpy_version": np.__version__,
+            "cuda_version": torch.version.cuda or "none",
+            "cudnn_version": (torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None),
+            "device": cfg.device,
+            "platform": platform.platform(),
+        },
         "git_commit": _git_commit_hash(),
         "training_config": {**cfg_json_for_ckpt, "model_type": args.model_type,
                             "augmentation": augmentation_config},

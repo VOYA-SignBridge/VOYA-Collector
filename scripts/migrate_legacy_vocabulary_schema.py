@@ -303,7 +303,7 @@ def main() -> int:
                     default=[REPO_ROOT / "processed" / "splits" / "train.csv",
                              REPO_ROOT / "processed" / "splits" / "val.csv",
                              REPO_ROOT / "processed" / "splits" / "test.csv",
-                             REPO_ROOT / "dataset" / "samples" / "samples.csv"])
+                             REPO_ROOT / "dataset" / "samples.csv"])
     ap.add_argument("--backup-dir", type=Path, default=REPO_ROOT / "dataset" / "backups")
     ap.add_argument("--report-out", type=Path, default=None,
                     help="Write the JSON report here (default: alongside labels.csv; skipped in dry-run)")

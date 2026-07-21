@@ -210,7 +210,7 @@ def main() -> int:
                     default=[REPO_ROOT / "processed" / "splits" / "train.csv",
                              REPO_ROOT / "processed" / "splits" / "val.csv",
                              REPO_ROOT / "processed" / "splits" / "test.csv",
-                             REPO_ROOT / "dataset" / "samples" / "samples.csv"],
+                             REPO_ROOT / "dataset" / "samples.csv"],
                     help="Frozen CSVs recording sample_id->user_id for pre-sidecar samples")
     ap.add_argument("--out-dir", type=Path, default=REPO_ROOT / "dataset" / "manifests")
     ap.add_argument("--force", action="store_true", help="Overwrite an existing version (breaks immutability — avoid)")

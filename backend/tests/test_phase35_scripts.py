@@ -17,6 +17,8 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 PASSED: list = []
 FAILED: list = []
@@ -75,17 +77,33 @@ def test_pilot_validation(ws: Path):
     print("[C2 pilot validation]")
     feats = ws / "features" / "vn" / "hoa-de" / "class_ok_u1"
     feats.mkdir(parents=True)
-    seq = np.random.rand(60, 126).astype(np.float32)
+    # Build a CONSISTENT raw -> normalized pair: the pilot gate re-derives the
+    # normalized frames from landmarks_raw via the shared normalization module,
+    # so the fixture must be a real product of that module (a pair of unrelated
+    # random arrays would, correctly, be rejected).
+    from processed.shared.normalization import normalize_hands_vector_126
+
+    raw = np.random.rand(45, 126).astype(np.float32)
+    raw[:, 63:] = 0.0  # right-hand slot absent -> exercises the per-hand masks
+    seq = np.zeros((60, 126), dtype=np.float32)
+    for t in range(raw.shape[0]):
+        seq[t] = normalize_hands_vector_126(raw[t])
     fm = np.any(seq != 0.0, axis=1)
     good = feats / "sample_good.npz"
     np.savez_compressed(good, sequence=seq, landmarks_normalized=seq,
-                        landmarks_raw=np.random.rand(45, 126).astype(np.float32),
+                        landmarks_raw=raw,
                         frame_valid_mask=fm,
-                        left_hand_valid_mask=np.ones(60, bool),
-                        right_hand_valid_mask=np.zeros(60, bool))
+                        left_hand_valid_mask=np.any(seq[:, :63] != 0.0, axis=1),
+                        right_hand_valid_mask=np.any(seq[:, 63:] != 0.0, axis=1))
+    # Mirrors exactly what the camera path writes: routers/upload.py builds the
+    # QC + provenance meta and dataset_samples.save_sequence_npz stamps
+    # storage_contract_version.
     good.with_suffix(".json").write_text(json.dumps({
-        "signer_id": "S001", "collection_campaign": "pilot_t",
-        "normalization_version": "hands126_v1", "preprocess_contract_version": "v2"}),
+        "signer_id": "S001", "session_id": "sess-1", "collection_campaign": "pilot_t",
+        "normalization_version": "hands126_v1", "preprocess_contract_version": "v2",
+        "storage_contract_version": "npz_v2", "quality_status": "ok",
+        "completeness": 0.95, "jitter": 0.011,
+        "left_hand_ratio": 1.0, "right_hand_ratio": 0.0}),
         encoding="utf-8")
     bad = feats / "sample_bad.npz"
     np.savez_compressed(bad, sequence=seq)  # legacy shape: no raw/masks/sidecar

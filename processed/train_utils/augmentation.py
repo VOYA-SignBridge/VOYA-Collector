@@ -9,6 +9,14 @@ import numpy as np
 SEQ_LEN = 60
 FEATURE_DIM = 126
 
+# Bumped whenever the SEMANTICS of a transform change (not its parameters).
+#   v1_image_space_mirror  -- mirror was x -> 1-x (wrong for wrist-centered
+#                             storage; inflated hand span ~3.1x). Never stamped
+#                             into checkpoints; inferred by absence.
+#   v2_wrist_centered_mirror -- mirror is x -> -x about the wrist origin, and
+#                             temporal masking is disabled by default.
+AUGMENTATION_CONTRACT_VERSION = "v2_wrist_centered_mirror"
+
 NUM_HANDS = 2
 NUM_POINTS = 21
 POINT_DIM = 3
@@ -173,19 +181,27 @@ class SignAugment:
         """
         Mirror augmentation for handedness diversity.
 
-        IMPORTANT:
-        This project uses swapped handedness semantics:
-            MediaPipe right -> left slot
-            MediaPipe left -> right slot
+        Operates on WRIST-CENTERED coordinates (the on-disk storage contract:
+        shared/normalization.normalize_single_hand puts each hand's wrist at
+        x=y=0 and divides by hand span). The correct reflection in that space
+        is x -> -x about the wrist origin.
 
-        Therefore:
-        - we mirror X coordinates
-        - AND swap hand slots
+        DO NOT use the image-space form (x -> 1-x). That is only valid for raw
+        MediaPipe coordinates in [0,1]; applied to wrist-centered data it
+        translates the hand by +1.0 and — because the wrist sits at exactly
+        x=0 — a `!= 0` guard would skip the wrist itself, tearing the hand
+        apart (measured: hand x-span inflated 3.1x, coordinates moved to a
+        region never produced at inference). See tests/test_augmentation_geometry.py.
 
-        This augmentation helps reduce:
-        - dominant-hand bias
-        - left/right orientation overfitting
-        - realtime handedness instability
+        Guarantees:
+        - wrist stays at the origin (reflection fixes x=0);
+        - all pairwise landmark distances and hand span are preserved exactly;
+        - absent hand slots (all-zero 63-dim blocks) stay all-zero;
+        - fully padded frames stay all-zero;
+        - applying the mirror twice is the identity.
+
+        This project uses swapped handedness semantics (MediaPipe right -> left
+        slot), so the two anatomical slots are swapped after reflection.
         """
 
         if random.random() > self.mirror_prob:
@@ -194,24 +210,28 @@ class SignAugment:
         arr = self._reshape(x).copy()
 
         # -----------------------------------------
-        # Mirror X coordinate
+        # Reflect X about the wrist origin, per present hand only.
+        # A hand slot is "absent" iff its whole 63-dim block is zero; leaving
+        # it untouched keeps the missing-hand encoding unambiguous.
         # -----------------------------------------
 
-        x_coords = arr[..., 0]
+        present = np.any(arr != 0.0, axis=(2, 3))  # (T, NUM_HANDS)
 
-        mask = (x_coords != 0)
-
-        x_coords[mask] = (
-            1.0 - x_coords[mask]
+        arr[..., 0] = np.where(
+            present[..., None],
+            -arr[..., 0],
+            arr[..., 0],
         )
 
-        arr[..., 0] = x_coords
+        # Collapse any -0.0 produced by negating an exact zero (e.g. the wrist)
+        # back to +0.0 so zero-tests stay byte-stable.
+        arr[..., 0] = arr[..., 0] + 0.0
 
         # -----------------------------------------
-        # Swap hand slots
+        # Swap anatomical hand slots (fancy-index -> contiguous copy)
         # -----------------------------------------
 
-        arr[:, [0, 1]] = arr[:, [1, 0]]
+        arr = arr[:, [1, 0]]
 
         return self._flatten(arr)
 
@@ -283,16 +303,30 @@ class SignAugment:
 
 # Named augmentation profiles for ablation studies. "full" is the historical
 # default; "none" disables augmentation entirely (returns None).
+#
+# temporal_mask_prob is 0.0 in every shipped profile as of the 2026-07-21
+# stabilization patch. _temporal_mask zeroes an ENTIRE frame, which is
+# indistinguishable from "both hands absent" and from tail padding under the
+# current 126-dim storage contract — a masked frame silently becomes a
+# missing-hand frame. Re-enabling it needs an explicit frame-validity channel
+# (a model input-contract change, deliberately NOT part of this patch).
+# The transform is kept in the class so the decision stays reversible via
+# --aug_set temporal_mask_probability=... for a dedicated experiment.
+TEMPORAL_MASK_DISABLED_REASON = (
+    "temporal_mask zeroes whole frames, which is ambiguous with the "
+    "missing-hand / padding encoding in the 126-dim contract"
+)
+
 AUGMENTATION_PROFILES = {
     "full": dict(p=0.9, noise_std=0.008, scale_range=(0.97, 1.03), translation_std=0.01,
                  mirror_prob=0.5, dropout_prob=0.015,
-                 temporal_mask_prob=0.15, temporal_jitter_prob=0.25, max_temporal_shift=2),
+                 temporal_mask_prob=0.0, temporal_jitter_prob=0.25, max_temporal_shift=2),
     "spatial": dict(p=0.9, noise_std=0.008, scale_range=(0.97, 1.03), translation_std=0.01,
                     mirror_prob=0.5, dropout_prob=0.015,
                     temporal_mask_prob=0.0, temporal_jitter_prob=0.0, max_temporal_shift=0),
     "temporal": dict(p=0.9, noise_std=0.0, scale_range=(1.0, 1.0), translation_std=0.0,
                      mirror_prob=0.0, dropout_prob=0.0,
-                     temporal_mask_prob=0.15, temporal_jitter_prob=0.25, max_temporal_shift=2),
+                     temporal_mask_prob=0.0, temporal_jitter_prob=0.25, max_temporal_shift=2),
     "none": None,
 }
 
@@ -334,12 +368,27 @@ def build_train_augment(profile: str = "full", overrides: Optional[dict] = None)
 
 def augment_config_dict(profile: str, overrides: Optional[dict] = None) -> dict:
     """Serializable snapshot of the effective augmentation config (for the
-    checkpoint contract and result summaries)."""
+    checkpoint contract and result summaries).
+
+    Carries AUGMENTATION_CONTRACT_VERSION so a checkpoint records WHICH mirror
+    semantics produced it: runs stamped "v1_image_space_mirror" (or carrying no
+    version at all) were trained with the broken x -> 1-x mirror and are not
+    research-valid. See scripts/audit_checkpoint_validity.py.
+    """
     base = AUGMENTATION_PROFILES.get(profile)
     if base is None:
-        return {"profile": profile, "enabled": False}
+        return {
+            "profile": profile,
+            "enabled": False,
+            "augmentation_contract_version": AUGMENTATION_CONTRACT_VERSION,
+        }
     params = dict(base)
     for key, value in (overrides or {}).items():
         params[AUG_OVERRIDE_KEYS[key]] = value
     params["scale_range"] = list(params["scale_range"])
-    return {"profile": profile, "enabled": True, **params}
+    return {
+        "profile": profile,
+        "enabled": True,
+        "augmentation_contract_version": AUGMENTATION_CONTRACT_VERSION,
+        **params,
+    }
