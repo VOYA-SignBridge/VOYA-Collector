@@ -825,10 +825,11 @@ def list_deleted_samples() -> List[Dict[str, Any]]:
     return _fetch_all(
         """
         SELECT s.sample_uid, s.class_uid, s.slug, s.label_original, s.language,
-               s.dialect, s.source_type, s.user_id, s.username, s.file_path,
+               s.dialect, s.source_type, s.user_id, u.username, s.file_path,
                s.storage_url, s.seq_len, s.created_at, s.deleted_at
         FROM samples s
         JOIN classes c ON c.class_uid = s.class_uid
+        LEFT JOIN users u ON u.id = s.auth_user_id
         WHERE s.deleted_at IS NOT NULL AND c.deleted_at IS NULL
         ORDER BY s.deleted_at DESC
         """
