@@ -170,6 +170,108 @@ def _read_split_manifest_checksum(train_csv: Path) -> str:
 CUBLAS_DETERMINISTIC_CONFIG = ":4096:8"
 
 
+def _enforce_augmentation_contract(aug_cfg: dict, run_purpose: str) -> None:
+    """Refuse to train on an augmentation config that cannot be trusted.
+
+    Guards the three ways the augmentation contract can silently go wrong:
+      1. the config carries no contract version at all;
+      2. the mirror implementation drifts from the wrist-centered reflection
+         the contract promises;
+      3. temporal masking is switched back on while the model input has no
+         frame-validity channel to disambiguate a masked frame from a padded
+         one or from "both hands absent".
+    """
+    from processed.train_utils.augmentation import (
+        AUGMENTATION_CONTRACT_VERSION, SignAugment,
+    )
+
+    def _fail(msg: str) -> None:
+        if run_purpose == "research":
+            raise SystemExit(f"[AUGMENT][CONTRACT] {msg}")
+        print(f"[AUGMENT][CONTRACT][WARN] {msg}")
+
+    if not aug_cfg.get("enabled", False):
+        return
+
+    version = str(aug_cfg.get("augmentation_contract_version") or "")
+    if not version:
+        _fail("augmentation config carries no augmentation_contract_version; "
+              "the run would not be attributable to a mirror implementation.")
+    elif version != AUGMENTATION_CONTRACT_VERSION:
+        _fail(f"augmentation_contract_version '{version}' != code version "
+              f"'{AUGMENTATION_CONTRACT_VERSION}'.")
+
+    # Behavioural check: reflect a synthetic wrist-centered hand and verify the
+    # wrist stays at the origin and the span is preserved. Catches a mirror
+    # implementation that drifted back to the image-space form.
+    probe = np.zeros((60, 126), dtype=np.float32)
+    hand = np.linspace(0.05, 0.35, 21 * 3).astype(np.float32).reshape(21, 3)
+    hand[0, 0] = 0.0
+    hand[0, 1] = 0.0
+    probe[:, :63] = hand.reshape(-1)
+    mirrored = SignAugment(
+        p=1.0, noise_std=0.0, scale_range=(1.0, 1.0), translation_std=0.0,
+        dropout_prob=0.0, temporal_mask_prob=0.0, temporal_jitter_prob=0.0,
+        mirror_prob=1.0, max_temporal_shift=0,
+    )(probe).reshape(60, 2, 21, 3)
+    src_x = hand[:, 0]
+    dst_x = mirrored[0, 1, :, 0]  # slots are swapped by the mirror
+    if abs(float(dst_x[0])) > 1e-6:
+        _fail(f"mirror moved the wrist off the origin (x={float(dst_x[0]):.4f}); "
+              f"implementation does not match the wrist-centered contract.")
+    span_src = float(src_x.max() - src_x.min())
+    span_dst = float(dst_x.max() - dst_x.min())
+    if span_src > 1e-6 and abs(span_dst / span_src - 1.0) > 1e-3:
+        _fail(f"mirror changed hand span by {span_dst / span_src:.2f}x; "
+              f"expected an isometry.")
+
+    if float(aug_cfg.get("temporal_mask_prob", 0.0)) > 0.0:
+        _fail("temporal_mask_prob > 0 but the model input has no frame-validity "
+              "channel: a masked frame is indistinguishable from padding and "
+              "from a both-hands-absent frame.")
+
+
+def _enforce_research_preconditions(args, cfg, manifest_checksum: str) -> None:
+    """--run-purpose research: provenance and split validity must hold BEFORE
+    a long training run burns compute and produces an uncitable checkpoint."""
+    problems = []
+    if not str(args.dataset_version or "").strip():
+        problems.append("--dataset_version is empty")
+    if not str(args.split_version or "").strip():
+        problems.append("--split_version is empty")
+    if not manifest_checksum:
+        problems.append("no dataset_manifest_checksum found next to the split "
+                        "(generate splits with make_splits.py --dataset_manifest ...)")
+    if not _git_commit_hash():
+        problems.append("git commit hash unavailable; run provenance cannot be pinned")
+
+    meta_path = Path(cfg.train_csv).resolve().parent / "split_metadata.json"
+    if not meta_path.exists():
+        # cfg.train_csv may already point at the filtered copy in run_dir
+        meta_path = Path(args.train_csv).resolve().parent / "split_metadata.json"
+    if not meta_path.exists():
+        problems.append(f"split_metadata.json not found next to {args.train_csv}")
+    else:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            problems.append(f"split_metadata.json unreadable: {exc}")
+            meta = {}
+        if "valid_for_research" not in meta:
+            problems.append("split_metadata.json predates the validity gate "
+                            "(no valid_for_research field) — regenerate the split")
+        elif not meta.get("valid_for_research"):
+            reasons = "; ".join(meta.get("invalid_reasons") or ["unspecified"])
+            problems.append(f"split is not valid for research: {reasons}")
+
+    if problems:
+        detail = "\n  - ".join(problems)
+        raise SystemExit(
+            f"[RESEARCH] refusing to start a research run:\n  - {detail}\n"
+            f"Fix the above, or use --run-purpose smoke_test for an exploratory run.")
+    print("[RESEARCH] preconditions OK — provenance and split validity verified.")
+
+
 def set_seed(seed: int, *, strict: bool = False) -> dict:
     """Seed every RNG and request deterministic kernels.
 
@@ -939,6 +1041,15 @@ def main() -> None:
              "order-agnostic average (only for reproducing old runs).",
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--run-purpose", dest="run_purpose", type=str, default="smoke_test",
+        choices=["smoke_test", "research"],
+        help="Declare what this run is for. Defaults to smoke_test so an "
+             "exploratory run can NEVER drift into a paper table: "
+             "aggregate_experiment_results.py only reports run_purpose=research. "
+             "Pass --run-purpose research for an official experiment; it also "
+             "enforces provenance and split validity before training starts.",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
@@ -1302,6 +1413,10 @@ def main() -> None:
     augmentation_config = augment_config_dict(args.augmentation_profile, aug_overrides)
     print(f"[AUGMENT] profile={args.augmentation_profile} overrides={aug_overrides or '{}'}")
 
+    _enforce_augmentation_contract(augmentation_config, args.run_purpose)
+    if args.run_purpose == "research":
+        _enforce_research_preconditions(args, cfg, manifest_checksum)
+
     train_loader = build_loader(
         cfg.train_csv,
         cfg.batch_size,
@@ -1482,8 +1597,22 @@ def main() -> None:
             tracker.update_status(experiment_id, "failed")
         raise
 
-    if best_state is not None:
+    # C13: test metrics must come from the restored best-validation state, and
+    # the checkpoint must SAY so rather than leaving it to be assumed.
+    restored_best_state = best_state is not None
+    if restored_best_state:
         model.load_state_dict(best_state)  # type: ignore[arg-type]
+    else:
+        print("[WARN] no best-validation state was captured; test metrics come from "
+              "the final epoch. This run is NOT research-valid (C13).")
+    model_selection = {
+        "criterion": "val_macro_f1",
+        "restored_best_state": bool(restored_best_state),
+        "best_epoch": int(_best_epoch_track),
+        "best_val_f1": float(best_val_f1),
+        "best_val_acc": float(_best_val_acc_track),
+        "early_stopping_patience": int(patience),
+    }
 
     te_loss, te_acc, te_f1, te_hand_metrics = evaluate_with_handedness(model, test_loader, cfg.device, num_classes)
 
@@ -1527,6 +1656,9 @@ def main() -> None:
         "common_labels": common_labels,
         "profile_specific_labels": profile_specific_labels,
         "seed": int(cfg.seed),
+        "run_purpose": args.run_purpose,
+        "run_status": "completed",
+        "model_selection": model_selection,
         "determinism": determinism_report,
         "runtime_env": {
             "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",

@@ -40,10 +40,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in _sys.path:
     _sys.path.insert(0, str(REPO_ROOT))
 
-from audit_checkpoint_validity import _classify  # noqa: E402  (shared verdict logic)
+from research_validity import (  # noqa: E402  (THE shared verdict logic)
+    RUN_PURPOSE_RESEARCH,
+    evaluate_checkpoint,
+    load_split_metadata,
+    run_purpose_of,
+)
 
 COLUMNS = [
-    "run_id", "research_valid", "recognition_profile", "unified", "include_common",
+    "run_id", "research_valid", "invalid_reasons", "run_purpose",
+    "split_valid_for_research",
+    "recognition_profile", "unified", "include_common",
     "dataset_version", "split_version", "split_mode", "model_type", "seed",
     "num_classes", "n_train", "n_val", "n_test",
     "test_acc", "test_f1", "val_best_f1",
@@ -99,11 +106,14 @@ def collect(outputs_root: Path) -> list[dict]:
         smeta = _split_metadata(split_version)
         counts = smeta.get("counts") or {}
         signers = smeta.get("signers") or {}
-        valid, _reason = _classify(ckpt)
+        verdict = evaluate_checkpoint(ckpt, split_meta=smeta or None)
 
         rows.append({
             "run_id": ckpt_path.stem,
-            "research_valid": {True: "true", False: "false"}.get(valid, "unverifiable"),
+            "research_valid": verdict.label,
+            "invalid_reasons": "; ".join(verdict.reasons),
+            "run_purpose": run_purpose_of(ckpt) or "",
+            "split_valid_for_research": smeta.get("valid_for_research", ""),
             "recognition_profile": ckpt.get("recognition_profile") or "",
             "unified": ckpt.get("unified", ""),
             "include_common": ckpt.get("include_common", ""),
@@ -232,18 +242,31 @@ def main() -> int:
         w.writeheader()
         w.writerows(rows)
 
-    valid_rows = [r for r in rows if r["research_valid"] == "true"]
+    # Two independent gates, both on by default:
+    #   run_purpose == research   -> a smoke test can never drift into a table
+    #   research_valid == true    -> C1..C14 from research_validity.py
+    research_rows = [r for r in rows if r["run_purpose"] == RUN_PURPOSE_RESEARCH]
+    valid_rows = [r for r in research_rows if r["research_valid"] == "true"]
     table_rows = rows if args.include_invalid else valid_rows
     tex_path = args.out_dir / "experiment_results.tex"
     tex_path.write_text(render_latex(table_rows, args.group_by), encoding="utf-8")
 
-    print(f"runs aggregated : {len(rows)}  (research_valid={len(valid_rows)})")
-    print(f"csv             -> {csv_path}")
-    print(f"latex           -> {tex_path}")
+    dropped_split = [r for r in rows if r["split_valid_for_research"] is False]
+
+    print(f"runs found            : {len(rows)}")
+    print(f"  run_purpose=research: {len(research_rows)}")
+    print(f"  research_valid=true : {len(valid_rows)}")
+    if dropped_split:
+        print(f"  dropped, split invalid: {len(dropped_split)}")
+    print(f"csv                   -> {csv_path}")
+    print(f"latex                 -> {tex_path}")
     if not table_rows:
         print("\n[WARN] LaTeX table is EMPTY: no research-valid run exists yet.")
-        print("       Re-train after the 2026-07-21 augmentation fix, or pass")
-        print("       --include-invalid to inspect the broken runs.")
+        print("       Train with --run-purpose research after the 2026-07-21")
+        print("       augmentation fix, on a split whose metadata says")
+        print("       valid_for_research=true. Pass --include-invalid to inspect.")
+        for r in rows[:5]:
+            print(f"       - {r['run_id']}: {r['invalid_reasons'][:150]}")
     return 0
 
 

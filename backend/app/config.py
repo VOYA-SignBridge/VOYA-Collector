@@ -117,6 +117,12 @@ class Settings(BaseSettings):
     qc_warn_jitter: float = float(os.getenv("QC_WARN_JITTER", 0.12))
     qc_reject_jitter: float = float(os.getenv("QC_REJECT_JITTER", 0.35))
     qc_min_valid_ratio: float = float(os.getenv("QC_MIN_VALID_RATIO", 0.7))
+    # Identifies the threshold SET, not the code. Bump it whenever any qc_*
+    # value above changes, so samples collected under different thresholds stay
+    # distinguishable. The thresholds are ALSO snapshotted into every sample's
+    # metadata (see qc_threshold_snapshot) — a version string alone would let
+    # an env override change the meaning of already-collected data silently.
+    quality_config_version: str = os.getenv("QUALITY_CONFIG_VERSION", "qc_v1_heuristic_2026-07")
     # --- Vocabulary schema v2 ---
     # Allow-list of realtime recognition profiles (comma-separated env override).
     recognition_profiles_raw: str = os.getenv("RECOGNITION_PROFILES", "north,central,south,hoa_de")

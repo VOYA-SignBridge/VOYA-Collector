@@ -18,7 +18,12 @@ from app.dataset_manager import (
 )
 from app.processing.utils import normalize_hands_vector_126
 from app.processing.utils import normalize_sequence
-from app.processing.quality import compute_quality_metrics, evaluate_quality
+from app.processing.quality import (
+    compute_quality_metrics,
+    evaluate_quality,
+    qc_threshold_snapshot,
+    record_quality_attempt,
+)
 from app.dataset_samples import save_sequence_npz
 from app.raw_uploads import (
     append_raw_upload_row,
@@ -497,7 +502,34 @@ async def upload_camera(
         metrics.jitter_p95, metrics.activity, verdict.flags or "-",
     )
 
+    qc_thresholds = qc_threshold_snapshot(settings)
+
     if settings.qc_enabled and verdict.reject_code:
+        # A rejected attempt keeps NO landmarks and NO video — only a minimal
+        # audit record, so pass/warn/reject rates are reportable without the
+        # rejected data ever entering the dataset. This log is deliberately
+        # separate from samples.csv and is never read by the manifest builder.
+        try:
+            from app.signers import resolve_signer_for_user
+            _signer = resolve_signer_for_user(current_user)
+        except Exception:
+            _signer = ""
+        record_quality_attempt({
+            "attempt_id": uuid.uuid4().hex[:12],
+            "campaign": getattr(settings, "collection_campaign", "") or "",
+            "signer_id": _signer,
+            "session_id": session_id,
+            "recognition_profile": class_meta.recognition_profile or "",
+            "vocabulary_scope": class_meta.vocabulary_scope or "",
+            "label": label,
+            "status": "rejected",
+            "flags": verdict.flags,
+            "metrics": metrics.as_dict(),
+            "quality_config_version": qc_thresholds["quality_config_version"],
+            "quality_thresholds": qc_thresholds,
+            "source_type": "camera",
+            "timestamp": su.now_str(),
+        })
         raise HTTPException(
             status_code=422,
             detail={
@@ -546,9 +578,15 @@ async def upload_camera(
         "left_hand_ratio": round(metrics.left_hand_ratio, 4),
         "right_hand_ratio": round(metrics.right_hand_ratio, 4),
         "both_hands_ratio": round(metrics.both_hands_ratio, 4),
+        "any_hand_ratio": round(metrics.any_hand_ratio, 4),
+        # 'jitter' is kept for backward compatibility with existing readers;
+        # 'jitter_p95' is the explicit name used from the pilot campaign on.
         "jitter": round(metrics.jitter_p95, 5),
+        "jitter_p95": round(metrics.jitter_p95, 5),
         "activity": round(metrics.activity, 5),
         "quality_flags": verdict.flags,
+        "quality_config_version": qc_thresholds["quality_config_version"],
+        "quality_thresholds": qc_thresholds,
         "hands_required": effective_hands or None,
         "client_quality": client_quality,
         "created_at": su.now_str(),
@@ -569,6 +607,26 @@ async def upload_camera(
     except Exception as e:
         log.error("[UPLOAD][camera][ERROR] sample save failed: %s", e)
         return {"success": False, "message": f"Sample upload failed: {e}"}
+
+    # Same audit stream as rejected attempts, so pass/warn/reject rates for a
+    # campaign are computable from ONE file.
+    record_quality_attempt({
+        "attempt_id": uuid.uuid4().hex[:12],
+        "campaign": getattr(settings, "collection_campaign", "") or "",
+        "signer_id": signer_id,
+        "session_id": session_id,
+        "recognition_profile": class_meta.recognition_profile or "",
+        "vocabulary_scope": class_meta.vocabulary_scope or "",
+        "label": label,
+        "status": "flagged" if verdict.warning_codes else "accepted",
+        "flags": verdict.flags,
+        "metrics": metrics.as_dict(),
+        "quality_config_version": qc_thresholds["quality_config_version"],
+        "quality_thresholds": qc_thresholds,
+        "source_type": "camera",
+        "sample_path": path,
+        "timestamp": su.now_str(),
+    })
 
     quality_payload = metrics.as_dict()
     quality_payload["warnings"] = [

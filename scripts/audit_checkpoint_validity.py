@@ -45,11 +45,17 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(REPO_ROOT))
 
-# The broken mirror was live in the train loader across this window.
-BROKEN_MIRROR_FROM = "2026-05-14"
-BROKEN_MIRROR_UNTIL = "2026-07-21"
-POST_FIX_CONTRACTS = {"v2_wrist_centered_mirror"}
+# All validity rules live in ONE module, shared with the aggregator.
+from research_validity import (  # noqa: E402
+    BROKEN_MIRROR_FROM,
+    BROKEN_MIRROR_UNTIL,
+    augmentation_of as _augmentation_of,
+    evaluate_checkpoint,
+    run_purpose_of,
+)
 
 DEFAULT_ROOTS = [
     REPO_ROOT / "processed" / "train_utils" / "outputs",
@@ -57,45 +63,10 @@ DEFAULT_ROOTS = [
 ]
 
 
-def _augmentation_of(ckpt: dict) -> dict | None:
-    tc = ckpt.get("training_config")
-    if isinstance(tc, dict) and isinstance(tc.get("augmentation"), dict):
-        return tc["augmentation"]
-    if isinstance(ckpt.get("augmentation"), dict):
-        return ckpt["augmentation"]
-    return None
-
-
 def _classify(ckpt: dict) -> tuple[object, str]:
-    """Return (research_valid, reason). research_valid may be True/False/None."""
-    aug = _augmentation_of(ckpt)
-
-    if aug is None:
-        return None, (
-            "no training_config.augmentation recorded (pre-contract checkpoint); "
-            "trained via train_tcn.py, which has applied the broken mirror by "
-            f"default since {BROKEN_MIRROR_FROM} — assume affected"
-        )
-
-    contract = str(aug.get("augmentation_contract_version") or "")
-    if contract in POST_FIX_CONTRACTS:
-        return True, f"stamped post-fix augmentation contract '{contract}'"
-
-    if aug.get("enabled") is False or str(aug.get("profile")) == "none":
-        return True, "augmentation disabled for this run (profile='none')"
-
-    mirror = aug.get("mirror_prob")
-    if mirror is None:
-        return None, "augmentation recorded but mirror_prob absent — cannot determine"
-    if float(mirror) == 0.0:
-        return True, "mirror_prob == 0.0 (broken transform never applied)"
-
-    p = float(aug.get("p", 1.0))
-    share = p * float(mirror)
-    return False, (
-        f"broken image-space mirror active: profile='{aug.get('profile')}' "
-        f"p={p} mirror_prob={mirror} -> ~{share:.0%} of training samples distorted"
-    )
+    """(research_valid, reason) — thin wrapper over the shared validator."""
+    v = evaluate_checkpoint(ckpt)
+    return v.valid, ("; ".join(v.reasons) if v.reasons else "all criteria met")
 
 
 def scan(roots: list[Path]) -> list[dict]:
@@ -138,6 +109,7 @@ def scan(roots: list[Path]) -> list[dict]:
                 "num_classes": ckpt.get("num_classes"),
                 "seed": ckpt.get("seed"),
                 "epochs": tc.get("epochs"),
+                "run_purpose": run_purpose_of(ckpt) or "",
                 "git_commit": (ckpt.get("git_commit") or "")[:8],
                 "has_contract_v2": "recognition_profile" in ckpt,
                 "augmentation_profile": aug.get("profile", ""),

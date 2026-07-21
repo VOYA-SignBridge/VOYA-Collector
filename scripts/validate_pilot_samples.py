@@ -52,7 +52,18 @@ EXPECTED_NORMALIZATION = "hands126_v1"
 VALID_QUALITY_STATUS = {"ok", "flagged"}
 # QC metrics the collection path attaches; a pilot sample without them cannot
 # support any quality-filtered training experiment later.
-REQUIRED_QC_FIELDS = ("completeness", "jitter", "left_hand_ratio", "right_hand_ratio")
+REQUIRED_QC_FIELDS = (
+    "completeness", "jitter_p95", "any_hand_ratio",
+    "left_hand_ratio", "right_hand_ratio", "both_hands_ratio",
+)
+# The threshold SET must be identified and snapshotted per sample: every qc_*
+# value is env-overridable, so a version label alone could silently change
+# meaning between machines or redeploys.
+REQUIRED_QC_PROVENANCE = ("quality_config_version", "quality_thresholds")
+REQUIRED_THRESHOLD_KEYS = (
+    "qc_min_valid_ratio", "qc_reject_hands_ratio", "qc_warn_hands_ratio",
+    "qc_reject_jitter", "qc_warn_jitter",
+)
 
 
 def _read_csv(path: Path):
@@ -165,6 +176,17 @@ def validate_sample(npz_path: Path, labels_by_folder: dict, active_signers: set,
     for field in REQUIRED_QC_FIELDS:
         if side.get(field) is None:
             errors.append(f"sidecar missing QC metric '{field}'")
+    for field in REQUIRED_QC_PROVENANCE:
+        if not side.get(field):
+            errors.append(f"sidecar missing QC provenance '{field}'")
+    thresholds = side.get("quality_thresholds")
+    if thresholds is not None:
+        if not isinstance(thresholds, dict):
+            errors.append("quality_thresholds is not an object")
+        else:
+            missing_thr = [k for k in REQUIRED_THRESHOLD_KEYS if thresholds.get(k) is None]
+            if missing_thr:
+                errors.append(f"quality_thresholds missing {missing_thr}")
 
     label_row = labels_by_folder.get(npz_path.parent.name)
     if label_row is None:

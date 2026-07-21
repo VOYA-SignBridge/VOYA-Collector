@@ -110,6 +110,13 @@ reports/quality_stats_*.json
 reports/release_log_*.json
 reports/determinism/
 
+# Source files caught by the blanket *.txt rule
+!backend/requirements.txt
+!backend/requirements-dev.txt
+!backend/realtime_service/requirements.txt
+!processed/requirements-train.txt
+!processed/requirements-realtime.txt
+
 # Research records -> committed (negate the blanket rules above)
 !docs/
 !docs/**/*.md

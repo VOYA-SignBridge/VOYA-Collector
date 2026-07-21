@@ -17,10 +17,26 @@ Two-tier thresholds (configured in app/config.py, env-overridable):
   REJECT (lenient) -> sample is refused (HTTP 422 upstream)
 """
 
+import json
+import os
+import threading
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
+
+# Append-only audit log of capture ATTEMPTS (including rejected ones).
+# Deliberately a plain JSONL file, not a DB table and not samples.csv: a
+# rejected attempt must never become addressable as training data. The
+# manifest builder scans dataset/features/**.npz and never reads this file.
+_QC_AUDIT_LOCK = threading.Lock()
+
+
+def quality_audit_path() -> Path:
+    return Path(os.getenv("QC_AUDIT_LOG",
+                          str(Path("dataset") / "quality_attempts.jsonl")))
 
 _LEFT = slice(0, 63)
 _RIGHT = slice(63, 126)
@@ -152,6 +168,46 @@ def compute_quality_metrics(seq: np.ndarray, hands_required: int = 0) -> Quality
         activity=activity_mean_abs_diff(seq),
         hands_required=hands_required,
     )
+
+
+def record_quality_attempt(record: dict) -> None:
+    """Append one capture-attempt audit record. Never raises.
+
+    Stores NO landmarks and NO video — only identity, label, verdict, metrics
+    and the thresholds in force. That is enough to report pass/warn/reject
+    rates per campaign without the rejected data entering the dataset.
+    """
+    try:
+        record.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+        path = quality_audit_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(record, ensure_ascii=False, default=str)
+        with _QC_AUDIT_LOCK:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception:
+        # An audit-log failure must never block or fail a capture.
+        pass
+
+
+def qc_threshold_snapshot(cfg) -> dict:
+    """The exact thresholds this verdict was produced under.
+
+    Stored per sample. A quality_config_version string on its own is not
+    enough: every qc_* value is env-overridable, so the same version label
+    could mean different thresholds on two machines or after a redeploy. The
+    snapshot makes each sample self-describing and lets a later QC ablation
+    group samples by the rules actually applied to them.
+    """
+    return {
+        "quality_config_version": str(getattr(cfg, "quality_config_version", "") or ""),
+        "qc_enabled": bool(getattr(cfg, "qc_enabled", True)),
+        "qc_min_valid_ratio": float(getattr(cfg, "qc_min_valid_ratio", 0.7)),
+        "qc_reject_hands_ratio": float(getattr(cfg, "qc_reject_hands_ratio", 0.30)),
+        "qc_warn_hands_ratio": float(getattr(cfg, "qc_warn_hands_ratio", 0.80)),
+        "qc_reject_jitter": float(getattr(cfg, "qc_reject_jitter", 0.35)),
+        "qc_warn_jitter": float(getattr(cfg, "qc_warn_jitter", 0.12)),
+    }
 
 
 def evaluate_quality(metrics: QualityMetrics, cfg) -> QualityVerdict:

@@ -699,15 +699,24 @@ def split_from_manifest(
     unified: bool = False,
     seed: int = 42,
     group_col: str = 'signer_id',
-    fail_on_missing_eval: bool = False,
+    fail_on_missing_eval: bool | None = None,
     exclude_unresolved_signers: bool = False,
 ):
     """Profile-filtered split over an immutable dataset manifest.
 
     Returns (train, val, test, report). Raises SystemExit on hard failures
-    (empty subset, class with no train sample, signer leakage in strict mode,
-    unresolved signer_id in strict mode).
+    (empty subset, empty train/val/test, class with no train coverage, signer
+    leakage or unresolved signer_id in strict mode).
+
+    fail_on_missing_eval defaults to True in strict_signer_disjoint mode: a
+    split whose val/test cannot evaluate the label space is worthless for
+    research, and silently writing one is how hoa_de_signer_disjoint_v1/_v3
+    ended up on disk with val=0/test=0. Pass False explicitly (CLI:
+    --allow_invalid_split) only for debugging; the report is then stamped
+    valid_for_research=false.
     """
+    if fail_on_missing_eval is None:
+        fail_on_missing_eval = (split_mode == 'strict_signer_disjoint')
     import sys as _sys
     _repo_root = Path(__file__).resolve().parents[2]
     if str(_repo_root) not in _sys.path:
@@ -777,19 +786,71 @@ def split_from_manifest(
     _assert_no_overlap(train, test)
     _assert_no_overlap(val, test)
 
-    # 4. Coverage rules: every class MUST have train samples; val/test configurable
+    # 4. Split-validity gate.
+    #
+    # A degenerate split is the dangerous failure mode here: with too few
+    # signers the greedy group assignment puts EVERY signer in train, leaving
+    # val/test empty. _assert_signer_disjoint then passes vacuously (the empty
+    # set is disjoint from everything) and, before this gate existed, the
+    # split version was still written to disk and looked successful. Both
+    # hoa_de_signer_disjoint_v1 and _v3 were produced that way (val=0, test=0).
+    #
+    # Empty val/test / missing train coverage are therefore HARD failures in
+    # strict mode. They can only be downgraded to warnings via the explicit
+    # compatibility flag, and the resulting artifact is permanently stamped
+    # valid_for_research=false so no aggregator can pick it up.
     def _classes(rows_):
         return {r['label_key'] for r in rows_}
     all_c, tr_c, va_c, te_c = _classes(rows), _classes(train), _classes(val), _classes(test)
+
+    invalid_reasons: list = []
+    if not train:
+        invalid_reasons.append('train split is empty')
+    if not val:
+        invalid_reasons.append('validation split is empty')
+    if not test:
+        invalid_reasons.append('test split is empty')
+
     missing_train = sorted(all_c - tr_c)
     if missing_train:
-        raise SystemExit(f"{len(missing_train)} class(es) have no TRAIN sample: {missing_train}")
-    missing_eval = sorted((all_c - va_c) | (all_c - te_c))
-    if missing_eval:
-        msg = f"{len(missing_eval)} class(es) missing from val and/or test: {missing_eval}"
+        invalid_reasons.append(
+            f'{len(missing_train)} class(es) have no TRAIN sample: {missing_train[:5]}')
+    missing_val = sorted(all_c - va_c)
+    missing_test = sorted(all_c - te_c)
+    if missing_val:
+        invalid_reasons.append(
+            f'{len(missing_val)} class(es) missing from val: {missing_val[:5]}')
+    if missing_test:
+        invalid_reasons.append(
+            f'{len(missing_test)} class(es) missing from test: {missing_test[:5]}')
+
+    if split_mode == 'strict_signer_disjoint':
+        overlap = (train_s & val_s) | (train_s & test_s) | (val_s & test_s)
+        if overlap:
+            invalid_reasons.append(f'signer overlap between splits: {sorted(overlap)}')
+        for name, sset in (('train', train_s), ('val', val_s), ('test', test_s)):
+            if not sset:
+                invalid_reasons.append(f'{name} split has no signer assigned')
+
+    valid_for_research = not invalid_reasons
+    if invalid_reasons:
+        detail = '\n  - '.join(invalid_reasons)
         if fail_on_missing_eval:
-            raise SystemExit(msg)
-        print(f"[WARN] {msg}")
+            raise SystemExit(
+                f"Split is not usable for research:\n  - {detail}\n"
+                f"Refusing to write a split version that cannot be evaluated. "
+                f"With {len(train_s | val_s | test_s)} signer(s) available, strict "
+                f"signer-disjoint splitting needs more signer coverage (>= 3 signers "
+                f"per class). Pass --allow_invalid_split ONLY for debugging: the "
+                f"artifact will be stamped valid_for_research=false.")
+        print(f"[WARN] split is NOT valid for research:\n  - {detail}")
+        print("[WARN] --allow_invalid_split was given; artifact will be stamped "
+              "valid_for_research=false and MUST NOT be used for paper results.")
+
+    signer_counts = {
+        'train': len(train_s), 'val': len(val_s), 'test': len(test_s),
+        'total_distinct': len(train_s | val_s | test_s),
+    }
 
     report = {
         'split_mode': split_mode,
@@ -797,10 +858,15 @@ def split_from_manifest(
         'include_common': include_common,
         'seed': seed,
         'group_col': group_col,
+        'valid_for_research': valid_for_research,
+        'invalid_reasons': invalid_reasons,
         'num_classes': len(unique_keys),
         'label_keys': unique_keys,
         'counts': {'train': len(train), 'val': len(val), 'test': len(test)},
+        'sample_counts': {'train': len(train), 'val': len(val), 'test': len(test),
+                          'total': len(rows)},
         'signers': {'train': sorted(train_s), 'val': sorted(val_s), 'test': sorted(test_s)},
+        'signer_counts': signer_counts,
         'class_coverage': {
             'train': len(tr_c) / max(1, len(all_c)),
             'val': len(va_c) / max(1, len(all_c)),
@@ -833,7 +899,10 @@ def run_manifest_mode(args) -> None:
         unified=args.unified,
         seed=args.seed,
         group_col=args.group_col,
-        fail_on_missing_eval=args.fail_on_missing_eval,
+        # --allow_invalid_split is the ONLY way to downgrade the validity gate
+        # to a warning; otherwise strict mode defaults to failing hard.
+        fail_on_missing_eval=(False if args.allow_invalid_split
+                              else (True if args.fail_on_missing_eval else None)),
         exclude_unresolved_signers=args.exclude_unresolved_signers,
     )
 
@@ -859,6 +928,13 @@ def run_manifest_mode(args) -> None:
     print(f"  signers: train={len(report['signers']['train'])} "
           f"val={len(report['signers']['val'])} test={len(report['signers']['test'])}")
     print(f"  coverage: {report['class_coverage']}")
+    if report.get('valid_for_research'):
+        print("  valid_for_research: TRUE")
+    else:
+        print("  valid_for_research: FALSE — this split MUST NOT be used for paper "
+              "results; the aggregator will refuse runs trained on it.")
+        for reason in report.get('invalid_reasons', []):
+            print(f"    - {reason}")
 
 
 def main():
@@ -896,7 +972,15 @@ def main():
     parser.add_argument('--output_version', type=str, default='',
                         help='Version name for the split (written under processed/splits/versions/<name>/)')
     parser.add_argument('--fail_on_missing_eval', action='store_true',
-                        help='Fail (instead of warn) when a class has no val/test sample')
+                        help='Fail when a class has no val/test sample. Already the '
+                             'DEFAULT in strict_signer_disjoint mode; use this to opt in '
+                             'for sample mode too.')
+    parser.add_argument('--allow_invalid_split', action='store_true',
+                        help='COMPATIBILITY/DEBUG ONLY. Downgrade the split-validity gate '
+                             '(empty train/val/test, missing class coverage, signer overlap) '
+                             'from an error to a warning and write the split anyway. The '
+                             'artifact is stamped valid_for_research=false and is rejected '
+                             'by aggregate_experiment_results.py.')
     parser.add_argument('--exclude_unresolved_signers', action='store_true',
                         help='Explicitly drop samples whose signer_id is unresolved '
                              '(otherwise strict mode fails). Exclusions are recorded in split_metadata.json')

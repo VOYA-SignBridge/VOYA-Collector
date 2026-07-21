@@ -102,8 +102,15 @@ def test_pilot_validation(ws: Path):
         "signer_id": "S001", "session_id": "sess-1", "collection_campaign": "pilot_t",
         "normalization_version": "hands126_v1", "preprocess_contract_version": "v2",
         "storage_contract_version": "npz_v2", "quality_status": "ok",
-        "completeness": 0.95, "jitter": 0.011,
-        "left_hand_ratio": 1.0, "right_hand_ratio": 0.0}),
+        "completeness": 0.95, "jitter": 0.011, "jitter_p95": 0.011,
+        "any_hand_ratio": 1.0, "both_hands_ratio": 0.0,
+        "left_hand_ratio": 1.0, "right_hand_ratio": 0.0,
+        "quality_config_version": "qc_v1_heuristic_2026-07",
+        "quality_thresholds": {
+            "quality_config_version": "qc_v1_heuristic_2026-07",
+            "qc_enabled": True, "qc_min_valid_ratio": 0.7,
+            "qc_reject_hands_ratio": 0.3, "qc_warn_hands_ratio": 0.8,
+            "qc_reject_jitter": 0.35, "qc_warn_jitter": 0.12}}),
         encoding="utf-8")
     bad = feats / "sample_bad.npz"
     np.savez_compressed(bad, sequence=seq)  # legacy shape: no raw/masks/sidecar

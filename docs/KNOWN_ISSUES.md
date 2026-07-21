@@ -1,6 +1,33 @@
 # Known Issues & Pending Decisions
 
-> Cập nhật 2026-07-19. Mục nào cần quyết định nghiệp vụ thì KHÔNG tự xử lý bằng code.
+> Cập nhật 2026-07-21 (pre-freeze). Mục nào cần quyết định nghiệp vụ thì KHÔNG tự xử lý bằng code.
+
+## Test đỏ đã biết — NGOÀI phạm vi release `isds2026-paper-pipeline-v1`
+
+Hai test dưới đây fail và **được quyết định là ngoài phạm vi** release này. Cả hai
+đều nằm ngoài đường đi của research pipeline (manifest → split → train → aggregate),
+không ảnh hưởng tới bất kỳ artifact nào dùng cho bài báo.
+
+| # | Test | Triệu chứng | Nguyên nhân gốc | Vì sao không chặn release |
+|---|---|---|---|---|
+| T1 | `backend/tests/test_schema_evolution.py::test_backward_compatibility_defaults` | `assert rows[0]["gdrive_synced"] is True` → nhận `False` | Schema tự mâu thuẫn: `metadata_db.py:120` (CREATE TABLE) khai `gdrive_synced BOOLEAN DEFAULT FALSE`, còn `metadata_db.py:214` (ALTER migration) khai `DEFAULT TRUE`. DB dựng mới đi theo nhánh CREATE nên nhận `FALSE`; DB migrate từ bản cũ nhận `TRUE`. | Cột này chỉ điều khiển mirror lên Google Drive (`sync_tasks`). Manifest builder quét filesystem (`dataset/features/**.npz`), **không** đọc cột này. Sửa default sẽ đổi hành vi sync (có thể gây re-upload hàng loạt hoặc bỏ sót upload) → cần owner quyết, không tự sửa trong vòng freeze. |
+| T2 | `frontend/src/hooks/useTrainingAPI.test.ts` (2 test) | `expect(axiosClient.post).toHaveBeenCalledWith(...)` → `Number of calls: 0` | Test viết 2026-07-15 (`1be7f25`) khẳng định hook phải dùng `axiosClient`. Thiết kế sau đó **cố ý** đổi sang raw `fetch` + CSRF double-submit + `credentials:'include'` (commit `3f63161`). Test lỗi thời, đang khẳng định điều ngược với thiết kế hiện hành. | Thuần frontend, không đụng research pipeline. Sửa test = viết lại assertion cho luồng fetch — là product work, cố tình không làm trong vòng freeze. **Không** xoá/sửa test để làm xanh cổng. |
+
+## Regression từ commit `cb46a07` (2026-07-21) — đã phát hiện, một phần đã khôi phục
+
+`cb46a07 "Update training for long sequence"` đã đưa nhiều file về trạng thái cũ hơn.
+Ba trường hợp đã xác nhận:
+
+| File | Mất gì | Trạng thái |
+|---|---|---|
+| `processed/splits/make_splits.py` | 229 dòng: `split_from_manifest`, `run_manifest_mode`, `_assert_signer_disjoint`, 6 CLI flag manifest-mode | **Đã khôi phục** (working tree bị revert về blob của `a0bb4c1`, 2026-07-05) |
+| `frontend/vite.config.ts` | Toàn bộ block `test:` (`environment: 'jsdom'`, `setupFiles`) → vitest chạy ở môi trường node, mọi test chết vì `window is not defined`; **cả suite frontend im lặng không chạy** | **Đã khôi phục** block `test:` |
+| `frontend/vite.config.ts` | `base: ''` và manual chunk `vendor_react` / `vendor_router` | **CHƯA khôi phục** — đổi output build có rủi ro về đường dẫn deploy và cache; cần owner xác nhận |
+| `frontend/src/hooks/useTrainingAPI.ts` | CSRF token header + `credentials:'include'` + surface backend error detail | Working tree đã bị revert về bản không CSRF; **đã restore về HEAD** |
+
+**Bài học:** `git status` sạch không đủ — cần so blob với HEAD. Test đã bắt được
+trường hợp 1 (`ImportError`) nhưng KHÔNG bắt được trường hợp 2, vì mất cấu hình test
+làm cho suite biến mất thay vì fail. Đó là lý do có `backend/tests/test_research_suites.py`.
 
 ## Chờ quyết định nghiệp vụ (owner)
 
