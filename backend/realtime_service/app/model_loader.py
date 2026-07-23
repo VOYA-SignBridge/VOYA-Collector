@@ -87,6 +87,10 @@ def _torch_load_checkpoint(path: str, map_location: str = "cpu") -> Any:
         except Exception as exc:
             logger.warning("weights_only torch.load failed; falling back to full torch.load: %s", exc)
 
+        # torch >= 2.6 defaults weights_only=True, so the fallback must opt out
+        # explicitly — otherwise it repeats the failure above.
+        return torch.load(path, map_location=map_location, weights_only=False)
+
     return torch.load(path, map_location=map_location)
 
 

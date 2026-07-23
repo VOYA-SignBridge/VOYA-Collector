@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
-import { getAuthToken, getCsrfToken } from '../api/axiosClient';
+import { getAuthToken } from '../api/axiosClient';
 
 export interface DatasetInfo {
   total_samples: number;
@@ -13,7 +13,6 @@ export interface DatasetInfo {
   languages: string[];
   dialects: Record<string, string[]>;
   class_distribution: Record<string, number>;
-  samples_by_dialect?: Record<string, number>;
   split_info?: { train: number; val: number; test: number };
   // Optional mapping from class uid/slug -> human label
   label_map?: Record<string, string>;
@@ -96,23 +95,11 @@ export interface PromoteResponse {
 // Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
 const API_URL = '/api/v1/training';
 
-// Training endpoints require authentication. These calls use raw fetch (not the
-// axios client), so they must attach BOTH the legacy Bearer token (if any) and,
-// for cookie-authenticated sessions, the CSRF double-submit token — otherwise
-// state-changing requests (start/cancel/promote/delete) are rejected 403 by the
-// CSRF middleware once an access cookie is present.
+// Training endpoints require authentication; attach the stored bearer token.
 function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
   const token = getAuthToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const csrf = getCsrfToken();
-  if (csrf) headers['X-CSRF-Token'] = csrf;
-  return headers;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
-
-// Raw fetch defaults to credentials:'same-origin'. Be explicit so the auth +
-// CSRF cookies are always sent, including if the API base URL ever differs.
-const FETCH_OPTS: RequestInit = { credentials: 'include' };
 
 export function useTrainingAPI() {
   const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null);
@@ -178,21 +165,13 @@ export function useTrainingAPI() {
     setError(null);
     try {
       const response = await fetch(`${API_URL}/start`, {
-        ...FETCH_OPTS,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(config),
       });
 
       if (!response.ok) {
-        // Surface the backend's detail (e.g. the "phương ngữ không đủ dữ liệu"
-        // guidance, or a CSRF/auth message) instead of a bare status text.
-        let detail = response.statusText;
-        try {
-          const body = await response.json();
-          if (body?.detail) detail = body.detail;
-        } catch { /* non-JSON error body */ }
-        throw new Error(`Failed to start training: ${detail}`);
+        throw new Error(`Failed to start training: ${response.statusText}`);
       }
 
       const contentType = response.headers.get('content-type') || '';
@@ -215,7 +194,7 @@ export function useTrainingAPI() {
   // Lấy job status
   const getJobStatus = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}`, { ...FETCH_OPTS, headers: authHeaders() });
+      const response = await fetch(`${API_URL}/jobs/${jobId}`, { headers: authHeaders() });
       if (!response.ok) {
         throw new Error(`Failed to fetch job status: ${response.statusText}`);
       }
@@ -238,7 +217,7 @@ export function useTrainingAPI() {
   // Lấy metrics
   const getJobMetrics = useCallback(async (jobId: string): Promise<TrainingMetrics[]> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`, { ...FETCH_OPTS, headers: authHeaders() });
+      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`, { headers: authHeaders() });
       if (!response.ok) {
         throw new Error(`Failed to fetch metrics: ${response.statusText}`);
       }
@@ -261,7 +240,7 @@ export function useTrainingAPI() {
   // Lịch sử jobs (mới nhất trước), kèm username người chạy
   const listJobs = useCallback(async (limit = 100): Promise<TrainingJobListItem[]> => {
     try {
-      const response = await fetch(`${API_URL}/jobs?limit=${limit}`, { ...FETCH_OPTS, headers: authHeaders() });
+      const response = await fetch(`${API_URL}/jobs?limit=${limit}`, { headers: authHeaders() });
       if (!response.ok) {
         throw new Error(`Failed to list jobs: ${response.statusText}`);
       }
@@ -276,7 +255,6 @@ export function useTrainingAPI() {
   const cancelTraining = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
       const response = await fetch(`${API_URL}/jobs/${jobId}/cancel`, {
-        ...FETCH_OPTS,
         method: 'POST',
         headers: authHeaders(),
       });
@@ -294,7 +272,6 @@ export function useTrainingAPI() {
   const promoteJob = useCallback(async (jobId: string): Promise<PromoteResponse | null> => {
     try {
       const response = await fetch(`${API_URL}/jobs/${jobId}/promote`, {
-        ...FETCH_OPTS,
         method: 'POST',
         headers: authHeaders(),
       });
@@ -311,7 +288,7 @@ export function useTrainingAPI() {
   // Per-class breakdown + confusion matrix trên test set (Step 7)
   const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/evaluation`, { ...FETCH_OPTS, headers: authHeaders() });
+      const response = await fetch(`${API_URL}/jobs/${jobId}/evaluation`, { headers: authHeaders() });
       if (!response.ok) {
         throw new Error(`Failed to fetch evaluation: ${response.statusText}`);
       }
@@ -326,7 +303,6 @@ export function useTrainingAPI() {
   const deleteJob = useCallback(async (jobId: string): Promise<boolean> => {
     try {
       const response = await fetch(`${API_URL}/jobs/${jobId}`, {
-        ...FETCH_OPTS,
         method: 'DELETE',
         headers: authHeaders(),
       });

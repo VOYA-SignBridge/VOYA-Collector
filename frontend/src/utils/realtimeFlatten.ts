@@ -1,4 +1,6 @@
 import type { MediaPipeLandmark } from "../types";
+import { assignHandSlots, wristOf, type HandAnchors, type HandDetection } from "./handIdentity";
+import { MIRROR_SERVING_PAYLOAD } from "../config/handTracking";
 
 /**
  * Realtime semantic encoding constants.
@@ -49,54 +51,11 @@ const ensureOutBuffer = (out?: Float32Array): Float32Array => {
   return new Float32Array(REALTIME_FEATURE_DIM);
 };
 
-type SelectedHand = {
-  landmarks: MediaPipeLandmark[];
-  score: number;
-} | null;
-
-/**
- * Selects the best landmarks array for a given MediaPipe handedness label.
- *
- * Deterministic policy:
- * - If multiple candidates exist, choose the highest `score` if provided.
- * - If scores are missing/invalid, the first encountered candidate wins.
- */
-const selectHandByLabel = (
-  allLandmarks: MediaPipeLandmark[][],
-  handedness: MediaPipeHandedness[] | undefined,
-  desired: MediaPipeHandLabel
-): SelectedHand => {
-  let best: SelectedHand = null;
-
-  for (let i = 0; i < allLandmarks.length; i++) {
-    const lms = allLandmarks[i];
-    if (!Array.isArray(lms) || lms.length === 0) continue;
-
-    const label = normalizeLabel(handedness?.[i]?.label);
-    if (label !== desired) continue;
-
-    const scoreRaw = handedness?.[i]?.score;
-    const score = isFiniteNumber(scoreRaw) ? scoreRaw : 0;
-
-    if (!best) {
-      best = { landmarks: lms, score };
-      // If we don't have scores, we keep the first match to be stable.
-      continue;
-    }
-
-    // Prefer higher score if available.
-    if (score > best.score) {
-      best = { landmarks: lms, score };
-    }
-  }
-
-  return best;
-};
-
 const writeHand63 = (
   out: Float32Array,
   offset: number,
-  landmarks: MediaPipeLandmark[] | undefined
+  landmarks: MediaPipeLandmark[] | undefined,
+  mirrorX: boolean
 ) => {
   if (!landmarks || landmarks.length === 0) return;
 
@@ -106,11 +65,57 @@ const writeHand63 = (
     if (!lm) continue;
 
     const base = offset + i * REALTIME_COORDS_PER_LANDMARK;
-    out[base + 0] = safeCoord(lm.x);
+    const x = safeCoord(lm.x);
+    out[base + 0] = mirrorX ? 1 - x : x;
     out[base + 1] = safeCoord(lm.y);
     out[base + 2] = safeCoord(lm.z);
   }
 };
+
+/**
+ * Turns raw MediaPipe results into detections carrying person-perspective labels.
+ *
+ * MediaPipe is trained on mirrored selfie images but receives the raw webcam
+ * frame, so its labels are from the CAMERA's point of view — the opposite of the
+ * person's. Swapping here means everything downstream reasons in anatomical
+ * terms, exactly as the capture modal does when recording.
+ */
+const toDetections = (
+  allLandmarks: MediaPipeLandmark[][],
+  handedness: MediaPipeHandedness[] | undefined
+): HandDetection[] => {
+  const out: HandDetection[] = [];
+  for (let i = 0; i < allLandmarks.length; i++) {
+    const lms = allLandmarks[i];
+    if (!Array.isArray(lms) || lms.length === 0) continue;
+
+    const rawLabel = normalizeLabel(handedness?.[i]?.label);
+    const scoreRaw = handedness?.[i]?.score;
+    out.push({
+      landmarks: lms,
+      label: rawLabel ? (rawLabel === "Left" ? "Right" : "Left") : undefined,
+      score: isFiniteNumber(scoreRaw) ? scoreRaw : 0,
+    });
+  }
+  return out;
+};
+
+export interface FlattenRealtimeOptions {
+  /**
+   * Caller-owned identity state, carried across frames. Mutated in place with
+   * each slot's latest wrist position. Omit it and every frame is resolved in
+   * isolation — which is what the old label-only encoder effectively did, and
+   * why left/right could swap mid-sequence inside the rolling window.
+   */
+  anchors?: HandAnchors;
+  /** Frame timestamp in ms; defaults to Date.now(). */
+  now?: number;
+  /**
+   * Mirror the x axis. Defaults to MIRROR_SERVING_PAYLOAD — see that constant
+   * for why serving does not simply follow how capture records.
+   */
+  mirrorX?: boolean;
+}
 
 /**
  * flattenRealtimeHands
@@ -120,13 +125,15 @@ const writeHand63 = (
  *   [User_LeftHand(63), User_RightHand(63)]
  *
  * Semantic guarantees:
- * - No mirroring
- * - MediaPipe handedness labels are swapped into anatomical slots
- * - No normalization
- * - Handedness labels used ONLY for stable slot assignment
+ * - Slot assignment goes through the same resolver the capture modal uses, so
+ *   two same-labelled hands never collapse into one slot and a mid-sequence
+ *   label flip cannot invert the two halves of the vector.
+ * - x mirroring follows MIRROR_SERVING_PAYLOAD, which is currently NOT the same
+ *   as how capture records — see that constant for the corpus split behind it.
+ * - No normalization (the realtime service applies the shared normalization).
  *
  * Missing hand policy:
- * - If "Left" or "Right" hand is missing, its 63 dims remain zero.
+ * - If the left or right hand is missing, its 63 dims remain zero.
  * - If coordinates are missing/NaN/undefined, they are zero-filled.
  *
  * Performance:
@@ -135,7 +142,8 @@ const writeHand63 = (
  */
 export function flattenRealtimeHands(
   results: MediaPipeHandsLikeResults | null | undefined,
-  out?: Float32Array
+  out?: Float32Array,
+  options?: FlattenRealtimeOptions
 ): Float32Array {
   const vec = ensureOutBuffer(out);
 
@@ -144,15 +152,25 @@ export function flattenRealtimeHands(
     return vec;
   }
 
-  const handedness = results?.multiHandedness;
+  const mirrorX = options?.mirrorX ?? MIRROR_SERVING_PAYLOAD;
+  const now = options?.now ?? Date.now();
+  const anchors = options?.anchors ?? {};
 
-  const mpLeft = selectHandByLabel(allLandmarks, handedness, "Left");
-  const mpRight = selectHandByLabel(allLandmarks, handedness, "Right");
+  const detections = toDetections(allLandmarks, results?.multiHandedness);
+  const assignment = assignHandSlots(detections, anchors, now);
 
-  // MediaPipe returns raw camera-perspective labels on the unflipped webcam
-  // frame. Swap them so slot 0 is the user's left hand and slot 1 is right.
-  writeHand63(vec, 0, mpRight?.landmarks);
-  writeHand63(vec, REALTIME_DIMS_PER_HAND, mpLeft?.landmarks);
+  // Refresh whichever slots were filled so the next frame can keep identity.
+  if (assignment.left?.length) {
+    const w = wristOf(assignment.left);
+    anchors.left = { x: w.x, y: w.y, t: now };
+  }
+  if (assignment.right?.length) {
+    const w = wristOf(assignment.right);
+    anchors.right = { x: w.x, y: w.y, t: now };
+  }
+
+  writeHand63(vec, 0, assignment.left, mirrorX);
+  writeHand63(vec, REALTIME_DIMS_PER_HAND, assignment.right, mirrorX);
 
   return vec;
 }

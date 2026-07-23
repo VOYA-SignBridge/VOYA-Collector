@@ -151,7 +151,11 @@ def build_manifest(features_root: Path, labels_rows: list, signer_name_to_id: di
         raw_name = str(side.get("user_id") or side.get("user") or "").strip()
         if not raw_name and legacy_user_index:
             raw_name = legacy_user_index.get(sample_id, "")
-        signer_id = str(side.get("signer_id") or "").strip() or signer_name_to_id.get(raw_name, "")
+        # Tên người ký (user_id) được ưu tiên hơn signer_id trong sidecar, vì
+        # signer_id ở đó suy ra từ TÀI KHOẢN thu thập. Tài khoản S010 và S011
+        # mỗi cái được ba người dùng chung để ký, nên lấy theo signer_id sẽ gộp
+        # nhiều người thành một và làm hỏng mọi split "tách người ký".
+        signer_id = signer_name_to_id.get(raw_name, "") or str(side.get("signer_id") or "").strip()
 
         quality_flags = str(side.get("quality_flags") or "").strip()
         quality_status = str(side.get("quality_status") or "").strip() or (

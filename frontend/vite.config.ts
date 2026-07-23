@@ -1,5 +1,4 @@
-/// <reference types="vitest" />
-import { defineConfig } from 'vitest/config'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
@@ -11,15 +10,6 @@ export default defineConfig({
       },
     }),
   ],
-  // Restored 2026-07-21: commit cb46a07 dropped this block, which silently
-  // disabled the whole frontend suite — vitest fell back to the node
-  // environment, so every test importing axiosClient died on
-  // "window is not defined". jsdom and vitest.setup.ts were still installed.
-  test: {
-    environment: 'jsdom',
-    setupFiles: ['./vitest.setup.ts'],
-    globals: true,
-  },
   server: {
     proxy: {
       '/api': {

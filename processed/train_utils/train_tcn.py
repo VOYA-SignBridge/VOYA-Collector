@@ -272,13 +272,19 @@ def _enforce_research_preconditions(args, cfg, manifest_checksum: str) -> None:
     print("[RESEARCH] preconditions OK — provenance and split validity verified.")
 
 
-def set_seed(seed: int, *, strict: bool = False) -> dict:
+def set_seed(seed: int, *, strict: bool = False, mode: str = "strict") -> dict:
     """Seed every RNG and request deterministic kernels.
 
     Returns a report describing what was actually achieved, so callers (and the
     checkpoint) can record whether the run was genuinely deterministic instead
     of assuming it. With strict=True a failure to enable deterministic
     algorithms raises instead of degrading silently.
+
+    mode="fast" seeds every RNG exactly the same but leaves kernel selection
+    free. Chỉ dành cho run thăm dò: cuDNN phải dùng thuật toán backward
+    deterministic cho dilated Conv1d, và trên GPU này nó chậm hơn ~170 lần
+    (4 ms -> 750 ms mỗi batch với TCN). Chế độ đã dùng luôn được ghi vào
+    checkpoint nên không thể nhầm run thăm dò với run cho bài báo.
 
     NOTE: on CUDA, torch requires CUBLAS_WORKSPACE_CONFIG to be set BEFORE the
     CUDA context is created. Setting it here is already too late if a tensor
@@ -290,18 +296,31 @@ def set_seed(seed: int, *, strict: bool = False) -> dict:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
     cublas_cfg = os.environ.get("CUBLAS_WORKSPACE_CONFIG", "")
     using_cuda = torch.cuda.is_available()
+    fast_mode = str(mode).lower() == "fast"
+
+    torch.backends.cudnn.deterministic = not fast_mode
+    torch.backends.cudnn.benchmark = fast_mode
+
     report = {
         "seed": int(seed),
-        "cudnn_deterministic": True,
+        "mode": "fast" if fast_mode else "strict",
+        "cudnn_deterministic": not fast_mode,
         "cublas_workspace_config": cublas_cfg,
         "deterministic_algorithms": False,
         "warnings": [],
     }
+
+    if fast_mode:
+        msg = (
+            "determinism=fast: kernel không deterministic, kết quả KHÔNG tái lập "
+            "bit-for-bit. Chỉ dùng cho run thăm dò, không dùng cho số liệu bài báo."
+        )
+        report["warnings"].append(msg)
+        print(f"[DETERMINISM][WARN] {msg}")
+        return report
 
     if using_cuda and cublas_cfg not in (":4096:8", ":16:8"):
         msg = (
@@ -1050,6 +1069,13 @@ def main() -> None:
              "Pass --run-purpose research for an official experiment; it also "
              "enforces provenance and split validity before training starts.",
     )
+    parser.add_argument(
+        "--determinism", type=str, default="strict", choices=["strict", "fast"],
+        help="strict (mặc định): kernel deterministic, tái lập bit-for-bit — dùng "
+             "cho mọi số liệu đưa vào bài báo. fast: bỏ ràng buộc kernel, TCN nhanh "
+             "hơn ~170 lần nhưng KHÔNG tái lập; chỉ dùng để thử nghiệm. Chế độ được "
+             "ghi vào checkpoint (determinism.mode).",
+    )
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
@@ -1092,7 +1118,12 @@ def main() -> None:
         out_dir=args.out_dir,
     )
 
-    determinism_report = set_seed(cfg.seed)
+    if args.determinism == "fast" and args.run_purpose == "research":
+        raise SystemExit(
+            "[RESEARCH] --determinism=fast không dùng được với --run-purpose research: "
+            "số liệu bài báo phải tái lập bit-for-bit."
+        )
+    determinism_report = set_seed(cfg.seed, mode=args.determinism)
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
     dialects = _parse_multi_values(args.dialect)
@@ -1662,7 +1693,7 @@ def main() -> None:
         "determinism": determinism_report,
         "runtime_env": {
             "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "pytorch_version": torch.__version__,
+            "pytorch_version": str(torch.__version__),
             "numpy_version": np.__version__,
             "cuda_version": torch.version.cuda or "none",
             "cudnn_version": (torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None),
@@ -1716,7 +1747,7 @@ def main() -> None:
         _dialect_model_track = "+".join(dialects) if dialects else "all"
         _runtime_env_track = {
             "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "pytorch_version": torch.__version__,
+            "pytorch_version": str(torch.__version__),
             "cuda_version": torch.version.cuda or "none",
             "device": cfg.device,
         }

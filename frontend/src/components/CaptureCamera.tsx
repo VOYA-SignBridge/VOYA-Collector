@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Sample as SampleT, SessionStats, MediaPipeLandmark, QualityInfo, CameraInfo, CameraUploadPayload } from "../types";
 import { uploadCamera } from "../api/upload";
 import { qcMessage } from "../utils/qualityMessages";
@@ -8,6 +8,7 @@ import SessionSummary from "./SessionSumary";
 import FullscreenCaptureModal from "./FullscreenCaptureModal";
 import Button from "./ui/Button";
 import { TARGET_FRAMES, CAPTURE_COUNT } from "../config/capture";
+import { createSessionId, NEW_SESSION_EVENT } from "../utils/session";
 import { me } from "../api/auth";
 
 type Props = {
@@ -23,11 +24,13 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   // Removed preview state - using fullscreen capture only
   const [showFullscreen, setShowFullscreen] = useState(false);
   
-  // Capture settings are fixed for public uploader — sourced from config
   const targetFrames = TARGET_FRAMES;
-  const captureCount = CAPTURE_COUNT;
+  // Số lượt thu mỗi lần bấm ghi. CAPTURE_COUNT chỉ còn là giá trị mặc định —
+  // người thu chỉnh được vì các lượt trong cùng một đợt là mẫu gần trùng nhau,
+  // nên nhiều lượt không đồng nghĩa nhiều dữ liệu độc lập hơn.
+  const [captureCount, setCaptureCount] = useState<number>(CAPTURE_COUNT);
 
-  const [sessionId] = useState(() => Date.now().toString());
+  const [sessionId, setSessionId] = useState(createSessionId);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [samples, setSamples] = useState<SampleT[]>([]);
   const [sampleCounter, setSampleCounter] = useState(1);
@@ -45,6 +48,25 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       return acc;
     }, {});
   }, [samples]);
+
+  // Bắt đầu một phiên thu mới: cấp session_id mới và xoá tổng kết của phiên cũ.
+  // KHÔNG reload trang — mẫu đã thu đều đã lưu lên server, nên reload chỉ làm
+  // mất ngữ cảnh nhập liệu mà không đem lại gì, và người dùng không nhận ra
+  // được là có chuyện gì vừa xảy ra.
+  const handleNewSession = useCallback(() => {
+    setSessionId(createSessionId());
+    setSamples([]);
+    setSampleCounter(1);
+    setSessionStats(null);
+  }, []);
+
+  // Nút "Phiên mới" ở thanh điều hướng phát sự kiện toàn cục; chỉ nơi đang thu
+  // mới biết cách reset đúng.
+  useEffect(() => {
+    const onRequest = () => handleNewSession();
+    window.addEventListener(NEW_SESSION_EVENT, onRequest);
+    return () => window.removeEventListener(NEW_SESSION_EVENT, onRequest);
+  }, [handleNewSession]);
 
   // Mất kết nối mạng ở cấp trình duyệt cũng được coi là sự cố — chặn thu tiếp
   // để tránh mất dữ liệu đã ghi.
@@ -226,8 +248,6 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
             Mở giao diện chụp toàn màn hình để thu dữ liệu tư thế không bị phân tâm. Tối ưu cho tốc độ và độ chính xác.
           </p>
 
-          {/* Capture settings are fixed for public uploader. Edit src/config/capture.ts to change them. */}
-
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center mb-5 sm:mb-6">
             <Button
               onClick={() => setShowFullscreen(true)}
@@ -353,6 +373,10 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           initialUser={user}
           targetFrames={targetFrames}
           captureCount={captureCount}
+          onCaptureCountChange={setCaptureCount}
+          sessionId={sessionId}
+          sessionSampleCount={samples.length}
+          onNewSession={handleNewSession}
           capturedSummary={capturedSummary}
           connectionIssue={connectionIssue}
           qualityNotice={qualityNotice}

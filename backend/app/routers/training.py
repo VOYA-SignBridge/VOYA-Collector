@@ -589,12 +589,33 @@ def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optio
     return None
 
 
+def _registry_display_name(dialect: str) -> str:
+    """Tên hiển thị của model đang phục vụ dialect này trong models.json ("" nếu chưa có)."""
+    try:
+        if not REGISTRY_PATH.exists():
+            return ""
+        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Không đọc được registry để lấy tên hiển thị: %s", e)
+        return ""
+
+    for m in registry_data.get("models", []):
+        if isinstance(m, dict) and m.get("dialect") == dialect:
+            name = str(m.get("name") or "").strip()
+            if name:
+                return name
+    return ""
+
+
 def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
                      ckpt: Dict[str, Any], dialect: str, language: str) -> bool:
     """Update models.json registry để realtime service load model mới.
 
     Entry được build từ chính checkpoint để pass validate_checkpoint_vs_registry
     của realtime service (normalization_version, seq_len, feature_dim phải khớp).
+
+    Mỗi dialect chỉ có đúng một entry: promote model mới cho một dialect sẽ THAY
+    THẾ entry cũ (giữ nguyên tên hiển thị) thay vì thêm model trùng vào danh sách.
     """
     try:
         if not REGISTRY_PATH.exists():
@@ -607,9 +628,15 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
         seq_len = int(ckpt.get("seq_len", 60))
         feature_dim = int(ckpt.get("feature_dim", 126))
 
+        existing = [m for m in registry_data.get("models", []) if isinstance(m, dict)]
+
+        # Giữ tên hiển thị của entry đang phục vụ dialect này (vd "Hòa đê") để
+        # dropdown realtime không đổi nhãn sau mỗi lần promote.
+        kept_name = _registry_display_name(dialect)
+
         model_entry = {
             "id": model_id,
-            "name": display_name,
+            "name": kept_name or display_name,
             "checkpoint_path": checkpoint_rel_path,  # relative to config dir, e.g. "checkpoints/x.pt"
             "language": language,
             "dialect": dialect,
@@ -631,13 +658,12 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
             }
         }
 
-        if "models" not in registry_data:
-            registry_data["models"] = []
-
-        # Remove existing model with same ID
-        registry_data["models"] = [m for m in registry_data["models"] if m.get("id") != model_id]
-
-        # Add new model
+        # Thay thế mọi entry cũ của dialect này (kể cả entry "training_<job_id>"
+        # do các bản promote trước để lại) — một dialect = một model.
+        registry_data["models"] = [
+            m for m in existing
+            if m.get("id") != model_id and m.get("dialect") != dialect
+        ]
         registry_data["models"].append(model_entry)
 
         # Write updated registry
@@ -651,7 +677,8 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
     return False
 
 
-def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version_string: str) -> bool:
+def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version_string: str,
+                                    dialect: str = "", language: str = "vn") -> bool:
     """Notify realtime service to reload/add model via /reload endpoint"""
     realtime_service_url = os.getenv("REALTIME_SERVICE_URL", "http://realtime_service:8010")
 
@@ -663,14 +690,18 @@ def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version
                     "model_id": model_id,
                     "checkpoint_path": checkpoint_path,
                     "version_string": version_string,
-                    "language": "vn",
+                    "dialect": dialect or model_id,
+                    "language": language,
                 },
             )
             if response.status_code == 200:
                 logger.info("Realtime service reloaded model: %s", model_id)
                 return True
             else:
-                logger.warning("Realtime service reload failed: %s", response.status_code)
+                logger.warning(
+                    "Realtime service reload failed: status=%s body=%s",
+                    response.status_code, response.text[:500],
+                )
                 return False
     except Exception as e:
         logger.error("Failed to notify realtime service: %s", e)
@@ -1095,7 +1126,12 @@ async def promote_training_job(
             ),
         )
 
-    model_id = f"training_{job_id}"
+    # Slot realtime được đánh khóa theo dialect (giống lúc startup load từ DB):
+    # promote model mới cho "hoa-de" sẽ thay model "hoa-de" đang chạy, không
+    # thêm một lựa chọn trùng vào tab nhận diện.
+    dialect = (job.config.dialects[0] if job.config.dialects else "multi")
+    language = (job.config.languages[0] if job.config.languages else "vn")
+    model_id = dialect
 
     # 1. Copy đúng checkpoint của job vào thư mục realtime service đọc được
     deployed_path = await asyncio.to_thread(
@@ -1107,9 +1143,7 @@ async def promote_training_job(
     fname = Path(deployed_path).name
 
     # 2. Ghi models.json (bền vững — realtime restart vẫn load được)
-    dialect = (job.config.dialects[0] if job.config.dialects else "multi")
-    language = (job.config.languages[0] if job.config.languages else "vn")
-    display_name = f"{model_type.upper()} {dialect} ({job_id})"
+    display_name = _registry_display_name(dialect) or f"{model_type.upper()} {dialect} ({job_id})"
     registry_updated = await asyncio.to_thread(
         _update_registry,
         model_id,
@@ -1126,6 +1160,8 @@ async def promote_training_job(
         model_id,
         f"{REALTIME_CONTAINER_CHECKPOINTS}/{fname}",
         f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        dialect,
+        language,
     )
 
     # 4. Ghi nhận promotion. checkpoint_path trỏ sang bản deployed để:
@@ -1135,11 +1171,20 @@ async def promote_training_job(
     job.checkpoint_path = deployed_path
     await _persist_job(job)
 
-    # 5. Backup bản promoted lên Google Drive (background, best-effort)
+    # 5. Publish bản promoted lên Google Drive (background, best-effort):
+    #    models/<tên model>/Deploy <thời điểm>/ gồm checkpoint + manifest inference
     try:
         from app.training_tasks import backup_promoted_checkpoint_task
 
-        backup_promoted_checkpoint_task.delay(job_id=job_id, checkpoint_path=deployed_path)
+        backup_promoted_checkpoint_task.delay(
+            job_id=job_id,
+            checkpoint_path=deployed_path,
+            model_id=model_id,
+            display_name=display_name,
+            dialect=dialect,
+            language=language,
+            promoted_at=job.promoted_at,
+        )
         logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
     except Exception as e:
         logger.warning("job=%s GDrive backup dispatch failed (promotion vẫn OK): %s", job_id, e)
