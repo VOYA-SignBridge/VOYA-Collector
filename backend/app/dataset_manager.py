@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from app.processing.utils import atomic_write_json
 from app.processing.quality import parse_hands_required  # re-exported for callers
+# Single source of truth for alphabet slug rules — see class_registry.
+from app.processing.class_registry import _VN_ALPHABET_SLUG, is_alphabet_dialect
 
 from app.config import settings
 
@@ -54,7 +56,13 @@ LABEL_FIELDS = [
 ]
 
 
-def slugify(text: str, maxlen: int = 40) -> str:
+def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
+    """ASCII slug. preserve_vn_letters keeps Ă/Â/Đ/Ê/Ô/Ơ/Ư distinct from their
+    base letter for the fingerspelling alphabet (see class_registry.slugify)."""
+    if preserve_vn_letters:
+        key = (text or "").strip().lower()
+        if key in _VN_ALPHABET_SLUG:
+            return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
@@ -523,7 +531,7 @@ def register_class(
     language = language.lower().strip()
     dialect = dialect.lower().strip()
 
-    slug = slugify(label_original)
+    slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dialect))
 
     if is_common_global:
         language_key = "global"
@@ -675,7 +683,7 @@ def get_or_register_class(
     dia = normalize_dialect(dia_input)
     if not dia:
         dia = "common" if is_common_language else ""
-    slug = slugify(label_original)
+    slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dia))
 
     # Search existing folder under the target hierarchy
     def _find_legacy_folder(base: Path) -> Optional[str]:

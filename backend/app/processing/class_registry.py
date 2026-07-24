@@ -21,8 +21,36 @@ LABELS_DIR = DATASET_ROOT / "labels"
 LABELS_MASTER_CSV = DATASET_ROOT / "labels.csv"
 
 # ---- Utils ----
-def slugify(text: str, maxlen: int = 30) -> str:
-    """Convert text (possibly with diacritics) to safe ASCII slug."""
+
+# Dialects where a single Vietnamese letter's diacritic IS the class distinction
+# (fingerspelling alphabet). For these, Ă/Â/Đ/Ê/Ô/Ơ/Ư must NOT collapse into
+# A/D/E/O/U the way the default diacritic-stripping slug does.
+ALPHABET_DIALECTS = {"bang-chu-cai"}
+
+# Telex-style ASCII slug for the 7 diacritic letters: keeps them filesystem-safe
+# AND distinct from their base letter (Đ -> "dd" stays separate from D -> "d").
+_VN_ALPHABET_SLUG = {
+    "ă": "aw", "â": "aa", "đ": "dd", "ê": "ee",
+    "ô": "oo", "ơ": "ow", "ư": "uw",
+}
+
+
+def is_alphabet_dialect(dialect: str) -> bool:
+    return (dialect or "").strip().lower() in ALPHABET_DIALECTS
+
+
+def slugify(text: str, maxlen: int = 30, preserve_vn_letters: bool = False) -> str:
+    """Convert text (possibly with diacritics) to safe ASCII slug.
+
+    By default Vietnamese diacritics are stripped — correct for word-level signs,
+    where the sign for "tôm" does not depend on the tone mark. Pass
+    preserve_vn_letters=True for the fingerspelling alphabet, where Ă/Â/Đ/Ê/Ô/Ơ/Ư
+    are DISTINCT letters and must not collapse into A/D/E/O/U.
+    """
+    if preserve_vn_letters:
+        key = (text or "").strip().lower()
+        if key in _VN_ALPHABET_SLUG:
+            return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
@@ -209,7 +237,7 @@ class ClassRegistry:
         Register a new class or return existing.
         If force_new=True, always create a new class_uid even if similar exists.
         """
-        slug = slugify(label_original)
+        slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dialect))
         
         # Check if already exists
         if not force_new:

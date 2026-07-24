@@ -70,7 +70,7 @@ class DistanceAwareGCNLayer(nn.Module):
 
 class HandGCNModel(SignLanguageModel):
     """
-    Hierarchical Distance-aware Graph Convolutional Network (HD-GCN) for Hands.
+    HandGCN — a hierarchical distance-aware Graph Convolutional Network for hands.
     
     Architecture:
     - Treats hand keypoints as graph nodes.
@@ -91,7 +91,7 @@ class HandGCNModel(SignLanguageModel):
         max_distance: int = 2,
         **kwargs,
     ):
-        super().__init__(input_dim, output_dim, name="HD-GCN")
+        super().__init__(input_dim, output_dim, name="HandGCN")
         self.num_nodes = num_nodes
         self.gcn_channels = gcn_channels
         self.num_gcn_layers = num_gcn_layers
@@ -293,7 +293,7 @@ class HandGCNModel(SignLanguageModel):
 
     def get_config(self) -> Dict[str, Any]:
         return {
-            "model": "HD-GCN",
+            "model": "HandGCN",
             "input_dim": self.input_dim,
             "output_dim": self.output_dim,
             "num_nodes": self.num_nodes,

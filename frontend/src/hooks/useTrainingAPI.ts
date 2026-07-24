@@ -13,6 +13,8 @@ export interface DatasetInfo {
   languages: string[];
   dialects: Record<string, string[]>;
   class_distribution: Record<string, number>;
+  // Số mẫu theo từng phương ngữ — dùng cho bước chia tập (DataSplitVisualization)
+  samples_by_dialect?: Record<string, number>;
   split_info?: { train: number; val: number; test: number };
   // Optional mapping from class uid/slug -> human label
   label_map?: Record<string, string>;
