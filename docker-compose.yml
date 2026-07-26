@@ -31,6 +31,10 @@ services:
       - ./backend/realtime_service:/app/realtime_service
       - ./processed/shared:/app/processed/shared:ro
       - ./processed/analysis:/app/processed/analysis:ro
+      # Model architectures, so promoted non-TCN checkpoints can be served by the
+      # SAME class that trained them. Self-contained (torch only); `processed` and
+      # `processed.train_utils` resolve as namespace packages.
+      - ./processed/train_utils/models:/app/processed/train_utils/models:ro
     restart: unless-stopped
     networks:
       voya_network:

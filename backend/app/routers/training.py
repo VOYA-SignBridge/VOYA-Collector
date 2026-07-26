@@ -1106,8 +1106,9 @@ async def promote_training_job(
     if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
         raise HTTPException(status_code=404, detail="Không tìm thấy checkpoint của job này")
 
-    # Load checkpoint để validate model type — realtime service hiện chỉ
-    # hỗ trợ kiến trúc TCN (model_loader từ chối model_type khác)
+    # Load checkpoint để validate model type. Realtime service dựng kiến trúc
+    # ngoài TCN từ chính registry đã huấn luyện nó, nên chỉ cần chặn những
+    # model_type không nhận ra — /reload vẫn validate + warmup trước khi swap.
     src_path = Path(job.checkpoint_path)
     try:
         ckpt = await asyncio.to_thread(
@@ -1117,11 +1118,12 @@ async def promote_training_job(
         raise HTTPException(status_code=500, detail=f"Không đọc được checkpoint: {e}")
 
     model_type = str(ckpt.get("model_type", "TCN")).replace(" (legacy)", "").strip()
-    if model_type.lower() != "tcn":
+    if model_type.lower() not in _MODEL_NAME_TO_REGISTRY_KEY:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Realtime service hiện chỉ hỗ trợ kiến trúc TCN — model này là '{model_type}'. "
+                f"Không nhận ra kiến trúc '{model_type}' — realtime service hỗ trợ: "
+                f"{', '.join(sorted(set(_MODEL_NAME_TO_REGISTRY_KEY.values())))}. "
                 "Model vẫn dùng được qua nút Test Model ở Step 7."
             ),
         )

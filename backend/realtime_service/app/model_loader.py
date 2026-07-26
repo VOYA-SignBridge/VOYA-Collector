@@ -5,6 +5,7 @@ import inspect
 import math
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -246,11 +247,77 @@ class TCNClassifier(nn.Module):
         return logits
 
 
+# Checkpoint `model_type` values (from model.get_model_name()) → registry keys.
+# Mirrors app/routers/training.py so the backend and this service agree on what a
+# checkpoint claims to be.
+_MODEL_NAME_TO_REGISTRY_KEY = {
+    "cnn": "cnn",
+    "lstm": "lstm",
+    "bigru + attention": "bigru_attention",
+    "bigru attention": "bigru_attention",
+    "bigru_attention": "bigru_attention",
+    "handgcn": "handgcn",
+    "hdgcn": "handgcn",
+    "hd-gcn": "handgcn",   # model.get_model_name() returns "HD-GCN"
+    "hd_gcn": "handgcn",
+    "tcn": "tcn",
+}
+
+
+def _import_models_registry():
+    """Import the training model package mounted at /app/processed/train_utils/models.
+
+    Must be a real package import, not spec_from_file_location: the package uses
+    relative imports internally. `processed` and `processed.train_utils` resolve
+    as namespace packages, so only the leaf `models/` directory needs mounting.
+    """
+    import importlib
+
+    root = os.getenv("MODEL_ARCHS_ROOT", "/app")
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return importlib.import_module("processed.train_utils.models")
+
+
+def _build_from_registry(registry_key: str, ckpt: Dict[str, Any], model_type: str) -> nn.Module:
+    """Build a non-TCN architecture from the same package that trained it.
+
+    Deliberately no fallback to TCN: mismatched weights would surface as a
+    confusing state_dict error instead of a clear "this architecture is
+    unavailable" one.
+    """
+    try:
+        models_module = _import_models_registry()
+        model_class = models_module.get_model_class(registry_key)
+        return model_class.from_config(
+            input_dim=int(ckpt.get("feature_dim", 126)),
+            output_dim=int(ckpt.get("num_classes")),
+            config=ckpt.get("model_config") or {},
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"cannot build '{model_type}' model: the training model package is "
+            f"unavailable or incompatible ({exc}). Mount "
+            f"processed/train_utils/models into the realtime container."
+        ) from exc
+
+
 def build_model_from_checkpoint(ckpt: Dict[str, Any]) -> nn.Module:
     model_type = str(ckpt.get("model_type") or "").strip()
-    if model_type != "TCN":
-        raise ValueError(f"unsupported model_type for Step 0: {model_type!r}")
+    registry_key = _MODEL_NAME_TO_REGISTRY_KEY.get(
+        model_type.lower().replace(" (legacy)", "").strip()
+    )
+    if registry_key is None:
+        raise ValueError(f"unsupported model_type: {model_type!r}")
 
+    if registry_key != "tcn":
+        return _build_from_registry(registry_key, ckpt, model_type)
+
+    # TCN keeps the inline definition below rather than the registry. It mirrors
+    # processed/train_utils/models/tcn.py including the temporal_pool head, is
+    # what every currently promoted model is served by, and works even when the
+    # model package is not mounted — so the serving path for existing models is
+    # unchanged by multi-architecture support.
     cfg = ckpt.get("model_config")
     if not isinstance(cfg, dict):
         raise ValueError("model_config must be a dict")
