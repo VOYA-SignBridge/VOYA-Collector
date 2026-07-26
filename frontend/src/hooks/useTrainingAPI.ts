@@ -84,6 +84,46 @@ export interface JobEvaluation {
   labels?: string[];
 }
 
+// GET /training/jobs/{id}/provenance
+export interface ProvenanceCheck {
+  id: string;      // C1/C5/C10/C11/C13 — same ids as scripts/research_validity.py
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface JobProvenance {
+  available: boolean;
+  job_id?: string;
+  code?: {
+    git_commit: string;
+    seed: number | null;
+    run_purpose: string;
+    run_status: string;
+    determinism: string;
+    created_at: string;
+  };
+  data?: {
+    dataset_version: string;
+    split_version: string;
+    dataset_manifest_checksum: string;
+    recognition_profile: string;
+    vocabulary_schema_version: string;
+  };
+  model?: {
+    model_type: string;
+    num_classes: number | null;
+    seq_len: number | null;
+    feature_dim: number | null;
+    normalization_version: string;
+    storage_contract_version: string;
+  };
+  model_selection?: Record<string, unknown>;
+  runtime_env?: Record<string, unknown>;
+  checks?: ProvenanceCheck[];
+  reproducible?: boolean;
+}
+
 // POST /training/jobs/{id}/promote
 export interface PromoteResponse {
   job: TrainingJob;
@@ -288,6 +328,19 @@ export function useTrainingAPI() {
   }, []);
 
   // Per-class breakdown + confusion matrix trên test set (Step 7)
+  const getJobProvenance = useCallback(async (jobId: string): Promise<JobProvenance | null> => {
+    try {
+      const response = await fetch(`${API_URL}/jobs/${jobId}/provenance`, { headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch provenance: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
   const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
     try {
       const response = await fetch(`${API_URL}/jobs/${jobId}/evaluation`, { headers: authHeaders() });
@@ -336,6 +389,7 @@ export function useTrainingAPI() {
     cancelTraining,
     promoteJob,
     getJobEvaluation,
+    getJobProvenance,
     deleteJob,
     useWebSocketProgress,
   };

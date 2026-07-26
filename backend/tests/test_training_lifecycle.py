@@ -234,6 +234,103 @@ def test_promote_rejects_an_unrecognized_architecture(client, tmp_path):
     assert "Transformer" in response.json()["detail"]
 
 
+def _reproducible_ckpt(**overrides) -> dict:
+    ckpt = {
+        "git_commit": "0475b78cabc9c35b3ab9345097a774f8b78818be",
+        "seed": 42,
+        "run_purpose": "research",
+        "run_status": "completed",
+        "determinism": {
+            "seed": 42,
+            "cudnn_deterministic": True,
+            "deterministic_algorithms": True,
+            "warnings": [],
+        },
+        "dataset_version": "isds2026_v6",
+        "split_version": "hoa_de_loso_v5/test_S001",
+        "dataset_manifest_checksum": "a95bc6d1ed3b",
+        "model_type": "TCN",
+        "num_classes": 7,
+        "runtime_env": {
+            "python_version": "3.11.15",
+            "pytorch_version": "2.0.0+cu117",
+            "numpy_version": "1.26.2",
+            "device": "cuda",
+        },
+        "model_selection": {
+            "criterion": "val_macro_f1",
+            "restored_best_state": True,
+            "best_epoch": 10,
+        },
+    }
+    ckpt.update(overrides)
+    return ckpt
+
+
+def test_provenance_is_unavailable_without_a_checkpoint(client):
+    _seed_job("j-nockpt", "completed")
+    body = client.get("/training/jobs/j-nockpt/provenance").json()
+    assert body["available"] is False
+
+
+def test_provenance_is_unavailable_for_a_pre_provenance_checkpoint(client, tmp_path):
+    """Older checkpoints predate provenance recording — say so, don't show blanks."""
+    _promotable_job(tmp_path, "j-legacy")
+    with patch.object(training_module.torch, "load", return_value={"model_type": "TCN"}):
+        body = client.get("/training/jobs/j-legacy/provenance").json()
+    assert body["available"] is False
+
+
+def test_provenance_reports_a_fully_reproducible_run(client, tmp_path):
+    _promotable_job(tmp_path, "j-good")
+    with patch.object(training_module.torch, "load", return_value=_reproducible_ckpt()):
+        body = client.get("/training/jobs/j-good/provenance").json()
+
+    assert body["available"] is True
+    assert body["reproducible"] is True
+    assert body["code"]["seed"] == 42
+    assert body["data"]["dataset_version"] == "isds2026_v6"
+    assert all(check["ok"] for check in body["checks"])
+
+
+def test_provenance_flags_a_smoke_test_run_as_not_reproducible(client, tmp_path):
+    """The distinction the panel exists to make: usable model, unusable numbers."""
+    _promotable_job(tmp_path, "j-smoke")
+    ckpt = _reproducible_ckpt(run_purpose="smoke_test", dataset_manifest_checksum="")
+
+    with patch.object(training_module.torch, "load", return_value=ckpt):
+        body = client.get("/training/jobs/j-smoke/provenance").json()
+
+    assert body["reproducible"] is False
+    failed = {c["id"] for c in body["checks"] if not c["ok"]}
+    assert failed == {"C1", "C5"}
+
+
+def test_provenance_values_are_scalars_the_ui_can_render(client, tmp_path):
+    """Regression: determinism is a dict in the checkpoint and rendered as
+    '[object Object]' if passed through untouched."""
+    _promotable_job(tmp_path, "j-scalar")
+    with patch.object(training_module.torch, "load", return_value=_reproducible_ckpt()):
+        body = client.get("/training/jobs/j-scalar/provenance").json()
+
+    for group in ("code", "data", "model"):
+        nested = [k for k, v in body[group].items() if isinstance(v, (dict, list))]
+        assert not nested, f"{group} still exposes nested objects: {nested}"
+    assert body["code"]["determinism"] == "đầy đủ"
+
+
+def test_provenance_summarizes_partial_determinism_with_warnings(client, tmp_path):
+    _promotable_job(tmp_path, "j-partial")
+    ckpt = _reproducible_ckpt(
+        determinism={"cudnn_deterministic": True, "deterministic_algorithms": False,
+                     "warnings": ["cublas workspace unset"]}
+    )
+    with patch.object(training_module.torch, "load", return_value=ckpt):
+        body = client.get("/training/jobs/j-partial/provenance").json()
+
+    assert body["code"]["determinism"] == "một phần (1 cảnh báo)"
+
+
 @pytest.mark.parametrize("model_type", ["TCN", "HD-GCN", "CNN", "LSTM", "BiGRU + Attention"])
 def test_promote_accepts_every_trained_architecture(client, tmp_path, monkeypatch, model_type):
     """The realtime service builds each architecture from the training registry.

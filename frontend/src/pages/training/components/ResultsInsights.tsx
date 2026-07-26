@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTrainingAPI } from '../../../hooks/useTrainingAPI';
-import type { JobEvaluation, PromoteResponse, TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
+import type { JobEvaluation, JobProvenance, PromoteResponse, TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
 import TestTrainedModelModal from './TestTrainedModelModal';
 import {
   ClipboardCheckIcon,
@@ -30,13 +30,57 @@ const prettyLabel = (labelKey: string): string => {
   return parts[parts.length - 1] || labelKey;
 };
 
+const ProvenanceGroup: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div>
+    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{title}</p>
+    <div className="space-y-1.5">{children}</div>
+  </div>
+);
+
+/** One provenance field. Renders "chưa ghi" rather than an empty cell, so a
+ *  missing value reads as a fact about the run instead of a broken UI. */
+const ProvenanceRow: React.FC<{
+  label: string;
+  value?: string | number | null;
+  mono?: boolean;
+  truncate?: boolean;
+  copyable?: boolean;
+}> = ({ label, value, mono, truncate, copyable }) => {
+  const text = value === null || value === undefined || value === '' ? '' : String(value);
+  const shown = text && truncate && text.length > 12 ? `${text.slice(0, 12)}…` : text;
+
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-sm">
+      <span className="text-slate-600 shrink-0">{label}:</span>
+      <span className="flex items-center gap-1 min-w-0">
+        <span
+          className={`${mono ? 'font-mono text-xs' : ''} ${text ? 'text-slate-900' : 'italic text-slate-400'} truncate`}
+          title={text || undefined}
+        >
+          {shown || 'chưa ghi'}
+        </span>
+        {copyable && text && (
+          <button
+            onClick={() => navigator.clipboard.writeText(text)}
+            className="shrink-0 text-slate-400 hover:text-slate-700 transition"
+            aria-label={`Sao chép ${label}`}
+          >
+            <CopyIcon className="h-3 w-3" />
+          </button>
+        )}
+      </span>
+    </div>
+  );
+};
+
 const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
   const [showTestModal, setShowTestModal] = useState(false);
   const { isAdmin } = useAuth();
-  const { getJobEvaluation } = useTrainingAPI();
+  const { getJobEvaluation, getJobProvenance } = useTrainingAPI();
   const [promoting, setPromoting] = useState(false);
   const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
   const [evaluation, setEvaluation] = useState<JobEvaluation | null>(null);
+  const [provenance, setProvenance] = useState<JobProvenance | null>(null);
 
   useEffect(() => {
     let stale = false;
@@ -44,11 +88,14 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
       getJobEvaluation(job.id).then((ev) => {
         if (!stale && ev?.available) setEvaluation(ev);
       });
+      getJobProvenance(job.id).then((pv) => {
+        if (!stale && pv?.available) setProvenance(pv);
+      });
     }
     return () => {
       stale = true;
     };
-  }, [job?.id, job?.status, getJobEvaluation]);
+  }, [job?.id, job?.status, getJobEvaluation, getJobProvenance]);
 
   if (!metrics || metrics.length === 0) {
     return (
@@ -363,6 +410,90 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
           )}
         </div>
       </div>
+
+      {/* Provenance — what this model can be traced back to */}
+      {provenance?.available && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
+              Nguồn gốc &amp; khả năng tái lập
+            </h4>
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                provenance.reproducible
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+              }`}
+            >
+              {provenance.reproducible ? (
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+              ) : (
+                <AlertTriangleIcon className="h-3.5 w-3.5" />
+              )}
+              {provenance.reproducible ? 'Đủ điều kiện tái lập' : 'Chưa đủ điều kiện tái lập'}
+            </span>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ProvenanceGroup title="Mã nguồn & lần chạy">
+              <ProvenanceRow label="Commit" value={provenance.code?.git_commit} mono truncate copyable />
+              <ProvenanceRow label="Seed" value={provenance.code?.seed} mono />
+              <ProvenanceRow label="Mục đích" value={provenance.code?.run_purpose} />
+              <ProvenanceRow label="Determinism" value={provenance.code?.determinism} />
+            </ProvenanceGroup>
+
+            <ProvenanceGroup title="Dữ liệu">
+              <ProvenanceRow label="Phiên bản dataset" value={provenance.data?.dataset_version} />
+              <ProvenanceRow label="Phiên bản split" value={provenance.data?.split_version} />
+              <ProvenanceRow
+                label="Checksum manifest"
+                value={provenance.data?.dataset_manifest_checksum}
+                mono
+                truncate
+              />
+              <ProvenanceRow label="Chuẩn hoá" value={provenance.model?.normalization_version} />
+            </ProvenanceGroup>
+
+            <ProvenanceGroup title="Môi trường chạy">
+              <ProvenanceRow label="Python" value={provenance.runtime_env?.python_version as string} />
+              <ProvenanceRow label="PyTorch" value={provenance.runtime_env?.pytorch_version as string} />
+              <ProvenanceRow label="NumPy" value={provenance.runtime_env?.numpy_version as string} />
+              <ProvenanceRow label="Thiết bị" value={provenance.runtime_env?.device as string} />
+            </ProvenanceGroup>
+          </div>
+
+          {/* Reproducibility criteria — same ids the offline audit script uses */}
+          {provenance.checks && provenance.checks.length > 0 && (
+            <div className="mt-4 border-t border-slate-200 pt-3">
+              <p className="text-xs text-slate-500 mb-2">
+                Tiêu chí hợp lệ nghiên cứu (mã trùng với <code className="font-mono">scripts/research_validity.py</code>)
+              </p>
+              <ul className="space-y-1.5">
+                {provenance.checks.map((check) => (
+                  <li key={check.id} className="flex items-start gap-2 text-sm">
+                    {check.ok ? (
+                      <CheckCircleIcon className="h-4 w-4 shrink-0 mt-0.5 text-emerald-600" />
+                    ) : (
+                      <AlertTriangleIcon className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                    )}
+                    <span className={check.ok ? 'text-slate-700' : 'text-amber-900'}>
+                      <span className="font-mono text-xs text-slate-500 mr-1.5">{check.id}</span>
+                      {check.label}
+                      <span className="text-slate-500"> — {check.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {!provenance.reproducible && (
+                <p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+                  Model vẫn dùng được để thử nghiệm, nhưng chưa đủ dữ kiện để tái lập chính xác
+                  lần chạy này. Không nên dùng con số của nó làm kết quả báo cáo.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Training Complete Message */}
       <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3">

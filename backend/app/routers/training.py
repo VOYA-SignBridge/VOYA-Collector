@@ -972,6 +972,145 @@ async def get_job_evaluation(
     return {"available": True, "job_id": job_id, **evaluation}
 
 
+def _determinism_summary(determinism: Any) -> str:
+    """Gộp khối determinism thành một dòng đọc được.
+
+    train_tcn.py ghi nó dạng dict (cudnn_deterministic, deterministic_algorithms,
+    cublas_workspace_config, warnings). Giao diện chỉ cần biết: đã bật đủ chưa,
+    và có cảnh báo nào không.
+    """
+    if not isinstance(determinism, dict):
+        return str(determinism or "")
+
+    full = bool(determinism.get("cudnn_deterministic")) and bool(
+        determinism.get("deterministic_algorithms")
+    )
+    warnings = determinism.get("warnings") or []
+    text = "đầy đủ" if full else "một phần"
+    if warnings:
+        text += f" ({len(warnings)} cảnh báo)"
+    return text
+
+
+def _provenance_checks(ckpt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Các tiêu chí tái lập trả lời được CHỈ từ checkpoint.
+
+    Dùng lại đúng mã C1/C5/C10/C11/C13 của scripts/research_validity.py để một
+    lần chạy được đánh giá giống nhau dù xem trên web hay chạy audit bằng script.
+    """
+    runtime_env = ckpt.get("runtime_env") or {}
+    selection = ckpt.get("model_selection") or {}
+    missing_env = [
+        k for k in ("python_version", "pytorch_version", "numpy_version", "device")
+        if not (runtime_env or {}).get(k)
+    ]
+    purpose = str(ckpt.get("run_purpose") or "")
+
+    return [
+        {
+            "id": "C1",
+            "label": "Chạy nghiên cứu (không phải smoke test)",
+            "ok": purpose == "research",
+            "detail": f"run_purpose = '{purpose or 'không ghi'}'",
+        },
+        {
+            "id": "C5",
+            "label": "Có checksum manifest dữ liệu",
+            "ok": bool(str(ckpt.get("dataset_manifest_checksum") or "").strip()),
+            "detail": str(ckpt.get("dataset_manifest_checksum") or "") or "trống",
+        },
+        {
+            "id": "C10",
+            "label": "Ghi đủ môi trường chạy",
+            "ok": not missing_env,
+            "detail": "đầy đủ" if not missing_env else f"thiếu: {', '.join(missing_env)}",
+        },
+        {
+            "id": "C11",
+            "label": "Ghim được commit sinh ra model",
+            "ok": bool(str(ckpt.get("git_commit") or "").strip()),
+            "detail": str(ckpt.get("git_commit") or "") or "trống",
+        },
+        {
+            "id": "C13",
+            "label": "Metrics lấy từ checkpoint val tốt nhất",
+            "ok": bool(selection.get("restored_best_state")),
+            "detail": (
+                f"tiêu chí {selection.get('criterion')}, epoch {selection.get('best_epoch')}"
+                if selection else "không ghi model_selection"
+            ),
+        },
+    ]
+
+
+@router.get("/jobs/{job_id}/provenance")
+async def get_job_provenance(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> dict:
+    """Nguồn gốc & khả năng tái lập của model (Step 7).
+
+    Đọc thẳng từ checkpoint chứ không từ bảng job: checkpoint mới là thứ được
+    promote, xuất bản và nạp lại — nên cái nó mang theo mới là cái thực sự tái
+    lập được. Trả {"available": false} cho job cũ chưa ghi provenance, giống
+    cách endpoint evaluation xử lý.
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
+        return {"available": False, "job_id": job_id}
+
+    try:
+        ckpt = await asyncio.to_thread(
+            torch.load, str(job.checkpoint_path), map_location="cpu", weights_only=False
+        )
+    except Exception as e:
+        logger.warning("job=%s không đọc được provenance: %s", job_id, e)
+        return {"available": False, "job_id": job_id}
+
+    if not isinstance(ckpt, dict) or "git_commit" not in ckpt:
+        # Checkpoint có trước khi provenance được ghi — nói rõ thay vì hiện ô trống.
+        return {"available": False, "job_id": job_id}
+
+    checks = _provenance_checks(ckpt)
+    return {
+        "available": True,
+        "job_id": job_id,
+        "code": {
+            "git_commit": ckpt.get("git_commit") or "",
+            "seed": ckpt.get("seed"),
+            "run_purpose": ckpt.get("run_purpose") or "",
+            "run_status": ckpt.get("run_status") or "",
+            # determinism là dict (cudnn/cublas/algorithms) — rút thành một câu
+            # đọc được thay vì đổ nguyên object ra giao diện.
+            "determinism": _determinism_summary(ckpt.get("determinism")),
+            "created_at": ckpt.get("created_at") or "",
+        },
+        "data": {
+            "dataset_version": ckpt.get("dataset_version") or "",
+            "split_version": ckpt.get("split_version") or "",
+            "dataset_manifest_checksum": ckpt.get("dataset_manifest_checksum") or "",
+            "recognition_profile": ckpt.get("recognition_profile") or "",
+            "vocabulary_schema_version": ckpt.get("vocabulary_schema_version") or "",
+        },
+        "model": {
+            "model_type": ckpt.get("model_type") or "",
+            "num_classes": ckpt.get("num_classes"),
+            "seq_len": ckpt.get("seq_len"),
+            "feature_dim": ckpt.get("feature_dim"),
+            "normalization_version": ckpt.get("normalization_version") or "",
+            "storage_contract_version": ckpt.get("storage_contract_version") or "",
+        },
+        "model_selection": ckpt.get("model_selection") or {},
+        "runtime_env": ckpt.get("runtime_env") or {},
+        "checks": checks,
+        "reproducible": all(c["ok"] for c in checks),
+    }
+
+
 @router.get("/queue/status")
 async def get_queue_status(
     current_user: Dict[str, Any] = Depends(get_current_user),
