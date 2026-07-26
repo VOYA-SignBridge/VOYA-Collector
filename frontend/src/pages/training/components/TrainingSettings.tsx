@@ -83,7 +83,9 @@ const MODEL_OPTIONS: ModelOption[] = [
   { id: 'cnn', label: 'CNN', description: 'Convolutional Neural Network' },
   { id: 'lstm', label: 'LSTM', description: 'Long Short-Term Memory' },
   { id: 'bigru_attention', label: 'BiGRU + Attention', description: 'Bidirectional GRU with Attention' },
-  { id: 'hdgcn', label: 'HDGCN', description: 'Hand Dynamics Graph Convolutional Network' },
+  // id stays 'hdgcn': it is the wire value the API expects and what existing job
+  // records store. Only the display name is normalized to HandGCN.
+  { id: 'hdgcn', label: 'HandGCN', description: 'Hand Skeleton Graph Convolutional Network' },
 ];
 
 const DEFAULT_CONFIG: TrainingConfig = {
