@@ -275,6 +275,19 @@ class TrainingConfig(BaseModel):
     levels: int = 3
     kernel_size: int = 5
 
+    # Chế độ nghiên cứu. Mặc định smoke_test là CỐ Ý (xem scripts/research_validity.py
+    # C1): job thăm dò dựng subset tạm từ bộ lọc dialect, nhanh nhưng không truy
+    # ngược được về một phiên bản dữ liệu cố định nên không trích dẫn được.
+    # Đặt run_purpose="research" + split_version để chạy trên split đã versioned;
+    # khi đó dialects/languages bị bỏ qua vì split đã định nghĩa sẵn tập dữ liệu.
+    run_purpose: str = "smoke_test"
+    split_version: Optional[str] = None
+    # Suy ra từ metadata của split ở phía server, không nhận từ client — nếu để
+    # client tự khai, checkpoint có thể khai một dataset_version khác với dữ
+    # liệu thực sự đã train.
+    dataset_version: Optional[str] = None
+    recognition_profile: Optional[str] = None
+
 
 class TrainingJob(BaseModel):
     """Thông tin training job"""
@@ -560,6 +573,67 @@ def _trainable_dialects_from_splits() -> Dict[str, int]:
     return {d: len(classes) for d, classes in counts.items()}
 
 
+def _research_splits() -> List[Dict[str, Any]]:
+    """Các split đã versioned dùng được cho chế độ nghiên cứu.
+
+    Chỉ nhận split "phẳng" (train/val/test ngay trong thư mục) — các bộ LOSO /
+    matched-leak chia theo fold con là giao thức đánh giá nhiều lần chạy, không
+    phải một job huấn luyện đơn lẻ, nên không liệt kê ở đây.
+
+    Bỏ qua split có valid_for_research=false: train_tcn.py sẽ từ chối chúng ở
+    _enforce_research_preconditions, nên hiện ra chỉ để người dùng chọn rồi
+    thất bại là vô ích.
+    """
+    versions_dir = WORKSPACE_ROOT / "processed" / "splits" / "versions"
+    if not versions_dir.is_dir():
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for d in sorted(versions_dir.iterdir()):
+        meta_path = d / "split_metadata.json"
+        if not d.is_dir() or not (d / "train.csv").exists() or not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("[SPLITS] bỏ qua %s: metadata không đọc được (%s)", d.name, exc)
+            continue
+
+        if not meta.get("valid_for_research"):
+            continue
+        checksum = str(meta.get("dataset_manifest_checksum") or "").strip()
+        if not checksum:
+            continue
+
+        # dataset_version suy ra từ tên manifest: .../dataset_manifest_isds2026_v5.csv
+        manifest = str(meta.get("dataset_manifest") or "")
+        dataset_version = ""
+        stem = Path(manifest).stem
+        if stem.startswith("dataset_manifest_"):
+            dataset_version = stem[len("dataset_manifest_"):]
+
+        counts = meta.get("counts") or {}
+        out.append({
+            "split_version": d.name,
+            "dataset_version": dataset_version,
+            "recognition_profile": str(meta.get("recognition_profile") or ""),
+            "split_mode": str(meta.get("split_mode") or ""),
+            "num_classes": meta.get("num_classes"),
+            "counts": {k: counts.get(k) for k in ("train", "val", "test")},
+            "seed": meta.get("seed"),
+            "dataset_manifest_checksum": checksum,
+        })
+    return out
+
+
+@router.get("/splits")
+async def list_research_splits(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    """Split đã versioned mà chế độ nghiên cứu có thể chạy trên đó."""
+    return await asyncio.to_thread(_research_splits)
+
+
 def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optional[Path] = None) -> Optional[str]:
     """Copy checkpoint (+ JSON sidecar) sang thư mục deployment."""
     try:
@@ -792,9 +866,33 @@ async def start_training(
     Tạo job ID, thêm vào queue, return job info
     """
     try:
+        if config.run_purpose == "research":
+            # Chặn sớm với thông báo rõ, thay vì để train_tcn.py SystemExit ở
+            # _enforce_research_preconditions sau khi job đã vào hàng đợi.
+            if not config.split_version:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Chế độ nghiên cứu cần chọn một split đã versioned.",
+                )
+            available = {s["split_version"]: s for s in _research_splits()}
+            chosen = available.get(config.split_version)
+            if not chosen:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Split '{config.split_version}' không dùng được cho nghiên cứu "
+                        f"(không tồn tại, thiếu checksum manifest, hoặc valid_for_research=false). "
+                        f"Đang dùng được: {sorted(available) or 'chưa có'}."
+                    ),
+                )
+            # Khoá provenance theo đúng split đã chọn.
+            config.dataset_version = chosen["dataset_version"]
+            config.recognition_profile = chosen["recognition_profile"]
+
         # Chặn sớm: lựa chọn dialect không có đủ dữ liệu trong split hiện tại sẽ
         # khiến subprocess train fail âm thầm (rc=1). Báo lỗi rõ ràng ngay đây.
-        selected_dialects = list(config.dialects or [])
+        # Chế độ nghiên cứu không lọc theo dialect — split đã định nghĩa dữ liệu.
+        selected_dialects = [] if config.run_purpose == "research" else list(config.dialects or [])
         if selected_dialects:
             trainable = _trainable_dialects_from_splits()
             empty = [d for d in selected_dialects if trainable.get(d, 0) < 2]

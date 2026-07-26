@@ -33,6 +33,22 @@ export interface TrainingConfig {
   channels: number;
   levels: number;
   kernel_size: number;
+  /** 'smoke_test' = thăm dò nhanh (mặc định); 'research' = chạy trên split đã
+   *  versioned để kết quả trích dẫn được. */
+  run_purpose?: 'smoke_test' | 'research';
+  split_version?: string | null;
+}
+
+// GET /training/splits — split đã versioned dùng được cho chế độ nghiên cứu
+export interface ResearchSplit {
+  split_version: string;
+  dataset_version: string;
+  recognition_profile: string;
+  split_mode: string;
+  num_classes: number | null;
+  counts: { train: number | null; val: number | null; test: number | null };
+  seed: number | null;
+  dataset_manifest_checksum: string;
 }
 
 export interface TrainingMetrics {
@@ -328,6 +344,19 @@ export function useTrainingAPI() {
   }, []);
 
   // Per-class breakdown + confusion matrix trên test set (Step 7)
+  const getResearchSplits = useCallback(async (): Promise<ResearchSplit[]> => {
+    try {
+      const response = await fetch(`${API_URL}/splits`, { headers: authHeaders() });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch splits: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return [];
+    }
+  }, []);
+
   const getJobProvenance = useCallback(async (jobId: string): Promise<JobProvenance | null> => {
     try {
       const response = await fetch(`${API_URL}/jobs/${jobId}/provenance`, { headers: authHeaders() });
@@ -390,6 +419,7 @@ export function useTrainingAPI() {
     promoteJob,
     getJobEvaluation,
     getJobProvenance,
+    getResearchSplits,
     deleteJob,
     useWebSocketProgress,
   };

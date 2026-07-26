@@ -147,6 +147,128 @@ def test_submit_rejects_dialects_without_enough_data(client, monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# Research mode
+# --------------------------------------------------------------------------
+
+SPLIT = {
+    "split_version": "hoa_de_sample_v5",
+    "dataset_version": "isds2026_v5",
+    "recognition_profile": "hoa_de",
+    "split_mode": "sample",
+    "num_classes": 7,
+    "counts": {"train": 311, "val": 66, "test": 68},
+    "seed": 42,
+    "dataset_manifest_checksum": "117749bedecf",
+}
+
+
+def test_research_mode_requires_a_split(client):
+    with patch("app.training_tasks.run_training_job") as task:
+        response = client.post("/training/start", json=_config(run_purpose="research"))
+
+    assert response.status_code == 400
+    task.apply_async.assert_not_called()
+
+
+def test_research_mode_rejects_a_split_that_is_not_research_valid(client, monkeypatch):
+    """Fail here with the list of usable splits, rather than letting train_tcn.py
+    SystemExit in _enforce_research_preconditions after the job is queued."""
+    monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
+
+    with patch("app.training_tasks.run_training_job") as task:
+        response = client.post(
+            "/training/start",
+            json=_config(run_purpose="research", split_version="made_up_v9"),
+        )
+
+    assert response.status_code == 400
+    assert "hoa_de_sample_v5" in response.json()["detail"]
+    task.apply_async.assert_not_called()
+
+
+def test_research_mode_pins_provenance_from_the_chosen_split(client, monkeypatch):
+    """dataset_version/recognition_profile come from the split metadata, never
+    from the client: a self-declared version could disagree with the real data."""
+    monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
+    persisted = []
+
+    async def _capture(job, auth_user_id=None):
+        persisted.append(job)
+
+    monkeypatch.setattr(training_module, "_persist_job", _capture)
+
+    with patch("app.training_tasks.run_training_job"):
+        response = client.post(
+            "/training/start",
+            json=_config(
+                run_purpose="research",
+                split_version="hoa_de_sample_v5",
+                dataset_version="LIES",
+                recognition_profile="LIES",
+            ),
+        )
+
+    assert response.status_code == 200
+    cfg = persisted[0].config
+    assert cfg.dataset_version == "isds2026_v5"
+    assert cfg.recognition_profile == "hoa_de"
+
+
+def test_research_mode_skips_the_dialect_data_check(client, monkeypatch):
+    """The split defines the data, so an unrelated empty dialect must not block it."""
+    monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
+    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 1})
+
+    with patch("app.training_tasks.run_training_job"):
+        response = client.post(
+            "/training/start",
+            json=_config(run_purpose="research", split_version="hoa_de_sample_v5",
+                         dialects=["hoa-de"]),
+        )
+
+    assert response.status_code == 200
+
+
+def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
+    from app.training_tasks import _build_cmd
+
+    cmd = _build_cmd(
+        {
+            "model_type": "hdgcn",
+            "run_purpose": "research",
+            "split_version": "hoa_de_sample_v5",
+            "dataset_version": "isds2026_v5",
+            "recognition_profile": "hoa_de",
+            "dialects": ["hoa-de"],
+            "languages": ["vn"],
+        },
+        "metrics.jsonl",
+    )
+
+    assert "--run-purpose=research" in cmd
+    assert "--split_version=hoa_de_sample_v5" in cmd
+    assert "--dataset_version=isds2026_v5" in cmd
+    assert any(a.startswith("--train_csv=") for a in cmd)
+    # --recognition_profile puts the trainer in profile mode, where it cannot
+    # infer the feature tree from the split CSV and aborts with
+    # "Profile mode requires locating the 'features' folder".
+    assert any(a.startswith("--features_root=") for a in cmd)
+    # A dialect filter would slice the split and make the checkpoint disagree
+    # with the split_version it claims.
+    assert not any(a.startswith("--dialect=") for a in cmd)
+
+
+def test_exploratory_command_keeps_dialect_filters_and_stays_smoke_test():
+    from app.training_tasks import _build_cmd
+
+    cmd = _build_cmd({"model_type": "tcn", "dialects": ["hoa-de"], "languages": ["vn"]}, "m.jsonl")
+
+    assert "--dialect=hoa-de" in cmd
+    assert not any(a.startswith("--run-purpose") for a in cmd)
+    assert not any(a.startswith("--split_version") for a in cmd)
+
+
+# --------------------------------------------------------------------------
 # Monitor
 # --------------------------------------------------------------------------
 

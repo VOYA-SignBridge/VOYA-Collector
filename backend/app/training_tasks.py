@@ -109,6 +109,29 @@ def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
         f"--metrics_file={metrics_file}",
         "--run_diagnostics",
     ]
+
+    # Chế độ nghiên cứu: chạy trên split đã versioned nên checkpoint truy ngược
+    # được về đúng phiên bản dữ liệu. Bộ lọc dialect/language KHÔNG áp dụng ở
+    # đây — split đã định nghĩa sẵn tập dữ liệu, thêm bộ lọc vào sẽ cắt bớt nó
+    # và làm checkpoint không còn khớp với split nó khai báo.
+    if str(config.get("run_purpose") or "") == "research" and config.get("split_version"):
+        split_dir = f"processed/splits/versions/{config['split_version']}"
+        cmd += [
+            "--run-purpose=research",
+            f"--split_version={config['split_version']}",
+            f"--train_csv={split_dir}/train.csv",
+            f"--val_csv={split_dir}/val.csv",
+            f"--test_csv={split_dir}/test.csv",
+            # Bắt buộc khi có --recognition_profile: trainer chuyển sang profile
+            # mode và không tự dò được thư mục features từ split CSV.
+            f"--features_root={os.getenv('FEATURES_ROOT', '/dataset/features')}",
+        ]
+        if config.get("dataset_version"):
+            cmd.append(f"--dataset_version={config['dataset_version']}")
+        if config.get("recognition_profile"):
+            cmd.append(f"--recognition_profile={config['recognition_profile']}")
+        return cmd
+
     for dialect in (config.get("dialects") or []):
         cmd.append(f"--dialect={dialect}")
     for language in (config.get("languages") or []):
