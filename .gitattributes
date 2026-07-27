@@ -1,0 +1,9 @@
+# Shell scripts must keep LF endings — they are COPY'd into Linux Docker
+# images and exec'd. On Windows, core.autocrlf=true would otherwise rewrite
+# them to CRLF, making the `#!/bin/sh` shebang unresolvable (exec: no such
+# file or directory). Force LF regardless of platform / git config.
+*.sh text eol=lf
+
+# Other Linux-container assets that are line-ending sensitive.
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf

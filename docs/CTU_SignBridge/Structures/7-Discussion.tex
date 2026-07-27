@@ -1,0 +1,64 @@
+\subsection{Protocol and Performer Effects}
+
+The matched experiment is our central result, and its lesson is narrow but firm: disjoint test samples did not, on their own, establish unseen-performer generalization once other samples from the same person were available during development. Protocol A asks what a model does with a person it has never met. Protocol B asks what it does with new samples from a person who shaped both its weights and its checkpoint. Both are legitimate questions. They are not the same question, and a paper that reports one while claiming the other has overstated its result.
+
+Three numbers sit side by side here. The mean exposure gap was 0.164; the spread across architecture means was 0.116; the spread across performers was 0.249. We are not claiming these are commensurable effect measures, and none of this proves that protocol dominates architecture in general. What it does show is that in this low-resource setting, who was recorded and how the partitions were drawn moved the conclusions at least as much as which network we trained. The practical reading is that recruiting one more independent performer is likely worth more than collecting many more repetitions from the people we already have.
+
+\subsection{Architecture Interpretation}
+
+HandGCN's explicit hand-topology bias plausibly helps it model the coordinated spatial and temporal structure of the Hòa Đê signs, which are predominantly dynamic. We offer that as a reading, not a finding: we ran no component ablations, and the two fingerspelling folds disagreed with each other about the best architecture. What the evidence supports is bounded to the configuration we evaluated. HandGCN was strongest on Hòa Đê. That is not the same as being the right architecture for Vietnamese sign recognition.
+
+\subsection{Reliability Evidence}
+
+\begin{table}[htbp]
+\centering
+\caption{Representative validity risks and safeguards.}
+\label{tab:reliability}
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.08}
+
+\begin{tabularx}{\linewidth}{
+    >{\raggedright\arraybackslash}p{2.2cm}
+    >{\raggedright\arraybackslash}X
+    >{\raggedright\arraybackslash}X
+}
+\toprule
+\textbf{Risk}
+& \textbf{Potential consequence}
+& \textbf{Control} \\
+\midrule
+Identity ambiguity
+& Hidden overlap or inflated performer count
+& Canonical physical-person mapping \\
+
+Performer exposure
+& Misstated unseen-person generalization
+& Performer-held-out gate and explicit protocol labels \\
+
+Mirror semantics
+& Invalid wrist origin and missing-hand encoding
+& Versioned correction and 22 checks \\
+
+Incomplete provenance
+& Invalid runs entering aggregation
+& Fail-closed gate; affected runs repeated \\
+
+Q contamination
+& Spurious temporal cue
+& Caveated reporting and planned recollection \\
+
+Session and storage
+& Uncertain session separation or restoration
+& String identifiers, checksums, and link audits \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Table~\ref{tab:reliability} pairs each validity risk we encountered with the control that answers it. Two of them deserve expanding on. A storage audit found 538 incorrect backup links among 937 inspected records. The local processed files used for training were correct, so no reported metric changed, but a restoration attempted through those links would have failed. We report the audit precisely because of that gap: computational repeatability and long-term artifact recoverability are different properties, and passing the first says nothing about the second.
+
+Determinism has the same blind spot. A run can be bit-identical on every rerun and still be scientifically worthless if its identity mapping, split, label namespace, augmentation semantics, or manifest is wrong; it will simply reproduce the wrong answer reliably. We therefore treat reproducibility as layered evidence rather than a single property: stable execution, compatible versioned artifacts, valid performer semantics, recoverable provenance, and data-quality limitations stated out loud.
+
+\subsection{Implications}
+
+Three recommendations follow for low-resource sign recognition. State which generalization you are claiming: new samples from known performers, new sessions, unseen performers, or new devices and sites. These are four different claims, and only one of them is usually tested. Compare architectures on the same frozen manifest, splits, preprocessing, augmentation, seeds, metrics, and checkpoint rule, so that the comparison is about the architectures. And treat identity overlap, checksum mismatch, label inconsistency, outdated contracts, and incomplete provenance as grounds for excluding a run, not as warnings to be read past. A warning that nobody acts on is indistinguishable from no warning at all.

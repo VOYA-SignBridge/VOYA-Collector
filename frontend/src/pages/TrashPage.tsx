@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../hooks/useToast";
+import { useAuth } from "../hooks/useAuth";
 import Modal from "../components/ui/Modal";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import {
@@ -54,7 +55,10 @@ function fmtDate(v?: string) {
 
 export default function TrashPage() {
   const { toast } = useToast();
-  const [tab, setTab] = useState<Tab>("classes");
+  const { isAdmin } = useAuth();
+  // Contributors only have a sample trash (they don't own labels), so default
+  // them straight to it; admins land on the labels tab.
+  const [tab, setTab] = useState<Tab>(isAdmin ? "classes" : "samples");
   const [classes, setClasses] = useState<TrashClass[]>([]);
   const [samples, setSamples] = useState<TrashSample[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,15 +69,22 @@ export default function TrashPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, s] = await Promise.all([getClassTrash(), getSampleTrash()]);
-    if (c.ok) setClasses(c.data);
-    else toast.error(c.error || "Không đọc được thùng rác nhãn");
+    // Everyone has a sample trash. The label (class) trash is admin-only — a
+    // contributor never owns a class, so skip that call (it would 403).
+    const s = await getSampleTrash();
     if (s.ok) setSamples(s.data);
     else toast.error(s.error || "Không đọc được thùng rác mẫu");
+    if (isAdmin) {
+      const c = await getClassTrash();
+      if (c.ok) setClasses(c.data);
+      else toast.error(c.error || "Không đọc được thùng rác nhãn");
+    } else {
+      setClasses([]);
+    }
     setSelClasses(new Set());
     setSelSamples(new Set());
     setLoading(false);
-  }, [toast]);
+  }, [toast, isAdmin]);
 
   useEffect(() => {
     load();
@@ -200,15 +211,26 @@ export default function TrashPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Thùng rác</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            Nhãn và mẫu đã xóa mềm vẫn giữ nguyên dữ liệu. <b className="text-slate-600">Khôi phục</b> để đưa lại, hoặc{" "}
-            <b className="text-slate-600">xóa vĩnh viễn</b> (không thể hoàn tác). Xóa vĩnh viễn một nhãn sẽ xóa luôn các mẫu bên trong.
+            {isAdmin ? (
+              <>
+                Nhãn và mẫu đã xóa mềm vẫn giữ nguyên dữ liệu.{" "}
+                <b className="text-slate-600">Khôi phục</b> để đưa lại, hoặc{" "}
+                <b className="text-slate-600">xóa vĩnh viễn</b> (không thể hoàn tác). Xóa vĩnh viễn một nhãn sẽ xóa luôn các mẫu bên trong.
+              </>
+            ) : (
+              <>
+                Thùng rác riêng của bạn — các lần quay bạn đã xóa vẫn giữ nguyên dữ liệu.{" "}
+                <b className="text-slate-600">Khôi phục</b> để đưa lại, hoặc{" "}
+                <b className="text-slate-600">xóa vĩnh viễn</b> (không thể hoàn tác).
+              </>
+            )}
           </p>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl mb-4">
-        <TabPill t="classes" label="Nhãn đã xóa" n={classes.length} />
+        {isAdmin && <TabPill t="classes" label="Nhãn đã xóa" n={classes.length} />}
         <TabPill t="samples" label="Mẫu đã xóa" n={samples.length} />
       </div>
 

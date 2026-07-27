@@ -66,8 +66,8 @@ class MessageResponse(BaseModel):
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, request: Request):
-    # Throttle account creation per IP to stop mass-registration spam.
-    enforce_ip_limit(request, "register", max_calls=10, window=3600)
+    # Throttle account creation: at most 5 new accounts per IP per day.
+    enforce_ip_limit(request, "register", max_calls=5, window=86400)
     user = create_user(
         username=payload.username,
         email=payload.email,

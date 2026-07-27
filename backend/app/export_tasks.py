@@ -62,14 +62,37 @@ def export_samples_to_sheets(self):
             logger.debug("[EXPORT] Samples Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        rows = list_samples()
+        # Active rows from samples.csv (authoritative, correct storage_key) PLUS
+        # every soft-deleted sample from Postgres, each carrying a deleted_at
+        # marker. Sorting active+deleted together by a STABLE key (created_at,
+        # sample_uid) keeps a soft-deleted row IN PLACE (just marked) instead of
+        # removing it and shifting every row below it up — which made a fixed
+        # sheet row appear to change its label ("đổi tên").
+        from app.storage.metadata_db import list_all_deleted_samples
 
-        # Full matrix: header + every current row, in the sheet's column order.
-        values = [list(SAMPLE_FIELDS)]
-        for row in rows:
-            values.append([str(row.get(field, "") or "") for field in SAMPLE_FIELDS])
+        active = list_samples()
+        seen = {(r.get("sample_uid") or "") for r in active}
+        merged: List[Dict[str, Any]] = []
+        for r in active:
+            rr = dict(r)
+            rr["deleted_at"] = ""  # active row: marker empty
+            merged.append(rr)
+        try:
+            for r in list_all_deleted_samples():
+                if (r.get("sample_uid") or "") in seen:
+                    continue
+                merged.append(r)
+        except Exception as exc:  # DB unreachable: fall back to active-only
+            logger.warning("[EXPORT] deleted-samples marker load failed: %s", exc)
+        merged.sort(key=lambda r: (str(r.get("created_at") or ""), str(r.get("sample_uid") or "")))
 
-        # Skip the (whole-sheet) rewrite when samples.csv is unchanged since the
+        # Full matrix: header (+ deleted_at) + every row, in the sheet's column order.
+        header = list(SAMPLE_FIELDS) + ["deleted_at"]
+        values = [header]
+        for row in merged:
+            values.append([str(row.get(field, "") or "") for field in header])
+
+        # Skip the (whole-sheet) rewrite when the matrix is unchanged since the
         # last successful sync — keeps the 30s beat from churning the API.
         import hashlib
         import json as _json
@@ -80,7 +103,7 @@ def export_samples_to_sheets(self):
         try:
             if guard.exists() and guard.read_text(encoding="utf-8").strip() == digest:
                 logger.debug("[EXPORT] Samples sheet already up-to-date; skipping rewrite")
-                return {"status": "skipped", "reason": "unchanged", "rows": len(rows)}
+                return {"status": "skipped", "reason": "unchanged", "rows": len(merged)}
         except Exception:
             pass
 
@@ -93,8 +116,9 @@ def export_samples_to_sheets(self):
         except Exception:
             pass
 
-        logger.info("[EXPORT] ✅ Mirrored %d samples to Sheets (full replace)", len(rows))
-        return {"status": "success", "synced_count": len(rows)}
+        logger.info("[EXPORT] ✅ Mirrored %d samples to Sheets (%d active + %d deleted)",
+                    len(merged), len(active), len(merged) - len(active))
+        return {"status": "success", "synced_count": len(merged)}
 
     except Exception as exc:
         logger.error("[EXPORT] Samples Sheets export failed: %s", exc)
@@ -124,22 +148,55 @@ def export_labels_to_sheets(self):
         # Labels are small enough to do full replace safely
         from app.dataset_manager import load_labels, LABEL_FIELDS
 
-        rows = load_labels()
-        if not rows:
+        # Active labels from labels.csv PLUS soft-deleted classes from Postgres,
+        # each carrying a deleted_at marker, ordered by class_idx (stable). A
+        # soft-deleted label therefore stays on the sheet WITH a marker instead
+        # of vanishing and shifting every row below it up by one.
+        from app.storage.metadata_db import list_deleted_classes
+
+        active = load_labels()
+        seen = {(r.get("class_uid") or "") for r in active}
+        merged: List[Dict[str, Any]] = []
+        for r in active:
+            rr = dict(r)
+            rr.setdefault("deleted_at", "")
+            merged.append(rr)
+        try:
+            for r in list_deleted_classes():
+                if (r.get("class_uid") or "") in seen:
+                    continue
+                row = dict(r)
+                # DB stores is_common_* as booleans; match the CSV "0"/"1" form.
+                row["is_common_global"] = str(int(bool(r.get("is_common_global"))))
+                row["is_common_language"] = str(int(bool(r.get("is_common_language"))))
+                merged.append(row)
+        except Exception as exc:  # DB unreachable: fall back to active-only
+            logger.warning("[EXPORT] deleted-classes marker load failed: %s", exc)
+
+        if not merged:
             logger.debug("[EXPORT] No labels to export")
             return {"status": "skipped", "reason": "no_labels"}
 
-        # Build full matrix with header
-        values = [list(LABEL_FIELDS)]
-        for row in rows:
-            values.append([str(row.get(field, "")) for field in LABEL_FIELDS])
+        def _idx(r: Dict[str, Any]) -> int:
+            try:
+                return int(r.get("class_idx") or 0)
+            except (TypeError, ValueError):
+                return 0
+        merged.sort(key=lambda r: (_idx(r), str(r.get("class_uid") or "")))
+
+        # Build full matrix with header (+ deleted_at marker column).
+        header = list(LABEL_FIELDS) + ["deleted_at"]
+        values = [header]
+        for row in merged:
+            values.append([str(row.get(field, "") or "") for field in header])
 
         from app.storage.gdrive_client import get_gdrive_client
         client = get_gdrive_client()
         client.replace_sheet_values(spreadsheet_id, sheet_gid, values)
 
-        logger.info("[EXPORT] ✅ Synced %d labels to Sheets", len(rows))
-        return {"status": "success", "synced_count": len(rows)}
+        logger.info("[EXPORT] ✅ Synced %d labels to Sheets (%d active + %d deleted)",
+                    len(merged), len(active), len(merged) - len(active))
+        return {"status": "success", "synced_count": len(merged)}
 
     except Exception as exc:
         logger.error("[EXPORT] Labels Sheets export failed: %s", exc)
@@ -181,6 +238,23 @@ def mirror_catalog_csvs_to_drive(self):
     return {"status": "done", "results": results}
 
 
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
+def reconcile_samples_csv_task(self):
+    """Periodic safety-net: re-add any ACTIVE Postgres sample missing from
+    samples.csv (lost to a rare append-vs-catalog-rewrite race). Append-only and
+    idempotent — Postgres is authoritative, so nothing is ever removed."""
+    try:
+        from app.dataset_samples import reconcile_samples_csv_from_db
+
+        restored = reconcile_samples_csv_from_db()
+        if restored:
+            logger.warning("[RECONCILE] samples.csv healed: %d row(s) restored", restored)
+        return {"status": "done", "restored": restored}
+    except Exception as exc:
+        logger.warning("[RECONCILE] task failed: %s", exc)
+        return {"status": "error", "error": str(exc)}
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def delete_gdrive_paths_task(self, rel_paths: list):
     """Delete Drive folders/files by dataset-relative path (async cleanup).
@@ -197,6 +271,7 @@ def delete_gdrive_paths_task(self, rel_paths: list):
 
     client = get_gdrive_client()
     results = {}
+    failures = 0
     for rel in rel_paths or []:
         if not rel:
             continue
@@ -206,7 +281,48 @@ def delete_gdrive_paths_task(self, rel_paths: list):
         except Exception as exc:  # per-path: one failure must not block the rest
             logger.warning("[GDRIVE_DELETE] %s failed: %s", rel, exc)
             results[rel] = f"failed: {exc}"
+            failures += 1
     logger.info("[GDRIVE_DELETE] done: %s", results)
+    # Retry the whole task if any path failed (transient Drive/network error).
+    # delete_path is idempotent — an already-deleted path resolves to nothing and
+    # returns False, so re-running the successful ones on retry is harmless.
+    if failures and self.request.retries < self.max_retries:
+        raise self.retry(exc=RuntimeError(f"{failures} Drive folder delete(s) failed"))
+    return {"status": "done", "results": results}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def delete_gdrive_files_task(self, refs: list):
+    """Delete individual Drive FILES by storage_key (dataset-relative file path),
+    Drive URL, gdrive:// ref, or file ID.
+
+    Used when purging a single sample. `delete_gdrive_paths_task` routes through
+    `delete_path`, which only resolves FOLDERS — so a *file* ref (e.g.
+    ``features/vn/common/class_x_ab12cd34/sample_ab12.npz`` or ``gdrive://<id>``)
+    never matched and the .npz was left on Drive forever. `delete_file` resolves
+    the parent folder + filename (or the ID/URL) and deletes the actual file.
+    """
+    if not getattr(settings, "use_google_drive", False):
+        return {"status": "skipped", "reason": "gdrive_disabled"}
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    results = {}
+    failures = 0
+    for ref in refs or []:
+        if not ref:
+            continue
+        try:
+            ok = client.delete_file(ref)
+            results[ref] = "ok" if ok else "not_found"
+        except Exception as exc:  # per-file: one failure must not block the rest
+            logger.warning("[GDRIVE_FILE_DELETE] %s failed: %s", ref, exc)
+            results[ref] = f"failed: {exc}"
+            failures += 1
+    logger.info("[GDRIVE_FILE_DELETE] done: %s", results)
+    if failures and self.request.retries < self.max_retries:
+        raise self.retry(exc=RuntimeError(f"{failures} Drive file delete(s) failed"))
     return {"status": "done", "results": results}
 
 
@@ -224,6 +340,7 @@ def move_gdrive_paths_task(self, pairs: list):
 
     client = get_gdrive_client()
     results = {}
+    failures = 0
     for pair in pairs or []:
         try:
             old_rel, new_rel = pair[0], pair[1]
@@ -238,7 +355,13 @@ def move_gdrive_paths_task(self, pairs: list):
         except Exception as exc:
             logger.warning("[GDRIVE_MOVE] %s failed: %s", key, exc)
             results[key] = f"failed: {exc}"
+            failures += 1
     logger.info("[GDRIVE_MOVE] done: %s", results)
+    # Retry on a transient failure so a one-off Drive/network error doesn't
+    # silently drop the rename. move_folder_path is idempotent on retry: an
+    # already-moved pair now has a missing source -> FileNotFoundError -> skipped.
+    if failures and self.request.retries < self.max_retries:
+        raise self.retry(exc=RuntimeError(f"{failures} Drive folder move(s) failed"))
     return {"status": "done", "results": results}
 
 

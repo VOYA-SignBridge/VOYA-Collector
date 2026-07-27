@@ -16,6 +16,7 @@
     "@mediapipe/drawing_utils": "0.3.1675466124",
     "@mediapipe/hands": "0.4.1675469240",
     "@mediapipe/holistic": "0.5.1675471629",
+    "@types/three": "^0.185.1",
     "autoprefixer": "^10.4.21",
     "axios": "^1.15.2",
     "postcss": "^8.5.8",
@@ -23,7 +24,8 @@
     "react-dom": "^19.1.1",
     "react-is": "^18.2.0",
     "react-router-dom": "^7.9.3",
-    "recharts": "^3.2.1"
+    "recharts": "^3.2.1",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@eslint/js": "^8.56.0",

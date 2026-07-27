@@ -19,6 +19,7 @@ from app.catalog_sync import (
     sync_restore_sample,
     sync_purge_sample,
     list_trash_samples,
+    list_trash_samples_for_user,
     bulk_restore_samples,
     bulk_purge_samples,
     empty_sample_trash,
@@ -48,6 +49,16 @@ def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> Non
             status_code=403,
             detail="Bạn không có quyền thực hiện thao tác này trên mẫu này",
         )
+
+
+def _user_owns_sample(sample_id: str, current_user: Dict[str, Any]) -> bool:
+    """Boolean ownership test (admin always True) — the counterpart to
+    _check_sample_ownership (which raises), used to filter bulk trash actions to
+    the caller's own samples. Ownership is by auth_user_id (UUID), not by name."""
+    if current_user.get("is_admin"):
+        return True
+    owner_id = get_sample_owner(sample_id)
+    return owner_id is not None and str(owner_id) == str(current_user["id"])
 
 # ---- Models ----
 class LabelOut(BaseModel):
@@ -192,8 +203,13 @@ def delete_label(
         raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
 
 
+# Requires login, unlike the sibling /labels listing. /labels backs the public
+# LabelsPage (that route is deliberately outside ProtectedRoute), but this one
+# returns a `user` UUID per sample — i.e. who contributed what — and nothing in
+# the repo calls it: the frontend only ever uses the /samples/{id}/... subpaths.
+# It was reachable anonymously purely by omission.
 @router.get("/samples", response_model=List[SampleOut])
-def list_samples():
+def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
     samples = list_samples_v2()
     labels_by_uid = _class_uid_to_label_row_map()
     out: List[Dict[str, Any]] = []
@@ -241,10 +257,14 @@ def get_sample_data(sample_id: str):
 
 
 @router.get("/samples/trash")
-def list_sample_trash(current_user: Dict[str, Any] = Depends(require_admin)):
-    """List soft-deleted samples (whose class is still active). Admin only."""
+def list_sample_trash(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """List soft-deleted samples (whose class is still active). An admin sees the
+    whole sample trash; a contributor sees ONLY their own (by auth_user_id)."""
     try:
-        items = list_trash_samples()
+        if current_user.get("is_admin"):
+            items = list_trash_samples()
+        else:
+            items = list_trash_samples_for_user(str(current_user["id"]))
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Không đọc được thùng rác mẫu: {exc}")
@@ -253,24 +273,37 @@ def list_sample_trash(current_user: Dict[str, Any] = Depends(require_admin)):
 @router.post("/samples/trash/restore")
 def bulk_restore_samples_endpoint(
     payload: dict = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """Restore several soft-deleted samples. Body: {sample_uids: [...]}."""
-    result = bulk_restore_samples(payload.get("sample_uids") or [])
+    """Restore several soft-deleted samples. Body: {sample_uids: [...]}. A
+    non-admin may only restore samples they own — foreign uids are dropped."""
+    uids = payload.get("sample_uids") or []
+    if not current_user.get("is_admin"):
+        uids = [u for u in uids if _user_owns_sample(u, current_user)]
+    result = bulk_restore_samples(uids)
     return {"success": True, "message": f"Đã khôi phục {result['ok_count']} mẫu.", **result}
 
 
 @router.post("/samples/trash/purge")
 def bulk_purge_samples_endpoint(
     payload: dict = Body(default={}),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete samples. Body: {sample_uids: [...]} for a selection, or
-    {all: true} to empty the whole sample trash. Irreversible."""
+    {all: true} to empty the trash. Irreversible. A non-admin acts ONLY on their
+    own samples: {all: true} empties just their trash; foreign uids are dropped."""
+    is_admin = bool(current_user.get("is_admin"))
     if payload.get("all"):
-        result = empty_sample_trash()
+        if is_admin:
+            result = empty_sample_trash()
+        else:
+            own = [s["sample_uid"] for s in list_trash_samples_for_user(str(current_user["id"]))]
+            result = bulk_purge_samples(own)
     else:
-        result = bulk_purge_samples(payload.get("sample_uids") or [])
+        uids = payload.get("sample_uids") or []
+        if not is_admin:
+            uids = [u for u in uids if _user_owns_sample(u, current_user)]
+        result = bulk_purge_samples(uids)
     return {"success": True, "message": f"Đã xóa vĩnh viễn {result['ok_count']} mẫu.", **result}
 
 

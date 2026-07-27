@@ -1,8 +1,31 @@
 import logging
 from celery import Celery
-from celery.signals import task_postrun, worker_ready
+from celery.signals import task_prerun, task_postrun, worker_ready, setup_logging
 from app.config import settings
 from app.mem_utils import release_memory
+from app.logging_config import configure_logging
+import structlog
+from asgi_correlation_id import correlation_id
+
+@setup_logging.connect
+def config_loggers(*args, **kwargs):
+    configure_logging()
+
+@task_prerun.connect
+def setup_structlog_context(task_id, task, *args, **kwargs):
+    # Retrieve request_id from kwargs if it was passed by the API
+    # otherwise fallback to task_id
+    req_id = kwargs.get("kwargs", {}).get("request_id", task_id)
+    correlation_id.set(req_id)
+    structlog.contextvars.bind_contextvars(
+        task_id=task_id,
+        task_name=task.name
+    )
+
+@task_postrun.connect
+def clear_structlog_context(*args, **kwargs):
+    structlog.contextvars.clear_contextvars()
+    correlation_id.set(None)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +44,12 @@ beat_schedule = {
     "cleanup-training-artifacts-daily": {
         "task": "app.training_tasks.cleanup_training_artifacts",
         "schedule": 86400.0,
+    },
+    # Integrity safety-net: re-add any active Postgres sample missing from
+    # samples.csv (append-only; heals the rare append-vs-catalog-rewrite race).
+    "reconcile-samples-csv-every-5min": {
+        "task": "app.export_tasks.reconcile_samples_csv_task",
+        "schedule": 300.0,
     },
 }
 
@@ -71,6 +100,26 @@ celery_app.conf.update(
     worker_max_memory_per_child=int(settings.worker_max_memory_per_child_kb),
     # Don't let one worker hoard many heavy video jobs at once.
     worker_prefetch_multiplier=1,
+    # ---- Broker/result resilience (Redis) ----
+    # A Redis restart/recreate (deploy, config change) takes a few seconds. These
+    # make Celery ride over that blip instead of erroring: retry the broker
+    # connection at startup AND at runtime, keep TCP keepalive on so dead sockets
+    # are detected, and periodically health-check the connection. This is the
+    # main defense against the sporadic "redis down" the users were seeing.
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=None,  # never give up reconnecting
+    broker_transport_options={
+        "socket_keepalive": True,
+        "retry_on_timeout": True,
+        "health_check_interval": 30,
+        # Re-queue a task if the worker dies mid-run without acking (default 1h).
+        "visibility_timeout": 3600,
+    },
+    result_backend_transport_options={
+        "retry_on_timeout": True,
+        "health_check_interval": 30,
+    },
 )
 
 
@@ -108,3 +157,4 @@ from app import tasks  # noqa: F401, E402
 from app import export_tasks  # noqa: F401, E402
 from app import training_tasks  # noqa: F401, E402
 from app import sync_tasks  # noqa: F401, E402
+from app import preview_tasks  # noqa: F401, E402

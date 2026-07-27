@@ -7,6 +7,7 @@ from fastapi import FastAPI, APIRouter, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
+from asgi_correlation_id import CorrelationIdMiddleware
 
 from app import activity
 from app.config import settings
@@ -22,11 +23,14 @@ from app.routers import (
     health,
     inference,
     jobs,
+    label_sessions,
     realtime_proxy,
+    sot_admin,
     training,
     tts,
     upload,
 )
+from app import metrics
 from app.logging_config import configure_logging
 
 # Configure logging before importing routers — some (e.g. training) connect
@@ -39,12 +43,52 @@ from app.services.tts_prewarm import prewarm_tts_cache
 
 app = FastAPI(title="Sign Dataset Backend")
 
+def _metric_path(request: Request) -> str:
+    """Low-cardinality path label: the matched route TEMPLATE (e.g.
+    /api/v1/classes/{class_uid}/sessions), not the concrete URL. The route is
+    only attached to the scope by Starlette's router, so this must be read AFTER
+    call_next has run. Falls back to a coarse prefix for unmatched paths (404s,
+    probes) so raw ids never explode the metric cardinality."""
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    if template:
+        return template
+    parts = request.url.path.split("/")
+    if len(parts) > 3:
+        return "/".join(parts[:3]) + "/{id}"
+    return request.url.path
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    import time
+    from app.metrics import http_requests_total, http_request_duration_seconds, http_requests_in_progress
+
+    method = request.method
+    # in-progress is bracketed around the call and the route isn't known yet, so
+    # label it by method only (path is added to the completed-request metrics).
+    http_requests_in_progress.labels(method=method).inc()
+    start_time = time.time()
+    status_code = "500"
+    try:
+        response = await call_next(request)
+        status_code = str(response.status_code)
+        return response
+    finally:
+        duration = time.time() - start_time
+        # Read the matched route template now — routing has run inside call_next.
+        path = _metric_path(request)
+        http_requests_in_progress.labels(method=method).dec()
+        http_requests_total.labels(method=method, status=status_code, path=path).inc()
+        http_request_duration_seconds.labels(method=method, status=status_code, path=path).observe(duration)
+
 # CORS: origins configurable via CORS_ALLOWED_ORIGINS (comma-separated).
 # The SPA is served same-origin through the nginx gateway, so the auth cookies
 # ride along without CORS involvement. Keep allow_credentials=False (wildcard
 # origin + credentials is invalid per spec). If you ever serve the API from a
 # different origin than the SPA, set an explicit origin AND allow_credentials
 # =True so the browser will send the cookies cross-origin.
+app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
@@ -184,11 +228,14 @@ app.include_router(dataset.router)
 app.include_router(upload.router)
 app.include_router(jobs.router)
 app.include_router(classes.router)
+app.include_router(label_sessions.router)
 app.include_router(inference.router)
 app.include_router(realtime_proxy.router)
 app.include_router(tts.router)
 app.include_router(training.router)
 app.include_router(admin.router)
+app.include_router(sot_admin.router)
+app.include_router(metrics.router)
 
 # Versioned API (do not remove unversioned endpoints; FE may depend on them)
 api_v1 = APIRouter(prefix="/api/v1")
@@ -197,12 +244,14 @@ api_v1.include_router(dataset.router)
 api_v1.include_router(upload.router)
 api_v1.include_router(jobs.router)
 api_v1.include_router(classes.router)
+api_v1.include_router(label_sessions.router)
 api_v1.include_router(inference.router)
 api_v1.include_router(auth.router)
 api_v1.include_router(realtime_proxy.router)
 api_v1.include_router(tts.router)
 api_v1.include_router(training.router)
 api_v1.include_router(admin.router)
+api_v1.include_router(sot_admin.router)
 app.include_router(api_v1)
 
 
@@ -221,5 +270,15 @@ async def report_presence(request: Request):
         await run_in_threadpool(activity.record_presence, ip, lat, lon, acc)
     return Response(status_code=204)
 
-
 # test
+
+@app.post("/api/v1/test/trigger-hardware-error", status_code=204)
+async def trigger_hardware_error():
+    """TEST ENDPOINT: Forces a hardware error metric to 1 to test Grafana Email Alert."""
+    from app.metrics import hardware_error
+    import time
+    
+    # Simulate a camera disconnecting
+    hardware_error.labels(resource='test_camera_1').set(1)
+    
+    return Response(status_code=204)

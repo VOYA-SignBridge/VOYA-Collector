@@ -1,0 +1,15 @@
+\subsection{Landmark-Based Isolated Sign Recognition}
+
+Large-scale datasets such as WLASL, PopSign ASL, and ASL Citizen have expanded isolated-sign recognition across web-video, smartphone, and community-sourced settings \cite{li_wlasl_2020,starner_popsign_2023,desai_asl_citizen_2023}. Their scale and performer diversity contrast with low-resource collections, where identity and split decisions can strongly affect reported results.
+
+Pose- and landmark-based methods reduce appearance dependence by modeling structured keypoint sequences. OpenHands supports pose-based transfer across languages, while skeleton-aware, hand-model-aware, multimodal, and part-wise approaches model spatial and temporal relations more explicitly \cite{selvaraj_openhands_2022,jiang_samslr_2021,hu_signbert_2021,gruber_modalities_2021,lee_p3d_2023}. We adopt a fixed two-hand landmark representation and make no claim to improve on it. Our attention goes to protocol and artifact validity instead.
+
+\subsection{Low-Resource and Signer-Independent Evaluation}
+
+Signer-independent evaluation is especially difficult in low-resource settings \cite{sincan_chalearn_2021,holmes_low_resource_2022}. Separating samples is not enough when several identifiers turn out to be one physical person, or when a single collection account aggregates several performers. We therefore take canonical physical-performer identity as the unit of independence and keep the target performer out of both training and validation.
+
+Vietnamese sign-recognition studies have explored dynamic-object extraction, MediaPipe-based alphabet recognition, and cross-attention video models \cite{pham_vsl_dynamic_2021,tran_vsl_alphabet_2025,chu_crossvivit_2025}. Neither their tasks nor their participant populations are directly comparable to ours. We are correspondingly careful with names: Hòa Đê is a community-origin workplace-sign profile, not a standardized vocabulary or a validated regional dialect, and our second profile is a 23-class fingerspelling subset, not a complete alphabet.
+
+\subsection{Artifact Documentation and Reproducibility}
+
+Datasheets and Model Cards promote structured reporting of datasets, models, evaluation conditions, and limitations \cite{gebru_datasheets_2021,mitchell_model_cards_2019}. OpenML-Python and Git-Theta offer complementary mechanisms for experiment sharing and model version control \cite{feurer_openml_python_2021,kandpal_git_theta_2023}. We apply those principles as machine-checkable links running from identity mappings and manifest checksums through splits, contracts, and source revisions to the checkpoint itself. Where the chain breaks, the run is excluded rather than kept with a warning attached.

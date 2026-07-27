@@ -175,7 +175,15 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
 
                     window_meta = {
                         "user": user,
-                        "user_id": user_id,
+                        # Mirror the camera path: user_id holds the DISPLAY name (for
+                        # the samples.csv user_id column) and auth_user_id holds the
+                        # authenticated UUID — persisted to samples.auth_user_id so the
+                        # recording AND its augmentations are owned by the uploader.
+                        # Previously user_id carried the UUID and auth_user_id was never
+                        # set, so every video/augmented sample landed auth_user_id=NULL
+                        # (invisible to the owner's Trash / reassign / delete).
+                        "user_id": user,
+                        "auth_user_id": user_id,
                         "session_id": session_id,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,

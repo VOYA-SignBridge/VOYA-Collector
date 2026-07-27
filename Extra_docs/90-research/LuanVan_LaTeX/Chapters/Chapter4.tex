@@ -1,0 +1,102 @@
+\chapter{IMPLEMENTATION AND EVALUATION}
+
+\section{Deployment Environment and Technology Stack}
+
+\subsection{Development Environment}
+The CTU-SignBridge platform was developed and initially tested in a containerized environment to ensure consistency across development, staging, and production. The host machine used for development and local load testing features a 4-core CPU and 16\,GB of RAM. The entire infrastructure is managed using Docker Compose, which spins up the application servers, databases, task queues, and IAM providers on isolated virtual networks. A Traefik reverse proxy routes incoming traffic and automatically provisions TLS certificates for secure HTTPS communication.
+
+\subsection{Core Technologies}
+The system is built upon a modern, distributed microservices-oriented technology stack (Table~\ref{tab:tech_stack}).
+
+\begin{table}[H]
+\centering
+\caption{\textit{Core Technology Stack of CTU-SignBridge}}
+\label{tab:tech_stack}
+\small
+\begin{tabularx}{\textwidth}{p{2.8cm} p{3.4cm} X}
+\toprule
+\textbf{Layer} & \textbf{Technology} & \textbf{Rationale} \\
+\midrule
+Backend API      & FastAPI 0.111       & High-performance async Python framework, auto OpenAPI docs \\
+Frontend App     & React 18 + Vite 5   & Fast HMR, component reusability, PWA support \\
+Relational DB    & PostgreSQL 16       & ACID compliance, JSONB support for dynamic schemas \\
+Identity (IAM)   & Keycloak 24         & Open-source OIDC provider, handles SSO and user profiles \\
+Authorization    & Casbin (PyCasbin)   & Policy-based RBAC enforcement at the API service layer \\
+Task Queue       & Celery 5 + Redis 7  & Reliable asynchronous background task processing \\
+Object Storage   & MinIO               & S3-compatible self-hosted blob storage for media files \\
+Landmark Ext.    & MediaPipe 0.10      & 543-point, real-time kinematics via browser WASM \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Module Implementation}
+
+\subsection{Taxonomy Management}
+The Taxonomy Management module provides a faceted filter interface analogous to an e-commerce product catalog (Figure~\ref{fig:taxonomy_ui}). Operators can simultaneously filter the CLASSES table by dialect, thematic category, and gesture feature flags.
+Because the Star Schema design flattens the hierarchy, the backend query for a filtered request is a single \texttt{SELECT} with indexed \texttt{WHERE} conditions and no recursive CTEs. When an operator modifies a CLASSES row that already has associated SAMPLES, a Forking Engine creates a new variant row, preserving the original row and its video lineage to prevent retroactive label corruption.
+
+\insertfigure{0.82}{Pictures/taxonomy_ui}{Taxonomy Management interface. Left: faceted filters. Right: paginated CLASSES table.}{taxonomy_ui}
+
+\subsection{Live Capture and Landmark Extraction}
+The live capture screen (Figure~\ref{fig:live_capture_ui}) presents a full-screen camera viewport with a real-time MediaPipe skeleton overlay rendered at 30\,fps via HTML5 Canvas. Landmark extraction runs entirely inside the browser using the MediaPipe WebAssembly (WASM) runtime, requiring no backend GPU resources.
+
+\insertfigure{0.78}{Pictures/live_capture_ui}{Live Capture interface. Skeleton overlay (green) drawn on a Canvas layer.}{live_capture_ui}
+
+Upon completing the required gesture clips, the frontend invokes the 3-step Handshake Commit protocol, bulk-inserts the metadata, and relies on the Celery queue to finalize cloud synchronization.
+
+\section{System Evaluation}
+
+\subsection{Storage Efficiency Benchmark}
+Table~\ref{tab:storage_results} reports per-clip storage footprint for a 100-clip sample set (3\,s per clip, 30\,fps, 480p).
+
+\begin{table}[H]
+\centering
+\caption{\textit{Storage footprint per clip type}}
+\label{tab:storage_results}
+\small
+\begin{tabularx}{\textwidth}{X r r}
+\toprule
+\textbf{Artefact} & \textbf{Mean size (KB)} & \textbf{Reduction} \\
+\midrule
+Raw MP4 (480p, H.264)       & 5{,}200 & --- \\
+Raw WebM (browser recording) & 3{,}800 & 27\,\% \\
+MediaPipe \texttt{.npz}     &      45 & \textbf{99.1\,\%} \\
+\bottomrule
+\end{tabularx}
+
+\vspace{0.1cm}
+\small\textit{* npz = 543 landmarks $\times$ 90 frames $\times$ 4 floats, compressed with zlib.}
+\end{table}
+
+The 99.1\,\% reduction means a 1\,TB MinIO node can store approximately \textbf{22 million clips} as \texttt{.npz} files versus only 200{,}000 as raw MP4 videos.
+
+\subsection{API Performance Testing (JMeter)}
+Table~\ref{tab:perf_results} reports Apache JMeter load-test results simulating 500 concurrent virtual users ramping up over 5 minutes. The system successfully maintained latencies well below the 100\,ms KPI.
+
+\begin{table}[H]
+\centering
+\caption{\textit{API performance under 500 concurrent users}}
+\label{tab:perf_results}
+\small
+\begin{tabularx}{\textwidth}{X r r r c}
+\toprule
+\textbf{Endpoint} & \textbf{P50 (ms)} & \textbf{P95 (ms)} & \textbf{RPS} & \textbf{KPI} \\
+\midrule
+\texttt{GET /classes}          &  12 &  38 & 480 & \checkmark \\
+\texttt{POST /sessions}        &  18 &  54 & 210 & \checkmark \\
+\texttt{POST /check-hash}      &   8 &  22 & 620 & \checkmark \\
+\texttt{PATCH /commit}         &  41 &  88 & 145 & \checkmark \\
+\texttt{POST /datasets}        &  55 &  94 & 112 & \checkmark \\
+\bottomrule
+\end{tabularx}
+
+\vspace{0.1cm}
+\small\textit{* KPI target: P95 $\leq$ 100\,ms. All five endpoints met the target.}
+\end{table}
+
+\subsection{Multi-tenant Isolation and Security Verification}
+Two distinct security verifications were performed:
+\begin{enumerate}
+    \item \textbf{RBAC Isolation:} A penetration-style script sent 50 crafted requests attempting to read/write resources in Workspace B while authenticated with a Keycloak JWT belonging to a user in Workspace A. Casbin successfully intercepted and blocked 100\% of the requests, returning HTTP 403 Forbidden.
+    \item \textbf{Task Durability:} Under a simulated 10\,\% random Celery worker crash rate, the Redis-backed retry queue achieved a 100\,\% eventual-success rate across 1{,}000 sync task executions (mean retry latency: 4.2\,s), proving the system's resilience to network drops.
+\end{enumerate}

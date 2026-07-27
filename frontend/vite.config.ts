@@ -64,6 +64,9 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('@mediapipe')) return 'vendor_mediapipe';
+            // three.js is only reached via the lazy Hand3DPlayer import —
+            // keep it out of the eager catch-all vendor chunk.
+            if (id.includes('/node_modules/three/')) return 'vendor_three';
             if (id.includes('recharts')) return 'vendor_recharts';
             if (id.includes('axios')) return 'vendor_axios';
             // Split the stable React runtime into its own chunk so that

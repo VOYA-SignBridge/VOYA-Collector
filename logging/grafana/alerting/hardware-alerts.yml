@@ -1,0 +1,247 @@
+apiVersion: 1
+
+# Grafana does NOT remove a rule when it disappears from a provisioning file —
+# it stays in grafana_data with provenance "file", invisible in git and
+# undeletable through the UI or the provisioning API. "High 5xx Error Rate" is
+# one such leftover from an earlier revision: it duplicates "Server 5xx Errors"
+# below but with `for: 0s`, so it pages on a single scrape spike. Declaring the
+# uid here is the supported way to retire it, and because this lives in git the
+# cleanup applies to every machine, not just the one it was noticed on.
+deleteRules:
+  - orgId: 1
+    uid: high-error-rule
+
+groups:
+  - orgId: 1
+    name: Hardware Alerts
+    folder: VOYA Alerts
+    interval: 1m
+    rules:
+      - uid: hw-error-rule
+        title: Hardware Error Alert
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: voya_hardware_error
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [0], type: gt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          description: Hardware disconnected
+          summary: Hardware Issue Detected
+        labels:
+          severity: critical
+
+      - uid: high-cpu-rule
+        title: High CPU Saturation Alert
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: voya_cpu_usage_percent
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [90], type: gt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          description: CPU Usage > 90%
+          summary: High CPU Saturation
+        labels:
+          severity: warning
+
+      - uid: high-traffic-rule
+        title: High Traffic Alert
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(http_requests_total[1m]))
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [100], type: gt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          description: Request Rate > 100 req/s
+          summary: Possible DDoS
+        labels:
+          severity: critical
+
+      - uid: high-error-rate-rule
+        title: Server 5xx Errors
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(http_requests_total{status=~"5.."}[1m]))
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [5], type: gt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          description: 5xx Errors > 5/s
+          summary: High 5xx Error Rate
+        labels:
+          severity: critical
+
+      # Availability alerts. Everything above measures a RUNNING system — high
+      # CPU, high traffic, 5xx rate — so a backend that is simply dead produced
+      # no alert at all: its metrics stop arriving and the threshold rules go
+      # quiet, which reads exactly like "healthy". These three watch for the
+      # absence instead.
+      #
+      # Note the inverted noDataState: for the backend probe, "no data" means
+      # Prometheus could not scrape it, which is itself the outage — so it must
+      # alert rather than resolve. The Redis/Postgres gauges are published BY
+      # the backend, so when the backend is down they legitimately have no data
+      # and would otherwise double-alert on the same root cause; those stay OK
+      # and let the backend rule speak for the outage.
+      - uid: backend-down-rule
+        title: Backend Down
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: up{job="voya_backend"}
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [1], type: lt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          description: Prometheus cannot scrape the backend (up == 0 or no data for 2m).
+          summary: Backend is down
+        labels:
+          severity: critical
+
+      - uid: redis-down-rule
+        title: Redis Down
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: voya_redis_up
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [1], type: lt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          description: Redis did not answer PING — Celery cannot dispatch or return tasks.
+          summary: Redis is down
+        labels:
+          severity: critical
+
+      - uid: postgres-down-rule
+        title: Postgres Down
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: prometheus
+            model:
+              expr: voya_postgres_up
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [1], type: lt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          description: Postgres did not answer SELECT 1 — the catalog and job state are unavailable.
+          summary: Postgres is down
+        labels:
+          severity: critical

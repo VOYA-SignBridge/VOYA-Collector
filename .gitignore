@@ -56,7 +56,12 @@ tmp/
 *.tmp
 
 # Video and model files
-dataset/
+# ...but keep the directory itself tracked. Docker creates a missing bind-mount
+# source as root:root, and the containers run as uid 1000 (appuser) — on Linux
+# that makes /dataset unwritable and every upload fails. A committed .gitkeep
+# means `git clone` creates the dir owned by the cloning user instead.
+dataset/*
+!dataset/.gitkeep
 *.mp4
 *.npz
 *.npy
@@ -67,7 +72,10 @@ dataset/
 .git/
 
 # Google Drive credentials
-gdrive/
+# Same reasoning as dataset/ above: keep the directory, never its contents
+# (credentials.json / token.json stay out of git).
+gdrive/*
+!gdrive/.gitkeep
 
 # Spreadsheet credentials
 SsheetAPI/
@@ -82,4 +90,26 @@ processed/splits
 *.md
 *.txt
 # TLS certs (self-signed for HTTP/2; use a real cert in prod)
-certs/
+certs/*
+!certs/.gitkeep
+
+# SOT — private signing keys must NEVER be committed (public keys in
+# app/sot/authorized_keys.json are fine; those are meant to be committed).
+sot_private.key
+*.key
+.voya/
+# ...but the public-key allowlist MUST be tracked (overrides the *.json rule
+# above); it is the committed root of trust servers verify against.
+!backend/app/sot/authorized_keys.json
+
+# Local scratch dir for verification logs / throwaway compose overrides.
+# Never part of a deploy.
+_tmp/
+
+# Database dumps. backup.sql and merge_data.sql were committed in 1be7f25 and
+# each carried 6 real user emails plus their bcrypt password hashes, along with
+# full users / user_profiles / refresh_tokens rows. Nothing in the repo reads
+# them. A dump is production personal data, not fixture data — keep it out.
+*.sql
+!**/migrations/*.sql
+!scripts/*.sql

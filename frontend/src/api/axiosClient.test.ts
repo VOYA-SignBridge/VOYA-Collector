@@ -19,11 +19,23 @@ describe('axiosClient API Sync Standard', () => {
     vi.restoreAllMocks();
   });
 
-  it('1. Đảm bảo cấu hình Runtime Environment Injection hoạt động (12-Factor App)', () => {
+  it('1. Đảm bảo cấu hình Runtime Environment Injection hoạt động (12-Factor App)', async () => {
     // Biến môi trường giả lập đã được set trong vitest.setup.ts
     const baseUrl = getApiBaseURL();
     expect(baseUrl).toBe('http://localhost:8000');
-    expect(axiosClient.defaults.baseURL).toBe('http://localhost:8000');
+
+    // Bản refactor cookie-auth không set axiosClient.defaults.baseURL nữa; thay
+    // vào đó base URL được prepend vào URL tương đối qua request interceptor.
+    // Test theo HÀNH VI đó thay vì thuộc tính defaults đã bị bỏ.
+    const mockRequest = {
+      method: 'get',
+      url: '/dataset/labels',
+      headers: {} as Record<string, string>,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const interceptor = (axiosClient.interceptors.request as any).handlers[0].fulfilled;
+    const config = await interceptor(mockRequest);
+    expect(config.url).toBe('http://localhost:8000/dataset/labels');
   });
 
   it('2. Đảm bảo Token được lưu và thiết lập đúng chuẩn', () => {

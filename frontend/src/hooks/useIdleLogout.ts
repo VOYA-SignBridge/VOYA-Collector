@@ -19,8 +19,11 @@ import { clearAuthToken } from "../api/axiosClient";
  * a `voya:idle-logout` event that <SecurityNotices> turns into a friendly
  * "your session ended due to inactivity" notice.
  */
+// 3-hour idle cap. Must stay in lockstep with the server backstop
+// (REFRESH_TOKEN_EXPIRE_MINUTES): if the server TTL were shorter, an idle user
+// would be logged out server-side before this timer fires.
 const IDLE_LIMIT_MS =
-  Number(import.meta.env.VITE_IDLE_TIMEOUT_MINUTES || 90) * 60_000;
+  Number(import.meta.env.VITE_IDLE_TIMEOUT_MINUTES || 180) * 60_000;
 const ACTIVITY_KEY = "voya:last-activity";
 const CHECK_MS = 30_000; // how often we evaluate the idle deadline
 const WRITE_THROTTLE_MS = 15_000; // don't touch localStorage on every mousemove

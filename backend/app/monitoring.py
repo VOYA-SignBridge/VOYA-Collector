@@ -472,6 +472,26 @@ def collect_resources() -> Dict[str, Any]:
     training = training_snapshot()
     rds = redis_snapshot()
     disk = disk_snapshot()
+    
+    # Fetch ignore flags from Redis
+    client = _redis_client()
+    if client:
+        try:
+            if client.get("config:ignore_missing_gpu") in (b"1", "1"):
+                gpu["ignored"] = True
+            if client.get("config:ignore_missing_disk") in (b"1", "1"):
+                disk["ignored"] = True
+        except Exception as e:
+            logger.debug("[MONITOR] Failed to fetch ignore flags: %s", e)
+
+    alerts = _build_alerts(host, gpu, training, rds, disk)
+    
+    if not gpu.get("available") and not gpu.get("ignored"):
+        alerts.append({"level": "critical", "message": "Mất kết nối GPU (Server không tìm thấy phần cứng đồ họa).", "resource": "gpu"})
+        
+    if disk and not disk.get("available") and not disk.get("ignored"):
+        alerts.append({"level": "critical", "message": "Mất kết nối Ổ cứng lưu trữ (Dataset volume).", "resource": "disk"})
+
     return {
         "timestamp": _iso_now(),
         "host": host,
@@ -480,5 +500,5 @@ def collect_resources() -> Dict[str, Any]:
         "redis": rds,
         "disk": disk,
         "config": resource_config(),
-        "alerts": _build_alerts(host, gpu, training, rds, disk),
+        "alerts": alerts,
     }

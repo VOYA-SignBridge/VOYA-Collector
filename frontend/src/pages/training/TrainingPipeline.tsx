@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTrainingAPI, useWebSocketProgress } from '../../hooks/useTrainingAPI';
 import type { TrainingJob, TrainingConfig, TrainingJobListItem, TrainingMetrics } from '../../hooks/useTrainingAPI';
+import { useAuth } from '../../hooks/useAuth';
 import TrainingHistory from './components/TrainingHistory';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
@@ -66,6 +67,7 @@ const TrainingPipeline: React.FC = () => {
 
   const api = useTrainingAPI();
   const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs } = api;
+  const { isAdmin } = useAuth();
 
   useEffect(() => {
     loadDatasetInfo();
@@ -130,15 +132,23 @@ const TrainingPipeline: React.FC = () => {
     (msg) => console.error('[WS_ERROR]', msg)
   );
 
-  const handleStartTraining = async () => {
-    const config: TrainingConfig = { ...trainingConfig, dialects: selectedDialects };
+  // Dispatch a run with an explicit config and reset the progress view.
+  const startWith = async (config: TrainingConfig) => {
     const newJob = await startTraining(config);
-
     if (newJob) {
       setJob(newJob);
+      setMetrics([]);
       setCurrentStep(6);
     }
   };
+
+  const handleStartTraining = () =>
+    startWith({ ...trainingConfig, dialects: selectedDialects });
+
+  // Retry a failed run with the SAME config it used (works even when the job was
+  // opened from history and the wizard state is empty).
+  const handleRetryTraining = () =>
+    startWith(job?.config ?? { ...trainingConfig, dialects: selectedDialects });
 
   const isTraining = job?.status === 'running';
   const progressRef = useRef<HTMLDivElement>(null);
@@ -313,6 +323,14 @@ const TrainingPipeline: React.FC = () => {
                   const cancelled = await api.cancelTraining(job.id);
                   if (cancelled) setJob(cancelled);
                 }}
+                onBack={() => {
+                  // Run đã kết thúc/thất bại → về bước cấu hình để chỉnh & chạy lại.
+                  setJob(null);
+                  setMetrics([]);
+                  setCurrentStep(5);
+                }}
+                onRetry={handleRetryTraining}
+                isAdmin={isAdmin}
               />
             )}
             {currentStep === 7 && (

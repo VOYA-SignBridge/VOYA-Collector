@@ -385,6 +385,15 @@ def reset_password_with_token(token: str, new_password: str) -> None:
                     """,
                     (row["user_id"],),
                 )
+                # Kill every existing session too. A reset is often "my account
+                # may be compromised" — leaving an attacker's still-valid refresh
+                # token alive would defeat the point. Same transaction as the
+                # password change, so it's all-or-nothing.
+                cur.execute(
+                    "UPDATE refresh_tokens SET revoked_at = NOW() "
+                    "WHERE user_id = %s AND revoked_at IS NULL",
+                    (row["user_id"],),
+                )
     finally:
         conn.close()
 

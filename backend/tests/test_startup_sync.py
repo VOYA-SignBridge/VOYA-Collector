@@ -7,6 +7,31 @@ from app.storage.metadata_db import (
 )
 from app.db import sync_missing_data_on_startup
 
+
+def _postgres_available() -> bool:
+    """Đây là các integration test cần Postgres thật (ensure_tables, ALTER TABLE…).
+
+    Khi chạy ngoài Docker (không có host `postgres`), trước đây cả file TREO vì
+    fixture cứ thử kết nối lại. Probe một lần với timeout ngắn: kết nối được thì
+    chạy, không thì SKIP cả module (connect_postgres tự bound theo connect_timeout
+    và ném ngay khi bị refuse nên probe này kết thúc nhanh).
+    """
+    try:
+        from app.storage.postgres_connection import connect_postgres
+
+        conn = connect_postgres(connect_timeout=2)
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _postgres_available(),
+    reason="Postgres không truy cập được — chạy trong Docker: "
+    "docker compose exec backend pytest tests/test_startup_sync.py",
+)
+
 # Mock data
 MOCK_CLASS = {
     "class_uid": "test-sync-class-001",
@@ -107,3 +132,25 @@ def test_sync_soft_delete_safety(mock_raw, mock_samples, mock_labels, mock_fetch
     assert len(rows) == 1
     assert rows[0]["slug"] == "test-slug-updated"
     assert rows[0]["deleted_at"] is not None
+
+@patch("app.db.sync_missing_data_on_startup")
+@patch("app.storage.metadata_db.drop_all_tables")
+@patch("app.storage.metadata_db.ensure_tables")
+@patch("app.storage.metadata_db._column_exists", return_value=False)
+def test_init_db_schema_recovery(mock_col, mock_ensure, mock_drop, mock_sync):
+    """When the post-ensure schema check STILL reports a missing column, init_db
+    must fall back to the nuclear 'drop_all_tables + rebuild' recovery path.
+
+    We force _column_exists -> False so the schema looks 'still broken' after
+    ensure_tables (the real ADD COLUMN IF NOT EXISTS migration would auto-heal
+    it, so a real dropped column never reaches this branch). Fully mocked, so the
+    test is deterministic and touches no real DB / data.
+    """
+    from app.db import init_db
+
+    mock_sync.return_value = True  # sync succeeds; the schema check is what fails
+    result = init_db()
+
+    assert result is True
+    mock_drop.assert_called_once()      # nuclear reset was triggered
+    assert mock_ensure.call_count == 2  # ensure_tables ran initially + after drop

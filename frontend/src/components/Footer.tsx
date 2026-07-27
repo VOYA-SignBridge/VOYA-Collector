@@ -24,7 +24,7 @@ export default function Footer() {
           {/* Brand Column */}
           <div className="lg:col-span-1">
             <div className="flex items-center gap-3 mb-5 cursor-pointer" onClick={() => navigate("/")}>
-              <img src="/logo.png" alt="CTU.SignBridge" className="h-12 w-12 object-contain" />
+              <img src="logo.png" alt="CTU.SignBridge" className="h-12 w-12 object-contain" />
               <div>
                 <div className="text-xl font-bold">
                   <span className="text-ctu-blue">CTU</span>

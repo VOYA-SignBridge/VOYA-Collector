@@ -1,0 +1,292 @@
+\documentclass[runningheads]{llncs}
+
+% =================================================
+% Packages
+% =================================================
+% Vietnamese characters. The LaTeX default encoding (OT1) has no glyph for
+% D-stroke, O-horn, or U-horn, so "Hoa De" and the excluded-letter list in
+% Section 3.2 lose those characters silently. T5 (vntex) covers them under
+% pdfLaTeX; the fontspec branch covers XeLaTeX and LuaLaTeX.
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage{lmodern}          % scalable outlines, so T5 does not fall back to bitmaps
+  \usepackage[T1,T5]{fontenc}
+  \usepackage[utf8]{inputenc}
+\else
+  \usepackage{fontspec}
+  \setmainfont{Latin Modern Roman}
+  \setsansfont{Latin Modern Sans}
+  \setmonofont{Latin Modern Mono}
+\fi
+
+% Evens out the loose interword spacing left by long \texttt{} identifiers.
+\usepackage{microtype}
+
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xurl}
+
+% Float placement. Without the barrier and the looser fractions, the floats
+% queue up and flush out after the bibliography.
+%
+% The barrier has a cost, though: it turns a float that could not be placed
+% into a hole at the foot of the page before the next \section. That is what
+% emptied the last quarter of p.11 (Table 5, declared in 6.4, forced out ahead
+% of Section 7) and the last fifth of p.3 (Table 1). The tables now carry an
+% "h" in their placement specs so they can settle where they are declared
+% instead of being deferred into a barrier. If floats still drift too far,
+% the next thing to try is dropping the [section] option and placing a manual
+% \FloatBarrier only where a figure genuinely must not cross a section.
+\usepackage[section]{placeins}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{4}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.7}
+\renewcommand{\textfraction}{0.07}
+% Kept high on purpose: a lower value lets LaTeX open a page for a single
+% float and leave the rest blank, which is what produced the near-empty
+% figure pages in the first revision.
+\renewcommand{\floatpagefraction}{0.85}
+
+% =================================================
+% Vertical-space budget
+% =================================================
+% llncs is generous with vertical glue, and with eight floats, five display
+% equations and roughly thirty headings that generosity was costing close to
+% two full pages. Everything below tightens glue only; no prose is affected.
+% To revert to stock llncs spacing, comment out this whole block.
+\makeatletter
+
+% --- Space above/below floats -------------------------------------------
+% llncs sets both of these to 8mm (~22.8pt). That is the single largest
+% source of the blank bands above and below every figure and table.
+\setlength{\textfloatsep}{11\p@ \@plus 2\p@ \@minus 2\p@} % float <-> text, page top/bottom
+\setlength{\intextsep}   {9\p@  \@plus 2\p@ \@minus 2\p@} % float placed mid-text
+\setlength{\floatsep}    {9\p@  \@plus 2\p@ \@minus 2\p@} % float <-> float
+\setlength{\@fptop}{0\p@}          % no leading glue on a float-only page
+\setlength{\@fpsep}{8\p@ \@plus 1fil}
+\setlength{\@fpbot}{0\p@ \@plus 1fil}
+
+% --- Caption skips -------------------------------------------------------
+% Figures caption below the graphic, so \abovecaptionskip is the gap that
+% matters there. Tables caption above the body; llncs hardcodes 0pt/10pt
+% inside its own table environment, so that environment has to be re-declared.
+\setlength{\abovecaptionskip}{5\p@}
+\setlength{\belowcaptionskip}{0\p@}
+\renewenvironment{table}
+   {\setlength\abovecaptionskip{0\p@}%
+    \setlength\belowcaptionskip{4\p@}%
+    \@float{table}}
+   {\end@float}
+\renewenvironment{table*}
+   {\setlength\abovecaptionskip{0\p@}%
+    \setlength\belowcaptionskip{4\p@}%
+    \@dblfloat{table}}
+   {\end@dblfloat}
+
+% --- Display equations ---------------------------------------------------
+% Five numbered displays, each previously carrying ~10pt of glue on both sides.
+\setlength{\abovedisplayskip}     {5\p@ \@plus 2\p@ \@minus 2\p@}
+\setlength{\belowdisplayskip}     {5\p@ \@plus 2\p@ \@minus 2\p@}
+\setlength{\abovedisplayshortskip}{2\p@ \@plus 2\p@}
+\setlength{\belowdisplayshortskip}{3\p@ \@plus 2\p@ \@minus 2\p@}
+
+% --- Lists ---------------------------------------------------------------
+% Only the contribution list in Section 1 uses this, but llncs opens it with
+% 8pt of topsep on each side.
+\def\@listI{\leftmargin\leftmargini
+            \parsep \z@ \@plus\p@ \@minus\p@
+            \topsep 4\p@ \@plus2\p@ \@minus2\p@
+            \itemsep \z@}
+\let\@listi\@listI
+\@listi
+
+% --- Headings ------------------------------------------------------------
+% NOTE: this is the one change that visibly departs from the stock LNCS
+% layout. llncs asks for 18pt above every heading and 12pt (section) / 8pt
+% (subsection) below. Across ~30 headings that is roughly half a page. The
+% values below keep the hierarchy legible while reclaiming it. Delete this
+% sub-block first if a reviewer objects to the deviation.
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+                       {-12\p@ \@plus -3\p@ \@minus -3\p@}%
+                       {7\p@ \@plus 2\p@ \@minus 2\p@}%
+                       {\normalfont\large\bfseries\boldmath
+                        \rightskip=\z@ \@plus 8em\pretolerance=10000 }}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+                       {-11\p@ \@plus -3\p@ \@minus -3\p@}%
+                       {4\p@ \@plus 2\p@ \@minus 2\p@}%
+                       {\normalfont\normalsize\bfseries\boldmath
+                        \rightskip=\z@ \@plus 8em\pretolerance=10000 }}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}%
+                       {-11\p@ \@plus -3\p@ \@minus -3\p@}%
+                       {-0.5em \@plus -0.22em \@minus -0.1em}%
+                       {\normalfont\normalsize\bfseries\boldmath}}
+\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}%
+                       {-9\p@ \@plus -3\p@ \@minus -3\p@}%
+                       {-0.5em \@plus -0.22em \@minus -0.1em}%
+                       {\normalfont\normalsize\itshape}}
+
+% --- Page filling --------------------------------------------------------
+% llncs sets both penalties to 10000, which ends a page one or two lines early
+% rather than allow a widow. A high-but-finite penalty still avoids widows
+% wherever it is cheap to do so.
+\widowpenalty=300
+\clubpenalty=300
+
+% llncs calls \LoadClass[twoside]{article}, and article only switches on
+% \raggedbottom for ONEside. So this document was running \flushbottom: every
+% page is forced to exactly \textheight, and because \parskip is rigid at 0pt
+% the entire shortfall gets pumped into the one or two stretchable skips on
+% the page -- normally the space around a heading. That is what produced the
+% oversized gap around "8.2 Conclusion" on p.14 and the stretched list on p.2.
+% \raggedbottom keeps inter-paragraph and heading spacing identical on every
+% page and sends the slack to the bottom margin instead.
+% (Deviation from stock LNCS, which is flush-bottom. Remove this one line to
+% go back.)
+\raggedbottom
+
+% --- Line packing --------------------------------------------------------
+% The long \texttt{} identifiers (hands126_v1, v2_wrist_centered_mirror) are
+% near-unbreakable boxes in a 12.2cm measure. Giving TeX more room to stretch
+% lets it settle several paragraphs one line shorter instead of overflowing.
+\tolerance=1500
+\emergencystretch=2em
+\hbadness=1500
+
+\makeatother
+% =================================================
+
+\urlstyle{same}
+
+% =================================================
+% Page-limit enforcement
+% =================================================
+% Nothing can guarantee a page count before the document is typeset, but the
+% build can be made to refuse to finish quietly once it is. Every compile now
+% prints the count, and going over turns into an error rather than something
+% discovered on the submission form.
+%
+%   raise the cap ...... edit \PageLimit
+%   downgrade to a note  comment out the \PackageError line
+\usepackage{lastpage}
+\usepackage{refcount}
+\newcommand{\PageLimit}{15}
+\AtEndDocument{%
+  \typeout{^^J==== PAGE COUNT: \getpagerefnumber{LastPage} of \PageLimit\space ====^^J}%
+  \ifnum\getpagerefnumber{LastPage}>\PageLimit\relax
+    \PackageError{pagelimit}%
+      {Document runs to \getpagerefnumber{LastPage} pages; the limit is \PageLimit}%
+      {Cut content, or raise \string\PageLimit\space in main.tex.}%
+  \fi
+}
+
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+% =================================================
+% Document
+% =================================================
+\begin{document}
+
+\title{CTU.SignBridge: Protocol- and Artifact-Aware Evaluation of
+Low-Resource Vietnamese Sign Recognition}
+
+\titlerunning{Protocol- and Artifact-Aware Sign Recognition}
+
+\author{
+Minh-Thai Truong\inst{1}
+\and
+Huyen-Tran Le Lu\inst{1}
+\and
+Nhat-Minh Mai\inst{1}
+\and
+Minh-Nghi Nguyen\inst{1}
+\and
+Vu-Khoa Vo Tran\inst{1}
+\and
+Quang-Long Nguyen\inst{1}
+\and
+Trong-Phuc Chau\inst{1}
+}
+
+\authorrunning{M.-T. Truong et al.}
+
+% The student address is one long typewriter string. Without a space after
+% each comma LaTeX has almost nowhere legal to break it, so the line runs
+% ragged and the closing brace is orphaned onto the next line.
+\institute{College of Information and Communication Technology,\\
+Can Tho University, Can Tho, Vietnam\\[2pt]
+\email{tmthai@ctu.edu.vn}\\
+\email{\{tranb2203588, minhb2203567, nghib2203570,
+khoab2203560, longb2203562, phucb2203523\}@student.ctu.edu.vn}}
+
+\maketitle
+
+\begin{abstract}
+Performer overlap, data partitioning, and incomplete experiment provenance can move low-resource sign-recognition results more than the choice of model does. This paper presents CTU.SignBridge, a protocol- and artifact-aware pipeline for isolated sign recognition from fixed-length hand-landmark sequences collected through a live camera interface, linking canonical performer identities, immutable manifests, versioned splits, processing contracts, and self-describing checkpoints behind fail-closed validity gates. We evaluate five compact neural architectures on a seven-class Hòa Đê workplace-sign profile and a 23-class fingerspelling subset. On Hòa Đê, HandGCN reached the highest mean held-out-performer accuracy, 0.878, and ranked first on all four folds. A matched 120-run experiment then held the test set fixed and varied only what development saw: admitting the target performer into training and validation raised accuracy in all 20 model--performer comparisons, from 0.794 to 0.958 on average. Variation between performers outran the range between architecture means, and the fingerspelling folds supported no stable ranking. Within the profiles we evaluated, performer-aware evaluation and verifiable artifact provenance decide how the resulting numbers should be read.
+
+\keywords{
+isolated sign recognition
+\and Vietnamese sign recognition
+\and hand landmarks
+\and held-out-performer evaluation
+\and performer exposure
+\and artifact provenance
+\and reproducibility
+}
+\end{abstract}
+
+% =================================================
+\section{Introduction}
+\label{sec:introduction}
+\input{Structures/1-Introduction}
+
+\section{Related Work}
+\label{sec:related_work}
+\input{Structures/2-Related Works}
+
+\section{Data and Representation}
+\label{sec:data}
+\input{Structures/3-Data and Representation}
+
+\section{Protocol- and Artifact-Aware Pipeline}
+\label{sec:pipeline}
+\input{Structures/4-Pipeline}
+
+\section{Experimental Design}
+\label{sec:experimental_design}
+\input{Structures/5-Experimental Design}
+
+\section{Results}
+\label{sec:results}
+\input{Structures/6-Results}
+
+\section{Discussion and Reliability Evidence}
+\label{sec:discussion}
+\input{Structures/7-Discussion}
+
+\section{Limitations and Conclusion}
+\label{sec:conclusion}
+\input{Structures/8-Limitations & Conclusion}
+
+% Unnumbered back matter: these are declarations, not a ninth contribution
+% section, and numbering them pushed the conclusion out of last place.
+% LNCS \subsubsection is run-in, which also costs less vertical space.
+\section*{Ethics and Artifact Availability}
+
+\subsubsection*{Ethics statement.}
+\input{Structures/ethics}
+
+\subsubsection*{Artifact availability.}
+\input{Structures/artifact_availability}
+
+% =================================================
+% Bibliography
+% =================================================
+\bibliographystyle{splncs04}
+\bibliography{mybibliography}
+
+\end{document}

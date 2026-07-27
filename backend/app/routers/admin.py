@@ -298,3 +298,28 @@ def get_sync_status(task_id: str, current_user: Dict[str, Any] = Depends(require
         }
     
     return response
+
+class IgnoreHardwarePayload(BaseModel):
+    resource: str
+    ignore: bool
+
+@router.post("/config/ignore-hardware")
+def ignore_hardware_alert(
+    payload: IgnoreHardwarePayload,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Bật/tắt cảnh báo (mute) cho phần cứng bị thiếu thông qua Redis (Chỉ Admin)"""
+    from app.monitoring import _redis_client
+    r = _redis_client()
+    if not r:
+        raise HTTPException(status_code=500, detail="Redis unavailable")
+    
+    if payload.resource not in ["gpu", "disk"]:
+        raise HTTPException(status_code=400, detail="Invalid resource")
+        
+    key = f"config:ignore_missing_{payload.resource}"
+    if payload.ignore:
+        r.set(key, "1")
+    else:
+        r.delete(key)
+    return {"status": "success", "resource": payload.resource, "ignored": payload.ignore}

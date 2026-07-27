@@ -7,22 +7,50 @@ services:
         # Leave empty so the frontend uses same-origin relative paths when possible.
         VITE_API_URL: ${VITE_API_URL:-}
     image: voya_frontend:latest
-    container_name: voya_frontend
+    container_name: ${CONTAINER_PREFIX:-voya}_frontend
     expose:
       - "80"
     env_file:
       - .env
+    environment:
+      # Sub-path the SPA is served under (injected into window.__ENV__ at runtime
+      # by the nginx entrypoint). Distinguishes deployments WITHOUT a rebuild:
+      #   - this machine / ngrok (root):            unset -> defaults to "/"
+      #   - CTU server https://se.cit.ctu.edu.vn/voya/:  set VITE_BASE_PATH=/voya
+      # Session-ended redirects and React Router basename both read this, so a
+      # logged-out user always returns to the app root under the SAME base path.
+      VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+      # Prefix that axios/WebSocket calls carry. Root deploy: empty (same-origin).
+      # /voya server: set VITE_API_URL=/voya so API calls become /voya/api/... and
+      # survive the campus proxy (which only forwards /voya/*).
+      VITE_API_URL: ${VITE_API_URL:-}
     restart: unless-stopped
+    # This container's own nginx proxies /api to http://backend:8000 with a
+    # literal hostname, so nginx resolves it at config-parse time and exits
+    # ("host not found in upstream") if backend isn't up yet. Without this gate
+    # a cold `compose up` crash-loops the frontend until backend happens to win
+    # the race — and on a machine where backend never starts it loops forever.
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       voya_network:
         aliases:
           - voya_frontend
           - frontend
+    healthcheck:
+      # nginx (in the frontend image) listens on IPv4 0.0.0.0:80 only, so hit
+      # 127.0.0.1 — "localhost" can resolve to ::1 first and give a false refusal.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   realtime_service:
     build: ./backend/realtime_service
     image: voya_realtime_service:latest
-    container_name: voya_realtime_service
+    container_name: ${CONTAINER_PREFIX:-voya}_realtime_service
     expose:
       - "8010"
     environment:
@@ -36,11 +64,45 @@ services:
       voya_network:
         aliases:
           - realtime_service
+    healthcheck:
+      # No wget/curl in this python image — hit /health (returns 200) via urllib.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # One-shot SOT reader: before any worker runs, pull the latest SIGNED Source-of-
+  # Truth version from Drive, verify its signature + checksums against the
+  # committed authorized keys, then make THIS deployment's DB a SUPERSET of it
+  # (schema + data; adds what's missing, never deletes). Read-only w.r.t Drive —
+  # only registered writer machines publish. Exits 0 on success or when SOT is
+  # empty/not-yet-published; a verification failure exits non-zero and blocks the
+  # stack (fail-closed: never start workers against a corrupt source of truth).
+  sot-init:
+    image: voya_backend:latest
+    container_name: ${CONTAINER_PREFIX:-voya}_sot_init
+    env_file:
+      - .env
+    volumes:
+      - ./dataset:/dataset
+      - ./gdrive:/gdrive
+      - .:/workspace
+    command: python -m app.sot.cli sync
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - voya_network
+    # One-shot, but it starts alongside every long-running service and pulls the
+    # catalog from Drive — cap it so a large sync can't eat the host's headroom
+    # during startup, when trainer/worker are also claiming their limits.
+    mem_limit: 512m
 
   backend:
-    build: ./backend
     image: voya_backend:latest
-    container_name: voya_backend
+    container_name: ${CONTAINER_PREFIX:-voya}_backend
     expose:
       - "8000"
     volumes:
@@ -52,20 +114,36 @@ services:
     environment:
       REALTIME_SERVICE_URL: http://realtime_service:8010
       TTS_REDIS_URL: redis://redis:6379/0
+    command: gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --max-requests 1000 --max-requests-jitter 100 --bind 0.0.0.0:8000
     depends_on:
-      - postgres
-      - redis
-      - realtime_service
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      realtime_service:
+        condition: service_started
+      sot-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       voya_network:
         aliases:
           - voya_backend
           - backend
+    healthcheck:
+      # curl is NOT in the backend image (Debian slim) — the old curl-based check
+      # exited 127 ("curl: not found") on every run, so the container was ALWAYS
+      # unhealthy regardless of app state. Python is in the image; hit the same
+      # endpoint with urllib (exits 0 only on HTTP 200).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health',timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   worker:
     image: voya_backend:latest
-    container_name: voya_worker
+    container_name: ${CONTAINER_PREFIX:-voya}_worker
     env_file:
       - .env
     volumes:
@@ -74,21 +152,43 @@ services:
       - .:/workspace
     environment:
       TTS_REDIS_URL: redis://redis:6379/0
-    command: celery -A app.worker.celery_app worker --loglevel=${LOG_LEVEL:-INFO}
+    command: celery -A app.worker.celery_app worker --max-tasks-per-child=100 --loglevel=${LOG_LEVEL:-INFO}
     depends_on:
-      - redis
-      - postgres
-      - backend
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      backend:
+        condition: service_started
+      sot-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - voya_network
+    healthcheck:
+      # Must run under a SHELL so $HOSTNAME expands INSIDE the container to the
+      # real node hostname. Two bugs in the old check:
+      #   1. exec-form ["CMD",...] has no shell, so "-d celery@$HOSTNAME" was a
+      #      literal string that matched no node -> "No nodes replied" -> unhealthy.
+      #   2. $$ escapes compose interpolation so the literal $HOSTNAME reaches the
+      #      container shell (a single $ would be substituted at compose-parse time).
+      # -t 8 gives the control ping time to reply while children are busy (< the
+      # 10s healthcheck timeout).
+      # -t 15 / timeout 30s / interval 60s: the check spends ~10s importing the
+      # app (mediapipe/torch) before it can ping, measured on an idle host, so
+      # the old 10s timeout failed a healthy worker as soon as the box was busy.
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping -d celery@$$HOSTNAME -t 15"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 90s
 
   # Dedicated training executor — consumes ONLY the "training" queue with
   # concurrency 1 (jobs stay strictly serialized). Isolates CPU-heavy
   # training from the API container so requests stay responsive.
   trainer:
     image: voya_backend:latest
-    container_name: voya_trainer
+    container_name: ${CONTAINER_PREFIX:-voya}_trainer
     env_file:
       - .env
     environment:
@@ -117,17 +217,32 @@ services:
     # job so any memory it touched is returned to the OS immediately ("trả liền").
     # The GPU is already freed by the training subprocess exiting; this covers the
     # Python supervisor process too.
-    command: celery -A app.worker.celery_app worker -Q training -c 1 --max-tasks-per-child=1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
+    command: celery -A app.worker.celery_app worker -Q training -c 2 --max-tasks-per-child=1 -n trainer@%h --loglevel=${LOG_LEVEL:-INFO}
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      sot-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - voya_network
+    healthcheck:
+      # Same shell-expansion rule as the worker check, but this node is named
+      # trainer@%h (see -n trainer@%h in the command), so match trainer@$HOSTNAME.
+      # -t 15 / timeout 30s / interval 60s: the check spends ~10s importing the
+      # app (mediapipe/torch) before it can ping, measured on an idle host, so
+      # the old 10s timeout failed a healthy worker as soon as the box was busy.
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping -d trainer@$$HOSTNAME -t 15"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 90s
 
   celery-beat:
     image: voya_backend:latest
-    container_name: voya_celery_beat
+    container_name: ${CONTAINER_PREFIX:-voya}_celery_beat
     env_file:
       - .env
     volumes:
@@ -144,19 +259,42 @@ services:
     restart: unless-stopped
     networks:
       - voya_network
+    healthcheck:
+      # celery beat is a scheduler, not a worker (no `inspect ping`). Confirm the
+      # beat process is the running container process (PID 1); if it dies the
+      # container is marked unhealthy (and restarted by restart: unless-stopped).
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if b'beat' in open('/proc/1/cmdline','rb').read() else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
-    container_name: voya_redis
+    container_name: ${CONTAINER_PREFIX:-voya}_redis
+    # Bound Redis memory even on a base-only launch. Without this the server
+    # runs with maxmemory=0 (unlimited) + noeviction: the Celery result backend
+    # keeps accumulating keys until Redis exhausts host RAM and gets OOM-killed
+    # (the "Redis không ổn định" symptom). volatile-lru evicts ONLY keys that
+    # carry a TTL (TTS cache, expiring task results); broker/queue keys have no
+    # TTL and are never dropped, so queued tasks are not lost under pressure.
+    # The prod override raises this together with a mem_limit.
+    command: redis-server --maxmemory 400mb --maxmemory-policy volatile-lru --save 60 1000
     volumes:
       - redis_data:/data
     restart: unless-stopped
     networks:
       - voya_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   postgres:
     image: postgres:17
-    container_name: voya_postgres
+    container_name: ${CONTAINER_PREFIX:-voya}_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -164,6 +302,16 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    # Gate dependents on ACCEPTING CONNECTIONS, not just "container started".
+    # sot-init is a hard gate in front of the whole stack (service_completed_
+    # successfully); without this, a fresh-volume cold start races Postgres'
+    # initdb and sot-init fails on "connection refused", blocking every service.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
     networks:
       voya_network:
         aliases:
@@ -171,11 +319,17 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: voya_nginx
+    container_name: ${CONTAINER_PREFIX:-voya}_nginx
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
-      - "8000:8000"
-      - "8001:8001"
+      # :8000 is the un-gatewayed backend vhost and :8001 a plain-text "OK"
+      # probe — neither passes through the /voya routing or the limit_req zones
+      # on :80, so publishing them on 0.0.0.0 hands out an unthrottled bypass of
+      # the gateway. Bind both to loopback: the vite dev proxy targets
+      # localhost:8000 from the host, so local development is unaffected.
+      # Override DEBUG_BIND_HOST / the port numbers if 8000/8001 are taken.
+      - "${DEBUG_BIND_HOST:-127.0.0.1}:${NGINX_BACKEND_PORT:-8000}:8000"
+      - "${DEBUG_BIND_HOST:-127.0.0.1}:${NGINX_HEALTH_PORT:-8001}:8001"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx.conf.d:/etc/nginx/conf.d:ro
@@ -188,10 +342,142 @@ services:
         aliases:
           - nginx
           - voya_nginx
+    healthcheck:
+      # Gateway listens on 0.0.0.0:80 (IPv4) — use 127.0.0.1, not localhost/::1.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: ${CONTAINER_PREFIX:-voya}_loki
+    user: "root"
+    volumes:
+      - ./logging/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki_data:/tmp/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - voya_network
+    healthcheck:
+      # /ready can report 503 in single-binary mode even when serving; /metrics
+      # returns 200 whenever the HTTP server is up (the liveness we care about).
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: ${CONTAINER_PREFIX:-voya}_promtail
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logging/promtail-config.yaml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    networks:
+      - voya_network
+    healthcheck:
+      # promtail image has no wget/curl/python — verify its process is PID 1.
+      # $$c escapes compose interpolation so the shell (dash) sees $c.
+      test: ["CMD-SHELL", "read c < /proc/1/cmdline; case \"$$c\" in *promtail*) exit 0;; *) exit 1;; esac"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          # Sits at ~49 MB steady while tailing 14 containers — 77% of the old
+          # 64M cap, with nothing left for a log burst during training. 128M.
+          memory: 128M
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: ${CONTAINER_PREFIX:-voya}_prometheus
+    volumes:
+      - ./logging/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    restart: unless-stopped
+    networks:
+      - voya_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          # 7d TSDB retention over ~14 scrape targets: the head block plus
+          # compaction peaks well past 128M, and an OOM-killed Prometheus takes
+          # the alert rules down with it. 256M leaves room for compaction spikes.
+          memory: 256M
+
+  grafana:
+    image: grafana/grafana-oss:10.4.2
+    container_name: ${CONTAINER_PREFIX:-voya}_grafana
+    ports:
+      # Bind to loopback only: Grafana has no campus-proxy route and its own
+      # login is the only thing guarding it. Reach it from the server over an
+      # SSH tunnel (ssh -L 3000:localhost:3000 <server>), not the public NIC.
+      - "127.0.0.1:${GRAFANA_HTTP_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./logging/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./logging/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+      - ./logging/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # SMTP Email Alerting Configuration.
+      # Grafana wants a single "host:port" string, but .env keeps host and port
+      # as separate vars (the backend's own SMTP client needs them apart), so
+      # recombine here — passing SMTP_HOST alone yields no port and every alert
+      # email silently fails to send.
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}:${SMTP_PORT:-587}
+      - GF_SMTP_USER=${SMTP_USER}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD}
+      # Gmail rejects a From that isn't the authenticated account, so default
+      # this to SMTP_FROM (the same mailbox the backend sends as).
+      - GF_SMTP_FROM_ADDRESS=${SMTP_FROM:-${SMTP_USER}}
+      - GF_SMTP_FROM_NAME=VOYA Alerts
+    restart: unless-stopped
+    networks:
+      - voya_network
+    depends_on:
+      - loki
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 200M
 
 volumes:
   postgres_data:
   redis_data:
+  loki_data:
+  grafana_data:
+  prometheus_data:
 
 networks:
   voya_network:

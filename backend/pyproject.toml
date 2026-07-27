@@ -24,3 +24,11 @@ dependencies = [
     "passlib[bcrypt]==1.7.4",
     "python-jose[cryptography]==3.3.0"
 ]
+
+[tool.pytest.ini_options]
+# Silence a third-party deprecation we can't act on: starlette's TestClient
+# constructs httpx with the deprecated `app=` shortcut. Scoped to that exact
+# message so our own future deprecations still surface.
+filterwarnings = [
+    "ignore:The 'app' shortcut is now deprecated:DeprecationWarning",
+]

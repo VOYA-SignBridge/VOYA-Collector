@@ -65,7 +65,7 @@ interface ConfigInfo {
   services?: ServiceAlloc[];
   total_alloc_mb?: number;
 }
-interface Alert { level: "critical" | "warning"; message: string }
+interface Alert { level: "critical" | "warning"; message: string; resource?: string }
 interface ResourceReport {
   timestamp: string;
   host: HostInfo;
@@ -159,6 +159,17 @@ export default function AdminResourcesPage() {
     };
   }, [live]);
 
+  const handleMuteAlert = async (resource: string) => {
+    if (!window.confirm("Bạn có chắc muốn tắt báo động cho phần cứng này không? Hành động này sẽ đánh dấu lỗi thành bỏ qua.")) return;
+    try {
+      await apiClient.post("/api/v1/admin/config/ignore-hardware", { resource, ignore: true });
+      // Fast refresh
+      apiClient.get<ResourceReport>("/api/v1/admin/resources").then((res) => setData(res.data)).catch(console.error);
+    } catch (err: any) {
+      alert("Lỗi khi tắt cảnh báo: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
   const host = data?.host;
   const gpu = data?.gpu;
   const training = data?.training;
@@ -220,10 +231,20 @@ export default function AdminResourcesPage() {
         <div className="space-y-2">
           {alerts.map((a, i) => (
             <div key={i}
-              className={`rounded-lg px-4 py-3 text-sm font-medium border flex items-center gap-2 ${
+              className={`rounded-lg px-4 py-3 text-sm font-medium border flex items-center justify-between gap-4 ${
                 a.level === "critical" ? "bg-red-50 border-red-200 text-red-700"
                                        : "bg-amber-50 border-amber-200 text-amber-700"}`}>
-              <span>{a.level === "critical" ? "🔴" : "🟠"}</span>{a.message}
+              <div className="flex items-center gap-2">
+                <span>{a.level === "critical" ? "🔴" : "🟠"}</span>{a.message}
+              </div>
+              {a.resource && (
+                <button
+                  onClick={() => handleMuteAlert(a.resource as string)}
+                  className="shrink-0 px-2.5 py-1.5 text-xs bg-white/60 hover:bg-white rounded-md border border-current/20 shadow-sm transition-colors opacity-90 hover:opacity-100 flex items-center gap-1.5"
+                >
+                  <span>🔕</span> Bỏ qua
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -253,7 +274,7 @@ export default function AdminResourcesPage() {
           value={gpu?.available ? `${fmtMem(gpu?.vram_used_mb)} / ${fmtMem(gpu?.vram_total_mb)}` : "—"}
           meta={gpu?.available
             ? `Gồm cả Windows · VOYA: ${gpu?.processes?.length ?? 0} tiến trình`
-            : `Không có số liệu${gpu?.reason ? ` (${gpu.reason})` : ""}`}
+            : `Không có số liệu${(gpu as any)?.ignored ? " (Đã tắt cảnh báo)" : gpu?.reason ? ` (${gpu.reason})` : ""}`}
           muted={!gpu?.available}
         />
         <StatTile
@@ -269,7 +290,7 @@ export default function AdminResourcesPage() {
           value={disk?.available ? `${(disk?.used_gb ?? 0).toFixed(1)} / ${(disk?.total_gb ?? 0).toFixed(1)} GB` : "—"}
           meta={disk?.available
             ? `Còn trống ${(disk?.free_gb ?? 0).toFixed(1)} GB`
-            : `Không đọc được${disk?.reason ? ` (${disk.reason})` : ""}`}
+            : `Không đọc được${(disk as any)?.ignored ? " (Đã tắt cảnh báo)" : disk?.reason ? ` (${disk.reason})` : ""}`}
           muted={!disk?.available}
         />
       </div>
@@ -362,6 +383,35 @@ export default function AdminResourcesPage() {
               <div className="text-xs text-slate-500">{redis.maxmemory_mb ? `Cache / broker · ${(redis.used_pct ?? 0).toFixed(0)}%` : "Không giới hạn — chỉ hiển thị dung lượng tuyệt đối"}</div>
             </div>
           ) : <p className="text-sm text-slate-500">—</p>}
+        </div>
+      </div>
+
+      {/* Grafana Observability Card */}
+      <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-xl shadow-lg border border-slate-700 p-6 text-white relative overflow-hidden group">
+        <div className="absolute top-0 right-0 p-8 opacity-10">
+          <svg className="w-32 h-32 transform group-hover:scale-110 transition-transform duration-700" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+        </div>
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-2xl">📊</span>
+              <h3 className="text-xl font-bold">Hệ thống Giám sát Enterprise (Grafana)</h3>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-ctu-blue text-white tracking-wide uppercase">New</span>
+            </div>
+            <p className="text-slate-300 text-sm max-w-2xl">
+              Log lỗi realtime, truy vết hành trình tác vụ (Audit Trail), và biểu đồ lưu trữ lịch sử phần cứng (Prometheus).
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-3">
+            <a 
+              href="http://localhost:3000" 
+              target="_blank" 
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white text-slate-900 text-sm font-semibold hover:bg-slate-50 transition-colors shadow-sm"
+            >
+              Mở Grafana Dashboard <span className="text-lg">↗</span>
+            </a>
+          </div>
         </div>
       </div>
 

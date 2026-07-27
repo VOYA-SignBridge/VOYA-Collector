@@ -26,7 +26,23 @@ CSRF_COOKIE = "voya_csrf"
 
 # Refresh cookie is only sent to the auth endpoints that need it (login sets it,
 # refresh rotates it, logout clears it) — never to ordinary API calls.
-REFRESH_COOKIE_PATH = "/api/v1/auth"
+_REFRESH_COOKIE_SUFFIX = "/api/v1/auth"
+
+
+def refresh_cookie_path() -> str:
+    """Path attribute for the refresh cookie, honoring a sub-path deploy.
+
+    Under a sub-path (e.g. served at /voya/), the gateway strips "/voya" before
+    the backend sees the request, but the browser still sends refresh calls to
+    "/voya/api/v1/auth/refresh". The cookie's Path must therefore carry the same
+    public prefix (COOKIE_PATH_PREFIX) or the browser never sends it back.
+    """
+    prefix = (settings.cookie_path_prefix or "").rstrip("/")
+    return f"{prefix}{_REFRESH_COOKIE_SUFFIX}"
+
+
+# Back-compat alias (root deploy): the exact string when no sub-path prefix.
+REFRESH_COOKIE_PATH = _REFRESH_COOKIE_SUFFIX
 
 
 def generate_csrf_token() -> str:
@@ -66,7 +82,7 @@ def set_auth_cookies(
     response.set_cookie(
         REFRESH_COOKIE, refresh_token,
         max_age=refresh_max, httponly=True, secure=secure,
-        samesite=samesite, domain=domain, path=REFRESH_COOKIE_PATH,
+        samesite=samesite, domain=domain, path=refresh_cookie_path(),
     )
     response.set_cookie(
         HINT_COOKIE, "1",
@@ -83,6 +99,6 @@ def set_auth_cookies(
 def clear_auth_cookies(response: Response) -> None:
     domain = _domain()
     response.delete_cookie(ACCESS_COOKIE, path="/", domain=domain)
-    response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH, domain=domain)
+    response.delete_cookie(REFRESH_COOKIE, path=refresh_cookie_path(), domain=domain)
     response.delete_cookie(HINT_COOKIE, path="/", domain=domain)
     response.delete_cookie(CSRF_COOKIE, path="/", domain=domain)

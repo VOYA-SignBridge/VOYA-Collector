@@ -1,0 +1,37 @@
+global:
+  # Was 5s. Every rule here evaluates with `for: 1m`, so 15s still gives four
+  # samples per evaluation window — but it stores three times fewer of them.
+  # On a 12GB host with 7d retention that difference is the bulk of the TSDB.
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: 'voya_backend'
+    static_configs:
+      - targets: ['backend:8000']
+
+  # Self-monitoring for the observability stack. Nothing was watching these,
+  # so the monitoring could fail silently and look identical to "no problems" —
+  # which is exactly how promtail collecting zero logs went unnoticed. The
+  # useful signals here are promtail_sent_entries_total / promtail_dropped_*
+  # (log delivery actually happening) and loki_* ingestion errors.
+  # Scraped less often than the app: these are slow-moving health signals.
+  - job_name: 'promtail'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['promtail:9080']
+
+  - job_name: 'loki'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['loki:3100']
+
+  - job_name: 'prometheus'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['grafana:3000']

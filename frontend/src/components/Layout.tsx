@@ -72,12 +72,24 @@ export default function Layout({ children }: { children: ReactNode }) {
         { name: "Quản lý người dùng", href: "/admin/users", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
         { name: "Giám sát tài nguyên", href: "/admin/resources", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
         { name: "Phiên hoạt động", href: "/admin/activity", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-3.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-3-3" /></svg> },
+        { name: "SOT & thiết bị", href: "/admin/sot", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg> },
         { name: "Thùng rác", href: "/trash", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> },
       ]
     }
   ];
 
-  const navigation = user?.is_admin ? [...baseNavigation, ...adminNavigation] : baseNavigation;
+  // A signed-in contributor gets their own Trash link (their soft-deleted
+  // recordings); admins already have it inside the "Quản trị" section above.
+  const userTrashItem: FlatNavItem = {
+    name: "Thùng rác",
+    href: "/trash",
+    icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+  };
+  const navigation: AnyNavItem[] = user?.is_admin
+    ? [...baseNavigation, ...adminNavigation]
+    : user
+      ? [...baseNavigation, userTrashItem]
+      : baseNavigation;
 
   const handleNewSession = useCallback(() => {
     setSidebarOpen(false);
@@ -271,7 +283,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </button>
             )}
             <div className="flex min-w-0 items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
-              <img src="/logo.png" alt="Đại học Cần Thơ" className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 object-contain" />
+              <img src="logo.png" alt="Đại học Cần Thơ" className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 object-contain" />
               <h1 className="truncate text-sm font-bold font-display sm:text-base lg:text-lg">
                 <span className="text-ctu-blue">CTU</span>
                 <span className="text-ctu-blue-light">.SignBridge</span>

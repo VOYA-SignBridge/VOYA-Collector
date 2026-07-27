@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 from typing import List
@@ -173,6 +174,12 @@ class Settings(BaseSettings):
     # Leave empty to scope cookies to the exact host; set to share across
     # subdomains (e.g. ".voya.local").
     cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
+    # Public sub-path the app is served under (e.g. "/voya"). The gateway strips
+    # this before requests reach the backend, but the BROWSER still addresses
+    # cookies at "/voya/...", so the path-scoped refresh cookie must carry the
+    # prefix or it is never sent back on /voya/api/v1/auth/refresh (→ sessions
+    # can't refresh under the sub-path). Empty = root. Match to VITE_BASE_PATH.
+    cookie_path_prefix: str = os.getenv("COOKIE_PATH_PREFIX", "")
 
     # Optional auth behavior
     allow_guest_upload: bool = bool(
@@ -254,6 +261,54 @@ class Settings(BaseSettings):
             self.dataset_root = _default_dataset_root()
 
         # speed_variants is computed by validator; no assignment needed here
+
+        self._check_placeholder_secrets()
+
+    def _check_placeholder_secrets(self) -> None:
+        """Refuse to run in production on secrets that are published in git.
+
+        `.env.example` ships literal REPLACE_WITH_* values, and copying it is the
+        documented way to start a new machine — so the default path for a fresh
+        install produces a stack that boots happily while signing its sessions
+        with a key anyone can read in the repository. Nothing warned about it.
+
+        Only APP_ENV=production is hard-failed. Local work and the test suite run
+        as "development" and merely get a warning, so this cannot turn into a
+        surprise breakage for everyday use.
+        """
+        published = ("REPLACE_WITH",)
+        problems = []
+
+        for name, value in (
+            ("SECRET_KEY", self.secret_key),
+            ("AUTH_TOKEN_SECRET_KEY", self.auth_token_secret_key),
+            ("ADMIN_PASSWORD", self.admin_password),
+        ):
+            text = str(value or "")
+            if any(marker in text for marker in published):
+                problems.append(f"{name} still holds the placeholder from .env.example")
+            elif not text:
+                problems.append(f"{name} is empty")
+            elif name != "ADMIN_PASSWORD" and len(text) < 32:
+                # 32 hex chars is what the documented
+                # `python -c "import secrets; print(secrets.token_hex(32))"` yields.
+                problems.append(f"{name} is only {len(text)} chars — generate a real random secret")
+
+        if not problems:
+            return
+
+        detail = "; ".join(problems)
+        if str(self.app_env).lower() == "production":
+            raise RuntimeError(
+                f"Refusing to start with insecure secrets ({detail}). "
+                'Generate them with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        logging.getLogger(__name__).warning(
+            "Insecure secrets in use (%s). This is tolerated because APP_ENV=%s, "
+            "but the stack will refuse to start with APP_ENV=production.",
+            detail,
+            self.app_env,
+        )
 
     class Config:
         env_file = ".env"

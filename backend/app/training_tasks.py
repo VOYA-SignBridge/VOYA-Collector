@@ -77,6 +77,18 @@ def _update_job(row: Dict[str, Any], **fields: Any) -> None:
         logger.warning("[TRAINER] job %s DB update failed: %s", row.get("job_id"), e)
 
 
+def _escalate_system_failure(row: Dict[str, Any], job_id: str, error: str, source: str) -> None:
+    """Notify admins if this trainer-side failure is a system/infra problem (not
+    the user's data). Best-effort — never let alerting break the task."""
+    try:
+        from app.training_alerts import notify_admins_training_failure
+
+        actor = str(row.get("username") or row.get("auth_user_id") or row.get("user_id") or "")
+        notify_admins_training_failure(job_id=job_id, actor=actor, error=error, source=source)
+    except Exception as e:
+        logger.warning("[TRAINER] job %s admin escalation failed: %s", job_id, e)
+
+
 def _insert_metric(job_id: str, m: Dict[str, Any]) -> None:
     try:
         from app.storage.metadata_db import insert_training_metric
@@ -177,8 +189,9 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
         )
     except Exception as e:
         log_handle.close()
-        _update_job(row, status="failed", completed_at=_now(),
-                    error_message=f"Không khởi động được training process: {e}")
+        msg = f"Không khởi động được training process: {e}"
+        _update_job(row, status="failed", completed_at=_now(), error_message=msg)
+        _escalate_system_failure(row, job_id, msg, source="trainer_spawn")
         return {"status": "failed", "reason": "spawn_error"}
 
     started_monotonic = time.monotonic()
@@ -268,15 +281,15 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
         return {"status": "cancelled"}
 
     if timed_out:
-        _update_job(
-            row, status="failed", completed_at=_now(),
-            error_message=f"Quá thời gian tối đa {TRAINING_JOB_TIMEOUT_SECONDS // 3600}h — job bị dừng tự động",
-        )
+        msg = f"Quá thời gian tối đa {TRAINING_JOB_TIMEOUT_SECONDS // 3600}h — job bị dừng tự động"
+        _update_job(row, status="failed", completed_at=_now(), error_message=msg)
+        _escalate_system_failure(row, job_id, msg, source="trainer_timeout")
         return {"status": "failed", "reason": "timeout"}
 
     if returncode != 0:
-        _update_job(row, status="failed", completed_at=_now(),
-                    error_message=f"Training process thoát với mã lỗi {returncode} (xem {log_file.name})")
+        msg = f"Training process thoát với mã lỗi {returncode} (xem {log_file.name})"
+        _update_job(row, status="failed", completed_at=_now(), error_message=msg)
+        _escalate_system_failure(row, job_id, msg, source="trainer_exit")
         return {"status": "failed", "returncode": returncode}
 
     # Success — checkpoint path comes from the train script's "final" record

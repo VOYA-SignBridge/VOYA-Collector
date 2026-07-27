@@ -39,7 +39,6 @@ export const getApiBaseURL = (): string => {
 const TOKEN_KEY = "VOYA_AUTHENTICATION_TOKEN";
 
 const axiosClient = axios.create({
-  baseURL: getApiBaseURL(),
   timeout: 30000,
   // Send + receive the auth cookies (same-origin through the nginx gateway).
   withCredentials: true,
@@ -101,8 +100,18 @@ function hasSessionCookie(): boolean {
 
 loadAuthToken();
 
-// Request: attach the CSRF token on unsafe methods + dev logging.
+// Pre-calculate apiBase to prepend to relative URLs
+let apiBase = getApiBaseURL().replace(/\/+$/, "");
+if (apiBase.endsWith("/api")) {
+  apiBase = apiBase.slice(0, -4);
+}
+
+// Request: attach the CSRF token on unsafe methods + dev logging + prepend baseUrl.
 axiosClient.interceptors.request.use((cfg) => {
+  if (cfg.url && cfg.url.startsWith("/") && apiBase) {
+    cfg.url = apiBase + cfg.url;
+  }
+
   const method = (cfg.method || "get").toLowerCase();
   if (method !== "get" && method !== "head" && method !== "options") {
     const csrf = readCookie("voya_csrf");

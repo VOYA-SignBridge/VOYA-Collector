@@ -780,15 +780,31 @@ class GoogleDriveClient:
                         pass
 
     def _find_file_by_name(self, folder_id: str, filename: str) -> Optional[str]:
-        """Find file by name in folder."""
-        query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+        """Find a file by name in a folder; return the first match or None.
+
+        Google Drive allows MULTIPLE files with the same name in one folder, so a
+        duplicate makes this lookup (and anything built on it, e.g. the SOT reader)
+        non-deterministic. Log a warning when that happens so the extras get
+        cleaned up rather than silently serving an arbitrary copy.
+        """
+        # Escape backslashes and single quotes so a name containing ' can't break
+        # out of — or inject into — the Drive query string.
+        safe = filename.replace("\\", "\\\\").replace("'", "\\'")
+        query = f"name='{safe}' and '{folder_id}' in parents and trashed=false"
         results = self.service.files().list(
             q=query,
             spaces='drive',
-            fields='files(id, name)'
+            fields='files(id, name)',
+            pageSize=10,
         ).execute(num_retries=self.num_retries)
-        
+
         files = results.get('files', [])
+        if len(files) > 1:
+            logger.warning(
+                "[GDrive] %d files named %r in folder %s (ids=%s) — using the first; "
+                "duplicate names make lookups non-deterministic, remove the extras.",
+                len(files), filename, folder_id, [f.get('id') for f in files],
+            )
         return files[0]['id'] if files else None
 
     def download_file(self, file_id_or_url: str, local_path: str) -> str:

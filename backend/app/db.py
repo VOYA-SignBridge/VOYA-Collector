@@ -22,20 +22,60 @@ def init_db():
     started_at = time.time()
     logger.info("[DB_INIT] starting schema initialization")
     try:
-        from app.storage.metadata_db import ensure_tables
+        from app.storage.metadata_db import ensure_tables, drop_all_tables, _column_exists
         ensure_tables()
         logger.info("[DB_INIT][SUCCESS] duration_ms=%.1f", (time.time() - started_at) * 1000)
         
         # Check and sync missing data (Idempotent seed)
-        sync_missing_data_on_startup()
+        success = sync_missing_data_on_startup()
         
+        # Check for missing critical schema changes that might not have applied properly
+        schema_ok = _column_exists("samples", "deleted_at")
+        
+        # The drop is gated on the SCHEMA check alone — deliberately not on the
+        # sync result any more.
+        #
+        # init_db() runs on every backend start, and sync_missing_data_on_startup()
+        # returns False for ANY exception, including a transient one: the CSVs it
+        # reads sit beside .lock files, so a concurrent writer is enough. The old
+        # `if not success or not schema_ok` therefore let a momentary CSV read
+        # error trigger drop_all_tables(), which DROPs users, refresh_tokens,
+        # password_reset_tokens, training_jobs and training_metrics. None of those
+        # exist in the CSVs — the re-seed restores classes/samples/raw_uploads
+        # only, and bootstrap_admin_user() recreates just the admin. Every other
+        # account and the whole training history were gone, permanently, because
+        # a file was briefly locked.
+        #
+        # A failed sync does not call for demolishing the database: nothing is
+        # corrupt, one read did not land. Report it and let the caller decide.
+        if not schema_ok:
+            logger.warning(
+                "[DB_INIT] Schema is corrupt (samples.deleted_at missing) — rebuilding from CSV. "
+                "NOTE: this drops users/training history, which the CSVs cannot restore."
+            )
+            drop_all_tables()
+            ensure_tables()
+            success_retry = sync_missing_data_on_startup()
+            if not success_retry:
+                logger.error("[DB_INIT] Retry sync failed.")
+                return False
+            return True
+
+        if not success:
+            logger.error(
+                "[DB_INIT] Startup CSV->DB sync failed, but the schema is intact so the "
+                "database was left untouched. The DB may be missing recent rows; re-run "
+                "the sync once the underlying error is resolved."
+            )
+            return False
+
         return True
     except Exception:
         # Best-effort: DB is optional
         logger.exception("[DB_INIT][FAILURE] schema initialization failed")
         return False
 
-def sync_missing_data_on_startup():
+def sync_missing_data_on_startup() -> bool:
     """Sync missing records from CSV to PostgreSQL on startup.
     Ensures Foreign Key safety by inserting parents first, and Idempotency
     by using ON CONFLICT DO UPDATE which preserves deleted_at.
@@ -72,8 +112,11 @@ def sync_missing_data_on_startup():
                 logger.info("[STARTUP_SYNC] Syncing raw_uploads. DB: %d, CSV: %d", db_uploads_count, len(uploads))
                 for upload in uploads:
                     upsert_raw_upload(upload)
+        
+        return True
     except Exception as exc:
         logger.error("[STARTUP_SYNC] Failed to sync missing data: %s", exc)
+        return False
 
 def bootstrap_admin_user():
     """Create admin user from .env if not already exists.

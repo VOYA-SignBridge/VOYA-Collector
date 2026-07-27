@@ -275,7 +275,11 @@ export function useWebSocketProgress(
     const token = getAuthToken();
     
     let wsUrl = '';
-    const apiBase = getApiBaseURL();
+    let apiBase = getApiBaseURL().replace(/\/+$/, "");
+    if (apiBase.endsWith("/api")) {
+      apiBase = apiBase.slice(0, -4);
+    }
+    
     if (apiBase && (apiBase.startsWith('http://') || apiBase.startsWith('https://'))) {
       const wsProtocol = apiBase.startsWith('https') ? 'wss:' : 'ws:';
       const hostPath = apiBase.replace(/^https?:\/\//, '');

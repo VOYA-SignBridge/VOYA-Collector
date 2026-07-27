@@ -12,24 +12,40 @@ interface Props {
   job: TrainingJob;
   metrics: TrainingMetrics[];
   onCancel?: () => Promise<void> | void;
+  /** Quay về bước cấu hình (mở khi run đã kết thúc/thất bại). */
+  onBack?: () => void;
+  /** Chạy lại một run mới với cùng cấu hình. */
+  onRetry?: () => void;
+  /** Admin thấy chi tiết kỹ thuật/khắc phục; user thường chỉ thấy thông báo gọn. */
+  isAdmin?: boolean;
 }
 
-const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
+// Trạng thái kết thúc: không còn gì để "load" nữa.
+const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+
+const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel, onBack, onRetry, isAdmin = false }) => {
   const [cancelling, setCancelling] = useState(false);
   const [startTime] = useState<Date>(new Date(job.started_at || new Date()));
   const [elapsedTime, setElapsedTime] = useState('0m');
   const [eta, setEta] = useState('Tính toán...');
 
-  // Update elapsed time and ETA
+  const isFailed = job.status === 'failed';
+  const isCancelled = job.status === 'cancelled';
+  const isTerminal = TERMINAL.has(job.status);
+  const isActive = !isTerminal; // pending | queued | running
+
+  // Update elapsed time and ETA. Freeze the clock once the run is terminal —
+  // otherwise a failed/cancelled job keeps ticking as if still training.
   useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date();
-      const elapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+    const compute = () => {
+      // A terminal run stops at completed_at; otherwise count up to "now".
+      const end = isTerminal && job.completed_at ? new Date(job.completed_at) : new Date();
+      const elapsed = Math.max(0, Math.floor((end.getTime() - startTime.getTime()) / 1000));
       const minutes = Math.floor(elapsed / 60);
       const seconds = elapsed % 60;
       setElapsedTime(`${minutes}m ${seconds}s`);
 
-      if (metrics.length > 0) {
+      if (metrics.length > 0 && isActive) {
         const last = metrics[metrics.length - 1];
         const avgTimePerEpoch = elapsed / Math.max(1, last.epoch);
         const remainingEpochs = Math.max(0, job.total_epochs - last.epoch);
@@ -37,10 +53,13 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
         const remainingMinutes = Math.floor(remainingSeconds / 60);
         setEta(`~${remainingMinutes}m`);
       }
-    }, 1000);
+    };
 
+    compute(); // set immediately (also correct when opened straight on a failed job)
+    if (!isActive) return; // don't keep an interval running for a finished run
+    const interval = setInterval(compute, 1000);
     return () => clearInterval(interval);
-  }, [startTime, metrics, job.total_epochs]);
+  }, [startTime, metrics, job.total_epochs, job.completed_at, isActive, isTerminal]);
 
   const trainLossSeries = useMemo(() => metrics.map((m) => m.train_loss), [metrics]);
   const trainAccSeries = useMemo(() => metrics.map((m) => m.train_acc), [metrics]);
@@ -48,6 +67,23 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
 
   const latestMetric = metrics[metrics.length - 1];
   const progressPercent = latestMetric ? (latestMetric.epoch / Math.max(1, job.total_epochs)) * 100 : 0;
+
+  // --- Terminal failure / cancel: stop the loading UI and show a clear,
+  // actionable error screen instead of a spinner that never resolves. ---------
+  if (isFailed || isCancelled) {
+    return (
+      <TrainingEndState
+        cancelled={isCancelled}
+        rawError={job.error_message}
+        elapsed={elapsedTime}
+        epochsDone={latestMetric?.epoch ?? 0}
+        totalEpochs={job.total_epochs}
+        isAdmin={isAdmin}
+        onBack={onBack}
+        onRetry={onRetry}
+      />
+    );
+  }
 
   const renderSparkline = (values: number[], stroke = '#1b2a57') => {
     if (!values || values.length === 0) return null;
@@ -170,20 +206,11 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
       )}
 
       <div className="space-y-4">
-        {(job?.status === 'cancelled' || job?.status === 'failed') ? (
-          <div className={`rounded-lg border p-4 text-sm ${
-            job.status === 'cancelled'
-              ? 'bg-amber-50 border-amber-300 text-amber-900'
-              : 'bg-red-50 border-red-300 text-red-900'
-          }`}>
-            {job.status === 'cancelled' ? '⏹️ Huấn luyện đã bị hủy' : '❌ Huấn luyện thất bại'}
-            {job.error_message ? ` — ${job.error_message}` : ''}
-          </div>
-        ) : (
-          <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-            ℹ️ Mô hình sẽ được lưu tự động khi huấn luyện hoàn tất.
-          </div>
-        )}
+        {/* Terminal states (failed/cancelled) are handled by TrainingEndState
+            above via an early return, so here the run is always in progress. */}
+        <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
+          ℹ️ Mô hình sẽ được lưu tự động khi huấn luyện hoàn tất.
+        </div>
 
         {/* Cancel button - visible while queued/running */}
         {(job?.status === 'running' || job?.status === 'queued') && onCancel && (
@@ -209,6 +236,248 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
     </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Terminal state (failed / cancelled)
+// ---------------------------------------------------------------------------
+
+interface Diagnosis {
+  /** 'system' = lỗi hạ tầng (không phải lỗi user, đã báo admin); 'data' = user tự sửa được. */
+  kind: 'system' | 'data';
+  title: string;
+  summary: string;
+  reasons: string[];
+  actions: string[];
+}
+
+/** Turn a raw backend error string into a human, actionable diagnosis. Keyword
+ *  based so a new backend message still lands on a sensible category. Must stay
+ *  in sync with the backend classifier (app/training_alerts.py). */
+function diagnoseTrainingError(raw?: string): Diagnosis {
+  const msg = (raw || '').toLowerCase();
+
+  if (/redis|celery|broker|queue|enqueue|dispatch|gửi được job|connection refused|10061|down/.test(msg)) {
+    return {
+      kind: 'system',
+      title: 'Không gửi được job tới trainer',
+      summary:
+        'Hệ thống hàng đợi (Redis / Celery) không phản hồi nên job huấn luyện chưa được đưa vào trainer. Chưa có epoch nào chạy.',
+      reasons: [
+        'Dịch vụ Redis (message broker) đang tắt, khởi động lại hoặc quá tải.',
+        'Trainer/worker Celery không chạy hoặc mất kết nối tới Redis.',
+        'Cấu hình REDIS_URL / CELERY_BROKER_URL sai hoặc mạng nội bộ gián đoạn.',
+      ],
+      actions: [
+        'Kiểm tra Redis: docker exec voya_redis redis-cli ping (kỳ vọng PONG).',
+        'Xem log trainer: docker logs voya_trainer --tail 50.',
+        'Khởi động lại dịch vụ nếu cần, sau đó bấm "Thử lại".',
+      ],
+    };
+  }
+
+  if (/no data|không có dữ liệu|dataset|splits|empty|no samples|thiếu dữ liệu|train\.csv|val\.csv|not found/.test(msg)) {
+    return {
+      kind: 'data',
+      title: 'Thiếu dữ liệu huấn luyện',
+      summary: 'Không tìm thấy đủ dữ liệu đã xử lý để bắt đầu huấn luyện cho lựa chọn hiện tại.',
+      reasons: [
+        'Phương ngữ/ngôn ngữ đã chọn chưa có mẫu nào được xử lý (.npz).',
+        'Bộ chia train/val/test (splits) chưa được tạo hoặc rỗng.',
+        'Dữ liệu vừa thu chưa được đồng bộ xong về máy huấn luyện.',
+      ],
+      actions: [
+        'Quay lại bước chọn phương ngữ và chọn nhãn có dữ liệu.',
+        'Kiểm tra bước xử lý/đồng bộ dữ liệu đã hoàn tất chưa.',
+        'Sau khi có dữ liệu, bấm "Thử lại".',
+      ],
+    };
+  }
+
+  if (/cuda|gpu|out of memory|oom|memory|vram/.test(msg)) {
+    return {
+      kind: 'system',
+      title: 'Hết tài nguyên phần cứng',
+      summary: 'Máy huấn luyện không đủ bộ nhớ (GPU/VRAM hoặc RAM) để chạy cấu hình này.',
+      reasons: [
+        'Batch size hoặc kích thước mô hình quá lớn so với VRAM khả dụng.',
+        'GPU đang bị một job khác chiếm dụng.',
+      ],
+      actions: [
+        'Giảm batch size hoặc số kênh (channels) ở bước cấu hình.',
+        'Đợi job khác chạy xong hoặc giải phóng GPU, rồi "Thử lại".',
+      ],
+    };
+  }
+
+  if (/timeout|timed out|hết thời gian|deadline/.test(msg)) {
+    return {
+      kind: 'system',
+      title: 'Quá thời gian chờ',
+      summary: 'Quá trình huấn luyện không phản hồi trong thời gian cho phép và đã bị dừng.',
+      reasons: ['Trainer bị treo hoặc quá tải.', 'Kết nối tới trainer bị gián đoạn giữa chừng.'],
+      actions: ['Xem log trainer để tìm nguyên nhân.', 'Bấm "Thử lại" khi hệ thống đã ổn định.'],
+    };
+  }
+
+  return {
+    kind: 'system',
+    title: 'Huấn luyện thất bại',
+    summary: raw
+      ? 'Đã xảy ra lỗi trong quá trình huấn luyện (chi tiết kỹ thuật bên dưới).'
+      : 'Đã xảy ra lỗi không xác định trong quá trình huấn luyện.',
+    reasons: [
+      'Lỗi phát sinh ở phía trainer trong lúc chạy.',
+      'Có thể do cấu hình huấn luyện hoặc dữ liệu đầu vào.',
+    ],
+    actions: [
+      'Xem chi tiết kỹ thuật bên dưới và log trainer: docker logs voya_trainer --tail 50.',
+      'Điều chỉnh cấu hình nếu cần rồi "Thử lại".',
+    ],
+  };
+}
+
+function TrainingEndState({
+  cancelled,
+  rawError,
+  elapsed,
+  epochsDone,
+  totalEpochs,
+  isAdmin,
+  onBack,
+  onRetry,
+}: {
+  cancelled: boolean;
+  rawError?: string;
+  elapsed: string;
+  epochsDone: number;
+  totalEpochs: number;
+  isAdmin: boolean;
+  onBack?: () => void;
+  onRetry?: () => void;
+}) {
+  const diag = cancelled ? null : diagnoseTrainingError(rawError);
+  const isSystem = !!diag && diag.kind === 'system';
+
+  // What each audience sees:
+  //  - Technical detail (raw error + docker/infra fixes): ADMIN only — it leaks
+  //    internals and users can't act on it anyway.
+  //  - Causes/fixes grid: admins always; users only for DATA errors they can fix.
+  //  - System errors for a normal user collapse to a friendly "admins notified".
+  const showTechnical = isAdmin && !!rawError;
+  const showCausesFixes = !!diag && (isAdmin || diag.kind === 'data');
+
+  const summary = cancelled
+    ? 'Bạn đã hủy phiên huấn luyện này. Không có mô hình nào được lưu.'
+    : isSystem && !isAdmin
+      ? 'Hệ thống đang tạm thời gặp sự cố kỹ thuật (không phải do dữ liệu của bạn). Quản trị viên đã được thông báo và sẽ xử lý — vui lòng thử lại sau ít phút.'
+      : diag!.summary;
+
+  const tone = cancelled
+    ? { ring: 'border-amber-300', head: 'bg-amber-50', badge: 'bg-amber-100 text-amber-800', icon: '⏹️', title: 'text-amber-900' }
+    : { ring: 'border-red-300', head: 'bg-red-50', badge: 'bg-red-100 text-red-800', icon: '❌', title: 'text-red-900' };
+
+  // A user should never see infra jargon in the title either.
+  const title = cancelled
+    ? 'Huấn luyện đã bị hủy'
+    : isSystem && !isAdmin
+      ? 'Huấn luyện thất bại do sự cố hệ thống'
+      : diag!.title;
+
+  const hasBody = showTechnical || showCausesFixes || isSystem;
+
+  return (
+    <div className="space-y-6">
+      <div className={`overflow-hidden rounded-xl border ${tone.ring} bg-white shadow-sm`}>
+        {/* Header */}
+        <div className={`flex items-start gap-4 border-b ${tone.ring} ${tone.head} p-5`}>
+          <div className="text-3xl leading-none">{tone.icon}</div>
+          <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className={`text-lg font-semibold ${tone.title}`}>{title}</h3>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone.badge}`}>
+                Đã dừng
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">{summary}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              ⏱️ Đã chạy {elapsed}
+              {epochsDone > 0 ? ` • ${epochsDone}/${totalEpochs} epoch trước khi dừng` : ' • chưa có epoch nào bắt đầu'}
+            </p>
+          </div>
+        </div>
+
+        {/* Body */}
+        {hasBody && (
+          <div className="space-y-5 p-5">
+            {/* "admins notified" banner for system failures */}
+            {isSystem && (
+              <div className="flex items-start gap-2 rounded-lg border border-ctu-blue/30 bg-ctu-blue/5 p-3 text-sm text-ctu-navy">
+                <span>🛎️</span>
+                <span>
+                  {isAdmin
+                    ? 'Sự cố hệ thống — đã tự động ghi vào nhật ký quản trị (Security log / Loki) và đếm vào cảnh báo giám sát.'
+                    : 'Quản trị viên đã được thông báo tự động về sự cố này.'}
+                </span>
+              </div>
+            )}
+
+            {/* Technical detail — admin only */}
+            {showTechnical && (
+              <div>
+                <h4 className="mb-1 text-sm font-semibold text-slate-800">Chi tiết kỹ thuật</h4>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                  {rawError}
+                </pre>
+              </div>
+            )}
+
+            {/* Likely causes + fixes */}
+            {showCausesFixes && diag && (
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-slate-800">Nguyên nhân có thể</h4>
+                  <ul className="space-y-1.5 text-sm text-slate-600">
+                    {diag.reasons.map((r, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="mt-0.5 text-red-500">•</span>
+                        <span>{r}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-slate-800">Cách khắc phục</h4>
+                  <ol className="space-y-1.5 text-sm text-slate-600">
+                    {diag.actions.map((a, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="mt-0.5 font-semibold text-ctu-blue">{i + 1}.</span>
+                        <span>{a}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Footer actions */}
+        <div className={`flex flex-wrap items-center justify-end gap-3 border-t ${tone.ring} bg-slate-50 px-5 py-4`}>
+          {onBack && (
+            <Button variant="secondary" size="md" onClick={onBack}>
+              ← Quay về cấu hình
+            </Button>
+          )}
+          {onRetry && (
+            <Button variant="primary" size="md" onClick={onRetry}>
+              🔄 Thử lại
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function MetricCard({
   label,

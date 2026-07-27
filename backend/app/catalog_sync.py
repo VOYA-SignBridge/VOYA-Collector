@@ -1184,9 +1184,170 @@ def sync_restore_sample(sample_uid: str) -> Dict[str, Any]:
         return {"restored": True, "sample_uid": sample_uid}
 
 
+def sync_reassign_sample(sample_uid: str, target_class_ref: int | str) -> Dict[str, Any]:
+    """Move ONE sample to a different EXISTING class (it was recorded under the
+    wrong label). Moves the local .npz (+ sidecar) into the target class folder,
+    relabels the samples.csv + Postgres row, and re-mirrors to Drive (upload the
+    moved file to its new path, then delete the old Drive copy). The caller
+    enforces ownership.
+
+    If the .npz is Drive-only (not materialized locally) it is downloaded from
+    Drive FIRST, then moved + re-uploaded like any local sample. If it cannot be
+    materialized (no local copy and no Drive copy to fetch), the reassign is
+    REFUSED rather than committed — the previous behaviour deleted the old Drive
+    file and never re-uploaded it, silently losing the sample.
+    """
+    ensure_tables()
+    op_id = f"sample_reassign_{sample_uid}"
+    slog.start_operation(op_id)
+    with _catalog_lock():
+        target_row = _find_class_row_by_ref(load_labels(), target_class_ref)
+        if target_row is None:
+            slog.end_operation(op_id)
+            raise CatalogSyncError(f"Target class {target_class_ref} not found",
+                                   status_code=404, error_code="CLASS_NOT_FOUND")
+        target_meta = _build_class_meta_from_row(target_row)
+
+        rows = list_samples()
+        sample_row = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
+        if sample_row is None:
+            slog.end_operation(op_id)
+            raise CatalogSyncError(f"Sample {sample_uid} not found",
+                                   status_code=404, error_code="SAMPLE_NOT_FOUND")
+
+        if sample_row.get("class_uid") == target_meta.class_uid:
+            slog.end_operation(op_id)
+            return {"changed": False, "sample_uid": sample_uid, "class_uid": target_meta.class_uid}
+
+        old_storage_key = str(sample_row.get("storage_key") or "").strip()
+        old_storage_url = str(sample_row.get("storage_url") or "").strip()
+        old_file = _resolve_sample_file_path(sample_row)
+        if old_file is not None and not old_file.is_absolute():
+            old_file = Path(settings.dataset_root) / old_file
+
+        target_dir = target_meta.hierarchy_path()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        filename = old_file.name if old_file else f"sample_{sample_uid}.npz"
+        new_file = target_dir / filename
+        new_sidecar = new_file.with_suffix(".json")
+        old_sidecar = old_file.with_suffix(".json") if old_file else None
+
+        moved_main = False
+        moved_side = False
+        try:
+            # Drive-only sample (not materialized on this machine): fetch it from
+            # Drive FIRST so the move + re-upload below runs the exact same path
+            # as a local sample. Without this, the Drive block deleted the old
+            # file but skipped the upload (new_file never existed) — losing the .npz.
+            if old_file is not None and not old_file.exists() and _google_drive_configured():
+                dl_ref = (old_storage_url
+                          if old_storage_url.startswith(("gdrive://", "https://drive.google.com"))
+                          else "")
+                if dl_ref:
+                    try:
+                        get_gdrive_client().download_file(dl_ref, str(old_file))
+                    except Exception as exc:
+                        logger.warning("[CATALOG] reassign: materialize from Drive failed for %s: %s", sample_uid, exc)
+
+            # Refuse rather than relabel a row whose file we cannot relocate: the
+            # old code would delete the Drive copy and never re-upload it.
+            if old_file is not None and not old_file.exists():
+                raise CatalogSyncError(
+                    "Mẫu chưa có bản .npz trên máy để di chuyển; hãy đồng bộ (pull) file "
+                    "từ Drive rồi đổi nhãn lại.",
+                    status_code=409, error_code="SAMPLE_NOT_MATERIALIZED")
+
+            if old_file is not None and old_file.exists():
+                if new_file.exists():
+                    raise CatalogSyncError(f"Target file already exists: {new_file}",
+                                           status_code=409, error_code="SAMPLE_PATH_CONFLICT")
+                shutil.move(str(old_file), str(new_file))
+                moved_main = True
+                if old_sidecar and old_sidecar.exists():
+                    shutil.move(str(old_sidecar), str(new_sidecar))
+                    moved_side = True
+                _update_sample_metadata_json(new_file, target_meta)
+
+            new_key = _dataset_storage_key(new_file) or (
+                f"features/{target_meta.language}/{target_meta.dialect}/"
+                f"{target_meta.folder_name()}/{filename}")
+
+            updated = dict(sample_row)
+            updated.update({
+                "class_uid": target_meta.class_uid,
+                "slug": target_meta.slug,
+                "label_original": target_meta.label_original,
+                "language": target_meta.language,
+                "dialect": target_meta.dialect,
+                "file_path": str(_relative_to_dataset(new_file) or new_file),
+                "storage_key": new_key,
+                # The old Drive URL is stale after the move; the re-upload task
+                # below rewrites it. Meanwhile keep the local path (same shape as
+                # a fresh upload before its Drive mirror completes).
+                "storage_url": str(new_file),
+            })
+            _write_samples_csv([updated if r.get("sample_uid") == sample_uid else r for r in rows])
+            db_upsert_sample(updated)
+
+            # Drive: delete the old file, upload the moved one to its new path.
+            # Reuses existing tasks — no new Drive primitive — and is best-effort:
+            # the local catalog is already the source of truth.
+            # Drive re-mirror: upload the moved file to its new path, and delete
+            # the old Drive copy ONLY when we actually have the new file to upload
+            # — pairing the two so a reassign can never delete without re-uploading.
+            if _google_drive_configured() and new_file.exists():
+                try:
+                    from app.export_tasks import delete_gdrive_files_task, upload_npz_to_gdrive_task
+
+                    upload_npz_to_gdrive_task.delay(
+                        sample_uid=sample_uid, local_path=str(new_file),
+                        storage_key=new_key, sidecar_path=str(new_sidecar))
+                    old_ref = old_storage_key or (
+                        old_storage_url
+                        if old_storage_url.startswith(("gdrive://", "https://drive.google.com"))
+                        else "")
+                    if old_ref and old_ref != new_key:
+                        delete_gdrive_files_task.delay(refs=[old_ref])
+                except Exception as exc:
+                    logger.warning("[CATALOG] reassign Drive re-mirror dispatch failed for %s: %s", sample_uid, exc)
+
+            _sync_drive_and_sheets_versioned_tables(None, None)
+            slog.log_operation(
+                OperationType.SAMPLE_UPDATE, OperationStatus.SUCCESS,
+                {"sample_uid": sample_uid, "class_uid": target_meta.class_uid,
+                 "slug": target_meta.slug, "reassigned": True},
+                duration_ms=slog.end_operation(op_id),
+            )
+            return {
+                "changed": True, "sample_uid": sample_uid,
+                "class_uid": target_meta.class_uid,
+                "label_original": target_meta.label_original,
+                "slug": target_meta.slug,
+            }
+        except Exception as exc:
+            try:  # roll the local move back so the file isn't stranded
+                if moved_side and new_sidecar.exists() and old_sidecar is not None:
+                    shutil.move(str(new_sidecar), str(old_sidecar))
+                if moved_main and new_file.exists() and old_file is not None:
+                    shutil.move(str(new_file), str(old_file))
+            except Exception as rb:
+                logger.error("[CATALOG][ROLLBACK] reassign restore failed for %s: %s", sample_uid, rb)
+            slog.end_operation(op_id)
+            raise CatalogSyncError(str(exc), status_code=getattr(exc, "status_code", 500),
+                                   error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED")) from exc
+
+
 def list_trash_samples() -> List[Dict[str, Any]]:
     ensure_tables()
     return db_list_deleted_samples()
+
+
+def list_trash_samples_for_user(auth_user_id: str) -> List[Dict[str, Any]]:
+    """A single contributor's own soft-deleted samples (ownership by UUID)."""
+    ensure_tables()
+    from app.storage.metadata_db import list_deleted_samples_for_user as _db_for_user
+
+    return _db_for_user(auth_user_id)
 
 
 # ===========================================================================
@@ -1263,6 +1424,11 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
             _write_samples_csv([r for r in rows if r.get("sample_uid") != sample_uid])
         db_delete_sample(sample_uid)
 
+        # Purging a sample removes a single .npz FILE from Drive. Route through
+        # delete_gdrive_files_task (-> gdrive_client.delete_file), which handles a
+        # relative file path, a Drive URL, a gdrive:// ref, or a file ID. The old
+        # delete_gdrive_paths_task only resolved FOLDERS, so the file ref never
+        # matched and the .npz was orphaned on Drive after every purge.
         drive_ref = str(source.get("storage_key") or "").strip()
         if not drive_ref:
             storage_url = str(source.get("storage_url") or "").strip()
@@ -1270,9 +1436,9 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
                 drive_ref = storage_url
         if drive_ref:
             try:
-                from app.export_tasks import delete_gdrive_paths_task
+                from app.export_tasks import delete_gdrive_files_task
 
-                delete_gdrive_paths_task.delay(rel_paths=[drive_ref])
+                delete_gdrive_files_task.delay(refs=[drive_ref])
             except Exception as exc:
                 logger.warning("[CATALOG] purge sample Drive delete dispatch failed for %s: %s", sample_uid, exc)
 

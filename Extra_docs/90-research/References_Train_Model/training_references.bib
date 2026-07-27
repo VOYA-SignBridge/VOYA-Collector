@@ -1,0 +1,223 @@
+% ==========================================================
+%  training_references.bib
+%  Tài liệu tham khảo cho quy trình train model TCN và đặc điểm VSL
+% ==========================================================
+
+% --- 1. TÀI LIỆU VỀ NGÔN NGỮ KÝ HIỆU VIỆT NAM (VSL) ---
+
+@misc{moet_vsl_dictionary,
+  author       = {{Bộ Giáo dục và Đào tạo (QIPEDC)}},
+  title        = {Từ điển ngôn ngữ ký hiệu Việt Nam},
+  howpublished = {\url{https://qipedc.moet.gov.vn/dictionary}},
+  note         = {Truy cập ngày: 28/06/2026},
+  year         = {2026}
+}
+
+@misc{tudienngonngukyhieu,
+  title        = {Từ điển Ngôn ngữ ký hiệu},
+  howpublished = {\url{https://tudienngonngukyhieu.com/}},
+  note         = {Truy cập ngày: 28/06/2026},
+  year         = {2026}
+}
+
+@article{le2020phuongthuc,
+  author  = {Lê Thị Tố Uyên},
+  title   = {Một số phương thức hình thành kí hiệu của người điếc Việt Nam},
+  journal = {Tạp chí Khoa học Giáo dục Việt Nam},
+  volume  = {30},
+  year    = {2020},
+  url     = {http://vjes.vnies.edu.vn/sites/default/files/baivietso6_0.pdf},
+  abstract= {Bài viết trình bày 6 kiểu hình thành ngôn ngữ kí hiệu của người điếc Việt Nam, phản ánh quá trình vận động tư duy và sự hình thành phương tiện giao tiếp của cộng đồng người điếc.}
+}
+
+
+% --- 2. TÀI LIỆU VỀ MÔ HÌNH TCN, XỬ LÝ DỮ LIỆU & HUẤN LUYỆN ---
+
+@article{bai2018empirical,
+  author  = {Bai, Shaojie and Kolter, J. Zico and Koltun, Vladlen},
+  title   = {An Empirical Evaluation of Generic Convolutional and Recurrent Networks for Sequence Modeling},
+  journal = {arXiv preprint arXiv:1803.01271},
+  year    = {2018},
+  url     = {https://arxiv.org/abs/1803.01271},
+  doi     = {10.48550/arXiv.1803.01271},
+  note    = {Bài báo gốc giới thiệu cấu trúc Temporal Convolutional Network (TCN) và chứng minh hiệu quả vượt trội so với các mạng RNN/LSTM trong xử lý chuỗi.}
+}
+
+@inproceedings{lea2017temporal,
+  author  = {Lea, Colin and Flynn, Michael D and Vidal, Rene and Reiter, Austin and Hager, Gregory D},
+  title   = {Temporal Convolutional Networks for Action Segmentation and Detection},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages   = {156--165},
+  year    = {2017},
+  doi     = {10.1109/CVPR.2017.113},
+  note    = {Nghiên cứu ứng dụng TCN vào nhận dạng và phân đoạn hành động từ video, tương đồng với bài toán nhận dạng ngôn ngữ ký hiệu.}
+}
+
+@article{kingma2014adam,
+  author  = {Kingma, Diederik P and Ba, Jimmy},
+  title   = {Adam: A Method for Stochastic Optimization},
+  journal = {arXiv preprint arXiv:1412.6980},
+  year    = {2014},
+  doi     = {10.48550/arXiv.1412.6980},
+  note    = {Thuật toán tối ưu hóa phổ biến được sử dụng để huấn luyện mô hình học sâu.}
+}
+
+@article{srivastava2014dropout,
+  author  = {Srivastava, Nitish and Hinton, Geoffrey and Krizhevsky, Alex and Sutskever, Ilya and Salakhutdinov, Ruslan},
+  title   = {Dropout: A Simple Way to Prevent Neural Networks from Overfitting},
+  journal = {The Journal of Machine Learning Research},
+  volume  = {15},
+  number  = {1},
+  pages   = {1929--1958},
+  year    = {2014},
+  publisher = {JMLR. org},
+  note    = {Phương pháp Dropout để xử lý overfit trong quá trình huấn luyện.}
+}
+
+@article{chawla2002smote,
+  author  = {Chawla, Nitesh V and Bowyer, Kevin W and Hall, Lawrence O and Kegelmeyer, W Philip},
+  title   = {SMOTE: Synthetic Minority Over-sampling Technique},
+  journal = {Journal of Artificial Intelligence Research},
+  volume  = {16},
+  pages   = {321--357},
+  year    = {2002},
+  doi     = {10.1613/jair.953},
+  note    = {Kỹ thuật xử lý mất cân bằng dữ liệu (imbalanced data), thường dùng khi số lượng sample giữa các class không đồng đều.}
+}
+
+% --- 3. KIẾN TRÚC MẠNG ĐỒNG THỜI VÀ ATTENTION CHO SKELETON DATA ---
+
+@inproceedings{yan2018spatial,
+  author    = {Yan, Sijie and Xiong, Yuanjun and Lin, Dahua},
+  title     = {Spatial Temporal Graph Convolutional Networks for Skeleton-Based Action Recognition},
+  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume    = {32},
+  number    = {1},
+  year      = {2018},
+  doi       = {10.1609/aaai.v32i1.12328},
+  note      = {Kiến trúc ST-GCN thường được dùng để đối sánh hoặc kết hợp với TCN trong việc học các đặc trưng của khung xương (skeleton/landmark).}
+}
+
+@article{vaswani2017attention,
+  author    = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, {\L}ukasz and Polosukhin, Illia},
+  title     = {Attention is All you Need},
+  journal   = {Advances in Neural Information Processing Systems},
+  volume    = {30},
+  year      = {2017},
+  note      = {Cơ chế Self-Attention có thể tích hợp với TCN để mô hình chú ý vào các khung hình (frames) quan trọng nhất của một cử chỉ.}
+}
+
+% --- 4. DATA AUGMENTATION & LOSS FUNCTIONS ---
+
+@inproceedings{lin2017focal,
+  author    = {Lin, Tsung-Yi and Goyal, Priya and Girshick, Ross and He, Kaiming and Doll{\'a}r, Piotr},
+  title     = {Focal Loss for Dense Object Detection},
+  booktitle = {Proceedings of the IEEE International Conference on Computer Vision (ICCV)},
+  pages     = {2980--2988},
+  year      = {2017},
+  note      = {Hàm Focal Loss được thiết kế để giải quyết bài toán class imbalance (tương tự như số lượng video không đều giữa các từ vựng VSL).}
+}
+
+@article{wen2020time,
+  author    = {Wen, Qingsong and Sun, Liang and Yang, Fan and Song, Xiaomin and Gao, Jingkun and Wang, Xue and Xu, Huan},
+  title     = {Time Series Data Augmentation for Deep Learning: A Survey},
+  journal   = {Proceedings of the 29th International Joint Conference on Artificial Intelligence (IJCAI)},
+  year      = {2020},
+  doi       = {10.24963/ijcai.2020/501},
+  note      = {Tổng hợp các kỹ thuật data augmentation cho dữ liệu chuỗi thời gian (time-series), áp dụng cho tọa độ landmark x,y,z theo thời gian.}
+}
+
+@book{prechelt1998early,
+  author    = {Prechelt, Lutz},
+  title     = {Early Stopping-But When?},
+  booktitle = {Neural Networks: Tricks of the Trade},
+  pages     = {55--69},
+  publisher = {Springer},
+  year      = {1998},
+  doi       = {10.1007/3-540-49430-8_3},
+  note      = {Cơ sở lý thuyết cho kỹ thuật Early Stopping nhằm ngăn model học vẹt (overfitting) tập train.}
+}
+
+% --- 5. TỔNG QUAN VỀ NHẬN DẠNG NGÔN NGỮ KÝ HIỆU & CÔNG CỤ TRÍCH XUẤT ---
+
+@article{cheok2019review,
+  author    = {Cheok, Ming Jin and Omar, Zaid and Sulaiman, Mohd Herwan},
+  title     = {A Review of Hand Gesture and Sign Language Recognition Techniques},
+  journal   = {International Journal of Machine Learning and Cybernetics},
+  volume    = {10},
+  number    = {1},
+  pages     = {131--153},
+  year      = {2019},
+  publisher = {Springer},
+  doi       = {10.1007/s13042-017-0705-5},
+  note      = {Bài khảo sát toàn diện về các phương pháp nhận dạng ngôn ngữ ký hiệu.}
+}
+
+@misc{lugaresi2019mediapipe,
+  author       = {Lugaresi, Camillo and Tang, Jiuqiang and Nash, Hadon and McClanahan, Chris and Uboweja, Esha and Hays, Michael and Zhang, Fan and Chang, Chuo-Ling and Yong, Ming Guang and Lee, Juhyun and others},
+  title        = {{MediaPipe}: A Framework for Building Perception Pipelines},
+  year         = {2019},
+  howpublished = {arXiv preprint arXiv:1906.08172},
+  doi          = {10.48550/arXiv.1906.08172},
+  note         = {Tài liệu kỹ thuật gốc của Google về công cụ MediaPipe dùng để trích xuất pose/hand landmarks.}
+}
+
+% --- 6. TIỀN XỬ LÝ DỮ LIỆU SKELETON (PREPROCESSING & NORMALIZATION) ---
+
+@article{zhang2019view,
+  author    = {Zhang, Pengfei and Lan, Cuiling and Xing, Junliang and Zeng, Wenjun and Xue, Jianru and Zheng, Nanning},
+  title     = {View Adaptive Neural Networks for High Performance Skeleton-Based Human Action Recognition},
+  journal   = {IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  volume    = {41},
+  number    = {8},
+  pages     = {1963--1978},
+  year      = {2019},
+  doi       = {10.1109/TPAMI.2018.2868668},
+  note      = {Trình bày tầm quan trọng của việc chuẩn hoá (normalization) toạ độ khung xương, dời tâm về các khớp chính (như cổ hoặc hông) để mô hình không bị ảnh hưởng bởi vị trí người đứng trong camera.}
+}
+
+@article{che2018recurrent,
+  author    = {Che, Zhengping and Purushotham, Sanjay and Cho, Kyunghyun and Sontag, David and Liu, Yan},
+  title     = {Recurrent Neural Networks for Multivariate Time Series with Missing Values},
+  journal   = {Scientific Reports},
+  volume    = {8},
+  number    = {1},
+  pages     = {6085},
+  year      = {2018},
+  doi       = {10.1038/s41598-018-24271-9},
+  note      = {Cơ sở lý thuyết để nội suy (interpolation) xử lý các frame bị mất (missing frames) hoặc nhiễu trong chuỗi dữ liệu chuỗi toạ độ MediaPipe.}
+}
+
+% --- 7. TỐI ƯU HOÁ QUÁ TRÌNH HUẤN LUYỆN (LEARNING RATE SCHEDULING) ---
+
+@article{loshchilov2016sgdr,
+  author    = {Loshchilov, Ilya and Hutter, Frank},
+  title     = {SGDR: Stochastic Gradient Descent with Warm Restarts},
+  journal   = {arXiv preprint arXiv:1608.03983},
+  year      = {2016},
+  doi       = {10.48550/arXiv.1608.03983},
+  note      = {Thuật toán Cosine Annealing Learning Rate, một kỹ thuật lập lịch tốc độ học phổ biến giúp mô hình hội tụ tốt hơn và thoát khỏi các cực tiểu địa phương (local minima).}
+}
+
+% --- 8. PHƯƠNG PHÁP BASELINE & CÁC BỘ DỮ LIỆU ĐỐI SÁNH (BENCHMARKS) ---
+
+@article{sakoe1978dynamic,
+  author    = {Sakoe, Hiroaki and Chiba, Seibi},
+  title     = {Dynamic Programming Algorithm Optimization for Spoken Word Recognition},
+  journal   = {IEEE Transactions on Acoustics, Speech, and Signal Processing},
+  volume    = {26},
+  number    = {1},
+  pages     = {43--49},
+  year      = {1978},
+  doi       = {10.1109/TASSP.1978.1163055},
+  note      = {Thuật toán Dynamic Time Warping (DTW) - phương pháp truyền thống kinh điển thường được dùng làm Baseline (hệ cơ sở) để so sánh hiệu suất với mô hình Deep Learning như TCN.}
+}
+
+@inproceedings{li2020word,
+  author    = {Li, Dongxu and Rodriguez, Cristian and Yu, Xin and Li, Hongdong},
+  title     = {Word-Level Deep Sign Language Recognition from Video: A New Large-Scale Dataset and Methods Comparison},
+  booktitle = {Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)},
+  pages     = {2844--2853},
+  year      = {2020},
+  note      = {Giới thiệu WLASL, bộ dữ liệu ngôn ngữ ký hiệu lớn nhất dành cho nhận dạng ở cấp độ từ (word-level). Đây là chuẩn mực (benchmark) thường dùng để so sánh các mô hình SLR.}
+}

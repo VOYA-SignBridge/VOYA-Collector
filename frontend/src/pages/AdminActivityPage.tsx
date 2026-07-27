@@ -11,6 +11,21 @@ interface SecurityEvent {
   target: string;
   reason?: string;
   duration_seconds?: number;
+  source?: string; // e.g. TRAINING_SYSTEM_FAILURE: dispatch | trainer_exit | ...
+}
+
+// Nhãn + màu cho mỗi loại sự kiện trong nhật ký bảo mật.
+function secEventBadge(action: string): { label: string; cls: string } {
+  switch (action) {
+    case "block_ip":
+      return { label: "Chặn IP", cls: "bg-red-100 text-red-700" };
+    case "unblock_ip":
+      return { label: "Bỏ chặn", cls: "bg-emerald-100 text-emerald-700" };
+    case "TRAINING_SYSTEM_FAILURE":
+      return { label: "Training lỗi hệ thống", cls: "bg-red-100 text-red-700" };
+    default:
+      return { label: "Ngắt phiên", cls: "bg-amber-100 text-amber-700" };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,20 +352,19 @@ export default function AdminActivityPage() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">🛡️ Nhật ký bảo mật</h3>
           <div className="space-y-1.5 max-h-72 overflow-y-auto">
-            {secLog.map((ev, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs text-slate-600 border-b border-slate-50 pb-1.5">
-                <span className="text-slate-400 tabular-nums shrink-0">{new Date(ev.ts * 1000).toLocaleString("vi-VN")}</span>
-                <span className={`px-1.5 py-0.5 rounded font-semibold shrink-0 ${
-                  ev.action === "block_ip" ? "bg-red-100 text-red-700"
-                    : ev.action === "unblock_ip" ? "bg-emerald-100 text-emerald-700"
-                      : "bg-amber-100 text-amber-700"}`}>
-                  {ev.action === "block_ip" ? "Chặn IP" : ev.action === "unblock_ip" ? "Bỏ chặn" : "Ngắt phiên"}
-                </span>
-                <span className="font-mono text-slate-500 shrink-0 truncate max-w-[160px]">{ev.target}</span>
-                {ev.reason && <span className="truncate">— {ev.reason}</span>}
-                <span className="text-slate-400 ml-auto shrink-0">bởi {ev.actor || "?"}</span>
-              </div>
-            ))}
+            {secLog.map((ev, i) => {
+              const badge = secEventBadge(ev.action);
+              return (
+                <div key={i} className="flex items-center gap-2 text-xs text-slate-600 border-b border-slate-50 pb-1.5">
+                  <span className="text-slate-400 tabular-nums shrink-0">{new Date(ev.ts * 1000).toLocaleString("vi-VN")}</span>
+                  <span className={`px-1.5 py-0.5 rounded font-semibold shrink-0 ${badge.cls}`}>{badge.label}</span>
+                  {ev.source && <span className="font-mono text-slate-400 shrink-0">[{ev.source}]</span>}
+                  <span className="font-mono text-slate-500 shrink-0 truncate max-w-[160px]">{ev.target}</span>
+                  {ev.reason && <span className="truncate">— {ev.reason}</span>}
+                  <span className="text-slate-400 ml-auto shrink-0">bởi {ev.actor || "?"}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

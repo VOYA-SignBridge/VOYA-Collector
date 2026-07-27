@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
+from starlette.concurrency import run_in_threadpool
 from psycopg2.errors import UniqueViolation
 from pydantic import BaseModel
 
@@ -217,7 +218,8 @@ class PromoteModelResponse(BaseModel):
 async def create_experiment_endpoint(req: CreateExperimentRequest):
     """Create a new training experiment with status 'pending'."""
     try:
-        return create_experiment(
+        return await run_in_threadpool(
+            create_experiment,
             dialect=req.dialect,
             subset_path=req.subset_path,
             hyperparameters=req.hyperparameters,
@@ -236,7 +238,8 @@ async def list_experiments_endpoint(
 ):
     """List experiments with optional dialect and status filters. Returns [] if no match."""
     try:
-        return list_experiments(
+        return await run_in_threadpool(
+            list_experiments,
             dialect=dialect,
             status=status,
             order_by=order_by,
@@ -249,7 +252,7 @@ async def list_experiments_endpoint(
 @router.get("/experiments/{experiment_id}", response_model=ExperimentDetailResponse)
 async def get_experiment_endpoint(experiment_id: int):
     """Get experiment details including all logged per-epoch metrics."""
-    result = get_experiment(experiment_id)
+    result = await run_in_threadpool(get_experiment, experiment_id)
     if result is None:
         raise HTTPException(
             status_code=404,
@@ -265,7 +268,7 @@ async def update_experiment_status_endpoint(
 ):
     """Transition experiment status. Sets completed_at automatically on terminal states (completed/failed)."""
     try:
-        return update_experiment_status(experiment_id, req.status)
+        return await run_in_threadpool(update_experiment_status, experiment_id, req.status)
     except HTTPException:
         raise
     except ValueError as e:
@@ -286,7 +289,8 @@ async def log_metric_endpoint(experiment_id: int, req: LogMetricRequest):
     rather than always creating one.
     """
     try:
-        return log_metric(
+        return await run_in_threadpool(
+            log_metric,
             experiment_id=experiment_id,
             epoch=req.epoch,
             train_loss=req.train_loss,
@@ -310,7 +314,8 @@ async def update_experiment_summary_endpoint(
 ):
     """Write best-of-run summary fields. Call after update_experiment_status('completed')."""
     try:
-        return update_experiment_summary(
+        return await run_in_threadpool(
+            update_experiment_summary,
             experiment_id=experiment_id,
             best_epoch=req.best_epoch,
             best_val_acc=req.best_val_acc,
@@ -414,7 +419,8 @@ async def create_model_version_endpoint(req: CreateModelVersionRequest):
     New versions always start with status='candidate'.
     """
     try:
-        return create_model_version(
+        return await run_in_threadpool(
+            create_model_version,
             model_family=req.model_family,
             experiment_id=req.experiment_id,
             dialect=req.dialect,
@@ -443,7 +449,7 @@ async def list_models_endpoint(
     experiments and feature_contract in model_versions.
     """
     try:
-        return list_models(dialect=dialect, status=status, limit=limit)
+        return await run_in_threadpool(list_models, dialect=dialect, status=status, limit=limit)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -461,7 +467,7 @@ async def get_active_model_endpoint(
     Pass ?status=candidate to query unvalidated models.
     """
     try:
-        result = get_best_model_for_dialect(dialect=dialect, status=status)
+        result = await run_in_threadpool(get_best_model_for_dialect, dialect=dialect, status=status)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -482,7 +488,7 @@ async def update_model_status_endpoint(
 ):
     """Update model version status. Lifecycle: candidate → production → archived."""
     try:
-        return update_model_status(version_id, req.status)
+        return await run_in_threadpool(update_model_status, version_id, req.status)
     except HTTPException:
         raise
     except ValueError as e:

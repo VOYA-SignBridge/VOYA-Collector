@@ -15,6 +15,20 @@ interface BlockedInfo {
  * Events are dispatched by the axios interceptor on 403(blocked)/401(force)
  * and by the inactivity timer (useIdleLogout).
  */
+/**
+ * Send the browser to the app's OWN root under its base path (e.g. "/voya/"),
+ * never the domain root. A hard `location.href = "/login"` is origin-relative
+ * and drops the "/voya" prefix — it would land on https://host/login, outside
+ * the app. Reading VITE_BASE_PATH (injected into window.__ENV__ by the nginx
+ * entrypoint) keeps the redirect inside the deployment and shows the logged-out
+ * landing page, which is exactly where an ended session should return.
+ */
+function goToAppHome() {
+  const base =
+    (window as { __ENV__?: { VITE_BASE_PATH?: string } }).__ENV__?.VITE_BASE_PATH || "/";
+  window.location.href = base.endsWith("/") ? base : `${base}/`;
+}
+
 export default function SecurityNotices() {
   const [blocked, setBlocked] = useState<BlockedInfo | null>(null);
   const [logout, setLogout] = useState<string | null>(null);
@@ -84,7 +98,7 @@ export default function SecurityNotices() {
           <h2 className="text-xl font-bold text-slate-900 mb-2">Phiên đã kết thúc</h2>
           <p className="text-slate-600 mb-6">{logout}</p>
           <button
-            onClick={() => { window.location.href = "/login"; }}
+            onClick={goToAppHome}
             className="px-5 py-2.5 rounded-lg bg-ctu-blue text-white font-medium hover:bg-ctu-navy transition-colors"
           >
             Đăng nhập lại
@@ -107,7 +121,7 @@ export default function SecurityNotices() {
             Đây là thao tác bảo mật thông thường — dữ liệu của bạn vẫn an toàn. Vui lòng đăng nhập lại để tiếp tục.
           </p>
           <button
-            onClick={() => { window.location.href = "/login"; }}
+            onClick={goToAppHome}
             className="px-5 py-2.5 rounded-lg bg-ctu-blue text-white font-medium hover:bg-ctu-navy transition-colors"
           >
             Đăng nhập lại

@@ -1,0 +1,125 @@
+% Plain math italic, not \mathbf: the symbol is introduced once and never
+% reused, so a bold X only reads as an accidental bold word mid-sentence.
+Each sample is represented by
+$X\in\mathbb{R}^{60\times126}$, where each frame contains
+$2\times21\times3=126$ coordinates from two MediaPipe hand slots.
+The $x$ and $y$ values are image-normalized, while $z$ is a relative
+depth estimate rather than a metric three-dimensional position.
+Missing-hand slots are zero-valued. All experiments use the
+\texttt{hands126\_v1} processing contract. Table~\ref{tab:profiles}
+summarizes the two profiles we evaluate.
+
+\begin{table}[htbp]
+\centering
+\caption{Evaluated recognition profiles. Performer counts are given as
+canonical physical performers over those with complete class coverage.}
+\label{tab:profiles}
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.08}
+
+\begin{tabularx}{\linewidth}{
+    >{\raggedright\arraybackslash}p{3.7cm}
+    c
+    c
+    c
+    >{\raggedright\arraybackslash}X
+}
+\toprule
+\textbf{Profile}
+& \textbf{Classes}
+& \textbf{Samples}
+& \textbf{Perf.}
+& \textbf{Evaluation} \\
+\midrule
+Hòa Đê workplace signs
+& 7 & 445 & 4/4
+& Four performer-held-out folds \\
+Fingerspelling subset
+& 23 & 793 & 5/2
+& Two complete-coverage folds \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Hòa Đê Workplace-Sign Profile}
+\label{subsec:hoa_de_profile}
+
+The Hòa Đê profile contains seven workplace signs:
+\texttt{rang-muoi}, \texttt{tom}, \texttt{lot-da-ca},
+\texttt{lot-vo-tom}, \texttt{cat-ky}, \texttt{danh-vay-ca}, and
+\texttt{cat-dau-ca}.
+
+Four adult performers, denoted H01--H04, contributed 445 usable samples,
+and all four covered all seven classes. H03 is the originating Deaf
+performer. H01, H02, and H04 were instructed performers who had not
+habitually used the vocabulary before collection.
+
+Source glosses were entered during capture, with help from a family
+member of H03 who communicated with them regularly. We therefore treat
+the labels as source annotations grounded in H03's own communication
+practice. They are not independent linguistic validation, and we do not
+present them as such.
+
+\subsection{Fingerspelling Profile}
+\label{subsec:fingerspelling_profile}
+
+The fingerspelling subset contains 793 usable samples across 23 classes:
+
+\begin{equation}
+\begin{aligned}
+\mathcal{C}_{\mathrm{FS}}=\{&
+\mathrm{A},\mathrm{B},\mathrm{C},\mathrm{D},\mathrm{E},
+\mathrm{G},\mathrm{H},\mathrm{I},\mathrm{K},\mathrm{L},
+\mathrm{M},\mathrm{N},\\
+&
+\mathrm{O},\mathrm{P},\mathrm{Q},\mathrm{R},\mathrm{S},
+\mathrm{T},\mathrm{U},\mathrm{V},\mathrm{X},\mathrm{Y},
+\mathrm{Z}\}.
+\end{aligned}
+\label{eq:fingerspelling_classes}
+\end{equation}
+
+This profile is not a complete Vietnamese fingerspelling inventory. It
+excludes the Latin letters F, J, and W, as well as the
+Vietnamese-specific letters Ă, Â, Đ, Ê, Ô, Ơ, and Ư.
+
+Five physical performers contributed samples, but only F01 and F02
+covered all 23 classes. Together, they contributed approximately 89\%
+of the usable samples. F01 and F02 correspond to H01 and H02,
+respectively; profile-specific pseudonyms are retained to keep the two
+collection inventories and split artifacts unambiguous.
+
+One of those performers turned out to have been recorded under two
+collection identifiers, \texttt{S005} and \texttt{S007}. We reconciled
+the pair to a single physical person in the canonical identity mapping.
+Left alone, it would have inflated the profile to six performers where
+there are five, and nothing would have stopped a split from placing one
+person on both sides of itself.
+
+\subsection{Session and Motion Audits}
+\label{subsec:session_motion_audits}
+
+Spreadsheet handling converted several early Hòa Đê session identifiers
+into scientific-notation strings, and distinct source identifiers lost
+the digits that told them apart. Sample identifiers survived intact, so
+no sample is ambiguous, but exact historical session counts cannot be
+reconstructed for every record. We therefore describe the collection as
+multi-session and make no claim of session-disjoint evaluation.
+
+A descriptive motion audit computed the mean frame-to-frame $\ell_1$
+landmark displacement per class. Z, which is dynamic by design, scored
+approximately 0.357. Q scored approximately 0.375, higher than Z despite
+being intended as a static handshape, and roughly 97\% of its samples
+exceeded 0.2. Manual inspection confirmed the cause: the
+recordings are contaminated with movement that does not belong to the
+sign.
+
+We kept Q in the frozen manifest rather than dropping it, so that the
+evaluated task definition stays intact and comparable, and we flag every
+fingerspelling result with this caveat. The class is marked for
+recollection in a future dataset version.
+
+Raw videos were not retained. Participant-level landmark sequences
+remain private, so the conclusions concern the frozen
+\texttt{hands126\_v1} representation.

@@ -25,6 +25,7 @@ import sys
 from importlib.util import spec_from_file_location, module_from_spec
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.auth import get_current_user, get_user_from_token, require_admin
 from app.cookie_auth import ACCESS_COOKIE
@@ -657,8 +658,8 @@ async def get_dataset_info(
         logger.debug("SAMPLES_CSV exists: %s", SAMPLES_CSV.exists())
         logger.debug("LABELS_CSV exists: %s", LABELS_CSV.exists())
 
-        samples, labels = _load_samples_and_labels()
-        dialects_map = _get_dialects_by_language()
+        samples, labels = await run_in_threadpool(_load_samples_and_labels)
+        dialects_map = await run_in_threadpool(_get_dialects_by_language)
 
         # Nếu có filter dialect/language, giới hạn samples về đúng các
         # class_uid có label khớp trước khi tính total/class_distribution.
@@ -727,19 +728,49 @@ async def start_training(
         await _persist_job(job, auth_user_id=str(current_user.get("id") or "") or None)
 
         # Dispatch to the dedicated trainer container (Celery queue "training",
-        # concurrency 1 — jobs execute strictly one at a time, off the API CPU)
+        # concurrency 1 — jobs execute strictly one at a time, off the API CPU).
+        # Retry a few times with backoff so a momentary broker blip (e.g. Redis
+        # being recreated during a deploy) doesn't turn into a failed job.
         try:
             from app.training_tasks import run_training_job
 
-            await asyncio.to_thread(
-                run_training_job.apply_async, kwargs={"job_id": job_id}, queue="training"
-            )
+            dispatch_err = None
+            for attempt in range(3):
+                try:
+                    await run_in_threadpool(
+                        run_training_job.apply_async,
+                        kwargs={"job_id": job_id}, queue="training",
+                    )
+                    dispatch_err = None
+                    break
+                except Exception as e:  # broker hiccup — brief backoff, then retry
+                    dispatch_err = e
+                    logger.warning(
+                        "job=%s dispatch attempt %d/3 failed: %s", job_id, attempt + 1, e
+                    )
+                    if attempt < 2:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+            if dispatch_err is not None:
+                raise dispatch_err
             logger.info("job=%s dispatched to trainer by user=%s", job_id, current_user.get("username"))
         except Exception as dispatch_err:
             job.status = "failed"
             job.completed_at = datetime.now().isoformat()
             job.error_message = f"Không gửi được job tới trainer (Redis/Celery down?): {dispatch_err}"
             await _persist_job(job)
+            # A dispatch failure is always a system/infra problem (not the user's
+            # data) → escalate to admins.
+            try:
+                from app.training_alerts import notify_admins_training_failure
+
+                notify_admins_training_failure(
+                    job_id=job_id,
+                    actor=str(current_user.get("username") or current_user.get("id") or ""),
+                    error=job.error_message,
+                    source="dispatch",
+                )
+            except Exception:
+                pass
             raise HTTPException(
                 status_code=503,
                 detail="Hàng đợi training tạm thời không khả dụng — thử lại sau",
@@ -762,7 +793,7 @@ async def list_jobs(
     try:
         from app.storage.metadata_db import list_training_jobs_with_user
 
-        rows = await asyncio.to_thread(list_training_jobs_with_user, limit)
+        rows = await run_in_threadpool(list_training_jobs_with_user, limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không đọc được lịch sử training: {e}")
 
@@ -799,7 +830,7 @@ async def get_job_status(
                 logger.debug("job=%s loading checkpoint from %s, exists=%s", job_id, ckpt_path, ckpt_path.exists())
                 if ckpt_path.exists():
                     # In thread — torch.load on a large checkpoint would block the event loop
-                    ckpt = await asyncio.to_thread(
+                    ckpt = await run_in_threadpool(
                         torch.load, ckpt_path, map_location="cpu", weights_only=False
                     )
                     metrics = ckpt.get("metrics", {})
@@ -833,7 +864,7 @@ async def get_job_metrics(
         try:
             from app.storage.metadata_db import list_training_metrics
 
-            rows = await asyncio.to_thread(list_training_metrics, job_id)
+            rows = await run_in_threadpool(list_training_metrics, job_id)
             job_info["progress"] = _metrics_from_db_rows(rows)
         except Exception as e:
             logger.warning("Metrics DB load failed for %s: %s", job_id, e)

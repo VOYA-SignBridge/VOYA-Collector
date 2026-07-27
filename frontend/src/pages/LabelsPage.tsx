@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
-import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass } from "../api/dataset";
+import { useNavigate } from "react-router-dom";
+import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass, registerClass } from "../api/dataset";
 import type { Label, ClassRow } from "../types";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
@@ -13,6 +14,7 @@ import { SearchIcon, TagIcon } from "../components/ui/Icons";
 import { useAuth } from "../hooks/useAuth";
 
 export default function LabelsPage() {
+  const navigate = useNavigate();
   const { loading: authLoading, isAdmin } = useAuth();
   const [labels, setLabels] = useState<Label[]>([]);
   const [classes, setClasses] = useState<ClassRow[] | null>(null);
@@ -72,6 +74,11 @@ export default function LabelsPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RenderItem | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
+  const [createTarget, setCreateTarget] = useState(false);
+  const [createValue, setCreateValue] = useState<string>("");
+  const [createLanguage, setCreateLanguage] = useState<string>("vn");
+  const [createDialect, setCreateDialect] = useState<string>("common");
+  const [createSaving, setCreateSaving] = useState(false);
 
   // Dialect normalization helper: map various forms to canonical slugs used by BE
   const normalizeDialect = (d?: string) => {
@@ -188,7 +195,7 @@ export default function LabelsPage() {
             const map: Record<string, number> = {};
             const distribution = statsRes.data.distribution || [];
             for (const s of distribution) {
-              if (s.class_uid) map[s.class_uid] = s.count || s.samples_count || 0;
+              if (s.class_uid) map[s.class_uid] = s.samples_count ?? s.count ?? 0;
             }
             // Debug: log sample count mapping size
             // eslint-disable-next-line no-console
@@ -262,6 +269,11 @@ export default function LabelsPage() {
     setEditDialect(item.dialect || dialect || "common");
   };
 
+  const navigateToDetails = (item: RenderItem) => {
+    const id = item.class_uid || item.class_idx;
+    navigate(`/labels/${id}`);
+  };
+
   const openDelete = (item: RenderItem) => {
     setStatusMessage(null);
     setError(null);
@@ -289,6 +301,50 @@ export default function LabelsPage() {
     }) : prev);
     const numericRef = Number(classRef);
     setLabels((prev) => prev.filter((item) => item.class_idx !== numericRef));
+  };
+
+  const saveCreate = async () => {
+    const nextLabel = createValue.trim();
+    if (!nextLabel) {
+      setError("Tên nhãn không được để trống.");
+      return;
+    }
+
+    setCreateSaving(true);
+    setError(null);
+    setShowOperationLogs(false);
+    try {
+      const result = await registerClass({
+        label: nextLabel,
+        language: createLanguage,
+        dialect: createDialect,
+        is_common_language: createDialect === "common",
+        is_common_global: false,
+      });
+      if (!result.ok) {
+        setError(result.error || "Không thể tạo nhãn.");
+        return;
+      }
+
+      const updated = result.data;
+      setStatusMessage(
+        `Đã tạo nhãn "${updated.label_original || nextLabel}" (${getLanguageName(updated.language || createLanguage)} / ${getDialectName(updated.dialect || createDialect)})`
+      );
+      
+      setClasses((prev) => prev ? [updated, ...prev] : [updated]);
+      if (updated.class_uid) {
+        setSampleCounts((prev) => ({ ...prev, [updated.class_uid]: 0 }));
+      }
+      setCreateTarget(false);
+      setCreateValue("");
+      setCreateLanguage("vn");
+      setCreateDialect("common");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Không thể tạo nhãn.");
+    } finally {
+      setCreateSaving(false);
+    }
   };
 
   const saveEdit = async () => {
@@ -471,6 +527,11 @@ export default function LabelsPage() {
             <div className="flex items-center gap-2">
               {!loading && renderItems.length > 0 && (
                 <>
+                  {isAdmin && (
+                    <Button variant="primary" size="sm" onClick={() => setCreateTarget(true)}>
+                      <span className="text-xs">Tạo nhãn mới</span>
+                    </Button>
+                  )}
                   <Button variant="secondary" size="sm" onClick={exportJSON}>
                     <span className="text-xs">Xuất JSON</span>
                   </Button>
@@ -624,6 +685,34 @@ export default function LabelsPage() {
                         )}
                       </div>
                     )}
+                    
+                    {/* Sample Progress (Grid View) */}
+                    {viewMode === 'grid' && (() => {
+                      const sessions = Math.floor((item.samples_count ?? 0) / 5);
+                      const isCompleted = sessions >= 5;
+                      return (
+                      <div className="mt-2.5">
+                        <div className="flex items-center justify-between text-[11px] font-medium text-gray-600 mb-1">
+                          <span>Tiến độ thu thập</span>
+                          <span className={`${isCompleted ? 'text-ctu-blue font-bold' : 'text-gray-900'}`}>{sessions} / 5</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1.5 overflow-hidden">
+                          <div 
+                            className="h-1.5 rounded-full transition-all duration-500 bg-ctu-blue"
+                            style={{ width: `${Math.min(100, (sessions / 5) * 100)}%` }}
+                          ></div>
+                        </div>
+                        {!isCompleted ? (
+                          <div className="text-[10px] text-amber-600 font-medium">Cần thêm {5 - sessions} lần quay</div>
+                        ) : (
+                          <div className="text-[10px] text-ctu-blue font-medium flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                            Đã đủ điều kiện huấn luyện
+                          </div>
+                        )}
+                      </div>
+                      );
+                    })()}
                   </div>
                   
                   {/* List view */}
@@ -657,33 +746,77 @@ export default function LabelsPage() {
                           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">⭐ Toàn cầu</span>
                         )}
                       </div>
+                      
+                      {/* Sample Progress (List View) */}
+                      {(() => {
+                        const sessions = Math.floor((item.samples_count ?? 0) / 5);
+                        const isCompleted = sessions >= 5;
+                        return (
+                          <div className="flex flex-col min-w-[140px]">
+                            <div className="flex items-center justify-between text-[11px] mb-1">
+                              <span className="text-gray-500 font-medium">Tiến độ</span>
+                              <span className={`font-bold ${isCompleted ? 'text-ctu-blue' : 'text-gray-900'}`}>{sessions}/5</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1 overflow-hidden">
+                              <div 
+                                className="h-1.5 rounded-full transition-all duration-500 bg-ctu-blue"
+                                style={{ width: `${Math.min(100, (sessions / 5) * 100)}%` }}
+                              ></div>
+                            </div>
+                            {!isCompleted ? (
+                              <div className="text-[10px] text-amber-600 font-medium text-right">Thiếu {5 - sessions} lần quay</div>
+                            ) : (
+                              <div className="text-[10px] text-ctu-blue font-medium text-right flex items-center justify-end gap-1">
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                Đã đủ
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
-                  {isAdmin && (
-                    <div className={`mt-3 grid grid-cols-2 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
+                  {isAdmin ? (
+                    <div className={`mt-3 grid grid-cols-3 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="w-full justify-center px-2 py-2 text-xs"
+                        onClick={() => navigateToDetails(item)}
+                      >
+                        Chi tiết
+                      </Button>
                       <Button
                         variant="secondary"
                         size="sm"
-                        className="w-full justify-center px-3 py-2 text-xs"
+                        className="w-full justify-center px-2 py-2 text-xs"
                         onClick={() => openEdit(item)}
                       >
-                        Chỉnh sửa
+                        Sửa
                       </Button>
                       <Button
                         variant="danger"
                         size="sm"
-                        className="w-full justify-center px-3 py-2 text-xs"
+                        className="w-full justify-center px-2 py-2 text-xs"
                         onClick={() => openDelete(item)}
                       >
                         Xóa
                       </Button>
                     </div>
-                  )}
-
-                  {!isAdmin && (
-                    <div className="mt-3 text-xs text-gray-500 italic text-center">
-                      Chỉ quản trị viên có thể chỉnh sửa
+                  ) : (
+                    <div className={`mt-3 grid grid-cols-1 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="w-full justify-center px-3 py-2 text-xs"
+                        onClick={() => navigateToDetails(item)}
+                      >
+                        Chi tiết
+                      </Button>
+                      <div className="mt-1 text-xs text-gray-500 italic text-center">
+                        Chỉ quản trị viên có thể chỉnh sửa
+                      </div>
                     </div>
                   )}
                 </div>
@@ -692,6 +825,67 @@ export default function LabelsPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={createTarget}
+        onClose={() => !createSaving && setCreateTarget(false)}
+        title="Tạo nhãn mới"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-ctu-blue/30 bg-ctu-blue/10 p-4 text-sm text-ctu-navy">
+            Nhãn mới sẽ được lưu vào cơ sở dữ liệu và đồng bộ vào file CSV gốc. Bạn cần thu thập ít nhất 5 mẫu cho nhãn này để có thể huấn luyện (Train) mô hình AI.
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">Tên nhãn (Tiếng Việt/English)</label>
+            <input
+              className="input w-full"
+              value={createValue}
+              onChange={(e) => setCreateValue(e.target.value)}
+              placeholder="Ví dụ: Xin chào, Cảm ơn..."
+              disabled={createSaving}
+              autoFocus
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">Ngôn ngữ</label>
+              <select
+                className="input w-full"
+                value={createLanguage}
+                onChange={(e) => setCreateLanguage(e.target.value)}
+                disabled={createSaving}
+              >
+                <option value="vn">🇻🇳 Tiếng Việt</option>
+                <option value="en">🇬🇧 English</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">Phương ngữ (Dialect)</label>
+              <select
+                className="input w-full"
+                value={createDialect}
+                onChange={(e) => setCreateDialect(e.target.value)}
+                disabled={createSaving}
+              >
+                <option value="common">Chung (Sử dụng toàn quốc)</option>
+                <option value="bac">Miền Bắc</option>
+                <option value="nam">Miền Nam</option>
+                <option value="trung">Miền Trung</option>
+                <option value="can-tho">Cần Thơ</option>
+                <option value="hoa-de">Hòa Đê</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-6">
+            <Button variant="ghost" onClick={() => setCreateTarget(false)} disabled={createSaving}>
+              Hủy
+            </Button>
+            <Button variant="primary" onClick={saveCreate} loading={createSaving}>
+              Tạo nhãn
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={Boolean(editTarget)}

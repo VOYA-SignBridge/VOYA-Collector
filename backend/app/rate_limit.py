@@ -29,10 +29,14 @@ logger = logging.getLogger(__name__)
 
 _REDIS_URL = os.getenv("REDIS_URL", getattr(settings, "broker_url", "redis://redis:6379/0"))
 
-# Tunables (env-overridable). Defaults: 5 failed logins per identifier/IP per
-# 15 minutes, then a 15-minute cooldown.
+# Tunables (env-overridable). Defaults: up to 5 failed logins per identifier/IP
+# within a 30-minute detection window; the 5th trips a 15-minute soft lock. The
+# detection window and the lock are separate on purpose ("5 sai trong 30p, khóa
+# mềm 15p") — the counter still rides its 30-min window for the admin anomaly
+# view, while the lock decides whether a login is refused.
 LOGIN_MAX_ATTEMPTS = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
-LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "900"))
+LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "1800"))   # 30-min detection window
+LOGIN_LOCK_SECONDS = int(os.getenv("LOGIN_LOCK_SECONDS", "900"))        # 15-min soft lock
 
 _KEY_PREFIX = "ratelimit:"
 
@@ -132,31 +136,72 @@ def _login_id_key(identifier: str) -> str:
     return f"{_KEY_PREFIX}login:id:{(identifier or '').strip().lower()}"
 
 
-def check_login_allowed(ip: str, identifier: str) -> None:
-    """Raise 429 if either the IP or the identifier is already over the limit.
-
-    Called BEFORE verifying credentials so a locked account/IP never even runs
-    bcrypt.
-    """
-    for key in (_login_ip_key(ip), _login_id_key(identifier)):
-        count, ttl = _peek(key)
-        if count >= LOGIN_MAX_ATTEMPTS:
-            raise _too_many(ttl or LOGIN_WINDOW_SECONDS)
+def _login_lock_ip_key(ip: str) -> str:
+    return f"{_KEY_PREFIX}login:lock:ip:{ip}"
 
 
-def register_failed_login(ip: str, identifier: str) -> None:
-    """Count a failed login against both the IP and the identifier."""
-    _incr_with_window(_login_ip_key(ip), LOGIN_WINDOW_SECONDS)
-    _incr_with_window(_login_id_key(identifier), LOGIN_WINDOW_SECONDS)
+def _login_lock_id_key(identifier: str) -> str:
+    return f"{_KEY_PREFIX}login:lock:id:{(identifier or '').strip().lower()}"
 
 
-def reset_login_attempts(ip: str, identifier: str) -> None:
-    """Clear counters after a successful login so a legit user isn't locked."""
+def _set_lock(key: str, seconds: int) -> None:
     c = _client()
     if c is None:
         return
     try:
-        c.delete(_login_ip_key(ip), _login_id_key(identifier))
+        c.set(key, "1", ex=max(1, seconds))
+    except Exception as exc:  # pragma: no cover
+        logger.warning("[ratelimit] set lock failed for %s: %s", key, exc)
+
+
+def _lock_ttl(key: str) -> int:
+    """Remaining lock seconds, or 0 if not locked."""
+    c = _client()
+    if c is None:
+        return 0
+    try:
+        ttl = int(c.ttl(key))
+        return ttl if ttl > 0 else 0
+    except Exception:  # pragma: no cover
+        return 0
+
+
+def check_login_allowed(ip: str, identifier: str) -> None:
+    """Raise 429 if the IP or the identifier is currently soft-locked.
+
+    Called BEFORE verifying credentials so a locked account/IP never even runs
+    bcrypt. The lock is a separate key from the failure counter, so it survives a
+    fixed 15 minutes regardless of the 30-minute counting window.
+    """
+    for key in (_login_lock_ip_key(ip), _login_lock_id_key(identifier)):
+        ttl = _lock_ttl(key)
+        if ttl > 0:
+            raise _too_many(ttl)
+
+
+def register_failed_login(ip: str, identifier: str) -> None:
+    """Count a failed login against both the IP and the identifier; on the
+    LOGIN_MAX_ATTEMPTS-th failure within the window, arm the 15-minute lock."""
+    for counter_key, lock_key in (
+        (_login_ip_key(ip), _login_lock_ip_key(ip)),
+        (_login_id_key(identifier), _login_lock_id_key(identifier)),
+    ):
+        count, _ = _incr_with_window(counter_key, LOGIN_WINDOW_SECONDS)
+        if count >= LOGIN_MAX_ATTEMPTS:
+            _set_lock(lock_key, LOGIN_LOCK_SECONDS)
+
+
+def reset_login_attempts(ip: str, identifier: str) -> None:
+    """Clear counters AND locks after a successful login so a legit user who
+    finally gets their password right is never left locked."""
+    c = _client()
+    if c is None:
+        return
+    try:
+        c.delete(
+            _login_ip_key(ip), _login_id_key(identifier),
+            _login_lock_ip_key(ip), _login_lock_id_key(identifier),
+        )
     except Exception as exc:  # pragma: no cover
         logger.warning("[ratelimit] reset failed: %s", exc)
 

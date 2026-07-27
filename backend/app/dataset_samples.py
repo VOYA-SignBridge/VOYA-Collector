@@ -182,6 +182,92 @@ def update_sample_rows_bulk(updates: Dict[str, Dict[str, Any]]):
             logging.getLogger(__name__).error("[UPDATE_SAMPLE_ROWS_BULK] failed: %s", e)
 
 
+def _db_row_to_csv_row(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a Postgres samples row into a samples.csv row. storage_key isn't a
+    DB column but equals the relative file_path (features/<lang>/<dialect>/<folder>/
+    sample_x.npz), so derive it from file_path."""
+    fp = r.get("file_path") or ""
+    return {
+        "sample_uid": r.get("sample_uid") or "",
+        "class_uid": r.get("class_uid") or "",
+        "slug": r.get("slug") or "",
+        "label_original": r.get("label_original") or "",
+        "language": r.get("language") or "",
+        "dialect": r.get("dialect") or "",
+        "source_type": r.get("source_type") or "",
+        "user_id": r.get("user_id") or "",
+        "session_id": r.get("session_id") or "",
+        "fps_original": r.get("fps_original") or "",
+        "fps_processed": r.get("fps_processed") or "",
+        "seq_len": str(r.get("seq_len") if r.get("seq_len") is not None else ""),
+        "augment_id": str(r.get("augment_id") if r.get("augment_id") is not None else ""),
+        "completeness": str(r.get("completeness") if r.get("completeness") is not None else ""),
+        "file_path": fp,
+        "storage_key": fp,
+        "storage_url": r.get("storage_url") or "",
+        "checksum": r.get("checksum") or "",
+        "created_at": str(r.get("created_at") or ""),
+    }
+
+
+def reconcile_samples_csv_from_db() -> int:
+    """Heal samples.csv by appending any ACTIVE Postgres sample that is missing
+    from it. Postgres is authoritative, so a row can only be *lost* from the CSV
+    (rare append-vs-catalog-rewrite race), never the reverse — hence APPEND-ONLY
+    and idempotent. Returns the number of rows restored.
+
+    MUST run under _catalog_lock (same lock every catalog mutation holds). A soft
+    delete removes the row from samples.csv and THEN sets deleted_at in the DB; a
+    reconcile that read "DB active" in that gap would resurrect the just-trashed
+    sample (or leave a CSV orphan after a purge). Holding the catalog lock — and
+    reading the DB only after acquiring it — makes reconcile see a settled state,
+    so it never re-adds a row a catalog op is deleting. Same lock-acquire order as
+    catalog ops (catalog lock, then the samples file lock) → no deadlock."""
+    _ensure_samples_file()
+
+    from filelock import Timeout
+    from app.catalog_sync import _catalog_lock
+
+    try:
+        # Skip this run (not fail) if a catalog op is busy — the beat retries soon.
+        with _catalog_lock().acquire(timeout=30):
+            try:
+                from app.storage.metadata_db import list_active_samples
+
+                db_rows = list_active_samples()
+            except Exception as e:
+                logging.getLogger(__name__).warning("[RECONCILE] DB read failed: %s", e)
+                return 0
+            if not db_rows:
+                return 0
+
+            lock = FileLock(str(SAMPLES_CSV) + ".lock")
+            with lock:
+                with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    fieldnames = list(reader.fieldnames or SAMPLE_FIELDS)
+                    existing = {(row.get("sample_uid") or "").strip() for row in reader}
+
+                missing = [r for r in db_rows if (r.get("sample_uid") or "") not in existing]
+                if not missing:
+                    return 0
+
+                with open(SAMPLES_CSV, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", restval="")
+                    for r in missing:
+                        writer.writerow(_db_row_to_csv_row(r))
+                    f.flush()
+                    os.fsync(f.fileno())
+
+            logging.getLogger(__name__).warning(
+                "[RECONCILE] restored %d sample row(s) from DB into samples.csv", len(missing)
+            )
+            return len(missing)
+    except Timeout:
+        logging.getLogger(__name__).info("[RECONCILE] skipped: catalog busy")
+        return 0
+
+
 def count_samples_for_class(class_uid: str) -> int:
     """Return number of samples for a class_uid based on samples.csv.
 
@@ -268,6 +354,14 @@ def save_sequence_npz(
     storage_key = None
     use_google_drive = settings.use_google_drive
 
+    # Single-mode (e.g. camera) Drive upload is DISPATCHED LATER — only AFTER the
+    # samples.csv + Postgres rows exist. Its callback fills storage_url via
+    # update_sample_row / update_sample_gdrive_url keyed by sample_uid; dispatched
+    # here (before the rows were written) a fast upload could run its write-back
+    # first and silently find nothing → row left with empty storage_url and
+    # gdrive_synced=false. Batch mode is already safe: the caller dispatches the
+    # collected items only after the whole loop has written every row.
+    pending_single_upload = None
     if use_google_drive:
         folder_name = class_meta.folder_name()
         storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
@@ -278,16 +372,9 @@ def save_sequence_npz(
             "sidecar_path": str(sidecar),
         }
         if upload_collector is not None:
-            # Batch mode: caller dispatches ONE task for all collected items.
             upload_collector.append(upload_item)
         else:
-            # Single mode (e.g. camera): dispatch immediately as before.
-            try:
-                from app.export_tasks import upload_npz_to_gdrive_task
-                upload_npz_to_gdrive_task.delay(**upload_item)
-                log.info("[SAVE_SEQUENCE] Google Drive upload deferred to Celery for key: %s", storage_key)
-            except Exception as e:
-                log.warning("[SAVE_SEQUENCE] Failed to dispatch Celery upload task: %s", e)
+            pending_single_upload = upload_item
     else:
         log.info("[SAVE_SEQUENCE] Google Drive not enabled; keeping local copy only")
 
@@ -368,7 +455,22 @@ def save_sequence_npz(
         }
         insert_sample(db_row)
     except Exception as e:
-        if getattr(settings, "debug_logging", False):
-            logging.getLogger(__name__).debug("[DB] insert_sample failed: %s", e)
+        # Previously logged only in debug mode — a sample could land in
+        # samples.csv but never in Postgres and go unnoticed. Always warn.
+        logging.getLogger(__name__).warning("[DB] insert_sample failed for %s: %s", sample_uid, e)
+
+    # The row now exists in samples.csv + Postgres, so the single-file Drive
+    # upload can safely run: its storage_url write-back will find the sample.
+    if pending_single_upload is not None:
+        try:
+            from app.export_tasks import upload_npz_to_gdrive_task
+
+            upload_npz_to_gdrive_task.delay(**pending_single_upload)
+            log.info(
+                "[SAVE_SEQUENCE] Google Drive upload deferred to Celery for key: %s",
+                pending_single_upload["storage_key"],
+            )
+        except Exception as e:
+            log.warning("[SAVE_SEQUENCE] Failed to dispatch Celery upload task: %s", e)
 
     return result_path

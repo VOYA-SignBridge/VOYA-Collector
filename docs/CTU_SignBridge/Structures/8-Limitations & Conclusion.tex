@@ -1,0 +1,21 @@
+\subsection{Limitations}
+
+Our study covers two small, closed-set profiles. Hòa Đê holds seven workplace signs and four complete-coverage performers; fingerspelling holds 23 classes and five physical performers, of whom only F01 and F02 cover all classes, between them contributing approximately 89\% of the usable samples. Three seeds reduce optimization variability, but seeds are not participants, and no number of them adds participant-level replication. Our analysis is descriptive for that reason.
+
+One consequence deserves stating on its own. We report cell means over three seeds but not the dispersion within a cell, so the 0.116 spread across architecture means arrives without an error bar and we cannot say how much of it is optimization noise. The architecture ranking should be read as provisional to exactly that extent, and the 0.025 margin at H03 is the clearest place where it might not hold. The exposure result is less exposed to the same doubt, since it is roughly $1.4\times$ larger and holds in all 20 cells with a minimum of 0.024, but we would rather name the weakness than let its size stand in for an argument.
+
+Participant roles are heterogeneous. H03 originated the Hòa Đê vocabulary while H01, H02, and H04 were instructed performers, and we cannot separate that role from fluency, morphology, timing, or capture conditions. Q carries known motion contamination and should be recollected.
+
+The matched experiment cannot guarantee session-disjointness, since some early session identifiers lost precision before we could preserve them. Protocol B also bundles two things together: target-performer influence on optimization, and target-performer influence on validation-based checkpoint selection. Its 0.164 gap is therefore a within-dataset exposure estimate. It is neither a universal causal effect nor a training-only one.
+
+Our models see only frozen hand-landmark sequences. Raw videos were not retained, so body, face, texture, and context are simply unavailable to them. All five architectures also share a single optimization budget. That buys procedural comparability, but it means no architecture here was tuned to its own best, and parameter counts still vary by roughly a factor of two across the set. Exact bitwise repetition was tested only for HandGCN, CNN, and TCN on one environment. Participant-level landmarks remain private, so the artifact claim is auditability and authorized-data reruns rather than unrestricted public end-to-end replication. Real-time deployment latency and usability were not evaluated.
+
+\subsection{Conclusion}
+
+We built CTU.SignBridge to make performer identity, dataset inventories, split definitions, processing contracts, source revisions, runtime metadata, and checkpoint provenance explicit and verifiable in low-resource isolated-sign recognition.
+
+Our matched 120-run experiment showed that admitting the target performer into training and validation raised fixed-test accuracy in all 20 model--performer comparisons, from 0.794 to 0.958 on average. On Hòa Đê, HandGCN reached the highest mean accuracy, 0.878, and ranked first on all four folds. Variation between performers outran the range between architecture means, and the two complete fingerspelling folds supported no stable ranking.
+
+Three bounded conclusions follow. An unseen-performer claim requires the target person to be absent from training and validation, not merely from the test partition. In small datasets, who was recorded can shape the conclusions as strongly as which architecture was chosen. And fixed random seeds are the least of what a trustworthy result needs: verifiable identity semantics, immutable manifests, explicit splits, versioned processing contracts, and self-describing checkpoints do the load-bearing work.
+
+The obvious next steps are to add independent performers, complete the fingerspelling inventory, and recollect Q. Beyond that, we intend to preserve session identifiers as strings, separate training exposure from validation exposure so the two can be measured apart, and evaluate cross-session, cross-device, cross-hardware, and real-time performance.

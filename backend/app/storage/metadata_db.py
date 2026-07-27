@@ -258,6 +258,22 @@ MIGRATION_STATEMENTS = [
         created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     )
     """,
+    # SOT writer registry (admin-managed via the SOT admin page). Unioned with the
+    # committed authorized_keys.json baseline by reader_sync.effective_authorized_keys,
+    # so a machine registered here is trusted by this deployment's reader WITHOUT a
+    # git commit / redeploy. Public keys are not secret; the private key never leaves
+    # the writer machine (or is downloaded once when the server generates the pair).
+    """
+    CREATE TABLE IF NOT EXISTS sot_authorized_keys (
+        public_key TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        fingerprint TEXT NOT NULL,
+        note TEXT,
+        added_by TEXT,
+        added_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMP WITH TIME ZONE
+    )
+    """,
 ]
 
 def _column_exists(table: str, column: str) -> bool:
@@ -274,6 +290,24 @@ def _column_exists(table: str, column: str) -> bool:
     except Exception:
         logger.error(f"Error occurred while checking column existence: {table}.{column}")
         return False
+
+def drop_all_tables():
+    tables = [
+        "training_metrics",
+        "training_jobs",
+        "raw_uploads",
+        "samples",
+        "classes",
+        "refresh_tokens",
+        "password_reset_tokens",
+        "users",
+        "google_sheets_sync_status"
+    ]
+    for t in tables:
+        try:
+            _execute(f"DROP TABLE IF EXISTS {t} CASCADE")
+        except Exception as exc:
+            logger.warning("drop_all_tables: failed to drop %s: %s", t, getattr(exc, "pgerror", str(exc)))
 
 def ensure_tables():
     # Apply DDL statements one-by-one so a later failure won't roll back earlier successful creates.
@@ -436,18 +470,26 @@ def insert_user(row: Dict[str, Any]):
     _execute(SQL_UPSERT_USER, payload)
 
 
+_CLASS_DB_KEYS = (
+    "class_uid", "class_idx", "slug", "label_original", "language", "dialect",
+    "is_common_global", "is_common_language", "folder_name", "created_at", "migrated_at",
+    "hands_required",
+)
+
+
 def upsert_class(row: Dict[str, Any]):
-    payload = {
-        **row,
-        "class_idx": _int_or_none(row.get("class_idx")),
-        "is_common_global": _bool_value(row.get("is_common_global")),
-        "is_common_language": _bool_value(row.get("is_common_language")),
-        "created_at": _ts_or_none(row.get("created_at")),
-        "migrated_at": _ts_or_none(row.get("migrated_at")),
-        # CSV-derived rows may lack the column entirely or carry "" -> NULL;
-        # ON CONFLICT COALESCEs so a lossy mirror upsert never wipes the value.
-        "hands_required": _int_or_none(row.get("hands_required")),
-    }
+    # Build defensively (row.get) so a partial dict — e.g. a labels.csv that is
+    # missing an optional column — never raises KeyError mid-CRUD. Mirrors
+    # insert_sample; ON CONFLICT DO UPDATE keeps existing behavior for full rows.
+    payload = {k: row.get(k) for k in _CLASS_DB_KEYS}
+    payload["class_idx"] = _int_or_none(payload.get("class_idx"))
+    payload["is_common_global"] = _bool_value(payload.get("is_common_global"))
+    payload["is_common_language"] = _bool_value(payload.get("is_common_language"))
+    payload["created_at"] = _ts_or_none(payload.get("created_at"))
+    payload["migrated_at"] = _ts_or_none(payload.get("migrated_at"))
+    # CSV-derived rows may lack the column entirely or carry "" -> NULL;
+    # ON CONFLICT COALESCEs so a lossy mirror upsert never wipes the value.
+    payload["hands_required"] = _int_or_none(payload.get("hands_required"))
     _execute(SQL_UPSERT_CLASS, payload)
 
 
@@ -745,6 +787,60 @@ def list_deleted_samples() -> List[Dict[str, Any]]:
     )
 
 
+def list_active_samples() -> List[Dict[str, Any]]:
+    """Every non-deleted sample with the columns needed to rebuild a samples.csv
+    row. Used by the reconcile safety-net (Postgres is authoritative; samples.csv
+    can rarely lose an appended row to a catalog-rewrite race)."""
+    return _fetch_all(
+        """
+        SELECT sample_uid, class_uid, slug, label_original, language, dialect,
+               source_type, user_id, session_id, fps_original, fps_processed,
+               seq_len, augment_id, completeness, file_path, storage_url,
+               checksum, created_at
+        FROM samples
+        WHERE deleted_at IS NULL
+        """
+    )
+
+
+def list_all_deleted_samples() -> List[Dict[str, Any]]:
+    """EVERY soft-deleted sample (regardless of whether its class is also deleted),
+    projected to the samples.csv columns + deleted_at. Used by the Google Sheets
+    mirror so a soft-deleted row stays on the sheet WITH a deleted_at marker
+    instead of vanishing and shifting every row below it up by one.
+    storage_key mirrors file_path (not a stored column)."""
+    return _fetch_all(
+        """
+        SELECT sample_uid, class_uid, slug, label_original, language, dialect,
+               source_type, user_id, session_id, fps_original, fps_processed,
+               seq_len, augment_id, completeness, file_path,
+               file_path AS storage_key, storage_url, checksum,
+               created_at, deleted_at
+        FROM samples
+        WHERE deleted_at IS NOT NULL
+        """
+    )
+
+
+def list_deleted_samples_for_user(auth_user_id: str) -> List[Dict[str, Any]]:
+    """Soft-deleted samples OWNED by one user (auth_user_id), whose class is
+    still active. Powers each contributor's own Trash — ownership is by UUID, not
+    by the display name in user_id/username."""
+    return _fetch_all(
+        """
+        SELECT s.sample_uid, s.class_uid, s.slug, s.label_original, s.language,
+               s.dialect, s.source_type, s.user_id, s.username, s.file_path,
+               s.storage_url, s.seq_len, s.created_at, s.deleted_at
+        FROM samples s
+        JOIN classes c ON c.class_uid = s.class_uid
+        WHERE s.deleted_at IS NOT NULL AND c.deleted_at IS NULL
+          AND s.auth_user_id = %s
+        ORDER BY s.deleted_at DESC
+        """,
+        (auth_user_id,),
+    )
+
+
 def get_deleted_sample(sample_uid: str) -> Optional[Dict[str, Any]]:
     rows = _fetch_all("SELECT * FROM samples WHERE sample_uid = %s AND deleted_at IS NOT NULL", (sample_uid,))
     return rows[0] if rows else None
@@ -764,6 +860,29 @@ def get_sample_owner(sample_uid: str):
             return str(row[0]) if row[0] is not None else None
     except Exception:
         return None
+
+
+def get_sample_owners(sample_uids: list) -> Dict[str, Any]:
+    """Batch variant of get_sample_owner — one query for many uids.
+
+    Returns {sample_uid: auth_user_id_str_or_None}. Missing uids are simply
+    absent from the dict. Avoids the N+1 query when a page lists many sessions.
+    """
+    uids = [u for u in (sample_uids or []) if u]
+    if not uids:
+        return {}
+    try:
+        with _cursor() as cur:
+            cur.execute(
+                "SELECT sample_uid, auth_user_id FROM samples WHERE sample_uid = ANY(%s)",
+                (uids,),
+            )
+            return {
+                str(row[0]): (str(row[1]) if row[1] is not None else None)
+                for row in cur.fetchall()
+            }
+    except Exception:
+        return {}
 
 
 def resolve_absolute_path(db_path_str: str) -> 'Path':
@@ -852,3 +971,65 @@ def upsert_sync_status(table_name: str, spreadsheet_id: str, sheet_index: int, d
             "data_rows": data_rows,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# SOT authorized-key registry (DB-backed, admin-managed via the SOT admin page)
+# ---------------------------------------------------------------------------
+
+def sot_list_authorized_keys(include_revoked: bool = False) -> List[Dict[str, Any]]:
+    """Registered writer machines. Active-only by default (revoked ones hidden)."""
+    where = "" if include_revoked else "WHERE revoked_at IS NULL"
+    return _fetch_all(
+        "SELECT public_key, name, fingerprint, note, added_by, added_at, revoked_at "
+        f"FROM sot_authorized_keys {where} ORDER BY added_at DESC"
+    )
+
+
+def sot_get_authorized_key(fingerprint: str) -> Optional[Dict[str, Any]]:
+    rows = _fetch_all(
+        "SELECT public_key, name, fingerprint, note, added_by, added_at, revoked_at "
+        "FROM sot_authorized_keys WHERE fingerprint = %s",
+        (fingerprint,),
+    )
+    return rows[0] if rows else None
+
+
+def sot_add_authorized_key(
+    *, name: str, public_key: str, fingerprint: str,
+    added_by: Optional[str] = None, note: Optional[str] = None,
+) -> None:
+    """Insert a writer key. Re-adding the SAME public key un-revokes + updates it.
+
+    Raises psycopg2.IntegrityError on a duplicate NAME that maps to a different
+    public key (the UNIQUE(name) constraint) — callers validate names up front to
+    turn that into a friendly 409.
+    """
+    _execute(
+        """
+        INSERT INTO sot_authorized_keys (public_key, name, fingerprint, note, added_by, revoked_at)
+        VALUES (%(public_key)s, %(name)s, %(fingerprint)s, %(note)s, %(added_by)s, NULL)
+        ON CONFLICT (public_key) DO UPDATE SET
+            name = EXCLUDED.name,
+            fingerprint = EXCLUDED.fingerprint,
+            note = EXCLUDED.note,
+            added_by = EXCLUDED.added_by,
+            added_at = NOW(),
+            revoked_at = NULL
+        """,
+        {"public_key": public_key, "name": name, "fingerprint": fingerprint,
+         "note": note, "added_by": added_by},
+    )
+
+
+def sot_revoke_authorized_key(fingerprint: str) -> bool:
+    """Soft-revoke (keeps the row for audit). Returns False if not found / already revoked."""
+    existing = sot_get_authorized_key(fingerprint)
+    if not existing or existing.get("revoked_at") is not None:
+        return False
+    _execute(
+        "UPDATE sot_authorized_keys SET revoked_at = NOW() "
+        "WHERE fingerprint = %s AND revoked_at IS NULL",
+        (fingerprint,),
+    )
+    return True

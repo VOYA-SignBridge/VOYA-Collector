@@ -1,0 +1,45 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          # Compose derives the project name from the DIRECTORY name unless
+          # COMPOSE_PROJECT_NAME is set, so a clone into any other folder (say
+          # the GitHub zip's "VOYA-Collector-main") would silently match nothing
+          # here and Loki would stay empty. .env pins COMPOSE_PROJECT_NAME to
+          # this value — keep the two in step if you ever rename the project.
+          - name: label
+            values: ["com.docker.compose.project=voya-collector"]
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+    pipeline_stages:
+      - docker: {}
+      - match:
+          # Suffix match, not a fixed list: container names carry a configurable
+          # CONTAINER_PREFIX (default "voya") so a second stack on the same host
+          # can coexist. Anchoring on the suffix keeps JSON log parsing working
+          # whatever prefix is in use.
+          selector: '{container=~".+_(backend|worker|trainer)"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  request_id: request_id
+                  task_id: task_id
+            - labels:
+                level:
+                request_id:
+                task_id:

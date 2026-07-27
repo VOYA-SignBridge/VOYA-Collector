@@ -10,6 +10,28 @@ from app.db import init_db
 from app.logging_config import configure_logging
 
 
+def _redact_db_url(url: str) -> str:
+    """Strip the password from a SQLAlchemy/libpq URL before logging.
+
+    postgresql://user:secret@host:5432/db -> postgresql://user:***@host:5432/db
+    Never let credentials reach the logs / Loki.
+    """
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(url)
+        if parts.password:
+            netloc = parts.hostname or ""
+            if parts.username:
+                netloc = f"{parts.username}:***@{netloc}"
+            if parts.port:
+                netloc = f"{netloc}:{parts.port}"
+            parts = parts._replace(netloc=netloc)
+        return urlunsplit(parts)
+    except Exception:
+        return "<hidden>"
+
+
 def run_init_db() -> int:
     configure_logging()
     logger = logging.getLogger("cli.init_db")
@@ -18,7 +40,7 @@ def run_init_db() -> int:
     logger.info(
         "[INIT_DB] start dataset_root=%s database_url=%s",
         settings.dataset_root,
-        settings.database_url,
+        _redact_db_url(settings.database_url),
     )
 
     try:

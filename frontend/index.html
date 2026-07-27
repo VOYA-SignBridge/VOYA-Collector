@@ -1,20 +1,41 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!--
+      This <base> must be a REAL element in the parsed head, and it must come
+      before the asset tags Vite injects below.
+
+      It used to be created from JavaScript (document.createElement('base')).
+      The browser's preload scanner, however, fetches <link rel="modulepreload">
+      hrefs while the HTML is still being parsed — before any inline script has
+      run — so it resolved Vite's relative "./assets/..." against the current
+      URL. On a nested route such as /admin/sot that became
+      /admin/assets/index-*.js and every preload 404'd ("preloaded but not used"
+      in the console). The page still worked, because by the time the real
+      <script> tag was fetched the base existed, but each deep route silently
+      threw away the whole point of module preloading.
+
+      docker-entrypoint.sh rewrites the placeholder to "/" or "/voya/" (it always
+      appends the trailing slash — without it, relative URLs resolve one level
+      up). Under `vite dev` no substitution happens, so the inline script below
+      repairs the href before it can do any harm; dev loads /src/main.tsx by
+      absolute path anyway.
+    -->
+    <base id="app-base" href="__VITE_BASE_PATH__" />
     <!-- Injected by Nginx at runtime (12-Factor App) -->
     <script>
       (function() {
         var basePath = "__VITE_BASE_PATH__";
-        // Fallback for dev mode
-        if (basePath === "__VI" + "TE_BASE_PATH__") basePath = "/";
-        
-        var base = document.createElement('base');
-        base.href = basePath;
-        document.head.appendChild(base);
+        // Fallback for dev mode, where the placeholder is never substituted.
+        if (basePath === "__VI" + "TE_BASE_PATH__") {
+          basePath = "/";
+          var el = document.getElementById('app-base');
+          if (el) el.href = "/";
+        }
 
         var apiUrl = "__VITE_API_URL__";
         if (apiUrl === "__VI" + "TE_API_URL__") apiUrl = "";
-        
+
         window.__ENV__ = {
           VITE_API_URL: apiUrl,
           VITE_BASE_PATH: basePath
@@ -22,7 +43,7 @@
       })();
     </script>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="icon" type="image/png" href="logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

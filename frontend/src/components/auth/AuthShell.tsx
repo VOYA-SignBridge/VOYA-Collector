@@ -15,7 +15,7 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
     <div className="relative min-h-dvh bg-ctu-navy font-display">
       <div className="absolute inset-0 overflow-hidden">
         <img
-          src="/background.png"
+          src="background.png"
           alt=""
           aria-hidden="true"
           className="h-full w-full scale-105 object-cover blur-[2px] saturate-[1.05]"
@@ -29,7 +29,7 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
             <div className="px-6 pb-5 pt-7 sm:px-10 sm:pb-6 sm:pt-8">
               <div className="flex flex-col items-center text-center">
                 <img
-                  src="/logo.png"
+                  src="logo.png"
                   alt="Đại học Cần Thơ"
                   className="h-16 w-16 sm:h-20 sm:w-20 object-contain drop-shadow-sm"
                 />

@@ -15,10 +15,29 @@ from app.config import settings
 logger = logging.getLogger("email")
 
 
+def _host_port() -> tuple[str, int]:
+    """Resolve (host, port) tolerating a combined 'host:port' in SMTP_HOST.
+
+    The same SMTP_HOST env var is shared with Grafana, which expects the
+    'smtp.gmail.com:587' form. Passing that whole string to smtplib would make
+    it DNS-resolve a host literally named 'smtp.gmail.com:587' and every send
+    would fail. If a port is baked into the host, split it out and let it win.
+    """
+    host = (settings.smtp_host or "").strip()
+    port = settings.smtp_port
+    if host.count(":") == 1:  # 'host:port' (ignore IPv6 which has multiple ':')
+        h, _, p = host.partition(":")
+        if p.isdigit():
+            host, port = h, int(p)
+    return host, port
+
+
 def _send(to_email: str, subject: str, body: str) -> None:
     if not settings.smtp_host:
         logger.warning("[EMAIL] SMTP not configured — would send to %s\nSubject: %s\n%s", to_email, subject, body)
         return
+
+    host, port = _host_port()
 
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
@@ -27,13 +46,13 @@ def _send(to_email: str, subject: str, body: str) -> None:
 
     try:
         if settings.smtp_use_tls:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+            with smtplib.SMTP(host, port, timeout=10) as server:
                 server.starttls()
                 if settings.smtp_user:
                     server.login(settings.smtp_user, settings.smtp_password)
                 server.send_message(msg)
         else:
-            with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=10) as server:
+            with smtplib.SMTP_SSL(host, port, timeout=10) as server:
                 if settings.smtp_user:
                     server.login(settings.smtp_user, settings.smtp_password)
                 server.send_message(msg)
