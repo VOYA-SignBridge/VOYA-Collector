@@ -5,6 +5,7 @@ from pathlib import Path
 from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.dataset_manager import get_or_register_class, list_classes, normalize_dialect
+from app.processing.class_registry import AlphabetLabelError
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
@@ -73,13 +74,18 @@ def register_class(payload: dict = Body(...)):
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "")))
     is_common_global = bool(payload.get("is_common_global", False))
     is_common_language = bool(payload.get("is_common_language", False))
-    meta = get_or_register_class(
-        label_original=label,
-        language=language,
-        dialect=dialect,
-        is_common_global=is_common_global,
-        is_common_language=is_common_language,
-    )
+    try:
+        meta = get_or_register_class(
+            label_original=label,
+            language=language,
+            dialect=dialect,
+            is_common_global=is_common_global,
+            is_common_language=is_common_language,
+        )
+    except AlphabetLabelError as exc:
+        # A typo in a fingerspelling label, surfaced to the recorder rather than
+        # accepted as a new class that would collide with a real letter.
+        raise HTTPException(status_code=422, detail=str(exc))
     return {
         "success": True,
         "class_uid": meta.class_uid,

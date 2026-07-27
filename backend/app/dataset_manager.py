@@ -14,7 +14,11 @@ from typing import Optional, List, Dict, Any
 from app.processing.utils import atomic_write_json
 from app.processing.quality import parse_hands_required  # re-exported for callers
 # Single source of truth for alphabet slug rules — see class_registry.
-from app.processing.class_registry import _VN_ALPHABET_SLUG, is_alphabet_dialect
+from app.processing.class_registry import (
+    _VN_ALPHABET_SLUG,
+    assert_single_alphabet_letter,
+    is_alphabet_dialect,
+)
 
 from app.config import settings
 
@@ -685,6 +689,8 @@ def get_or_register_class(
     dia = normalize_dialect(dia_input)
     if not dia:
         dia = "common" if is_common_language else ""
+    if is_alphabet_dialect(dia):
+        assert_single_alphabet_letter(label_original)
     slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dia))
 
     # Search existing folder under the target hierarchy

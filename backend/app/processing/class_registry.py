@@ -39,6 +39,41 @@ def is_alphabet_dialect(dialect: str) -> bool:
     return (dialect or "").strip().lower() in ALPHABET_DIALECTS
 
 
+# Telex sequence -> the letter it is meant to produce. Used only to explain the
+# mistake back to the user; nothing is auto-corrected.
+_TELEX_HINT = {slug: letter.upper() for letter, slug in _VN_ALPHABET_SLUG.items()}
+
+
+class AlphabetLabelError(ValueError):
+    """A fingerspelling label that is not a single letter."""
+
+
+def assert_single_alphabet_letter(label: str) -> str:
+    """Every fingerspelling label is exactly one letter — reject anything else.
+
+    Without this, a label typed while the Vietnamese input method is off or is
+    swallowed by the field ("aw" instead of "Ă") is accepted and slugifies to
+    "aw", which is precisely the slug Ă itself produces. The class is then
+    created carrying the literal text as its label, and the next person who
+    types Ă correctly is silently handed that malformed class instead of a new
+    one — the same collision the NFC fix removed, arriving by another route.
+    """
+    text = unicodedata.normalize("NFC", (label or "").strip())
+    if len(text) == 1:
+        return text
+
+    hint = _TELEX_HINT.get(text.lower())
+    if hint:
+        raise AlphabetLabelError(
+            f"'{text}' is a telex sequence, not a letter — did you mean '{hint}'? "
+            f"Turn the Vietnamese input method on and type the letter itself."
+        )
+    raise AlphabetLabelError(
+        f"A fingerspelling label must be exactly one letter, got '{text}' "
+        f"({len(text)} characters)."
+    )
+
+
 def slugify(text: str, maxlen: int = 30, preserve_vn_letters: bool = False) -> str:
     """Convert text (possibly with diacritics) to safe ASCII slug.
 

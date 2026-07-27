@@ -82,6 +82,49 @@ def test_word_signs_still_strip_diacritics(slugify):
     assert slugify("cắt đầu cá") == "cat-dau-ca"
 
 
+class TestSingleLetterGuard:
+    """A telex sequence slugifies to exactly the slug its own letter produces:
+    'aw' -> 'aw' is also what 'Ă' gives. Accepting it would create a class
+    labelled with the literal text and then hand it to whoever types Ă properly.
+    """
+
+    @pytest.mark.parametrize("letter", sorted(DIACRITICS))
+    def test_accepts_the_real_letter(self, letter):
+        from app.processing.class_registry import assert_single_alphabet_letter
+
+        assert assert_single_alphabet_letter(letter) == letter
+        assert assert_single_alphabet_letter(unicodedata.normalize("NFD", letter)) == letter
+
+    @pytest.mark.parametrize("telex,letter", sorted(DIACRITICS.items(), key=lambda kv: kv[1]))
+    def test_rejects_the_telex_sequence_and_names_the_letter(self, telex, letter):
+        from app.processing.class_registry import (
+            AlphabetLabelError,
+            assert_single_alphabet_letter,
+        )
+
+        sequence = DIACRITICS[telex]
+        with pytest.raises(AlphabetLabelError) as excinfo:
+            assert_single_alphabet_letter(sequence)
+        # The message must point at the letter the recorder meant.
+        assert telex.upper() in str(excinfo.value)
+
+    @pytest.mark.parametrize("bad", ["", "  ", "ab", "xin chao", "a1"])
+    def test_rejects_anything_that_is_not_one_letter(self, bad):
+        from app.processing.class_registry import (
+            AlphabetLabelError,
+            assert_single_alphabet_letter,
+        )
+
+        with pytest.raises(AlphabetLabelError):
+            assert_single_alphabet_letter(bad)
+
+    @pytest.mark.parametrize("letter", sorted(BASE_LETTERS))
+    def test_plain_letters_still_pass(self, letter):
+        from app.processing.class_registry import assert_single_alphabet_letter
+
+        assert assert_single_alphabet_letter(letter) == letter
+
+
 def test_both_slugify_copies_agree():
     """The two implementations are duplicated; keep them from drifting apart."""
     samples = list(DIACRITICS) + list(BASE_LETTERS) + ["tôm", "rang muối", "Đ", "đ"]
