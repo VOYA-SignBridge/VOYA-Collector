@@ -41,11 +41,15 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      '/realtime': {
+      // Keys starting with ^ are regexes. /realtime and /upload are BOTH SPA
+      // routes and API prefixes, so a plain prefix rule sends the page request
+      // to the backend on reload and the browser gets a JSON 404 instead of the
+      // app. Match only the API paths underneath them.
+      '^/realtime/(predict|models|health)': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      '/upload': {
+      '^/upload/(camera|video)': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
