@@ -127,6 +127,21 @@ const normalizeText = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+/** Mirrors ALPHABET_DIALECTS in backend/app/processing/class_registry.py. */
+const ALPHABET_DIALECT_KEYS = new Set(["bang-chu-cai"]);
+
+/**
+ * Diacritic-PRESERVING label match for the fingerspelling alphabet, where
+ * Ă Â Đ Ê Ô Ơ Ư are distinct letters rather than accented A/D/E/O/U.
+ *
+ * normalizeText folds them into the base letter. That is right for word signs —
+ * "tôm" and "tom" mean the same sign — but on the alphabet it made a typed "Ă"
+ * match the catalog row for "A", so the box reported A's existing samples for a
+ * letter that had never been recorded once.
+ */
+const normalizeAlphabetText = (value: string) =>
+  value.normalize("NFC").trim().toLowerCase();
+
 const normalizeLanguageKey = (value?: string) => (value || "").trim().toLowerCase();
 
 const normalizeDialectKey = (value?: string) => {
@@ -979,11 +994,15 @@ export default function FullscreenCaptureModal({
   const selectedDialectKey = normalizeDialectKey(dialect);
   const selectedLanguageRows = catalogRows.filter((row) => normalizeLanguageKey(row.language) === selectedLanguageKey);
   const selectedDialectRows = selectedLanguageRows.filter((row) => normalizeDialectKey(row.dialect) === selectedDialectKey);
-  const normalizedLabel = normalizeText(label);
+  // The alphabet needs a diacritic-preserving comparison; word signs do not.
+  const matchLabelText = ALPHABET_DIALECT_KEYS.has(selectedDialectKey)
+    ? normalizeAlphabetText
+    : normalizeText;
+  const normalizedLabel = matchLabelText(label);
   // Use server-side suggestions instead of client-side filter
   const labelSuggestions = serverLabelSuggestions;
   const matchingCatalogRow = normalizedLabel
-    ? selectedDialectRows.find((row) => normalizeText(row.label_original) === normalizedLabel)
+    ? selectedDialectRows.find((row) => matchLabelText(row.label_original) === normalizedLabel)
     : undefined;
   const labelExists = Boolean(matchingCatalogRow);
   const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0;
