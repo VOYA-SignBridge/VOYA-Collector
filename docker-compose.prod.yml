@@ -107,6 +107,14 @@ services:
 
   worker:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_worker
     # Hard RAM ceiling: isolates the video worker so a leak/spike can never
     # starve the parallel GPU trainer or the DB (12GB host budget).
@@ -171,6 +179,14 @@ services:
   # before relying on it. Remove this block to fall back to CPU-only.
   trainer:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_trainer
     # Largest RAM slice: dataset (.npz features) is materialized into host RAM
     # for training. GPU holds the model/activations; host RAM holds the data.
@@ -234,6 +250,14 @@ services:
 
   celery-beat:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_celery_beat
     mem_limit: 256m
     env_file:

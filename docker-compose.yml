@@ -81,6 +81,14 @@ services:
   # stack (fail-closed: never start workers against a corrupt source of truth).
   sot-init:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_sot_init
     env_file:
       - .env
@@ -102,6 +110,14 @@ services:
 
   backend:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_backend
     expose:
       - "8000"
@@ -143,6 +159,14 @@ services:
 
   worker:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_worker
     env_file:
       - .env
@@ -188,6 +212,14 @@ services:
   # training from the API container so requests stay responsive.
   trainer:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_trainer
     env_file:
       - .env
@@ -242,6 +274,14 @@ services:
 
   celery-beat:
     image: voya_backend:latest
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_celery_beat
     env_file:
       - .env
