@@ -204,8 +204,28 @@ class Settings(BaseSettings):
         os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30")
     )
     # Base URL of the frontend app, used to build the reset-password link
-    # sent by email, e.g. "https://app.example.com".
+    # sent by email, e.g. "https://app.example.com". FALLBACK only: when the
+    # request arrives on an allowlisted host (below), the link is built from
+    # that request instead, so a moving tunnel URL needs no redeploy.
     frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+    # Hosts allowed to DEFINE the emailed links, comma-separated. A leading dot
+    # matches sub-domains (".ngrok-free.dev"), anything else is an exact
+    # hostname. Empty = never trust the request, always use frontend_base_url.
+    # Changing this needs a container recreate (it is env) — prefer the file
+    # below for hosts that move. See app/public_url.py for the threat model.
+    frontend_trusted_host_suffixes_raw: str = os.getenv(
+        "FRONTEND_TRUSTED_HOST_SUFFIXES", ""
+    )
+    # Same allowlist, read from a FILE at request time. The repo is bind-mounted
+    # into the container, so editing it applies to the next request with no
+    # restart — the whole point, since a running container's env cannot change.
+    # Default resolves inside the container first, then in a host checkout.
+    public_hosts_file: str = os.getenv(
+        "PUBLIC_HOSTS_FILE",
+        "/workspace/deploy/public_hosts.txt"
+        if os.path.isdir("/workspace/deploy")
+        else str(Path(__file__).resolve().parents[2] / "deploy" / "public_hosts.txt"),
+    )
 
     # SMTP (outbound email for password reset, etc.)
     # If smtp_host is empty, emails are logged instead of sent — safe default
@@ -251,6 +271,11 @@ class Settings(BaseSettings):
         if raw == "*" or not raw:
             return ["*"]
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+    @property
+    def frontend_trusted_host_suffixes(self) -> List[str]:
+        raw = self.frontend_trusted_host_suffixes_raw or ""
+        return [entry.strip().lower() for entry in raw.split(",") if entry.strip()]
 
     def __init__(self, **values):
         super().__init__(**values)

@@ -121,3 +121,8 @@ _tmp/
 postgres_data/
 pgdata/
 redis_data/
+
+# Per-machine allowlist of public hostnames (see deploy/public_hosts.example.txt).
+# Like .env it differs on every machine — the tunnel hostname here is not the
+# tunnel hostname there — so only the example is tracked.
+deploy/public_hosts.txt

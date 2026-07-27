@@ -5,9 +5,12 @@ any XSS) can't read them. Two companion non-httpOnly cookies let the SPA work:
   - HINT_COOKIE  : presence lets the client skip a pointless /auth/me for guests
   - CSRF_COOKIE  : echoed back in an X-CSRF-Token header (double-submit CSRF)
 
-`Secure` is config-gated (COOKIE_SECURE) so this works on plain-HTTP dev and can
-be tightened to HTTPS-only in production. SameSite=Lax already stops cross-site
-POSTs from sending these cookies; the CSRF token is defense-in-depth.
+`Secure` is set when EITHER the config demands it (COOKIE_SECURE=1) or the
+request itself arrived over HTTPS. The per-request half is what lets one
+deployment serve plain-HTTP localhost and an HTTPS tunnel at the same time: with
+a static COOKIE_SECURE=1 the localhost session breaks, with a static 0 the
+tunnel's tokens ride an unprotected cookie. SameSite=Lax already stops
+cross-site POSTs from sending these cookies; the CSRF token is defense-in-depth.
 """
 
 from __future__ import annotations
@@ -15,9 +18,10 @@ from __future__ import annotations
 import secrets
 from typing import Optional
 
-from fastapi import Response
+from fastapi import Request, Response
 
 from app.config import settings
+from app.public_url import request_is_https
 
 ACCESS_COOKIE = "voya_access"
 REFRESH_COOKIE = "voya_refresh"
@@ -53,6 +57,18 @@ def _domain() -> Optional[str]:
     return settings.cookie_domain or None
 
 
+def _secure_for(request: Optional[Request]) -> bool:
+    """Whether to mark this response's cookies Secure.
+
+    COOKIE_SECURE=1 forces it everywhere. Otherwise it follows the scheme the
+    browser actually used, so an HTTPS tunnel gets protected cookies without
+    locking out plain-HTTP localhost on the same stack.
+    """
+    if settings.cookie_secure:
+        return True
+    return request is not None and request_is_https(request)
+
+
 def _access_max_age() -> int:
     return int(settings.access_token_expire_minutes) * 60
 
@@ -67,8 +83,9 @@ def set_auth_cookies(
     access_token: str,
     refresh_token: str,
     csrf_token: str,
+    request: Optional[Request] = None,
 ) -> None:
-    secure = settings.cookie_secure
+    secure = _secure_for(request)
     samesite = settings.cookie_samesite
     domain = _domain()
     access_max = _access_max_age()

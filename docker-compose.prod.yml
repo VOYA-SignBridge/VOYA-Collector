@@ -29,7 +29,7 @@ services:
     build: ./backend/realtime_service
     image: voya_realtime_service:latest
     container_name: ${CONTAINER_PREFIX:-voya}_realtime_service
-    mem_limit: 800m
+    mem_limit: ${REALTIME_MEM:-800m}
     stop_grace_period: 20s
     expose:
       - "8010"
@@ -67,7 +67,7 @@ services:
     # dominate, and it stays flat there after TTS prewarm). At the old 1200m
     # that was 76% consumed before serving a single request, leaving too little
     # for concurrent uploads. 1500m keeps ~40% free at rest.
-    mem_limit: 1500m
+    mem_limit: ${BACKEND_MEM:-1500m}
     # Drain in-flight HTTP requests on SIGTERM before SIGKILL — an update never
     # cuts off an active user mid-request (uvicorn shuts down gracefully).
     stop_grace_period: 30s
@@ -118,7 +118,7 @@ services:
     container_name: ${CONTAINER_PREFIX:-voya}_worker
     # Hard RAM ceiling: isolates the video worker so a leak/spike can never
     # starve the parallel GPU trainer or the DB (12GB host budget).
-    mem_limit: 2500m
+    mem_limit: ${WORKER_MEM:-2500m}
     # Celery warm shutdown: finish the current video task before exiting so an
     # update doesn't discard in-progress processing.
     stop_grace_period: 60s
@@ -196,7 +196,7 @@ services:
     # 40-class dataset sat flat at 3.05 GiB — 89% of the old cap — for its whole
     # duration. It survived, but the headroom scales with the dataset and an
     # OOM-kill here loses the entire training job, so give it room to grow.
-    mem_limit: 4000m
+    mem_limit: ${TRAINER_MEM:-4000m}
     # A training job can run for many minutes; don't kill it on a stray stop.
     # Best practice: only update the trainer when no job is running (jobs are
     # serialized, so the admin can drain it first). This grace covers cleanup.
@@ -296,7 +296,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ${CONTAINER_PREFIX:-voya}_redis
-    mem_limit: 512m
+    mem_limit: ${REDIS_MEM:-512m}
     # Bound Redis memory. volatile-lru evicts only keys WITH a TTL (TTS cache,
     # expiring task results) — broker queue keys have no TTL and are never
     # dropped, so queued Celery tasks are not lost under memory pressure.
@@ -316,7 +316,7 @@ services:
   postgres:
     image: postgres:17
     container_name: ${CONTAINER_PREFIX:-voya}_postgres
-    mem_limit: 768m
+    mem_limit: ${POSTGRES_MEM:-768m}
     # Give Postgres time for a clean shutdown (flush + checkpoint) before
     # SIGKILL — protects data integrity on stop/update.
     stop_grace_period: 60s

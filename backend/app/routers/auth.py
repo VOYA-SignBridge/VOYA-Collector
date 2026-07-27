@@ -22,6 +22,7 @@ from app.cookie_auth import (
     generate_csrf_token,
     set_auth_cookies,
 )
+from app.public_url import resolve_frontend_base_url
 from app.rate_limit import (
     check_login_allowed,
     client_ip,
@@ -131,6 +132,7 @@ def login(payload: LoginRequest, request: Request, response: Response):
         access_token=_access_for(user),
         refresh_token=create_refresh_token(user["id"]),
         csrf_token=generate_csrf_token(),
+        request=request,
     )
     return user
 
@@ -173,6 +175,7 @@ def refresh(request: Request, response: Response):
         access_token=_access_for(user),
         refresh_token=new_refresh,
         csrf_token=generate_csrf_token(),
+        request=request,
     )
     return user
 
@@ -210,7 +213,10 @@ def forgot_password(
     result = request_password_reset(payload.identifier.strip())
     if result:
         user, token = result
-        reset_link = f"{settings.frontend_base_url.rstrip('/')}/reset-password?token={token}"
+        # Built from THIS request's host when that host is allowlisted, so a
+        # moved tunnel URL mails a working link without a redeploy; otherwise
+        # (or on a forged Host) it falls back to FRONTEND_BASE_URL.
+        reset_link = f"{resolve_frontend_base_url(request)}/reset-password?token={token}"
         background_tasks.add_task(
             send_password_reset_email, user["email"], user["username"], reset_link
         )
