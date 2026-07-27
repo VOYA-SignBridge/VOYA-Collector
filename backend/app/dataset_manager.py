@@ -3,9 +3,11 @@ from __future__ import annotations
 import os
 import re
 import csv
+import json
 import uuid
 import logging
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 from datetime import datetime
 from filelock import FileLock
@@ -58,6 +60,65 @@ LABEL_FIELDS = [
     "is_active",
     "motion_type",  # static | dynamic | mixed | "" (unknown)
 ]
+
+
+@lru_cache(maxsize=1)
+def _vocabulary_mapping() -> Dict[str, Dict[str, str]]:
+    """dialect -> its confirmed vocabulary-schema-v2 fields.
+
+    Reads config/legacy_vocabulary_mapping.json, the same file
+    scripts/migrate_legacy_vocabulary_schema.py used to back-fill the existing
+    classes. Only entries the owner marked ``status: confirmed`` are returned —
+    an unconfirmed dialect keeps empty cells and shows up in the review report,
+    which is the behaviour that file was designed around.
+
+    Without this, a class created through the app carries empty
+    recognition_profile / vocabulary_scope, and every split filtered by profile
+    silently omits it: the class trains nothing and nobody is told.
+    """
+    override = os.getenv("VOCABULARY_MAPPING_PATH", "").strip()
+    candidates = [Path(override)] if override else [
+        Path(__file__).resolve().parents[2] / "config" / "legacy_vocabulary_mapping.json",
+        Path("/workspace/config/legacy_vocabulary_mapping.json"),
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            raw = json.loads(path.read_text(encoding="utf-8")).get("dialect_mapping", {})
+        except Exception as exc:  # a malformed file must not block recording
+            logger.warning("[VOCAB] cannot read %s: %s", path, exc)
+            continue
+        return {
+            dialect: entry
+            for dialect, entry in raw.items()
+            if isinstance(entry, dict) and entry.get("status") == "confirmed"
+        }
+    logger.warning("[VOCAB] no vocabulary mapping found; new classes will need manual review")
+    return {}
+
+
+def _semantic_label_from_slug(slug: str) -> str:
+    """cam-on -> cam_on. Mirrors semantic_label_from_slug in
+    processed/shared/vocabulary.py, which the backend cannot import (the
+    `processed` package is not on its path and no backend module depends on it).
+    """
+    return (slug or "").strip().replace("-", "_")
+
+
+def vocabulary_defaults_for_dialect(dialect: str) -> Dict[str, str]:
+    """The v2 cells a new class in this dialect should be born with."""
+    entry = _vocabulary_mapping().get((dialect or "").strip().lower(), {})
+    return {
+        key: str(entry.get(key) or "")
+        for key in (
+            "vocabulary_scope",
+            "recognition_profile",
+            "vocabulary_group",
+            "motion_type",
+            "collection_campaign",
+        )
+    }
 
 
 def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
@@ -572,6 +633,7 @@ def register_class(
             short_uid = class_uid[:8]
             folder_name = f"class_{slug}_{short_uid}"
 
+            v2 = vocabulary_defaults_for_dialect(dialect_key)
             meta = ClassMetadata(
                 class_uid=class_uid,
                 class_idx=next_idx,
@@ -582,6 +644,14 @@ def register_class(
                 is_common_global=is_common_global,
                 is_common_language=is_common_language and not is_common_global,
                 folder_override=folder_name,
+                # Born with its schema-v2 cells filled. Leaving them empty made
+                # the class invisible to every profile-filtered split.
+                semantic_label=_semantic_label_from_slug(slug),
+                vocabulary_scope=v2["vocabulary_scope"],
+                recognition_profile=v2["recognition_profile"],
+                vocabulary_group=v2["vocabulary_group"],
+                motion_type=v2["motion_type"],
+                collection_campaign=v2["collection_campaign"],
             )
 
             # 3. WRITE — append immediately after allocate
