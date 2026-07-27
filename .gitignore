@@ -113,3 +113,11 @@ _tmp/
 *.sql
 !**/migrations/*.sql
 !scripts/*.sql
+
+# Postgres/Redis data directories. This compose uses NAMED volumes, so these
+# should not appear in the repo at all — but an older setup (or a hand-run
+# container) can leave one behind, and it then shows up as untracked noise that
+# a careless `git clean -fd` would delete along with the database inside it.
+postgres_data/
+pgdata/
+redis_data/
