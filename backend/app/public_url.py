@@ -45,7 +45,8 @@ from app.config import settings
 _HOST_RE = re.compile(r"^[a-z0-9.\-]+(:\d{1,5})?$")
 
 _cache_lock = threading.Lock()
-_cache: Tuple[Optional[float], List[str]] = (None, [])
+# Keyed on (mtime_ns, size), not mtime alone — see _file_entries.
+_cache: Tuple[Optional[Tuple[int, int]], List[str]] = (None, [])
 
 
 def _file_entries() -> List[str]:
@@ -53,6 +54,16 @@ def _file_entries() -> List[str]:
 
     A missing/unreadable file means an EMPTY allowlist (fail closed → the
     configured FRONTEND_BASE_URL is used), never "trust everything".
+
+    The cache key includes st_size because a modification time is not a reliable
+    change detector on its own. Two writes in quick succession routinely land on
+    the identical timestamp — measured here on the bind-mounted repo, where even
+    st_mtime_ns was byte-identical across two consecutive rewrites, because the
+    underlying filesystem's timestamps are coarser than the syscall's precision.
+    Keyed on mtime alone, the second edit is silently ignored and the tunnel
+    hostname you just added simply does not take effect, with nothing logged to
+    explain why. Size changes with almost every real edit, so the pair catches
+    what either misses.
     """
     global _cache
 
@@ -60,13 +71,14 @@ def _file_entries() -> List[str]:
     if not path:
         return []
     try:
-        mtime = os.path.getmtime(path)
+        st = os.stat(path)
+        key = (st.st_mtime_ns, st.st_size)
     except OSError:
         return []
 
     with _cache_lock:
-        cached_mtime, cached_entries = _cache
-        if cached_mtime == mtime:
+        cached_key, cached_entries = _cache
+        if cached_key == key:
             return cached_entries
 
     try:
@@ -81,7 +93,7 @@ def _file_entries() -> List[str]:
         if stripped and not stripped.startswith("#")
     ]
     with _cache_lock:
-        _cache = (mtime, entries)
+        _cache = (key, entries)
     return entries
 
 
