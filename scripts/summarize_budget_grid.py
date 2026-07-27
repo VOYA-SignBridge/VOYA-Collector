@@ -73,6 +73,69 @@ def cell_means(rows: List[dict], metric: str) -> Dict[Tuple[str, int, int], floa
     return {k: mean(v) for k, v in buckets.items()}
 
 
+def sufficiency_threshold(
+    means: Dict[Tuple[str, int, int], float],
+    helds: List[str],
+    ns: List[int],
+    reps: List[int],
+) -> dict:
+    """The smallest budget that is already as good as the best cell observed.
+
+    Deliberately NOT the arg-max. Picking the highest cell in a noisy grid
+    overestimates by roughly one standard error — the cell is highest partly
+    because it got lucky — and with four folds that bias is around the size of
+    the effects worth reporting. This is the one-standard-error rule used for
+    model selection (Breiman et al., CART; Hastie et al., ESL): take the
+    cheapest configuration whose mean is within 1 SE of the best one.
+
+    It answers "from where on does more stop being worth it", which is the
+    practical question, rather than "where is the peak", which is mostly noise.
+    """
+    stats = {}
+    for n in ns:
+        for r in reps:
+            per_fold = [means[(h, n, r)] for h in helds if (h, n, r) in means]
+            if len(per_fold) < 2:
+                continue
+            m = mean(per_fold)
+            se = statistics.stdev(per_fold) / (len(per_fold) ** 0.5)
+            stats[(n, r)] = {"mean": m, "se": se, "folds": len(per_fold),
+                             "budget": n * r}
+    if not stats:
+        return {}
+
+    best_cell = max(stats, key=lambda k: stats[k]["mean"])
+    best = stats[best_cell]
+    cutoff = best["mean"] - best["se"]
+
+    within = [k for k, v in stats.items() if v["mean"] >= cutoff]
+    # Cheapest first: fewest samples, then fewest signers to record.
+    chosen = min(within, key=lambda k: (stats[k]["budget"], k[0]))
+
+    # A threshold sitting on the edge of the grid is not a plateau — it is the
+    # grid running out. Saying so is the difference between a finding and an
+    # artefact.
+    edges = []
+    if chosen[0] == max(ns):
+        edges.append(f"so nguoi = {chosen[0]} la muc CAO NHAT trong luoi")
+    if chosen[1] == max(reps):
+        edges.append(f"so lan lap = {chosen[1]} la muc CAO NHAT trong luoi")
+    if best_cell[0] == max(ns):
+        edges.append(f"o tot nhat cung dung o muc nguoi cao nhat ({max(ns)})")
+
+    return {
+        "best_cell": {"n": best_cell[0], "r": best_cell[1], **best},
+        "cutoff": cutoff,
+        "chosen": {"n": chosen[0], "r": chosen[1], **stats[chosen]},
+        "candidates_within_1se": sorted(
+            [{"n": n, "r": r, **stats[(n, r)]} for (n, r) in within],
+            key=lambda c: c["budget"],
+        ),
+        "grid_edge_warnings": edges,
+        "grid": {"n_levels": ns, "r_levels": reps},
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -154,6 +217,31 @@ def main() -> int:
               f"cach chia nhieu nguoi hon thang {won}/{tot} fold")
         print("(duong > 0 = cung ngan sach, them NGUOI tot hon them LAN LAP)")
 
+    # ---- how much is enough -----------------------------------------------
+    suff = sufficiency_threshold(means, helds, ns, reps)
+    if suff:
+        best, chosen = suff["best_cell"], suff["chosen"]
+        print(f"\nNGUONG DU DUNG (quy tac 1 sai so chuan, khong phai cuc dai):")
+        print(f"  o tot nhat quan sat duoc : {best['n']} nguoi x {best['r']} lan"
+              f"  = {best['mean']:.4f} (SE {best['se']:.4f}, {best['budget']} mau/lop)")
+        print(f"  nguong  (>= {suff['cutoff']:.4f}) : {chosen['n']} nguoi x {chosen['r']} lan"
+              f"  = {chosen['mean']:.4f}  -> {chosen['budget']} mau/lop")
+        others = [c for c in suff["candidates_within_1se"]
+                  if (c["n"], c["r"]) != (chosen["n"], chosen["r"])]
+        if others:
+            print("  cac cau hinh khac cung dat nguong: "
+                  + ", ".join(f"{c['n']}x{c['r']}" for c in others))
+        if suff["grid_edge_warnings"]:
+            print("\n  [CANH BAO] nguong nam o MEP LUOI — day KHONG phai bang chung bao hoa,")
+            print("             ma la dau hieu het du lieu de tang tiep:")
+            for w in suff["grid_edge_warnings"]:
+                print(f"               - {w}")
+            print("             Dung viet 'bao hoa tai ...' trong bai; hay viet")
+            print("             'trong dai da khao sat, chua quan sat duoc diem bao hoa'.")
+        else:
+            print("\n  Nguong nam BEN TRONG luoi — co the noi den dau hieu chung lai,")
+            print("  van kem dieu kien: tren tap tu vung nay va kien truc nay.")
+
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps({
@@ -166,6 +254,7 @@ def main() -> int:
                           for n in ns for r in reps
                           if any((h, n, r) in means for h in helds)},
             "iso_budget_comparisons": report,
+            "sufficiency_threshold": suff,
         }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"\nda ghi {args.out}")
     return 0
