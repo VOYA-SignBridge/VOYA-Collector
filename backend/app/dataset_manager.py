@@ -60,7 +60,9 @@ def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> s
     """ASCII slug. preserve_vn_letters keeps Ă/Â/Đ/Ê/Ô/Ơ/Ư distinct from their
     base letter for the fingerspelling alphabet (see class_registry.slugify)."""
     if preserve_vn_letters:
-        key = (text or "").strip().lower()
+        # NFC first — see the note in class_registry.slugify: a decomposed "Â"
+        # otherwise misses this table and collapses into the base letter.
+        key = unicodedata.normalize("NFC", (text or "").strip()).lower()
         if key in _VN_ALPHABET_SLUG:
             return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")

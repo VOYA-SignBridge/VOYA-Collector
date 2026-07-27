@@ -48,7 +48,12 @@ def slugify(text: str, maxlen: int = 30, preserve_vn_letters: bool = False) -> s
     are DISTINCT letters and must not collapse into A/D/E/O/U.
     """
     if preserve_vn_letters:
-        key = (text or "").strip().lower()
+        # NFC first: Vietnamese input methods may emit "Â" either precomposed
+        # (U+00C2) or decomposed (A + U+0302). The table is keyed on the
+        # precomposed form, so without this a decomposed letter misses the
+        # lookup, falls through to diacritic stripping, and collapses into its
+        # base letter — Â would silently become the existing "a" class.
+        key = unicodedata.normalize("NFC", (text or "").strip()).lower()
         if key in _VN_ALPHABET_SLUG:
             return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")
