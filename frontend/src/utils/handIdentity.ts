@@ -39,6 +39,15 @@ export type HandAssignment = {
   right?: MediaPipeLandmark[];
 };
 
+export type AssignOptions = {
+  /**
+   * Force a lone detection into this slot. Set once a clip is known to be
+   * one-handed: the physical hand cannot change anatomical identity mid-clip,
+   * so no per-frame label may move it.
+   */
+  pinnedSlot?: "left" | "right";
+};
+
 /**
  * An anchor older than this is treated as gone, so a hand re-entering the frame
  * is matched by label rather than glued to where the old one used to be.
@@ -57,6 +66,18 @@ export const HAND_ANCHOR_MATCH_RADIUS = 0.28;
  */
 export const HAND_SWAP_MARGIN = 0.06;
 
+/**
+ * Match radius when only ONE slot is live. Deliberately much wider than
+ * HAND_ANCHOR_MATCH_RADIUS: that value has to discriminate between two
+ * competing hands, whereas here there is nothing to confuse the detection with,
+ * so the only job is to reject a detection that cannot physically be the same
+ * hand. A fast sign easily moves the wrist more than 0.28 of the frame between
+ * two processed frames -- treating that as a different hand is what let a
+ * flipped per-frame label swap the hand mid-clip. Crossing more than half the
+ * frame in one frame interval is still rejected as a reacquisition.
+ */
+export const HAND_ANCHOR_SOLO_RADIUS = 0.55;
+
 /** Wrist is landmark 0 of MediaPipe's 21-point hand model. */
 export const wristOf = (lms: MediaPipeLandmark[]) => ({
   x: lms[0]?.x ?? 0.5,
@@ -71,6 +92,7 @@ export function assignHandSlots(
   detections: HandDetection[],
   anchors: HandAnchors,
   now: number,
+  options: AssignOptions = {},
 ): HandAssignment {
   if (detections.length === 0) return {};
 
@@ -81,12 +103,35 @@ export function assignHandSlots(
 
   if (detections.length === 1) {
     const only = detections[0];
+
+    // A clip known to be one-handed has exactly one answer, whatever the
+    // per-frame classifier says.
+    if (options.pinnedSlot) {
+      return options.pinnedSlot === "left"
+        ? { left: only.landmarks }
+        : { right: only.landmarks };
+    }
+
     const wrist = wristOf(only.landmarks);
+
+    // Exactly one slot is live: nothing competes for this detection, so judge it
+    // against the wider solo radius and keep the identity. Only a jump too large
+    // to be the same hand falls through to the label.
+    if (leftAnchor && !rightAnchor) {
+      if (wristDistance(wrist, leftAnchor) <= HAND_ANCHOR_SOLO_RADIUS) {
+        return { left: only.landmarks };
+      }
+    } else if (rightAnchor && !leftAnchor) {
+      if (wristDistance(wrist, rightAnchor) <= HAND_ANCHOR_SOLO_RADIUS) {
+        return { right: only.landmarks };
+      }
+    }
+
     const toLeft = leftAnchor ? wristDistance(wrist, leftAnchor) : Infinity;
     const toRight = rightAnchor ? wristDistance(wrist, rightAnchor) : Infinity;
 
-    // Trust position only when at least one anchor is a genuine match AND one
-    // option is clearly better than the other.
+    // Both slots live: trust position only when at least one anchor is a
+    // genuine match AND one option is clearly better than the other.
     if (toLeft <= HAND_ANCHOR_MATCH_RADIUS || toRight <= HAND_ANCHOR_MATCH_RADIUS) {
       if (toLeft + HAND_SWAP_MARGIN < toRight) return { left: only.landmarks };
       if (toRight + HAND_SWAP_MARGIN < toLeft) return { right: only.landmarks };
@@ -94,6 +139,16 @@ export function assignHandSlots(
     if (only.label === "Left") return { left: only.landmarks };
     if (only.label === "Right") return { right: only.landmarks };
     return {};
+  }
+
+  // Two hands but the clip is pinned one-handed: keep the most confident
+  // detection in the pinned slot rather than inventing a second hand from a
+  // spurious detection.
+  if (options.pinnedSlot) {
+    const best = [...detections].sort((p, q) => q.score - p.score)[0];
+    return options.pinnedSlot === "left"
+      ? { left: best.landmarks }
+      : { right: best.landmarks };
   }
 
   // Two or more detections: keep the two most confident.

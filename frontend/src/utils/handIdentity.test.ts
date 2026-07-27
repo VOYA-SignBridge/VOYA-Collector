@@ -159,4 +159,87 @@ describe("assignHandSlots", () => {
 
     expect(new Set(seen)).toEqual(new Set(["right"]));
   });
+
+  it("keeps a lone hand in its slot when the label flips mid-clip", () => {
+    // The reported bug: one-handed signing, MediaPipe flips its per-frame label
+    // (typically as the palm rotates), and the hand jumps to the other half of
+    // the 126-dim vector for the rest of the sample.
+    const anchors = { right: { x: 0.6, y: 0.5, t: NOW } };
+    const flipped = detection(0.62, 0.5, "Left", 0.88);
+
+    expect(assignHandSlots([flipped], anchors, NOW + 33)).toEqual({
+      right: flipped.landmarks,
+    });
+  });
+
+  it("keeps a lone hand in its slot across fast motion that exceeds the two-hand radius", () => {
+    // 0.36 of the frame in one interval: far beyond HAND_ANCHOR_MATCH_RADIUS
+    // (0.28) but well within reach of a real hand during a dynamic sign. With
+    // one slot live this must stay the same hand, not fall through to a label
+    // that may have flipped.
+    const anchors = { right: { x: 0.2, y: 0.5, t: NOW } };
+    const moved = detection(0.55, 0.6, "Left", 0.95);
+
+    expect(assignHandSlots([moved], anchors, NOW + 33)).toEqual({
+      right: moved.landmarks,
+    });
+  });
+
+  it("still rejects a jump too large to be the same hand", () => {
+    // Across the whole frame in one interval is a different hand, or a
+    // reacquisition — the label is the better evidence there.
+    const anchors = { right: { x: 0.1, y: 0.1, t: NOW } };
+    const teleported = detection(0.95, 0.95, "Left", 0.9);
+
+    expect(assignHandSlots([teleported], anchors, NOW + 33)).toEqual({
+      left: teleported.landmarks,
+    });
+  });
+
+  it("still uses the label once the only anchor has aged out", () => {
+    const anchors = { right: { x: 0.6, y: 0.5, t: NOW } };
+    const later = NOW + HAND_ANCHOR_MAX_AGE_MS + 1;
+    const d = detection(0.3, 0.5, "Left", 0.9);
+
+    expect(assignHandSlots([d], anchors, later)).toEqual({ left: d.landmarks });
+  });
+
+  it("still arbitrates by position when both slots are live", () => {
+    // The distance gate must survive for genuine two-handed captures.
+    const anchors = {
+      left: { x: 0.3, y: 0.5, t: NOW },
+      right: { x: 0.7, y: 0.5, t: NOW },
+    };
+    const nearLeft = detection(0.32, 0.5, "Right", 0.9);
+
+    expect(assignHandSlots([nearLeft], anchors, NOW + 33)).toEqual({
+      left: nearLeft.landmarks,
+    });
+  });
+
+  describe("pinned slot (clip known to be one-handed)", () => {
+    it("overrides a contradicting label", () => {
+      const d = detection(0.3, 0.5, "Left", 0.99);
+      expect(assignHandSlots([d], {}, NOW, { pinnedSlot: "right" })).toEqual({
+        right: d.landmarks,
+      });
+    });
+
+    it("overrides a contradicting anchor", () => {
+      const anchors = { left: { x: 0.3, y: 0.5, t: NOW } };
+      const d = detection(0.3, 0.5, "Left", 0.99);
+      expect(assignHandSlots([d], anchors, NOW + 33, { pinnedSlot: "right" })).toEqual({
+        right: d.landmarks,
+      });
+    });
+
+    it("keeps only the most confident hand when a spurious second is detected", () => {
+      const real = detection(0.6, 0.5, "Right", 0.95);
+      const spurious = detection(0.1, 0.9, "Left", 0.4);
+
+      const result = assignHandSlots([real, spurious], {}, NOW, { pinnedSlot: "right" });
+
+      expect(result).toEqual({ right: real.landmarks });
+    });
+  });
 });

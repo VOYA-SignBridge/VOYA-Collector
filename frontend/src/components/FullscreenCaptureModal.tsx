@@ -562,6 +562,9 @@ export default function FullscreenCaptureModal({
       graceCounterRef.current = 0;
       isRecoveringRef.current = false;
       recoveryTimeoutRef.current = 0;
+      // A pinned slot belongs to one clip only — the next take may well be the
+      // other hand.
+      pinnedSlotRef.current = undefined;
       recoveryConfirmRef.current = 0;
     }
   }, [recording]);
@@ -728,6 +731,12 @@ export default function FullscreenCaptureModal({
   // identity stable across frames. Entries expire by age, so no explicit reset
   // is needed between recordings.
   const handAnchorsRef = useRef<{ left?: HandAnchor; right?: HandAnchor }>({});
+  /**
+   * Slot locked in for a one-handed clip. A single physical hand cannot change
+   * anatomical identity partway through a sample, so once the slot is known no
+   * per-frame handedness label may move it. Cleared when recording restarts.
+   */
+  const pinnedSlotRef = useRef<"left" | "right" | undefined>(undefined);
   const visibilityStateRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
   const lastRenderedLeftRef = useRef<MediaPipeLandmark[] | undefined>(undefined);
   const lastRenderedRightRef = useRef<MediaPipeLandmark[] | undefined>(undefined);
@@ -1133,9 +1142,25 @@ export default function FullscreenCaptureModal({
         };
       });
 
-      const assignment = assignHandSlots(detections, handAnchorsRef.current, now);
+      // Pin the slot only once the clip is known to be one-handed — either the
+      // recorder said so, or the warmup window inferred it.
+      const oneHandedClip =
+        (expectedHandsOptionRef.current ?? expectedHandsRef.current) === 1;
+      const assignment = assignHandSlots(detections, handAnchorsRef.current, now, {
+        pinnedSlot: oneHandedClip ? pinnedSlotRef.current : undefined,
+      });
       const leftHandLandmarks = assignment.left;
       const rightHandLandmarks = assignment.right;
+
+      // First resolved frame of a one-handed clip decides the slot for the rest
+      // of it. Before that the normal anchor/label logic applies.
+      if (oneHandedClip && !pinnedSlotRef.current) {
+        if (leftHandLandmarks?.length && !rightHandLandmarks?.length) {
+          pinnedSlotRef.current = "left";
+        } else if (rightHandLandmarks?.length && !leftHandLandmarks?.length) {
+          pinnedSlotRef.current = "right";
+        }
+      }
 
       // Refresh anchors for whichever slots were filled. Unfilled slots keep
       // their previous anchor and age out via HAND_ANCHOR_MAX_AGE_MS.
