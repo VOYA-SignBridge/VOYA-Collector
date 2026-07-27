@@ -17,6 +17,11 @@ MODEL=${MODEL:-tcn}
 PROFILE=${PROFILE:-hoa_de}
 SEEDS=${SEEDS:-"42 43 44"}
 EPOCHS=${EPOCHS:-80}
+# Stop after this many cells. Lets a smoke test end on its own rather than being
+# killed with `timeout`, which cuts the docker client while the training process
+# inside the container keeps running -- and this image has no ps or pkill to
+# find it with afterwards.
+MAX_CELLS=${MAX_CELLS:-0}
 
 ROOT=processed/splits/versions/$VERSION
 
@@ -70,6 +75,10 @@ for cell in $(find "$ROOT" -name train.csv | sort); do
   nr=$(basename "$(dirname "$D")")
   held=$(basename "$(dirname "$(dirname "$D")")")
   i=$((i + 1))
+  if [ "$MAX_CELLS" -gt 0 ] && [ "$i" -gt "$MAX_CELLS" ]; then
+    echo "dung som sau $MAX_CELLS o (MAX_CELLS)"
+    break
+  fi
 
   for s in $SEEDS; do
     tag="$held $nr $combo $MODEL seed=$s"
