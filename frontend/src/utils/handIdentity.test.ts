@@ -233,6 +233,43 @@ describe("assignHandSlots", () => {
       });
     });
 
+    it("resolves to one hand from the first frame when the clip is declared one-handed", () => {
+      // The deadlock this exists to break: a bystander hand keeps two detections
+      // coming, the frame resolves to two slots, the expected-count check
+      // rejects it, and the caller never sees the single-hand frame it needs to
+      // pin a slot — so capture stalls forever.
+      const signing = detection(0.6, 0.5, "Right", 0.95);
+      const bystander = detection(0.15, 0.5, "Left", 0.7);
+
+      const result = assignHandSlots([signing, bystander], {}, NOW, { forceSingle: true });
+
+      expect(result.right).toBe(signing.landmarks);
+      expect(result.left).toBeUndefined();
+    });
+
+    it("forceSingle does not override an already pinned slot", () => {
+      const a = detection(0.6, 0.5, "Right", 0.95);
+      const b = detection(0.2, 0.5, "Left", 0.9);
+
+      const result = assignHandSlots([a, b], {}, NOW, {
+        pinnedSlot: "left",
+        forceSingle: true,
+      });
+
+      expect(result.left).toBe(a.landmarks);
+      expect(result.right).toBeUndefined();
+    });
+
+    it("leaves two-handed clips alone", () => {
+      const a = detection(0.2, 0.5, "Left", 0.95);
+      const b = detection(0.8, 0.5, "Right", 0.9);
+
+      const result = assignHandSlots([a, b], {}, NOW, { forceSingle: false });
+
+      expect(result.left).toBe(a.landmarks);
+      expect(result.right).toBe(b.landmarks);
+    });
+
     it("keeps only the most confident hand when a spurious second is detected", () => {
       const real = detection(0.6, 0.5, "Right", 0.95);
       const spurious = detection(0.1, 0.9, "Left", 0.4);

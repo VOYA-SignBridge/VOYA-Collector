@@ -1148,6 +1148,11 @@ export default function FullscreenCaptureModal({
         (expectedHandsOptionRef.current ?? expectedHandsRef.current) === 1;
       const assignment = assignHandSlots(detections, handAnchorsRef.current, now, {
         pinnedSlot: oneHandedClip ? pinnedSlotRef.current : undefined,
+        // Declared one-handed: never let a bystander hand fill the second slot.
+        // The frame would then resolve to two hands, fail the expected-count
+        // check, and stall the capture without ever producing the single-hand
+        // frame the pin is waiting for.
+        forceSingle: oneHandedClip,
       });
       const leftHandLandmarks = assignment.left;
       const rightHandLandmarks = assignment.right;

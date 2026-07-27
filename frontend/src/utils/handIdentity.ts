@@ -46,6 +46,17 @@ export type AssignOptions = {
    * so no per-frame label may move it.
    */
   pinnedSlot?: "left" | "right";
+
+  /**
+   * The clip is declared one-handed but no slot is pinned yet. Keep only the
+   * most confident detection so a bystander hand — the signer's resting other
+   * hand, someone behind them — cannot fill the second slot.
+   *
+   * Without this, a declared-one-handed clip that never shows exactly one
+   * detection can deadlock: the caller pins a slot only after seeing a
+   * single-hand frame, while the extra detection keeps producing two.
+   */
+  forceSingle?: boolean;
 };
 
 /**
@@ -100,6 +111,13 @@ export function assignHandSlots(
     a && now - a.t <= HAND_ANCHOR_MAX_AGE_MS ? a : undefined;
   const leftAnchor = stillFresh(anchors.left);
   const rightAnchor = stillFresh(anchors.right);
+
+  // A declared one-handed clip has one hand by definition. Drop the extra
+  // detections here so the rest of the function sees the lone-hand case, which
+  // is also what lets the caller pin a slot on the very first frame.
+  if (options.forceSingle && !options.pinnedSlot && detections.length > 1) {
+    detections = [[...detections].sort((p, q) => q.score - p.score)[0]];
+  }
 
   if (detections.length === 1) {
     const only = detections[0];
