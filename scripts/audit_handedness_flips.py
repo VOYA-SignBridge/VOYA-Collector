@@ -162,6 +162,11 @@ def main() -> int:
     parser.add_argument("--dialect", default="", help="restrict to one dialect/group")
     parser.add_argument("--out", type=Path, default=None, help="write a JSON report")
     parser.add_argument("--list", type=int, default=15, help="how many worst samples to print")
+    parser.add_argument(
+        "--exclusion-plan", type=Path, default=None,
+        help="write a decisions file (config/excluded_samples.json) listing the "
+             "conclusively flipped samples so a new manifest version leaves them out",
+    )
     args = parser.parse_args()
 
     meta = load_manifest(args.manifest)
@@ -243,6 +248,36 @@ def main() -> int:
                   f"direct={f['direct_flips']} gapped={f['gapped_flips']} "
                   f"minority={f['minority_share']}")
             print(f"      {f['states']}")
+
+    if args.exclusion_plan:
+        # Only DIRECT flips: those are physically impossible, so no judgement
+        # call is involved. Gapped ones stay out — they can be genuine.
+        entries = [
+            {
+                "path": str(Path(f["path"]).as_posix()),
+                "reason": (
+                    f"handedness flip: {f['direct_flips']} impossible L<->R "
+                    f"transition(s) inside the sample "
+                    f"({f['dialect']}/{f['slug']}, signer={f['signer_id'] or 'unattributed'})"
+                ),
+                "decision": "exclude",
+            }
+            for f in sorted(findings, key=lambda x: str(x["path"]))
+            if f["direct_flips"] > 0
+        ]
+        args.exclusion_plan.parent.mkdir(parents=True, exist_ok=True)
+        args.exclusion_plan.write_text(json.dumps({
+            "$comment": (
+                "Samples whose left/right slots swap mid-recording, produced by "
+                "scripts/audit_handedness_flips.py. A single physical hand cannot "
+                "move between anatomical slots between consecutive frames, so these "
+                "encode motion that never happened. Feed to "
+                "create_dataset_manifest.py --exclude <this file>; the files stay on "
+                "disk so older manifest versions still resolve."
+            ),
+            "files": entries,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"\nwrote {args.exclusion_plan} ({len(entries)} samples marked exclude)")
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

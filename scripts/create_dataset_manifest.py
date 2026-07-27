@@ -115,16 +115,45 @@ def build_legacy_user_index(sources) -> dict:
     return index
 
 
+def load_excluded_ids(path: Path | None) -> dict:
+    """sample_id -> reason, from a decisions file.
+
+    Excluding at the manifest instead of deleting or moving the file keeps every
+    previously published split runnable: a manifest is a versioned view of the
+    feature tree, so a new version can drop a sample while the older versions
+    that reference it still resolve on disk.
+    """
+    if not path or not path.exists():
+        return {}
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    excluded = {}
+    for entry in cfg.get("files", []):
+        if str(entry.get("decision") or "").strip() not in ("exclude", "quarantine"):
+            continue
+        sample_id = Path(str(entry.get("path") or "")).stem.replace("sample_", "")
+        if sample_id:
+            excluded[sample_id] = str(entry.get("reason") or "")
+    return excluded
+
+
 def build_manifest(features_root: Path, labels_rows: list, signer_name_to_id: dict,
-                   legacy_user_index: dict | None = None) -> tuple:
+                   legacy_user_index: dict | None = None,
+                   excluded_ids: dict | None = None) -> tuple:
     label_by_folder = {}
     for r in labels_rows:
         folder = (r.get("folder_name") or "").strip()
         if folder:
             label_by_folder[folder] = r
 
-    rows, unreadable, unlabeled = [], [], []
+    excluded_ids = excluded_ids or {}
+    rows, unreadable, unlabeled, excluded = [], [], [], []
     for npz_path in sorted(features_root.rglob("*.npz")):
+        sample_id_early = npz_path.stem.replace("sample_", "")
+        if sample_id_early in excluded_ids:
+            excluded.append({"sample_id": sample_id_early, "path": str(npz_path),
+                             "reason": excluded_ids[sample_id_early]})
+            continue
+
         folder = npz_path.parent.name
         label_row = label_by_folder.get(folder)
         if label_row is None:
@@ -188,7 +217,7 @@ def build_manifest(features_root: Path, labels_rows: list, signer_name_to_id: di
             "folder_name": folder,
             "file": npz_path.name,
         })
-    return rows, unreadable, unlabeled
+    return rows, unreadable, unlabeled, excluded
 
 
 def compute_stats(rows: list) -> dict:
@@ -217,6 +246,8 @@ def main() -> int:
                              REPO_ROOT / "dataset" / "samples.csv"],
                     help="Frozen CSVs recording sample_id->user_id for pre-sidecar samples")
     ap.add_argument("--out-dir", type=Path, default=REPO_ROOT / "dataset" / "manifests")
+    ap.add_argument("--exclude", type=Path, default=REPO_ROOT / "config" / "excluded_samples.json",
+                    help="Decisions file listing samples to leave OUT of this manifest version")
     ap.add_argument("--force", action="store_true", help="Overwrite an existing version (breaks immutability — avoid)")
     args = ap.parse_args()
 
@@ -234,13 +265,19 @@ def main() -> int:
             "legacy_name_to_signer_id", {})
 
     legacy_user_index = build_legacy_user_index(args.legacy_user_sources)
-    rows, unreadable, unlabeled = build_manifest(
-        args.features_root, labels_rows, signer_name_to_id, legacy_user_index)
+    excluded_ids = load_excluded_ids(args.exclude)
+    rows, unreadable, unlabeled, excluded = build_manifest(
+        args.features_root, labels_rows, signer_name_to_id, legacy_user_index,
+        excluded_ids=excluded_ids)
     stats = compute_stats(rows)
     stats["generated_at"] = datetime.utcnow().isoformat() + "Z"
     stats["version"] = args.version
     stats["unreadable_files"] = unreadable
     stats["unlabeled_files_count"] = len(unlabeled)
+    # Recorded in the version's stats so a later reader can tell that this
+    # manifest deliberately omits samples that still exist on disk, and why.
+    stats["excluded_samples_count"] = len(excluded)
+    stats["excluded_samples"] = excluded
 
     out_dir.mkdir(parents=True, exist_ok=True)
     with manifest_path.open("w", newline="", encoding="utf-8") as f:
@@ -262,6 +299,9 @@ def main() -> int:
     print(f"manifest -> {manifest_path}  ({len(rows)} samples, sha256={checksum[:12]}...)")
     print(f"stats: scope={stats['by_vocabulary_scope']} profiles={stats['by_recognition_profile']}")
     print(f"raw available: {stats['raw_landmarks_available']}")
+    if excluded:
+        print(f"excluded by {args.exclude.name}: {len(excluded)} samples "
+              f"(files left on disk so older manifest versions still resolve)")
     if unreadable:
         print(f"[WARN] unreadable npz: {len(unreadable)}")
     if unlabeled:
