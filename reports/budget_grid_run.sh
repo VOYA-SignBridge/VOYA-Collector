@@ -12,14 +12,35 @@
 # training samples), so the whole grid is an overnight job, not a week.
 cd /workspace || exit 1
 
-VERSION=${VERSION:-hoa_de_budget_v1}
+VERSION=${VERSION:-hoa_de_budget_v2}
 MODEL=${MODEL:-tcn}
 PROFILE=${PROFILE:-hoa_de}
-DATASET_VERSION=${DATASET_VERSION:-isds2026_v9}
 SEEDS=${SEEDS:-"42 43 44"}
 EPOCHS=${EPOCHS:-80}
 
 ROOT=processed/splits/versions/$VERSION
+
+# Read the dataset version out of the grid itself rather than defaulting to a
+# hard-coded one. A stale default would stamp every checkpoint of a 900-run job
+# with the wrong provenance -- the run would look valid and be uncitable.
+if [ -z "$DATASET_VERSION" ]; then
+  DATASET_VERSION=$(python - "$ROOT" <<'PY'
+import json, re, sys
+from pathlib import Path
+meta = next(Path(sys.argv[1]).rglob("split_metadata.json"), None)
+manifest = json.loads(meta.read_text(encoding="utf-8")).get("dataset_manifest", "") if meta else ""
+# Matched by pattern, not by Path(): the field is written on Windows and carries
+# backslashes, which a Linux Path treats as part of the filename.
+m = re.search(r"dataset_manifest_([A-Za-z0-9_.-]+)\.csv", manifest)
+print(m.group(1) if m else "")
+PY
+)
+  if [ -z "$DATASET_VERSION" ]; then
+    echo "[LOI] khong suy ra duoc dataset_version tu $ROOT — dat bien DATASET_VERSION va chay lai"
+    exit 2
+  fi
+  echo "dataset_version suy ra tu split: $DATASET_VERSION"
+fi
 OUT=/workspace/processed/train_utils/outputs/budget_grid/$VERSION/$MODEL
 LOG=/workspace/reports/budget_grid_${VERSION}_${MODEL}_raw.txt
 
