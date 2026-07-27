@@ -238,13 +238,10 @@ services:
     # Toolkit on the host; verify with
     # `docker run --rm --gpus all voya_backend:latest python -c "import torch;print(torch.cuda.is_available())"`.
     # Remove this block (and CUBLAS_WORKSPACE_CONFIG above) to fall back to CPU-only.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # GPU reservation moved to docker-compose.gpu.yml — see the note there.
+    # `driver: nvidia` is resolved at container-create time, so leaving it here
+    # made the trainer (and the deploy) fail outright on any host without the
+    # NVIDIA Container Toolkit. Opt in with -f docker-compose.gpu.yml instead.
     # --max-tasks-per-child=1: recycle the supervisor child after every training
     # job so any memory it touched is returned to the OS immediately ("trả liền").
     # The GPU is already freed by the training subprocess exiting; this covers the

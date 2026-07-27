@@ -213,13 +213,18 @@ services:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
       - .:/workspace
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # GPU reservation lives in docker-compose.gpu.yml, not here.
+    #
+    # `driver: nvidia` is not a hint — Docker resolves it at container-create
+    # time, so on any host without the NVIDIA Container Toolkit this service
+    # died immediately with `could not select device driver "nvidia" with
+    # capabilities: [[gpu]]`, taking the deploy with it. That is every laptop and
+    # every CPU-only server, i.e. exactly the machines used for a demo.
+    #
+    # train_tcn.py already selects CUDA via torch.cuda.is_available(), so the
+    # CPU fallback needs no code change. On a GPU host, add the extra file:
+    #   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+    #                  -f docker-compose.gpu.yml up -d --build
     # --max-tasks-per-child=1: recycle the supervisor child after every training
     # job so any memory it touched is returned to the OS immediately ("trả liền").
     # The GPU is already freed by the training subprocess exiting; this covers the

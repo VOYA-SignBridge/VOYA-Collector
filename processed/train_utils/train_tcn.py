@@ -19,6 +19,43 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
+
+def pick_device() -> str:
+    """Choose cuda only when this torch build has kernels for the actual GPU.
+
+    `torch.cuda.is_available()` answers "is there a working driver + runtime",
+    not "can this build run on that chip". A wheel compiled for older
+    architectures reports True on a newer card and then dies on the first kernel
+    launch with `no kernel image is available for execution on the device` —
+    mid-training, after the dataset is loaded, with an error that reads like a
+    bug rather than a build mismatch.
+
+    torch 2.0.0+cu117 ships sm_37…sm_86. That covers Ampere (RTX 30xx) but not
+    Ada (RTX 40xx, sm_89) or Blackwell (RTX 50xx, sm_120), so a newer card needs
+    a newer wheel. Until then, falling back to CPU trains slowly but finishes;
+    the alternative is a job that always crashes.
+    """
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        major, minor = torch.cuda.get_device_capability(0)
+        arch = f"sm_{major}{minor}"
+        supported = torch.cuda.get_arch_list()
+        if supported and arch not in supported:
+            print(
+                f"[TRAINER] GPU {torch.cuda.get_device_name(0)} is {arch}, but this "
+                f"torch {torch.__version__} was built for {supported}. Falling back "
+                f"to CPU — install a torch wheel that includes {arch} to use the GPU.",
+                file=sys.stderr,
+            )
+            return "cpu"
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[TRAINER] GPU capability probe failed ({exc}); using CPU.", file=sys.stderr)
+        return "cpu"
+    return "cuda"
+
+
 try:
     # local metrics (accuracy, SCS, macro-f1) for future use
     from .metrics import sequence_consistency_score  # type: ignore
@@ -132,7 +169,7 @@ class TrainConfig:
     levels: int = 3
     kernel_size: int = 5
     seed: int = 42
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = pick_device()
     num_workers: int = 0
     out_dir: Path = Path(__file__).resolve().parents[1] / "train_utils" / "outputs"
 
@@ -777,7 +814,7 @@ def main() -> None:
     parser.add_argument("--levels", type=int, default=3)
     parser.add_argument("--kernel_size", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", type=str, default=pick_device())
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
     parser.add_argument("--run_diagnostics", action="store_true", help="Run signer diversity, imbalance, and sequence length diagnostics after training")
