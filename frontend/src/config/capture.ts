@@ -8,7 +8,7 @@ export const TARGET_FRAMES = 60;
 // samples. More takes grow the file count without growing dataset diversity.
 export const CAPTURE_COUNT = 5;
 export const MIN_CAPTURE_COUNT = 1;
-export const MAX_CAPTURE_COUNT = 10;
+export const MAX_CAPTURE_COUNT = 20;
 
 /**
  * Coerce arbitrary user input into a valid take count.
