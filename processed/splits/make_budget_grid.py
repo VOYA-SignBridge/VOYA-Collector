@@ -91,6 +91,11 @@ def main() -> int:
     ap.add_argument("--label_col", type=str, default="label_slug")
     ap.add_argument("--reps", type=int, nargs="+", default=[4, 6, 8, 12],
                     help="Samples per class per training signer")
+    ap.add_argument("--max-combos", dest="max_combos", type=int, default=0,
+                    help="Cap the signer combinations kept per (held-out, n). 0 = keep all. "
+                         "The count explodes as C(signers-1, n), so with 6+ signers a cap "
+                         "keeps the grid to an overnight run; the combinations kept are "
+                         "chosen deterministically from the seed.")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out_root", type=Path,
                     default=REPO_ROOT / "processed" / "splits" / "versions")
@@ -139,7 +144,14 @@ def main() -> int:
         test_rows = [r for r in rows if r[args.group_col] == held]
 
         for n in range(1, len(pool) + 1):
-            for combo in combinations(pool, n):
+            combos = list(combinations(pool, n))
+            if args.max_combos and len(combos) > args.max_combos:
+                # Deterministic subset: which combinations get kept must not
+                # change between runs, or two runs of the "same" grid are not
+                # comparable.
+                random.Random(f"combos|{args.seed}|{held}|{n}").shuffle(combos)
+                combos = sorted(combos[:args.max_combos])
+            for combo in combos:
                 for r_per in usable_reps:
                     # Seeded per cell so a cell is reproducible on its own, and
                     # the same (signer, class) draw is reused across cells that
@@ -233,6 +245,7 @@ def main() -> int:
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\n{n_ok} o hop le, {n_bad} o khong hop le -> {root}")
+    print(f"uoc tinh: {n_ok} o x so seed  (vd 3 seed = {n_ok * 3} lan chay)")
     print("O CUNG NGAN SACH (day la cac so sanh mang y nghia):")
     for budget, combos in iso.items():
         pretty = "  |  ".join(f"{n} nguoi x {r} lan" for n, r in combos)
