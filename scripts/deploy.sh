@@ -35,6 +35,18 @@ gpu_usable() {
     nvidia-smi >/dev/null 2>&1
 }
 
+# Per-machine allowlist of public hostnames. It is gitignored (the tunnel name
+# here is not the tunnel name there), so a fresh clone has none — and a missing
+# file means an empty allowlist, which is safe but silent: reset-password mails
+# quietly fall back to FRONTEND_BASE_URL and nobody notices until a user clicks
+# a link pointing at the wrong host. Seed it from the example instead.
+if [ ! -f deploy/public_hosts.txt ] && [ -f deploy/public_hosts.example.txt ]; then
+  cp deploy/public_hosts.example.txt deploy/public_hosts.txt
+  echo "==> Seeded deploy/public_hosts.txt from the example."
+  echo "    Add this machine's public hostname to it — it is re-read per request,"
+  echo "    so no restart is needed after an edit."
+fi
+
 echo "==> Probing for a usable GPU…"
 if gpu_usable; then
   NAME=$(docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 \

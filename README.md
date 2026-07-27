@@ -185,6 +185,34 @@ MAX_SAMPLES_PER_CLASS=2000
 - **Google Drive** (when `USE_GOOGLE_DRIVE=1`)
 ```
 
+### Changing the public URL (tunnels, new domain)
+
+The stack is host-agnostic: nginx has no `server_name`, there is no trusted-host
+middleware, session cookies are host-only and the SPA calls relative paths. So
+serving the same deployment at a new hostname — an ngrok/cloudflared tunnel that
+gets a fresh name on every restart, a new domain — needs **no rebuild and no
+container restart**. `CORS_ALLOWED_ORIGINS` is not involved either: the SPA and
+the API share one origin through nginx, so the browser never runs a CORS check.
+
+The one thing that has to follow the hostname is the password-reset link that
+goes out by email. List the hostname in `deploy/public_hosts.txt` (copy it from
+`deploy/public_hosts.example.txt`); the backend re-reads that file on each
+request, so the change is live immediately. With ngrok, let the script do it:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\sync-public-host.ps1
+# ...or leave it running so a restarted tunnel needs no action at all:
+powershell -ExecutionPolicy Bypass -File scripts\sync-public-host.ps1 -Watch
+```
+
+A host that is not listed falls back to `FRONTEND_BASE_URL`. That fallback is
+the security boundary, not a convenience: `Host` is set by the caller, so
+without the allowlist an attacker could trigger a reset for your account and
+have the email carry a real token pointing at their server. `COOKIE_SECURE`
+likewise no longer needs to be flipped per environment — cookies are marked
+`Secure` on the requests that actually arrive over HTTPS, so an HTTPS tunnel and
+plain-HTTP localhost can serve from one stack at the same time.
+
 ---
 
 ## Directory Structure

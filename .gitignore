@@ -124,5 +124,8 @@ redis_data/
 
 # Per-machine allowlist of public hostnames (see deploy/public_hosts.example.txt).
 # Like .env it differs on every machine — the tunnel hostname here is not the
-# tunnel hostname there — so only the example is tracked.
+# tunnel hostname there — so only the example is tracked. The blanket *.txt rule
+# above swallows the example too, hence the explicit un-ignore: without it the
+# template never reaches the other machines, which is where it is actually read.
 deploy/public_hosts.txt
+!deploy/public_hosts.example.txt

@@ -81,8 +81,13 @@ def _file_entries() -> List[str]:
         if cached_key == key:
             return cached_entries
 
+    # utf-8-sig, not utf-8: this file is edited by hand on Windows, and Notepad
+    # writes UTF-8 WITH a BOM. Those three bytes land on the first line, which
+    # is the first hostname — "﻿my-tunnel.example" matches nothing, and the
+    # only symptom is a reset link that keeps using the fallback URL. utf-8-sig
+    # drops the BOM when present and is identical to utf-8 when it is not.
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             lines = fh.read().splitlines()
     except OSError:
         return []
