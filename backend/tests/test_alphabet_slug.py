@@ -125,6 +125,43 @@ class TestSingleLetterGuard:
         assert assert_single_alphabet_letter(letter) == letter
 
 
+class TestSuggestionSearch:
+    """Autocomplete must not steer a recorder from Â onto A.
+
+    The recorder types the letter, picks what the box offers, and records. If
+    the box offers the base letter, the wrong class is chosen by hand — the same
+    collision the slug fix removed, committed one layer up.
+    """
+
+    ALPHABET = ["A", "O", "D", "E", "U", "Ă", "Â", "Ô", "Ơ", "Đ", "Ê", "Ư"]
+
+    def _suggest(self, query, labels, alphabet: bool):
+        from app.routers.classes import _normalize_alphabet_search, _normalize_search
+
+        normalize = _normalize_alphabet_search if alphabet else _normalize_search
+        q = normalize(query)
+        return [l for l in sorted(labels) if normalize(l).startswith(q)]
+
+    @pytest.mark.parametrize("letter", ["Ă", "Â", "Ô", "Ơ", "Đ", "Ê", "Ư"])
+    def test_a_diacritic_letter_suggests_only_itself(self, letter):
+        assert self._suggest(letter, self.ALPHABET, alphabet=True) == [letter]
+
+    @pytest.mark.parametrize("letter", ["A", "O", "D", "E", "U"])
+    def test_a_base_letter_does_not_pull_in_its_diacritics(self, letter):
+        assert self._suggest(letter, self.ALPHABET, alphabet=True) == [letter]
+
+    def test_case_and_unicode_form_do_not_matter(self):
+        decomposed = unicodedata.normalize("NFD", "â")
+        assert self._suggest("â", self.ALPHABET, alphabet=True) == ["Â"]
+        assert self._suggest(decomposed, self.ALPHABET, alphabet=True) == ["Â"]
+
+    def test_word_signs_keep_the_forgiving_match(self):
+        """Typing without diacritics must still find a word sign."""
+        words = ["tôm", "rang muối", "cắt đầu cá"]
+        assert self._suggest("tom", words, alphabet=False) == ["tôm"]
+        assert self._suggest("rang mu", words, alphabet=False) == ["rang muối"]
+
+
 def test_both_slugify_copies_agree():
     """The two implementations are duplicated; keep them from drifting apart."""
     samples = list(DIACRITICS) + list(BASE_LETTERS) + ["tôm", "rang muối", "Đ", "đ"]

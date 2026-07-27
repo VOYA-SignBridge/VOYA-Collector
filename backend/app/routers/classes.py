@@ -5,7 +5,7 @@ from pathlib import Path
 from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.dataset_manager import get_or_register_class, list_classes, normalize_dialect
-from app.processing.class_registry import AlphabetLabelError
+from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
@@ -57,7 +57,12 @@ def _save_prefs(data: dict) -> None:
 # Text normalization for prefix matching (remove diacritics)
 # ---------------------------------------------------------------------------
 def _normalize_search(text: str) -> str:
-    """Normalize text for prefix search: lowercase, remove diacritics."""
+    """Normalize text for prefix search: lowercase, remove diacritics.
+
+    Correct for word signs \u2014 typing "tom" should find "t\u00f4m". NOT correct for the
+    fingerspelling alphabet, where \u0102/\u00c2/\u0110/\u00ca/\u00d4/\u01a0/\u01af are distinct letters; use
+    _normalize_alphabet_search there instead.
+    """
     if not text:
         return ""
     t = text.strip().lower()
@@ -65,6 +70,17 @@ def _normalize_search(text: str) -> str:
     t = unicodedata.normalize("NFKD", t)
     t = "".join(c for c in t if not unicodedata.combining(c))
     return t
+
+
+def _normalize_alphabet_search(text: str) -> str:
+    """Diacritic-PRESERVING normalization for fingerspelling labels.
+
+    Suggesting "A" to someone who typed "\u00c2" walks them into recording the wrong
+    class, which is the same letter collision the slug fix removed \u2014 this time
+    committed by the recorder rather than the code. Case and Unicode form are
+    still normalized so "\u00e2" and a decomposed "\u00c2" match the same entry.
+    """
+    return unicodedata.normalize("NFC", (text or "").strip()).lower()
 
 
 @router.post("/register")
@@ -127,15 +143,18 @@ def suggest_labels(
 
     unique_labels.sort()
 
-    query_norm = _normalize_search(q)
+    # The fingerspelling alphabet is a closed set of distinct letters, so its
+    # search must not fold Â into A. Word signs keep the forgiving match.
+    normalize = (
+        _normalize_alphabet_search if is_alphabet_dialect(dialect or "") else _normalize_search
+    )
+    query_norm = normalize(q)
 
     if not query_norm:
         return {"suggestions": unique_labels[:limit]}
 
     matches = [
-        label
-        for label in unique_labels
-        if _normalize_search(label).startswith(query_norm)
+        label for label in unique_labels if normalize(label).startswith(query_norm)
     ]
     return {"suggestions": matches[:limit]}
 
