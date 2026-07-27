@@ -47,6 +47,18 @@ LOG=/workspace/reports/budget_grid_${VERSION}_${MODEL}_raw.txt
 mkdir -p /workspace/reports "$OUT"
 touch "$LOG"
 
+# Refuse to start a second copy. Two of these in one container means two training
+# processes competing for the same GPU and RAM, which wedged the engine badly
+# enough that even `ps` stopped answering. The image has no pkill, so a stray run
+# cannot be stopped from inside either -- far better not to start it.
+LOCK=/tmp/budget_grid_${VERSION}_${MODEL}.lock
+if [ -e "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  echo "[LOI] da co mot lan chay khac (PID $(cat "$LOCK")). Dung: kill \$(cat $LOCK)"
+  exit 3
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT INT TERM
+
 total=$(find "$ROOT" -name train.csv | wc -l)
 echo "=== $VERSION / $MODEL : $total o x $(echo $SEEDS | wc -w) seed ===" | tee -a "$LOG"
 
