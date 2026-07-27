@@ -67,19 +67,31 @@ def _client() -> Optional[redis.Redis]:
 
 
 def client_ip(request: Request) -> str:
-    """Best-effort real client IP behind the nginx gateway.
+    """Real client IP as the gateway resolved it. Never raises.
 
-    nginx sets X-Forwarded-For / X-Real-IP; take the first hop. Falls back to
-    the socket peer. Never raises.
+    X-Real-IP FIRST, because it is the only one of these headers nginx
+    OVERWRITES on every proxied location (see the $rl_client map in nginx.conf).
+    Whatever a caller puts there is discarded before the request reaches us.
+
+    X-Forwarded-For is checked only as a fallback, and deliberately not first:
+    Cloudflare APPENDS the real client to whatever the caller already sent, so
+    behind the tunnel `X-Forwarded-For: 1.2.3.4` arrives as
+    "1.2.3.4, <real client>" and the first hop is the caller's choice. That
+    matters here specifically — this value keys the login brute-force lockout
+    below and activity.get_block(), the admin IP ban list, so a forgeable
+    first hop lets a banned or throttled address rotate itself clean on every
+    request.
     """
+    real = request.headers.get("x-real-ip")
+    if real:
+        first = real.split(",")[0].strip()
+        if first:
+            return first
     xff = request.headers.get("x-forwarded-for")
     if xff:
         first = xff.split(",")[0].strip()
         if first:
             return first
-    real = request.headers.get("x-real-ip")
-    if real:
-        return real.strip()
     return (request.client.host if request.client else "unknown") or "unknown"
 
 

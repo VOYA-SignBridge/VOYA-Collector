@@ -1055,7 +1055,10 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
-                  Tăng số luồng để upload nhanh hơn (khuyến nghị: 3-5). Quá cao có thể gây lỗi server.
+                  Trong mạng nội bộ: 3-5 luồng cho nhanh. Qua tên miền công khai
+                  (tunnel/proxy): để <strong>1</strong> — băng thông tải lên không
+                  tăng theo số luồng, chỉ bị chia nhỏ, nên mỗi file lâu hơn và dễ
+                  bị proxy ngắt giữa chừng.
                 </p>
               </div>
             )}
