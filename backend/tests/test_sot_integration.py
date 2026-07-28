@@ -49,6 +49,15 @@ LAB_HEADER = (
     "is_common_language,folder_name,created_at,migrated_at\n"
 )
 
+# class_uid is free-form, so the SOTTEST_ prefix that marks throwaway rows works
+# there. sample_uid is NOT: samples carries a CHECK that it is 10 lowercase hex
+# chars, which is what stops a spreadsheet from rewriting a uid like
+# "7690373e04" as the float 7.69E+10. So synthetic samples need a valid-shaped
+# uid. "5070" reads as SOT0 and is still hex, keeping these rows recognisable in
+# a database inspection; the fixture teardown finds them by class_uid anyway.
+SAMPLE_RT = b"5070000001"      # round-trip test
+SAMPLE_NUMERIC = b"5070000002"  # empty-numeric-fields test
+
 
 def _lab(*rows):
     return (LAB_HEADER + "".join(rows)).encode("utf-8")
@@ -167,7 +176,7 @@ def test_publish_then_sync_real_drive_and_postgres(sot):
     ver = sot.publish(
         root,
         _lab(_lrow("SOTTEST_rt1", "hello", "Xin chao"), _lrow("SOTTEST_rt2", "thanks", "Cam on")),
-        b"sample_uid,class_uid\nSOTTEST_rts,SOTTEST_rt1\n",
+        b"sample_uid,class_uid\n" + SAMPLE_RT + b",SOTTEST_rt1\n",
         b"upload_uid\n",
     )
     assert sot.reader(root).list_version_dirs() == [ver]
@@ -175,7 +184,7 @@ def test_publish_then_sync_real_drive_and_postgres(sot):
     assert res.status == "applied"
     row = db._fetch_all("SELECT slug FROM classes WHERE class_uid='SOTTEST_rt2'")
     assert row and row[0]["slug"] == "thanks"
-    srow = db._fetch_all("SELECT 1 FROM samples WHERE sample_uid='SOTTEST_rts'")
+    srow = db._fetch_all("SELECT 1 FROM samples WHERE sample_uid=%s", (SAMPLE_RT.decode(),))
     assert srow
 
 
@@ -242,11 +251,12 @@ def test_empty_numeric_sample_fields_become_null(sot):
     samples = (
         b"sample_uid,class_uid,slug,source_type,user_id,session_id,fps_original,fps_processed,"
         b"seq_len,augment_id,completeness,file_path,created_at\n"
-        b"SOTTEST_n1,SOTTEST_nc,x,camera,u,sess1,,,,,,feat/x.npz,2026-07-18T00:00:00Z\n"
+        + SAMPLE_NUMERIC + b",SOTTEST_nc,x,camera,u,sess1,,,,,,feat/x.npz,2026-07-18T00:00:00Z\n"
     )
     sot.publish(root, _lab(_lrow("SOTTEST_nc", "x", "X")), samples, b"upload_uid\n")
     sot.sync(root)
-    row = db._fetch_all("SELECT seq_len, completeness FROM samples WHERE sample_uid='SOTTEST_n1'")
+    row = db._fetch_all("SELECT seq_len, completeness FROM samples WHERE sample_uid=%s",
+                        (SAMPLE_NUMERIC.decode(),))
     assert row and row[0]["seq_len"] is None and row[0]["completeness"] is None
 
 
