@@ -1,0 +1,21 @@
+{
+  "legacy_name_to_signer_id": {
+    "Trân": "S001",
+    "Minh": "S002",
+    "Tran": "S001",
+    "Ảnh": "S004",
+    "Hoàng Anh": "S005",
+    "trân": "S001",
+    "ha": "S007",
+    "minh": "S002",
+    "user1": "S009",
+    "Nhung": "S012",
+    "Khoa": "S013"
+  },
+  "merge_candidates_requiring_confirmation": [],
+  "account_ids_not_signers": {
+    "_comment": "signer_id suy ra tu TAI KHOAN thu thap, khong phai nguoi ky. Moi tai khoan duoi day duoc nhieu nguoi dung de ky, nen khong bao gio duoc dung lam danh tinh nguoi ky. Danh tinh that lay tu user_id roi tra qua legacy_name_to_signer_id.",
+    "S010": ["Khoa", "Nhung", "Trân"],
+    "S011": ["Khoa", "Minh", "Trân"]
+  }
+}

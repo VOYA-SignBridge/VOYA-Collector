@@ -22,6 +22,9 @@ EPOCHS=${EPOCHS:-80}
 # inside the container keeps running -- and this image has no ps or pkill to
 # find it with afterwards.
 MAX_CELLS=${MAX_CELLS:-0}
+# Give up once this many runs fail back to back (see the failure handler below).
+MAX_CONSECUTIVE_FAILURES=${MAX_CONSECUTIVE_FAILURES:-5}
+consecutive_failures=0
 
 ROOT=processed/splits/versions/$VERSION
 
@@ -98,9 +101,21 @@ for cell in $(find "$ROOT" -name train.csv | sort); do
     if [ -z "$line" ]; then
       echo "$tag FAILED" >> "$LOG"
       echo "  [$i/$total] $tag -> FAILED"
+      consecutive_failures=$((consecutive_failures + 1))
+      # Once training starts failing it usually keeps failing -- a CUDA fault or
+      # exhausted memory does not heal mid-run. Stopping early leaves a grid
+      # that can be resumed; carrying on burned 482 of 936 cells before anyone
+      # noticed, and every one of them had to be rerun anyway.
+      if [ "$consecutive_failures" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
+        echo "[DUNG] $consecutive_failures lan hong lien tiep — nhieu kha nang moi truong da hong."
+        echo "       Kiem tra GPU/bo nho, xoa cac dong FAILED khoi $LOG, roi chay lai de tiep tuc."
+        echo "[DUNG] $consecutive_failures lan hong lien tiep" >> "$LOG"
+        exit 4
+      fi
     else
       echo "$tag $line" >> "$LOG"
       echo "  [$i/$total] $tag -> $line"
+      consecutive_failures=0
     fi
   done
 done
