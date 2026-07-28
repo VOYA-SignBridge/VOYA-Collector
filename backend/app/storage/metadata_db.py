@@ -92,7 +92,7 @@ DDL_STATEMENTS = [
         folder_name TEXT,
         created_at TIMESTAMP WITH TIME ZONE,
         migrated_at TIMESTAMP WITH TIME ZONE,
-        deleted_at TIMESTAMP WITH TIME ZONE
+        deleted_at TIMESTAMP WITH TIME ZONE,
         hands_required INTEGER
     )
     """,
@@ -274,6 +274,53 @@ MIGRATION_STATEMENTS = [
         revoked_at TIMESTAMP WITH TIME ZONE
     )
     """,
+    # ---------------------------------------------------------------------
+    # Integrity constraints. Last in the list, because each one needs the
+    # tables above to exist. They live here rather than in the CREATE TABLE
+    # bodies so that databases predating them get them too — ensure_tables()
+    # runs this list on every startup, and CREATE ... IF NOT EXISTS / the
+    # duplicate_object catch makes each one idempotent.
+    #
+    # Every constraint corresponds to damage that actually happened to this
+    # dataset, not to a hypothetical:
+    #
+    #  - two classes sharing a class_idx silently merge two labels into one
+    #    model output slot (class_idx IS the output index — dataset_loader.py
+    #    maps class_idx-1 to the tensor index), and nothing prevented it;
+    #  - a sample_uid is uuid4().hex[:10], so it is always 10 lowercase hex
+    #    chars. One row reached the DB as '7,69E+10' because a uid of the form
+    #    <digits>e<digits> ("7690373e04") is valid scientific notation, and a
+    #    round-trip through a spreadsheet converted it to a float. The CHECK
+    #    rejects that at the door instead of leaving an unjoinable row behind;
+    #  - file_path is a local path; 728 rows once held a Drive URL there after
+    #    a sync wrote to the wrong column, which made every file lookup miss;
+    #  - samples.class_uid had no FK, so a class delete that ran before its
+    #    samples were deleted left orphans no class-scoped query could see.
+    #
+    # The partial WHERE deleted_at IS NULL is deliberate: soft-deleted rows sit
+    # in the Trash and must not block a new class reusing the same slug/idx.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_slug_lang_dialect "
+    "ON classes(slug, language, dialect) WHERE deleted_at IS NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_class_idx "
+    "ON classes(class_idx) WHERE deleted_at IS NULL AND class_idx IS NOT NULL",
+    """
+    DO $$ BEGIN
+        ALTER TABLE samples ADD CONSTRAINT samples_uid_is_hex10
+            CHECK (sample_uid ~ '^[0-9a-f]{10}$');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+    """,
+    """
+    DO $$ BEGIN
+        ALTER TABLE samples ADD CONSTRAINT samples_file_path_is_local
+            CHECK (file_path IS NULL OR file_path NOT LIKE 'http%');
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+    """,
+    """
+    DO $$ BEGIN
+        ALTER TABLE samples ADD CONSTRAINT samples_class_uid_fkey
+            FOREIGN KEY (class_uid) REFERENCES classes(class_uid);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+    """,
 ]
 
 def _column_exists(table: str, column: str) -> bool:
@@ -353,6 +400,101 @@ def ensure_tables():
             _execute(stmt)
         except Exception as exc:
             logger.warning("ensure_tables: index creation failed (ignored): %s : %s", getattr(exc, "pgerror", str(exc)), stmt)
+
+    verify_integrity_constraints()
+
+
+# Constraint name -> the query that finds the rows blocking it, so a failure
+# report can say WHICH data is in the way instead of only that something is.
+_INTEGRITY_CONSTRAINTS = {
+    "samples_uid_is_hex10": (
+        "samples",
+        "SELECT count(*) FROM samples WHERE sample_uid !~ '^[0-9a-f]{10}$'",
+        "sample_uid khong phai 10 ky tu hex",
+    ),
+    "samples_file_path_is_local": (
+        "samples",
+        "SELECT count(*) FROM samples WHERE file_path LIKE 'http%'",
+        "file_path dang chua URL thay vi duong dan cuc bo",
+    ),
+    "samples_class_uid_fkey": (
+        "samples",
+        "SELECT count(*) FROM samples s LEFT JOIN classes c ON c.class_uid = s.class_uid "
+        "WHERE s.class_uid IS NOT NULL AND c.class_uid IS NULL",
+        "mau mo coi: class_uid khong tro toi lop nao",
+    ),
+    "uq_classes_class_idx": (
+        "classes",
+        "SELECT coalesce(sum(n - 1), 0) FROM (SELECT count(*) AS n FROM classes "
+        "WHERE deleted_at IS NULL AND class_idx IS NOT NULL GROUP BY class_idx HAVING count(*) > 1) d",
+        "hai lop dung chung class_idx (= chung mot o dau ra cua model)",
+    ),
+    "uq_classes_slug_lang_dialect": (
+        "classes",
+        "SELECT coalesce(sum(n - 1), 0) FROM (SELECT count(*) AS n FROM classes "
+        "WHERE deleted_at IS NULL GROUP BY slug, language, dialect HAVING count(*) > 1) d",
+        "hai lop trung (slug, language, dialect)",
+    ),
+}
+
+
+def verify_integrity_constraints() -> list[str]:
+    """Report which integrity constraints are NOT in force, and why.
+
+    Postgres refuses to add a CHECK/FK/unique index that the existing rows
+    already violate, and ensure_tables() deliberately swallows DDL failures so
+    one bad statement cannot block startup. Those two behaviours combine badly:
+    on a database with pre-existing bad rows the constraints simply never
+    apply, startup looks healthy, and the guarantees are quietly absent. That
+    is how a deployment ends up believing it is protected when it is not.
+
+    Measured on a database seeded with the exact damage this dataset suffered
+    (an orphan sample, a spreadsheet-mangled uid, a Drive URL in file_path, two
+    classes on one class_idx): 4 of the 5 constraints failed to apply and the
+    only trace was a warning.
+
+    So state it plainly, once, at startup, naming the offending row count and
+    the fix. Returns the missing constraint names (empty list = fully armed).
+    """
+    missing: list[str] = []
+    for name, (table, offender_sql, why) in _INTEGRITY_CONSTRAINTS.items():
+        try:
+            with _cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_constraint WHERE conname = %s "
+                    "UNION ALL SELECT 1 FROM pg_indexes WHERE indexname = %s",
+                    (name, name),
+                )
+                if cur.fetchone() is not None:
+                    continue
+        except Exception as exc:
+            logger.warning("verify_integrity_constraints: cannot check %s: %s", name, exc)
+            continue
+
+        missing.append(name)
+        try:
+            with _cursor() as cur:
+                cur.execute(offender_sql)
+                bad = cur.fetchone()[0]
+        except Exception:
+            bad = "?"
+        logger.error(
+            "[INTEGRITY] %s KHONG duoc ap dung tren bang %s — %s hang dang vi pham (%s). "
+            "Du lieu xau phai duoc don truoc; rang buoc se tu dong ap dung o lan khoi dong sau.",
+            name, table, bad, why,
+        )
+
+    if missing:
+        logger.error(
+            "[INTEGRITY] %d/%d rang buoc KHONG co hieu luc: %s. "
+            "Database nay dang KHONG duoc bao ve khoi cac loi da tung xay ra.",
+            len(missing), len(_INTEGRITY_CONSTRAINTS), ", ".join(missing),
+        )
+    else:
+        logger.info("[INTEGRITY] du %d/%d rang buoc toan ven dang co hieu luc.",
+                    len(_INTEGRITY_CONSTRAINTS), len(_INTEGRITY_CONSTRAINTS))
+    return missing
+
 
 SQL_UPSERT_USER = """
 INSERT INTO users(id, username, email, password_hash, is_active, is_admin, created_at)

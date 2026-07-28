@@ -14,6 +14,7 @@ rows; a fixture deletes both afterwards, so live data is never touched.
 
 from __future__ import annotations
 
+import itertools
 import time
 import tempfile
 from pathlib import Path
@@ -53,7 +54,18 @@ def _lab(*rows):
     return (LAB_HEADER + "".join(rows)).encode("utf-8")
 
 
-def _lrow(uid, slug, label, idx=9000, dialect="common"):
+# class_idx is filler for these tests — nothing here asserts its value — but it
+# may not REPEAT. It is the model's output index, so classes(class_idx) carries a
+# unique index, and the old fixed default of 9000 made every synthetic row in a
+# test (and across tests sharing the database) collide on it. reader_sync upserts
+# row by row and merely logs a row it cannot write, so the collision surfaced as
+# a silently short sync rather than an error. Hand out a fresh index per row.
+_next_idx = itertools.count(9000)
+
+
+def _lrow(uid, slug, label, idx=None, dialect="common"):
+    if idx is None:
+        idx = next(_next_idx)
     return f"{uid},{idx},{slug},{label},vn,{dialect},0,0,class_{slug},2026-07-18T00:00:00Z,\n"
 
 

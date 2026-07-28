@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 from app.storage.metadata_db import _execute, _fetch_all, ensure_tables
 
 MOCK_CLASS_UID = "test-schema-class-001"
-MOCK_SAMPLE_UID = "test-schema-sample-001"
+# Must satisfy samples_uid_is_hex10: a real sample_uid is uuid4().hex[:10], and
+# the CHECK enforcing that is what stops a spreadsheet round-trip from turning a
+# uid like "7690373e04" into the float 7.69E+10. This test is about default
+# column backfill, so any valid-shaped uid does; it just may not be prose.
+MOCK_SAMPLE_UID = "dead0beef1"
 
 @pytest.fixture(autouse=True)
 def setup_and_teardown():

@@ -874,9 +874,15 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
             _write_samples_csv(remaining_sample_rows)
             _write_csv(RAW_UPLOADS_CSV, RAW_UPLOAD_FIELDS, remaining_raw_rows)
 
-            db_delete_class(old_meta.class_uid)
+            # Children BEFORE the parent. The reverse order left samples whose
+            # class_uid pointed at a row that no longer existed whenever the
+            # sample delete failed after the class delete succeeded — 39 such
+            # orphans accumulated in production, invisible to every class-scoped
+            # query. samples.class_uid now has a FK to classes, so the reverse
+            # order would also be rejected outright.
             db_delete_samples_by_class(old_meta.class_uid)
             db_delete_raw_uploads_by_class(old_meta.class_uid)
+            db_delete_class(old_meta.class_uid)
 
             # The label is gone — drop its cached TTS audio.
             _invalidate_tts_cache(old_meta.label_original)
