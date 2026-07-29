@@ -130,3 +130,45 @@ redis_data/
 deploy/public_hosts.txt
 !deploy/public_hosts.example.txt
 *.env.example
+
+# ---------------------------------------------------------------------------
+# Research release policy (ISDS 2026 paper pipeline)
+#
+# The blanket *.json / *.csv / *.md rules above keep datasets and trained
+# artifacts out of git, but they also swallow the research RECORDS the paper
+# depends on. Those are re-included explicitly below.
+#
+#   commit  -> records that justify a claim (why legacy checkpoints are
+#              invalid; the exact augmentation config the methodology cites)
+#   ignore  -> anything regenerable from artifacts (result tables, determinism
+#              logs, per-run audits, coverage dumps, pilot outputs)
+# ---------------------------------------------------------------------------
+
+# Generated / regenerable -> never committed
+reports/experiment_results.csv
+reports/experiment_results.tex
+reports/determinism_report.json
+reports/duplicate_audit.json
+reports/duplicate_audit.md
+reports/coverage_*.json
+reports/pilot_*.json
+reports/pilot_*.md
+reports/quality_stats_*.json
+reports/release_log_*.json
+reports/determinism/
+
+# Source files caught by the blanket *.txt rule
+!backend/requirements.txt
+!backend/requirements-dev.txt
+!backend/realtime_service/requirements.txt
+!processed/requirements-train.txt
+!processed/requirements-realtime.txt
+
+# Research records -> committed (negate the blanket rules above)
+!docs/
+!docs/**/*.md
+!reports/checkpoint_validity.md
+!reports/augmentation_contract.md
+!reports/augmentation_contract.json
+!release/
+!release/*.json

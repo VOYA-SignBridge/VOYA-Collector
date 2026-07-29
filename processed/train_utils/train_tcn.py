@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import os
+import platform
 import random
 import re
 import shutil
@@ -98,12 +99,32 @@ except Exception:
         detect_imbalance = None  # diagnostic optional
 
 try:
-    from .augmentation import build_train_augment
+    from .augmentation import build_train_augment, augment_config_dict
 except Exception:
     import sys
     from pathlib import Path as _P
     sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from processed.train_utils.augmentation import build_train_augment
+    from processed.train_utils.augmentation import build_train_augment, augment_config_dict
+
+try:
+    from processed.shared.vocabulary import (
+        RECOGNITION_PROFILES,
+        check_label_collisions,
+        label_key_v2,
+        select_rows_for_profile,
+        split_common_and_profile_labels,
+    )
+except Exception:
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.shared.vocabulary import (
+        RECOGNITION_PROFILES,
+        check_label_collisions,
+        label_key_v2,
+        select_rows_for_profile,
+        split_common_and_profile_labels,
+    )
 
 try:
     # When run as module: python -m processed.train_utils.train_tcn
@@ -135,18 +156,233 @@ except Exception:
 EXPECTED_FEATURE_DIM = 126
 
 
-def set_seed(seed: int) -> None:
+def _git_commit_hash() -> str:
+    """Best-effort HEAD commit for the checkpoint contract ('' if unavailable).
+
+    Falls back to parsing .git/HEAD directly — training containers usually
+    have the repo mounted but no git binary installed.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, cwd=str(repo_root),
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    try:
+        head = (repo_root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(None, 1)[1].strip()
+            ref_file = repo_root / ".git" / ref
+            if ref_file.exists():
+                return ref_file.read_text(encoding="utf-8").strip()
+            packed = repo_root / ".git" / "packed-refs"
+            if packed.exists():
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    if line.endswith(ref):
+                        return line.split()[0]
+            return ""
+        return head
+    except Exception:
+        return ""
+
+
+def _read_split_manifest_checksum(train_csv: Path) -> str:
+    """Read dataset_manifest_checksum from split_metadata.json next to the
+    split CSVs (written by make_splits manifest mode). '' when absent."""
+    try:
+        meta_path = Path(train_csv).resolve().parent / "split_metadata.json"
+        if meta_path.exists():
+            return str(json.loads(meta_path.read_text(encoding="utf-8")).get(
+                "dataset_manifest_checksum", ""))
+    except Exception:
+        pass
+    return ""
+
+
+CUBLAS_DETERMINISTIC_CONFIG = ":4096:8"
+
+
+def _enforce_augmentation_contract(aug_cfg: dict, run_purpose: str) -> None:
+    """Refuse to train on an augmentation config that cannot be trusted.
+
+    Guards the three ways the augmentation contract can silently go wrong:
+      1. the config carries no contract version at all;
+      2. the mirror implementation drifts from the wrist-centered reflection
+         the contract promises;
+      3. temporal masking is switched back on while the model input has no
+         frame-validity channel to disambiguate a masked frame from a padded
+         one or from "both hands absent".
+    """
+    from processed.train_utils.augmentation import (
+        AUGMENTATION_CONTRACT_VERSION, SignAugment,
+    )
+
+    def _fail(msg: str) -> None:
+        if run_purpose == "research":
+            raise SystemExit(f"[AUGMENT][CONTRACT] {msg}")
+        print(f"[AUGMENT][CONTRACT][WARN] {msg}")
+
+    if not aug_cfg.get("enabled", False):
+        return
+
+    version = str(aug_cfg.get("augmentation_contract_version") or "")
+    if not version:
+        _fail("augmentation config carries no augmentation_contract_version; "
+              "the run would not be attributable to a mirror implementation.")
+    elif version != AUGMENTATION_CONTRACT_VERSION:
+        _fail(f"augmentation_contract_version '{version}' != code version "
+              f"'{AUGMENTATION_CONTRACT_VERSION}'.")
+
+    # Behavioural check: reflect a synthetic wrist-centered hand and verify the
+    # wrist stays at the origin and the span is preserved. Catches a mirror
+    # implementation that drifted back to the image-space form.
+    probe = np.zeros((60, 126), dtype=np.float32)
+    hand = np.linspace(0.05, 0.35, 21 * 3).astype(np.float32).reshape(21, 3)
+    hand[0, 0] = 0.0
+    hand[0, 1] = 0.0
+    probe[:, :63] = hand.reshape(-1)
+    mirrored = SignAugment(
+        p=1.0, noise_std=0.0, scale_range=(1.0, 1.0), translation_std=0.0,
+        dropout_prob=0.0, temporal_mask_prob=0.0, temporal_jitter_prob=0.0,
+        mirror_prob=1.0, max_temporal_shift=0,
+    )(probe).reshape(60, 2, 21, 3)
+    src_x = hand[:, 0]
+    dst_x = mirrored[0, 1, :, 0]  # slots are swapped by the mirror
+    if abs(float(dst_x[0])) > 1e-6:
+        _fail(f"mirror moved the wrist off the origin (x={float(dst_x[0]):.4f}); "
+              f"implementation does not match the wrist-centered contract.")
+    span_src = float(src_x.max() - src_x.min())
+    span_dst = float(dst_x.max() - dst_x.min())
+    if span_src > 1e-6 and abs(span_dst / span_src - 1.0) > 1e-3:
+        _fail(f"mirror changed hand span by {span_dst / span_src:.2f}x; "
+              f"expected an isometry.")
+
+    if float(aug_cfg.get("temporal_mask_prob", 0.0)) > 0.0:
+        _fail("temporal_mask_prob > 0 but the model input has no frame-validity "
+              "channel: a masked frame is indistinguishable from padding and "
+              "from a both-hands-absent frame.")
+
+
+def _enforce_research_preconditions(args, cfg, manifest_checksum: str) -> None:
+    """--run-purpose research: provenance and split validity must hold BEFORE
+    a long training run burns compute and produces an uncitable checkpoint."""
+    problems = []
+    if not str(args.dataset_version or "").strip():
+        problems.append("--dataset_version is empty")
+    if not str(args.split_version or "").strip():
+        problems.append("--split_version is empty")
+    if not manifest_checksum:
+        problems.append("no dataset_manifest_checksum found next to the split "
+                        "(generate splits with make_splits.py --dataset_manifest ...)")
+    if not _git_commit_hash():
+        problems.append("git commit hash unavailable; run provenance cannot be pinned")
+
+    meta_path = Path(cfg.train_csv).resolve().parent / "split_metadata.json"
+    if not meta_path.exists():
+        # cfg.train_csv may already point at the filtered copy in run_dir
+        meta_path = Path(args.train_csv).resolve().parent / "split_metadata.json"
+    if not meta_path.exists():
+        problems.append(f"split_metadata.json not found next to {args.train_csv}")
+    else:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            problems.append(f"split_metadata.json unreadable: {exc}")
+            meta = {}
+        if "valid_for_research" not in meta:
+            problems.append("split_metadata.json predates the validity gate "
+                            "(no valid_for_research field) — regenerate the split")
+        elif not meta.get("valid_for_research"):
+            reasons = "; ".join(meta.get("invalid_reasons") or ["unspecified"])
+            problems.append(f"split is not valid for research: {reasons}")
+
+    if problems:
+        detail = "\n  - ".join(problems)
+        raise SystemExit(
+            f"[RESEARCH] refusing to start a research run:\n  - {detail}\n"
+            f"Fix the above, or use --run-purpose smoke_test for an exploratory run.")
+    print("[RESEARCH] preconditions OK — provenance and split validity verified.")
+
+
+def set_seed(seed: int, *, strict: bool = False, mode: str = "strict") -> dict:
+    """Seed every RNG and request deterministic kernels.
+
+    Returns a report describing what was actually achieved, so callers (and the
+    checkpoint) can record whether the run was genuinely deterministic instead
+    of assuming it. With strict=True a failure to enable deterministic
+    algorithms raises instead of degrading silently.
+
+    mode="fast" seeds every RNG exactly the same but leaves kernel selection
+    free. Chỉ dành cho run thăm dò: cuDNN phải dùng thuật toán backward
+    deterministic cho dilated Conv1d, và trên GPU này nó chậm hơn ~170 lần
+    (4 ms -> 750 ms mỗi batch với TCN). Chế độ đã dùng luôn được ghi vào
+    checkpoint nên không thể nhầm run thăm dò với run cho bài báo.
+
+    NOTE: on CUDA, torch requires CUBLAS_WORKSPACE_CONFIG to be set BEFORE the
+    CUDA context is created. Setting it here is already too late if a tensor
+    has been allocated; scripts/verify_determinism.py sets it in the child
+    environment before launching.
+    """
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+
+    cublas_cfg = os.environ.get("CUBLAS_WORKSPACE_CONFIG", "")
+    using_cuda = torch.cuda.is_available()
+    fast_mode = str(mode).lower() == "fast"
+
+    torch.backends.cudnn.deterministic = not fast_mode
+    torch.backends.cudnn.benchmark = fast_mode
+
+    report = {
+        "seed": int(seed),
+        "mode": "fast" if fast_mode else "strict",
+        "cudnn_deterministic": not fast_mode,
+        "cublas_workspace_config": cublas_cfg,
+        "deterministic_algorithms": False,
+        "warnings": [],
+    }
+
+    if fast_mode:
+        msg = (
+            "determinism=fast: kernel không deterministic, kết quả KHÔNG tái lập "
+            "bit-for-bit. Chỉ dùng cho run thăm dò, không dùng cho số liệu bài báo."
+        )
+        report["warnings"].append(msg)
+        print(f"[DETERMINISM][WARN] {msg}")
+        return report
+
+    if using_cuda and cublas_cfg not in (":4096:8", ":16:8"):
+        msg = (
+            "CUDA is available but CUBLAS_WORKSPACE_CONFIG is not set to "
+            f"'{CUBLAS_DETERMINISTIC_CONFIG}' (got {cublas_cfg!r}); cuBLAS matmuls "
+            "may be non-deterministic across runs."
+        )
+        if strict:
+            raise RuntimeError(msg)
+        report["warnings"].append(msg)
+        print(f"[DETERMINISM][WARN] {msg}")
+
     try:
         torch.use_deterministic_algorithms(True)
-    except Exception:
-        pass
+        report["deterministic_algorithms"] = True
+    except Exception as exc:
+        msg = f"torch.use_deterministic_algorithms(True) failed: {exc}"
+        if strict:
+            raise RuntimeError(msg) from exc
+        report["warnings"].append(msg)
+        # Loud, not silent: a swallowed failure here silently invalidates any
+        # reproducibility claim made about the run.
+        print(f"[DETERMINISM][WARN] {msg}")
+
+    return report
 
 
 def _seed_worker(worker_id: int) -> None:
@@ -686,8 +922,9 @@ def build_checkpoint(
     te_f1=None,
     te_hand_metrics=None,
     stamp="",
+    contract_extra: Optional[Dict[str, object]] = None,
 ):
-    return {
+    ckpt = {
         "schema_version": "1.0",
 
         "model_state_dict": {
@@ -702,6 +939,8 @@ def build_checkpoint(
             "levels": cfg.levels,
             "kernel_size": cfg.kernel_size,
             "dropout": cfg.dropout,
+            # Persist the temporal pooling so realtime rebuilds the exact head.
+            "temporal_pool": getattr(model, "temporal_pool", "gap"),
         },
 
         "feature_dim": EXPECTED_FEATURE_DIM,
@@ -736,6 +975,9 @@ def build_checkpoint(
 
         "created_at": stamp,
     }
+    if contract_extra:
+        ckpt.update(contract_extra)
+    return ckpt
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a TCN classifier on NPZ sign-sequence features.")
@@ -757,7 +999,41 @@ def main() -> None:
         "--dialect",
         action="append",
         default=None,
-        help="Optional: filter to one or more dialects (can repeat or comma-separate). Example: --dialect bac",
+        help="[DEPRECATED — legacy experiments only] filter by legacy dialect column. "
+             "New experiments must use --recognition_profile / --unified.",
+    )
+    # --- Vocabulary schema v2: recognition-profile training ---
+    parser.add_argument(
+        "--recognition_profile",
+        type=str,
+        default="",
+        choices=["", *RECOGNITION_PROFILES],
+        help="Train a profile model: common vocabulary + this profile's vocabulary. "
+             "One of: " + ", ".join(RECOGNITION_PROFILES),
+    )
+    parser.add_argument(
+        "--include_common", dest="include_common", action="store_true", default=False,
+        help="EXPLICITLY include common vocabulary in the profile model. "
+             "Default: false — profiles (including the standalone 'alphabet') train independently.",
+    )
+    parser.add_argument("--no_include_common", dest="include_common", action="store_false",
+                        help="[kept for compatibility — no-op now that the default is false]")
+    parser.add_argument(
+        "--unified", action="store_true",
+        help="Unified baseline: common + every validly-assigned profile (mutually exclusive with --recognition_profile)",
+    )
+    parser.add_argument("--dataset_version", type=str, default="unversioned",
+                        help="Dataset manifest version this run trains on (goes into output path + checkpoint)")
+    parser.add_argument("--split_version", type=str, default="unversioned",
+                        help="Split version identifier (goes into output path + checkpoint)")
+    parser.add_argument(
+        "--augmentation_profile", type=str, default="full",
+        choices=["none", "spatial", "temporal", "full"],
+        help="Train-time augmentation profile (validation/test are never augmented)",
+    )
+    parser.add_argument(
+        "--aug_set", action="append", default=None, metavar="KEY=VALUE",
+        help="Override an augmentation parameter, e.g. --aug_set mirror_probability=0.0 (repeatable)",
     )
     parser.add_argument(
         "--filter_language",
@@ -813,7 +1089,33 @@ def main() -> None:
     parser.add_argument("--channels", type=int, default=64)
     parser.add_argument("--levels", type=int, default=3)
     parser.add_argument("--kernel_size", type=int, default=5)
+    parser.add_argument(
+        "--temporal_pool", type=str, default="attention",
+        choices=["gap", "attention", "mean_max"],
+        help="TCN time-axis aggregation. 'attention' (default) keeps temporal "
+             "order — better for dynamic multi-action phrases; 'gap' is the legacy "
+             "order-agnostic average (only for reproducing old runs).",
+    )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--run-purpose", dest="run_purpose", type=str, default="smoke_test",
+        choices=["smoke_test", "research"],
+        help="Declare what this run is for. Defaults to smoke_test so an "
+             "exploratory run can NEVER drift into a paper table: "
+             "aggregate_experiment_results.py only reports run_purpose=research. "
+             "Pass --run-purpose research for an official experiment; it also "
+             "enforces provenance and split validity before training starts.",
+    )
+    parser.add_argument(
+        "--determinism", type=str, default="strict", choices=["strict", "fast"],
+        help="strict (mặc định): kernel deterministic, tái lập bit-for-bit — dùng "
+             "cho mọi số liệu đưa vào bài báo. fast: bỏ ràng buộc kernel, TCN nhanh "
+             "hơn ~170 lần nhưng KHÔNG tái lập; chỉ dùng để thử nghiệm. Chế độ được "
+             "ghi vào checkpoint (determinism.mode).",
+    )
+    # pick_device() comes from the deploy line: it also copes with GPUs whose
+    # compute capability this torch build has no kernels for (Blackwell), which
+    # torch.cuda.is_available() reports as usable and then fails on first use.
     parser.add_argument("--device", type=str, default=pick_device())
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
@@ -856,11 +1158,38 @@ def main() -> None:
         out_dir=args.out_dir,
     )
 
-    set_seed(cfg.seed)
+    if args.determinism == "fast" and args.run_purpose == "research":
+        raise SystemExit(
+            "[RESEARCH] --determinism=fast không dùng được với --run-purpose research: "
+            "số liệu bài báo phải tái lập bit-for-bit."
+        )
+    determinism_report = set_seed(cfg.seed, mode=args.determinism)
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
     dialects = _parse_multi_values(args.dialect)
     languages = _parse_multi_values(args.filter_language)
+
+    profile_mode = bool(args.recognition_profile or args.unified)
+    if args.unified and args.recognition_profile:
+        raise SystemExit("--unified and --recognition_profile are mutually exclusive.")
+    if profile_mode and (dialects or languages):
+        raise SystemExit("--recognition_profile/--unified cannot be combined with the "
+                         "deprecated --dialect/--filter_language flags.")
+    if dialects:
+        print("[DEPRECATED] --dialect is a legacy-compatibility flag. New experiments "
+              "must use --recognition_profile or --unified (vocabulary schema v2).")
+
+    # Parse augmentation overrides (KEY=VALUE)
+    aug_overrides: Dict[str, object] = {}
+    for kv in (args.aug_set or []):
+        if "=" not in kv:
+            raise SystemExit(f"--aug_set expects KEY=VALUE, got '{kv}'")
+        k, v = kv.split("=", 1)
+        try:
+            aug_overrides[k.strip()] = float(v)
+        except ValueError:
+            raise SystemExit(f"--aug_set value must be numeric: '{kv}'")
+
     subset_mode = bool(dialects or languages)
 
     # For subset runs, create a filtered copy of split CSVs and a local label mapping.
@@ -868,7 +1197,127 @@ def main() -> None:
     features_root: Optional[Path] = None
     label_to_index_json: Optional[Path] = None
     subset_tag = ""
-    if subset_mode:
+    subset_dir: Optional[Path] = None
+    common_labels: List[str] = []
+    profile_specific_labels: List[str] = []
+    manifest_checksum = ""
+    motion_types_present: List[str] = []
+
+    if profile_mode:
+        # ------------------------------------------------------------------
+        # Vocabulary schema v2: common + selected profile (or unified).
+        # Split CSVs must carry vocabulary_scope/recognition_profile columns
+        # (produced by make_splits --dataset_manifest ...).
+        # ------------------------------------------------------------------
+        features_root = (args.features_root if args.features_root is not None
+                         else _find_features_root_from_csv(cfg.train_csv))
+        if features_root is None:
+            try:
+                dataset_root = cfg.train_csv.resolve().parents[2]
+                features_root = dataset_root / "dataset" / "features"
+            except Exception:
+                features_root = None
+        if features_root is None or not features_root.exists():
+            raise SystemExit("Profile mode requires locating the 'features' folder.")
+
+        profile_tag = "unified" if args.unified else args.recognition_profile
+        subset_tag = profile_tag
+        run_dir = (args.out_dir / args.dataset_version / profile_tag /
+                   args.split_version / args.model_type / f"seed_{args.seed}")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        subset_dir = run_dir
+        # Capture the manifest checksum from the ORIGINAL split dir before
+        # cfg.train_csv is repointed at the filtered copy in run_dir.
+        manifest_checksum = _read_split_manifest_checksum(cfg.train_csv)
+
+        def _prep_profile_csv(src_csv: Path, name: str) -> Path:
+            rows, fieldnames = _read_csv_rows(src_csv)
+            if rows and "vocabulary_scope" not in rows[0]:
+                raise SystemExit(
+                    f"{name} split CSV has no vocabulary schema v2 columns "
+                    f"(vocabulary_scope/recognition_profile). Generate splits with "
+                    f"make_splits.py --dataset_manifest ... first: {src_csv}")
+            rows = select_rows_for_profile(
+                rows,
+                recognition_profile=(args.recognition_profile or None),
+                include_common=args.include_common,
+                unified=args.unified,
+            )
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split empty after filtering.")
+            for r in rows:
+                r["label_key"] = label_key_v2(
+                    r.get("language") or "vn", r.get("vocabulary_scope") or "",
+                    r.get("recognition_profile") or "",
+                    r.get("slug") or r.get("label_slug") or "")
+                if not (r.get("label_slug") or "").strip():
+                    r["label_slug"] = (r.get("slug") or "").strip()
+            collisions = check_label_collisions(rows)
+            if collisions:
+                raise SystemExit(f"Label collision between common and profile-specific "
+                                 f"vocabulary: {collisions} — resolve before training.")
+            fieldnames = _ensure_cols(fieldnames, ["label_key", "label_slug", "label_original"])
+            rows = _filter_rows_with_existing_features(
+                rows, features_root=features_root, default_language="vn", label=f"{name} split")
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split empty after "
+                                 f"removing missing feature files.")
+            out_csv = run_dir / f"{name}.csv"
+            _write_csv_rows(out_csv, rows, fieldnames)
+            return out_csv
+
+        sub_train = _prep_profile_csv(cfg.train_csv, "train")
+        sub_val = _prep_profile_csv(cfg.val_csv, "val")
+        sub_test = _prep_profile_csv(cfg.test_csv, "test")
+
+        train_rows, _ = _read_csv_rows(sub_train)
+        l2i, i2l = _build_subset_label_maps(train_rows, default_language="vn")
+        if len(l2i) < 2:
+            raise SystemExit(f"Profile '{profile_tag}': need at least 2 classes, got {len(l2i)}.")
+        common_labels, profile_specific_labels = split_common_and_profile_labels(list(l2i.keys()))
+
+        # Hard cross-profile guard: a profile checkpoint must never contain
+        # another profile's labels (alphabet vs regional vs hoa_de isolation).
+        if not args.unified:
+            allowed = {f"vn/{args.recognition_profile}/"}
+            if args.include_common:
+                allowed.add("vn/common/")
+            foreign = [k for k in l2i if not any(k.startswith(p) for p in allowed)]
+            assert not foreign, (
+                f"Cross-profile label leak into '{profile_tag}' label space: {foreign[:5]}")
+
+        # Motion types present in this label space (checkpoint contract field).
+        motion_types_present = sorted(
+            {(r.get("motion_type") or "").strip() or "unknown" for r in train_rows})
+
+        def _filter_profile_known(src_csv: Path, name: str) -> None:
+            rows, fieldnames = _read_csv_rows(src_csv)
+            before = len(rows)
+            rows = [r for r in rows if (r.get("label_key") or "").strip() in l2i]
+            if before - len(rows) > 0:
+                print(f"Profile '{profile_tag}': removed {before - len(rows)} rows "
+                      f"from {name} due to labels unseen in train.")
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split became empty.")
+            _write_csv_rows(src_csv, rows, fieldnames)
+
+        _filter_profile_known(sub_val, "val")
+        _filter_profile_known(sub_test, "test")
+
+        label_to_index_json = run_dir / "label_to_index.json"
+        (run_dir / "label_to_index.json").write_text(
+            json.dumps(l2i, indent=2, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "index_to_label.json").write_text(
+            json.dumps({str(k): v for k, v in i2l.items()}, indent=2, ensure_ascii=False),
+            encoding="utf-8")
+
+        cfg.train_csv, cfg.val_csv, cfg.test_csv = sub_train, sub_val, sub_test
+        cfg.out_dir = run_dir
+        subset_mode = True  # reuse downstream subset bookkeeping (tag/summary/tracking)
+        print(f"[PROFILE] {profile_tag}: common={len(common_labels)} "
+              f"profile_specific={len(profile_specific_labels)} classes={len(l2i)}")
+
+    if subset_mode and not profile_mode:
         # Determine an absolute features root so generated CSVs can live anywhere.
         features_root = ( args.features_root if args.features_root is not None else _find_features_root_from_csv(cfg.train_csv) )
         if features_root is None:
@@ -1012,6 +1461,7 @@ def main() -> None:
             "levels": cfg.levels,
             "kernel_size": cfg.kernel_size,
             "dropout": cfg.dropout,
+            "temporal_pool": args.temporal_pool,  # TCN only; others ignore it
         }
         model = model_class.from_config(
             input_dim=in_dim,
@@ -1030,7 +1480,13 @@ def main() -> None:
     print(f"Input Dim: {in_dim} | Output Dim: {num_classes}")
     print(f"{'='*70}")
 
-    train_augment = build_train_augment()
+    train_augment = build_train_augment(args.augmentation_profile, aug_overrides)
+    augmentation_config = augment_config_dict(args.augmentation_profile, aug_overrides)
+    print(f"[AUGMENT] profile={args.augmentation_profile} overrides={aug_overrides or '{}'}")
+
+    _enforce_augmentation_contract(augmentation_config, args.run_purpose)
+    if args.run_purpose == "research":
+        _enforce_research_preconditions(args, cfg, manifest_checksum)
 
     train_loader = build_loader(
         cfg.train_csv,
@@ -1212,8 +1668,22 @@ def main() -> None:
             tracker.update_status(experiment_id, "failed")
         raise
 
-    if best_state is not None:
+    # C13: test metrics must come from the restored best-validation state, and
+    # the checkpoint must SAY so rather than leaving it to be assumed.
+    restored_best_state = best_state is not None
+    if restored_best_state:
         model.load_state_dict(best_state)  # type: ignore[arg-type]
+    else:
+        print("[WARN] no best-validation state was captured; test metrics come from "
+              "the final epoch. This run is NOT research-valid (C13).")
+    model_selection = {
+        "criterion": "val_macro_f1",
+        "restored_best_state": bool(restored_best_state),
+        "best_epoch": int(_best_epoch_track),
+        "best_val_f1": float(best_val_f1),
+        "best_val_acc": float(_best_val_acc_track),
+        "early_stopping_patience": int(patience),
+    }
 
     te_loss, te_acc, te_f1, te_hand_metrics = evaluate_with_handedness(model, test_loader, cfg.device, num_classes)
 
@@ -1243,6 +1713,38 @@ def main() -> None:
 
     # save
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cfg_json_for_ckpt = {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(cfg).items()}
+    contract_extra = {
+        "vocabulary_schema_version": "v2" if profile_mode else "v1_legacy",
+        "recognition_profile": (args.recognition_profile or ("unified" if args.unified else "")),
+        "include_common": bool(args.include_common),
+        "unified": bool(args.unified),
+        "dataset_version": args.dataset_version,
+        "split_version": args.split_version,
+        "preprocess_contract_version": "v2",
+        "storage_contract_version": "npz_v2",
+        "motion_types_present": motion_types_present,
+        "common_labels": common_labels,
+        "profile_specific_labels": profile_specific_labels,
+        "seed": int(cfg.seed),
+        "run_purpose": args.run_purpose,
+        "run_status": "completed",
+        "model_selection": model_selection,
+        "determinism": determinism_report,
+        "runtime_env": {
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "pytorch_version": str(torch.__version__),
+            "numpy_version": np.__version__,
+            "cuda_version": torch.version.cuda or "none",
+            "cudnn_version": (torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None),
+            "device": cfg.device,
+            "platform": platform.platform(),
+        },
+        "git_commit": _git_commit_hash(),
+        "training_config": {**cfg_json_for_ckpt, "model_type": args.model_type,
+                            "augmentation": augmentation_config},
+        "dataset_manifest_checksum": manifest_checksum or _read_split_manifest_checksum(cfg.train_csv),
+    }
     final_checkpoint = build_checkpoint(
         model=model,
         cfg=cfg,
@@ -1253,6 +1755,7 @@ def main() -> None:
         te_f1=te_f1,
         te_hand_metrics=te_hand_metrics,
         stamp=stamp,
+        contract_extra=contract_extra,
     )
     # Use actual model name instead of hardcoded "tcn"
     # Clean up model name: remove special chars, normalize spaces
@@ -1284,7 +1787,7 @@ def main() -> None:
         _dialect_model_track = "+".join(dialects) if dialects else "all"
         _runtime_env_track = {
             "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            "pytorch_version": torch.__version__,
+            "pytorch_version": str(torch.__version__),
             "cuda_version": torch.version.cuda or "none",
             "device": cfg.device,
         }
@@ -1312,6 +1815,13 @@ def main() -> None:
 
     summary = {
         "timestamp": stamp,
+        "vocabulary_schema_version": contract_extra["vocabulary_schema_version"],
+        "recognition_profile": contract_extra["recognition_profile"],
+        "dataset_version": args.dataset_version,
+        "split_version": args.split_version,
+        "git_commit": contract_extra["git_commit"],
+        "augmentation": augmentation_config,
+        "dataset_manifest_checksum": contract_extra["dataset_manifest_checksum"],
         "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
         "config": cfg_json,
         "in_dim": in_dim,

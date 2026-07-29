@@ -9,6 +9,8 @@ import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
 import { ChipIcon, HandIcon, HomeIcon, RefreshIcon, TagIcon, UploadIcon } from "./ui/Icons";
+import { useToast } from "../hooks/useToast";
+import { requestNewSession } from "../utils/session";
 import Footer from "./Footer";
 
 const AUTH_EVENT = "voya:auth-change";
@@ -25,6 +27,7 @@ export type AnyNavItem = FlatNavItem | NavSection;
 export default function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const { toast } = useToast();
   const location = useLocation();
   // User comes from the single shared AuthProvider (no duplicate /auth/me here).
   const { user } = useAuth();
@@ -93,10 +96,14 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const handleNewSession = useCallback(() => {
     setSidebarOpen(false);
-    // Hard reload for a clean, reliable fresh start (navigate(0) can no-op inside
-    // Suspense/lazy boundaries — window.location.reload always works).
-    window.location.reload();
-  }, []);
+    // Trước đây nút này gọi window.location.reload(). Reload thật sự có cấp
+    // session_id mới, nhưng mọi chỗ hiển thị phiên đều đang tắt (SessionPanel
+    // nằm sau cờ SHOW_ADVANCED), nên màn hình sau reload y hệt trước đó và
+    // người dùng tưởng nút hỏng. Giờ chỉ nơi đang thu mới reset — kèm toast xác
+    // nhận để luôn có phản hồi thấy được.
+    requestNewSession();
+    toast.success("Đã bắt đầu phiên thu mới");
+  }, [toast]);
 
   const handleLogout = useCallback(async () => {
     setSidebarOpen(false);

@@ -123,12 +123,20 @@ export const getClassesList = async (language?: string, dialect?: string): Promi
     }
 
     // Normalize class_idx to number (BE returns string, sometimes empty)
-    items = items.map(item => ({
-      ...item,
-      class_idx: item.class_idx === '' || item.class_idx === null || item.class_idx === undefined 
-        ? -1 
-        : (typeof item.class_idx === 'string' ? parseInt(item.class_idx, 10) : Number(item.class_idx))
-    }));
+    // and hands_required to 1 | 2 | null (BE returns ""/"1"/"2" strings)
+    items = items.map(item => {
+      const rawHands = item.hands_required;
+      const handsNum = rawHands === '' || rawHands === null || rawHands === undefined
+        ? null
+        : Number(rawHands);
+      return {
+        ...item,
+        class_idx: item.class_idx === '' || item.class_idx === null || item.class_idx === undefined
+          ? -1
+          : (typeof item.class_idx === 'string' ? parseInt(item.class_idx, 10) : Number(item.class_idx)),
+        hands_required: handsNum === 1 || handsNum === 2 ? handsNum : null,
+      };
+    });
 
     const data: ClassesListResponse = { count, items };
     

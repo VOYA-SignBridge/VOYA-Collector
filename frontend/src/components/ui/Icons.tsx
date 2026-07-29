@@ -237,3 +237,50 @@ export function XIcon(props: SVGProps<SVGSVGElement>) {
     </Icon>
   );
 }
+
+export function AlertTriangleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M12 4.2 21 19H3L12 4.2Z" />
+      <path d="M12 10v4" />
+      <circle cx="12" cy="16.8" r="0.15" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+export function InfoCircleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11v5.5" />
+      <circle cx="12" cy="8" r="0.15" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+export function CopyIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect x="9" y="9" width="11" height="11" rx="1.5" />
+      <path d="M6.5 15H5.5A1.5 1.5 0 0 1 4 13.5v-8A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v1" />
+    </Icon>
+  );
+}
+
+export function PlayCircleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M10.3 8.7v6.6l5.4-3.3-5.4-3.3Z" />
+    </Icon>
+  );
+}
+
+export function ArrowUpCircleIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 15.5v-7M8.7 11.8 12 8.5l3.3 3.3" />
+    </Icon>
+  );
+}

@@ -1,6 +1,8 @@
 import type { Session, Label, UploadResult, JobStatus, ClassRow } from "../types";
 
-export type Result<T> = { ok: true; data: T } | { ok: false; error: string };
+export type Result<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; errorCode?: string };
 
 export function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;

@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, List
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .base import SignLanguageModel, initialize_kaiming
 
@@ -25,6 +26,7 @@ class DistanceAwareGCNLayer(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, max_distance: int = 2):
         super().__init__()
         self.max_distance = max_distance
+        self.out_channels = out_channels
         # We need a linear projection for each distance matrix
         self.linear_layers = nn.ModuleList([
             nn.Linear(in_channels, out_channels) for _ in range(max_distance + 1)
@@ -44,24 +46,31 @@ class DistanceAwareGCNLayer(nn.Module):
             adjs: List of normalized adjacency matrices [N, N], length = max_distance + 1
         """
         B, N, C = x.shape
-        out = torch.zeros(B, N, self.linear_layers[0].out_features, device=x.device)
-        
+
+        # Gộp các phép chiếu theo khoảng cách thành MỘT gemm rồi mới tách.
+        # Trọng số vẫn nằm ở từng nn.Linear (state_dict không đổi), chỉ ghép lại
+        # lúc forward — rẻ vì ma trận trọng số bé, trong khi x là [batch*T, N, C].
+        weight = torch.cat([lin.weight for lin in self.linear_layers], dim=0)
+        bias = torch.cat([lin.bias for lin in self.linear_layers], dim=0)
+        projections = F.linear(x, weight, bias).split(self.out_channels, dim=-1)
+
+        out: Optional[torch.Tensor] = None
         for d in range(self.max_distance + 1):
-            adj = adjs[d].unsqueeze(0).expand(B, -1, -1).to(x.device)
-            # x -> linear -> [B, N, out_channels]
-            x_proj = self.linear_layers[d](x)
-            # A_d @ x_proj
-            out = out + torch.bmm(adj, x_proj)
-            
-        out = out.permute(0, 2, 1)  # [B, out_channels, N]
-        out = self.bn(out)
-        out = out.permute(0, 2, 1)  # [B, N, out_channels]
+            # A_d @ x_proj. matmul broadcasts [N,N] over the batch, nên không
+            # phải expand adjacency thành B bản rồi bmm như trước.
+            contrib = torch.matmul(adjs[d], projections[d])
+            out = contrib if out is None else out + contrib
+
+        # BatchNorm1d thống kê theo channel: gộp [B,N,C] -> [B*N,C] cho ra đúng
+        # cùng mean/var với đường [B,C,N], nhưng bỏ được 2 lần permute trên
+        # tensor lớn (B ở đây là batch*seq_len nên mỗi permute là một bản copy).
+        out = self.bn(out.reshape(B * N, -1)).reshape(B, N, -1)
         return self.relu(out)
 
 
 class HandGCNModel(SignLanguageModel):
     """
-    Hierarchical Distance-aware Graph Convolutional Network (HD-GCN) for Hands.
+    HandGCN — a hierarchical distance-aware Graph Convolutional Network for hands.
     
     Architecture:
     - Treats hand keypoints as graph nodes.
@@ -82,7 +91,7 @@ class HandGCNModel(SignLanguageModel):
         max_distance: int = 2,
         **kwargs,
     ):
-        super().__init__(input_dim, output_dim, name="HD-GCN")
+        super().__init__(input_dim, output_dim, name="HandGCN")
         self.num_nodes = num_nodes
         self.gcn_channels = gcn_channels
         self.num_gcn_layers = num_gcn_layers
@@ -235,9 +244,7 @@ class HandGCNModel(SignLanguageModel):
             x_graph = gcn_layer(x_graph, fine_adjs)
             
         # 3. Hierarchical Pooling (42 nodes -> 12 nodes)
-        P = self.hierarchical_pooling_matrix.to(x_graph.device)
-        P = P.unsqueeze(0).expand(B * T, -1, -1)
-        x_part = torch.bmm(P, x_graph)
+        x_part = torch.matmul(self.hierarchical_pooling_matrix, x_graph)
         
         # 4. Part level Distance-aware GCN
         part_adjs = [getattr(self, f"part_adj_d{d}") for d in range(self.max_distance + 1)]
@@ -286,7 +293,7 @@ class HandGCNModel(SignLanguageModel):
 
     def get_config(self) -> Dict[str, Any]:
         return {
-            "model": "HD-GCN",
+            "model": "HandGCN",
             "input_dim": self.input_dim,
             "output_dim": self.output_dim,
             "num_nodes": self.num_nodes,

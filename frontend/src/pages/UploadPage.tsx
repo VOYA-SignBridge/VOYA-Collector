@@ -20,19 +20,12 @@ export default function UploadPage() {
   const [tab, setTab] = useState<"video" | "camera">("camera"); // Start with camera for faster data collection
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [todayStats, setTodayStats] = useState({ samples: 0, sessions: 0 });
   const [quickLabels] = useState([
     "walking", "running", "sitting", "standing", 
     "jumping", "waving", "pointing", "clapping"
   ]);
   // Feature flag to hide quick label suggestions temporarily
   const SHOW_QUICK_LABELS = false;
-
-  useEffect(() => {
-    // Load today's stats from localStorage or API
-    const stats = JSON.parse(localStorage.getItem('todayStats') || '{"samples": 0, "sessions": 0}');
-    setTodayStats(stats);
-  }, []);
 
   useEffect(() => {
     if (!feedback) return;
@@ -49,18 +42,8 @@ export default function UploadPage() {
   return (
     <div className="space-y-6">
       <PageHeader 
-        title="Trung tâm Thu thập Dữ liệu" 
+        title="Trung tâm Thu thập Dữ liệu"
         subtitle="Quy trình gọn nhẹ để tạo bộ dữ liệu hiệu quả"
-        actions={
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="info">
-              📊 Hôm nay: {todayStats.samples} mẫu
-            </Badge>
-            <Badge variant="success">
-              🎯 {todayStats.sessions} phiên
-            </Badge>
-          </div>
-        }
       />
 
       {error && (
@@ -102,10 +85,6 @@ export default function UploadPage() {
               <div>
                 <h3 className="text-base sm:text-lg font-semibold text-gray-900">Ghi hình trực tiếp</h3>
                 <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Thu thập nhanh theo lô với phản hồi tức thì</p>
-                <div className="flex flex-wrap items-center mt-2 gap-2">
-                  <Badge variant="success" size="sm">⚡ Nhanh nhất</Badge>
-                  <Badge variant="info" size="sm">🎯 Chế độ lô</Badge>
-                </div>
               </div>
             </div>
             {tab === "camera" && (
@@ -136,10 +115,6 @@ export default function UploadPage() {
               <div>
                 <h3 className="text-base sm:text-lg font-semibold text-gray-900">Tải video lên</h3>
                 <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Xử lý các tệp video có sẵn</p>
-                <div className="flex flex-wrap items-center mt-2 gap-2">
-                  <Badge variant="warning" size="sm">📁 Dựa trên tệp</Badge>
-                  <Badge variant="info" size="sm">🔄 Xử lý hàng loạt</Badge>
-                </div>
               </div>
             </div>
             {tab === "video" && (

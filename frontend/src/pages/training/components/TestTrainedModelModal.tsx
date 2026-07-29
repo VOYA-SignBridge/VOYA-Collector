@@ -10,8 +10,8 @@ import {
   type RealtimeSchedulerStatus,
 } from '../../../utils/realtimeInferenceScheduler';
 import { PredictionSmoother } from '../../../utils/predictionSmoother';
-
-const MP_HANDS_VERSION = '0.4.1675469240';
+import { HAND_TRACKING_OPTIONS, MP_HANDS_VERSION } from '../../../config/handTracking';
+import type { HandAnchors } from '../../../utils/handIdentity';
 
 interface TestTrainedModelModalProps {
   isOpen: boolean;
@@ -32,6 +32,7 @@ export default function TestTrainedModelModal({
   const smootherRef = useRef<PredictionSmoother | null>(null);
   const schedulerRef = useRef<RealtimeInferenceScheduler<{ label: string; confidence: number; label_key: string }> | null>(null);
   const frameScratchRef = useRef<Float32Array | null>(null);
+  const handAnchorsRef = useRef<HandAnchors>({});
   const disposedRef = useRef(false);
   const startingRef = useRef(false);
   const startEpochRef = useRef(0);
@@ -118,19 +119,16 @@ export default function TestTrainedModelModal({
     ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126, minReadyFrames: 40 });
     smootherRef.current = new PredictionSmoother({ historySize: 2, emaAlpha: 0.7 });
     frameScratchRef.current = new Float32Array(126);
+    handAnchorsRef.current = {};
 
     const hands = new Hands({
       locateFile: (file: string) =>
         `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
     });
 
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 0,
-      refineLandmarks: false,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
+    // Shared contract — this modal exists to preview how a trained model will
+    // behave, so it must extract exactly as capture and realtime do.
+    hands.setOptions({ ...HAND_TRACKING_OPTIONS });
 
     hands.onResults((results: unknown) => {
       if (disposedRef.current) return;
@@ -219,7 +217,9 @@ export default function TestTrainedModelModal({
           return;
         }
 
-        const vec = flattenRealtimeHands(mpResults, scratch);
+        const vec = flattenRealtimeHands(mpResults, scratch, {
+          anchors: handAnchorsRef.current,
+        });
         ring.append(vec);
         scheduler?.trigger();
       } catch (e) {

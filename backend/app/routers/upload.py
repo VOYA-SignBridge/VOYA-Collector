@@ -10,9 +10,20 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
 from app.processing import storage_utils as su
-from app.dataset_manager import get_or_register_class, normalize_dialect
+from app.dataset_manager import (
+    get_or_register_class,
+    normalize_dialect,
+    parse_hands_required,
+    set_class_hands_required,
+)
 from app.processing.utils import normalize_hands_vector_126
 from app.processing.utils import normalize_sequence
+from app.processing.quality import (
+    compute_quality_metrics,
+    evaluate_quality,
+    qc_threshold_snapshot,
+    record_quality_attempt,
+)
 from app.dataset_samples import save_sequence_npz
 from app.raw_uploads import (
     append_raw_upload_row,
@@ -315,6 +326,10 @@ async def upload_camera(
     language = validate_language(payload.get("language", "vn"))
     session_id = payload.get("session_id", None) or uuid.uuid4().hex
     frames = payload.get("frames")
+    # Client-declared hand requirement (1|2, anything else -> unknown) and
+    # client-computed quality snapshot (informational only; server recomputes).
+    hands_required_payload = parse_hands_required(payload.get("hands_required")) or 0
+    client_quality = payload.get("quality_info") if isinstance(payload.get("quality_info"), dict) else None
 
     if not frames:
         return {"success": False, "message": "Missing label or frames"}
@@ -331,6 +346,15 @@ async def upload_camera(
     class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
 
     log = logging.getLogger("upload.camera")
+
+    # Class value is authoritative; the payload only fills it in on first
+    # capture of the label (first-capture-wins, persisted to labels.csv + DB).
+    effective_hands = class_meta.hands_required or hands_required_payload
+    if not class_meta.hands_required and hands_required_payload in (1, 2):
+        try:
+            set_class_hands_required(class_meta.class_uid, hands_required_payload)
+        except Exception as exc:
+            log.warning("[QC] persisting hands_required failed (upload continues): %s", exc)
 
     # Convert frames (list of {timestamp, landmarks }) into numpy array
     # We expect landmarks arrays per frame; stack into (T, N) array
@@ -447,6 +471,13 @@ async def upload_camera(
         log.error("[LANDMARKS][ERROR] %s", e)
         return {"success": False, "message": f"Invalid frames payload: {e}"}
     
+    # Preprocess contract v2: keep the RAW landmark sequence (image-normalized
+    # MediaPipe coordinates, BEFORE wrist centering/scaling and BEFORE temporal
+    # padding) so future preprocessing experiments stay possible. Legacy
+    # samples never get a synthesized raw copy.
+    seq_raw = seq.astype(np.float32, copy=True)
+    sequence_length_original = int(seq.shape[0])
+
     # Ensure sequence has proper shape (pad/truncate to settings.seq_len)
     seq_padded, info = normalize_sequence(
         seq,
@@ -454,29 +485,110 @@ async def upload_camera(
         expected_D=int(getattr(settings, "feature_dim", 126)),
     )
 
+    # Validity masks, computed BEFORE per-hand normalization (zero block = absent)
+    left_hand_valid_mask = np.any(seq_padded[:, :63] != 0.0, axis=1)
+    right_hand_valid_mask = np.any(seq_padded[:, 63:] != 0.0, axis=1)
+    frame_valid_mask = left_hand_valid_mask | right_hand_valid_mask
+
+    # QC metrics must be computed BEFORE per-hand normalization: coordinates
+    # are still image-normalized (0..1) so jitter has a physical scale, and a
+    # missing hand is still an all-zero block.
+    metrics = compute_quality_metrics(seq_padded, hands_required=effective_hands)
+    verdict = evaluate_quality(metrics, settings)
+    log.info(
+        "[QC] label=%s hands_required=%s completeness=%.3f L=%.3f R=%.3f both=%.3f jitter_p95=%.4f activity=%.4f flags=%s",
+        label, effective_hands or 0, metrics.completeness,
+        metrics.left_hand_ratio, metrics.right_hand_ratio, metrics.both_hands_ratio,
+        metrics.jitter_p95, metrics.activity, verdict.flags or "-",
+    )
+
+    qc_thresholds = qc_threshold_snapshot(settings)
+
+    if settings.qc_enabled and verdict.reject_code:
+        # A rejected attempt keeps NO landmarks and NO video — only a minimal
+        # audit record, so pass/warn/reject rates are reportable without the
+        # rejected data ever entering the dataset. This log is deliberately
+        # separate from samples.csv and is never read by the manifest builder.
+        try:
+            from app.signers import resolve_signer_for_user
+            _signer = resolve_signer_for_user(current_user)
+        except Exception:
+            _signer = ""
+        record_quality_attempt({
+            "attempt_id": uuid.uuid4().hex[:12],
+            "campaign": getattr(settings, "collection_campaign", "") or "",
+            "signer_id": _signer,
+            "session_id": session_id,
+            "recognition_profile": class_meta.recognition_profile or "",
+            "vocabulary_scope": class_meta.vocabulary_scope or "",
+            "label": label,
+            "status": "rejected",
+            "flags": verdict.flags,
+            "metrics": metrics.as_dict(),
+            "quality_config_version": qc_thresholds["quality_config_version"],
+            "quality_thresholds": qc_thresholds,
+            "source_type": "camera",
+            "timestamp": su.now_str(),
+        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": verdict.reject_code,
+                "message": "Mẫu không đạt chất lượng tối thiểu, vui lòng thu lại.",
+                "metrics": metrics.as_dict(),
+            },
+        )
+
     for t in range(seq_padded.shape[0]):
         seq_padded[t] = normalize_hands_vector_126(
             seq_padded[t]
         )
 
-    valid_ratio = np.mean(
-        np.any(seq_padded != 0.0, axis=1)
-    )
-
-    if valid_ratio < 0.7:
-        return {
-            "success": False,
-            "message": "Too many invalid frames"
-        }
+    # Vocabulary schema v2: normalized signer identity (never free text) +
+    # provenance + preprocess contract. Class-level v2 fields ride along so
+    # samples are self-describing even before the class is fully migrated.
+    try:
+        from app.signers import resolve_signer_for_user
+        signer_id = resolve_signer_for_user(current_user)
+    except Exception as exc:
+        log.warning("[SIGNER] resolution failed (sample saved without signer_id): %s", exc)
+        signer_id = ""
 
     meta = {
         "user": user,
         "user_id": user,
         "auth_user_id": current_user["id"],
+        "signer_id": signer_id,
         "session_id": session_id,
+        "collection_campaign": getattr(settings, "collection_campaign", "") or "",
+        "vocabulary_scope": class_meta.vocabulary_scope or "",
+        "recognition_profile": class_meta.recognition_profile or "",
+        "vocabulary_group": class_meta.vocabulary_group or "",
+        "semantic_label": class_meta.semantic_label or "",
+        "normalization_version": "hands126_v1",
+        "preprocess_contract_version": "v2",
+        "coordinate_space": "mediapipe_normalized",
+        "target_sequence_length": int(getattr(settings, "seq_len", 60)),
+        "feature_dimension": int(getattr(settings, "feature_dim", 126)),
+        "sequence_length_original": sequence_length_original,
+        "quality_status": "flagged" if verdict.warning_codes else "ok",
         "fps_original": None,
         "fps_processed": None,
-        "completeness": None,
+        "completeness": round(metrics.completeness, 4),
+        "left_hand_ratio": round(metrics.left_hand_ratio, 4),
+        "right_hand_ratio": round(metrics.right_hand_ratio, 4),
+        "both_hands_ratio": round(metrics.both_hands_ratio, 4),
+        "any_hand_ratio": round(metrics.any_hand_ratio, 4),
+        # 'jitter' is kept for backward compatibility with existing readers;
+        # 'jitter_p95' is the explicit name used from the pilot campaign on.
+        "jitter": round(metrics.jitter_p95, 5),
+        "jitter_p95": round(metrics.jitter_p95, 5),
+        "activity": round(metrics.activity, 5),
+        "quality_flags": verdict.flags,
+        "quality_config_version": qc_thresholds["quality_config_version"],
+        "quality_thresholds": qc_thresholds,
+        "hands_required": effective_hands or None,
+        "client_quality": client_quality,
         "created_at": su.now_str(),
     }
 
@@ -486,11 +598,49 @@ async def upload_camera(
             seq_padded,
             meta=meta,
             augment_id=0,
-            source_type="camera"
+            source_type="camera",
+            raw_sequence=seq_raw,
+            frame_valid_mask=frame_valid_mask,
+            left_hand_valid_mask=left_hand_valid_mask,
+            right_hand_valid_mask=right_hand_valid_mask,
         )
     except Exception as e:
         log.error("[UPLOAD][camera][ERROR] sample save failed: %s", e)
         return {"success": False, "message": f"Sample upload failed: {e}"}
+
+    # Same audit stream as rejected attempts, so pass/warn/reject rates for a
+    # campaign are computable from ONE file.
+    record_quality_attempt({
+        "attempt_id": uuid.uuid4().hex[:12],
+        "campaign": getattr(settings, "collection_campaign", "") or "",
+        "signer_id": signer_id,
+        "session_id": session_id,
+        "recognition_profile": class_meta.recognition_profile or "",
+        "vocabulary_scope": class_meta.vocabulary_scope or "",
+        "label": label,
+        "status": "flagged" if verdict.warning_codes else "accepted",
+        "flags": verdict.flags,
+        "metrics": metrics.as_dict(),
+        "quality_config_version": qc_thresholds["quality_config_version"],
+        "quality_thresholds": qc_thresholds,
+        "source_type": "camera",
+        "sample_path": path,
+        "timestamp": su.now_str(),
+    })
+
+    quality_payload = metrics.as_dict()
+    quality_payload["warnings"] = [
+        {
+            "code": code,
+            "message": "Chất lượng mẫu thấp — mẫu đã được lưu và đánh dấu để kiểm tra.",
+            "detail": {
+                "completeness": round(metrics.completeness, 4),
+                "jitter_p95": round(metrics.jitter_p95, 5),
+                "hands_required": effective_hands or None,
+            },
+        }
+        for code in verdict.warning_codes
+    ]
 
     return {
         "success": True,
@@ -499,5 +649,6 @@ async def upload_camera(
         "total_samples": 1,
         "message": "saved original sample",
         "language": language,
-        "dialect": dialect
+        "dialect": dialect,
+        "quality": quality_payload,
     }

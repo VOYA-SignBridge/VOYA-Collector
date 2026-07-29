@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -120,6 +121,29 @@ def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
         f"--metrics_file={metrics_file}",
         "--run_diagnostics",
     ]
+
+    # Chế độ nghiên cứu: chạy trên split đã versioned nên checkpoint truy ngược
+    # được về đúng phiên bản dữ liệu. Bộ lọc dialect/language KHÔNG áp dụng ở
+    # đây — split đã định nghĩa sẵn tập dữ liệu, thêm bộ lọc vào sẽ cắt bớt nó
+    # và làm checkpoint không còn khớp với split nó khai báo.
+    if str(config.get("run_purpose") or "") == "research" and config.get("split_version"):
+        split_dir = f"processed/splits/versions/{config['split_version']}"
+        cmd += [
+            "--run-purpose=research",
+            f"--split_version={config['split_version']}",
+            f"--train_csv={split_dir}/train.csv",
+            f"--val_csv={split_dir}/val.csv",
+            f"--test_csv={split_dir}/test.csv",
+            # Bắt buộc khi có --recognition_profile: trainer chuyển sang profile
+            # mode và không tự dò được thư mục features từ split CSV.
+            f"--features_root={os.getenv('FEATURES_ROOT', '/dataset/features')}",
+        ]
+        if config.get("dataset_version"):
+            cmd.append(f"--dataset_version={config['dataset_version']}")
+        if config.get("recognition_profile"):
+            cmd.append(f"--recognition_profile={config['recognition_profile']}")
+        return cmd
+
     for dialect in (config.get("dialects") or []):
         cmd.append(f"--dialect={dialect}")
     for language in (config.get("languages") or []):
@@ -324,13 +348,105 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
 # Model backup + artifact retention
 # ============================================================================
 
-@celery_app.task(bind=True, max_retries=5, default_retry_delay=30)
-def backup_promoted_checkpoint_task(self, job_id: str, checkpoint_path: str):
-    """Mirror a PROMOTED model checkpoint to Google Drive.
+_DRIVE_UNSAFE_CHARS = re.compile(r"[/\\:*?\"<>|]+")
 
-    Only promoted models are backed up — experimental runs in outputs/ are
-    reproducible and not worth the bandwidth. Dispatched by the promote
-    endpoint; failure never blocks the promotion itself.
+
+def _drive_safe_name(raw: str, fallback: str) -> str:
+    """Make a Drive folder name from free text (tên hiển thị có dấu vẫn giữ)."""
+    cleaned = _DRIVE_UNSAFE_CHARS.sub("-", str(raw or "").strip()).strip(". ")
+    return cleaned or fallback
+
+
+def _build_deploy_manifest(
+    ckpt: Dict[str, Any],
+    *,
+    job_id: str,
+    model_id: str,
+    display_name: str,
+    dialect: str,
+    language: str,
+    promoted_at: str,
+    checkpoint_name: str,
+    checkpoint_sha256: str,
+    checkpoint_bytes: int,
+) -> Dict[str, Any]:
+    """Self-describing contract để app khác (mobile…) chạy được model này.
+
+    Gom đủ thứ một client cần mà không phải mở file .pt: nhãn theo đúng thứ tự
+    index, hợp đồng tiền xử lý, kích thước input, và hyperparams để dựng lại
+    mạng TCN.
+    """
+    idx_to_label = ckpt.get("idx_to_label")
+    if isinstance(idx_to_label, dict):
+        # Khóa có thể là str sau khi qua JSON — sắp theo index số.
+        labels = [idx_to_label[k] for k in sorted(idx_to_label, key=lambda x: int(x))]
+    elif isinstance(idx_to_label, list):
+        labels = idx_to_label
+    else:
+        labels = []
+
+    return {
+        "manifest_version": "1.0",
+        "model_id": model_id,
+        "display_name": display_name,
+        "dialect": dialect,
+        "language": language,
+        "job_id": job_id,
+        "promoted_at": promoted_at,
+        "trained_at": ckpt.get("created_at"),
+        "git_commit": ckpt.get("git_commit"),
+        "framework": "pytorch",
+        "model_type": str(ckpt.get("model_type", "TCN")),
+        "checkpoint": {
+            "filename": checkpoint_name,
+            "sha256": checkpoint_sha256,
+            "size_bytes": checkpoint_bytes,
+            "state_dict_key": "model_state_dict",
+        },
+        "input": {
+            "seq_len": ckpt.get("seq_len"),
+            "feature_dim": ckpt.get("feature_dim"),
+            "shape": [ckpt.get("seq_len"), ckpt.get("feature_dim")],
+            "dtype": "float32",
+            "normalization_version": ckpt.get("normalization_version"),
+            "preprocess_contract": ckpt.get("preprocess_contract"),
+        },
+        "output": {
+            "num_classes": ckpt.get("num_classes"),
+            "labels": labels,
+            "activation": "softmax",
+        },
+        "model_config": ckpt.get("model_config"),
+        "metrics": ckpt.get("metrics"),
+        "vocabulary_schema_version": ckpt.get("vocabulary_schema_version"),
+        "dataset_version": ckpt.get("dataset_version"),
+        "split_version": ckpt.get("split_version"),
+    }
+
+
+@celery_app.task(bind=True, max_retries=5, default_retry_delay=30)
+def backup_promoted_checkpoint_task(
+    self,
+    job_id: str,
+    checkpoint_path: str,
+    model_id: str = "",
+    display_name: str = "",
+    dialect: str = "",
+    language: str = "vn",
+    promoted_at: str = "",
+):
+    """Publish a PROMOTED model to Google Drive as a self-contained deploy folder.
+
+    Cấu trúc:  models/<Tên model>/Deploy <YYYY-MM-DD HH-MM-SS>/
+                 ├── <checkpoint>.pt          bản weights đang chạy realtime
+                 ├── <checkpoint>.json        sidecar cấu hình training (nếu có)
+                 └── deploy_manifest.json     hợp đồng inference cho client ngoài
+
+    Mỗi lần promote tạo một thư mục Deploy mới nên lịch sử triển khai giữ
+    nguyên; `models/<Tên model>/latest_manifest.json` luôn trỏ bản mới nhất để
+    mobile chỉ cần đọc một đường dẫn cố định. Chỉ model đã promote mới được đẩy
+    lên — các run thử nghiệm trong outputs/ tái tạo được, không đáng băng thông.
+    Lỗi ở đây không bao giờ chặn việc promote.
     """
     from app.config import settings
 
@@ -345,21 +461,71 @@ def backup_promoted_checkpoint_task(self, job_id: str, checkpoint_path: str):
             logger.warning("[MODEL_BACKUP] checkpoint not found: %s", checkpoint_path)
             return {"status": "skipped", "reason": "file_not_found"}
 
-        storage_key = f"models/promoted/{src.name}"
-        logger.info("[MODEL_BACKUP] job %s uploading %s -> gdrive:%s", job_id, src, storage_key)
-        url = upload_to_gdrive(str(src), storage_key, content_type="application/octet-stream", make_public=False)
+        promoted_at = promoted_at or datetime.now().isoformat()
+        folder_name = _drive_safe_name(display_name or model_id or dialect, job_id)
+        try:
+            deploy_stamp = datetime.fromisoformat(promoted_at).strftime("%Y-%m-%d %H-%M-%S")
+        except ValueError:
+            deploy_stamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        deploy_dir = f"models/{folder_name}/Deploy {deploy_stamp}"
 
-        # Sidecar JSON (metadata) if present
+        logger.info("[MODEL_BACKUP] job %s uploading %s -> gdrive:%s/", job_id, src, deploy_dir)
+        # replace_existing ở mọi upload: task này retry tới 5 lần, không có nó
+        # thì mỗi lần retry lại đẻ thêm một bản trùng tên trong cùng thư mục.
+        url = upload_to_gdrive(
+            str(src), f"{deploy_dir}/{src.name}",
+            content_type="application/octet-stream", make_public=False,
+            replace_existing=True,
+        )
+
+        # Sidecar JSON (cấu hình training gốc) nếu có
         sidecar = src.with_suffix(".json")
         if sidecar.exists():
             try:
-                upload_to_gdrive(str(sidecar), f"models/promoted/{sidecar.name}",
-                                 content_type="application/json", make_public=False)
+                upload_to_gdrive(str(sidecar), f"{deploy_dir}/{sidecar.name}",
+                                 content_type="application/json", make_public=False,
+                                 replace_existing=True)
             except Exception as e:
                 logger.warning("[MODEL_BACKUP] sidecar upload failed: %s", e)
 
-        logger.info("[MODEL_BACKUP] job %s ✓ backed up: %s", job_id, url)
-        return {"status": "success", "url": url}
+        # Manifest: đọc từ chính checkpoint đã deploy nên luôn khớp weights
+        try:
+            import hashlib
+
+            import torch
+
+            digest = hashlib.sha256()
+            with src.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    digest.update(chunk)
+
+            ckpt = torch.load(str(src), map_location="cpu", weights_only=False)
+            manifest = _build_deploy_manifest(
+                ckpt,
+                job_id=job_id,
+                model_id=model_id or dialect,
+                display_name=display_name or model_id or dialect,
+                dialect=dialect,
+                language=language,
+                promoted_at=promoted_at,
+                checkpoint_name=src.name,
+                checkpoint_sha256=digest.hexdigest(),
+                checkpoint_bytes=src.stat().st_size,
+            )
+            payload = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+
+            upload_to_gdrive(payload, f"{deploy_dir}/deploy_manifest.json",
+                             content_type="application/json", make_public=False,
+                             replace_existing=True)
+            # Con trỏ ổn định cho client ngoài — ghi đè sau mỗi lần promote
+            upload_to_gdrive(payload, f"models/{folder_name}/latest_manifest.json",
+                             content_type="application/json", make_public=False,
+                             replace_existing=True)
+        except Exception as e:
+            logger.warning("[MODEL_BACKUP] manifest build/upload failed: %s", e)
+
+        logger.info("[MODEL_BACKUP] job %s ✓ published: %s", job_id, deploy_dir)
+        return {"status": "success", "url": url, "deploy_dir": deploy_dir}
     except Exception as exc:
         logger.error("[MODEL_BACKUP] job %s failed: %s", job_id, exc)
         raise self.retry(exc=exc)

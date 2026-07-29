@@ -38,3 +38,5 @@ vn/can-tho/ca-phe
 vn/can-tho/chao-co
 vn/can-tho/phuc-vu
 vn/can-tho/vao-lop
+vn/spa/nan-mun
+vn/spa/up-mong

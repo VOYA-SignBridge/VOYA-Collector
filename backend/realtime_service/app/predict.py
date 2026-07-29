@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import numpy as np
 import torch
 from fastapi import APIRouter, HTTPException, Request
 
+from .latency import get_recorder
 from .schemas import PredictRequest, PredictResponse
 
 logger = logging.getLogger("realtime_service.predict")
@@ -48,11 +50,16 @@ def _normalize_frames(normalization_module: Any, frames: list) -> np.ndarray:
 def _run_inference(model: torch.nn.Module, frames: np.ndarray) -> tuple:
     """Run deterministic inference.
 
-    Returns (pred_idx, probs) where:
+    Returns (pred_idx, probs, device) where:
     - pred_idx: int, argmax of softmax logits
     - probs: np.ndarray of shape (num_classes,), softmax probabilities
+    - device: str, device the model ran on (reported alongside latency)
 
     ASSUMES: model is already in eval mode (set at startup).
+
+    Timing note: the caller times this whole function as `infer_ms`. On CUDA the
+    `.cpu()` transfer below forces the queued kernels to finish, so the measured
+    span covers the actual compute rather than an async launch.
     """
     # Build input tensor on the same device as the model (CPU or CUDA).
     try:
@@ -77,7 +84,7 @@ def _run_inference(model: torch.nn.Module, frames: np.ndarray) -> tuple:
         probs = probs.reshape(1)
 
     pred_idx = int(np.argmax(probs))
-    return pred_idx, probs
+    return pred_idx, probs, str(model_device)
 
 
 @router.post("/predict", response_model=PredictResponse)
@@ -99,6 +106,7 @@ def predict(request_data: PredictRequest, request: Request) -> PredictResponse:
     - label_key: machine-readable identifier
     """
     app_state = request.app.state
+    t_start = time.perf_counter()
 
     # 1. Validate service health
     normalization_module = getattr(app_state, "normalization_module", None)
@@ -109,18 +117,22 @@ def predict(request_data: PredictRequest, request: Request) -> PredictResponse:
     bundle = _validate_model_available(app_state, request_data.model_id)
 
     # 3. Normalize frames (deterministic)
+    t_normalize = time.perf_counter()
     try:
         frames_normalized = _normalize_frames(normalization_module, request_data.frames)
     except Exception as exc:
         logger.error("normalization failed: %s", exc)
         raise HTTPException(status_code=500, detail="normalization error")
+    normalize_ms = (time.perf_counter() - t_normalize) * 1000.0
 
     # 4. Run inference (deterministic, stateless)
+    t_infer = time.perf_counter()
     try:
-        pred_idx, probs = _run_inference(bundle.model, frames_normalized)
+        pred_idx, probs, device = _run_inference(bundle.model, frames_normalized)
     except Exception as exc:
         logger.error("inference failed: %s", exc)
         raise HTTPException(status_code=500, detail="inference error")
+    infer_ms = (time.perf_counter() - t_infer) * 1000.0
 
     # 5. Decode prediction
     try:
@@ -144,5 +156,17 @@ def predict(request_data: PredictRequest, request: Request) -> PredictResponse:
     except Exception as exc:
         logger.error("response validation failed: %s", exc)
         raise HTTPException(status_code=500, detail="response validation error")
+
+    # 7. Record latency. Only served predictions are counted — a rejected request
+    # never reached the model, so folding it in would distort the distribution.
+    get_recorder(app_state).record(
+        request_data.model_id,
+        {
+            "normalize_ms": normalize_ms,
+            "infer_ms": infer_ms,
+            "server_total_ms": (time.perf_counter() - t_start) * 1000.0,
+        },
+        device=device,
+    )
 
     return response

@@ -5,6 +5,7 @@ import os
 from fastapi import FastAPI
 
 from .health import router as health_router
+from .latency import LatencyRecorder, router as latency_router
 from .predict import router as predict_router
 from .reload import router as reload_router
 from .startup import register_startup
@@ -16,6 +17,9 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(predict_router)
     app.include_router(reload_router)
+    app.include_router(latency_router)
+
+    app.state.latency = LatencyRecorder()
 
     default_registry_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "config", "models.json")

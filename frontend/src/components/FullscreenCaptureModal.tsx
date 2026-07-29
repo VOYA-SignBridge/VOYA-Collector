@@ -6,17 +6,26 @@ import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import type { ClassRow, MediaPipeLandmark, CameraInfo, QualityInfo } from "../types";
 
-import { TARGET_FRAMES, CAPTURE_COUNT, FRAME_INTERVAL_MS } from "../config/capture";
+import {
+  TARGET_FRAMES,
+  FRAME_INTERVAL_MS,
+  MIN_CAPTURE_COUNT,
+  MAX_CAPTURE_COUNT,
+  clampCaptureCount,
+} from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
 import { getClassesList, getClassesStats } from "../api/dataset";
 import { fetchLabelSuggestions, fetchCollectorSuggestions, getPreference, setPreference } from "../api/preferences";
+import { assignHandSlots, wristOf } from "../utils/handIdentity";
+import type { HandAnchor, HandDetection } from "../utils/handIdentity";
+import { HAND_TRACKING_OPTIONS, MP_HANDS_VERSION } from "../config/handTracking";
+import { formatSessionLabel } from "../utils/session";
 
 // ---------------------------------------------------------------------------
 // Module-level constants — stable across renders, safe in hook dep arrays.
 // ---------------------------------------------------------------------------
 const FIXED_TARGET_FRAMES = TARGET_FRAMES;
-const FIXED_CAPTURE_COUNT = CAPTURE_COUNT;
 
 // FIX (type): Moved CaptureFrame type out of the component body so it is not
 // re-evaluated on every render.
@@ -58,20 +67,30 @@ const SWAP_HANDEDNESS = parseBoolEnv(
 // Enable verbose hand diagnostics: set VITE_DEBUG_HANDS=1
 const DEBUG_HANDS = parseBoolEnv(import.meta.env.VITE_DEBUG_HANDS, false);
 
-// Keep CDN asset version aligned with pinned npm dependency.
-const MP_HANDS_VERSION = "0.4.1675469240";
 const CAPTURE_FRAME_WIDTH = 1280;
 const CAPTURE_FRAME_HEIGHT = 720;
-const DEFAULT_DIALECTS = ["Bắc", "Trung", "Nam", "Cần Thơ"];
+
+// Preview smoothing. These affect the on-screen skeleton ONLY — recorded frames
+// always use raw MediaPipe output (see the capture block below).
+// Raised from 0.6: the skeleton visibly trailed the hand during fast signing.
+const RENDER_ALPHA = 0.75;
+// Normalized units; a per-frame jump beyond this bypasses smoothing entirely.
+const RENDER_SNAP_DISTANCE = 0.12;
+// Thứ tự khớp recognition profiles v2: Bảng chữ cái là nhóm độc lập, các miền
+// hiển thị đầy đủ "Miền ..." cho rõ nghĩa. Danh sách này chỉ là fallback khi
+// chưa tải được catalog từ server.
+const DEFAULT_DIALECTS = ["Bảng chữ cái", "Miền Bắc", "Miền Trung", "Miền Nam", "Hòa Đê"];
 const DEFAULT_LANGUAGES = ["vn", "en"];
 
 const DIALECT_LABELS: Record<string, string> = {
   common: "Chung",
-  bac: "Bắc",
-  trung: "Trung",
-  nam: "Nam",
+  "bang-chu-cai": "Bảng chữ cái",
+  bac: "Miền Bắc",
+  trung: "Miền Trung",
+  nam: "Miền Nam",
   "hoa-de": "Hòa Đê",
   "can-tho": "Cần Thơ",
+  spa: "Spa",
 };
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -80,10 +99,21 @@ const LANGUAGE_LABELS: Record<string, string> = {
   en: "English",
 };
 
-const sanitizeCollectorName = (value: string) =>
+// Chuẩn hóa tên người thu: bỏ ký tự lạ, gộp khoảng trắng, và tự viết hoa
+// chữ cái đầu mỗi từ (theo locale vi) — để "trân"/"Trân"/"TRÂN" đều nhập ra
+// cùng một dạng hiển thị, tránh tạo thêm biến thể signer trùng người.
+const titleCaseVi = (value: string) =>
   value
-    .replace(/[^\p{L}\s]/gu, " ")
-    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((w) => (w ? w.charAt(0).toLocaleUpperCase("vi") + w.slice(1) : w))
+    .join(" ");
+
+const sanitizeCollectorName = (value: string) =>
+  titleCaseVi(
+    value
+      .replace(/[^\p{L}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+  )
     .trim();
 
 const normalizeText = (value: string) =>
@@ -96,6 +126,21 @@ const normalizeText = (value: string) =>
     .replace(/[^a-z0-9\s-]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+/** Mirrors ALPHABET_DIALECTS in backend/app/processing/class_registry.py. */
+const ALPHABET_DIALECT_KEYS = new Set(["bang-chu-cai"]);
+
+/**
+ * Diacritic-PRESERVING label match for the fingerspelling alphabet, where
+ * Ă Â Đ Ê Ô Ơ Ư are distinct letters rather than accented A/D/E/O/U.
+ *
+ * normalizeText folds them into the base letter. That is right for word signs —
+ * "tôm" and "tom" mean the same sign — but on the alphabet it made a typed "Ă"
+ * match the catalog row for "A", so the box reported A's existing samples for a
+ * letter that had never been recorded once.
+ */
+const normalizeAlphabetText = (value: string) =>
+  value.normalize("NFC").trim().toLowerCase();
 
 const normalizeLanguageKey = (value?: string) => (value || "").trim().toLowerCase();
 
@@ -119,6 +164,8 @@ const normalizeDialectKey = (value?: string) => {
     "can tho": "can-tho",
     cantho: "can-tho",
     "can-tho": "can-tho",
+    "bang chu cai": "bang-chu-cai",
+    "bang-chu-cai": "bang-chu-cai",
     chung: "common",
     common: "common",
   };
@@ -320,16 +367,37 @@ interface FullscreenCaptureModalProps {
     frames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>,
     label: string,
     user: string,
-    meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string }
+    meta?: {
+      camera_info?: CameraInfo;
+      quality_info?: QualityInfo;
+      dialect?: string;
+      language?: string;
+      /** Số tay dùng khi thu: lựa chọn thủ công 1/2, hoặc số suy ra từ warmup ở chế độ Auto. */
+      hands_used?: number | null;
+    }
   ) => void;
   initialLabel?: string;
   initialUser?: string;
   targetFrames?: number;
   captureCount?: number;
+  /** Cho phép người thu đổi số lượt ghi ngay trong modal. Bỏ trống thì ô nhập bị ẩn. */
+  onCaptureCountChange?: (value: number) => void;
+  /** session_id của phiên thu hiện tại — khoá nhóm dùng khi chia split dữ liệu. */
+  sessionId?: string;
+  /** Số mẫu đã thu trong phiên hiện tại. */
+  sessionSampleCount?: number;
+  /** Bắt đầu phiên mới. Bỏ trống thì khối thông tin phiên bị ẩn. */
+  onNewSession?: () => void;
   /** Số mẫu đã lưu thành công lên server trong phiên hiện tại, theo từng từ. */
   capturedSummary?: Record<string, number>;
   /** Thông báo lỗi kết nối/lưu server hiện tại; khi có giá trị, tạm chặn bắt đầu thu mới. */
   connectionIssue?: string | null;
+  /**
+   * Thông báo QC sau khi upload (warning = mẫu được lưu nhưng bị đánh dấu,
+   * error = mẫu bị từ chối). Phải render BÊN TRONG modal vì element-fullscreen
+   * che toàn bộ ToastContainer global. `key` tăng dần để re-trigger auto-dismiss.
+   */
+  qualityNotice?: { kind: "warning" | "error"; message: string; key: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,8 +411,13 @@ export default function FullscreenCaptureModal({
   initialUser = "",
   targetFrames = 60,
   captureCount = 1,
+  onCaptureCountChange,
+  sessionId = "",
+  sessionSampleCount = 0,
+  onNewSession,
   capturedSummary = {},
   connectionIssue = null,
+  qualityNotice = null,
 }: FullscreenCaptureModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -356,7 +429,7 @@ export default function FullscreenCaptureModal({
   const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState(initialUser);
   const [language, setLanguage] = useState<string>("vn");
-  const [dialect, setDialect] = useState<string>("Bắc");
+  const [dialect, setDialect] = useState<string>("Miền Bắc");
   const [languageList, setLanguageList] = useState<string[]>(DEFAULT_LANGUAGES);
   const [dialectList, setDialectList] = useState<string[]>(DEFAULT_DIALECTS);
   const [catalogRows, setCatalogRows] = useState<ClassRow[]>([]);
@@ -372,6 +445,49 @@ export default function FullscreenCaptureModal({
   const [completedCaptures, setCompletedCaptures] = useState(0);
   const [showTips, setShowTips] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  // Bản nháp dạng chuỗi của ô "số lượt thu". Giữ riêng với giá trị đã commit để
+  // người dùng xoá trắng ô rồi gõ lại được, thay vì bị ép về giá trị hợp lệ ngay
+  // sau mỗi phím. Giá trị chỉ được clamp và commit khi blur hoặc nhấn Enter.
+  const [captureCountDraft, setCaptureCountDraft] = useState(String(captureCount));
+  // Đọc trong callback của MediaPipe: nếu đưa captureCount vào dep array của
+  // effect chính thì mỗi lần đổi số sẽ tear-down và khởi tạo lại camera.
+  const captureCountRef = useRef(captureCount);
+  useEffect(() => {
+    captureCountRef.current = captureCount;
+    setCaptureCountDraft(String(captureCount));
+  }, [captureCount]);
+
+  const commitCaptureCount = useCallback(() => {
+    const next = clampCaptureCount(captureCountDraft);
+    if (next === null) {
+      setCaptureCountDraft(String(captureCount));
+      return;
+    }
+    setCaptureCountDraft(String(next));
+    if (next !== captureCount) onCaptureCountChange?.(next);
+  }, [captureCountDraft, captureCount, onCaptureCountChange]);
+
+  const stepCaptureCount = useCallback((delta: number) => {
+    const next = clampCaptureCount(captureCount + delta);
+    if (next !== null && next !== captureCount) onCaptureCountChange?.(next);
+  }, [captureCount, onCaptureCountChange]);
+
+  // Người ký đầu tiên của phiên. Nếu người thu đổi tên giữa chừng mà quên bắt
+  // đầu phiên mới, mẫu của hai người sẽ chung một session_id — khoá nhóm dùng
+  // để chia split mất ý nghĩa. Đây là lúc dễ quên nhất nên cần nhắc tại chỗ.
+  const [sessionSigner, setSessionSigner] = useState("");
+  // Phiên mới thì quên mốc cũ đi...
+  useEffect(() => { setSessionSigner(""); }, [sessionId]);
+  // ...rồi chốt tên đầu tiên không rỗng làm mốc của phiên.
+  useEffect(() => {
+    const current = user.trim();
+    if (current && !sessionSigner) setSessionSigner(current);
+  }, [user, sessionSigner]);
+
+  const signerChangedMidSession = Boolean(
+    sessionSigner && user.trim() && user.trim() !== sessionSigner
+  );
+
   const [expectedHandsOption, setExpectedHandsOption] = useState<number | null>(null);
   const expectedHandsOptionRef = useRef<number | null>(expectedHandsOption);
   useEffect(() => { expectedHandsOptionRef.current = expectedHandsOption; }, [expectedHandsOption]);
@@ -403,6 +519,7 @@ export default function FullscreenCaptureModal({
   const labelRef = useRef(label);
   const userRef = useRef(user);
   const dialectRef = useRef(dialect);
+  const languageRef = useRef(language);
   const targetFramesRef = useRef(targetFrames);
   const onSampleCaptureRef = useRef(onSampleCapture);
   const connectionIssueRef = useRef(connectionIssue);
@@ -435,6 +552,7 @@ export default function FullscreenCaptureModal({
   useEffect(() => { framesRef.current = frames; }, [frames]);
   useEffect(() => { labelRef.current = label; }, [label]);
   useEffect(() => { dialectRef.current = dialect; }, [dialect]);
+  useEffect(() => { languageRef.current = language; }, [language]);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
@@ -459,6 +577,9 @@ export default function FullscreenCaptureModal({
       graceCounterRef.current = 0;
       isRecoveringRef.current = false;
       recoveryTimeoutRef.current = 0;
+      // A pinned slot belongs to one clip only — the next take may well be the
+      // other hand.
+      pinnedSlotRef.current = undefined;
       recoveryConfirmRef.current = 0;
     }
   }, [recording]);
@@ -513,6 +634,7 @@ export default function FullscreenCaptureModal({
   const computeQuality = useCallback((capturedFrames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>) => {
     let totalHandLandmarks = 0;
     let framesWithHands = 0;
+    let framesWithBothHands = 0;
     let framesAccepted = 0;
     let confidenceSum = 0;
     let confidenceCount = 0;
@@ -523,6 +645,7 @@ export default function FullscreenCaptureModal({
       const handCount = leftCount + rightCount;
       totalHandLandmarks += handCount;
       if (handCount > 0) { framesWithHands++; framesAccepted++; }
+      if (leftCount > 0 && rightCount > 0) framesWithBothHands++;
 
       for (const lm of [...(f.left_hand || []), ...(f.right_hand || [])]) {
         if (typeof lm.visibility === "number") { confidenceSum += lm.visibility; confidenceCount++; }
@@ -534,9 +657,26 @@ export default function FullscreenCaptureModal({
       framesAccepted,
       avgPoseLandmarksPerFrame: capturedFrames.length ? totalHandLandmarks / capturedFrames.length : 0,
       percentFramesWithHands: capturedFrames.length ? (framesWithHands / capturedFrames.length) * 100 : 0,
+      percentFramesWithBothHands: capturedFrames.length ? (framesWithBothHands / capturedFrames.length) * 100 : 0,
       confidenceSummary: confidenceCount ? { avg: confidenceSum / confidenceCount } : undefined,
     };
     return quality;
+  }, []);
+
+  const deriveHandsUsed = useCallback((capturedFrames: Array<{ left_hand: MediaPipeLandmark[]; right_hand: MediaPipeLandmark[] }>) => {
+    const counts = new Set<number>();
+
+    for (const frame of capturedFrames) {
+      const handCount = (frame.left_hand?.length ? 1 : 0) + (frame.right_hand?.length ? 1 : 0);
+      if (handCount > 0) counts.add(handCount);
+    }
+
+    if (counts.size === 1) {
+      const [singleCount] = Array.from(counts);
+      return singleCount === 1 || singleCount === 2 ? singleCount : null;
+    }
+
+    return null;
   }, []);
 
   // -------------------------------------------------------------------------
@@ -549,39 +689,69 @@ export default function FullscreenCaptureModal({
     image?: HTMLImageElement | HTMLVideoElement;
   } | null>(null);
 
-  const renderAlpha = 0.6;
-
   const renderPrevRef = useRef<Record<string, MediaPipeLandmark>>({});
 
   const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+  // Drops every smoothing sample for one hand so the next frame starts clean.
+  // Called when a slot is re-acquired after a dropout — otherwise the skeleton
+  // interpolates from wherever the hand was before it disappeared and visibly
+  // flies across the frame.
+  const resetRenderGroup = useCallback((group: string) => {
+    const prev = renderPrevRef.current;
+    for (const key of Object.keys(prev)) {
+      if (key.startsWith(`${group}.`)) delete prev[key];
+    }
+  }, []);
+
   const getRenderLandmarks = useCallback((raw: MediaPipeLandmark[] | undefined, group = "pose") => {
     if (!raw) return [] as MediaPipeLandmark[];
     const prev = renderPrevRef.current;
-    const alpha = Math.max(0, Math.min(1, renderAlpha));
-    const maxChange = 1.0;
     return raw.map((lm, idx) => {
       const key = `${group}.${idx}`;
       const prevLm = prev[key];
       const tx = lm.x ?? 0, ty = lm.y ?? 0, tz = lm.z ?? 0;
       const tv = typeof lm.visibility === "number" ? lm.visibility : undefined;
       if (!prevLm) { const nl = { ...lm } as MediaPipeLandmark; prev[key] = nl; return nl; }
-      let nx = lerp(prevLm.x ?? tx, tx, alpha);
-      let ny = lerp(prevLm.y ?? ty, ty, alpha);
-      const dx = Math.abs((prevLm.x ?? tx) - tx), dy = Math.abs((prevLm.y ?? ty) - ty);
-      if (dx > maxChange) nx = (prevLm.x ?? tx) + Math.sign(tx - (prevLm.x ?? tx)) * maxChange;
-      if (dy > maxChange) ny = (prevLm.y ?? ty) + Math.sign(ty - (prevLm.y ?? ty)) * maxChange;
-      const nz = lerp(prevLm.z ?? tz, tz, alpha);
-      const nv = typeof tv === "number" ? lerp((prevLm.visibility as number) ?? tv, tv, alpha) : (prevLm.visibility as number | undefined);
-      const out: MediaPipeLandmark = { ...lm, x: nx, y: ny, z: nz, visibility: typeof nv === "number" ? nv : undefined };
+      const px = prevLm.x ?? tx, py = prevLm.y ?? ty;
+      // A displacement this large is a re-acquisition, an identity reassignment,
+      // or genuinely fast signing. Easing across it would drag the skeleton over
+      // the frame, so snap straight to the target instead.
+      // (The previous clamp used maxChange = 1.0 on normalized coordinates, which
+      // no displacement can ever exceed — it never actually fired.)
+      if (Math.hypot(tx - px, ty - py) > RENDER_SNAP_DISTANCE) {
+        const nl = { ...lm } as MediaPipeLandmark;
+        prev[key] = nl;
+        return nl;
+      }
+      const nv = typeof tv === "number"
+        ? lerp((prevLm.visibility as number) ?? tv, tv, RENDER_ALPHA)
+        : (prevLm.visibility as number | undefined);
+      const out: MediaPipeLandmark = {
+        ...lm,
+        x: lerp(px, tx, RENDER_ALPHA),
+        y: lerp(py, ty, RENDER_ALPHA),
+        z: lerp(prevLm.z ?? tz, tz, RENDER_ALPHA),
+        visibility: typeof nv === "number" ? nv : undefined,
+      };
       prev[key] = out;
       return out;
     });
-  }, [renderAlpha]);
+  }, []);
 
   const PRESENCE_HISTORY_SIZE = 7;
   const leftPresenceHistoryRef = useRef<boolean[]>([]);
   const rightPresenceHistoryRef = useRef<boolean[]>([]);
+  // Last wrist position per slot, used by assignHandSlots to keep left/right
+  // identity stable across frames. Entries expire by age, so no explicit reset
+  // is needed between recordings.
+  const handAnchorsRef = useRef<{ left?: HandAnchor; right?: HandAnchor }>({});
+  /**
+   * Slot locked in for a one-handed clip. A single physical hand cannot change
+   * anatomical identity partway through a sample, so once the slot is known no
+   * per-frame handedness label may move it. Cleared when recording restarts.
+   */
+  const pinnedSlotRef = useRef<"left" | "right" | undefined>(undefined);
   const visibilityStateRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
   const lastRenderedLeftRef = useRef<MediaPipeLandmark[] | undefined>(undefined);
   const lastRenderedRightRef = useRef<MediaPipeLandmark[] | undefined>(undefined);
@@ -824,15 +994,34 @@ export default function FullscreenCaptureModal({
   const selectedDialectKey = normalizeDialectKey(dialect);
   const selectedLanguageRows = catalogRows.filter((row) => normalizeLanguageKey(row.language) === selectedLanguageKey);
   const selectedDialectRows = selectedLanguageRows.filter((row) => normalizeDialectKey(row.dialect) === selectedDialectKey);
-  const normalizedLabel = normalizeText(label);
+  // The alphabet needs a diacritic-preserving comparison; word signs do not.
+  const matchLabelText = ALPHABET_DIALECT_KEYS.has(selectedDialectKey)
+    ? normalizeAlphabetText
+    : normalizeText;
+  const normalizedLabel = matchLabelText(label);
   // Use server-side suggestions instead of client-side filter
   const labelSuggestions = serverLabelSuggestions;
   const matchingCatalogRow = normalizedLabel
-    ? selectedDialectRows.find((row) => normalizeText(row.label_original) === normalizedLabel)
+    ? selectedDialectRows.find((row) => matchLabelText(row.label_original) === normalizedLabel)
     : undefined;
   const labelExists = Boolean(matchingCatalogRow);
   const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0;
   const currentCatalogLabelCount = selectedDialectRows.length;
+
+  // `hands_required` chỉ là gợi ý từ catalog, không được khóa cứng vì cùng
+  // một nhãn có thể xuất hiện 1 tay ở đầu và 2 tay ở đoạn sau.
+  const suggestedHands = typeof matchingCatalogRow?.hands_required === "number"
+    ? matchingCatalogRow.hands_required
+    : null;
+
+  // In-modal QC toast: auto-dismiss sau 5s, re-trigger theo notice.key
+  const [visibleNotice, setVisibleNotice] = useState<typeof qualityNotice>(null);
+  useEffect(() => {
+    if (!qualityNotice) return;
+    setVisibleNotice(qualityNotice);
+    const timer = setTimeout(() => setVisibleNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [qualityNotice]);
 
   // -------------------------------------------------------------------------
   // Capture handlers
@@ -841,6 +1030,8 @@ export default function FullscreenCaptureModal({
     if (!labelRef.current || !userRef.current || connectionIssueRef.current) return;
     setFrames([]); framesRef.current = [];
     expectedHandsRef.current = expectedHandsOptionRef.current;
+    // If user explicitly selected 1/2 hands, skip warmup and accept frames immediately
+    if (expectedHandsOptionRef.current != null) initializationCompleteRef.current = true;
     setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
     lastFrameTimeRef.current = 0; setCountdown(3); setMode("COUNTDOWN");
     setTimeout(() => {
@@ -873,7 +1064,12 @@ export default function FullscreenCaptureModal({
     setPaused(false); pausedRef.current = false;
     if (framesRef.current.length > 0) {
       const quality = computeQuality(framesRef.current);
-      onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
+      onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, {
+        quality_info: quality,
+        dialect: dialectRef.current,
+        language: languageRef.current,
+        hands_used: expectedHandsOptionRef.current ?? expectedHandsRef.current,
+      });
       setFrames([]); framesRef.current = [];
       expectedHandsRef.current = expectedHandsOptionRef.current;
     }
@@ -917,13 +1113,9 @@ export default function FullscreenCaptureModal({
         `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
     });
 
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.75,
-    });
+    // Shared contract — see config/handTracking.ts. This is the path that
+    // RECORDS the corpus, so realtime and model testing are aligned to it.
+    hands.setOptions({ ...HAND_TRACKING_OPTIONS });
 
     hands.onResults((results: unknown) => {
       const r = results as {
@@ -950,18 +1142,60 @@ export default function FullscreenCaptureModal({
       // Previously this was documented incorrectly and defaulted to false,
       // so every saved sample had left/right swapped — this is the primary
       // fix for wrong hand recognition in the trained model.
-      let leftHandLandmarks: MediaPipeLandmark[] | undefined;
-      let rightHandLandmarks: MediaPipeLandmark[] | undefined;
-
-      detected.forEach((landmarks, i) => {
-        const rawLabel = handednessData[i]?.label; // "Left" or "Right" from MP
-        const effectiveLabel = SWAP_HANDEDNESS
-          ? rawLabel === "Left" ? "Right" : "Left"
-          : rawLabel;
-
-        if (effectiveLabel === "Left") leftHandLandmarks = landmarks;
-        else if (effectiveLabel === "Right") rightHandLandmarks = landmarks;
+      //
+      // The raw label is only the STARTING point — assignHandSlots reconciles it
+      // against each slot's last known wrist position so that two same-labelled
+      // hands can no longer collapse into one slot, and a mid-clip label flip no
+      // longer inverts left_hand / right_hand inside a single sample.
+      const now = Date.now();
+      const detections: HandDetection[] = detected.map((landmarks, i) => {
+        const rawLabel = handednessData[i]?.label; // "Left" | "Right" | undefined
+        let effectiveLabel: string | undefined = rawLabel;
+        if (SWAP_HANDEDNESS && rawLabel) {
+          effectiveLabel = rawLabel === "Left" ? "Right" : "Left";
+        }
+        return {
+          landmarks,
+          label: effectiveLabel,
+          score: typeof handednessData[i]?.score === "number" ? (handednessData[i].score as number) : 0,
+        };
       });
+
+      // Pin the slot only once the clip is known to be one-handed — either the
+      // recorder said so, or the warmup window inferred it.
+      const oneHandedClip =
+        (expectedHandsOptionRef.current ?? expectedHandsRef.current) === 1;
+      const assignment = assignHandSlots(detections, handAnchorsRef.current, now, {
+        pinnedSlot: oneHandedClip ? pinnedSlotRef.current : undefined,
+        // Declared one-handed: never let a bystander hand fill the second slot.
+        // The frame would then resolve to two hands, fail the expected-count
+        // check, and stall the capture without ever producing the single-hand
+        // frame the pin is waiting for.
+        forceSingle: oneHandedClip,
+      });
+      const leftHandLandmarks = assignment.left;
+      const rightHandLandmarks = assignment.right;
+
+      // First resolved frame of a one-handed clip decides the slot for the rest
+      // of it. Before that the normal anchor/label logic applies.
+      if (oneHandedClip && !pinnedSlotRef.current) {
+        if (leftHandLandmarks?.length && !rightHandLandmarks?.length) {
+          pinnedSlotRef.current = "left";
+        } else if (rightHandLandmarks?.length && !leftHandLandmarks?.length) {
+          pinnedSlotRef.current = "right";
+        }
+      }
+
+      // Refresh anchors for whichever slots were filled. Unfilled slots keep
+      // their previous anchor and age out via HAND_ANCHOR_MAX_AGE_MS.
+      if (leftHandLandmarks?.length) {
+        const w = wristOf(leftHandLandmarks);
+        handAnchorsRef.current.left = { x: w.x, y: w.y, t: now };
+      }
+      if (rightHandLandmarks?.length) {
+        const w = wristOf(rightHandLandmarks);
+        handAnchorsRef.current.right = { x: w.x, y: w.y, t: now };
+      }
 
       // ---- Temporal smoothing for presence / preview ----
       const leftDetectedNow = !!(leftHandLandmarks && leftHandLandmarks.length > 0);
@@ -992,6 +1226,9 @@ export default function FullscreenCaptureModal({
       let renderRight: MediaPipeLandmark[] = [];
 
       if (leftDetectedNow) {
+        // Slot was empty last frame — start smoothing from scratch rather than
+        // easing in from the stale position.
+        if (!lastRenderedLeftRef.current) resetRenderGroup("leftHand");
         renderLeft = getRenderLandmarks(leftHandLandmarks, "leftHand");
         lastRenderedLeftRef.current = renderLeft;
       } else if (leftSmoothedVisible && lastRenderedLeftRef.current) {
@@ -1001,6 +1238,7 @@ export default function FullscreenCaptureModal({
       }
 
       if (rightDetectedNow) {
+        if (!lastRenderedRightRef.current) resetRenderGroup("rightHand");
         renderRight = getRenderLandmarks(rightHandLandmarks, "rightHand");
         lastRenderedRightRef.current = renderRight;
       } else if (rightSmoothedVisible && lastRenderedRightRef.current) {
@@ -1009,15 +1247,13 @@ export default function FullscreenCaptureModal({
         lastRenderedRightRef.current = undefined;
       }
 
-      // Clear ghost when only one hand detected
-      if (leftDetectedNow && !rightDetectedNow) {
-        lastRenderedRightRef.current = undefined;
-        rightPresenceHistoryRef.current = [];
-      }
-      if (rightDetectedNow && !leftDetectedNow) {
-        lastRenderedLeftRef.current = undefined;
-        leftPresenceHistoryRef.current = [];
-      }
+      // NOTE: a block here used to wipe the *other* hand's presence history
+      // whenever exactly one hand was detected, to avoid a lingering ghost
+      // skeleton. But that cleared the majority-vote buffer on the very first
+      // dropped frame, so the 7-frame hysteresis never got to do its job in the
+      // two-hand case and the second skeleton flickered on every missed frame.
+      // The `else` branches above already drop the ghost once the vote itself
+      // turns false, which is the same guarantee without defeating the vote.
 
       renderDataRef.current = {
         leftHandLandmarks: renderLeft,
@@ -1076,8 +1312,10 @@ export default function FullscreenCaptureModal({
       const userChoice = expectedHandsOptionRef.current;
 
       // =====================================================================
-      // PHASE 1A: TEMPORAL STABILIZATION
-      // Majority voting (init) + grace period + recovery with no auto-switching
+      // PHASE 1A: Unified stabilization
+      // Handles: manual selection (userChoice), explicit expectation (expectedHandsRef),
+      // and auto-inference warmup. Grace + recovery logic is shared so manual
+      // 2-hand mode will pause then resume correctly when hands reappear.
       // =====================================================================
       const INIT_WINDOW = 5;
       const INIT_MAJORITY_THRESHOLD = 0.60;
@@ -1086,15 +1324,13 @@ export default function FullscreenCaptureModal({
       const RECOVERY_CONFIRM = 3;
       const HISTORY_SIZE = 7;
 
+      // Effective expected hand count: manual override (userChoice) else the inferred/locked expectation
+      const effectiveExpected = (userChoice != null) ? userChoice : expectedHandsRef.current;
+
+      // If no hands at all, skip
       if (detectedHandsCountRaw === 0) {
-        // No hands detected at all
         accept = false;
-      } else if (userChoice != null) {
-        // Manual mode: user selected 1 or 2 hands explicitly
-        if (userChoice === 2) accept = presentLeftRaw && presentRightRaw;
-        else if (userChoice === 1) accept = presentLeftRaw !== presentRightRaw;
-        else accept = true;
-      } else if (expectedHandsRef.current == null) {
+      } else if (effectiveExpected == null) {
         // AUTO MODE: INITIALIZATION PHASE (warmup-only, no append to dataset)
         initFrameCountRef.current++;
 
@@ -1126,54 +1362,44 @@ export default function FullscreenCaptureModal({
             recentCounts,
           });
         }
-      } else if (initializationCompleteRef.current && expectedHandsRef.current !== null) {
-        // AUTO MODE: TRACKING / GRACE / RECOVERY PHASES
+      } else {
+        // TRACKING / GRACE / RECOVERY for a known expectation (manual or inferred)
+        // Ensure expectedHandsRef reflects manual override so telemetry/debug use a single source
+        if (userChoice != null && expectedHandsRef.current !== userChoice) expectedHandsRef.current = userChoice;
 
         // Update history ring buffer (for debug/telemetry only)
         detectionHistoryRef.current[historyIndexRef.current] = detectedHandsCountRaw;
         historyIndexRef.current = (historyIndexRef.current + 1) % HISTORY_SIZE;
 
         const currentHandCount = detectedHandsCountRaw;
-        const isMatching = currentHandCount === expectedHandsRef.current;
+        const isMatching = currentHandCount === effectiveExpected;
 
         if (isMatching) {
           // TRACKING: Hand count matches expectation
-          // Reset all grace/recovery counters
           graceCounterRef.current = 0;
           isRecoveringRef.current = false;
           recoveryTimeoutRef.current = 0;
           recoveryConfirmRef.current = 0;
           accept = true;
         } else if (!isRecoveringRef.current) {
-          // GRACE PERIOD: Mismatch & not in recovery yet
+          // GRACE PERIOD: give user a short window before pausing
           graceCounterRef.current++;
-
           if (graceCounterRef.current <= GRACE_FRAMES) {
-            // Still in grace period: don't accept, but don't pause
             accept = false;
             if (DEBUG_HANDS) console.debug("Grace period", graceCounterRef.current, "/", GRACE_FRAMES);
           } else {
-            // Grace period exceeded: enter recovery state, pause capture
             isRecoveringRef.current = true;
             recoveryTimeoutRef.current = 0;
             recoveryConfirmRef.current = 0;
             accept = false;
             if (DEBUG_HANDS) console.warn("Grace period exceeded, entering recovery");
           }
-        } else if (isRecoveringRef.current) {
-          // RECOVERY: Wait for hands to return
-          // Track two separate counts:
-          // - recoveryTimeoutRef: total frames in recovery (for timeout detection)
-          // - recoveryConfirmRef: CONSECUTIVE matching frames (for resume confirmation)
-
+        } else {
+          // RECOVERY: wait for RECOVERY_CONFIRM consecutive matching frames
           recoveryTimeoutRef.current++;
-
-          if (currentHandCount === expectedHandsRef.current) {
-            // Hands match this frame!
+          if (currentHandCount === effectiveExpected) {
             recoveryConfirmRef.current++;
-
             if (recoveryConfirmRef.current >= RECOVERY_CONFIRM) {
-              // Confirmed! Resume capture (3 consecutive matching frames)
               isRecoveringRef.current = false;
               graceCounterRef.current = 0;
               recoveryTimeoutRef.current = 0;
@@ -1181,29 +1407,19 @@ export default function FullscreenCaptureModal({
               accept = true;
               if (DEBUG_HANDS) console.log("Recovery successful, resuming capture");
             } else {
-              // Still building up consecutive matches
               accept = false;
               if (DEBUG_HANDS) console.debug("Recovery progress", recoveryConfirmRef.current, "/", RECOVERY_CONFIRM);
             }
           } else {
-            // Hands DON'T match this frame
-            recoveryConfirmRef.current = 0; // RESET consecutive match counter on mismatch
-
+            recoveryConfirmRef.current = 0;
             if (recoveryTimeoutRef.current >= RECOVERY_TIMEOUT) {
-              // Recovery timeout exceeded (hands missing for 3+ frames)
-              // DO NOT auto-switch expectations (prevents mode drift from temporary occlusion)
-              // Remain in recovery state, pause capture
               accept = false;
               if (DEBUG_HANDS) console.warn("Recovery timeout exceeded, waiting for hands to reappear");
             } else {
-              // Still within recovery window, waiting for hands
               accept = false;
             }
           }
         }
-      } else {
-        // Fallback (should not reach here in normal operation)
-        accept = false;
       }
 
       // Auto mode should not stall on transient hand-count drops.
@@ -1251,14 +1467,17 @@ export default function FullscreenCaptureModal({
         const newCompleted = completedCapturesRef.current + 1;
 
         onSampleCaptureRef.current(capturedFrames, labelRef.current, userRef.current, {
-          quality_info: quality, dialect: dialectRef.current,
+          quality_info: quality,
+          dialect: dialectRef.current,
+          language: languageRef.current,
+          hands_used: deriveHandsUsed(capturedFrames),
         });
 
         completedCapturesRef.current = newCompleted;
         setCompletedCaptures(newCompleted);
         setCurrentCaptureIndex(newCompleted);
 
-        if (newCompleted < FIXED_CAPTURE_COUNT) {
+        if (newCompleted < captureCountRef.current) {
           setFrames([]); framesRef.current = [];
           expectedHandsRef.current = expectedHandsOptionRef.current;
           lastFrameTimeRef.current = 0;
@@ -1274,6 +1493,7 @@ export default function FullscreenCaptureModal({
           setTimeout(() => {
             setCountdown(3); setMode("COUNTDOWN");
             setTimeout(() => {
+              if (expectedHandsOptionRef.current != null) initializationCompleteRef.current = true;
               setRecording(true); recordingRef.current = true;
               setMode("RECORD"); lastFrameTimeRef.current = Date.now();
             }, 3000);
@@ -1347,7 +1567,7 @@ export default function FullscreenCaptureModal({
     // FIX: `expectedHandsOption` removed — would restart MediaPipe on every
     //       hands-mode toggle.  Use `expectedHandsOptionRef` inside callback.
     // FIX: `filterLandmarks` removed — it is not used inside this effect.
-  }, [isOpen, renderLandmarks, computeQuality, getRenderLandmarks, mirrorLandmarkX, stopCameraResources]);
+  }, [isOpen, renderLandmarks, computeQuality, deriveHandsUsed, getRenderLandmarks, resetRenderGroup, mirrorLandmarkX, stopCameraResources]);
 
   // -------------------------------------------------------------------------
   // Countdown effect
@@ -1414,7 +1634,10 @@ export default function FullscreenCaptureModal({
           expectedHandsRef.current = expectedHandsOptionRef.current;
           setCurrentCaptureIndex(0); setCompletedCaptures(0); completedCapturesRef.current = 0;
           setCountdown(3); setMode("COUNTDOWN");
-          setTimeout(() => { setRecording(true); recordingRef.current = true; setMode("RECORD"); }, 3000);
+          setTimeout(() => {
+            if (expectedHandsOptionRef.current != null) initializationCompleteRef.current = true;
+            setRecording(true); recordingRef.current = true; setMode("RECORD");
+          }, 3000);
         } else if (recordingRef.current) {
           const collected = framesRef.current.length || 0;
           const required = targetFramesRef.current || 0;
@@ -1424,7 +1647,11 @@ export default function FullscreenCaptureModal({
             setRecording(false); recordingRef.current = false;
             if (framesRef.current.length > 0) {
               const quality = computeQuality(framesRef.current);
-              onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, { quality_info: quality, dialect: dialectRef.current });
+              onSampleCaptureRef.current(framesRef.current, labelRef.current, userRef.current, {
+                quality_info: quality,
+                dialect: dialectRef.current,
+                hands_used: deriveHandsUsed(framesRef.current),
+              });
               setFrames([]); framesRef.current = [];
               expectedHandsRef.current = expectedHandsOptionRef.current;
             }
@@ -1450,7 +1677,7 @@ export default function FullscreenCaptureModal({
     };
     document.addEventListener("keydown", handleKeyPress);
     return () => document.removeEventListener("keydown", handleKeyPress);
-  }, [isOpen, computeQuality, handlePause, handleResume]);
+  }, [isOpen, computeQuality, deriveHandsUsed, handlePause, handleResume]);
 
   useEffect(() => {
     // Chặn cuộn trên body
@@ -1474,6 +1701,32 @@ export default function FullscreenCaptureModal({
 
   return (
     <div ref={rootRef} className="fixed inset-0 h-[100dvh] w-screen z-[9999] bg-black flex flex-col overflow-hidden">
+      {/* QC notice — phải nằm TRONG root vì element-fullscreen che toast global */}
+      {visibleNotice && (
+        <div className="fixed bottom-4 right-4 z-[10001] max-w-sm pointer-events-none">
+          <div
+            className={`pointer-events-auto rounded-lg border px-4 py-3 text-sm shadow-xl backdrop-blur-md ${
+              visibleNotice.kind === "error"
+                ? "bg-red-900/85 border-red-500 text-red-100"
+                : "bg-yellow-900/85 border-yellow-500 text-yellow-100"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-2">
+              <span>{visibleNotice.kind === "error" ? "⛔" : "⚠️"}</span>
+              <span className="leading-snug">{visibleNotice.message}</span>
+              <button
+                onClick={() => setVisibleNotice(null)}
+                className="ml-auto -mr-1 -mt-1 p-1 opacity-70 hover:opacity-100"
+                aria-label="Đóng thông báo"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Camera Error */}
       {cameraError && (
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -1516,6 +1769,11 @@ export default function FullscreenCaptureModal({
                   </button>
                 ))}
               </div>
+              {suggestedHands !== null && (
+                <span className="text-xs text-ctu-yellow" title="Nhãn này có số tay gợi ý từ catalog, nhưng vẫn cho phép thu linh hoạt 1 hoặc 2 tay.">
+                  Gợi ý catalog: {suggestedHands} tay
+                </span>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
@@ -1597,7 +1855,7 @@ export default function FullscreenCaptureModal({
                 <div className="text-2xl mb-2">Chuẩn bị thực hiện:</div>
                 <div className="text-3xl font-semibold text-green-400">{label}</div>
                 {captureCount > 1 && (
-                  <div className="text-lg mt-4 text-gray-300">Lần chụp {currentCaptureIndex + 1} / {FIXED_CAPTURE_COUNT}</div>
+                  <div className="text-lg mt-4 text-gray-300">Lần chụp {currentCaptureIndex + 1} / {captureCount}</div>
                 )}
               </div>
             </div>
@@ -1646,7 +1904,7 @@ export default function FullscreenCaptureModal({
                 <div className="text-4xl mb-4">🎉</div>
                 <div className="text-2xl font-bold mb-2 text-green-400">Đã chụp {completedCaptures} mẫu!</div>
                 <div className="text-xl mb-4">Chuẩn bị chụp tiếp...</div>
-                <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {FIXED_CAPTURE_COUNT}</div>
+                <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {captureCount}</div>
                 <div className="w-64 bg-gray-700 rounded-full h-3 mt-4 mx-auto">
                   <div className="bg-green-500 h-3 rounded-full transition-all duration-500" style={{ width: `${(completedCaptures / captureCount) * 100}%` }} />
                 </div>
@@ -1669,7 +1927,7 @@ export default function FullscreenCaptureModal({
             <div className="absolute top-20 sm:top-24 left-3 sm:left-6 flex items-center space-x-3 bg-red-500 text-white px-3 sm:px-4 py-2 rounded-full shadow-lg">
               <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
               <span className="font-medium">ĐANG GHI</span>
-              {FIXED_CAPTURE_COUNT > 1 && <span className="text-sm">({completedCaptures + 1}/{FIXED_CAPTURE_COUNT})</span>}
+              {captureCount > 1 && <span className="text-sm">({completedCaptures + 1}/{captureCount})</span>}
             </div>
           )}
 
@@ -1729,7 +1987,7 @@ export default function FullscreenCaptureModal({
               <div>
                 <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">👤 Người thực hiện *</label>
                 <div className="relative">
-                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder="tên người thu thập" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder="Ví dụ: Trân" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
                   <div className="absolute inset-y-0 right-1.5 flex items-center">
                     <SpeechInputButton onText={(text) => setUser(text)} title="Giọng nói" className="h-7 w-7" />
                   </div>
@@ -1784,6 +2042,82 @@ export default function FullscreenCaptureModal({
               <div className="text-[10px] text-blue-200/60">
                 {catalogLoading ? "Đang tải..." : `${displayLanguageLabel(language)} / ${displayDialectLabel(dialect)} • ${currentCatalogLabelCount} nhãn`}
               </div>
+
+              {/* Phiên thu hiện tại */}
+              {onNewSession && (
+                <div className="rounded-lg border border-blue-500/20 bg-gray-900/40 px-2.5 py-2 sm:px-3">
+                  <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+                    <div className="min-w-0">
+                      <div className="text-[11px] sm:text-xs font-medium text-blue-300">🗂 Phiên thu</div>
+                      <div className="mt-0.5 truncate text-[11px] text-blue-100/80" title={sessionId}>
+                        Bắt đầu {formatSessionLabel(sessionId)} · {sessionSampleCount} mẫu
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onNewSession}
+                      disabled={recording || countdown > 0}
+                      className="shrink-0 rounded-lg border border-blue-500/40 bg-blue-950/60 px-2.5 py-1.5 text-[11px] font-medium text-blue-100 transition hover:bg-blue-900/70 disabled:cursor-not-allowed disabled:opacity-40 sm:text-xs"
+                    >
+                      Phiên mới
+                    </button>
+                  </div>
+                  {signerChangedMidSession && (
+                    <div className="mt-1.5 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-950/40 px-2 py-1 text-[10px] leading-relaxed text-amber-200">
+                      <span aria-hidden="true">⚠</span>
+                      <span>
+                        Người thực hiện đã đổi từ <b>{sessionSigner}</b>. Hãy bắt đầu phiên
+                        mới để mẫu của hai người không bị gộp chung một nhóm.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Số lượt thu mỗi lần ghi */}
+              {onCaptureCountChange && (
+                <div>
+                  <label htmlFor="capture-count" className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">
+                    🔁 Số lượt thu
+                  </label>
+                  <div className="flex items-stretch gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => stepCaptureCount(-1)}
+                      disabled={recording || countdown > 0 || captureCount <= MIN_CAPTURE_COUNT}
+                      aria-label="Giảm số lượt thu"
+                      className="w-9 shrink-0 rounded-lg border border-gray-600 bg-gray-800/80 text-lg leading-none text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      −
+                    </button>
+                    <input
+                      id="capture-count"
+                      type="number"
+                      inputMode="numeric"
+                      min={MIN_CAPTURE_COUNT}
+                      max={MAX_CAPTURE_COUNT}
+                      value={captureCountDraft}
+                      onChange={(e) => setCaptureCountDraft(e.target.value)}
+                      onBlur={commitCaptureCount}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); commitCaptureCount(); }
+                      }}
+                      disabled={recording || countdown > 0}
+                      aria-describedby="capture-count-hint"
+                      className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-800/80 px-2.5 py-1.5 text-center text-sm font-semibold text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 sm:px-3 sm:py-2"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => stepCaptureCount(1)}
+                      disabled={recording || countdown > 0 || captureCount >= MAX_CAPTURE_COUNT}
+                      aria-label="Tăng số lượt thu"
+                      className="w-9 shrink-0 rounded-lg border border-gray-600 bg-gray-800/80 text-lg leading-none text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <AddDialectModal isOpen={showAddDialectModal} onClose={() => setShowAddDialectModal(false)} onAdd={(name) => {
@@ -1795,7 +2129,7 @@ export default function FullscreenCaptureModal({
             {/* Status — desktop only */}
             <div className="bg-gray-800 rounded-lg p-3 hidden sm:block">
               <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between text-gray-400"><span>Lần chụp:</span><span className="text-white">{currentCaptureIndex + 1}/{FIXED_CAPTURE_COUNT}</span></div>
+                <div className="flex justify-between text-gray-400"><span>Lần chụp:</span><span className="text-white">{currentCaptureIndex + 1}/{captureCount}</span></div>
                 {frames.length > 0 && (
                   <div className="w-full bg-gray-700 rounded-full h-1.5">
                     <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
@@ -1824,7 +2158,7 @@ export default function FullscreenCaptureModal({
                 title={connectionIssue ? "Đang gặp sự cố kết nối/lưu server — tạm ngưng thu" : undefined}
               >
                 <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                {FIXED_CAPTURE_COUNT > 1 ? `Bắt đầu chụp (${FIXED_CAPTURE_COUNT}x)` : "Bắt đầu chụp"} (Enter)
+                {captureCount > 1 ? `Bắt đầu chụp (${captureCount}x)` : "Bắt đầu chụp"} (Enter)
               </Button>
             ) : paused ? (
               <div className="text-center py-3 text-gray-400 text-sm">

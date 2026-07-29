@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Sample as SampleT, SessionStats, MediaPipeLandmark, QualityInfo, CameraInfo } from "../types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Sample as SampleT, SessionStats, MediaPipeLandmark, QualityInfo, CameraInfo, CameraUploadPayload } from "../types";
 import { uploadCamera } from "../api/upload";
+import { qcMessage } from "../utils/qualityMessages";
 import CaptureGuide from "./CaptureGuide";
 import SessionPanel from "./SessionPanel";
 import SessionSummary from "./SessionSumary";
 import FullscreenCaptureModal from "./FullscreenCaptureModal";
 import Button from "./ui/Button";
 import { TARGET_FRAMES, CAPTURE_COUNT } from "../config/capture";
+import { createSessionId, NEW_SESSION_EVENT } from "../utils/session";
 import { me } from "../api/auth";
 
 type Props = {
@@ -22,15 +24,20 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   // Removed preview state - using fullscreen capture only
   const [showFullscreen, setShowFullscreen] = useState(false);
   
-  // Capture settings are fixed for public uploader — sourced from config
   const targetFrames = TARGET_FRAMES;
-  const captureCount = CAPTURE_COUNT;
+  // Số lượt thu mỗi lần bấm ghi. CAPTURE_COUNT chỉ còn là giá trị mặc định —
+  // người thu chỉnh được vì các lượt trong cùng một đợt là mẫu gần trùng nhau,
+  // nên nhiều lượt không đồng nghĩa nhiều dữ liệu độc lập hơn.
+  const [captureCount, setCaptureCount] = useState<number>(CAPTURE_COUNT);
 
-  const [sessionId] = useState(() => Date.now().toString());
+  const [sessionId, setSessionId] = useState(createSessionId);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const [samples, setSamples] = useState<SampleT[]>([]);
   const [sampleCounter, setSampleCounter] = useState(1);
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null);
+  // Thông báo QC hiển thị TRONG modal fullscreen (toast global bị element-fullscreen che).
+  // `key` tăng dần để modal re-trigger auto-dismiss cho từng thông báo mới.
+  const [qualityNotice, setQualityNotice] = useState<{ kind: "warning" | "error"; message: string; key: number } | null>(null);
 
   // Số mẫu đã thu thành công theo từng từ, dùng để hiển thị danh sách trong
   // giao diện toàn màn hình (chỉ tính mẫu đã xử lý và lưu lên server).
@@ -41,6 +48,25 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       return acc;
     }, {});
   }, [samples]);
+
+  // Bắt đầu một phiên thu mới: cấp session_id mới và xoá tổng kết của phiên cũ.
+  // KHÔNG reload trang — mẫu đã thu đều đã lưu lên server, nên reload chỉ làm
+  // mất ngữ cảnh nhập liệu mà không đem lại gì, và người dùng không nhận ra
+  // được là có chuyện gì vừa xảy ra.
+  const handleNewSession = useCallback(() => {
+    setSessionId(createSessionId());
+    setSamples([]);
+    setSampleCounter(1);
+    setSessionStats(null);
+  }, []);
+
+  // Nút "Phiên mới" ở thanh điều hướng phát sự kiện toàn cục; chỉ nơi đang thu
+  // mới biết cách reset đúng.
+  useEffect(() => {
+    const onRequest = () => handleNewSession();
+    window.addEventListener(NEW_SESSION_EVENT, onRequest);
+    return () => window.removeEventListener(NEW_SESSION_EVENT, onRequest);
+  }, [handleNewSession]);
 
   // Mất kết nối mạng ở cấp trình duyệt cũng được coi là sự cố — chặn thu tiếp
   // để tránh mất dữ liệu đã ghi.
@@ -55,10 +81,15 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
     };
   }, []);
 
+  // Giữ đồng bộ với FullscreenCaptureModal: viết hoa chữ cái đầu mỗi từ
+  // (locale vi) để tên người thu nhất quán, tránh biến thể signer trùng người.
   const sanitizeCollectorName = (value: string) =>
     value
       .replace(/[^\p{L}\s]/gu, " ")
       .replace(/\s+/g, " ")
+      .split(" ")
+      .map((w) => (w ? w.charAt(0).toLocaleUpperCase("vi") + w.slice(1) : w))
+      .join(" ")
       .trim();
 
   useEffect(() => {
@@ -116,22 +147,13 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   const handleFullscreenCapture = async (capturedFrames: Array<{
     left_hand: MediaPipeLandmark[];
     right_hand: MediaPipeLandmark[];
-  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string }) => {
+  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string; language?: string; hands_used?: number | null }) => {
     console.log(`Parent received capture: ${capturedLabel} with ${capturedFrames.length} frames`);
-    
+
     // Don't set uploading state to avoid blocking the modal
     try {
       // Prepare data for backend API
-      const payload: {
-        user: string;
-        label: string;
-        session_id: string;
-        dialect?: string;
-        frames: Array<{ timestamp: number; landmarks: {
-          left_hand?: MediaPipeLandmark[];
-          right_hand?: MediaPipeLandmark[];
-        } }>;
-      } = {
+      const payload: CameraUploadPayload = {
         user: capturedUser,
         label: capturedLabel,
         session_id: sessionId,
@@ -141,11 +163,16 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
         }))
       };
       if (meta?.dialect) payload.dialect = meta.dialect;
+      if (meta?.language) payload.language = meta.language;
+      if (meta?.hands_used === 1 || meta?.hands_used === 2) payload.hands_required = meta.hands_used;
+      if (meta?.quality_info) payload.quality_info = meta.quality_info;
 
       console.log('Uploading payload to backend...');
       // Call real API in background
       uploadCamera(payload).then((result) => {
-        if (result.ok) {
+        // HTTP 200 nhưng success=false (payload lỗi) trước đây bị coi là
+        // thành công — giờ xử lý như thất bại.
+        if (result.ok && result.data.success !== false) {
           const sample: SampleT = {
             id: sampleCounter,
             session_id: sessionId,
@@ -160,14 +187,29 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           setSamples(prev => [...prev, sample]);
           setSampleCounter(prev => prev + 1);
           setConnectionIssue(null);
-          onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
+
+          const warning = result.data.quality?.warnings?.[0];
+          if (warning) {
+            // Mẫu được lưu nhưng bị đánh dấu — cảnh báo không chặn phiên quay.
+            const message = qcMessage(warning.code, warning.detail);
+            setQualityNotice(prev => ({ kind: "warning", message, key: (prev?.key ?? 0) + 1 }));
+          } else {
+            onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
+          }
 
           console.log(`Sample "${capturedLabel}" (${capturedFrames.length} frames) uploaded successfully! Total samples: ${samples.length + 1}`);
+        } else if (!result.ok && result.errorCode) {
+          // QC reject (422): lỗi dữ liệu chứ không phải lỗi mạng — hiện toast
+          // đỏ trong modal, KHÔNG set connectionIssue (sẽ đóng băng phiên quay).
+          console.error('Upload rejected by QC:', result.errorCode, result.error);
+          const message = qcMessage(result.errorCode);
+          setQualityNotice(prev => ({ kind: "error", message, key: (prev?.key ?? 0) + 1 }));
         } else {
-          console.error('Upload failed:', result.error);
-          setConnectionIssue(result.error || 'Không thể lưu mẫu lên máy chủ.');
+          const errorMsg = result.ok ? (result.data.message || 'Không thể lưu mẫu lên máy chủ.') : result.error;
+          console.error('Upload failed:', errorMsg);
+          setConnectionIssue(errorMsg || 'Không thể lưu mẫu lên máy chủ.');
           if (onError) {
-            onError(result.error || 'Upload failed. Please try again.');
+            onError(errorMsg || 'Upload failed. Please try again.');
           }
         }
       }).catch((error) => {
@@ -206,8 +248,6 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
             Mở giao diện chụp toàn màn hình để thu dữ liệu tư thế không bị phân tâm. Tối ưu cho tốc độ và độ chính xác.
           </p>
 
-          {/* Capture settings are fixed for public uploader. Edit src/config/capture.ts to change them. */}
-
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center mb-5 sm:mb-6">
             <Button
               onClick={() => setShowFullscreen(true)}
@@ -230,28 +270,6 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
               </svg>
               Xem hướng dẫn
             </Button>
-          </div>
-
-          {/* Quick Features */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 max-w-4xl mx-auto text-xs sm:text-sm">
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-blue/10 rounded-xl">
-              <svg className="w-5 h-5 text-ctu-blue mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="text-ctu-blue font-medium">Đếm ngược 3 giây</span>
-            </div>
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-navy/10 rounded-xl">
-              <svg className="w-5 h-5 text-ctu-navy mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-ctu-navy font-medium">Phát hiện bàn tay bằng AI</span>
-            </div>
-            <div className="flex items-center justify-center p-3 sm:p-4 bg-ctu-yellow/15 rounded-xl">
-              <svg className="w-5 h-5 text-ctu-navy mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 4V2a1 1 0 011-1h4a1 1 0 011 1v2m-6 0h8m-6 0a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2m-6 0V4" />
-              </svg>
-              <span className="text-ctu-navy font-medium">Hỗ trợ phím tắt</span>
-            </div>
           </div>
         </div>
       </div>
@@ -355,8 +373,13 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           initialUser={user}
           targetFrames={targetFrames}
           captureCount={captureCount}
+          onCaptureCountChange={setCaptureCount}
+          sessionId={sessionId}
+          sessionSampleCount={samples.length}
+          onNewSession={handleNewSession}
           capturedSummary={capturedSummary}
           connectionIssue={connectionIssue}
+          qualityNotice={qualityNotice}
         />
       )}
 

@@ -26,6 +26,8 @@ import { Hands } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
 
 import { flattenRealtimeHands, type MediaPipeHandsLikeResults } from "../../utils/realtimeFlatten";
+import { HAND_TRACKING_OPTIONS, MP_HANDS_VERSION } from "../../config/handTracking";
+import type { HandAnchors } from "../../utils/handIdentity";
 import { RealtimeRingBuffer } from "../../utils/realtimeRingBuffer";
 import {
   RealtimeInferenceScheduler,
@@ -59,8 +61,9 @@ const parseBoolEnv = (value: unknown, fallback: boolean) => {
   return fallback;
 };
 
-// Keep CDN asset version aligned with pinned dependency (matches capture modal).
-const MP_HANDS_VERSION = "0.4.1675469240";
+// Extraction settings and CDN asset version come from the shared contract in
+// config/handTracking.ts so serving can never drift from how the corpus was
+// recorded. Do not re-declare them here.
 
 // Server-side TTS voice options
 const TTS_VOICES = [
@@ -98,6 +101,10 @@ export default function RealtimeRuntime({
 
   // Reusable frame vector scratch (copied into ring buffer each frame).
   const frameScratchRef = useRef<Float32Array | null>(null);
+  // Left/right identity carried across frames, mirroring what the capture modal
+  // does. Reset whenever a run starts so a new session never inherits stale
+  // wrist positions from the previous one.
+  const handAnchorsRef = useRef<HandAnchors>({});
 
   // Safety: prevent post-unmount work.
   const disposedRef = useRef(false);
@@ -498,6 +505,7 @@ export default function RealtimeRuntime({
     ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126, minReadyFrames: 40 });
     smootherRef.current = new PredictionSmoother({ historySize: 2, emaAlpha: 0.7 });
     frameScratchRef.current = new Float32Array(126);
+    handAnchorsRef.current = {};
 
     // MediaPipe Hands
     const hands = new Hands({
@@ -505,13 +513,10 @@ export default function RealtimeRuntime({
         `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
     });
 
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 0,
-      refineLandmarks: false,
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.65,
-    });
+    // Shared contract — must stay identical to the capture modal. Realtime used
+    // to run modelComplexity 0 with 0.6/0.65, i.e. a different landmark network
+    // and stricter tracking than the one that produced the training corpus.
+    hands.setOptions({ ...HAND_TRACKING_OPTIONS });
 
     hands.onResults((results: unknown) => {
       if (disposedRef.current) return;
@@ -527,13 +532,18 @@ export default function RealtimeRuntime({
         const hasHands = mpResults?.multiHandLandmarks && mpResults.multiHandLandmarks.length > 0;
 
         if (!hasHands) {
-          // No hands detected: clear ring buffer to reset on next hand detection
+          // No hands detected: clear ring buffer to reset on next hand detection.
+          // Anchors are left alone — they expire on their own, so a hand lost for
+          // a frame or two still resolves back into the slot it came from.
           ring.clear();
           return;
         }
 
-        // Hands detected: RAW webcam coordinates only; flatten handles the required handedness swap.
-        const vec = flattenRealtimeHands(mpResults, scratch);
+        // flatten applies the handedness swap, the cross-frame identity lock and
+        // the x mirror, so the vector matches how the corpus was recorded.
+        const vec = flattenRealtimeHands(mpResults, scratch, {
+          anchors: handAnchorsRef.current,
+        });
         ring.append(vec);
 
         // Scheduler itself gates on isReady() and inFlight.

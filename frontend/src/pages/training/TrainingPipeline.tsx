@@ -34,9 +34,9 @@ const STEP_ICON_CLASS = 'h-6 w-6 sm:h-7 sm:w-7';
 
 const STEP_LABELS: Record<number, { title: string; icon: ReactNode; description: string }> = {
   1: { title: 'Dữ Liệu', icon: <DatabaseIcon className={STEP_ICON_CLASS} />, description: 'Xem thông tin dataset' },
-  2: { title: 'Chia Tập', icon: <SplitIcon className={STEP_ICON_CLASS} />, description: 'Phân tách train/val/test' },
-  3: { title: 'Tăng Cường', icon: <SparkleIcon className={STEP_ICON_CLASS} />, description: 'Xem trước augmentation' },
-  4: { title: 'Chọn Dialect', icon: <GlobeIcon className={STEP_ICON_CLASS} />, description: 'Lựa chọn phương ngữ' },
+  2: { title: 'Chọn Dialect', icon: <GlobeIcon className={STEP_ICON_CLASS} />, description: 'Lựa chọn phương ngữ' },
+  3: { title: 'Chia Tập', icon: <SplitIcon className={STEP_ICON_CLASS} />, description: 'Phân tách train/val/test' },
+  4: { title: 'Tăng Cường', icon: <SparkleIcon className={STEP_ICON_CLASS} />, description: 'Xem trước augmentation' },
   5: { title: 'Cấu Hình', icon: <GearIcon className={STEP_ICON_CLASS} />, description: 'Điều chỉnh hyperparameters' },
   6: { title: 'Huấn Luyện', icon: <ChipIcon className={STEP_ICON_CLASS} />, description: 'Quá trình training' },
   7: { title: 'Kết Quả', icon: <ClipboardCheckIcon className={STEP_ICON_CLASS} />, description: 'Phân tích kết quả' },
@@ -158,12 +158,12 @@ const TrainingPipeline: React.FC = () => {
     switch (currentStep) {
       case 1: // Dataset Info - always valid
         return !!datasetInfo;
-      case 2: // Data Split - always valid
-        return true;
-      case 3: // Augmentation Preview - always valid
-        return true;
-      case 4: // Dialect Selector - must select at least one
+      case 2: // Dialect Selector - must select at least one (moved before split)
         return selectedDialects.length > 0;
+      case 3: // Data Split - always valid
+        return true;
+      case 4: // Augmentation Preview - always valid
+        return true;
       case 5: // Training Settings - always valid
         return selectedDialects.length > 0;
       case 6: // Training Progress - automatic
@@ -303,15 +303,17 @@ const TrainingPipeline: React.FC = () => {
             )}
 
             {currentStep === 1 && <DatasetInfo datasetInfo={datasetInfo} loading={loading} />}
-            {currentStep === 2 && <DataSplitVisualization datasetInfo={datasetInfo} />}
-            {currentStep === 3 && <AugmentationPreview />}
-            {currentStep === 4 && (
+            {currentStep === 2 && (
               <DialectSelector
                 dialects={datasetInfo?.dialects || {}}
                 selected={selectedDialects}
                 onChange={setSelectedDialects}
               />
             )}
+            {currentStep === 3 && (
+              <DataSplitVisualization datasetInfo={datasetInfo} selectedDialects={selectedDialects} />
+            )}
+            {currentStep === 4 && <AugmentationPreview />}
             {currentStep === 5 && (
               <TrainingSettings config={trainingConfig} onChange={setTrainingConfig} />
             )}

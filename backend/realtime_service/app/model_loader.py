@@ -5,6 +5,7 @@ import inspect
 import math
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,6 +87,10 @@ def _torch_load_checkpoint(path: str, map_location: str = "cpu") -> Any:
             return torch.load(path, map_location=map_location, weights_only=True)
         except Exception as exc:
             logger.warning("weights_only torch.load failed; falling back to full torch.load: %s", exc)
+
+        # torch >= 2.6 defaults weights_only=True, so the fallback must opt out
+        # explicitly — otherwise it repeats the failure above.
+        return torch.load(path, map_location=map_location, weights_only=False)
 
     return torch.load(path, map_location=map_location)
 
@@ -171,8 +176,14 @@ class TCNClassifier(nn.Module):
         dropout: float = 0.3,
         use_proj: bool = True,
         proj_dim: Optional[int] = None,
+        temporal_pool: str = "gap",
     ) -> None:
         super().__init__()
+        # MUST mirror processed/train_utils/models/tcn.py exactly (same submodule
+        # names + feature widths) so a trained state_dict loads with strict=True.
+        if temporal_pool not in ("gap", "attention", "mean_max"):
+            raise ValueError(f"temporal_pool must be gap|attention|mean_max, got {temporal_pool}")
+        self.temporal_pool = temporal_pool
         proj_dim = int(proj_dim or channels)
         self.proj: nn.Module = nn.Identity()
         current_in = int(in_dim)
@@ -193,7 +204,22 @@ class TCNClassifier(nn.Module):
                 )
             )
         self.network = nn.Sequential(*blocks)
-        self.classifier = nn.Linear(int(channels), int(num_classes))
+
+        if temporal_pool == "attention":
+            self.attn: Optional[nn.Module] = nn.Sequential(
+                nn.Linear(int(channels), int(channels) // 2),
+                nn.Tanh(),
+                nn.Linear(int(channels) // 2, 1),
+            )
+            feat_dim = int(channels)
+        elif temporal_pool == "mean_max":
+            self.attn = None
+            feat_dim = int(channels) * 3
+        else:
+            self.attn = None
+            feat_dim = int(channels)
+
+        self.classifier = nn.Linear(feat_dim, int(num_classes))
         nn.init.kaiming_uniform_(self.classifier.weight, a=math.sqrt(5))
         if self.classifier.bias is not None:
             nn.init.zeros_(self.classifier.bias)
@@ -209,16 +235,89 @@ class TCNClassifier(nn.Module):
         x = self.proj(x)
         x = self.network(x)
 
-        pooled = x.mean(dim=2)
+        if self.temporal_pool == "attention" and self.attn is not None:
+            h = x.transpose(1, 2)                    # [B, T, channels]
+            w = torch.softmax(self.attn(h), dim=1)   # [B, T, 1]
+            pooled = (h * w).sum(dim=1)
+        elif self.temporal_pool == "mean_max":
+            pooled = torch.cat([x.mean(dim=2), x.max(dim=2).values, x[:, :, -1]], dim=1)
+        else:
+            pooled = x.mean(dim=2)
         logits = self.classifier(pooled)
         return logits
 
 
+# Checkpoint `model_type` values (from model.get_model_name()) → registry keys.
+# Mirrors app/routers/training.py so the backend and this service agree on what a
+# checkpoint claims to be.
+_MODEL_NAME_TO_REGISTRY_KEY = {
+    "cnn": "cnn",
+    "lstm": "lstm",
+    "bigru + attention": "bigru_attention",
+    "bigru attention": "bigru_attention",
+    "bigru_attention": "bigru_attention",
+    "handgcn": "handgcn",
+    "hdgcn": "handgcn",
+    "hd-gcn": "handgcn",   # model.get_model_name() returns "HD-GCN"
+    "hd_gcn": "handgcn",
+    "tcn": "tcn",
+}
+
+
+def _import_models_registry():
+    """Import the training model package mounted at /app/processed/train_utils/models.
+
+    Must be a real package import, not spec_from_file_location: the package uses
+    relative imports internally. `processed` and `processed.train_utils` resolve
+    as namespace packages, so only the leaf `models/` directory needs mounting.
+    """
+    import importlib
+
+    root = os.getenv("MODEL_ARCHS_ROOT", "/app")
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    return importlib.import_module("processed.train_utils.models")
+
+
+def _build_from_registry(registry_key: str, ckpt: Dict[str, Any], model_type: str) -> nn.Module:
+    """Build a non-TCN architecture from the same package that trained it.
+
+    Deliberately no fallback to TCN: mismatched weights would surface as a
+    confusing state_dict error instead of a clear "this architecture is
+    unavailable" one.
+    """
+    try:
+        models_module = _import_models_registry()
+        model_class = models_module.get_model_class(registry_key)
+        return model_class.from_config(
+            input_dim=int(ckpt.get("feature_dim", 126)),
+            output_dim=int(ckpt.get("num_classes")),
+            config=ckpt.get("model_config") or {},
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"cannot build '{model_type}' model: the training model package is "
+            f"unavailable or incompatible ({exc}). Mount "
+            f"processed/train_utils/models into the realtime container."
+        ) from exc
+
+
 def build_model_from_checkpoint(ckpt: Dict[str, Any]) -> nn.Module:
     model_type = str(ckpt.get("model_type") or "").strip()
-    if model_type != "TCN":
-        raise ValueError(f"unsupported model_type for Step 0: {model_type!r}")
+    registry_key = _MODEL_NAME_TO_REGISTRY_KEY.get(
+        model_type.lower().replace(" (legacy)", "").strip()
+    )
+    if registry_key is None:
+        raise ValueError(f"unsupported model_type: {model_type!r}")
 
+    if registry_key != "tcn":
+        return _build_from_registry(registry_key, ckpt, model_type)
+
+    # TCN keeps the inline definition below rather than the registry. It mirrors
+    # processed/train_utils/models/tcn.py including the temporal_pool head, is
+    # what every currently promoted model is served by, and works even when the
+    # model package is not mounted — so the serving path for existing models is
+    # unchanged by multi-architecture support.
     cfg = ckpt.get("model_config")
     if not isinstance(cfg, dict):
         raise ValueError("model_config must be a dict")
@@ -250,6 +349,8 @@ def build_model_from_checkpoint(ckpt: Dict[str, Any]) -> nn.Module:
         dropout=dropout,
         use_proj=bool(cfg.get("use_proj", True)),
         proj_dim=proj_dim,
+        # Old checkpoints have no temporal_pool -> "gap" (unchanged behaviour).
+        temporal_pool=str(cfg.get("temporal_pool", "gap")),
     )
 
 

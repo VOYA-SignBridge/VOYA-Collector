@@ -3,15 +3,24 @@ from __future__ import annotations
 import os
 import re
 import csv
+import json
 import uuid
 import logging
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 from datetime import datetime
 from filelock import FileLock
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from app.processing.utils import atomic_write_json
+from app.processing.quality import parse_hands_required  # re-exported for callers
+# Single source of truth for alphabet slug rules — see class_registry.
+from app.processing.class_registry import (
+    _VN_ALPHABET_SLUG,
+    assert_single_alphabet_letter,
+    is_alphabet_dialect,
+)
 
 from app.config import settings
 
@@ -25,22 +34,102 @@ LANGUAGE_LABELS = LABELS_DIR / "labels_language.csv"
 DIALECT_LABELS = LABELS_DIR / "labels_dialect.csv"
 
 # Field order for labels_master.csv (extended to include class_idx, folder_name, timestamps)
+# NOTE: `dialect` is DEPRECATED as a semantic field (it conflated region /
+# vocabulary domain / collection campaign). It is kept because it still names
+# the physical storage directory. New code must use the vocabulary schema v2
+# columns below (see processed/shared/vocabulary.py + docs/VOCABULARY_SCHEMA_V2.md).
 LABEL_FIELDS = [
     "class_uid",
     "class_idx",
     "slug",
     "label_original",
     "language",
-    "dialect",
+    "dialect",  # deprecated semantics — physical storage dir only
     "is_common_global",
     "is_common_language",
     "folder_name",
     "created_at",
     "migrated_at",
+    "hands_required",
+    # --- vocabulary schema v2 ---
+    "semantic_label",
+    "vocabulary_scope",
+    "recognition_profile",
+    "vocabulary_group",
+    "collection_campaign",
+    "is_active",
+    "motion_type",  # static | dynamic | mixed | "" (unknown)
 ]
 
 
-def slugify(text: str, maxlen: int = 40) -> str:
+@lru_cache(maxsize=1)
+def _vocabulary_mapping() -> Dict[str, Dict[str, str]]:
+    """dialect -> its confirmed vocabulary-schema-v2 fields.
+
+    Reads config/legacy_vocabulary_mapping.json, the same file
+    scripts/migrate_legacy_vocabulary_schema.py used to back-fill the existing
+    classes. Only entries the owner marked ``status: confirmed`` are returned —
+    an unconfirmed dialect keeps empty cells and shows up in the review report,
+    which is the behaviour that file was designed around.
+
+    Without this, a class created through the app carries empty
+    recognition_profile / vocabulary_scope, and every split filtered by profile
+    silently omits it: the class trains nothing and nobody is told.
+    """
+    override = os.getenv("VOCABULARY_MAPPING_PATH", "").strip()
+    candidates = [Path(override)] if override else [
+        Path(__file__).resolve().parents[2] / "config" / "legacy_vocabulary_mapping.json",
+        Path("/workspace/config/legacy_vocabulary_mapping.json"),
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            raw = json.loads(path.read_text(encoding="utf-8")).get("dialect_mapping", {})
+        except Exception as exc:  # a malformed file must not block recording
+            logger.warning("[VOCAB] cannot read %s: %s", path, exc)
+            continue
+        return {
+            dialect: entry
+            for dialect, entry in raw.items()
+            if isinstance(entry, dict) and entry.get("status") == "confirmed"
+        }
+    logger.warning("[VOCAB] no vocabulary mapping found; new classes will need manual review")
+    return {}
+
+
+def _semantic_label_from_slug(slug: str) -> str:
+    """cam-on -> cam_on. Mirrors semantic_label_from_slug in
+    processed/shared/vocabulary.py, which the backend cannot import (the
+    `processed` package is not on its path and no backend module depends on it).
+    """
+    return (slug or "").strip().replace("-", "_")
+
+
+def vocabulary_defaults_for_dialect(dialect: str) -> Dict[str, str]:
+    """The v2 cells a new class in this dialect should be born with."""
+    entry = _vocabulary_mapping().get((dialect or "").strip().lower(), {})
+    return {
+        key: str(entry.get(key) or "")
+        for key in (
+            "vocabulary_scope",
+            "recognition_profile",
+            "vocabulary_group",
+            "motion_type",
+            "collection_campaign",
+        )
+    }
+
+
+def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
+    """ASCII slug. preserve_vn_letters keeps Ă/Â/Đ/Ê/Ô/Ơ/Ư distinct from their
+    base letter for the fingerspelling alphabet (see class_registry.slugify)."""
+    if preserve_vn_letters:
+        # NFC first — see the note in class_registry.slugify: a decomposed "Â"
+        # otherwise misses this table and collapses into the base letter.
+        key = unicodedata.normalize("NFC", (text or "").strip()).lower()
+        if key in _VN_ALPHABET_SLUG:
+            return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
@@ -80,46 +169,12 @@ def parse_bool(value) -> bool:
 
 
 def normalize_dialect(dialect: Optional[str]) -> str:
-    """Normalize frontend dialect names to canonical slugs.
-    Examples: "Bắc"->"bac", "Trung"->"trung", "Nam"->"nam", "Hòa Đê"/"Hoa De"->"hoa-de".
-    Also accepts already-normalized values.
+    """ASCII-safe normalization for dialect values received from the API.
+
+    (A second, older normalize_dialect + DIALECT_MAPPING used to sit above this
+    one and was silently shadowed — removed 2026-07-19; this is the only
+    implementation.)
     """
-    if not dialect:
-        return ""
-    d = str(dialect).strip().lower()
-    # Remove diacritics and extra spaces to match mapping better
-    base = "".join([c for c in d if not unicodedata.combining(c)])
-    base = re.sub(r"\s+", " ", base).strip()
-    # Try exact and base
-    return DIALECT_MAPPING.get(d, DIALECT_MAPPING.get(base, d))
-
-
-# Module-level mapping constant for reuse and testability
-DIALECT_MAPPING = {
-    "bac": "bac",
-    "bắc": "bac",
-    "mien bac": "bac",
-    "miền bắc": "bac",
-    "north": "bac",
-    "trung": "trung",
-    "miền trung": "trung",
-    "mien trung": "trung",
-    "central": "trung",
-    "nam": "nam",
-    "miền nam": "nam",
-    "mien nam": "nam",
-    "south": "nam",
-    "hoa de": "hoa-de",
-    "hòa đê": "hoa-de",
-    "hoa đê": "hoa-de",
-    "hoade": "hoa-de",
-    "hoa-de": "hoa-de",
-    "chung": "common",
-}
-
-
-def normalize_dialect(dialect: Optional[str]) -> str:
-    """ASCII-safe normalization for dialect values received from the API."""
     if not dialect:
         return ""
 
@@ -150,6 +205,8 @@ def normalize_dialect(dialect: Optional[str]) -> str:
         "can tho": "can-tho",
         "cantho": "can-tho",
         "can-tho": "can-tho",
+        "bang chu cai": "bang-chu-cai",
+        "bang-chu-cai": "bang-chu-cai",
         "chung": "common",
         "common": "common",
     }
@@ -172,6 +229,15 @@ class ClassMetadata:
     is_common_language: bool
     folder_override: Optional[str] = None
     class_idx: Optional[int] = None
+    hands_required: Optional[int] = None  # 1 | 2 | None (unknown)
+    # --- vocabulary schema v2 (empty string = unassigned / needs review) ---
+    semantic_label: str = ""
+    vocabulary_scope: str = ""       # "common" | "profile_specific" | ""
+    recognition_profile: str = ""    # north|central|south|hoa_de|legacy_unassigned|""
+    vocabulary_group: str = ""
+    collection_campaign: str = ""
+    is_active: bool = True
+    motion_type: str = ""  # static | dynamic | mixed | "" (unknown)
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -201,6 +267,14 @@ class ClassMetadata:
             "folder_name": self.folder_name(),
             "created_at": now_str(),
             "migrated_at": now_str(),
+            "hands_required": str(self.hands_required or ""),
+            "semantic_label": self.semantic_label or "",
+            "vocabulary_scope": self.vocabulary_scope or "",
+            "recognition_profile": self.recognition_profile or "",
+            "vocabulary_group": self.vocabulary_group or "",
+            "collection_campaign": self.collection_campaign or "",
+            "is_active": "1" if self.is_active else "0",
+            "motion_type": self.motion_type or "",
         }
 
     def write_metadata_json(self):
@@ -216,8 +290,42 @@ class ClassMetadata:
             "is_common_global": self.is_common_global,
             "is_common_language": self.is_common_language,
             "folder_name": self.folder_name(),
+            "hands_required": self.hands_required,
         }
         atomic_write_json(path, data, indent=2)
+
+
+def _upgrade_labels_header_locked():
+    """Rewrite labels.csv with the current LABEL_FIELDS header if the on-disk
+    header is missing columns. MUST be called while holding the MASTER_LABELS
+    lock. All label writers use LABEL_FIELDS directly, so appending new-schema
+    rows to an old-header file would silently misalign columns.
+    Old rows get "" for the new columns (DictReader restval)."""
+    with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f, restval="")
+        on_disk = reader.fieldnames or []
+        if all(col in on_disk for col in LABEL_FIELDS):
+            return
+        rows = list(reader)
+    tmp = MASTER_LABELS.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, MASTER_LABELS)
+    logger.info("[CLASS] Upgraded labels.csv header to %s (%d rows preserved)", LABEL_FIELDS, len(rows))
+
+
+def _labels_header_outdated() -> bool:
+    """Cheap lock-free peek at the on-disk header (first line only)."""
+    try:
+        with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), [])
+    except (OSError, StopIteration):
+        return False
+    return bool(header) and any(col not in header for col in LABEL_FIELDS)
 
 
 def _ensure_labels_file():
@@ -231,6 +339,10 @@ def _ensure_labels_file():
                 with open(MASTER_LABELS, "w", newline="", encoding="utf-8") as f:
                     writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS)
                     writer.writeheader()
+    elif _labels_header_outdated():
+        lock = FileLock(str(MASTER_LABELS) + ".lock")
+        with lock:
+            _upgrade_labels_header_locked()
     # ensure derivative label indexes exist (generated lazily)
     for path, fields in [
         (
@@ -375,6 +487,58 @@ def regenerate_label_indexes():
                 writer.writerows(items)
 
 
+def set_class_hands_required(class_uid: str, hands_required: int) -> bool:
+    """Persist hands_required (1|2) for a class, first-capture-wins.
+
+    Only writes when the class has no value yet. Mutates ONLY the
+    hands_required cell of the matching row (rebuilding rows via
+    to_label_row() would clobber created_at/migrated_at), then atomically
+    rewrites labels.csv. Returns True if the value was written.
+    """
+    hands_required = parse_hands_required(hands_required)
+    if hands_required is None:
+        return False
+    _ensure_labels_file()
+
+    updated_row: Optional[Dict[str, str]] = None
+    lock = FileLock(str(MASTER_LABELS) + ".lock")
+    with lock:
+        rows = _load_labels_locked()
+        for r in rows:
+            if r.get("class_uid") == class_uid:
+                if parse_hands_required(r.get("hands_required")) is not None:
+                    return False  # already set — first capture wins
+                r["hands_required"] = str(hands_required)
+                updated_row = dict(r)
+                break
+        else:
+            logger.warning("[CLASS] set_class_hands_required: class_uid=%s not found", class_uid)
+            return False
+
+        tmp = MASTER_LABELS.with_suffix(".csv.tmp")
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
+            writer.writeheader()
+            writer.writerows(rows)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, MASTER_LABELS)
+
+    logger.info("[CLASS] hands_required=%s persisted for class_uid=%s", hands_required, class_uid)
+
+    # Best-effort mirrors — never fail the caller for these
+    try:
+        from app.storage.metadata_db import upsert_class
+        upsert_class(updated_row)
+    except Exception as exc:
+        logger.warning("[CLASS] hands_required DB mirror failed: %s", exc)
+    try:
+        sync_master_labels_to_gdrive()
+    except Exception as exc:
+        logger.warning("[CLASS] hands_required Drive mirror failed: %s", exc)
+    return True
+
+
 def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
     """Construct ClassMetadata from a labels CSV row."""
     return ClassMetadata(
@@ -389,6 +553,14 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         is_common_global=parse_bool(existing.get("is_common_global")),
         is_common_language=parse_bool(existing.get("is_common_language")),
         folder_override=existing.get("folder_name") or None,
+        hands_required=parse_hands_required(existing.get("hands_required")),
+        semantic_label=(existing.get("semantic_label") or "").strip(),
+        vocabulary_scope=(existing.get("vocabulary_scope") or "").strip(),
+        recognition_profile=(existing.get("recognition_profile") or "").strip(),
+        vocabulary_group=(existing.get("vocabulary_group") or "").strip(),
+        collection_campaign=(existing.get("collection_campaign") or "").strip(),
+        is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
+        motion_type=(existing.get("motion_type") or "").strip(),
     )
 
 
@@ -426,7 +598,7 @@ def register_class(
     language = language.lower().strip()
     dialect = dialect.lower().strip()
 
-    slug = slugify(label_original)
+    slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dialect))
 
     if is_common_global:
         language_key = "global"
@@ -461,6 +633,7 @@ def register_class(
             short_uid = class_uid[:8]
             folder_name = f"class_{slug}_{short_uid}"
 
+            v2 = vocabulary_defaults_for_dialect(dialect_key)
             meta = ClassMetadata(
                 class_uid=class_uid,
                 class_idx=next_idx,
@@ -471,6 +644,14 @@ def register_class(
                 is_common_global=is_common_global,
                 is_common_language=is_common_language and not is_common_global,
                 folder_override=folder_name,
+                # Born with its schema-v2 cells filled. Leaving them empty made
+                # the class invisible to every profile-filtered split.
+                semantic_label=_semantic_label_from_slug(slug),
+                vocabulary_scope=v2["vocabulary_scope"],
+                recognition_profile=v2["recognition_profile"],
+                vocabulary_group=v2["vocabulary_group"],
+                motion_type=v2["motion_type"],
+                collection_campaign=v2["collection_campaign"],
             )
 
             # 3. WRITE — append immediately after allocate
@@ -537,6 +718,7 @@ def list_classes(
                 dialect=r["dialect"],
                 is_common_global=parse_bool(r.get("is_common_global")),
                 is_common_language=parse_bool(r.get("is_common_language")),
+                hands_required=parse_hands_required(r.get("hands_required")),
             )
         )
     return out
@@ -577,7 +759,9 @@ def get_or_register_class(
     dia = normalize_dialect(dia_input)
     if not dia:
         dia = "common" if is_common_language else ""
-    slug = slugify(label_original)
+    if is_alphabet_dialect(dia):
+        assert_single_alphabet_letter(label_original)
+    slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dia))
 
     # Search existing folder under the target hierarchy
     def _find_legacy_folder(base: Path) -> Optional[str]:

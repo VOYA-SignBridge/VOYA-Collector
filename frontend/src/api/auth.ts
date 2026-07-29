@@ -1,4 +1,4 @@
-import axiosClient from "./axiosClient";
+import axiosClient, { clearAuthToken, setAuthToken } from "./axiosClient";
 
 export type AuthUser = {
   id: string;
@@ -29,6 +29,11 @@ export async function register(payload: RegisterPayload): Promise<AuthUser> {
  *  (no token in the body — the browser can't read the httpOnly cookies). */
 export async function login(payload: LoginPayload): Promise<AuthUser> {
   const res = await axiosClient.post("/api/v1/auth/login", payload);
+  // Purge any legacy localStorage Bearer token from the pre-cookie era: if it
+  // lingered, every request would carry a stale Authorization header alongside
+  // the fresh cookie and could shadow the new session.
+  clearAuthToken();
+  setAuthToken(null);
   return res.data as AuthUser;
 }
 

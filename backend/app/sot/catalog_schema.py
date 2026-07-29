@@ -25,6 +25,12 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         "class_uid", "class_idx", "slug", "label_original", "language", "dialect",
         "is_common_global", "is_common_language", "folder_name", "created_at",
         "migrated_at", "deleted_at", "hands_required",
+        # Vocabulary schema v2. The ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+        # statements that create these live in metadata_db.MIGRATION_STATEMENTS,
+        # which export_schema_sql() below snapshots — so a reader that applies
+        # the published schema always has them.
+        "semantic_label", "vocabulary_scope", "recognition_profile",
+        "vocabulary_group", "collection_campaign", "is_active", "motion_type",
     ],
     "samples": [
         "sample_uid", "class_uid", "slug", "label_original", "language", "dialect",
@@ -33,6 +39,13 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         "storage_url", "checksum", "created_at", "gdrive_synced", "deleted_at",
         "left_hand_ratio", "right_hand_ratio", "both_hands_ratio", "jitter",
         "quality_flags",
+        # Vocabulary schema v2 / research provenance. signer_id is the canonical
+        # physical-performer identity the held-out-signer protocol depends on —
+        # a reader missing it would import samples with no way to tell people
+        # apart, which is exactly the failure the protocol exists to prevent.
+        "signer_id", "collection_campaign", "raw_landmarks_available",
+        "normalization_version", "preprocess_contract_version",
+        "sequence_length_original", "quality_status",
     ],
     "raw_uploads": [
         "upload_uid", "class_uid", "slug", "label_original", "language", "dialect",
