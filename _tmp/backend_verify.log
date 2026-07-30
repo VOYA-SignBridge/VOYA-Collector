@@ -1,0 +1,66 @@
+============================= test session starts =============================
+platform win32 -- Python 3.11.0, pytest-7.4.3, pluggy-1.6.0 -- E:\CTU_ProjectOutside\VOYA-Collector\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: E:\CTU_ProjectOutside\VOYA-Collector\backend
+plugins: anyio-4.13.0, asyncio-0.21.1, cov-4.1.0
+asyncio: mode=Mode.STRICT
+collecting ... collected 44 items
+
+tests/test_label_sessions.py::test_sessions_grouping PASSED              [  2%]
+tests/test_label_sessions.py::test_sessions_unknown_class_404 PASSED     [  4%]
+tests/test_label_sessions.py::test_frames_payload_and_cache_header PASSED [  6%]
+tests/test_label_sessions.py::test_frames_unknown_session_404 PASSED     [  9%]
+tests/test_label_sessions.py::test_frames_missing_npz_404 PASSED         [ 11%]
+tests/test_label_sessions.py::test_preview_video_before_render_404 PASSED [ 13%]
+tests/test_label_sessions.py::test_preview_status_renders_inline_without_broker PASSED [ 15%]
+tests/test_label_sessions.py::test_endpoints_require_auth PASSED         [ 18%]
+tests/test_label_sessions.py::test_render_all_zero_sequence_does_not_crash PASSED [ 20%]
+tests/test_label_sessions.py::test_render_rejects_bad_shape PASSED       [ 22%]
+tests/test_label_sessions.py::test_safe_session_part_sanitizes_paths PASSED [ 25%]
+tests/test_label_sessions.py::TestFpsFallbackChain::test_given_valid_fps_processed_then_it_wins PASSED [ 27%]
+tests/test_label_sessions.py::TestFpsFallbackChain::test_given_empty_fps_processed_when_original_valid_then_fallback PASSED [ 29%]
+tests/test_label_sessions.py::TestFpsFallbackChain::test_given_all_invalid_then_default_15 PASSED [ 31%]
+tests/test_label_sessions.py::TestOriginalSampleSelection::test_given_only_augmented_samples_then_lowest_augment_wins PASSED [ 34%]
+tests/test_label_sessions.py::TestOriginalSampleSelection::test_given_garbage_augment_id_then_treated_as_zero_no_crash PASSED [ 36%]
+tests/test_label_sessions.py::TestOriginalSampleSelection::test_given_empty_rows_then_none PASSED [ 38%]
+tests/test_label_sessions.py::TestSessionListEdgeCases::test_given_status_deleted_row_then_excluded_even_without_deleted_at PASSED [ 40%]
+tests/test_label_sessions.py::TestSessionListEdgeCases::test_sessions_sorted_newest_first PASSED [ 43%]
+tests/test_label_sessions.py::TestSessionListEdgeCases::test_given_traversal_session_id_then_404_and_no_escape PASSED [ 45%]
+tests/test_label_sessions.py::TestCorruptDataHandling::test_given_corrupt_npz_then_500_with_clear_message PASSED [ 47%]
+tests/test_label_sessions.py::TestCorruptDataHandling::test_given_1d_sequence_then_500_bad_format PASSED [ 50%]
+tests/test_label_sessions.py::TestRendererBoundaries::test_given_single_visible_point_then_degenerate_bbox_does_not_crash PASSED [ 52%]
+tests/test_label_sessions.py::TestRendererBoundaries::test_given_existing_preview_when_rerendered_then_atomic_overwrite PASSED [ 54%]
+tests/test_label_sessions.py::TestRendererBoundaries::test_given_one_frame_sequence_then_video_still_written PASSED [ 56%]
+tests/test_label_sessions.py::TestRendererBoundaries::test_given_wider_feature_dim_then_first_126_used PASSED [ 59%]
+tests/test_observability.py::test_structlog_data_masking_standard PASSED [ 61%]
+tests/test_observability.py::test_structlog_data_masking_edge_cases PASSED [ 63%]
+tests/test_observability.py::test_add_correlation_id_processor PASSED    [ 65%]
+tests/test_observability.py::test_prometheus_metrics_endpoint_standard PASSED [ 68%]
+tests/test_observability.py::test_prometheus_metrics_endpoint_missing_resources PASSED [ 70%]
+tests/test_observability.py::test_prometheus_metrics_endpoint_missing_but_ignored PASSED [ 72%]
+tests/test_observability.py::test_asgi_correlation_id_middleware_no_header PASSED [ 75%]
+tests/test_observability.py::test_celery_task_context_signals_with_request_id PASSED [ 77%]
+tests/test_observability.py::test_celery_task_context_signals_missing_request_id PASSED [ 79%]
+tests/test_startup_sync.py::test_sync_on_empty_db SKIPPED (Postgres ...) [ 81%]
+tests/test_startup_sync.py::test_sync_idempotency SKIPPED (Postgres ...) [ 84%]
+tests/test_startup_sync.py::test_sync_soft_delete_safety SKIPPED (Po...) [ 86%]
+tests/test_startup_sync.py::test_init_db_schema_recovery SKIPPED (Po...) [ 88%]
+tests/test_edge_cases.py::test_missing_auth_header_metrics PASSED        [ 90%]
+tests/test_edge_cases.py::test_invalid_uuid_format PASSED                [ 93%]
+tests/test_edge_cases.py::test_extreme_pagination_params PASSED          [ 95%]
+tests/test_edge_cases.py::test_negative_pagination_params PASSED         [ 97%]
+tests/test_edge_cases.py::test_malformed_json_payload PASSED             [100%]
+
+============================== warnings summary ===============================
+..\.venv\Lib\site-packages\httpx\_client.py:690
+..\.venv\Lib\site-packages\httpx\_client.py:690
+..\.venv\Lib\site-packages\httpx\_client.py:690
+  E:\CTU_ProjectOutside\VOYA-Collector\.venv\Lib\site-packages\httpx\_client.py:690: DeprecationWarning: The 'app' shortcut is now deprecated. Use the explicit style 'transport=WSGITransport(app=...)' instead.
+    warnings.warn(message, DeprecationWarning)
+
+tests/test_edge_cases.py::test_malformed_json_payload
+  E:\CTU_ProjectOutside\VOYA-Collector\.venv\Lib\site-packages\httpx\_content.py:204: DeprecationWarning: Use 'content=<...>' to upload raw bytes/text content.
+    warnings.warn(message, DeprecationWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 40 passed, 4 skipped, 4 warnings in 119.06s (0:01:59) ============

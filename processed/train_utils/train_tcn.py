@@ -1160,7 +1160,12 @@ def main() -> None:
     subset_dir: Optional[Path] = None
     common_labels: List[str] = []
     profile_specific_labels: List[str] = []
-    manifest_checksum = ""
+    # Đọc ngay từ thư mục split gốc, trước khi bất kỳ nhánh nào repoint
+    # cfg.train_csv sang bản lọc trong run_dir. Trước đây chỉ nhánh profile mode
+    # đọc checksum, nên một split hợp lệ chia theo dialect luôn trượt cổng
+    # --run-purpose research với lý do "no dataset_manifest_checksum" dù
+    # split_metadata.json nằm ngay cạnh train.csv.
+    manifest_checksum = _read_split_manifest_checksum(cfg.train_csv)
     motion_types_present: List[str] = []
 
     if profile_mode:

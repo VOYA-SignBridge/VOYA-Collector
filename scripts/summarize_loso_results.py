@@ -30,13 +30,23 @@ def wilson(k: float, n: int, z: float = 1.96) -> tuple[float, float]:
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
+MIN_FOLDS_FOR_TEST = 4
+
+
 def paired_bootstrap(a: dict, b: dict, folds: list, n_iter: int = 10000,
-                     seed: int = 42) -> float:
+                     seed: int = 42) -> float | None:
     """p-value 2 phia: xac suat chenh lech quan sat duoc chi do ngau nhien.
 
     Lay mau lai theo FOLD (khong phai theo run) vi cac run trong cung fold
     khong doc lap — chung dung chung du lieu.
+
+    Duoi MIN_FOLDS_FOR_TEST fold thi tra ve None chu khong tra ve so. Voi 2 fold
+    chi co 4 cach lay mau lai; p-value sinh ra khong do duoc gi ngoai chinh no,
+    va no se vui ve dan nhan "co y nghia" cho mot chenh lech 0.009 trong khi bo
+    qua chenh lech 0.034. Mot o trong doc dung hon mot con so sai.
     """
+    if len(folds) < MIN_FOLDS_FOR_TEST:
+        return None
     rng = random.Random(seed)
     obs = sum(a[f] for f in folds) / len(folds) - sum(b[f] for f in folds) / len(folds)
     if obs == 0:
@@ -54,6 +64,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('results', type=Path)
     ap.add_argument('--metric', choices=['acc', 'f1'], default='acc')
+    ap.add_argument('--splits_dir', type=Path, default=None,
+                    help='thu muc chua cac fold test_*; dung de doc so mau test '
+                         'moi fold. Thieu thi cac fold duoc coi la bang nhau.')
     args = ap.parse_args()
 
     n_test: dict[str, int] = {}
@@ -72,11 +85,15 @@ def main() -> int:
         print('Khong doc duoc ket qua nao.')
         return 1
 
-    # so mau test moi fold (doc tu split neu co)
-    base = Path('/workspace/processed/train_utils/outputs/loso5_hoa_de')
+    # So mau test moi fold. Thieu thi moi fold nang bang nhau — dung hon la lang
+    # le cho n=0 roi rot ve trung binh khong trong so ma khong noi gi.
     for f in folds:
-        p = base / f / 'test.csv'
-        n_test[f] = (sum(1 for _ in p.open(encoding='utf-8')) - 1) if p.exists() else 0
+        p = (args.splits_dir / f / 'test.csv') if args.splits_dir else None
+        n_test[f] = (sum(1 for _ in p.open(encoding='utf-8')) - 1) \
+            if (p and p.exists()) else 0
+    if not any(n_test.values()):
+        print('[warn] khong doc duoc so mau test (thieu --splits_dir): '
+              'moi fold duoc nang bang nhau.\n')
 
     per_fold = {m: {f: (sum(runs[(m, f)]) / len(runs[(m, f)]) if runs[(m, f)] else 0.0)
                     for f in folds} for m in models}
@@ -84,7 +101,7 @@ def main() -> int:
     weighted = {m: (sum(per_fold[m][f] * (n_test[f] or 1) for f in folds) / total_n)
                 for m in models}
 
-    print(f'=== LOSO 4 fold — chi so: {args.metric} ===')
+    print(f'=== LOSO {len(folds)} fold — chi so: {args.metric} ===')
     print(f'{"model":18s}' + ''.join(f'{f.replace("test_", "")+f" (n={n_test[f]})":>16s}'
                                      for f in folds) + f'{"TB":>9s}')
     for m in sorted(models, key=lambda x: -weighted[x]):
@@ -98,10 +115,17 @@ def main() -> int:
         print(f'  {i}. {m:18s} {weighted[m]:.4f}  CI95=[{lo:.3f}, {hi:.3f}]')
 
     print('\n=== Chenh lech co that khong? (paired bootstrap theo fold) ===')
+    if len(folds) < MIN_FOLDS_FOR_TEST:
+        print(f'  Chi co {len(folds)} fold — duoi nguong {MIN_FOLDS_FOR_TEST}, khong '
+              f'kiem dinh. Nguoi ky la don vi doc lap, va {len(folds)} nguoi thi khong '
+              f'du de noi chenh lech nao la that.')
     best = order[0]
     for m in order[1:]:
         p = paired_bootstrap(per_fold[best], per_fold[m], folds)
         diff = weighted[best] - weighted[m]
+        if p is None:
+            print(f'  {best} vs {m:18s} chenh {diff:+.3f}  p=—      -> khong kiem dinh')
+            continue
         verdict = 'CO Y NGHIA' if p < 0.05 else 'khong ket luan duoc'
         print(f'  {best} vs {m:18s} chenh {diff:+.3f}  p={p:.3f}  -> {verdict}')
 
