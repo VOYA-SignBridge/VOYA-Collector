@@ -251,6 +251,25 @@ REALTIME_CONTAINER_CHECKPOINTS = "/app/realtime_service/config/checkpoints"
 # Pydantic Models
 # ============================================================================
 
+class SplitProvenance(BaseModel):
+    """Cách tập dữ liệu ĐANG được chia, đọc từ split_metadata.json.
+
+    Step 3 trước đây hiện ba thanh trượt tỉ lệ mà không gửi đi đâu: backend luôn
+    dùng split đã sinh sẵn. Người dùng tưởng mình đang điều chỉnh, và quan trọng
+    hơn là không biết con số cuối cùng đo trên người ký đã thấy hay người mới —
+    khác biệt đo được là +0.129 độ chính xác. Model này thay thanh trượt giả bằng
+    sự thật.
+    """
+    split_mode: Optional[str] = None
+    signer_disjoint: bool = False
+    signers: Dict[str, List[str]] = {}     # train/val/test -> danh sách signer_id
+    counts: Dict[str, int] = {}            # train/val/test -> số mẫu
+    dataset_manifest: Optional[str] = None
+    valid_for_research: Optional[bool] = None
+    # Câu hiển thị thẳng cho người dùng; rỗng nghĩa là không có gì bất thường.
+    warning: Optional[str] = None
+
+
 class DatasetInfo(BaseModel):
     """Thông tin dataset"""
     total_samples: int
@@ -260,6 +279,7 @@ class DatasetInfo(BaseModel):
     class_distribution: Dict[str, int]  # class_name -> count
     samples_by_dialect: Dict[str, int] = {}  # dialect -> sample count (for split viz)
     split_info: Optional[Dict[str, int]] = None  # train, val, test counts
+    split_provenance: Optional[SplitProvenance] = None
 
 
 class TrainingConfig(BaseModel):
@@ -304,6 +324,12 @@ class TrainingJob(BaseModel):
     test_f1: Optional[float] = None  # Test F1 score from checkpoint
     error_message: Optional[str] = None  # Failure/cancellation reason
     promoted_at: Optional[str] = None  # When admin promoted this model to realtime
+    # Cách dữ liệu được chia TẠI THỜI ĐIỂM chạy job này. Ghi vào job chứ không
+    # đọc lại lúc xem kết quả: split trên đĩa sẽ được sinh lại khi thu thêm dữ
+    # liệu, và khi đó một job cũ sẽ hiện điều kiện đánh giá mà nó chưa từng
+    # chạy. test_acc chỉ có nghĩa khi biết nó đo trên người ký mới hay người đã
+    # thấy — chênh lệch giữa hai trường hợp trên tập này là +0.129.
+    split_provenance: Optional[SplitProvenance] = None
 
 
 class TrainingMetrics(BaseModel):
@@ -345,6 +371,7 @@ def _persist_job_sync(job: TrainingJob, auth_user_id: Optional[str] = None) -> N
             "test_f1": job.test_f1,
             "error_message": job.error_message,
             "promoted_at": job.promoted_at,
+            "split_provenance": job.split_provenance.dict() if job.split_provenance else None,
         })
     except Exception as e:
         logger.warning("job %s DB write failed (state kept in memory): %s", job.id, e)
@@ -397,7 +424,22 @@ def _job_from_db_row(row: Dict[str, Any]) -> TrainingJob:
         test_f1=row.get("test_f1"),
         error_message=row.get("error_message"),
         promoted_at=_iso(row.get("promoted_at")),
+        # Jobs written before this column existed have NULL here; the UI treats
+        # that as "unknown" rather than "fine", which is the honest reading.
+        split_provenance=_split_prov_from_row(row.get("split_provenance")),
     )
+
+
+def _split_prov_from_row(value: Any) -> Optional[SplitProvenance]:
+    if not value:
+        return None
+    try:
+        if isinstance(value, str):
+            value = json.loads(value)
+        return SplitProvenance(**value)
+    except Exception as exc:
+        logger.warning("[SPLIT_PROV] không đọc được split_provenance đã lưu: %s", exc)
+        return None
 
 
 def _metrics_from_db_rows(rows: List[Dict[str, Any]]) -> List[TrainingMetrics]:
@@ -544,6 +586,88 @@ def _get_dialects_by_language() -> Dict[str, List[str]]:
             dialects_map[language].add(dialect)
 
     return {lang: sorted(list(dialects)) for lang, dialects in dialects_map.items()}
+
+
+def _root_split_provenance() -> SplitProvenance:
+    """How the active root split partitions the data, read from the split itself.
+
+    The signer lists are recomputed from the CSVs rather than trusted from
+    split_metadata.json: the metadata describes how the split was *generated*,
+    and the question the UI has to answer is what the files on disk *are*. A
+    hand-edited or stale split would otherwise report a guarantee it no longer
+    keeps — the same class of drift §7.3 of the paper argues has to be checked.
+    """
+    import csv as _csv
+
+    prov = SplitProvenance()
+    meta_path = SPLITS_DIR / "split_metadata.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            prov.split_mode = meta.get("split_mode")
+            prov.dataset_manifest = str(meta.get("dataset_manifest") or "") or None
+            prov.valid_for_research = meta.get("valid_for_research")
+        except Exception as exc:
+            logger.warning("[SPLIT_PROV] không đọc được split_metadata.json: %s", exc)
+
+    # Identity column: canonical signer_id when the split carries it, else the
+    # raw user_id the legacy splits recorded. Reading only signer_id looked
+    # correct and was worse than useless: on a legacy split every row returns
+    # empty, so the check reports "no signers" and stays silent about the very
+    # overlap it exists to catch. Whichever column is present, the same person
+    # must not appear on both sides.
+    identity_col: Optional[str] = None
+    seen: Dict[str, set] = {}
+    for part in ("train", "val", "test"):
+        path = SPLITS_DIR / f"{part}.csv"
+        if not path.exists():
+            continue
+        signers: set = set()
+        n = 0
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                reader = _csv.DictReader(f)
+                cols = reader.fieldnames or []
+                col = "signer_id" if "signer_id" in cols else (
+                    "user_id" if "user_id" in cols else None)
+                identity_col = identity_col or col
+                for row in reader:
+                    n += 1
+                    who = (row.get(col) or "").strip() if col else ""
+                    if who:
+                        signers.add(who)
+        except Exception as exc:
+            logger.warning("[SPLIT_PROV] không đọc được %s: %s", path.name, exc)
+            continue
+        seen[part] = signers
+        prov.counts[part] = n
+        prov.signers[part] = sorted(signers)
+
+    train, val, test = seen.get("train", set()), seen.get("val", set()), seen.get("test", set())
+    overlap = sorted((train & test) | (train & val))
+    prov.signer_disjoint = bool(train and test) and not overlap
+
+    if identity_col is None and (train or val or test or prov.counts):
+        prov.warning = (
+            "Tập dữ liệu đang dùng không có cột định danh người ký "
+            "(signer_id hoặc user_id), nên KHÔNG kiểm được người ký có bị lẫn "
+            "giữa huấn luyện và đánh giá hay không."
+        )
+    elif not meta_path.exists():
+        prov.warning = (
+            "Tập dữ liệu đang dùng không có split_metadata.json, nên không thể "
+            "xác định nó được chia thế nào."
+        )
+    elif overlap:
+        prov.warning = (
+            f"{len(overlap)} người ký xuất hiện ở cả tập huấn luyện và tập đánh giá "
+            f"({', '.join(overlap[:5])}{'…' if len(overlap) > 5 else ''}). Kết quả sẽ "
+            "lạc quan hơn thực tế: mô hình đã thấy chính người đó lúc học, nên con số "
+            "này KHÔNG phản ánh độ chính xác trên người ký mới."
+        )
+    elif not train or not test:
+        prov.warning = "Tập huấn luyện hoặc tập đánh giá rỗng."
+    return prov
 
 
 def _trainable_dialects_from_splits() -> Dict[str, int]:
@@ -843,6 +967,7 @@ async def get_dataset_info(
             if d:
                 samples_by_dialect[d] = samples_by_dialect.get(d, 0) + 1
 
+        provenance = _root_split_provenance()
         return DatasetInfo(
             total_samples=len(samples),
             total_classes=len(class_counts),
@@ -850,6 +975,8 @@ async def get_dataset_info(
             dialects=dialects_map,
             class_distribution=class_counts,
             samples_by_dialect=samples_by_dialect,
+            split_info=provenance.counts or None,
+            split_provenance=provenance,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
@@ -907,6 +1034,27 @@ async def start_training(
                 )
                 raise HTTPException(status_code=400, detail=detail)
 
+        # Snapshot how the data is split right now. Research runs read a frozen
+        # versioned split and already carry their own provenance through the
+        # checkpoint contract; the exploratory path reads the root split, which
+        # is regenerated whenever new recordings arrive.
+        split_prov: Optional[SplitProvenance] = None
+        if config.run_purpose != "research":
+            split_prov = _root_split_provenance()
+            # Fail closed on a split that cannot train, rather than letting the
+            # subprocess exit rc=1 after the job has been queued and the user has
+            # watched a progress bar for nothing.
+            if not split_prov.counts.get("train") or not split_prov.counts.get("test"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Tập chia hiện tại không dùng được để huấn luyện "
+                        f"(train={split_prov.counts.get('train', 0)}, "
+                        f"test={split_prov.counts.get('test', 0)} mẫu). "
+                        "Hãy chia lại tập dữ liệu trước khi huấn luyện."
+                    ),
+                )
+
         job_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
 
@@ -916,6 +1064,7 @@ async def start_training(
             config=config,
             created_at=now,
             total_epochs=config.epochs,
+            split_provenance=split_prov,
         )
 
         training_jobs[job_id] = {

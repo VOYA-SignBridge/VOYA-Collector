@@ -1,20 +1,57 @@
 /**
- * Step 2: Data Split Visualization - Professional Layout
- * Displays and allows customization of train/validation/test split ratios
+ * Step 3: how the data is actually partitioned.
+ *
+ * This step used to show three ratio sliders. They were local state: nothing
+ * sent them to the server, and the server has no parameter to receive them —
+ * training always runs on the split already generated on disk. The control
+ * implied a choice that did not exist, and hid the one fact that changes how
+ * the final numbers should be read: whether the same person appears in both
+ * training and evaluation. On this dataset that difference is worth +0.129
+ * accuracy, so a screen that stays silent about it is misleading in the
+ * direction that flatters the result.
  */
 
-import React, { useMemo, useState } from 'react';
-import type { DatasetInfo } from '../../../hooks/useTrainingAPI';
+import React from 'react';
+import type { DatasetInfo, SplitProvenance } from '../../../hooks/useTrainingAPI';
 import DIALECT_LABELS from '../../../config/dialectLabels';
 import { CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
 
 interface Props {
   datasetInfo: DatasetInfo | null;
-  // Phương ngữ đã chọn ở bước trước — split chỉ áp dụng cho các phương ngữ này.
+  // Phương ngữ đã chọn ở bước trước — dùng để nói rõ tập nào sẽ được lọc ra.
   selectedDialects?: string[];
 }
 
-const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
+const PARTS = [
+  {
+    key: 'train',
+    label: 'Huấn Luyện',
+    description: 'Dạy mô hình',
+    color: 'from-ctu-blue to-ctu-navy',
+    icon: <GraduationCapIcon className="h-7 w-7" />,
+  },
+  {
+    key: 'val',
+    label: 'Kiểm Tra',
+    description: 'Chọn checkpoint',
+    color: 'from-emerald-500 to-emerald-600',
+    icon: <CheckCircleIcon className="h-7 w-7" />,
+  },
+  {
+    key: 'test',
+    label: 'Đánh Giá',
+    description: 'Đo lần cuối',
+    color: 'from-amber-500 to-orange-600',
+    icon: <SearchIcon className="h-7 w-7" />,
+  },
+] as const;
+
+const MODE_LABELS: Record<string, string> = {
+  strict_signer_disjoint: 'Tách theo người ký',
+  strict_user_disjoint: 'Tách theo tài khoản',
+  coverage_preserving: 'Giữ độ phủ lớp',
+  sample: 'Chia ngẫu nhiên theo mẫu',
+};
 
 const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects = [] }) => {
   if (!datasetInfo) {
@@ -25,171 +62,133 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
     );
   }
 
-  // Số mẫu để chia: nếu đã chọn phương ngữ, chỉ tính các phương ngữ đó
-  // (khớp đúng dữ liệu sẽ được huấn luyện); nếu chưa chọn, dùng toàn dataset.
-  const byDialect = datasetInfo.samples_by_dialect || {};
-  const total =
-    selectedDialects.length > 0
-      ? selectedDialects.reduce((sum, d) => sum + (byDialect[d] || 0), 0)
-      : datasetInfo.total_samples;
-  const [trainPct, setTrainPct] = useState<number>(70);
-  const [valPct, setValPct] = useState<number>(15);
+  const prov: SplitProvenance | undefined = datasetInfo.split_provenance;
+  const counts = prov?.counts ?? {};
+  const total = PARTS.reduce((s, p) => s + (counts[p.key] ?? 0), 0);
 
-  const testPct = useMemo(() => 100 - clamp(trainPct) - clamp(valPct), [trainPct, valPct]);
-  const trainCount = Math.floor((clamp(trainPct) / 100) * total);
-  const valCount = Math.floor((clamp(valPct) / 100) * total);
-  const testCount = Math.max(0, total - trainCount - valCount);
+  if (!prov || total === 0) {
+    return (
+      <div className="rounded-xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+        <p className="font-semibold">Chưa đọc được cách chia dữ liệu</p>
+        <p className="mt-1">
+          Máy chủ không trả về thông tin phân chia. Không thể xác nhận người ký có bị
+          lẫn giữa tập huấn luyện và tập đánh giá hay không — hãy kiểm tra trước khi
+          tin vào con số cuối cùng.
+        </p>
+      </div>
+    );
+  }
+
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+  const disjoint = prov.signer_disjoint;
 
   return (
     <div className="space-y-6">
-      {/* Ngữ cảnh: split áp dụng cho các phương ngữ đã chọn ở bước trước */}
-      {selectedDialects.length > 0 && (
-        <div className="rounded-lg bg-ctu-blue/5 border border-ctu-blue/20 px-4 py-3 text-sm">
-          <span className="text-slate-600">Chia tập cho phương ngữ đã chọn: </span>
-          <span className="font-semibold text-ctu-blue">
-            {selectedDialects.map((d) => DIALECT_LABELS[d] ?? d).join(', ')}
-          </span>
-        </div>
-      )}
-
-      {/* Controls */}
-      <div className="rounded-xl border border-slate-200 bg-white p-6">
-        <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-6">
-          Điều Chỉnh Tỷ Lệ Chia Tập
-        </h3>
-
-        <div className="space-y-6">
-          {/* Training Split */}
+      {/* Điều quan trọng nhất đặt trên cùng: số cuối đo trên người mới hay người cũ */}
+      <div
+        className={`rounded-xl border p-5 ${
+          disjoint
+            ? 'border-emerald-300 bg-emerald-50'
+            : 'border-amber-400 bg-amber-50'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <span className="text-xl leading-none">{disjoint ? '✓' : '⚠️'}</span>
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label htmlFor="train-split" className="text-sm font-medium text-slate-900">
-                Tập Huấn Luyện
-              </label>
-              <span className="text-sm font-semibold text-ctu-blue">{clamp(trainPct)}%</span>
-            </div>
-            <input
-              id="train-split"
-              type="range"
-              min={0}
-              max={100}
-              value={trainPct}
-              onChange={(e) => setTrainPct(Number(e.target.value))}
-              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-ctu-blue"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              {trainCount.toLocaleString()} mẫu — dùng để dạy mô hình
+            <p
+              className={`font-semibold ${
+                disjoint ? 'text-emerald-900' : 'text-amber-900'
+              }`}
+            >
+              {disjoint
+                ? 'Đánh giá trên người ký chưa từng thấy'
+                : 'Đánh giá KHÔNG trên người ký mới'}
             </p>
-          </div>
-
-          {/* Validation Split */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label htmlFor="val-split" className="text-sm font-medium text-slate-900">
-                Tập Kiểm Tra (Validation)
-              </label>
-              <span className="text-sm font-semibold text-emerald-600">{clamp(valPct)}%</span>
-            </div>
-            <input
-              id="val-split"
-              type="range"
-              min={0}
-              max={100}
-              value={valPct}
-              onChange={(e) => setValPct(Number(e.target.value))}
-              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              {valCount.toLocaleString()} mẫu — dùng để điều chỉnh mô hình
-            </p>
-          </div>
-
-          {/* Test Split (Auto) */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-900">
-                Tập Đánh Giá (Test)
-              </label>
-              <span className="text-sm font-semibold text-amber-600">{Math.max(0, testPct)}%</span>
-            </div>
-            <div className="w-full h-2 bg-slate-200 rounded-lg overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-amber-500 to-orange-600"
-                style={{ width: `${Math.max(0, testPct)}%` }}
-              />
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              {testCount.toLocaleString()} mẫu — đo hiệu suất cuối cùng (tính tự động)
+            <p
+              className={`mt-1 text-sm ${
+                disjoint ? 'text-emerald-800' : 'text-amber-800'
+              }`}
+            >
+              {prov.warning ??
+                'Không người ký nào xuất hiện ở cả tập huấn luyện và tập đánh giá, nên độ chính xác báo cáo phản ánh khả năng nhận dạng một người hoàn toàn mới.'}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Visual Representation */}
+      {/* Cách chia này do hệ thống quyết định, không phải người dùng */}
+      <div className="rounded-xl border border-slate-200 bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wider text-slate-900">
+              Cách chia đang áp dụng
+            </p>
+            <p className="mt-1 text-lg font-bold text-ctu-navy">
+              {prov.split_mode ? MODE_LABELS[prov.split_mode] ?? prov.split_mode : 'Không xác định'}
+            </p>
+          </div>
+          <div className="text-right text-xs text-slate-500">
+            <p>{total.toLocaleString()} mẫu</p>
+            {prov.dataset_manifest && (
+              <p className="mt-0.5 font-mono">
+                {prov.dataset_manifest.replace(/^.*[\\/]/, '')}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <p className="mt-3 text-xs text-slate-500">
+          Tỉ lệ và thành phần do split đã sinh sẵn quyết định — bước này hiển thị để
+          đối chiếu, không chỉnh sửa được tại đây.
+          {selectedDialects.length > 0 && (
+            <>
+              {' '}Khi huấn luyện, dữ liệu sẽ được lọc còn:{' '}
+              <span className="font-semibold text-ctu-blue">
+                {selectedDialects.map((d) => DIALECT_LABELS[d] ?? d).join(', ')}
+              </span>
+              .
+            </>
+          )}
+        </p>
+      </div>
+
+      {/* Tỉ lệ thật */}
       <div>
-        <p className="mb-3 text-sm font-semibold text-slate-900 uppercase tracking-wider">
-          Hình Ảnh Phân Chia
+        <p className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-900">
+          Tỉ Lệ Thực Tế
         </p>
         <div className="flex h-20 w-full overflow-hidden rounded-xl shadow-sm">
-          <div
-            className="flex items-center justify-center bg-gradient-to-r from-ctu-blue to-ctu-navy text-white font-semibold text-sm text-center transition-all duration-300"
-            style={{ width: `${clamp(trainPct)}%` }}
-            title={`Train: ${trainCount.toLocaleString()} mẫu`}
-          >
-            {clamp(trainPct) > 10 && `${clamp(trainPct)}% Train`}
-          </div>
-          <div
-            className="flex items-center justify-center bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold text-sm text-center transition-all duration-300"
-            style={{ width: `${clamp(valPct)}%` }}
-            title={`Validation: ${valCount.toLocaleString()} mẫu`}
-          >
-            {clamp(valPct) > 10 && `${clamp(valPct)}% Val`}
-          </div>
-          <div
-            className="flex items-center justify-center bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold text-sm text-center transition-all duration-300"
-            style={{ width: `${Math.max(0, testPct)}%` }}
-            title={`Test: ${testCount.toLocaleString()} mẫu`}
-          >
-            {Math.max(0, testPct) > 10 && `${Math.max(0, testPct)}% Test`}
-          </div>
+          {PARTS.map((p) => {
+            const n = counts[p.key] ?? 0;
+            const w = pct(n);
+            return (
+              <div
+                key={p.key}
+                className={`flex items-center justify-center bg-gradient-to-r ${p.color} text-center text-sm font-semibold text-white`}
+                style={{ width: `${w}%` }}
+                title={`${p.label}: ${n.toLocaleString()} mẫu`}
+              >
+                {w > 10 && `${Math.round(w)}%`}
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Ai nằm ở đâu — phần mà thanh trượt cũ che mất */}
       <div className="grid gap-3 sm:grid-cols-3">
-        <SplitCard
-          label="Huấn Luyện"
-          icon={<GraduationCapIcon className="h-7 w-7" />}
-          count={trainCount}
-          percentage={clamp(trainPct)}
-          color="from-ctu-blue to-ctu-navy"
-          description="Dạy mô hình"
-        />
-        <SplitCard
-          label="Kiểm Tra"
-          icon={<CheckCircleIcon className="h-7 w-7" />}
-          count={valCount}
-          percentage={clamp(valPct)}
-          color="from-emerald-500 to-emerald-600"
-          description="Điều chỉnh"
-        />
-        <SplitCard
-          label="Đánh Giá"
-          icon={<SearchIcon className="h-7 w-7" />}
-          count={testCount}
-          percentage={Math.max(0, testPct)}
-          color="from-amber-500 to-orange-600"
-          description="Kiểm định cuối"
-        />
-      </div>
-
-      {/* Info */}
-      <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-        <p className="font-medium">ℹ️ Hướng dẫn phân chia</p>
-        <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
-          <li>Train (70%): Dùng để huấn luyện mô hình</li>
-          <li>Validation (15%): Dùng để điều chỉnh hyperparameters</li>
-          <li>Test (15%): Dùng để đánh giá hiệu suất cuối cùng (không được thay đổi)</li>
-        </ul>
+        {PARTS.map((p) => (
+          <SplitCard
+            key={p.key}
+            label={p.label}
+            icon={p.icon}
+            count={counts[p.key] ?? 0}
+            percentage={Math.round(pct(counts[p.key] ?? 0))}
+            color={p.color}
+            description={p.description}
+            signers={prov.signers?.[p.key] ?? []}
+          />
+        ))}
       </div>
     </div>
   );
@@ -202,6 +201,7 @@ function SplitCard({
   percentage,
   color,
   description,
+  signers,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -209,6 +209,7 @@ function SplitCard({
   percentage: number;
   color: string;
   description: string;
+  signers: string[];
 }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -218,12 +219,23 @@ function SplitCard({
           <h4 className="mt-2 font-semibold text-slate-900">{label}</h4>
           <p className="text-xs text-slate-500">{description}</p>
         </div>
-        <div className={`inline-flex items-center gap-1 rounded-full bg-gradient-to-r ${color} px-2.5 py-1 text-xs font-semibold text-white`}>
+        <div
+          className={`inline-flex items-center gap-1 rounded-full bg-gradient-to-r ${color} px-2.5 py-1 text-xs font-semibold text-white`}
+        >
           {percentage}%
         </div>
       </div>
       <p className="mt-3 text-lg font-bold text-slate-900">{count.toLocaleString()}</p>
       <p className="text-xs text-slate-500">mẫu</p>
+
+      <div className="mt-3 border-t border-slate-100 pt-2">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400">
+          Người ký ({signers.length})
+        </p>
+        <p className="mt-1 break-words font-mono text-xs text-slate-700">
+          {signers.length > 0 ? signers.join(', ') : '—'}
+        </p>
+      </div>
     </div>
   );
 }

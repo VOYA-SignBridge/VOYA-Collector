@@ -7,6 +7,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
 import { getAuthToken } from '../api/axiosClient';
 
+/** Cách tập dữ liệu ĐANG được chia — đọc từ split trên đĩa, không phải từ
+ *  lựa chọn của người dùng. Bước 3 trước đây hiện thanh trượt tỉ lệ không gửi
+ *  đi đâu; backend luôn dùng split đã sinh sẵn. */
+export interface SplitProvenance {
+  split_mode: string | null;
+  signer_disjoint: boolean;
+  signers: Record<string, string[]>;   // train/val/test -> signer ids
+  counts: Record<string, number>;      // train/val/test -> số mẫu
+  dataset_manifest: string | null;
+  valid_for_research: boolean | null;
+  warning: string | null;
+}
+
 export interface DatasetInfo {
   total_samples: number;
   total_classes: number;
@@ -16,6 +29,7 @@ export interface DatasetInfo {
   // Số mẫu theo từng phương ngữ — dùng cho bước chia tập (DataSplitVisualization)
   samples_by_dialect?: Record<string, number>;
   split_info?: { train: number; val: number; test: number };
+  split_provenance?: SplitProvenance;
   // Optional mapping from class uid/slug -> human label
   label_map?: Record<string, string>;
 }

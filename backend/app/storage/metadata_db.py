@@ -167,6 +167,7 @@ DDL_STATEMENTS = [
         error_message TEXT,
         promoted_at TIMESTAMP WITH TIME ZONE,
         evaluation JSONB,
+        split_provenance JSONB,
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
@@ -216,6 +217,11 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP WITH TIME ZONE",
     # Test-set evaluation (confusion matrix + per-class metrics) for Step 7
     "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS evaluation JSONB",
+    # How the data was partitioned when this job ran. Snapshotted per job rather
+    # than read back from disk: the root split is regenerated whenever new
+    # recordings arrive, so a finished job would otherwise display evaluation
+    # conditions it never ran under.
+    "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS split_provenance JSONB",
     # Live-capture QC: per-class hand requirement + per-sample quality metrics
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS hands_required INTEGER",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS left_hand_ratio REAL",
@@ -632,13 +638,15 @@ INSERT INTO training_jobs(
     job_id, status, model_type, config, auth_user_id,
     created_at, started_at, completed_at,
     current_epoch, total_epochs, checkpoint_path,
-    test_acc, test_f1, error_message, promoted_at, evaluation
+    test_acc, test_f1, error_message, promoted_at, evaluation,
+    split_provenance
 )
 VALUES(
     %(job_id)s, %(status)s, %(model_type)s, %(config)s, %(auth_user_id)s,
     %(created_at)s, %(started_at)s, %(completed_at)s,
     %(current_epoch)s, %(total_epochs)s, %(checkpoint_path)s,
-    %(test_acc)s, %(test_f1)s, %(error_message)s, %(promoted_at)s, %(evaluation)s
+    %(test_acc)s, %(test_f1)s, %(error_message)s, %(promoted_at)s, %(evaluation)s,
+    %(split_provenance)s
 )
 ON CONFLICT (job_id) DO UPDATE SET
     status = EXCLUDED.status,
@@ -657,7 +665,8 @@ ON CONFLICT (job_id) DO UPDATE SET
 def upsert_training_job(row: Dict[str, Any]):
     payload = dict(row)
     payload.setdefault("evaluation", None)
-    for jsonb_field in ("config", "evaluation"):
+    payload.setdefault("split_provenance", None)
+    for jsonb_field in ("config", "evaluation", "split_provenance"):
         value = payload.get(jsonb_field)
         if isinstance(value, (dict, list)):
             payload[jsonb_field] = Json(value)
