@@ -25,6 +25,29 @@ _FEATURE_DIM_TRUNCATE_WARNED = False
 _EXPECTED_SEQ_LEN = 60
 _EXPECTED_FEATURE_DIM = 126
 
+# Feature version. "v1" reads the stored `sequence` exactly as before and is the
+# default, so nothing changes unless a run asks for something else. "v2" and
+# "v2g" rebuild the frame from `landmarks_raw`, which every .npz carries, so no
+# stored artefact and no manifest checksum is touched. See shared/features_v2.py.
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from shared import features_v2 as _fv2
+except Exception:  # pragma: no cover - v1 runs must not depend on this
+    _fv2 = None  # type: ignore
+
+_DEFAULT_FEATURE_VERSION = os.environ.get("VOYA_FEATURE_VERSION", "v1").strip() or "v1"
+
+
+class MissingRawLandmarks(Exception):
+    """A sample cannot supply `landmarks_raw` for a non-v1 feature version.
+
+    This must never be treated as a corrupt file. The corrupt-file path silently
+    substitutes a neighbouring sample, which would quietly duplicate rows and
+    mislabel them; on root_strict_v13 that would have hit 9% of train and 62% of
+    test without raising anything.
+    """
+
 
 class NPZSignDataset(Dataset):  # type: ignore[misc]
     """
@@ -45,7 +68,18 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         feature_key_priority: Optional[List[str]] = None,
         dtype: str = "float32",
         augment_fn: Optional[Any] = None,
+        feature_version: Optional[str] = None,
     ) -> None:
+        self.feature_version = (feature_version or _DEFAULT_FEATURE_VERSION)
+        if self.feature_version != "v1" and _fv2 is None:
+            raise RuntimeError(
+                "feature_version=%r needs processed/shared/features_v2.py, which "
+                "failed to import" % (self.feature_version,)
+            )
+        self.expected_feature_dim = (
+            _EXPECTED_FEATURE_DIM if self.feature_version == "v1"
+            else _fv2.feature_dim(self.feature_version)
+        )
         self.csv_path = Path(csv_path)
         if root:
             self.root = Path(root)
@@ -299,6 +333,15 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         )
 
     def _choose_array_from_npz(self, npz: Any) -> Any:
+        # Rebuild from raw when the run asks for a newer feature version. The
+        # stored `sequence` is left alone; it is simply not the array we use.
+        if self.feature_version != "v1":
+            if 'landmarks_raw' not in npz:
+                raise MissingRawLandmarks(
+                    "feature_version=%s needs 'landmarks_raw'; this .npz only has %s"
+                    % (self.feature_version, sorted(npz.keys()))
+                )
+            return _fv2.build_sequence(npz['landmarks_raw'], self.feature_version)
         # try priority keys
         for k in self.feature_key_priority:
             if k in npz:
@@ -368,6 +411,10 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         try:
             with np.load(path, allow_pickle=False) as data:  # type: ignore[attr-defined]
                 arr = self._choose_array_from_npz(data)
+        except MissingRawLandmarks:
+            # Never fall through to the neighbour substitution below: a missing
+            # feature version is a dataset-coverage problem, not a corrupt file.
+            raise
         except Exception as e:
             # Size-prefilter catches 0-byte files; this catches the rarer case
             # of a non-empty but truncated/corrupt archive. Fall back to a
@@ -391,9 +438,9 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # enforce expected temporal-first shape (T, D) without modifying dimensions
         if x.ndim != 2:
             raise ValueError(f"Invalid feature shape {tuple(x.shape)} in {path}; expected 2D (T,D).")
-        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, _EXPECTED_FEATURE_DIM):
+        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, self.expected_feature_dim):
             raise ValueError(
-                f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {_EXPECTED_FEATURE_DIM})."
+                f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {self.expected_feature_dim})."
             )
 
         # Cache mảng thô đã qua kiểm tra shape; augmentation/kiểm tra hữu hạn vẫn
@@ -412,7 +459,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
 
             if tuple(x.shape) != (
                 _EXPECTED_SEQ_LEN,
-                _EXPECTED_FEATURE_DIM
+                self.expected_feature_dim
             ):
                 raise ValueError(
                     f"Augmentation returned invalid shape {tuple(x.shape)}"
