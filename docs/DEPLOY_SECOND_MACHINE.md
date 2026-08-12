@@ -83,6 +83,64 @@ EXPECTED_DATABASE=signdb docker compose run --rm backend \
 Lý lẽ đầy đủ ở
 [INCIDENT_2026-08-12_schema_code_skew.md §6](INCIDENT_2026-08-12_schema_code_skew.md).
 
+## 2c. Dung lượng Docker — vì sao `prune` không giải quyết được gì
+
+Trên WSL2 toàn bộ engine nằm trong **một tệp `.vhdx` chỉ phình, không bao giờ
+tự co**. Hệ quả đo được ngày 13/08/2026:
+
+```
+dọn 45.87 GB trong Docker  →  ổ D nhận về ĐÚNG 0 byte
+nén vhdx                   →  123.3 GB → 24.2 GB, ổ D +99.1 GB, trong 73 giây
+```
+
+Nên `docker system df` có thể báo hàng chục GB "reclaimable" trong khi ổ đĩa ở
+99%, và lời khuyên thông thường ("cứ prune đi") đọc như đã xong trong khi chưa
+sửa gì. **Prune và nén là hai việc khác nhau; chỉ việc thứ hai trả tiền về.**
+
+Cơ chế tự thu hồi của WSL (`wsl --manage --set-sparse`) **không dùng được**:
+Microsoft đã tắt nó vì nguy cơ hỏng dữ liệu, phải `--allow-unsafe` mới bật. Cơ
+sở dữ liệu sản xuất nằm trong chính tệp đó, nên đây là cái giá không đáng trả.
+
+### Ba tầng bảo vệ
+
+| tầng | ở đâu | làm gì |
+|---|---|---|
+| pre-flight | `deploy.sh` | **CHẶN** build khi ổ chứa vhdx còn < 20 GB, cảnh báo < 40 GB |
+| theo lịch | Task `VOYA Docker disk watch`, CN 09:00 | dọn an toàn + email khi cần |
+| bằng tay | `scripts/docker_gc.sh` | `--deep` dọn sâu, `--compact` nén |
+
+Tầng pre-flight là tầng **duy nhất** nhìn được ổ host: filesystem bên trong
+vhdx vẫn báo rộng rãi khi D đã đầy, nên không thứ gì chạy trong container có
+thể báo động.
+
+### Tín hiệu: KHOẢNG CÁCH, không phải chỗ trống
+
+`docker_watch.sh` cảnh báo theo **`vhdx trên đĩa − dung lượng Docker thật sự
+dùng`**, tức "nén sẽ lấy lại được bao nhiêu". Ngày 13/08 con số đó là ~106 GB
+và nén lấy về 99.1 GB. Chỗ trống thuần tuý không phân biệt được "ổ chật nhưng
+nén vô ích" với "có sẵn 100 GB chờ một lượt nén".
+
+```bash
+bash scripts/docker_watch.sh --dry-run   # chi do va in
+bash scripts/docker_watch.sh --install   # dang ky lai lich (khong can admin)
+bash scripts/docker_gc.sh --compact      # nen that (dung stack, can bam UAC)
+```
+
+Nhật ký: `voya_backups/docker_watch.log` (kết quả) và `docker_watch_task.log`
+(lượt chạy theo lịch, gồm cả lần hỏng).
+
+### Ba cái bẫy đã trả giá
+
+* **Giết tiến trình `Docker Desktop` KHÔNG khởi động lại engine** — đó chỉ là
+  giao diện. Muốn engine đọc lại `daemon.json` thì bắt buộc `wsl --shutdown`.
+  Kiểm bằng `docker run --rm alpine cat /proc/uptime`.
+* **Docker Desktop ghi đè `~/.docker/daemon.json`** bằng bản cache của nó khi
+  khởi động. Sửa lúc Docker đang chạy là mất trắng.
+* **Đừng bao giờ `--volumes`.** Đo tại đây: ba volume mồ côi đều 0 B, toàn bộ
+  volume 403 MB. Lãi 0 byte. Và bước nén phải dừng Docker — nếu ở đó dùng
+  `down` thay vì `stop` thì mọi volume thành mồ côi và cùng lệnh ấy xoá cơ sở
+  dữ liệu. Xoá volume mồ côi thì xoá **theo tên**.
+
 ## 3. GPU: chip khác đời thì phải kiểm, không phải đoán
 
 `torch.cuda.is_available()` trả lời *"có driver chạy được không"*, **không** trả
