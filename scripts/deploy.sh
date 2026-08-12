@@ -96,6 +96,58 @@ fi
 
 docker info >/dev/null 2>&1 || fail "cannot talk to the Docker daemon — is Docker Desktop running?"
 
+# ---------------------------------------------------------------------------
+# Room on the drive that holds Docker's disk. Checked HERE, on the host, because
+# nothing inside Docker can see it.
+#
+# On WSL2 the whole engine lives in one growing .vhdx file. That file only ever
+# gets bigger — deleting images and cache frees space INSIDE it and returns
+# nothing to the host — so `docker system df` can report tens of GB reclaimable
+# while the host drive is at 99%. Measured 2026-08-13: 45.87 GB pruned, host
+# free space unchanged at 2.6 GB, vhdx still 123.3 GB.
+#
+# Why it is a FAIL and not a warning: on 2026-08-05 a `docker compose build`
+# started with ~1 GB free and killed `dockerd` outright, while Docker Desktop
+# kept drawing containers in the UI as if nothing had happened. A full build of
+# this stack writes on the order of 15-20 GB before it settles.
+# ---------------------------------------------------------------------------
+DISK_FAIL_GB=20
+DISK_WARN_GB=40
+
+docker_disk_report() {
+  # Windows/WSL2: find the vhdx, report its drive. Prints "<free_gb> <vhdx_gb>".
+  command -v powershell >/dev/null 2>&1 || return 1
+  powershell -NoProfile -Command '
+    $dir = $null
+    $s = "$env:APPDATA\Docker\settings-store.json"
+    if (Test-Path $s) { $dir = (Get-Content $s -Raw | ConvertFrom-Json).CustomWslDistroDir }
+    if (-not $dir) { $dir = "$env:LOCALAPPDATA\Docker\wsl" }
+    if (-not (Test-Path $dir)) { exit 1 }
+    $drive = (Get-Item $dir).PSDrive.Name
+    $free  = (Get-PSDrive $drive).Free / 1GB
+    $vhdx  = (Get-ChildItem $dir -Recurse -Filter *.vhdx -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum).Sum / 1GB
+    "{0:N1} {1:N1} {2}" -f $free, $vhdx, $drive
+  ' 2>/dev/null | tr -d '\r'
+}
+
+disk_line=$(docker_disk_report || true)
+if [ -n "$disk_line" ]; then
+  set -- $disk_line
+  free_gb="$1"; vhdx_gb="$2"; drive="$3"
+  free_int=${free_gb%%.*}
+  note "Docker disk: ${drive}: has ${free_gb} GB free, vhdx is ${vhdx_gb} GB"
+
+  if [ "$free_int" -lt "$DISK_FAIL_GB" ]; then
+    fail "only ${free_gb} GB free on ${drive}: — a full build needs ~15-20 GB and "\
+"has killed dockerd here before. Reclaim space FIRST:  bash scripts/docker_gc.sh"
+  elif [ "$free_int" -lt "$DISK_WARN_GB" ]; then
+    note "[warn] under ${DISK_WARN_GB} GB free — run \`bash scripts/docker_gc.sh\` soon."
+  fi
+else
+  note "[warn] could not measure the Docker disk (not Windows, or layout changed) — skipped"
+fi
+
 if [ "$preflight_fail" -ne 0 ]; then
   echo
   echo "Pre-flight failed. Nothing was built or started." >&2
