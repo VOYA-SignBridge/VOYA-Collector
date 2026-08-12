@@ -36,18 +36,47 @@ Liên quan: ``app/storage/rls.py``, ``app/storage/authz_schema.py``,
 from __future__ import annotations
 
 import logging
-import uuid
 
 import pytest
 
 
 # ---------------------------------------------------------------------------
-# Dữ liệu thử: hai tenant, một user chưa thuộc tenant nào
+# Dữ liệu thử: hai tenant, và một người thử thuộc tenant thứ nhất
 # ---------------------------------------------------------------------------
+
+#: Tên CỐ ĐỊNH, có chữ `test`, đọc được, ngắn — không phải hex ngẫu nhiên.
+#:
+#: Bản đầu dùng `uuid4().hex[:8]`. Nó chạy được, nhưng sai ở chỗ quan trọng:
+#: khi một hàng sót lại trong cơ sở dữ liệu dùng chung — và điều đó ĐÃ xảy ra
+#: trong lượt điều tra này — thì `pytest-rlsw-a-3f9c1e02` không nói cho ai biết
+#: nó từ đâu ra. Một cái tên như `test-rls-home` thì tự khai: đây là rác của bộ
+#: test, và của phần kiểm RLS.
+#:
+#: Cái giá của tên cố định là hai lượt chạy song song sẽ đụng nhau. Bộ này chạy
+#: tuần tự (không có pytest-xdist), và fixture tự dọn ở ĐẦU nên một lượt chạy
+#: trước bị ngắt cũng không chặn lượt sau.
+#: Ba tenant, không phải hai. `OWNER` là nơi người thử THUỘC VỀ; `HOME` và
+#: `OTHER` là hai tenant nó CHƯA thuộc, để mọi bài kiểm ở dưới tự do ghi
+#: membership vào cả hai mà không va chỉ mục duy nhất.
+OWNER_TENANT = "test-rls-owner"
+HOME_TENANT = "test-rls-home"
+OTHER_TENANT = "test-rls-other"
+PROBE_USERNAME = "test-rls-probe"
+PROBE_EMAIL = "test-rls-probe@test.invalid"
+
+_ALL_TENANTS = [OWNER_TENANT, HOME_TENANT, OTHER_TENANT]
+
+
+def _purge(cur) -> None:
+    """Xoá sạch dấu vết của fixture này. Chạy cả trước lẫn sau."""
+    cur.execute("DELETE FROM memberships WHERE tenant_id = ANY(%s)", (_ALL_TENANTS,))
+    cur.execute("DELETE FROM users WHERE username = %s", (PROBE_USERNAME,))
+    cur.execute("DELETE FROM tenants WHERE tenant_id = ANY(%s)", (_ALL_TENANTS,))
+
 
 @pytest.fixture
 def rls_write_fixture():
-    """Hai tenant và một user chưa là thành viên của cái nào.
+    """Hai tenant, và một người thử thuộc tenant thứ nhất chứ không thuộc tenant thứ hai.
 
     Người dùng mới được nhân bản từ một hàng `users` có sẵn qua
     `jsonb_populate_record` chứ không liệt kê cột bằng tay: bảng `users` có
@@ -61,29 +90,47 @@ def rls_write_fixture():
     from app.storage.metadata_db import _cursor
     from app.tenant_context import system_scope
 
-    tag = uuid.uuid4().hex[:8]
-    home, other = f"pytest-rlsw-a-{tag}", f"pytest-rlsw-b-{tag}"
-
     with system_scope("test: dung du lieu cho cong RLS ghi"), _cursor() as cur:
-        for tenant in (home, other):
+        # Dọn TRƯỚC, không chỉ sau. Tên cố định nên một lượt chạy trước bị ngắt
+        # giữa chừng sẽ để lại đúng ba hàng này; xoá chúng ở đầu khiến fixture
+        # tự lành thay vì đỏ vì lỗi trùng khoá của một lượt chạy đã chết.
+        _purge(cur)
+
+        for tenant in _ALL_TENANTS:
             cur.execute(
                 "INSERT INTO tenants (tenant_id, display_name, slug, plan_code) "
                 "VALUES (%s, %s, %s, 'internal')", (tenant, tenant, tenant))
         cur.execute(
             "INSERT INTO users SELECT (jsonb_populate_record(NULL::users, "
             "  to_jsonb(u) || jsonb_build_object('id', gen_random_uuid()::text, "
-            "    'username', %s, 'email', %s))).* "
+            "    'username', %s, 'email', %s, 'tenant_id', %s))).* "
             "FROM users u LIMIT 1 RETURNING id",
-            (f"pytest-rlsw-{tag}", f"pytest-rlsw-{tag}@test.invalid"))
+            (PROBE_USERNAME, PROBE_EMAIL, OWNER_TENANT))
         user_id = cur.fetchone()[0]
 
+        # Người thử PHẢI là thành viên của tenant nhà nó — và đó là lý do có
+        # `OWNER_TENANT` chứ không phải chỉ hai tenant.
+        #
+        # Không phải để các bài kiểm dưới đây chạy được; chúng chạy được kể cả
+        # khi không có dòng này. Mà vì `test_every_live_user_is_a_member_of_
+        # their_tenant` canh một bất biến TOÀN CỤC: mọi tài khoản còn sống đều
+        # thuộc tenant của nó. Luồng đăng ký giữ đúng bất biến đó — có lời mời
+        # thì `consume_invitation` gắn vào, không có thì `create_self_serve_
+        # tenant` dựng tổ chức riêng, và nếu cả hai hỏng thì tài khoản bị VÔ
+        # HIỆU HOÁ. Một tài khoản sống không thuộc tenant nào là trạng thái sản
+        # xuất không tạo ra được.
+        #
+        # Bản đầu của fixture này tạo người thử mà KHÔNG cho membership, nên
+        # trong lúc nó sống, bất biến toàn cục bị vi phạm — và bài kiểm kia đỏ
+        # hay xanh tuỳ thứ tự chạy. Đó là hồi quy do chính tệp này gây ra, không
+        # phải bất biến đã lỗi thời.
+        cur.execute(_INSERT_MEMBERSHIP, (user_id, OWNER_TENANT))
+
     try:
-        yield {"home": home, "other": other, "user": str(user_id)}
+        yield {"home": HOME_TENANT, "other": OTHER_TENANT, "user": str(user_id)}
     finally:
         with system_scope("test: don du lieu cong RLS ghi"), _cursor() as cur:
-            cur.execute("DELETE FROM memberships WHERE user_id = %s", (user_id,))
-            cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-            cur.execute("DELETE FROM tenants WHERE tenant_id = ANY(%s)", ([home, other],))
+            _purge(cur)
 
 
 _INSERT_MEMBERSHIP = (
@@ -189,8 +236,14 @@ class TestRlsBlocksCrossTenantWrites:
         f = rls_write_fixture
         with system_scope("test: ghi lien tenant hop le"), _cursor() as cur:
             cur.execute(_INSERT_MEMBERSHIP, (f["user"], f["other"]))
-            cur.execute("SELECT tenant_id FROM memberships WHERE user_id = %s", (f["user"],))
-            assert cur.fetchone()[0] == f["other"]
+            # Hỏi ĐÍCH DANH dòng vừa ghi, không phải `fetchone()` trên toàn bộ
+            # membership của người thử: nó còn một membership ở tenant nhà, nên
+            # "dòng đầu tiên" không xác định và một assert như thế sẽ đỏ hoặc
+            # xanh tuỳ thứ tự Postgres trả về.
+            cur.execute(
+                "SELECT count(*) FROM memberships WHERE user_id = %s AND tenant_id = %s",
+                (f["user"], f["other"]))
+            assert cur.fetchone()[0] == 1
 
     def test_a_misspelt_system_scope_sentinel_fails_closed(self, rls_write_fixture):
         """`app.system_scope` chỉ nhận đúng chuỗi `'on'`.
