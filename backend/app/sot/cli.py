@@ -249,7 +249,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    # The SOT is a cross-tenant artefact by definition: `publish` reads every
+    # tenant's rows out of the database and `sync` writes every tenant's rows
+    # back in. Unscoped, `publish` would export an empty catalogue and `sync`
+    # would be rejected by the write policy — both silently, since each already
+    # tolerates per-statement failures. Scoping the whole CLI is correct here in
+    # a way it would not be for a request handler.
+    from app.tenant_context import system_scope
+
+    with system_scope(f"sot cli: {getattr(args, 'cmd', 'unknown')}"):
+        return args.func(args)
 
 
 if __name__ == "__main__":

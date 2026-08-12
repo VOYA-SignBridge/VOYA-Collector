@@ -1,14 +1,29 @@
 /**
  * Step 3: Augmentation Preview - Professional Layout
  * Displays and configures data augmentation techniques
+ *
+ * @i18n-key-table — `name`/`description`/`benefit` trong `INITIAL_AUGS` là KHOÁ
+ * từ điển, dịch lúc dựng bằng `t(aug.name)`.
  */
 
 import React, { useState } from 'react';
+import { Trans, useI18n } from "../../../i18n";
+import {
+  AlertTriangleIcon,
+  ArrowRightIcon,
+  ChartBarIcon,
+  CheckIcon,
+  FilmIcon,
+  LightbulbIcon,
+  RepeatIcon,
+  RulerIcon,
+  XIcon,
+} from '../../../components/ui/Icons';
 
 type Aug = {
   id: string;
   name: string;
-  icon: string;
+  Icon: (props: { className?: string }) => React.ReactElement;
   description: string;
   benefit: string;
   enabled: boolean;
@@ -18,7 +33,7 @@ const INITIAL_AUGS: Aug[] = [
   {
     id: 'noise',
     name: 'Thêm Nhiễu',
-    icon: '📊',
+    Icon: ChartBarIcon,
     description: 'Thêm lệch nhỏ vào tọa độ (±1%)',
     benefit: 'Chống nhạy cảm với các biến động nhỏ',
     enabled: true,
@@ -26,7 +41,7 @@ const INITIAL_AUGS: Aug[] = [
   {
     id: 'rotate',
     name: 'Xoay Góc',
-    icon: '🔄',
+    Icon: RepeatIcon,
     description: 'Xoay nhẹ (±5°)',
     benefit: 'Làm việc với nhiều góc camera khác nhau',
     enabled: true,
@@ -34,7 +49,7 @@ const INITIAL_AUGS: Aug[] = [
   {
     id: 'scale',
     name: 'Co Giãn',
-    icon: '📏',
+    Icon: RulerIcon,
     description: 'Thay đổi kích thước (-5% → +5%)',
     benefit: 'Xử lý người cao thấp khác nhau',
     enabled: true,
@@ -42,7 +57,7 @@ const INITIAL_AUGS: Aug[] = [
   {
     id: 'translate',
     name: 'Dịch Chuyển',
-    icon: '➡️',
+    Icon: ArrowRightIcon,
     description: 'Dịch vị trí trong khung (±1.5%)',
     benefit: 'Thích ứng với vị trí tay khác nhau',
     enabled: true,
@@ -50,7 +65,7 @@ const INITIAL_AUGS: Aug[] = [
   {
     id: 'time_mask',
     name: 'Mặt Nạ Thời Gian',
-    icon: '🎬',
+    Icon: FilmIcon,
     description: 'Che khung ngẫu nhiên (15%)',
     benefit: 'Học từ dữ liệu thưa và không liên tục',
     enabled: true,
@@ -58,7 +73,7 @@ const INITIAL_AUGS: Aug[] = [
   {
     id: 'flip',
     name: 'Lật Ngược Tay',
-    icon: '🔁',
+    Icon: RepeatIcon,
     description: 'Hoán đổi trái/phải (50%)',
     benefit: 'Xử lý cả tay thuận và tay trái',
     enabled: true,
@@ -66,6 +81,7 @@ const INITIAL_AUGS: Aug[] = [
 ];
 
 const AugmentationPreview: React.FC = () => {
+  const { t } = useI18n();
   const [augs, setAugs] = useState<Aug[]>(INITIAL_AUGS);
 
   const toggle = (id: string) => {
@@ -83,10 +99,10 @@ const AugmentationPreview: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-            Kỹ Thuật Tăng Cường Dữ Liệu
+            {t("Kỹ Thuật Tăng Cường Dữ Liệu")}
           </h3>
           <p className="mt-1 text-sm text-slate-600">
-            Tạo các biến thể từ dữ liệu gốc để mô hình học tổng quát hơn
+            {t("Tạo các biến thể từ dữ liệu gốc để mô hình học tổng quát hơn")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -94,13 +110,13 @@ const AugmentationPreview: React.FC = () => {
             onClick={enableAll}
             className="inline-flex items-center gap-1 rounded-lg bg-ctu-blue/10 px-3 py-2 text-sm font-medium text-ctu-blue hover:bg-ctu-blue/20 transition-colors"
           >
-            ✓ Bật Hết
+            <CheckIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {t("Bật Hết")}
           </button>
           <button
             onClick={disableAll}
             className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200 transition-colors"
           >
-            ✕ Tắt Hết
+            <XIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {t("Tắt Hết")}
           </button>
         </div>
       </div>
@@ -108,7 +124,19 @@ const AugmentationPreview: React.FC = () => {
       {/* Summary Indicator */}
       <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4">
         <p className="text-sm text-ctu-navy">
-          <strong>Đang sử dụng {enabledCount}/{augs.length} kỹ thuật</strong> — Mỗi mẫu sẽ tạo ra ~10 biến thể
+          <Trans
+            k="{dang_dung} — Mỗi mẫu sẽ tạo ra ~10 biến thể"
+            vars={{
+              dang_dung: (
+                <strong>
+                  {t("Đang sử dụng {n}/{tong} kỹ thuật", {
+                    n: enabledCount,
+                    tong: augs.length,
+                  })}
+                </strong>
+              ),
+            }}
+          />
         </p>
       </div>
 
@@ -126,11 +154,14 @@ const AugmentationPreview: React.FC = () => {
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
-                <div className="text-3xl">{aug.icon}</div>
+                <aug.Icon className="h-7 w-7 shrink-0 text-ctu-blue"  aria-hidden="true" />
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-slate-900">{aug.name}</h4>
-                  <p className="mt-0.5 text-xs text-slate-600">{aug.description}</p>
-                  <p className="mt-2 text-xs font-medium text-ctu-blue">💡 {aug.benefit}</p>
+                  <h4 className="font-semibold text-slate-900">{t(aug.name)}</h4>
+                  <p className="mt-0.5 text-xs text-slate-600">{t(aug.description)}</p>
+                  <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-ctu-blue">
+        <LightbulbIcon className="mt-0.5 h-3.5 w-3.5 shrink-0"  aria-hidden="true" />
+        {t(aug.benefit)}
+      </p>
                 </div>
               </div>
 
@@ -165,30 +196,30 @@ const AugmentationPreview: React.FC = () => {
 
       {/* Info Section */}
       <div className="rounded-lg bg-slate-50 border border-slate-200 p-5">
-        <h4 className="font-semibold text-slate-900 mb-3">Lợi Ích Của Tăng Cường</h4>
+        <h4 className="font-semibold text-slate-900 mb-3">{t("Lợi Ích Của Tăng Cường")}</h4>
         <ul className="space-y-2 text-sm text-slate-700">
           <li className="flex gap-2">
-            <span>✓</span>
+            <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"  aria-hidden="true" />
             <span>
-              <strong>Tăng dữ liệu:</strong> Mỗi mẫu gốc tạo ra ~10 biến thể mới
+              <strong>{t("Tăng dữ liệu:")}</strong> {t("Mỗi mẫu gốc tạo ra ~10 biến thể mới")}
             </span>
           </li>
           <li className="flex gap-2">
-            <span>✓</span>
+            <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"  aria-hidden="true" />
             <span>
-              <strong>Cải thiện tổng quát:</strong> Model học các đặc trưng cốt lõi thay vì ghi nhớ
+              <strong>{t("Cải thiện tổng quát:")}</strong> {t("Model học các đặc trưng cốt lõi thay vì ghi nhớ")}
             </span>
           </li>
           <li className="flex gap-2">
-            <span>✓</span>
+            <CheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"  aria-hidden="true" />
             <span>
-              <strong>Linh hoạt hơn:</strong> Xử lý tốt hơn với góc độ, vị trí, kích thước khác nhau
+              <strong>{t("Linh hoạt hơn:")}</strong> {t("Xử lý tốt hơn với góc độ, vị trí, kích thước khác nhau")}
             </span>
           </li>
           <li className="flex gap-2">
-            <span>⚠️</span>
+            <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"  aria-hidden="true" />
             <span>
-              <strong>Tính toán:</strong> Tăng thời gian huấn luyện ~ 20-30% (vẫn chấp nhận được)
+              <strong>{t("Tính toán:")}</strong> {t("Tăng thời gian huấn luyện ~ 20-30% (vẫn chấp nhận được)")}
             </span>
           </li>
         </ul>

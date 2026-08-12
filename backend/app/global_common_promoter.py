@@ -4,6 +4,7 @@ import argparse, shutil
 from collections import defaultdict
 
 from app.dataset_manager import load_labels, register_class, ClassMetadata
+from app.tenancy import tenant_id_of
 
 def find_multi_language_slugs(min_languages: int = 2):
     rows = load_labels()
@@ -31,7 +32,10 @@ def promote(slug: str, metas: list[dict], dry_run: bool = False):
         src_meta = ClassMetadata(
             class_uid=m['class_uid'], slug=m['slug'], label_original=m['label_original'],
             language=m['language'], dialect=m['dialect'],
-            is_common_global=False, is_common_language=bool(int(m['is_common_language']))
+            is_common_global=False, is_common_language=bool(int(m['is_common_language'])),
+            # See dataset_manager.tenant_features_root: the source directory is
+            # derived from the owner, not from the calling context.
+            tenant_id=tenant_id_of(m),
         )
         src_dir = src_meta.hierarchy_path()
         if not src_dir.exists():

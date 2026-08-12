@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n";
 const SPEEDS = [0.25, 0.5, 1, 1.5, 2];
 
 interface PlayerControlsProps {
@@ -19,12 +20,13 @@ export default function PlayerControls({
   onSeek,
   onSpeed,
 }: PlayerControlsProps) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center gap-3 px-4 py-3 bg-slate-800/95 rounded-b-2xl">
       <button
         type="button"
         onClick={onToggle}
-        aria-label={playing ? "Tạm dừng" : "Phát"}
+        aria-label={playing ? t("Tạm dừng") : t("Phát")}
         className="w-9 h-9 flex items-center justify-center rounded-full bg-ctu-blue hover:bg-ctu-blue-light text-white transition-colors shrink-0"
       >
         {playing ? (
@@ -45,7 +47,7 @@ export default function PlayerControls({
         max={Math.max(0, frameCount - 1)}
         value={frame}
         onChange={(e) => onSeek(Number(e.target.value))}
-        aria-label="Tua khung hình"
+        aria-label={t("Tua khung hình")}
         className="flex-1 accent-ctu-blue-light cursor-pointer"
       />
 
@@ -56,7 +58,7 @@ export default function PlayerControls({
       <select
         value={speed}
         onChange={(e) => onSpeed(Number(e.target.value))}
-        aria-label="Tốc độ phát"
+        aria-label={t("Tốc độ phát")}
         className="bg-slate-700 text-slate-100 text-xs rounded-lg px-2 py-1.5 border border-slate-600 cursor-pointer"
       >
         {SPEEDS.map((s) => (

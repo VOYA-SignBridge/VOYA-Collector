@@ -21,8 +21,76 @@ LABELS_DIR = DATASET_ROOT / "labels"
 LABELS_MASTER_CSV = DATASET_ROOT / "labels.csv"
 
 # ---- Utils ----
-def slugify(text: str, maxlen: int = 30) -> str:
-    """Convert text (possibly with diacritics) to safe ASCII slug."""
+
+# Dialects where a single Vietnamese letter's diacritic IS the class distinction
+# (fingerspelling alphabet). For these, Ă/Â/Đ/Ê/Ô/Ơ/Ư must NOT collapse into
+# A/D/E/O/U the way the default diacritic-stripping slug does.
+ALPHABET_DIALECTS = {"bang-chu-cai"}
+
+# Telex-style ASCII slug for the 7 diacritic letters: keeps them filesystem-safe
+# AND distinct from their base letter (Đ -> "dd" stays separate from D -> "d").
+_VN_ALPHABET_SLUG = {
+    "ă": "aw", "â": "aa", "đ": "dd", "ê": "ee",
+    "ô": "oo", "ơ": "ow", "ư": "uw",
+}
+
+
+def is_alphabet_dialect(dialect: str) -> bool:
+    return (dialect or "").strip().lower() in ALPHABET_DIALECTS
+
+
+# Telex sequence -> the letter it is meant to produce. Used only to explain the
+# mistake back to the user; nothing is auto-corrected.
+_TELEX_HINT = {slug: letter.upper() for letter, slug in _VN_ALPHABET_SLUG.items()}
+
+
+class AlphabetLabelError(ValueError):
+    """A fingerspelling label that is not a single letter."""
+
+
+def assert_single_alphabet_letter(label: str) -> str:
+    """Every fingerspelling label is exactly one letter — reject anything else.
+
+    Without this, a label typed while the Vietnamese input method is off or is
+    swallowed by the field ("aw" instead of "Ă") is accepted and slugifies to
+    "aw", which is precisely the slug Ă itself produces. The class is then
+    created carrying the literal text as its label, and the next person who
+    types Ă correctly is silently handed that malformed class instead of a new
+    one — the same collision the NFC fix removed, arriving by another route.
+    """
+    text = unicodedata.normalize("NFC", (label or "").strip())
+    if len(text) == 1:
+        return text
+
+    hint = _TELEX_HINT.get(text.lower())
+    if hint:
+        raise AlphabetLabelError(
+            f"'{text}' is a telex sequence, not a letter — did you mean '{hint}'? "
+            f"Turn the Vietnamese input method on and type the letter itself."
+        )
+    raise AlphabetLabelError(
+        f"A fingerspelling label must be exactly one letter, got '{text}' "
+        f"({len(text)} characters)."
+    )
+
+
+def slugify(text: str, maxlen: int = 30, preserve_vn_letters: bool = False) -> str:
+    """Convert text (possibly with diacritics) to safe ASCII slug.
+
+    By default Vietnamese diacritics are stripped — correct for word-level signs,
+    where the sign for "tôm" does not depend on the tone mark. Pass
+    preserve_vn_letters=True for the fingerspelling alphabet, where Ă/Â/Đ/Ê/Ô/Ơ/Ư
+    are DISTINCT letters and must not collapse into A/D/E/O/U.
+    """
+    if preserve_vn_letters:
+        # NFC first: Vietnamese input methods may emit "Â" either precomposed
+        # (U+00C2) or decomposed (A + U+0302). The table is keyed on the
+        # precomposed form, so without this a decomposed letter misses the
+        # lookup, falls through to diacritic stripping, and collapses into its
+        # base letter — Â would silently become the existing "a" class.
+        key = unicodedata.normalize("NFC", (text or "").strip()).lower()
+        if key in _VN_ALPHABET_SLUG:
+            return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
@@ -209,7 +277,7 @@ class ClassRegistry:
         Register a new class or return existing.
         If force_new=True, always create a new class_uid even if similar exists.
         """
-        slug = slugify(label_original)
+        slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dialect))
         
         # Check if already exists
         if not force_new:

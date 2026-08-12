@@ -7,12 +7,18 @@ from typing import List, Dict, Any
 from app.worker import celery_app
 from app.config import settings
 from app.storage.postgres_connection import connect_postgres
+from app.storage.rls import apply_scope
 from psycopg2.extras import RealDictCursor
 from app.storage.gdrive_client import download_from_gdrive
+from app.monitoring import DISK_CRIT_PCT
 
 logger = logging.getLogger(__name__)
 
-DISK_HIGH_WATERMARK = 0.95  # 95% — stop downloading to protect DB & filesystem
+# Cùng một ngưỡng với cảnh báo "nguy cấp" trên bảng quản trị, và cố ý lấy từ
+# đó chứ không viết lại: nếu hai con số trôi ra khỏi nhau thì bảng quản trị sẽ
+# báo "còn ổn" trong khi việc tải đã âm thầm dừng, hoặc ngược lại. Xem
+# `app/monitoring.py` để biết vì sao chiều nhập khẩu là như vậy.
+DISK_HIGH_WATERMARK = DISK_CRIT_PCT / 100.0
 
 
 def _disk_over_watermark() -> bool:
@@ -40,7 +46,12 @@ def _is_present(path: Path) -> bool:
         return False
 
 
-@celery_app.task(bind=True)
+# `platform_wide`: this sweeps every tenant's samples and raw_uploads for
+# missing local files, and it is dispatched from the admin router — from inside
+# a request, which now carries a tenant header. Without the flag the sweep would
+# silently cover one tenant and log success. The body below documents its
+# dependency on system scope explicitly; this is what keeps that true.
+@celery_app.task(bind=True, platform_wide=True)
 def download_missing_files_to_local(self):
     """
     Scans the database for samples and raw_uploads that have a storage_url
@@ -57,6 +68,14 @@ def download_missing_files_to_local(self):
 
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # This task opens its own connection instead of going through
+                # metadata_db, so it has to bind the tenant scope itself — the
+                # two reads below hit policy-protected tables and would return
+                # zero rows otherwise, i.e. the job would log success having
+                # downloaded nothing. The ambient scope is `system`, set for
+                # every task by worker.py's task_prerun handler.
+                apply_scope(cur)
+
                 # 1. Fetch Features
                 cur.execute(
                     """

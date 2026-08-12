@@ -18,7 +18,7 @@ groups:
     interval: 1m
     rules:
       - uid: hw-error-rule
-        title: Hardware Error Alert
+        title: Phần cứng gặp sự cố
         condition: B
         data:
           - refId: A
@@ -43,13 +43,16 @@ groups:
         execErrState: OK
         for: 1m
         annotations:
-          description: Hardware disconnected
-          summary: Hardware Issue Detected
+          description: >-
+            Một thiết bị (đĩa dữ liệu hoặc GPU) không còn đọc được. Xem nhãn
+            `resource` để biết là cái nào, và trang Tài nguyên trong ứng dụng
+            để biết nó mất từ lúc nào.
+          summary: Không đọc được một thiết bị phần cứng
         labels:
           severity: critical
 
       - uid: high-cpu-rule
-        title: High CPU Saturation Alert
+        title: CPU quá tải
         condition: B
         data:
           - refId: A
@@ -74,13 +77,15 @@ groups:
         execErrState: OK
         for: 1m
         annotations:
-          description: CPU Usage > 90%
-          summary: High CPU Saturation
+          description: >-
+            CPU máy chủ trên 90% liên tục hơn một phút. Thường là một lượt
+            huấn luyện đang chạy; nếu không có lượt nào thì kiểm tra worker.
+          summary: CPU máy chủ trên 90% quá một phút
         labels:
           severity: warning
 
       - uid: high-traffic-rule
-        title: High Traffic Alert
+        title: Lưu lượng bất thường
         condition: B
         data:
           - refId: A
@@ -105,13 +110,16 @@ groups:
         execErrState: OK
         for: 1m
         annotations:
-          description: Request Rate > 100 req/s
-          summary: Possible DDoS
+          description: >-
+            Trên 100 yêu cầu mỗi giây. Với quy mô sử dụng hiện tại đây là mức
+            bất thường — có thể là một vòng lặp phía client, hoặc lưu lượng
+            không mong muốn từ bên ngoài.
+          summary: Trên 100 yêu cầu mỗi giây
         labels:
           severity: critical
 
       - uid: high-error-rate-rule
-        title: Server 5xx Errors
+        title: Máy chủ trả lỗi 5xx
         condition: B
         data:
           - refId: A
@@ -136,8 +144,10 @@ groups:
         execErrState: OK
         for: 1m
         annotations:
-          description: 5xx Errors > 5/s
-          summary: High 5xx Error Rate
+          description: >-
+            Hơn 5 lỗi máy chủ mỗi giây. Đây là lỗi PHÍA MÁY CHỦ, không phải do
+            người dùng gửi sai — xem log backend trong Loki cùng khoảng thời gian.
+          summary: Hơn 5 lỗi máy chủ mỗi giây
         labels:
           severity: critical
 
@@ -154,7 +164,7 @@ groups:
       # and would otherwise double-alert on the same root cause; those stay OK
       # and let the backend rule speak for the outage.
       - uid: backend-down-rule
-        title: Backend Down
+        title: Backend không phản hồi
         condition: B
         data:
           - refId: A
@@ -179,13 +189,15 @@ groups:
         execErrState: Alerting
         for: 2m
         annotations:
-          description: Prometheus cannot scrape the backend (up == 0 or no data for 2m).
-          summary: Backend is down
+          description: >-
+            Prometheus không lấy được chỉ số từ backend trong hai phút (up == 0
+            hoặc không có dữ liệu). Toàn bộ ứng dụng đang không dùng được.
+          summary: Backend đã ngừng phản hồi
         labels:
           severity: critical
 
       - uid: redis-down-rule
-        title: Redis Down
+        title: Redis không phản hồi
         condition: B
         data:
           - refId: A
@@ -210,13 +222,15 @@ groups:
         execErrState: OK
         for: 2m
         annotations:
-          description: Redis did not answer PING — Celery cannot dispatch or return tasks.
-          summary: Redis is down
+          description: >-
+            Redis không trả lời PING. Hàng đợi Celery nằm ở đây, nên mọi tác vụ
+            nền — đồng bộ Drive, xuất dữ liệu, huấn luyện — đều dừng.
+          summary: Redis đã ngừng phản hồi
         labels:
           severity: critical
 
       - uid: postgres-down-rule
-        title: Postgres Down
+        title: Postgres không phản hồi
         condition: B
         data:
           - refId: A
@@ -241,7 +255,9 @@ groups:
         execErrState: OK
         for: 2m
         annotations:
-          description: Postgres did not answer SELECT 1 — the catalog and job state are unavailable.
-          summary: Postgres is down
+          description: >-
+            Postgres không trả lời SELECT 1. Danh mục lớp, tài khoản và trạng
+            thái các lượt huấn luyện đều không đọc được.
+          summary: Postgres đã ngừng phản hồi
         labels:
           severity: critical

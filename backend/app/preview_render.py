@@ -69,16 +69,65 @@ def _split_hands(sequence: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return left, right
 
 
-def _fit_transform(left: np.ndarray, right: np.ndarray) -> Callable[[float, float], Tuple[int, int]]:
-    """Map data coords to canvas pixels using the whole-sequence bounding box.
+def _frame_has_hand(hand_frame: np.ndarray) -> bool:
+    """True when this ONE frame holds a real hand — (21, 3).
 
-    Fitting once over the sequence (not per frame) keeps the playback steady,
-    and works for both raw [0,1] MediaPipe coords and normalized features.
-    Missing landmarks are stored as all-zero triples and must not skew the box.
+    Two ways to be absent:
+      * all-zero, which is how an undetected hand is stored;
+      * zero spatial extent. 3.3% of stored samples write the left hand as 21
+        identical points at (1.0, 0.0) — a constant placeholder that passed the
+        "any non-zero" test, drew 21 dots on one pixel, and stretched the
+        shared bounding box to x=1.0 so the real hand beside it was squashed
+        into a sliver.
+
+    The WRIST is legitimately (0,0,0) in wrist-centred data, so presence is
+    judged on the whole hand and never landmark by landmark.
     """
-    pts = np.concatenate([left.reshape(-1, 3), right.reshape(-1, 3)], axis=0)
-    mask = np.any(pts != 0.0, axis=1)
-    visible = pts[mask]
+    if not np.any(hand_frame != 0.0):
+        return False
+    xy = hand_frame[:, :2]
+    finite = xy[np.all(np.isfinite(xy), axis=1)]
+    if finite.shape[0] == 0:
+        return False
+    extent = max(
+        float(finite[:, 0].max() - finite[:, 0].min()),
+        float(finite[:, 1].max() - finite[:, 1].min()),
+    )
+    return extent >= 1e-6
+
+
+def _present_mask(hand: np.ndarray) -> np.ndarray:
+    """(T,) bool — which frames of this hand are real. Input (T, 21, 3)."""
+    return np.array([_frame_has_hand(hand[t]) for t in range(hand.shape[0])], dtype=bool)
+
+
+def _hand_present(hand: np.ndarray) -> bool:
+    """True when this hand is real in at least one frame."""
+    return bool(_present_mask(hand).any())
+
+
+def _fit_transform(
+    hand: np.ndarray, column: Tuple[float, float] = (0.0, 1.0)
+) -> Callable[[float, float], Tuple[int, int]]:
+    """Map ONE hand's coords to canvas pixels, inside its own column.
+
+    Fitting once over the sequence (not per frame) keeps playback steady, and
+    works for raw [0,1] MediaPipe coords and normalized features alike.
+
+    One fit for BOTH hands was wrong: stored coordinates are wrist-centred, so
+    each hand spans roughly the same range around its own origin. A shared
+    bounding box therefore drew them on top of each other, both wrists landing
+    on the same pixel — the two hands read as one tangled shape joined at the
+    middle. Each hand now gets its own box inside its own half of the canvas.
+    """
+    # Only frames holding a real hand shape the box. Undetected frames are
+    # all-zero, and placeholder frames have no extent — either one would drag
+    # the box somewhere the hand never was. Inside a real frame every landmark
+    # counts, including a wrist at the origin: dropping it removes the joint
+    # every finger hangs off and the palm falls apart.
+    present = _present_mask(hand)
+    pts = hand[present].reshape(-1, 3) if present.any() else np.empty((0, 3), dtype=np.float32)
+    visible = pts[np.any(pts != 0.0, axis=1)] if pts.shape[0] else pts
     if visible.shape[0] == 0:
         x_min, x_max, y_min, y_max = 0.0, 1.0, 0.0, 1.0
     else:
@@ -87,10 +136,14 @@ def _fit_transform(left: np.ndarray, right: np.ndarray) -> Callable[[float, floa
         y_min = float(visible[:, 1].min())
         y_max = float(visible[:, 1].max())
 
+    col_start = column[0] * CANVAS_SIZE
+    col_width = max((column[1] - column[0]) * CANVAS_SIZE, 1.0)
+
     span = max(x_max - x_min, y_max - y_min, 1e-6)
-    scale = (CANVAS_SIZE - 2 * _MARGIN) / span
-    # Center the box on the canvas.
-    x_off = (CANVAS_SIZE - (x_max - x_min) * scale) / 2.0
+    # Uniform scale on both axes so a hand is never stretched; the narrower
+    # column is what limits it once two hands share the canvas.
+    scale = (min(col_width, CANVAS_SIZE) - 2 * _MARGIN) / span
+    x_off = col_start + (col_width - (x_max - x_min) * scale) / 2.0
     y_off = (CANVAS_SIZE - (y_max - y_min) * scale) / 2.0
 
     def to_px(x: float, y: float) -> Tuple[int, int]:
@@ -101,20 +154,100 @@ def _fit_transform(left: np.ndarray, right: np.ndarray) -> Callable[[float, floa
     return to_px
 
 
+def _hand_columns(left: np.ndarray, right: np.ndarray) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """Two half-canvas columns when both hands appear, full width for one."""
+    if _hand_present(left) and _hand_present(right):
+        return (0.0, 0.5), (0.5, 1.0)
+    return (0.0, 1.0), (0.0, 1.0)
+
+
+#: Below this the two wrists are literally the same point, so the recording says
+#: nothing about where the hands were relative to each other.
+#:
+#: Deliberately tiny. Wrist-centred data scores EXACTLY 0.0 (178/178 measured
+#: samples, every percentile), so this only has to absorb rounding noise.
+#: Generosity is what breaks real recordings: the closest genuine two-hand
+#: sample scores 0.0154, and an earlier 0.05 threshold split two samples whose
+#: hands genuinely touched. Must match COINCIDENT_WRIST_RATIO in
+#: frontend/src/components/viewer/handData.ts.
+_COINCIDENT_WRIST_RATIO = 0.005
+
+
+def _wrist_separation(left: np.ndarray, right: np.ndarray) -> Optional[float]:
+    """Median wrist-to-wrist distance over the sequence, in units of hand size.
+
+    None when the hands never appear in the same frame.
+    """
+    both = _present_mask(left) & _present_mask(right)
+    if not both.any():
+        return None
+    dist = np.linalg.norm(left[both][:, 0, :2] - right[both][:, 0, :2], axis=1)
+
+    pts = np.concatenate([left[both].reshape(-1, 3), right[both].reshape(-1, 3)])
+    visible = pts[np.any(pts != 0.0, axis=1)]
+    if visible.shape[0] == 0:
+        return None
+    span = max(
+        float(visible[:, 0].max() - visible[:, 0].min()),
+        float(visible[:, 1].max() - visible[:, 1].min()),
+        1e-6,
+    )
+    return float(np.median(dist) / span)
+
+
+def _shared_fit(left: np.ndarray, right: np.ndarray) -> Callable[[float, float], Tuple[int, int]]:
+    """One transform covering both hands, so their real distance and relative
+    size survive onto the canvas.
+
+    Only hands that are actually present go into the box. Concatenating blindly
+    lets a placeholder hand — 21 coincident points parked at x=1.0 — stretch the
+    box across ground no hand ever touched, which collapsed the real hand beside
+    it to a quarter of its size (measured on sample_93dced57ed).
+    """
+    parts = [h for h in (left, right) if _hand_present(h)]
+    if not parts:
+        return _fit_transform(left, (0.0, 1.0))
+    return _fit_transform(np.concatenate(parts, axis=1), (0.0, 1.0))
+
+
+def _use_columns(left: np.ndarray, right: np.ndarray) -> bool:
+    """Should the hands be drawn side by side, or where they were recorded?
+
+    Two conventions live on disk. Most recordings are wrist-centred — the
+    normalizer subtracts each hand's own wrist, so both wrists land on the
+    origin and one shared fit stacks the hands into a single tangled shape.
+    About 11% of samples, though, kept raw image coordinates, where the hands
+    already hold their true relative position and size.
+
+    Splitting every sample into columns fixes the first group and corrupts the
+    second: it moves hands that were correctly placed and rescales each one on
+    its own, inventing a layout the recording never had. So the answer is read
+    from the data.
+    """
+    if not (_hand_present(left) and _hand_present(right)):
+        return False
+    sep = _wrist_separation(left, right)
+    return sep is not None and sep < _COINCIDENT_WRIST_RATIO
+
+
 def _draw_hand(frame: np.ndarray, hand: np.ndarray, color, to_px) -> None:
     import cv2
 
-    # A hand that was not detected in this frame is stored as all zeros — skip
-    # it entirely instead of drawing a collapsed point at the origin.
-    if not np.any(hand != 0.0):
+    # Nothing to draw for an undetected hand (all zeros) or a placeholder one
+    # (21 coincident points) — the latter would paint a stack of dots that
+    # reviewers read as a real, badly-tracked hand.
+    if not _frame_has_hand(hand):
         return
     pts = [to_px(float(p[0]), float(p[1])) for p in hand]
+    # Every landmark is drawn. The per-landmark "skip if (0,0,0)" test that used
+    # to guard these two loops silently deleted the WRIST from every frame:
+    # the data is wrist-centred, so landmark 0 is exactly (0,0,0) by
+    # construction. That removed the joint the thumb, index and palm edge all
+    # connect to, leaving the fingers floating apart.
     for a, b in HAND_CONNECTIONS:
-        if np.any(hand[a] != 0.0) and np.any(hand[b] != 0.0):
-            cv2.line(frame, pts[a], pts[b], color, 2, cv2.LINE_AA)
+        cv2.line(frame, pts[a], pts[b], color, 2, cv2.LINE_AA)
     for i, p in enumerate(pts):
-        if np.any(hand[i] != 0.0):
-            cv2.circle(frame, p, 4, color, -1, cv2.LINE_AA)
+        cv2.circle(frame, p, 6 if i == 0 else 4, color, -1, cv2.LINE_AA)
 
 
 def _transcode_h264(src: str, dst: str) -> bool:
@@ -142,7 +275,12 @@ def render_sequence_to_mp4(sequence: np.ndarray, out_path: Path, fps: float = _D
     import cv2
 
     left, right = _split_hands(sequence)
-    to_px = _fit_transform(left, right)
+    if _use_columns(left, right):
+        left_col, right_col = _hand_columns(left, right)
+        to_px_left = _fit_transform(left, left_col)
+        to_px_right = _fit_transform(right, right_col)
+    else:
+        to_px_left = to_px_right = _shared_fit(left, right)
     fps = float(fps) if fps and float(fps) > 0 else _DEFAULT_FPS
 
     out_path = Path(out_path)
@@ -162,8 +300,8 @@ def render_sequence_to_mp4(sequence: np.ndarray, out_path: Path, fps: float = _D
         try:
             for t in range(left.shape[0]):
                 frame = np.full((CANVAS_SIZE, CANVAS_SIZE, 3), _BG_COLOR, dtype=np.uint8)
-                _draw_hand(frame, left[t], _LEFT_COLOR, to_px)
-                _draw_hand(frame, right[t], _RIGHT_COLOR, to_px)
+                _draw_hand(frame, left[t], _LEFT_COLOR, to_px_left)
+                _draw_hand(frame, right[t], _RIGHT_COLOR, to_px_right)
                 writer.write(frame)
         finally:
             writer.release()
@@ -286,10 +424,12 @@ def render_preview_for_session(class_uid: str, session_id: str) -> Path:
     if npz_path is None:
         raise FileNotFoundError(f"npz missing for session {class_uid}/{session_id}")
 
-    with np.load(npz_path, allow_pickle=True) as data:
-        sequence = np.asarray(data["sequence"], dtype=np.float32)
+    from app.dataset_samples import load_display_sequence
+
+    sequence, landmark_source = load_display_sequence(npz_path)
 
     out_path = Path(meta.hierarchy_path()) / preview_filename(session_id)
     render_sequence_to_mp4(sequence, out_path, fps=sample_fps(row))
-    logger.info("[PREVIEW] rendered %s (%s frames)", out_path, sequence.shape[0])
+    logger.info("[PREVIEW] rendered %s (%s frames, landmarks=%s)",
+                out_path, sequence.shape[0], landmark_source)
     return out_path

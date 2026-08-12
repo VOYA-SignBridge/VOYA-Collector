@@ -2,11 +2,11 @@
   "schema_version": "1.0",
   "models": [
     {
-      "id": "hoa-de",
-      "name": "Hòa đê",
-      "checkpoint_path": "checkpoints/tcn_dialect-hoa-de_20260515_131050.pt",
+      "id": "bang-chu-cai",
+      "name": "Bảng Chữ Cái",
+      "checkpoint_path": "checkpoints/tcn_dialect-bang-chu-cai_20260607_130922.pt",
       "language": "vn",
-      "dialect": "hoa-de",
+      "dialect": "bang-chu-cai",
       "seq_len": 60,
       "feature_dim": 126,
       "normalization_version": "hands126_v1",
@@ -31,11 +31,11 @@
       }
     },
     {
-      "id": "bang-chu-cai",
-      "name": "Bảng Chữ Cái",
-      "checkpoint_path": "checkpoints/tcn_dialect-bang-chu-cai_20260607_130922.pt",
+      "id": "hoa-de",
+      "name": "Hòa đê",
+      "checkpoint_path": "checkpoints/tcn_dialect-hoa-de_20260721_160609.pt",
       "language": "vn",
-      "dialect": "bang-chu-cai",
+      "dialect": "hoa-de",
       "seq_len": 60,
       "feature_dim": 126,
       "normalization_version": "hands126_v1",

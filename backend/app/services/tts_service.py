@@ -40,13 +40,13 @@ ALLOWED_VOICES: List[Dict[str, str]] = [
         "id": "vi-VN-HoaiMyNeural",
         "name": "HoaiMy",
         "gender": "female",
-        "description": "Giọng nữ miền Bắc — tự nhiên",
+        "description": "Giọng nữ ",
     },
     {
         "id": "vi-VN-NamMinhNeural",
         "name": "NamMinh",
         "gender": "male",
-        "description": "Giọng nam miền Bắc",
+        "description": "Giọng nam ",
     },
 ]
 

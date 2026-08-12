@@ -1,4 +1,7 @@
-from fastapi import APIRouter
+from typing import Any, Dict
+
+from fastapi import APIRouter, Depends
+from app.auth import get_current_user
 from app.worker import celery_app
 from app.api_validation import validate_job_id
 
@@ -6,9 +9,16 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.get("/{job_id}")
-def get_job_status(job_id: str):
+def get_job_status(job_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Query job status from Celery
+
+    Authenticated because the payload includes `traceback` and the stringified
+    exception on failure. A traceback names filesystem paths, module layout and
+    library versions — an inventory of the deployment, handed to anyone who can
+    guess a job id. The only caller is the upload poller in `frontend/src/api/
+    jobs.ts`, which always runs with a session (uploading requires one), so the
+    guard costs nothing.
     """
     from celery.result import AsyncResult
     job_id = validate_job_id(job_id)

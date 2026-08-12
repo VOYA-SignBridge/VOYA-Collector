@@ -3,12 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { getSamples } from "../../api/dataset";
 import type { Session } from "../../types";
 import Button from "../ui/Button";
+import { useI18n } from "../../i18n";
 
 interface HeroSectionProps {
   username: string | null;
 }
 
 export default function HeroSection({ username }: HeroSectionProps) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [userSamples, setUserSamples] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -49,23 +51,25 @@ export default function HeroSection({ username }: HeroSectionProps) {
         {username ? (
           <>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">Xin chào, {username}!</span> 👋
+              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">
+                {t("Xin chào, {ten}!", { ten: username })}
+              </span>
             </h1>
 
             <div className="mb-8 space-y-3">
               <p className="text-lg sm:text-xl font-semibold text-slate-900">
                 {loading ? (
-                  <span className="text-slate-400">Đang tính toán đóng góp của bạn...</span>
+                  <span className="text-slate-400">{t("Đang tính toán đóng góp của bạn...")}</span>
                 ) : (
                   <>
-                    Bạn đã đóng góp <span className="text-ctu-blue">{userSamples.toLocaleString()}</span> mẫu cho cộng đồng.
+                    {t("Bạn đã đóng góp")} <span className="text-ctu-blue">{userSamples.toLocaleString()}</span> {t("mẫu cho cộng đồng.")}
                   </>
                 )}
               </p>
               <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
-                Mỗi mẫu dữ liệu giúp cải thiện hệ thống nhận dạng Ngôn ngữ Ký hiệu Việt Nam.
+                {t("Mỗi mẫu dữ liệu giúp cải thiện hệ thống nhận dạng Ngôn ngữ Ký hiệu Việt Nam.")}
                 <br />
-                <strong>Tác động của bạn là có thật.</strong>
+                <strong>{t("Tác động của bạn là có thật.")}</strong>
               </p>
             </div>
 
@@ -75,31 +79,31 @@ export default function HeroSection({ username }: HeroSectionProps) {
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="primary"
               >
-                Đóng góp thêm dữ liệu →
+                {t("Đóng góp thêm dữ liệu →")}
               </Button>
               <Button
                 onClick={() => navigate("/realtime")}
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="ghost"
               >
-                Thử nhận dạng
+                {t("Thử nhận dạng")}
               </Button>
             </div>
           </>
         ) : (
           <>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">Xin chào</span> 👋
+              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">{t("Xin chào")}</span>
             </h1>
 
             <div className="mb-8 space-y-3">
               <p className="text-lg sm:text-xl font-semibold text-slate-900">
-                Khám phá CTU.SignBridge
+                {t("Khám phá CTU.SignBridge")}
               </p>
               <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
-                Cùng xây dựng cộng đồng Ngôn ngữ Ký hiệu Việt Nam thông qua công nghệ nhận dạng AI.
+                {t("Cùng xây dựng cộng đồng Ngôn ngữ Ký hiệu Việt Nam thông qua công nghệ nhận dạng AI.")}
                 <br />
-                <strong>Mỗi đóng góp đều quan trọng.</strong>
+                <strong>{t("Mỗi đóng góp đều quan trọng.")}</strong>
               </p>
             </div>
 
@@ -109,14 +113,14 @@ export default function HeroSection({ username }: HeroSectionProps) {
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="primary"
               >
-                Thử nhận dạng ngay →
+                {t("Thử nhận dạng ngay →")}
               </Button>
               <Button
                 onClick={() => navigate("/register")}
                 className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
                 variant="ghost"
               >
-                Đăng ký đóng góp
+                {t("Đăng ký đóng góp")}
               </Button>
             </div>
           </>

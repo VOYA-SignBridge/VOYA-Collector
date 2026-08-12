@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { getCommunityStats } from "../../api/dataset";
 import { FolderIcon, GlobeIcon, TagIcon, UsersIcon } from "../ui/Icons";
+import { useI18n } from "../../i18n";
 
 interface StatItem {
   label: string;
@@ -11,6 +12,7 @@ interface StatItem {
 }
 
 export default function CommunityStatsSection() {
+  const { t } = useI18n();
   const [stats, setStats] = useState<StatItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -23,27 +25,27 @@ export default function CommunityStatsSection() {
 
         const newStats: StatItem[] = [
           {
-            label: "nhãn",
+            label: t("nhãn"),
             value: s.labels_count,
-            description: "Ngôn ngữ ký hiệu được ghi nhận",
+            description: t("Ngôn ngữ ký hiệu được ghi nhận"),
             icon: <TagIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
-            label: "mẫu",
+            label: t("mẫu"),
             value: s.total_samples,
-            description: "Video hoặc ghi hình được tải lên",
+            description: t("Video hoặc ghi hình được tải lên"),
             icon: <FolderIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
-            label: "người đóng góp",
+            label: t("người đóng góp"),
             value: s.contributors_count,
-            description: "Thành viên cộng đồng hoạt động",
+            description: t("Thành viên cộng đồng hoạt động"),
             icon: <UsersIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
           {
-            label: "khu vực/phương ngữ",
+            label: t("khu vực/phương ngữ"),
             value: s.regions_count,
-            description: "Vùng lãnh thổ được đại diện",
+            description: t("Vùng lãnh thổ được đại diện"),
             icon: <GlobeIcon className="h-8 w-8 sm:h-9 sm:w-9" />,
           },
         ];
@@ -76,7 +78,7 @@ export default function CommunityStatsSection() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Cộng đồng của chúng ta</h2>
+      <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">{t("Cộng đồng của chúng ta")}</h2>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {stats.map((stat) => (
@@ -96,11 +98,11 @@ export default function CommunityStatsSection() {
 
       <div className="bg-gradient-to-r from-slate-50 to-slate-100 rounded-2xl px-6 py-5 border border-slate-200 text-center">
         <p className="text-sm sm:text-base text-slate-700">
-          <strong>Đang phát triển bởi</strong>
+          <strong>{t("Đang phát triển bởi")}</strong>
           <br />
-          <span className="text-ctu-blue font-semibold">Đại học Cần Thơ (CTU)</span>
+          <span className="text-ctu-blue font-semibold">{t("Đại học Cần Thơ (CTU)")}</span>
           <br />
-          <span className="text-xs text-slate-500 mt-1 block">Vì một cộng đồng giao tiếp không rào cản</span>
+          <span className="text-xs text-slate-500 mt-1 block">{t("Vì một cộng đồng giao tiếp không rào cản")}</span>
         </p>
       </div>
     </div>

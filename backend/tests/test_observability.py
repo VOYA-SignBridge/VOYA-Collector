@@ -120,10 +120,28 @@ def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger
         "Hardware disconnected or not found",
         extra={"resource": "disk", "details": "Dataset volume is unavailable."},
     )
-    mock_logger.error.assert_any_call(
-        "Hardware disconnected or not found",
-        extra={"resource": "gpu", "details": "Nvidia GPU is missing or unreadable."},
+    # GPU: `details` KHÔNG còn là một câu cố định.
+    #
+    # Bản cũ ghim đúng chuỗi "Nvidia GPU is missing or unreadable." cho mọi
+    # nguyên nhân, và ngày 2026-08-09 chính câu đó được gửi đi trong một lá thư
+    # cảnh báo bảo người vận hành đi tìm cái card đang nằm yên trong máy — lỗi
+    # thật là stack dựng thiếu overlay GPU. Nên test này giờ khẳng định điều
+    # đáng khẳng định: lý do được MANG THEO, và lời khuyên đi kèm là lời khuyên
+    # của đúng lý do đó. Xem `app/monitoring.GPU_ABSENCE_HINTS`.
+    from app.monitoring import GPU_ABSENCE_HINTS
+
+    gpu_call = next(
+        c for c in mock_logger.error.call_args_list
+        if c.kwargs.get("extra", {}).get("resource") == "gpu"
     )
+    extra = gpu_call.kwargs["extra"]
+    assert gpu_call.args == ("Hardware disconnected or not found",)
+    # `collect_resources` giả ở trên không kèm `reason`, nên đường mã phải chịu
+    # được việc đó thay vì ném KeyError trên chính đường xử lý sự cố.
+    assert extra["reason"] == "unknown"
+    assert extra["details"]
+    assert extra["details"] not in ("", None)
+    assert all(hint for hint in GPU_ABSENCE_HINTS.values())
 
 @patch("app.metrics.logger")
 @patch("app.metrics.collect_resources")
@@ -143,12 +161,26 @@ def test_prometheus_metrics_endpoint_missing_but_ignored(mock_collect, mock_logg
 
 
 def test_asgi_correlation_id_middleware_no_header():
-    """Verify that incoming requests without an ID get a generated UUID."""
+    """Verify that incoming requests without an ID get a generated UUID.
+
+    Authenticates because `access_gate` closes every route not on the public
+    allowlist, and this test mounts an ad-hoc one. Nothing here is about auth —
+    the override just gets past the door so the correlation-id middleware is
+    what the assertion actually measures.
+    """
+    from app.auth import get_current_user_optional
+
     @app.get("/api/v1/test_trace_empty")
     def trace_endpoint():
         return {"req_id": correlation_id.get()}
-        
-    response = client.get("/api/v1/test_trace_empty")
+
+    app.dependency_overrides[get_current_user_optional] = lambda: {
+        "id": None, "username": "tester", "is_admin": False,
+    }
+    try:
+        response = client.get("/api/v1/test_trace_empty")
+    finally:
+        app.dependency_overrides.pop(get_current_user_optional, None)
     assert response.status_code == 200
     
     # A UUID4 should be generated automatically

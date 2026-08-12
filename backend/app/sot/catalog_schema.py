@@ -25,6 +25,12 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         "class_uid", "class_idx", "slug", "label_original", "language", "dialect",
         "is_common_global", "is_common_language", "folder_name", "created_at",
         "migrated_at", "deleted_at", "hands_required",
+        # vocabulary schema v2
+        "semantic_label", "vocabulary_scope", "recognition_profile",
+        "vocabulary_group", "collection_campaign", "is_active", "motion_type",
+        # multi-tenant (A1) — the upsert writes it, so a reader whose schema
+        # lacks it passes verification and then fails mid-import.
+        "tenant_id",
     ],
     "samples": [
         "sample_uid", "class_uid", "slug", "label_original", "language", "dialect",
@@ -33,12 +39,20 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         "storage_url", "checksum", "created_at", "gdrive_synced", "deleted_at",
         "left_hand_ratio", "right_hand_ratio", "both_hands_ratio", "jitter",
         "quality_flags",
+        # vocabulary schema v2
+        "signer_id", "collection_campaign", "raw_landmarks_available",
+        "normalization_version", "preprocess_contract_version",
+        "sequence_length_original", "quality_status",
+        # multi-tenant (A1)
+        "tenant_id",
     ],
     "raw_uploads": [
         "upload_uid", "class_uid", "slug", "label_original", "language", "dialect",
         "source_type", "user_id", "auth_user_id", "session_id", "original_filename",
         "local_path", "storage_key", "storage_url", "created_at", "updated_at",
         "deleted_at",
+        # multi-tenant (A1)
+        "tenant_id",
     ],
 }
 

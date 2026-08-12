@@ -1,3 +1,28 @@
+### Khuôn thư cảnh báo — VĂN BẢN THUẦN, cố ý.
+#
+# Bản trước dựng một trang HTML đầy đủ trong `message`, và người nhận thấy
+# NGUYÊN VĂN mã đó: `<div style="font-family: Arial…">` in ra thành chữ, kéo
+# dài hai màn hình, không một dòng nào đọc được.
+#
+# Vì sao: `message` của contact point kiểu email KHÔNG phải thân thư. Grafana
+# có khuôn thư HTML riêng (`ng_alert_notification.html` — chính cái khung có
+# logo Grafana ở đầu thư), và nó chèn `message` vào đó **qua html/template**,
+# tức là escape mọi dấu ngoặc nhọn. Không có cấu hình nào tắt được điều này ở
+# Grafana OSS; thay khuôn HTML phải sửa tệp trong image.
+#
+# Nên khuôn đúng ở đây là văn bản thuần. Grafana tự bọc nó trong khung có
+# thương hiệu, và người nhận đọc được ngay trên điện thoại.
+#
+# Hai điều nữa đã đổi cùng lúc:
+#
+# 1. **Duyệt `.Alerts` thay vì đọc `.CommonLabels`.** Chính sách gộp theo
+#    `alertname`, nên khi hai máy cùng kêu một cảnh báo, những nhãn KHÁC nhau
+#    biến mất khỏi `CommonLabels` — thư cũ sẽ hiện "Mức độ: " bỏ trống mà không
+#    nói gì về việc có hai sự cố. Duyệt từng cái thì mỗi sự cố có một khối.
+# 2. **Không ký hiệu tượng hình.** Nhiều trình đọc thư dựng emoji bằng phông
+#    của hệ điều hành; trên máy chủ và điện thoại cũ nó ra ô vuông rỗng. Chữ
+#    "BÁO ĐỘNG"/"ĐÃ KHÔI PHỤC" đọc được ở mọi nơi.
+
 apiVersion: 1
 
 templates:
@@ -5,44 +30,31 @@ templates:
     name: email.voya.message
     template: |
       {{ define "email.voya.message" }}
-      <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f4;">
-        <div style="background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <h2 style="color: {{ if eq .Status "firing" }}#d9534f{{ else }}#5cb85c{{ end }}; border-bottom: 2px solid #eee; padding-bottom: 10px;">
-            {{ if eq .Status "firing" }}🚨 BÁO ĐỘNG HỆ THỐNG{{ else }}✅ ĐÃ KHÔI PHỤC{{ end }}
-          </h2>
-          <p style="font-size: 16px; color: #333;">
-            Hệ thống giám sát VOYA ghi nhận trạng thái mới từ cụm máy chủ:
-          </p>
-          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-            <tr style="background-color: #f9f9f9;">
-              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Cảnh báo</th>
-              <td style="padding: 10px; border: 1px solid #ddd;"><b>{{ .CommonLabels.alertname }}</b></td>
-            </tr>
-            <tr>
-              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Mức độ</th>
-              <td style="padding: 10px; border: 1px solid #ddd;">
-                <span style="padding: 4px 8px; border-radius: 4px; color: #fff; background-color: {{ if eq .CommonLabels.severity "critical" }}#d9534f{{ else }}#f0ad4e{{ end }};">
-                  {{ .CommonLabels.severity }}
-                </span>
-              </td>
-            </tr>
-            <tr style="background-color: #f9f9f9;">
-              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Tóm tắt</th>
-              <td style="padding: 10px; border: 1px solid #ddd;">{{ .CommonAnnotations.summary }}</td>
-            </tr>
-            <tr>
-              <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Mô tả</th>
-              <td style="padding: 10px; border: 1px solid #ddd;">{{ .CommonAnnotations.description }}</td>
-            </tr>
-          </table>
-          
-          <p style="color: #666; font-size: 14px; text-align: center; margin-top: 30px;">
-            Hệ thống tự động phát ra từ Grafana - Enterprise VOYA Collector
-          </p>
-        </div>
-      </div>
+      {{ if eq .Status "firing" }}BÁO ĐỘNG HỆ THỐNG — {{ .Alerts.Firing | len }} sự cố đang mở{{ else }}ĐÃ KHÔI PHỤC{{ end }}
+
+      Hệ thống giám sát VOYA ghi nhận trạng thái mới từ cụm máy chủ.
+      {{ range .Alerts }}
+      ------------------------------------------------------------
+      Cảnh báo : {{ .Labels.alertname }}
+      Mức độ   : {{ if .Labels.severity }}{{ .Labels.severity }}{{ else }}(không ghi){{ end }}
+      Trạng thái: {{ if eq .Status "firing" }}đang xảy ra từ {{ .StartsAt.Format "15:04 02-01-2006" }}{{ else }}đã hết lúc {{ .EndsAt.Format "15:04 02-01-2006" }}{{ end }}
+      {{ if .Annotations.summary }}
+      Tóm tắt  : {{ .Annotations.summary }}{{ end }}
+      {{ if .Annotations.description }}
+      Chi tiết : {{ .Annotations.description }}{{ end }}
+      {{ if .Labels.resource }}
+      Bộ phận  : {{ .Labels.resource }}{{ end }}
+      {{ if .DashboardURL }}
+      Biểu đồ  : {{ .DashboardURL }}{{ end }}
+      {{ if .SilenceURL }}
+      Tắt tiếng: {{ .SilenceURL }}{{ end }}
+      {{ end }}
+      ------------------------------------------------------------
+
+      Thư do Grafana tự động phát ra từ hệ thống VOYA Collector.
+      Không trả lời thư này.
       {{ end }}
   - orgId: 1
     name: email.voya.subject
     template: |
-      {{ define "email.voya.subject" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}{{ end }}
+      {{ define "email.voya.subject" }}[{{ if eq .Status "firing" }}BÁO ĐỘNG {{ .Alerts.Firing | len }}{{ else }}ĐÃ KHÔI PHỤC{{ end }}] {{ .CommonLabels.alertname }}{{ end }}

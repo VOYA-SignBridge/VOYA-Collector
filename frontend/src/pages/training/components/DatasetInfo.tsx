@@ -6,6 +6,8 @@
 import React from 'react';
 import type { DatasetInfo as DatasetInfoType } from '../../../hooks/useTrainingAPI';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
+import { AlertTriangleIcon, InfoCircleIcon } from '../../../components/ui/Icons';
+import { useI18n } from "../../../i18n";
 
 interface Props {
   datasetInfo: DatasetInfoType | null;
@@ -13,12 +15,13 @@ interface Props {
 }
 
 const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
+  const { t } = useI18n();
   const dialectCount = datasetInfo ? Object.values(datasetInfo.dialects).flat().length : 0;
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <LoadingSpinner size="lg" label="Đang tải thông tin dataset..." />
+        <LoadingSpinner size="lg" label={t("Đang tải thông tin dataset...")} />
       </div>
     );
   }
@@ -27,11 +30,11 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
     return (
       <div className="rounded-lg bg-red-50 border border-red-200 p-6">
         <div className="flex gap-3">
-          <div className="text-2xl">⚠️</div>
+          <AlertTriangleIcon className="h-6 w-6"  aria-hidden="true" />
           <div>
-            <h4 className="font-semibold text-red-900">Không thể tải dataset</h4>
+            <h4 className="font-semibold text-red-900">{t("Không thể tải dataset")}</h4>
             <p className="mt-1 text-sm text-red-800">
-              Vui lòng kiểm tra xem folder dataset có tồn tại và chứa các file CSV cần thiết.
+              {t("Vui lòng kiểm tra xem folder dataset có tồn tại và chứa các file CSV cần thiết.")}
             </p>
           </div>
         </div>
@@ -44,20 +47,20 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
       {/* Key Metrics */}
       <div>
         <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-3">
-          Thống Kê Chính
+          {t("Thống Kê Chính")}
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="Tổng mẫu" value={datasetInfo.total_samples} unit="video" />
-          <MetricCard label="Classes" value={datasetInfo.total_classes} unit="ký hiệu" />
-          <MetricCard label="Ngôn ngữ" value={datasetInfo.languages.length} unit="ngôn ngữ" />
-          <MetricCard label="Phương ngữ" value={dialectCount} unit="phương ngữ" />
+          <MetricCard label={t("Tổng mẫu")} value={datasetInfo.total_samples} unit="video" />
+          <MetricCard label={t("Số lớp")} value={datasetInfo.total_classes} unit={t("ký hiệu")} />
+          <MetricCard label={t("Ngôn ngữ")} value={datasetInfo.languages.length} unit={t("ngôn ngữ")} />
+          <MetricCard label={t("Phương ngữ")} value={dialectCount} unit={t("phương ngữ")} />
         </div>
       </div>
 
       {/* Dataset Distribution */}
       <div className="rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 p-6">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-          Phân Bố Theo Phương Ngữ
+          {t("Phân Bố Theo Phương Ngữ")}
         </h3>
         <div className="space-y-3">
           {Object.entries(datasetInfo.dialects).map(([lang, dialects]) => (
@@ -85,7 +88,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
       <div className="rounded-xl border border-slate-200 bg-white p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-            Phân Bố Lớp (Top 10)
+            {t("Phân Bố Lớp (Top 10)")}
           </h3>
           <span className="text-xs text-slate-500">
             Tổng: {datasetInfo.total_samples} mẫu
@@ -132,8 +135,11 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
 
       {/* Info Message */}
       <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-        <p className="font-medium">ℹ️ Dữ liệu sẵn sàng</p>
-        <p className="mt-1">Dataset đã được tải thành công. Hãy tiếp tục để xem chi tiết phân chia tập dữ liệu.</p>
+        <p className="flex items-center gap-1.5 font-medium">
+            <InfoCircleIcon className="h-4 w-4"  aria-hidden="true" />
+            {t("Dữ liệu sẵn sàng")}
+          </p>
+        <p className="mt-1">{t("Dataset đã được tải thành công. Hãy tiếp tục để xem chi tiết phân chia tập dữ liệu.")}</p>
       </div>
     </div>
   );

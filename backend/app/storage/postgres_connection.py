@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import threading
-from typing import Iterable
+from typing import Iterable, NamedTuple
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg2
@@ -35,8 +35,19 @@ def _rewrite_host(database_url: str, host: str) -> str:
     return urlunsplit((parts.scheme, host_part, parts.path, parts.query, parts.fragment))
 
 
-def _candidate_hosts() -> Iterable[str]:
-    current_url = settings.database_url
+def migration_dsn() -> str:
+    """DSN for schema changes.
+
+    Falls back to the application DSN when MIGRATION_DATABASE_URL is unset, so a
+    deployment that has not split the roles yet behaves exactly as before. Once
+    split, this is the only DSN in the process that may run DDL — see
+    `settings.migration_database_url` for why the split matters.
+    """
+    return (settings.migration_database_url or "").strip() or settings.database_url
+
+
+def _candidate_hosts(database_url: str | None = None) -> Iterable[str]:
+    current_url = database_url or settings.database_url
     parsed = urlsplit(current_url)
     current_host = parsed.hostname or ""
 
@@ -58,16 +69,21 @@ def _candidate_hosts() -> Iterable[str]:
         yield host
 
 
-def connect_postgres(*, connect_timeout: int = 5, application_name: str | None = None):
+def connect_postgres(
+    *,
+    connect_timeout: int = 5,
+    application_name: str | None = None,
+    database_url: str | None = None,
+):
     """Connect to Postgres with host fallbacks.
 
     This keeps containerized deployments resilient when the configured host name
     differs from the runtime DNS alias that is actually available.
     """
-    base_url = settings.database_url
+    base_url = database_url or settings.database_url
     errors: list[str] = []
 
-    for host in _candidate_hosts():
+    for host in _candidate_hosts(base_url):
         dsn = _rewrite_host(base_url, host)
         try:
             kwargs = {"connect_timeout": connect_timeout}
@@ -86,6 +102,62 @@ def connect_postgres(*, connect_timeout: int = 5, application_name: str | None =
     raise psycopg2.OperationalError(
         "Unable to connect to Postgres using any configured host candidate: " + "; ".join(errors)
     )
+
+
+def connect_migration(*, connect_timeout: int = 10):
+    """Connect using the DDL role.
+
+    Deliberately unpooled: schema changes run once at boot (`ensure_tables`) or
+    from a CLI, so the handshake cost is irrelevant, and keeping DDL off the
+    shared pool means a pooled connection can never be holding DDL rights when a
+    request borrows it.
+    """
+    return connect_postgres(
+        connect_timeout=connect_timeout,
+        application_name="voya_migration",
+        database_url=migration_dsn(),
+    )
+
+
+class RolePrivileges(NamedTuple):
+    """What the connected role is allowed to ignore."""
+
+    rolname: str
+    is_superuser: bool
+    bypasses_rls: bool
+
+    @property
+    def can_bypass_rls(self) -> bool:
+        # Superuser implies BYPASSRLS in PostgreSQL even when rolbypassrls is
+        # false, so the two must be OR-ed rather than checked independently.
+        return self.is_superuser or self.bypasses_rls
+
+
+def current_role_privileges(conn) -> RolePrivileges:
+    """Read the RLS-relevant attributes of the role `conn` is authenticated as."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+        )
+        row = cur.fetchone()
+    if not row:  # pragma: no cover - current_user always exists in pg_roles
+        return RolePrivileges("unknown", False, False)
+    return RolePrivileges(str(row[0]), bool(row[1]), bool(row[2]))
+
+
+def rls_enabled_tables(conn, tables: Iterable[str]) -> list[str]:
+    """Which of `tables` currently have row-level security switched on."""
+    names = [t for t in tables]
+    if not names:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT tablename FROM pg_tables "
+            "WHERE schemaname = 'public' AND rowsecurity AND tablename = ANY(%s) "
+            "ORDER BY tablename",
+            (names,),
+        )
+        return [str(r[0]) for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------

@@ -39,19 +39,9 @@
     "folder_name": "class_lot-vo-tom_de9eb6e1",
     "label_key": "vn/hoa-de/lot-vo-tom"
   },
-  "5": {
-    "slug": "lay-chi-tom",
-    "label_original": "lấy chỉ tôm",
-    "language": "vn",
-    "dialect": "hoa-de",
-    "class_idx": 5,
-    "class_uid": "b5c5ceb2-ffe5-4c4d-a31e-54a7ca3b1b84",
-    "folder_name": "class_lay-chi-tom_b5c5ceb2",
-    "label_key": "vn/hoa-de/lay-chi-tom"
-  },
   "6": {
     "slug": "cat-ky",
-    "label_original": "Cắt kỳ",
+    "label_original": "cắt kỳ",
     "language": "vn",
     "dialect": "hoa-de",
     "class_idx": 6,
@@ -118,16 +108,6 @@
     "class_uid": "bd134d66-3e4b-4273-a8cf-8e33966c8cbd",
     "folder_name": "class_p_bd134d66",
     "label_key": "vn/bang-chu-cai/p"
-  },
-  "13": {
-    "slug": "q",
-    "label_original": "Q",
-    "language": "vn",
-    "dialect": "bang-chu-cai",
-    "class_idx": 13,
-    "class_uid": "795eec29-34d7-4b23-aba9-89cab7a5deec",
-    "folder_name": "class_q_795eec29",
-    "label_key": "vn/bang-chu-cai/q"
   },
   "14": {
     "slug": "r",
@@ -398,5 +378,255 @@
     "class_uid": "82efff3d-e049-4a29-bd9c-382ef49f9d57",
     "folder_name": "class_vao-lop_82efff3d",
     "label_key": "vn/can-tho/vao-lop"
+  },
+  "41": {
+    "slug": "nan-mun",
+    "label_original": "nặn mụn",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 41,
+    "class_uid": "7fa33e1f-6925-4732-a14d-b79d2ecdb92c",
+    "folder_name": "class_nan-mun_7fa33e1f",
+    "label_key": "vn/spa/nan-mun"
+  },
+  "42": {
+    "slug": "up-mong",
+    "label_original": "úp móng",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 42,
+    "class_uid": "d8d5a551-b869-42e7-9250-37668f0c6b92",
+    "folder_name": "class_up-mong_d8d5a551",
+    "label_key": "vn/spa/up-mong"
+  },
+  "43": {
+    "slug": "xin-chao",
+    "label_original": "xin chào",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 43,
+    "class_uid": "7c40ba80-0b87-4925-9b00-3a3a9abb40b5",
+    "folder_name": "class_xin-chao_7c40ba80",
+    "label_key": "vn/common/xin-chao"
+  },
+  "44": {
+    "slug": "toi-di-sieu-thi",
+    "label_original": "Tôi đi siêu thị",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 44,
+    "class_uid": "499fc91b-d0ce-45da-9973-b8e1f1615c90",
+    "folder_name": "class_toi-di-sieu-thi_499fc91b",
+    "label_key": "vn/common/toi-di-sieu-thi"
+  },
+  "13": {
+    "slug": "q",
+    "label_original": "Q",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 13,
+    "class_uid": "356d0732-cf18-4cfb-bded-5ac06d847a3e",
+    "folder_name": "class_q_356d0732",
+    "label_key": "vn/bang-chu-cai/q"
+  },
+  "45": {
+    "slug": "aw",
+    "label_original": "Ă",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 45,
+    "class_uid": "80ab9d55-06b3-4fc7-8457-83c51cfe3ef7",
+    "folder_name": "class_aw_80ab9d55",
+    "label_key": "vn/bang-chu-cai/aw"
+  },
+  "46": {
+    "slug": "aa",
+    "label_original": "Â",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 46,
+    "class_uid": "cf079207-e73b-420c-9e82-47d42851154f",
+    "folder_name": "class_aa_cf079207",
+    "label_key": "vn/bang-chu-cai/aa"
+  },
+  "47": {
+    "slug": "dd",
+    "label_original": "Đ",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 47,
+    "class_uid": "4b68a54b-c902-4b54-b52b-5827c90ce04c",
+    "folder_name": "class_dd_4b68a54b",
+    "label_key": "vn/bang-chu-cai/dd"
+  },
+  "48": {
+    "slug": "ee",
+    "label_original": "Ê",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 48,
+    "class_uid": "49d38489-1561-4146-9880-4ed7107b95e8",
+    "folder_name": "class_ee_49d38489",
+    "label_key": "vn/bang-chu-cai/ee"
+  },
+  "49": {
+    "slug": "oo",
+    "label_original": "Ô",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 49,
+    "class_uid": "870073c5-30cc-40c6-9c7d-d9d01de52074",
+    "folder_name": "class_oo_870073c5",
+    "label_key": "vn/bang-chu-cai/oo"
+  },
+  "50": {
+    "slug": "ow",
+    "label_original": "Ơ",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 50,
+    "class_uid": "e19bfd88-5c54-4b76-a2c4-2b63e0054bfd",
+    "folder_name": "class_ow_e19bfd88",
+    "label_key": "vn/bang-chu-cai/ow"
+  },
+  "51": {
+    "slug": "uw",
+    "label_original": "Ư",
+    "language": "vn",
+    "dialect": "bang-chu-cai",
+    "class_idx": 51,
+    "class_uid": "c8e6db29-fd24-47e2-b478-76fcb361c978",
+    "folder_name": "class_uw_c8e6db29",
+    "label_key": "vn/bang-chu-cai/uw"
+  },
+  "5": {
+    "slug": "lay-chi-tom",
+    "label_original": "lấy chỉ tôm",
+    "language": "vn",
+    "dialect": "hoa-de",
+    "class_idx": 5,
+    "class_uid": "b5c5ceb2-ffe5-4c4d-a31e-54a7ca3b1b84",
+    "folder_name": "class_lay-chi-tom_b5c5ceb2",
+    "label_key": "vn/hoa-de/lay-chi-tom"
+  },
+  "52": {
+    "slug": "vo-tay",
+    "label_original": "Vỗ tay",
+    "language": "vn",
+    "dialect": "can-tho",
+    "class_idx": 52,
+    "class_uid": "57301200-6e34-4aa4-a6fb-0ff8c4480ca6",
+    "folder_name": "class_vo-tay_57301200",
+    "label_key": "vn/can-tho/vo-tay"
+  },
+  "53": {
+    "slug": "cam-on",
+    "label_original": "Cảm ơn",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 53,
+    "class_uid": "cb7be8bf-a01b-404c-acc0-571c41950eab",
+    "folder_name": "class_cam-on_cb7be8bf",
+    "label_key": "vn/common/cam-on"
+  },
+  "54": {
+    "slug": "dia-chi",
+    "label_original": "Địa chỉ",
+    "language": "vn",
+    "dialect": "bac",
+    "class_idx": 54,
+    "class_uid": "dc06f29f-3965-425c-8845-afdf6a2d9916",
+    "folder_name": "class_dia-chi_dc06f29f",
+    "label_key": "vn/bac/dia-chi"
+  },
+  "55": {
+    "slug": "dia-chi",
+    "label_original": "Địa chỉ",
+    "language": "vn",
+    "dialect": "nam",
+    "class_idx": 55,
+    "class_uid": "df77087d-4fab-4de8-a074-8c3f619a1919",
+    "folder_name": "class_dia-chi_df77087d",
+    "label_key": "vn/nam/dia-chi"
+  },
+  "56": {
+    "slug": "xin-loi",
+    "label_original": "xin lỗi",
+    "language": "vn",
+    "dialect": "common",
+    "class_idx": 56,
+    "class_uid": "45b9d84c-d7a4-4960-8a47-a7b404ba898a",
+    "folder_name": "class_xin-loi_45b9d84c",
+    "label_key": "vn/common/xin-loi"
+  },
+  "57": {
+    "slug": "cat-da",
+    "label_original": "cắt da",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 57,
+    "class_uid": "843cc323-cc00-489b-8324-62fabbcb088d",
+    "folder_name": "class_cat-da_843cc323",
+    "label_key": "vn/spa/cat-da"
+  },
+  "58": {
+    "slug": "lam-mat-meo",
+    "label_original": "làm mắt mèo",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 58,
+    "class_uid": "05455d4b-d3a7-4488-ae40-d97480403f5a",
+    "folder_name": "class_lam-mat-meo_05455d4b",
+    "label_key": "vn/spa/lam-mat-meo"
+  },
+  "59": {
+    "slug": "duoi-mong",
+    "label_original": "duỗi móng",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 59,
+    "class_uid": "7abdcd85-cdd5-42ce-8ff1-0f4e146c4d44",
+    "folder_name": "class_duoi-mong_7abdcd85",
+    "label_key": "vn/spa/duoi-mong"
+  },
+  "60": {
+    "slug": "son-mong",
+    "label_original": "sơn móng",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 60,
+    "class_uid": "52c72061-f7f3-45b9-b30f-0a4dc4d7b88a",
+    "folder_name": "class_son-mong_52c72061",
+    "label_key": "vn/spa/son-mong"
+  },
+  "61": {
+    "slug": "ho-gel",
+    "label_original": "hơ gel",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 61,
+    "class_uid": "4b3946a9-243d-44f5-b4d4-b95280e6ecb0",
+    "folder_name": "class_ho-gel_4b3946a9",
+    "label_key": "vn/spa/ho-gel"
+  },
+  "62": {
+    "slug": "tay-mong",
+    "label_original": "tẩy móng",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 62,
+    "class_uid": "c699332e-b644-442a-81fb-451757519c37",
+    "folder_name": "class_tay-mong_c699332e",
+    "label_key": "vn/spa/tay-mong"
+  },
+  "63": {
+    "slug": "dap-bot",
+    "label_original": "đắp bột",
+    "language": "vn",
+    "dialect": "spa",
+    "class_idx": 63,
+    "class_uid": "1db59b4c-a443-4ee8-bd0d-41d043c09dce",
+    "folder_name": "class_dap-bot_1db59b4c",
+    "label_key": "vn/spa/dap-bot"
   }
 }

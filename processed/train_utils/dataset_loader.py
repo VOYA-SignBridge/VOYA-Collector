@@ -1,6 +1,7 @@
 from __future__ import annotations
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -46,6 +47,14 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         augment_fn: Optional[Any] = None,
     ) -> None:
         self.csv_path = Path(csv_path)
+        # Whether the caller NAMED a features root, as opposed to us guessing one.
+        # An explicit root has to outrank the `file_path` column (see
+        # _resolve_feature_path): a split CSV carries the path the features had
+        # when the split was made, so any experiment that swaps the feature tree
+        # — a preprocessing ablation, a rebuilt corpus, a restored backup — was
+        # silently reading the ORIGINAL tree while believing otherwise, and both
+        # arms came out identical for the most convincing possible reason.
+        self.root_is_explicit = bool(root)
         if root:
             self.root = Path(root)
         else:
@@ -59,6 +68,35 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         self.to_tensor = bool(to_tensor and TORCH_AVAILABLE)
         self.dtype = dtype
         self.augment_fn = augment_fn
+
+        # Mỗi epoch đọc lại toàn bộ .npz từ đĩa (giải nén zip cho từng mẫu) —
+        # với num_workers=0 chi phí này nằm thẳng trên luồng chính và lấn át cả
+        # thời gian tính của model. Giữ mảng đã giải nén trong RAM: augmentation
+        # vẫn chạy lại mỗi epoch trên bản copy nên kết quả huấn luyện không đổi.
+        # TRAIN_FEATURE_CACHE_MB=0 để tắt.
+        try:
+            budget_mb = float(os.environ.get('TRAIN_FEATURE_CACHE_MB', '512'))
+        except ValueError:
+            budget_mb = 512.0
+        self._cache_budget_bytes = int(max(budget_mb, 0.0) * 1024 * 1024)
+        self._feature_cache: Dict[str, Any] = {}
+        self._cache_bytes = 0
+        self._cache_full_logged = False
+
+        # _resolve_feature_path phải stat() 1-2 lần cho mỗi mẫu để dò đúng vị trí
+        # file. Trên bind mount Windows/WSL2 một stat tốn ~1 ms, nhân với số mẫu
+        # × số epoch thì đây là phần đắt nhất của cả vòng huấn luyện. Layout thư
+        # mục không đổi trong một lần chạy nên nhớ luôn kết quả theo chỉ số dòng.
+        self._path_cache: Dict[int, Path] = {}
+
+        self._legacy_signer_map: Dict[str, str] = {}
+        try:
+            mapping_path = Path(__file__).resolve().parents[2] / 'config' / 'legacy_signer_mapping.json'
+            raw_map = json.loads(mapping_path.read_text(encoding='utf-8'))
+            self._legacy_signer_map = dict(raw_map.get('legacy_name_to_signer_id') or {})
+        except Exception:
+            # Không có bảng gộp thì giữ nguyên tên thô — hành vi như trước.
+            self._legacy_signer_map = {}
         self.feature_key_priority = feature_key_priority or [
             'sequence',
             'features', 'x', 'data', 'arr_0'
@@ -227,7 +265,30 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             return (parts[0], '')
         return (default_language, '')
 
+    def _root_relative_candidate(self, row: Dict[str, str]) -> Optional[Path]:
+        """Where this row's file would live under an explicitly named root."""
+        folder_name = (row.get('folder_name') or '').strip()
+        file_name = (row.get('file') or '').strip()
+        if not folder_name or not file_name:
+            return None
+        language = (row.get('language') or 'vn').strip() or 'vn'
+        dialect = (row.get('dialect') or '').strip()
+        if not dialect:
+            lk = (row.get('label_key') or '').strip()
+            _, inferred = self._infer_language_dialect_from_label_key(lk, default_language=language)
+            dialect = (inferred or '').strip()
+        return self.root / language / (dialect or 'common') / folder_name / file_name
+
     def _resolve_feature_path(self, row: Dict[str, str]) -> Path:
+        # An explicitly requested root wins over the CSV's remembered path.
+        # Without this, `--features_root` is accepted, reported in the run
+        # config, and then ignored for every row whose `file_path` still
+        # resolves — which is every row of a freshly built split.
+        if getattr(self, 'root_is_explicit', False):
+            cand = self._root_relative_candidate(row)
+            if cand is not None and cand.exists():
+                return cand
+
         file_path = (row.get('file_path') or '').strip()
         if file_path:
             candidate = Path(file_path)
@@ -284,9 +345,57 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
                 continue
         raise KeyError('No array found in npz archive')
 
+    def _canonical_signer(self, row: Dict[str, str]) -> str:
+        """Danh tính NGƯỜI KÝ, chuẩn hoá các biến thể viết hoa/thường.
+
+        Ưu tiên `user_id` chứ không phải `signer_id`, ngược với trực giác. Lý do:
+        `signer_id` được suy ra từ TÀI KHOẢN thu thập, nên khi nhiều người cùng
+        ký dưới một tài khoản thì họ bị gộp thành một. Dữ liệu hoa-de có đúng
+        trường hợp đó: S010 (tài khoản "tran") chứa cả Nhung lẫn Khoa. Dùng
+        signer_id ở đây sẽ khiến split "tách người" âm thầm để hai người khác
+        nhau nằm cả ở train lẫn test — đúng thứ rò rỉ mà split này muốn chặn.
+        `user_id` ghi tên người ký thật, còn biến thể chính tả thì đã có bảng gộp
+        được chủ dữ liệu xác nhận (xem scripts/apply_signer_merges.py).
+        """
+        raw = (row.get('user_id') or '').strip()
+        if raw:
+            return self._legacy_signer_map.get(raw, raw)
+        return (row.get('signer_id') or '').strip()
+
+    def _feature_path_for(self, idx: int, row: Dict[str, str]) -> Path:
+        """_resolve_feature_path có nhớ kết quả — tránh stat() lại mỗi epoch."""
+        cached = self._path_cache.get(idx)
+        if cached is not None:
+            return cached
+        resolved = self._resolve_feature_path(row)
+        self._path_cache[idx] = resolved
+        return resolved
+
+    def _cache_put(self, key: str, x: "np.ndarray") -> None:
+        if self._cache_budget_bytes <= 0:
+            return
+        nbytes = int(x.nbytes)
+        if self._cache_bytes + nbytes > self._cache_budget_bytes:
+            if not self._cache_full_logged:
+                print(
+                    f"[DATASET] feature cache đầy ở {self._cache_bytes / 1048576:.0f} MB "
+                    f"({len(self._feature_cache)} mẫu); phần còn lại đọc thẳng từ đĩa. "
+                    "Tăng TRAIN_FEATURE_CACHE_MB nếu còn RAM."
+                )
+                self._cache_full_logged = True
+            return
+        self._feature_cache[key] = x
+        self._cache_bytes += nbytes
+
     def __getitem__(self, idx: int):
         r = self.rows[idx]
-        path = self._resolve_feature_path(r)
+        path = self._feature_path_for(idx, r)
+
+        cached = self._feature_cache.get(str(path))
+        if cached is not None:
+            # Bản copy: augment_fn được phép sửa tại chỗ.
+            return self._finalize(r, path, cached.copy())
+
         try:
             with np.load(path, allow_pickle=False) as data:  # type: ignore[attr-defined]
                 arr = self._choose_array_from_npz(data)
@@ -297,9 +406,10 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             n = len(self.rows)
             print(f"[DATASET] Skipping corrupt feature {path} ({e}); using neighbour.")
             for step in range(1, n):
-                alt = self.rows[(idx + step) % n]
+                alt_idx = (idx + step) % n
+                alt = self.rows[alt_idx]
                 try:
-                    alt_path = self._resolve_feature_path(alt)
+                    alt_path = self._feature_path_for(alt_idx, alt)
                     with np.load(alt_path, allow_pickle=False) as data:  # type: ignore[attr-defined]
                         arr = self._choose_array_from_npz(data)
                     r, path = alt, alt_path
@@ -316,6 +426,13 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             raise ValueError(
                 f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {_EXPECTED_FEATURE_DIM})."
             )
+
+        # Cache mảng thô đã qua kiểm tra shape; augmentation/kiểm tra hữu hạn vẫn
+        # chạy lại mỗi lần lấy mẫu trong _finalize.
+        self._cache_put(str(path), x)
+        return self._finalize(r, path, x.copy() if self.augment_fn is not None else x)
+
+    def _finalize(self, r: Dict[str, Any], path: Any, x: "np.ndarray"):
         if self.augment_fn is not None:
             x = self.augment_fn(x)
 
@@ -339,15 +456,18 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
     
         y = self._resolve_target(r)
 
+        # All-string meta: torch default_collate rejects None values, and
+        # manifest-era CSVs carry signer_id (normalized) instead of the legacy
+        # free-text user_id — prefer it, fall back for old split CSVs.
         meta = {
-            'sample_id': r.get('sample_id'),
-            'label_slug': r.get('label_slug'),
-            'label_original': r.get('label_original'),
+            'sample_id': r.get('sample_id') or '',
+            'label_slug': r.get('label_slug') or '',
+            'label_original': r.get('label_original') or '',
             'file_path': str(path),
-            'class_uid': r.get('class_uid'),
-            'signer_id': r.get('user_id'),
-            'language': r.get('language'),
-            'dialect': r.get('dialect'),
+            'class_uid': r.get('class_uid') or '',
+            'signer_id': self._canonical_signer(r),
+            'language': r.get('language') or '',
+            'dialect': r.get('dialect') or '',
         }
 
         if self.to_tensor and TORCH_AVAILABLE:

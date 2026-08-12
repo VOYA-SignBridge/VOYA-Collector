@@ -7,6 +7,8 @@
     "dev": "vite",
     "dev:win": "powershell -ExecutionPolicy Bypass -File ./dev.ps1 dev",
     "build": "tsc -b && vite build",
+    "//typecheck": "Dùng lệnh NÀY, đừng gõ `npx tsc --noEmit`. Không có -b thì tsc đọc tsconfig.json gốc, mà tệp đó là `files: []` + hai project reference — nên nó kiểm ĐÚNG KHÔNG TỆP NÀO, thoát 0, và trông y hệt một lượt kiểm sạch. Đó là lý do `npm run build` từng đỏ trong khi `tsc --noEmit` xanh.",
+    "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest"

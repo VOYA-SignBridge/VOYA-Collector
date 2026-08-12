@@ -110,12 +110,26 @@ def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.nd
         out[t] = alpha * out[t] + (1.0 - alpha) * out[t - 1]
     return out
 
-def normalize_single_hand(hand: np.ndarray) -> np.ndarray:
+# Hand normalization. KEEP BYTE-IDENTICAL WITH processed/shared/normalization.py
+# — the realtime service loads that file by path and must not import the
+# backend, so the logic lives twice on purpose. See that module's docstring for
+# what v1 and v2 mean, and backend/tests/test_normalization_parity.py, which
+# fails if the two copies drift.
+NORMALIZATION_V1 = "hands126_v1"
+NORMALIZATION_V2 = "hands126_v2"
+NORMALIZATION_VERSIONS = (NORMALIZATION_V1, NORMALIZATION_V2)
+DEFAULT_NORMALIZATION_VERSION = NORMALIZATION_V1
+
+
+def normalize_single_hand(hand: np.ndarray,
+                          version: str = DEFAULT_NORMALIZATION_VERSION) -> np.ndarray:
     """
     Normalize ONE hand independently.
 
     hand shape: (21,3)
     """
+    if version not in NORMALIZATION_VERSIONS:
+        raise ValueError(f"unknown normalization version: {version!r}")
 
     h = hand.astype(np.float32).copy()
 
@@ -124,12 +138,19 @@ def normalize_single_hand(hand: np.ndarray) -> np.ndarray:
         return h
 
     # wrist landmark
-    wrist = h[0, :2].copy()
+    ndim = 3 if version == NORMALIZATION_V2 else 2
+    wrist = h[0, :ndim].copy()
 
     # translate
-    h[:, :2] = h[:, :2] - wrist
+    h[:, :ndim] = h[:, :ndim] - wrist
 
     # compute scale
+    #
+    # The span is measured on x/y only in BOTH versions. z is the axis whose
+    # magnitude MediaPipe does not promise — it is regressed depth, not a
+    # measurement — so letting it widen the span would make the scale of a hand
+    # depend on the least trustworthy number in the frame. v2 divides z by the
+    # x/y scale; it does not let z decide that scale.
     valid = np.linalg.norm(h[:, :2], axis=1) > 1e-6
 
     if valid.any():
@@ -142,12 +163,13 @@ def normalize_single_hand(hand: np.ndarray) -> np.ndarray:
         scale = max(span_x, span_y)
 
         if scale > 1e-6:
-            h[:, :2] = h[:, :2] / scale
+            h[:, :ndim] = h[:, :ndim] / scale
 
     return h
 
 
-def normalize_hands_vector_126(vec: np.ndarray) -> np.ndarray:
+def normalize_hands_vector_126(vec: np.ndarray,
+                               version: str = DEFAULT_NORMALIZATION_VERSION) -> np.ndarray:
 
     if vec is None:
         return vec
@@ -167,8 +189,8 @@ def normalize_hands_vector_126(vec: np.ndarray) -> np.ndarray:
     right = arr[1]
 
     # normalize independently
-    left = normalize_single_hand(left)
-    right = normalize_single_hand(right)
+    left = normalize_single_hand(left, version)
+    right = normalize_single_hand(right, version)
 
     out = np.concatenate([
         left.reshape(-1),

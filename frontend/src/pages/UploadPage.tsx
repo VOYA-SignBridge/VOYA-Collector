@@ -7,6 +7,8 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import LoadingScreen from "../components/LoadingScreen";
 import { useAuth } from "../hooks/useAuth";
+import { LightbulbIcon, TagIcon } from "../components/ui/Icons";
+import { useI18n } from "../i18n";
 const CaptureCamera = lazy(() => import("../components/CaptureCamera"));
 
 type Feedback = {
@@ -15,24 +17,19 @@ type Feedback = {
 };
 
 export default function UploadPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { loading: authLoading, isAuthenticated } = useAuth();
-  const [tab, setTab] = useState<"video" | "camera">("camera"); // Start with camera for faster data collection
+  const [tab, setTab] = useState<"video" | "camera">("camera");
+  // Start with camera for faster data collection
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [todayStats, setTodayStats] = useState({ samples: 0, sessions: 0 });
   const [quickLabels] = useState([
     "walking", "running", "sitting", "standing", 
     "jumping", "waving", "pointing", "clapping"
   ]);
   // Feature flag to hide quick label suggestions temporarily
   const SHOW_QUICK_LABELS = false;
-
-  useEffect(() => {
-    // Load today's stats from localStorage or API
-    const stats = JSON.parse(localStorage.getItem('todayStats') || '{"samples": 0, "sessions": 0}');
-    setTodayStats(stats);
-  }, []);
 
   useEffect(() => {
     if (!feedback) return;
@@ -49,18 +46,8 @@ export default function UploadPage() {
   return (
     <div className="space-y-6">
       <PageHeader 
-        title="Trung tâm Thu thập Dữ liệu" 
-        subtitle="Quy trình gọn nhẹ để tạo bộ dữ liệu hiệu quả"
-        actions={
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="info">
-              📊 Hôm nay: {todayStats.samples} mẫu
-            </Badge>
-            <Badge variant="success">
-              🎯 {todayStats.sessions} phiên
-            </Badge>
-          </div>
-        }
+        title={t("Trung tâm Thu thập Dữ liệu")}
+        subtitle={t("Quy trình gọn nhẹ để tạo bộ dữ liệu hiệu quả")}
       />
 
       {error && (
@@ -100,12 +87,8 @@ export default function UploadPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Ghi hình trực tiếp</h3>
-                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Thu thập nhanh theo lô với phản hồi tức thì</p>
-                <div className="flex flex-wrap items-center mt-2 gap-2">
-                  <Badge variant="success" size="sm">⚡ Nhanh nhất</Badge>
-                  <Badge variant="info" size="sm">🎯 Chế độ lô</Badge>
-                </div>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">{t("Ghi hình trực tiếp")}</h3>
+                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">{t("Thu thập nhanh theo lô với phản hồi tức thì")}</p>
               </div>
             </div>
             {tab === "camera" && (
@@ -134,12 +117,8 @@ export default function UploadPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Tải video lên</h3>
-                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Xử lý các tệp video có sẵn</p>
-                <div className="flex flex-wrap items-center mt-2 gap-2">
-                  <Badge variant="warning" size="sm">📁 Dựa trên tệp</Badge>
-                  <Badge variant="info" size="sm">🔄 Xử lý hàng loạt</Badge>
-                </div>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">{t("Tải video lên")}</h3>
+                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">{t("Xử lý các tệp video có sẵn")}</p>
               </div>
             </div>
             {tab === "video" && (
@@ -157,11 +136,14 @@ export default function UploadPage() {
       {SHOW_QUICK_LABELS && tab === "camera" && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-700">🏷️ Gợi ý nhãn nhanh</h3>
+            <h3 className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                <TagIcon className="h-4 w-4"  aria-hidden="true" />
+                {t("Gợi ý nhãn nhanh")}
+              </h3>
             <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span>Được dùng nhiều hôm nay:</span>
-              <Badge variant="info" size="sm">walking (12)</Badge>
-              <Badge variant="success" size="sm">sitting (8)</Badge>
+              <span>{t("Được dùng nhiều hôm nay:")}</span>
+              <Badge variant="info" size="sm">{t("xin chào (12)")}</Badge>
+              <Badge variant="success" size="sm">{t("cảm ơn (8)")}</Badge>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -183,7 +165,8 @@ export default function UploadPage() {
             ))}
           </div>
           <div className="mt-2 text-xs text-gray-500">
-            💡 Nhấp để tự động điền nhãn giúp thu dữ liệu nhanh hơn
+            <LightbulbIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" />
+            {t("Nhấp để tự động điền nhãn giúp thu dữ liệu nhanh hơn")}
           </div>
         </div>
       )}
@@ -191,15 +174,15 @@ export default function UploadPage() {
       {/* Content Area */}
       {!isAuthenticated && (
         <div className="card p-6 text-center">
-          <h2 className="text-xl font-semibold mb-4">Cần đăng nhập để tải lên</h2>
+          <h2 className="text-xl font-semibold mb-4">{t("Cần đăng nhập để tải lên")}</h2>
           <p className="text-gray-600 mb-6">
-            Vui lòng đăng nhập bằng tài khoản của bạn để bắt đầu gửi dữ liệu ký hiệu tay.
+            {t("Vui lòng đăng nhập bằng tài khoản của bạn để bắt đầu gửi dữ liệu ký hiệu tay.")}
           </p>
           <Button
             variant="primary"
             onClick={() => navigate('/login')}
           >
-            Đăng nhập
+            {t("Đăng nhập")}
           </Button>
         </div>
       )}
@@ -212,7 +195,7 @@ export default function UploadPage() {
               <div className="card">
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="ml-3 text-gray-600">Đang tải giao diện camera...</span>
+                  <span className="ml-3 text-gray-600">{t("Đang tải giao diện camera...")}</span>
                 </div>
               </div>
             }>

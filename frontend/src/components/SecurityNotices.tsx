@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { BellIcon, HandsPrayIcon, MailIcon, MoonIcon } from "./ui/Icons";
+import { useI18n } from "../i18n";
 
 interface BlockedInfo {
   reason?: string;
@@ -30,6 +32,7 @@ function goToAppHome() {
 }
 
 export default function SecurityNotices() {
+  const { t } = useI18n();
   const [blocked, setBlocked] = useState<BlockedInfo | null>(null);
   const [logout, setLogout] = useState<string | null>(null);
   const [idle, setIdle] = useState(false);
@@ -37,7 +40,7 @@ export default function SecurityNotices() {
   useEffect(() => {
     const onBlocked = (e: Event) => setBlocked((e as CustomEvent).detail || {});
     const onLogout = (e: Event) =>
-      setLogout((e as CustomEvent).detail?.message || "Phiên đã bị đăng xuất bởi quản trị viên");
+      setLogout((e as CustomEvent).detail?.message || t("Phiên đã bị đăng xuất bởi quản trị viên"));
     const onIdle = () => setIdle(true);
     window.addEventListener("voya:blocked", onBlocked as EventListener);
     window.addEventListener("voya:forcelogout", onLogout as EventListener);
@@ -54,35 +57,39 @@ export default function SecurityNotices() {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 text-center">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center text-3xl">🙏</div>
-          <h2 className="text-xl font-bold text-slate-900 mb-2">Truy cập tạm thời bị hạn chế</h2>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+            <HandsPrayIcon className="h-8 w-8"  aria-hidden="true" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">{t("Truy cập tạm thời bị hạn chế")}</h2>
           <p className="text-slate-600 mb-4">
-            Rất tiếc, kết nối của bạn hiện đang bị tạm ngưng bởi quản trị viên. Chúng tôi mong bạn thông cảm.
+            {t("Rất tiếc, kết nối của bạn hiện đang bị tạm ngưng bởi quản trị viên. Chúng tôi mong bạn thông cảm.")}
           </p>
           <div className="rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-sm px-4 py-3 mb-4 text-left">
-            <div><span className="font-semibold">Lý do:</span> {blocked.reason || "Không rõ"}</div>
+            <div><span className="font-semibold">{t("Lý do:")}</span> {blocked.reason || t("Không rõ")}</div>
             <div className="mt-1">
-              <span className="font-semibold">Thời hạn:</span>{" "}
-              {until ? `đến ${until.toLocaleString("vi-VN")}` : "cho đến khi được gỡ"}
+              <span className="font-semibold">{t("Thời hạn:")}</span>{" "}
+              {until
+                ? t("đến {khi}", { khi: until.toLocaleString("vi-VN") })
+                : t("cho đến khi được gỡ")}
             </div>
           </div>
-          <p className="text-sm text-slate-500 mb-2">Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ để được hỗ trợ:</p>
+          <p className="text-sm text-slate-500 mb-2">{t("Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ để được hỗ trợ:")}</p>
           {blocked.contact ? (
             <a
-              href={`mailto:${blocked.contact}?subject=${encodeURIComponent("Khiếu nại hạn chế truy cập")}&body=${encodeURIComponent("Xin chào, truy cập của tôi bị hạn chế với lý do: " + (blocked.reason || "") + ". Tôi mong được xem xét lại. Cảm ơn.")}`}
+              href={`mailto:${blocked.contact}?subject=${encodeURIComponent(t("Khiếu nại hạn chế truy cập"))}&body=${encodeURIComponent(t("Xin chào, truy cập của tôi bị hạn chế với lý do: {ly_do}. Tôi mong được xem xét lại. Cảm ơn.", { ly_do: blocked.reason || "" }))}`}
               className="inline-flex items-center gap-1.5 mb-5 text-ctu-blue font-medium hover:underline"
             >
-              ✉️ {blocked.contact}
+              <MailIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" /> {blocked.contact}
             </a>
           ) : (
-            <p className="text-sm text-slate-400 mb-5">quản trị viên hệ thống</p>
+            <p className="text-sm text-slate-400 mb-5">{t("quản trị viên hệ thống")}</p>
           )}
           <div>
             <button
               onClick={() => window.location.reload()}
               className="px-5 py-2.5 rounded-lg bg-slate-100 text-slate-700 font-medium hover:bg-slate-200 transition-colors"
             >
-              Thử lại
+              {t("Thử lại")}
             </button>
           </div>
         </div>
@@ -94,14 +101,16 @@ export default function SecurityNotices() {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 text-center">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center text-3xl">🔔</div>
-          <h2 className="text-xl font-bold text-slate-900 mb-2">Phiên đã kết thúc</h2>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+            <BellIcon className="h-8 w-8"  aria-hidden="true" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">{t("Phiên đã kết thúc")}</h2>
           <p className="text-slate-600 mb-6">{logout}</p>
           <button
             onClick={goToAppHome}
             className="px-5 py-2.5 rounded-lg bg-ctu-blue text-white font-medium hover:bg-ctu-navy transition-colors"
           >
-            Đăng nhập lại
+            {t("Đăng nhập lại")}
           </button>
         </div>
       </div>
@@ -112,19 +121,21 @@ export default function SecurityNotices() {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 text-center">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center text-3xl">😴</div>
-          <h2 className="text-xl font-bold text-slate-900 mb-2">Phiên đăng nhập đã tạm nghỉ</h2>
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+            <MoonIcon className="h-8 w-8"  aria-hidden="true" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">{t("Phiên đăng nhập đã tạm nghỉ")}</h2>
           <p className="text-slate-600 mb-2">
-            Bạn đã không hoạt động trong một khoảng thời gian, nên chúng tôi tự động đăng xuất để bảo vệ tài khoản của bạn.
+            {t("Bạn đã không hoạt động trong một khoảng thời gian, nên chúng tôi tự động đăng xuất để bảo vệ tài khoản của bạn.")}
           </p>
           <p className="text-sm text-slate-500 mb-6">
-            Đây là thao tác bảo mật thông thường — dữ liệu của bạn vẫn an toàn. Vui lòng đăng nhập lại để tiếp tục.
+            {t("Đây là thao tác bảo mật thông thường — dữ liệu của bạn vẫn an toàn. Vui lòng đăng nhập lại để tiếp tục.")}
           </p>
           <button
             onClick={goToAppHome}
             className="px-5 py-2.5 rounded-lg bg-ctu-blue text-white font-medium hover:bg-ctu-navy transition-colors"
           >
-            Đăng nhập lại
+            {t("Đăng nhập lại")}
           </button>
         </div>
       </div>

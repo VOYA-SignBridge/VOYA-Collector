@@ -59,10 +59,25 @@
     #4fa8db 100%
   );
 
-  --success: #059669;
-  --warning: #d97706;
-  --danger: #dc2626;
-  --info: #0284c7;
+  /* Bốn sắc thái trạng thái. Ba trong bốn lấy thẳng từ con dấu CTU
+     (public/logo.png), nên bảng màu trạng thái và bảng màu thương hiệu là MỘT.
+
+     `--success` là XANH DƯƠNG, không phải xanh lá — quyết định của chủ dự án,
+     và nó cũng là quyết định đúng về mặt thương hiệu: xanh lá là màu duy nhất
+     trong giao diện không có mặt trong con dấu. Hệ quả cần biết: "thành công"
+     và "thông tin" cùng họ màu, nên phải phân biệt bằng ĐỘ ĐẬM chứ không bằng
+     sắc — xem `theme/status.ts`.
+
+     Sắc dùng cho CHỮ đậm hơn sắc dùng cho nền/viền. #0e7bc2 trên nền trắng chỉ
+     đạt 4.53:1, vừa đủ AA cho chữ thường và TRƯỢT cho chữ nhỏ; #0a5c8f đạt
+     6.6:1 nên chữ 12px vẫn đọc được. Đây là lý do có hai biến chứ không một. */
+  --success: #0e7bc2;          /* CTU blue — nền, viền, thanh tiến trình */
+  --success-strong: #0a5c8f;   /* chữ trên nền sáng */
+  --warning: #d97706;          /* chữ; sắc vàng con dấu #fbd91a chỉ đạt 1.6:1 */
+  --warning-accent: #fbd91a;   /* CTU yellow — chỉ dùng làm mảng màu/gạch nhấn */
+  --danger: #ea3137;           /* CTU red */
+  --danger-strong: #b91c1c;    /* chữ trên nền sáng */
+  --info: #475569;             /* slate — trung tính, để không tranh với success */
 
   --border-primary: #e2e8f0;
   --border-secondary: #f1f5f9;
@@ -287,4 +302,167 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 1rem;
+}
+
+/* ===========================================================================
+   Văn bản pháp lý — `.prose-legal`
+   ---------------------------------------------------------------------------
+   Lớp này ĐÃ ĐƯỢC GỌI từ `LegalDocumentPage.tsx` từ lâu và chưa từng được định
+   nghĩa ở đâu. Hệ quả là thân điều khoản dựng ra hoàn toàn không có nhịp: mọi
+   tiêu đề, đoạn và danh sách chỉ mang khoảng cách mặc định của `Markdown.tsx`,
+   dài hết chiều ngang khung, và không có ranh giới nào giữa các mục. Đó là lý
+   do văn bản pháp lý "hỗn độn, khó nhìn" — không phải vì viết dở.
+
+   Bốn quyết định, mỗi cái giải một vấn đề đo được:
+
+   1. `max-width: 68ch` — dòng dài quá 75 ký tự làm mắt mất hàng khi xuống dòng.
+      Với một văn bản người ta đọc MỘT lần và phải hiểu đúng, đó không phải
+      chuyện thoải mái mà là chuyện đọc sót.
+   2. `color: #0f172a` trên nền trắng cho tỉ lệ tương phản 16:1 — vượt xa mức
+      4.5:1 của WCAG AA. Điều khoản là thứ ràng buộc pháp lý; chữ mờ ở đây là
+      một vấn đề về hiệu lực, không phải về thẩm mỹ.
+   3. Tiêu đề mục có đường kẻ phía trên. Văn bản pháp lý được ĐIỀU HƯỚNG chứ
+      không đọc tuần tự — người ta nhảy tới "mục 5". Đường kẻ là thứ giúp mắt
+      dừng đúng chỗ khi cuộn nhanh.
+   4. KHÔNG đánh số tự động. Bản văn thật đã mang số trong chữ ("1. Các bên"),
+      nên một bộ đếm CSS sẽ dựng ra "1. 1. Các bên". Số thuộc về nội dung ở đây,
+      không thuộc về lớp trình bày.
+   =========================================================================== */
+.prose-legal {
+  max-width: 68ch;
+  color: #0f172a;
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+.prose-legal > div > p {
+  margin: 0 0 1.15em;
+}
+
+.prose-legal h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 0 0 1.25rem;
+  color: #0f172a;
+}
+
+.prose-legal h2 {
+  font-size: 1.2rem;
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 2.5rem 0 0.85rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e2e8f0;
+  color: #0f172a;
+}
+
+/* Tiêu đề mục đầu tiên không cần đường kẻ — phía trên nó đã là dải siêu dữ
+   liệu, và hai đường kẻ liền nhau đọc như một lỗi dựng trang. */
+.prose-legal h2:first-of-type {
+  margin-top: 1.75rem;
+}
+
+.prose-legal h3 {
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 1.75rem 0 0.5rem;
+  color: #1e293b;
+}
+
+.prose-legal strong {
+  font-weight: 650;
+  color: #0f172a;
+}
+
+.prose-legal ul,
+.prose-legal ol {
+  margin: 0 0 1.15em;
+  padding-left: 1.5rem;
+}
+
+.prose-legal li {
+  margin-bottom: 0.4em;
+  padding-left: 0.2rem;
+}
+
+.prose-legal li::marker {
+  color: #64748b;
+}
+
+/* Khối trích dẫn mang cảnh báo ("Bản thảo kỹ thuật…"). Viền dày bên trái +
+   nền hổ phách để nó KHÔNG đọc như một đoạn văn bình thường — nội dung của nó
+   là điều kiện áp dụng, không phải nội dung điều khoản. */
+.prose-legal blockquote {
+  margin: 1.5rem 0;
+  border-left: 4px solid #f59e0b;
+  background: #fffbeb;
+  padding: 0.85rem 1.15rem;
+  color: #78350f;
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.prose-legal blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-legal hr {
+  margin: 2.5rem 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+.prose-legal a {
+  color: #0369a1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose-legal a:hover {
+  color: #075985;
+}
+
+.prose-legal table {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.prose-legal th,
+.prose-legal td {
+  border: 1px solid #e2e8f0;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose-legal th {
+  background: #f8fafc;
+  font-weight: 650;
+}
+
+.prose-legal code {
+  background: #f1f5f9;
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  font-size: 0.9em;
+}
+
+@media print {
+  /* In ra để ký hoặc lưu hồ sơ là việc có thật với loại văn bản này. */
+  .prose-legal {
+    max-width: none;
+    color: #000;
+    font-size: 11pt;
+  }
+  .prose-legal h2 {
+    break-after: avoid;
+  }
+  .prose-legal blockquote,
+  .prose-legal table {
+    break-inside: avoid;
+  }
 }

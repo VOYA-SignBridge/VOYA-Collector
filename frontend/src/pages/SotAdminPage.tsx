@@ -14,6 +14,8 @@ import {
   type SotRemote,
   type SotVerifyResult,
 } from "../api/sot";
+import { friendlyError } from "../lib/errors";
+import { useI18n } from "../i18n";
 
 function fmtDate(v?: string | null): string {
   if (!v) return "—";
@@ -32,7 +34,7 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 
 function Badge({ tone, children }: { tone: "green" | "gray" | "red" | "blue"; children: ReactNode }) {
   const tones: Record<string, string> = {
-    green: "bg-green-100 text-green-800 border-green-200",
+    green: "bg-sky-100 text-sky-800 border-sky-200",
     gray: "bg-slate-100 text-slate-700 border-slate-200",
     red: "bg-red-100 text-red-800 border-red-200",
     blue: "bg-ctu-blue/10 text-ctu-blue border-ctu-blue/30",
@@ -45,6 +47,7 @@ function Badge({ tone, children }: { tone: "green" | "gray" | "red" | "blue"; ch
 }
 
 export default function SotAdminPage() {
+  const { t } = useI18n();
   const { toast } = useToast();
   const [overview, setOverview] = useState<SotOverview | null>(null);
   const [remote, setRemote] = useState<SotRemote | null>(null);
@@ -68,7 +71,7 @@ export default function SotAdminPage() {
       setLoading(true);
       setOverview(await getSotOverview());
     } catch (e: any) {
-      toast.error(e.response?.data?.detail || "Không tải được thông tin SOT");
+      toast.error(friendlyError(e, "Không tải được thông tin SOT"));
     } finally {
       setLoading(false);
     }
@@ -79,7 +82,7 @@ export default function SotAdminPage() {
       setRemoteLoading(true);
       setRemote(await getSotRemote());
     } catch (e: any) {
-      setRemote({ available: false, error: e.response?.data?.detail || "Lỗi đọc Drive" });
+      setRemote({ available: false, error: friendlyError(e, "Lỗi đọc Drive") });
     } finally {
       setRemoteLoading(false);
     }
@@ -99,7 +102,7 @@ export default function SotAdminPage() {
       if (res.ok) toast.success(`Verify OK — ${res.version ?? res.status}`);
       else toast.error("Verify thất bại");
     } catch (e: any) {
-      toast.error(e.response?.data?.detail || "Verify lỗi");
+      toast.error(friendlyError(e, "Verify lỗi"));
     } finally {
       setVerifying(false);
     }
@@ -122,7 +125,7 @@ export default function SotAdminPage() {
         mode,
         public_key: mode === "public_key" ? publicKey.trim() : undefined,
       });
-      toast.success(`Đã đăng ký máy "${res.machine.name}"`);
+      toast.success(t("Đã đăng ký máy \"{name}\"", { name: res.machine.name }));
       if (res.private_key) {
         setGeneratedKey({ name: res.machine.name ?? name, private_key: res.private_key, hint: res.private_key_hint });
       }
@@ -131,7 +134,7 @@ export default function SotAdminPage() {
       setPublicKey("");
       loadOverview();
     } catch (e: any) {
-      toast.error(e.response?.data?.detail || "Đăng ký thất bại");
+      toast.error(friendlyError(e, "Đăng ký thất bại"));
     } finally {
       setSubmitting(false);
     }
@@ -139,13 +142,13 @@ export default function SotAdminPage() {
 
   const doRevoke = async (m: SotMachine) => {
     if (!m.fingerprint) return;
-    if (!window.confirm(`Thu hồi quyền SOT của máy "${m.name}"?`)) return;
+    if (!window.confirm(t("Thu hồi quyền SOT của máy \"{name}\"?", { name: m.name }))) return;
     try {
       await revokeSotMachine(m.fingerprint);
-      toast.success(`Đã thu hồi "${m.name}"`);
+      toast.success(t("Đã thu hồi \"{name}\"", { name: m.name }));
       loadOverview();
     } catch (e: any) {
-      toast.error(e.response?.data?.detail || "Thu hồi thất bại");
+      toast.error(friendlyError(e, "Thu hồi thất bại"));
     }
   };
 
@@ -162,78 +165,80 @@ export default function SotAdminPage() {
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6 animate-fade-in">
       <PageHeader
-        title="Quản lý SOT & thiết bị"
-        subtitle="Source of Truth: máy được cấp quyền, dữ liệu đã publish, schema."
+        title={t("Quản lý SOT & thiết bị")}
+        subtitle={t("Source of Truth: máy được cấp quyền, dữ liệu đã publish, schema.")}
         actions={
           <>
             <button
               onClick={() => { loadOverview(); loadRemote(); }}
               className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-700 font-medium hover:bg-slate-50 transition-colors"
             >
-              Làm mới
+              {t("Làm mới")}
             </button>
             <button
               onClick={doVerify}
               disabled={verifying}
               className="px-3 py-2 rounded-lg bg-ctu-blue text-white text-sm font-medium hover:bg-ctu-blue/90 disabled:opacity-50 transition-colors"
             >
-              {verifying ? "Đang verify…" : "Verify SOT"}
+              {verifying ? t("Đang verify…") : "Verify SOT"}
             </button>
           </>
         }
       />
 
       {verifyResult && (
-        <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? "bg-green-50 border-green-200 text-green-800" : "bg-red-50 border-red-200 text-red-700"}`}>
+        <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? "bg-sky-50 border-sky-200 text-sky-800" : "bg-red-50 border-red-200 text-red-700"}`}>
           {verifyResult.ok
-            ? `✓ Verify OK — version=${verifyResult.version ?? verifyResult.status}, signed_by=${verifyResult.signed_by ?? "?"}`
-            : `✗ ${verifyResult.error}`}
+            ? `Verify OK — version=${verifyResult.version ?? verifyResult.status}, signed_by=${verifyResult.signed_by ?? "?"}`
+            : t("Không xác minh được: {error}", { error: verifyResult.error })}
         </div>
       )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card title="Version đã publish">
+        <Card title={t("Version đã publish")}>
           {remoteLoading ? (
             <span className="text-slate-400">…</span>
           ) : remote?.available === false ? (
-            <Badge tone="red">Drive lỗi</Badge>
+            <Badge tone="red">{t("Drive lỗi")}</Badge>
           ) : remote?.published ? (
             <div>
               <div className="text-lg font-bold text-slate-900">{remote.version}</div>
               <div className="mt-1 text-xs text-slate-500">
-                {remote.trusted ? <Badge tone="green">signed: {remote.signed_by}</Badge> : <Badge tone="red">chữ ký lạ</Badge>}
+                {remote.trusted ? <Badge tone="green">signed: {remote.signed_by}</Badge> : <Badge tone="red">{t("chữ ký lạ")}</Badge>}
               </div>
             </div>
           ) : (
-            <Badge tone="gray">Chưa publish</Badge>
+            <Badge tone="gray">{t("Chưa publish")}</Badge>
           )}
         </Card>
-        <Card title="Máy này">
+        <Card title={t("Máy này")}>
           {overview?.this_machine.is_writer ? (
             <div>
-              <Badge tone="green">Writer</Badge>
+              <Badge tone="green">{t("Máy ghi")}</Badge>
               <div className="text-xs text-slate-500 mt-1.5 font-mono break-all">{overview.this_machine.fingerprint}</div>
             </div>
           ) : (
-            <Badge tone="gray">Read-only (không có khóa)</Badge>
+            <Badge tone="gray">{t("Read-only (không có khóa)")}</Badge>
           )}
         </Card>
-        <Card title="Schema version">
+        <Card title={t("Phiên bản lược đồ")}>
           <div className="text-2xl font-bold text-slate-900 tabular-nums">{overview?.schema_version ?? "—"}</div>
         </Card>
-        <Card title="Máy được cấp quyền">
+        <Card title={t("Máy được cấp quyền")}>
           <div className="text-2xl font-bold text-slate-900 tabular-nums">{overview?.machines.length ?? 0}</div>
         </Card>
       </div>
 
       {/* DB counts */}
-      <Card title="Dữ liệu trong database (live)">
+      <Card title={t("Dữ liệu trong database (live)")}>
         <div className="grid grid-cols-3 gap-4">
-          {(["classes", "samples", "raw_uploads"] as const).map((t) => (
-            <div key={t} className="text-center">
-              <div className="text-2xl font-bold text-slate-900 tabular-nums">{dbc[t] >= 0 ? dbc[t] : "?"}</div>
-              <div className="text-xs text-slate-500 mt-0.5">{t === "classes" ? "nhãn (classes)" : t}</div>
+          {/* Tham số tên `t` sẽ CHE hàm dịch `t` của cả component — lỗi hiện ra
+              ở dòng khác chỗ gây ra nó. Đặt tên `kind`. */}
+          {(["classes", "samples", "raw_uploads"] as const).map((kind) => (
+            <div key={kind} className="text-center">
+              <div className="text-2xl font-bold text-slate-900 tabular-nums">{dbc[kind] >= 0 ? dbc[kind] : "?"}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{kind === "classes" ? t("nhãn (classes)") : kind}</div>
             </div>
           ))}
         </div>
@@ -241,13 +246,13 @@ export default function SotAdminPage() {
 
       {/* Remote CSV files */}
       {remote?.published && remote.files && (
-        <Card title={`File CSV trong ${remote.version} (từ manifest)`}>
+        <Card title={t("File CSV trong {version} (từ manifest)", { version: remote.version })}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-slate-500 border-b border-slate-200">
-                  <th className="py-2 pr-4 font-semibold">File</th>
-                  <th className="py-2 pr-4 font-semibold">Số dòng</th>
+                  <th className="py-2 pr-4 font-semibold">{t("Tệp")}</th>
+                  <th className="py-2 pr-4 font-semibold">{t("Số dòng")}</th>
                   <th className="py-2 font-semibold">sha256</th>
                 </tr>
               </thead>
@@ -266,15 +271,15 @@ export default function SotAdminPage() {
       )}
 
       {/* Machines */}
-      <Card title="Máy được cấp quyền SOT">
+      <Card title={t("Máy được cấp quyền SOT")}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-500 border-b border-slate-200">
-                <th className="py-2 pr-4 font-semibold">Tên</th>
-                <th className="py-2 pr-4 font-semibold">Fingerprint</th>
-                <th className="py-2 pr-4 font-semibold">Nguồn</th>
-                <th className="py-2 pr-4 font-semibold">Thêm bởi / lúc</th>
+                <th className="py-2 pr-4 font-semibold">{t("Tên")}</th>
+                <th className="py-2 pr-4 font-semibold">{t("Dấu vân khoá")}</th>
+                <th className="py-2 pr-4 font-semibold">{t("Nguồn")}</th>
+                <th className="py-2 pr-4 font-semibold">{t("Thêm bởi / lúc")}</th>
                 <th className="py-2"></th>
               </tr>
             </thead>
@@ -287,7 +292,7 @@ export default function SotAdminPage() {
                   </td>
                   <td className="py-2 pr-4 font-mono text-xs text-slate-600 break-all">{m.fingerprint}</td>
                   <td className="py-2 pr-4">
-                    {m.source === "committed" ? <Badge tone="blue">committed</Badge> : <Badge tone="gray">db</Badge>}
+                    {m.source === "committed" ? <Badge tone="blue">{t("đã ghi trong mã nguồn")}</Badge> : <Badge tone="gray">db</Badge>}
                   </td>
                   <td className="py-2 pr-4 text-xs text-slate-500">
                     {m.added_by ?? "—"}<br />{fmtDate(m.added_at)}
@@ -295,16 +300,16 @@ export default function SotAdminPage() {
                   <td className="py-2 text-right">
                     {m.revocable ? (
                       <button onClick={() => doRevoke(m)} className="text-red-600 hover:text-red-800 text-xs font-medium">
-                        Thu hồi
+                        {t("Thu hồi")}
                       </button>
                     ) : (
-                      <span className="text-xs text-slate-400" title="Nằm trong authorized_keys.json (git)">khóa</span>
+                      <span className="text-xs text-slate-400" title={t("Nằm trong authorized_keys.json (git)")}>{t("khóa")}</span>
                     )}
                   </td>
                 </tr>
               ))}
               {(overview?.machines ?? []).length === 0 && (
-                <tr><td colSpan={5} className="py-4 text-center text-slate-400">Chưa có máy nào</td></tr>
+                <tr><td colSpan={5} className="py-4 text-center text-slate-400">{t("Chưa có máy nào")}</td></tr>
               )}
             </tbody>
           </table>
@@ -312,32 +317,32 @@ export default function SotAdminPage() {
       </Card>
 
       {/* Register */}
-      <Card title="Đăng ký máy mới">
+      <Card title={t("Đăng ký máy mới")}>
         <div className="flex gap-2 mb-3">
           <button
             onClick={() => setMode("public_key")}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === "public_key" ? "bg-ctu-blue text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
           >
-            Dán public key
+            {t("Dán public key")}
           </button>
           <button
             onClick={() => setMode("generate")}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === "generate" ? "bg-ctu-blue text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}
           >
-            Server tạo khóa
+            {t("Server tạo khóa")}
           </button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Tên máy (vd: desktop-lab)"
+            placeholder={t("Tên máy (vd: desktop-lab)")}
             className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-ctu-blue/30 focus:border-ctu-blue"
           />
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Ghi chú (tuỳ chọn)"
+            placeholder={t("Ghi chú (tuỳ chọn)")}
             className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-ctu-blue/30 focus:border-ctu-blue"
           />
         </div>
@@ -345,31 +350,31 @@ export default function SotAdminPage() {
           <textarea
             value={publicKey}
             onChange={(e) => setPublicKey(e.target.value)}
-            placeholder="Public key base64 (máy chạy `python -m app.sot.cli keygen` để lấy)"
+            placeholder={t("Public key base64 (máy chạy `python -m app.sot.cli keygen` để lấy)")}
             rows={2}
             className="mt-3 w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm text-slate-900 font-mono placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-ctu-blue/30 focus:border-ctu-blue"
           />
         )}
         {mode === "generate" && (
           <p className="mt-3 text-xs text-amber-600">
-            Server sẽ sinh cặp khóa và hiển thị khóa riêng <b>một lần duy nhất</b> để bạn tải về máy writer.
+            {t("Server sẽ sinh cặp khóa và hiển thị khóa riêng")} <b>{t("một lần duy nhất")}</b> {t("để bạn tải về máy writer.")}
           </p>
         )}
         <button
           onClick={doRegister}
           disabled={submitting}
-          className="mt-3 px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition-colors"
+          className="mt-3 px-4 py-2 rounded-lg bg-sky-600 text-white text-sm font-medium hover:bg-sky-700 disabled:opacity-50 transition-colors"
         >
-          {submitting ? "Đang đăng ký…" : "Đăng ký"}
+          {submitting ? t("Đang đăng ký…") : t("Đăng ký")}
         </button>
       </Card>
 
       {/* Schema viewer — table/column inventory only. The raw CREATE TABLE
           listing used to be rendered here; the API no longer returns it, so the
           DDL cannot leak through a screenshot or a shared screen. */}
-      <Card title="Database schema (SOT)">
+      <Card title={t("Lược đồ cơ sở dữ liệu (SOT)")}>
         <button onClick={() => setShowSchema((s) => !s)} className="text-sm text-ctu-blue font-medium hover:underline">
-          {showSchema ? "Ẩn" : "Hiện"} danh sách bảng &amp; cột
+          {showSchema ? t("Ẩn") : t("Hiện")} danh sách bảng &amp; cột
         </button>
         {showSchema && (
           <div className="mt-3 max-h-96 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -380,7 +385,9 @@ export default function SotAdminPage() {
                 <div key={table} className="mb-3 last:mb-0">
                   <p className="text-xs font-semibold text-slate-700">
                     {table}
-                    <span className="ml-2 font-normal text-slate-400">{cols.length} cột</span>
+                    <span className="ml-2 font-normal text-slate-400">
+                      {t("{n} cột", { n: cols.length })}
+                    </span>
                   </p>
                   <p className="mt-1 break-words text-xs leading-relaxed text-slate-600">
                     {cols.join(", ")}
@@ -398,7 +405,7 @@ export default function SotAdminPage() {
           <div className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-slate-900">Khóa riêng của "{generatedKey.name}"</h3>
             <p className="text-sm text-amber-600 mt-1">
-              {generatedKey.hint || "Lưu ngay — chỉ hiển thị một lần. Server không lưu khóa riêng."}
+              {generatedKey.hint || t("Lưu ngay — chỉ hiển thị một lần. Server không lưu khóa riêng.")}
             </p>
             <textarea
               readOnly
@@ -415,7 +422,7 @@ export default function SotAdminPage() {
                 Copy
               </button>
               <button onClick={() => setGeneratedKey(null)} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 font-medium hover:bg-slate-50 transition-colors">
-                Đã lưu, đóng
+                {t("Đã lưu, đóng")}
               </button>
             </div>
           </div>

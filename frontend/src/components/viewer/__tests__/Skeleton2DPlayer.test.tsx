@@ -69,6 +69,46 @@ describe("Skeleton2DPlayer — vẽ đúng những gì có trong dữ liệu", (
     expect(ctx.stroke).toHaveBeenCalledTimes(42);
   });
 
+  // Hồi quy: dữ liệu .npz là toạ độ TÂM-CỔ-TAY, nên cổ tay (landmark 0) nằm
+  // đúng ở gốc và API làm tròn 5 chữ số biến phần dư float của nó thành 0 tròn.
+  // Quy tắc cũ "(0,0,0) = landmark thiếu" vì thế đã loại bỏ cổ tay và 3 nét nối
+  // gan bàn tay ([0,1] [0,5] [0,17]) ở 100% khung hình (đo được 19127/19127).
+  it("cổ tay ở gốc toạ độ VẪN được vẽ — (0,0,0) là vị trí thật, không phải thiếu", () => {
+    const frame = new Array<number>(FRAME_DIM).fill(0);
+    // Một bàn tay trái: cổ tay đúng tại gốc, 20 landmark còn lại lệch đi.
+    for (let i = 1; i < 21; i++) {
+      frame[i * 3] = 0.1 * i;
+      frame[i * 3 + 1] = 0.05 * i;
+      frame[i * 3 + 2] = 0;
+    }
+    render(<Skeleton2DPlayer data={makeData([frame])} frame={0} />);
+
+    // Đủ 21 điểm (kể cả cổ tay) và đủ 21 nét nối của một bàn tay.
+    expect(ctx.arc).toHaveBeenCalledTimes(21);
+    expect(ctx.stroke).toHaveBeenCalledTimes(21);
+  });
+
+  it("hai tay được đặt ở hai cột riêng, không chồng lên nhau tại gốc", () => {
+    // Cả hai tay đều tâm-cổ-tay nên toạ độ giống hệt nhau; nếu dùng chung một
+    // phép fit thì chúng sẽ vẽ đè nhau.
+    const frame = new Array<number>(FRAME_DIM).fill(0);
+    for (let i = 1; i < 21; i++) {
+      const v = 0.1 * i;
+      frame[i * 3] = v;
+      frame[i * 3 + 1] = v;
+      frame[DIMS_PER_HAND + i * 3] = v;
+      frame[DIMS_PER_HAND + i * 3 + 1] = v;
+    }
+    render(<Skeleton2DPlayer data={makeData([frame])} frame={0} />);
+
+    const xs = ctx.arc.mock.calls.map((c) => c[0] as number);
+    const leftXs = xs.slice(0, 21);
+    const rightXs = xs.slice(21);
+    // Tay trái nằm hẳn nửa trái, tay phải nằm hẳn nửa phải.
+    expect(Math.max(...leftXs)).toBeLessThanOrEqual(320);
+    expect(Math.min(...rightXs)).toBeGreaterThanOrEqual(320);
+  });
+
   it("frame index vượt biên (ngoài sequence) → không crash, không vẽ", () => {
     const frame = new Array<number>(FRAME_DIM).fill(0.5);
     render(<Skeleton2DPlayer data={makeData([frame])} frame={99} />);

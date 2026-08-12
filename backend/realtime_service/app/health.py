@@ -52,6 +52,7 @@ def list_models(request: Request) -> List[Dict[str, Any]]:
     Falls back to model_bundles when registry is None (DB-driven startup).
     """
     registry = getattr(request.app.state, "registry", None)
+    bundles = getattr(request.app.state, "model_bundles", {}) or {}
 
     if registry is not None:
         # Try to reload registry from file to pick up new models (e.g., trained models)
@@ -65,12 +66,17 @@ def list_models(request: Request) -> List[Dict[str, Any]]:
             # Fall back to in-memory registry
 
         if registry is not None:
+            # Chỉ liệt kê model đã có bundle nạp sẵn — entry vừa ghi vào
+            # models.json mà /reload thất bại sẽ chỉ trả 404 nếu người dùng chọn.
+            selectable = [m for m in registry.models if m.id in bundles]
+            skipped = [m.id for m in registry.models if m.id not in bundles]
+            if skipped:
+                logger.warning("[MODELS] registry entries without a loaded bundle: %s", skipped)
             return [
                 {"id": m.id, "name": m.name, "language": m.language, "dialect": m.dialect}
-                for m in registry.models
+                for m in selectable
             ]
 
-    bundles = getattr(request.app.state, "model_bundles", {}) or {}
     return sorted(
         [
             {

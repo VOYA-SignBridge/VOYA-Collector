@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
-  computeFit,
+  handDepth,
+  handLayout,
   handPoints,
+  handWidth,
   HAND_CONNECTIONS,
   LEFT_COLOR,
   RIGHT_COLOR,
@@ -39,6 +41,7 @@ interface HandRig {
   group: THREE.Group;
   joints: THREE.Mesh[];
   bones: THREE.Mesh[];
+  marker: THREE.Mesh;
 }
 
 function buildHandRig(
@@ -70,15 +73,19 @@ function buildHandRig(
   }
 
   // Colored wrist marker so reviewers can tell left from right at a glance.
+  //
+  // It hangs off `group`, NOT off joints[0]: the wrist joint carries
+  // scale.setScalar(2.0), and a child inherits its parent's scale, so the
+  // marker rendered at r=0.07 — nearly twice the wrist it was meant to label,
+  // and the offset doubled with it. That is the oversized ball in the 3D view.
   const marker = new THREE.Mesh(
     new THREE.SphereGeometry(0.035, 16, 12),
     new THREE.MeshStandardMaterial({ color: new THREE.Color(accentColor), roughness: 0.4 }),
   );
-  joints[0].add(marker);
-  marker.position.set(0, -0.06, 0);
+  group.add(marker);
 
   scene.add(group);
-  return { group, joints, bones };
+  return { group, joints, bones, marker };
 }
 
 export default function Hand3DPlayer({ data, frameRef, onFps }: Hand3DPlayerProps) {
@@ -86,7 +93,12 @@ export default function Hand3DPlayer({ data, frameRef, onFps }: Hand3DPlayerProp
   const onFpsRef = useRef(onFps);
   onFpsRef.current = onFps;
 
-  const fit = useMemo(() => computeFit(data.sequence), [data]);
+  // Same per-sample decision the 2D player makes: wrist-centred recordings put
+  // both wrists on the origin and get one half of the world each; recordings
+  // that kept image coordinates already hold the hands apart correctly and are
+  // drawn with a single shared fit so their real distance and relative size
+  // survive.
+  const layout = useMemo(() => handLayout(data.sequence), [data]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -160,15 +172,31 @@ export default function Hand3DPlayer({ data, frameRef, onFps }: Hand3DPlayerProp
         rig.group.visible = !!pts;
         if (!pts) return;
 
+        const fit = layout[side];
+        // Metric depth when the recording has it. `depth.scale` converts metres
+        // into hand-widths, and multiplying by the hand's on-screen width puts
+        // it in the same units as the x,y the 2D fit produced — so the depth
+        // drawn is the proportion that was recorded, not a guess.
+        const depth = handDepth(data.sequence_world?.[index], side);
+        const onScreenWidth = handWidth(pts, fit);
         for (let i = 0; i < 21; i++) {
           const [ux, uy] = fit.toUnit(pts[i * 3], pts[i * 3 + 1]);
           worldPos[i].set(
             (ux - 0.5) * WORLD_SIZE,
             (0.5 - uy) * WORLD_SIZE, // image y points down; world y points up
-            -pts[i * 3 + 2] * fit.scale * WORLD_SIZE * 0.5,
+            // Same scale as x and y — the hand keeps its real proportions.
+            // A stray *0.5 here squashed depth to half of width, on top of the
+            // flattening the stored data already had, which is what made the
+            // 3D hands look like cardboard cut-outs.
+            depth
+              ? -depth.z[i] * depth.scale * onScreenWidth * WORLD_SIZE
+              : -pts[i * 3 + 2] * fit.scale * WORLD_SIZE,
           );
           rig.joints[i].position.copy(worldPos[i]);
         }
+        // Follows the wrist now that it is no longer parented to it.
+        rig.marker.position.copy(worldPos[0]);
+        rig.marker.position.y -= 0.06;
 
         for (let c = 0; c < HAND_CONNECTIONS.length; c++) {
           const [a, b] = HAND_CONNECTIONS[c];
@@ -226,7 +254,7 @@ export default function Hand3DPlayer({ data, frameRef, onFps }: Hand3DPlayerProp
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [data, fit, frameRef]);
+  }, [data, layout, frameRef]);
 
   return (
     <div

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List
 from app.balancer import build_balance_plan
 from app.dataset_manager import ClassMetadata, load_labels
+from app.tenancy import tenant_id_of
 from app.dataset_samples import save_sequence_npz
 from app.processing.augmenter import generate_augmented_sequences
 
@@ -17,7 +18,8 @@ def get_class_dirs() -> dict[str, Path]:
             class_uid=r['class_uid'], slug=r['slug'], label_original=r['label_original'],
             language=r['language'], dialect=r['dialect'],
             is_common_global=bool(int(r['is_common_global'])),
-            is_common_language=bool(int(r['is_common_language']))
+            is_common_language=bool(int(r['is_common_language'])),
+            tenant_id=tenant_id_of(r),
         )
         out[meta.class_uid] = meta.hierarchy_path()
     return out
@@ -48,7 +50,8 @@ def execute(target: int | None = None, per_sequence_aug: int = 2):
         class_uid=r['class_uid'], slug=r['slug'], label_original=r['label_original'],
         language=r['language'], dialect=r['dialect'],
         is_common_global=bool(int(r['is_common_global'])),
-        is_common_language=bool(int(r['is_common_language']))
+        is_common_language=bool(int(r['is_common_language'])),
+        tenant_id=tenant_id_of(r),
     ) for r in rows}
     performed = []
     for item in plan.get('plan', []):

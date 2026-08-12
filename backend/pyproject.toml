@@ -22,7 +22,13 @@ dependencies = [
     "sqlalchemy==1.4.50",
     "uvicorn[standard]==0.22.0",
     "passlib[bcrypt]==1.7.4",
-    "python-jose[cryptography]==3.3.0"
+    "python-jose[cryptography]==3.3.0",
+    # Engine quyết định phân quyền. Tên gói trên PyPI là `casbin`, không phải
+    # `pycasbin` — `pycasbin` là tên dự án trên GitHub, và `pip install
+    # pycasbin` cài một gói khác. KHÔNG kèm adapter cơ sở dữ liệu nào: adapter
+    # ở đây tự viết và chỉ-đọc, xem app/authorization/adapter.py về vì sao
+    # `casbin_rule` là thứ không được phép tồn tại.
+    "casbin==1.36.0"
 ]
 
 [tool.pytest.ini_options]
@@ -31,4 +37,10 @@ dependencies = [
 # message so our own future deprecations still surface.
 filterwarnings = [
     "ignore:The 'app' shortcut is now deprecated:DeprecationWarning",
+]
+# Registered so `-m "not integration"` is a supported way to run the suite
+# without a live Postgres, and so a typo'd marker name shows up as a warning
+# rather than silently selecting nothing.
+markers = [
+    "integration: needs a live Postgres/Redis (skips cleanly when absent)",
 ]

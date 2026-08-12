@@ -84,3 +84,57 @@ def test_real_hand_video_extracts_seqlen_x_126_sequences():
     # each saved sequence is (seq_len, feature_dim=126)
     seq = save.call_args_list[0].args[1]
     assert hasattr(seq, "shape") and seq.shape[1] == 126
+
+
+class TestSourceDirectoryIsNotScratchSpace:
+    """Extraction must not write into the directory the video came from.
+
+    `ffmpeg_resample` used to place its temp output next to the input "for
+    atomicity" — but that file is only read and deleted, never renamed over
+    anything, so there was no atomicity to gain. The costs were real, and both
+    are pinned here.
+    """
+
+    def test_read_only_source_directory_still_works(self, tmp_path, monkeypatch):
+        """A read-only source is what surfaced this: the whole run died with
+        `Read-only file system`. Uploads land in a writable dir today, so this
+        never bit production — but `dataset/raw/` is an archive, and archives
+        are exactly the thing one mounts read-only."""
+        from app.processing import ingest
+
+        source = tmp_path / "readonly_source"
+        source.mkdir()
+        video = source / "clip.mp4"
+        # 30 fps in, 20 fps target => resample actually runs.
+        _make_noise_video(video, frames=12, fps=30)
+        source.chmod(0o500)
+        try:
+            out, _, fps_out = ingest.ffmpeg_resample(str(video), 20)
+        finally:
+            source.chmod(0o700)
+
+        if out == str(video):
+            pytest.skip("ffmpeg unavailable — resample was skipped, nothing to assert")
+
+        assert not str(out).startswith(str(source)), (
+            f"temp resample landed in the source directory: {out}"
+        )
+        assert fps_out == 20.0
+        os.remove(out)
+
+    def test_unopenable_resample_does_not_leak_its_temp_file(self, tmp_path, monkeypatch):
+        """`raise RuntimeError("Cannot open video file")` used to sit ABOVE the
+        try/finally, so the one path where cleanup mattered most was the one
+        path that skipped it."""
+        from app.processing import ingest
+
+        leaked = tmp_path / "leaked.mp4"
+        leaked.write_bytes(b"not a video")
+
+        monkeypatch.setattr(
+            ingest, "ffmpeg_resample", lambda path, fps: (str(leaked), 30.0, 20.0)
+        )
+        with pytest.raises(RuntimeError, match="Cannot open video file"):
+            list(ingest.frame_generator(str(tmp_path / "original.mp4"), fps_target=20))
+
+        assert not leaked.exists(), "temp resample survived the failure path"

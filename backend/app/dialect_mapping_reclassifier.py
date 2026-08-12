@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from app.dataset_manager import load_labels, register_class, ClassMetadata, MASTER_LABELS, LABEL_FIELDS, regenerate_label_indexes
+from app.tenancy import tenant_id_of
 from app.dataset_samples import SAMPLES_CSV, SAMPLE_FIELDS
 from filelock import FileLock
 
@@ -101,7 +102,10 @@ def reclassify(mapping_csv: str, apply: bool = False, remove_old: bool = False, 
             class_uid=existing['class_uid'], slug=existing['slug'], label_original=existing['label_original'],
             language=existing['language'], dialect=existing['dialect'],
             is_common_global=bool(int(existing['is_common_global'])),
-            is_common_language=bool(int(existing['is_common_language']))
+            is_common_language=bool(int(existing['is_common_language'])),
+            # Source directory is derived from this; without it the move reads
+            # from the bootstrap tenant's tree no matter who owns the class.
+            tenant_id=tenant_id_of(existing),
         )
         src_dir = source_meta.hierarchy_path()
         dst_dir = new_meta.hierarchy_path()

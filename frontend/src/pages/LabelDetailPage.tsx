@@ -1,4 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+/**
+ * Chi tiết nhãn.
+ *
+ * @i18n-key-table — `TIER_LABELS` là bảng KHOÁ, dịch tại chỗ dựng.
+ */
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import PageHeader from "../components/ui/PageHeader";
 import Badge from "../components/ui/Badge";
@@ -19,23 +24,23 @@ import {
   type LabelSession,
   type LabelSessionsResponse,
 } from "../api/labelDetail";
-import type { FramesData } from "../components/viewer/handData";
+import { stabilizeSequence, type FramesData } from "../components/viewer/handData";
+import { dialectLabel } from "../config/dialectLabels";
 import { usePlayback } from "../components/viewer/usePlayback";
 import { useRenderTier, type TierChoice } from "../components/viewer/useRenderTier";
 import Skeleton2DPlayer from "../components/viewer/Skeleton2DPlayer";
 import PlayerControls from "../components/viewer/PlayerControls";
+import { Trans, useI18n } from "../i18n";
 
 // three.js (~150KB gz) stays out of the page chunk until a Tier-1 device
 // actually renders the 3D view.
 const Hand3DPlayer = lazy(() => import("../components/viewer/Hand3DPlayer"));
 
-const DIALECT_NAMES: Record<string, string> = {
-  common: "Chung",
-  bac: "Miền Bắc",
-  trung: "Miền Trung",
-  nam: "Miền Nam",
-  mienTay: "Miền Tây",
-};
+// The third hand-maintained dialect map found in this codebase, and the same
+// story as the other two: it listed `mienTay`, which is not a dialect id in the
+// registry and never had a class behind it, while any dialect approved through
+// the registry could not appear. The slug is the label now — see
+// config/dialectLabels.ts.
 
 const TIER_LABELS: Record<Exclude<TierChoice, "auto">, string> = {
   "3d": "3D da thịt",
@@ -54,6 +59,7 @@ function formatDate(iso: string): string {
 type PreviewState = "checking" | "rendering" | "ready" | "error";
 
 export default function LabelDetailPage() {
+  const { t } = useI18n();
   const { id: classUid = "" } = useParams();
 
   const [info, setInfo] = useState<LabelSessionsResponse | null>(null);
@@ -65,7 +71,6 @@ export default function LabelDetailPage() {
   const [framesError, setFramesError] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<PreviewState>("checking");
   const [deletingId, setDeletingId] = useState<string>("");
-
   // Reassign ("đổi nhãn"): move a recording to a different existing label.
   const [reassignTarget, setReassignTarget] = useState<LabelSession | null>(null);
   const [labels, setLabels] = useState<ClassRow[]>([]);
@@ -78,6 +83,18 @@ export default function LabelDetailPage() {
 
   const playback = usePlayback(frames?.frames ?? 0, frames?.fps ?? 15);
 
+  // Display-only de-jitter, shared by the 2D and 3D tiers so both show the same
+  // motion. Off-switch kept because judging whether a sample is faulty means
+  // looking at exactly what was stored, unsmoothed.
+  const [stabilize, setStabilize] = useState(true);
+  const viewFrames = useMemo(
+    () =>
+      frames && stabilize
+        ? { ...frames, sequence: stabilizeSequence(frames.sequence) }
+        : frames,
+    [frames, stabilize]
+  );
+
   const loadSessions = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -87,7 +104,7 @@ export default function LabelDetailPage() {
       setSelectedId((prev) => prev || data.sessions[0]?.session_id || "");
     } catch (err) {
       const e = err as { userMessage?: string; message?: string };
-      setError(e.userMessage || e.message || "Không tải được danh sách lần quay");
+      setError(e.userMessage || e.message || t("Không tải được danh sách lần quay"));
     } finally {
       setLoading(false);
     }
@@ -102,8 +119,8 @@ export default function LabelDetailPage() {
   const handleDeleteSession = useCallback(
     async (session: LabelSession) => {
       const ok = window.confirm(
-        `Xóa lần quay này của "${info?.label_original ?? "nhãn"}"?\n` +
-          `${session.sample_count} mẫu sẽ được chuyển vào thùng rác.`,
+        `Xóa lần quay này của "${info?.label_original ?? t("nhãn")}"?\n` +
+          t("{sample_count} mẫu sẽ được chuyển vào thùng rác.", { sample_count: session.sample_count }),
       );
       if (!ok) return;
       setDeletingId(session.session_id);
@@ -116,7 +133,7 @@ export default function LabelDetailPage() {
         await loadSessions();
       } catch (err) {
         const e = err as { userMessage?: string; message?: string };
-        setError(e.userMessage || e.message || "Không xóa được lần quay");
+        setError(e.userMessage || e.message || t("Không xóa được lần quay"));
       } finally {
         setDeletingId("");
       }
@@ -151,7 +168,7 @@ export default function LabelDetailPage() {
         await loadSessions();
       } catch (err) {
         const e = err as { userMessage?: string; message?: string };
-        setError(e.userMessage || e.message || "Không đổi được nhãn cho lần quay");
+        setError(e.userMessage || e.message || t("Không đổi được nhãn cho lần quay"));
       } finally {
         setReassignSaving(false);
       }
@@ -171,7 +188,7 @@ export default function LabelDetailPage() {
       })
       .catch((err) => {
         const e = err as { userMessage?: string; message?: string };
-        if (!cancelled) setFramesError(e.userMessage || e.message || "Không tải được dữ liệu khung hình");
+        if (!cancelled) setFramesError(e.userMessage || e.message || t("Không tải được dữ liệu khung hình"));
       });
     return () => {
       cancelled = true;
@@ -214,9 +231,9 @@ export default function LabelDetailPage() {
   if (error || !info) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-4">
-        <ErrorBanner message={error || "Không tải được dữ liệu nhãn"} />
+        <ErrorBanner message={error || t("Không tải được dữ liệu nhãn")} />
         <button type="button" onClick={loadSessions} className="btn-secondary text-sm px-4 py-2 rounded-lg">
-          Thử lại
+          {t("Thử lại")}
         </button>
       </div>
     );
@@ -227,22 +244,22 @@ export default function LabelDetailPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       <PageHeader
-        breadcrumb={[{ label: "Thư viện nhãn", href: "/labels" }, info.label_original]}
+        breadcrumb={[{ label: t("Thư viện nhãn"), href: "/labels" }, info.label_original]}
         title={info.label_original}
-        subtitle={`${DIALECT_NAMES[info.dialect] || info.dialect} · ${info.count} lần quay đã thu thập`}
+        subtitle={t("{p1} · {count} lần quay đã thu thập", { p1: dialectLabel(info.dialect), count: info.count })}
       />
 
       <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
         {/* ------- Left: sessions & timeline ------- */}
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
-            Các lần quay (Sessions)
+            {t("Các lần quay (Sessions)")}
           </h2>
 
           {info.sessions.length === 0 && (
             <EmptyState
-              title="Chưa có lần quay nào"
-              description="Nhãn này chưa có dữ liệu được thu thập."
+              title={t("Chưa có lần quay nào")}
+              description={t("Nhãn này chưa có dữ liệu được thu thập.")}
             />
           )}
 
@@ -268,8 +285,8 @@ export default function LabelDetailPage() {
             <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-700/60">
               <span className="text-slate-200 text-sm font-medium flex-1 min-w-[10rem] truncate">
                 {selected
-                  ? `Người đóng góp: ${selected.username || selected.user_id || "Ẩn danh"}`
-                  : "Chọn một lần quay"}
+                  ? t("Người đóng góp: {ai}", { ai: selected.username || selected.user_id || t("Ẩn danh") })
+                  : t("Chọn một lần quay")}
               </span>
 
               <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none">
@@ -279,31 +296,79 @@ export default function LabelDetailPage() {
                   onChange={(e) => tierState.setEco(e.target.checked)}
                   className="accent-ctu-blue"
                 />
-                Eco (tiết kiệm máy)
+                {t("Eco (tiết kiệm máy)")}
               </label>
 
               <select
                 value={tierState.choice}
                 onChange={(e) => tierState.setChoice(e.target.value as TierChoice)}
-                aria-label="Chất lượng hiển thị"
+                aria-label={t("Chất lượng hiển thị")}
                 className="bg-slate-700 text-slate-100 text-xs rounded-lg px-2 py-1.5 border border-slate-600 cursor-pointer"
               >
-                <option value="auto">Tự động ({TIER_LABELS[tier]})</option>
-                <option value="3d">{TIER_LABELS["3d"]}</option>
-                <option value="2d">{TIER_LABELS["2d"]}</option>
-                <option value="video">{TIER_LABELS.video}</option>
+                <option value="auto">{t("Tự động ({che_do})", { che_do: t(TIER_LABELS[tier]) })}</option>
+                <option value="3d">{t(TIER_LABELS["3d"])}</option>
+                <option value="2d">{t(TIER_LABELS["2d"])}</option>
+                <option value="video">{t(TIER_LABELS.video)}</option>
               </select>
+
+              {tier !== "video" && (
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={stabilize}
+                    onChange={(e) => setStabilize(e.target.checked)}
+                    className="cursor-pointer accent-sky-500"
+                  />
+                  {t("Giảm rung")}
+                </label>
+              )}
             </div>
 
             {tierState.downgraded && tierState.choice === "auto" && (
               <div className="px-4 py-2 text-xs text-amber-300 bg-amber-500/10 border-b border-amber-500/20">
-                Máy đang chậm/nóng — đã tự chuyển về chế độ nhẹ hơn. Bạn có thể chọn lại ở menu Chất lượng.
+                {t("Máy đang chậm/nóng — đã tự chuyển về chế độ nhẹ hơn. Bạn có thể chọn lại ở menu Chất lượng.")}
+              </div>
+            )}
+
+            {/* Older samples stored only the model's input. Say so, instead of
+                letting a flattened, artificially separated pair of hands look
+                like a faithful replay of what was recorded. */}
+            {frames?.landmark_source === "normalized" && tier !== "video" && (
+              <div className="px-4 py-2 text-xs text-slate-300 bg-slate-700/40 border-b border-slate-600/50">
+                <Trans
+                  k="Mẫu này chỉ lưu dữ liệu đã chuẩn hoá cho mô hình: mỗi bàn tay đã bị dời về gốc cổ tay và co giãn riêng. Vì vậy {matgi} — hai tay được xếp cạnh nhau để xem cho rõ, không phải vị trí lúc quay."
+                  vars={{
+                    matgi: (
+                      <strong>
+                        {t("khoảng cách thật giữa hai tay và độ sâu không còn")}
+                      </strong>
+                    ),
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Depth is the one thing the 3D view cannot fake. Samples recorded
+                before the capture side read MediaPipe's world landmarks carry
+                only its image-space z, which is a relative regression spanning
+                ~20% of a hand's own width — so those hands really are flatter
+                than the signer's were, and that is a property of the recording
+                rather than of this view. */}
+            {tier === "3d" && frames && !frames.sequence_world && (
+              <div className="px-4 py-2 text-xs text-slate-300 bg-slate-700/40 border-b border-slate-600/50">
+                <Trans
+                  k="Mẫu này không có toạ độ 3D thật (chỉ thu trước khi hệ thống lưu {toado}), nên {chieusau} so với lúc ký. Hình dạng và chuyển động vẫn đúng."
+                  vars={{
+                    toado: <em>{t("toạ độ trong không gian thật")}</em>,
+                    chieusau: <strong>{t("chiều sâu bị dẹp")}</strong>,
+                  }}
+                />
               </div>
             )}
 
             {!selected ? (
               <div className="aspect-square flex items-center justify-center text-slate-400 text-sm">
-                Chọn một lần quay ở danh sách bên trái để xem lại chuyển động.
+                {t("Chọn một lần quay ở danh sách bên trái để xem lại chuyển động.")}
               </div>
             ) : tier === "video" ? (
               <VideoTier
@@ -320,7 +385,7 @@ export default function LabelDetailPage() {
                 className="aspect-square flex items-center justify-center text-slate-400 text-sm animate-pulse"
                 data-testid="frames-loading"
               >
-                Đang tải dữ liệu chuyển động…
+                {t("Đang tải dữ liệu chuyển động…")}
               </div>
             ) : (
               <>
@@ -328,18 +393,18 @@ export default function LabelDetailPage() {
                   <Suspense
                     fallback={
                       <div className="aspect-square flex items-center justify-center text-slate-400 text-sm animate-pulse">
-                        Đang khởi tạo khung cảnh 3D…
+                        {t("Đang khởi tạo khung cảnh 3D…")}
                       </div>
                     }
                   >
                     <Hand3DPlayer
-                      data={frames}
+                      data={viewFrames ?? frames}
                       frameRef={playback.frameRef}
                       onFps={tierState.reportFps}
                     />
                   </Suspense>
                 ) : (
-                  <Skeleton2DPlayer data={frames} frame={playback.frame} />
+                  <Skeleton2DPlayer data={viewFrames ?? frames} frame={playback.frame} />
                 )}
                 <PlayerControls
                   frame={playback.frame}
@@ -355,8 +420,7 @@ export default function LabelDetailPage() {
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Trình xem chỉ hiển thị đúng dữ liệu tọa độ đã thu (.npz) — không dùng video quay gốc,
-            nên danh tính người đóng góp luôn được bảo vệ.
+            {t("Trình xem chỉ hiển thị đúng dữ liệu tọa độ đã thu (.npz) — không dùng video quay gốc, nên danh tính người đóng góp luôn được bảo vệ.")}
           </p>
         </div>
       </div>
@@ -366,25 +430,24 @@ export default function LabelDetailPage() {
         onClose={() => {
           if (!reassignSaving) setReassignTarget(null);
         }}
-        title="Đổi nhãn cho lần quay"
+        title={t("Đổi nhãn cho lần quay")}
         size="md"
       >
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
-            Chọn nhãn đúng để chuyển lần quay này sang. Dữ liệu (.npz) sẽ được di
-            chuyển sang nhãn mới.
+            {t("Chọn nhãn đúng để chuyển lần quay này sang. Dữ liệu (.npz) sẽ được di chuyển sang nhãn mới.")}
           </p>
           <input
             type="text"
             value={labelFilter}
             onChange={(e) => setLabelFilter(e.target.value)}
-            placeholder="Tìm nhãn…"
+            placeholder={t("Tìm nhãn…")}
             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ctu-blue"
             autoFocus
           />
           {labelsLoading ? (
             <div className="py-6 text-center text-sm text-slate-400 animate-pulse">
-              Đang tải danh sách nhãn…
+              {t("Đang tải danh sách nhãn…")}
             </div>
           ) : (
             <div className="max-h-[45vh] overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg">
@@ -411,19 +474,19 @@ export default function LabelDetailPage() {
                       {c.label_original}
                     </span>
                     <span className="text-[11px] text-slate-400 whitespace-nowrap">
-                      {c.language || ""} · {DIALECT_NAMES[c.dialect || ""] || c.dialect}
+                      {c.language || ""} · {dialectLabel(c.dialect)}
                     </span>
                   </button>
                 ))}
               {labels.filter((c) => c.class_uid !== info.class_uid).length === 0 && (
                 <div className="py-6 text-center text-sm text-slate-400">
-                  Không có nhãn nào khác.
+                  {t("Không có nhãn nào khác.")}
                 </div>
               )}
             </div>
           )}
           {reassignSaving && (
-            <div className="text-sm text-ctu-blue animate-pulse">Đang chuyển lần quay…</div>
+            <div className="text-sm text-ctu-blue animate-pulse">{t("Đang chuyển lần quay…")}</div>
           )}
         </div>
       </Modal>
@@ -448,6 +511,7 @@ function SessionCard({
   onDelete: () => void;
   onReassign: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       role="button"
@@ -466,7 +530,7 @@ function SessionCard({
           Lần quay {index}
           {session.is_owner && (
             <span className="text-[10px] font-medium text-ctu-blue bg-ctu-blue/10 px-1.5 py-0.5 rounded">
-              của bạn
+              {t("của bạn")}
             </span>
           )}
         </span>
@@ -476,13 +540,13 @@ function SessionCard({
           </Badge>
           {session.has_preview && (
             <Badge size="sm" variant="success">
-              video nhẹ
+              {t("video nhẹ")}
             </Badge>
           )}
         </div>
       </div>
       <p className="mt-1 text-xs text-slate-600 truncate">
-        {session.username || session.user_id || "Ẩn danh"} · {formatDate(session.created_at)}
+        {session.username || session.user_id || t("Ẩn danh")} · {formatDate(session.created_at)}
       </p>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-slate-400">
@@ -497,7 +561,7 @@ function SessionCard({
                 onClick={(e) => e.stopPropagation()}
                 className="text-[11px] text-ctu-blue hover:text-ctu-navy hover:underline"
               >
-                Tải .npz
+                {t("Tải .npz")}
               </a>
             )}
             <button
@@ -509,7 +573,7 @@ function SessionCard({
               disabled={deleting}
               className="text-[11px] text-amber-600 hover:text-amber-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Đổi nhãn
+              {t("Đổi nhãn")}
             </button>
             <button
               type="button"
@@ -520,7 +584,7 @@ function SessionCard({
               disabled={deleting}
               className="text-[11px] text-red-600 hover:text-red-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {deleting ? "Đang xóa…" : "Xóa"}
+              {deleting ? t("Đang xóa…") : "Xóa"}
             </button>
           </div>
         )}
@@ -538,6 +602,7 @@ function VideoTier({
   sessionId: string;
   state: PreviewState;
 }) {
+  const { t } = useI18n();
   if (state === "ready") {
     return (
       <video
@@ -556,7 +621,7 @@ function VideoTier({
     return (
       <div className="aspect-square flex items-center justify-center px-6">
         <p className="text-red-300 text-sm text-center">
-          Chưa tạo được video xem nhẹ cho lần quay này. Hãy thử chế độ Khung xương 2D.
+          {t("Chưa tạo được video xem nhẹ cho lần quay này. Hãy thử chế độ Khung xương 2D.")}
         </p>
       </div>
     );
@@ -567,9 +632,11 @@ function VideoTier({
       data-testid="preview-rendering"
     >
       <span className="animate-pulse">
-        {state === "checking" ? "Đang kiểm tra bản xem nhẹ…" : "Server đang chuẩn bị video (một lần duy nhất)…"}
+        {state === "checking"
+          ? t("Đang kiểm tra bản xem nhẹ…")
+          : t("Server đang chuẩn bị video (một lần duy nhất)…")}
       </span>
-      <span className="text-[11px] text-slate-500">Các lần xem sau sẽ mở ngay lập tức.</span>
+      <span className="text-[11px] text-slate-500">{t("Các lần xem sau sẽ mở ngay lập tức.")}</span>
     </div>
   );
 }

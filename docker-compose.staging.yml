@@ -1,0 +1,104 @@
+# Môi trường thử (staging) — chồng lên `docker-compose.yml`.
+#
+# Vì sao cần: tính tới 2026-08-10 chỉ có sản xuất và máy cá nhân. Mọi thay đổi
+# lược đồ, mọi lượt nâng cấp ảnh đều được thử lần đầu **trên chính máy đang phục
+# vụ người dùng**. Đợt vá lược đồ ngày 10/08 cho thấy giá của việc đó: một máy
+# dựng mới nhận lược đồ thiếu 2 bảng và 7 khoá ngoại, và không ai biết cho tới
+# khi có một nền chạy sạch để so.
+#
+# CÁCH LY BẰNG TÊN DỰ ÁN, KHÔNG PHẢI BẰNG TÊN TÀI NGUYÊN
+# --------------------------------------------------------
+# Chạy bằng `-p voya-staging`. Docker Compose lấy tên dự án làm tiền tố cho
+# **container, volume và network**, nên staging không thể chạm vào volume của
+# sản xuất kể cả khi ai đó gõ nhầm lệnh. Đây là điều mà việc đổi tên từng tài
+# nguyên trong tệp này KHÔNG bảo đảm được — bỏ sót một dòng là đủ để hai stack
+# dùng chung một volume dữ liệu.
+#
+# Dùng `scripts/staging.sh`, đừng gõ tay.
+#
+# STAGING KHỞI ĐỘNG TỪ CSDL TRỐNG
+# --------------------------------
+# Không chép dữ liệu sản xuất sang. Hai lý do, lý do thứ hai quan trọng hơn:
+#
+#   1. Dữ liệu thật ở đây là khuôn mặt và bàn tay của người thật. Nhân bản chúng
+#      sang một môi trường lỏng hơn là mở rộng bề mặt rủi ro mà không ai đồng ý.
+#   2. **Khởi động sạch chính là thứ đáng thử nhất.** Kịch bản "máy thứ hai" là
+#      kịch bản đã hỏng trong im lặng suốt nhiều tháng. Staging chạy đúng đường
+#      đó mỗi lần dựng lại, và `ci.yml` kiểm cùng một tính chất bằng
+#      `schema_debt()`.
+#
+# Cần dữ liệu để thử? Nạp một bản sao ĐÃ LÀM MỜ, và làm mờ là một bước tường
+# minh — không phải mặc định.
+
+services:
+  postgres:
+    container_name: voya_staging_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-signdb}
+    # KHÔNG publish ra host. Sản xuất cũng không, và staging không có lý do nào
+    # để lỏng hơn: mọi thứ cần nói chuyện với nó đều nằm trong network này.
+    mem_limit: 512m
+
+  redis:
+    container_name: voya_staging_redis
+    mem_limit: 256m
+
+  # `backend` phụ thuộc `sot-init` với `service_completed_successfully`, nên một
+  # mã thoát khác 0 ở đây giữ cả stack không bao giờ khởi động. Trên staging
+  # không có `gdrive/` (thư mục đó gitignored) nên phải tắt Drive tường minh:
+  # `_cmd_sync` thấy `USE_GOOGLE_DRIVE=0` thì bỏ qua sạch sẽ và trả 0.
+  #
+  # KHÔNG nới lỏng phép kiểm chữ ký để đạt điều này. Cổng ấy tồn tại để một
+  # nguồn sự thật bị sửa trộm không đi được vào hệ thống, và staging không phải
+  # lý do chính đáng để tháo nó ra.
+  sot-init:
+    container_name: voya_staging_sot_init
+    environment:
+      - USE_GOOGLE_DRIVE=0
+
+  # Bị kéo vào qua `depends_on` của backend. Đặt tên và giới hạn bộ nhớ tường
+  # minh thay vì để compose tự sinh — một container không tên trong `docker ps`
+  # là một container không ai biết thuộc stack nào.
+  realtime_service:
+    container_name: voya_staging_realtime
+    mem_limit: 512m
+
+  backend:
+    container_name: voya_staging_backend
+    environment:
+      # Nhãn để mọi dòng log, mọi số đo và mọi email nói ra mình đến từ đâu.
+      # Thiếu nó, một thư "gói sắp hết hạn" gửi từ staging tới người dùng thật
+      # là chuyện chỉ cần một lần để mất niềm tin.
+      - VOYA_ENVIRONMENT=staging
+      # Không có SMTP ở staging: thư ghi ra log thay vì gửi đi.
+      - SMTP_HOST=
+    mem_limit: 1g
+
+  worker:
+    container_name: voya_staging_worker
+    environment:
+      - VOYA_ENVIRONMENT=staging
+      - SMTP_HOST=
+    mem_limit: 1g
+
+  celery-beat:
+    container_name: voya_staging_celery_beat
+    environment:
+      - VOYA_ENVIRONMENT=staging
+      # Lượt quét vòng đời đăng ký TẮT ở staging trừ khi bật tường minh: nó gửi
+      # thư và đổi trạng thái thanh toán, hai việc không nên tự chạy ở một môi
+      # trường mà người ta bấm thử.
+      - SUBSCRIPTION_SWEEP_ENABLED=${STAGING_SUBSCRIPTION_SWEEP:-0}
+    mem_limit: 256m
+
+  frontend:
+    container_name: voya_staging_frontend
+    mem_limit: 128m
+
+  nginx:
+    container_name: voya_staging_nginx
+    ports:
+      # Cổng khác sản xuất, và chỉ mở trên loopback. Staging không phải thứ để
+      # cả mạng trường ghé thăm.
+      - "127.0.0.1:${STAGING_HTTP_PORT:-8080}:80"
+    mem_limit: 128m

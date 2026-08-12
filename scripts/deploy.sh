@@ -47,6 +47,62 @@ if [ ! -f deploy/public_hosts.txt ] && [ -f deploy/public_hosts.example.txt ]; t
   echo "    so no restart is needed after an edit."
 fi
 
+# ---------------------------------------------------------------------------
+# Pre-flight: catch the machine-specific failures BEFORE a 15-minute build.
+#
+# Every check below is something that already fails today — just later, and with
+# a message that points somewhere else. The app refuses to start with weak
+# secrets when APP_ENV=production, but only after the image is rebuilt and the
+# container is up; `env_file: .env` fails with a compose error that reads like a
+# YAML problem. Two seconds here beats a quarter of an hour there.
+# ---------------------------------------------------------------------------
+preflight_fail=0
+note() { echo "    $*"; }
+fail() { echo "    [FAIL] $*" >&2; preflight_fail=1; }
+
+echo "==> Pre-flight…"
+
+if [ ! -f .env ]; then
+  fail ".env is missing. Copy .env.example and fill it in:  cp .env.example .env"
+else
+  # Read without sourcing: .env is not a shell script and may hold values with
+  # spaces, '#', or quotes that would execute or truncate under `source`.
+  env_get() { sed -n "s/^$1=//p" .env | tail -1 | tr -d '\r'; }
+
+  app_env=$(env_get APP_ENV)
+  for key in SECRET_KEY AUTH_TOKEN_SECRET_KEY; do
+    value=$(env_get "$key")
+    if [ -z "$value" ]; then
+      fail "$key is not set in .env"
+    elif [ "${#value}" -lt 32 ]; then
+      if [ "$app_env" = "production" ]; then
+        fail "$key is only ${#value} chars and APP_ENV=production — the backend "\
+"will refuse to start. Generate one:  openssl rand -hex 32"
+      else
+        note "[warn] $key is only ${#value} chars (tolerated: APP_ENV=${app_env:-unset})"
+      fi
+    fi
+  done
+
+  for key in POSTGRES_PASSWORD VOYA_APP_DB_PASSWORD; do
+    [ -n "$(env_get "$key")" ] || fail "$key is not set in .env"
+  done
+
+  # FRONTEND_BASE_URL must match the URL people actually open, or password-reset
+  # and invitation links point at the wrong host on this machine.
+  base_url=$(env_get FRONTEND_BASE_URL)
+  [ -n "$base_url" ] || note "[warn] FRONTEND_BASE_URL is empty — mail links will be relative"
+fi
+
+docker info >/dev/null 2>&1 || fail "cannot talk to the Docker daemon — is Docker Desktop running?"
+
+if [ "$preflight_fail" -ne 0 ]; then
+  echo
+  echo "Pre-flight failed. Nothing was built or started." >&2
+  exit 3
+fi
+note "ok"
+
 echo "==> Probing for a usable GPU…"
 if gpu_usable; then
   NAME=$(docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 \
@@ -62,6 +118,49 @@ else
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Persist the file list into .env as COMPOSE_FILE.
+#
+# THIS is why the GPU kept disappearing. The probe above is correct and the
+# deploy that follows it is correct — but the overlay only lives in this
+# script's argv. Anything else that touches the stack loses it:
+#
+#     docker compose up -d              # bare, no -f  -> trainer without GPU
+#     docker compose restart trainer    # ditto
+#     the Restart button in Docker Desktop
+#     a copy-pasted command from an older note
+#
+# and none of them fail. The trainer comes up perfectly healthy with
+# DeviceRequests=null and quietly trains on CPU, which is why it took a
+# screenshot of the monitoring page to notice.
+#
+# Compose reads COMPOSE_FILE from the .env file in the project directory, so
+# writing it there makes the plain `docker compose` command in this folder mean
+# the right thing for everyone — including tools that never heard of this
+# script. COMPOSE_PATH_SEPARATOR is pinned because its default differs by
+# platform (';' on Windows, ':' elsewhere) and this repo is deployed on both.
+# ---------------------------------------------------------------------------
+compose_file_value=""
+for f in "${FILES[@]}"; do
+  [ "$f" = "-f" ] && continue
+  compose_file_value="${compose_file_value:+$compose_file_value:}$f"
+done
+
+upsert_env() {
+  local key="$1" value="$2"
+  if grep -q "^${key}=" .env 2>/dev/null; then
+    # In-place with a temp file: `sed -i` differs between GNU and BSD.
+    sed "s|^${key}=.*|${key}=${value}|" .env > .env.tmp && mv .env.tmp .env
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> .env
+  fi
+}
+
+upsert_env COMPOSE_PATH_SEPARATOR ":"
+upsert_env COMPOSE_FILE "$compose_file_value"
+echo "==> .env: COMPOSE_FILE=$compose_file_value"
+echo "    (a bare \`docker compose up -d\` in this folder now keeps the same overlays)"
+
 echo "==> docker compose ${FILES[*]} up -d ${BUILD[*]}"
 docker compose "${FILES[@]}" up -d "${BUILD[@]}"
 
@@ -76,9 +175,24 @@ docker compose "${FILES[@]}" ps -a --format "{{.Name}}\t{{.Status}}"
 # whose compute capability this torch build has no kernels for, so this line is
 # the ground truth for whether training will really use the card.
 echo "==> Trainer device:"
-docker exec "$(docker ps -qf name=_trainer | head -1)" python -c "
+TRAINER=$(docker ps -qf name=_trainer | head -1)
+docker exec "$TRAINER" python -c "
 import sys; sys.path.insert(0,'/workspace')
 from processed.train_utils.train_tcn import pick_device
 import torch
 print('   ', pick_device(), '|', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no CUDA device')
 " 2>/dev/null || echo "    (trainer not up yet)"
+
+# The probe said this host has a GPU, so the container must have been given one.
+# Without this check the two outcomes are indistinguishable from the outside: a
+# GPU trainer and a CPU trainer are both "Up (healthy)", and the difference only
+# shows up as a training run that takes ten times longer than it should.
+if [ -n "$TRAINER" ] && printf '%s' "$compose_file_value" | grep -q "docker-compose.gpu.yml"; then
+  if [ "$(docker inspect "$TRAINER" --format '{{len .HostConfig.DeviceRequests}}' 2>/dev/null)" = "0" ]; then
+    echo
+    echo "    [WARN] The GPU overlay is in COMPOSE_FILE but this trainer container has" >&2
+    echo "           no device reservation — it predates the overlay and was not" >&2
+    echo "           recreated. \`restart\` does not re-read compose; force it:" >&2
+    echo "               docker compose up -d --force-recreate trainer" >&2
+  fi
+fi

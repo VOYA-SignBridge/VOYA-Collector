@@ -17,7 +17,6 @@ DATABASE_URL/REDIS_URL pointed at them.
 
 from __future__ import annotations
 
-import random
 import uuid
 from unittest.mock import patch
 
@@ -27,17 +26,19 @@ from fastapi.testclient import TestClient
 from app import auth
 from app.main import app
 from app.storage.metadata_db import _execute, _fetch_all
+from conftest import LoopbackPeer, fresh_client_ip
 
-client = TestClient(app)
+client = TestClient(LoopbackPeer(app))
 
 FORGOT = "/api/v1/auth/forgot-password"
 RESET = "/api/v1/auth/reset-password"
 LOGIN = "/api/v1/auth/login"
 
 def _ip() -> str:
-    # Fully random so every call — and every test RUN — gets a fresh rate-limit
-    # bucket (redis keys live 1h; a sequential scheme would collide across runs).
-    return f"{random.randint(1, 223)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
+    """A fresh rate-limit bucket per call. Shared with the other HTTP suites —
+    see `conftest.fresh_client_ip` for why both the peer and the forwarded
+    address are needed."""
+    return fresh_client_ip()
 
 
 @pytest.fixture

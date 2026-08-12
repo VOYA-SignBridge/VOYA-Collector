@@ -40,6 +40,23 @@ def _make_client(is_admin=False):
     uid = uuid.uuid4().hex[:8]
     u = auth.create_user(username=f"pipe_{uid}", email=f"pipe_{uid}@example.com",
                          password=PW, is_admin=is_admin)
+    # `create_user` là hàm mức THẤP: nó dựng tài khoản và KHÔNG dựng tư cách
+    # thành viên. Mọi đường đăng ký thật đều đi qua `create_self_serve_tenant`
+    # hoặc `consume_invitation`, và cả hai đều ghi một dòng thành viên — đo trên
+    # sản xuất: 10 tài khoản / 10 dòng thành viên, 0 tài khoản mồ côi.
+    #
+    # Nên một tài khoản không có dòng thành viên là trạng thái KHÔNG tồn tại
+    # ngoài đời, và bộ test này từng dựa vào nó: các route ghi không kiểm vai,
+    # nên một tài khoản mồ côi vẫn tải video và gửi huấn luyện được. Từ khi
+    # `access_gate` chặn "không có grant tenant nào", trạng thái ấy trả 403 —
+    # đúng, và test phải dựng người dùng giống thật thay vì nới cổng ra.
+    _execute(
+        "INSERT INTO memberships(tenant_id, user_id, scope_level, legacy_role, "
+        "                        status, joined_at) "
+        "VALUES(%s, %s, 'TENANT', 'editor', 'ACTIVE', NOW()) "
+        "ON CONFLICT (tenant_id, user_id) WHERE scope_level = 'TENANT' DO NOTHING",
+        (u["tenant_id"], u["id"]),
+    )
     c = TestClient(app)
     r = c.post("/api/v1/auth/login", json={"identifier": u["username"], "password": PW},
                headers={"X-Forwarded-For": _ip()})
@@ -69,9 +86,20 @@ def admin_client():
 
 def _fake_class():
     # folder_name() is a METHOD on the real class_meta, not an attribute.
+    #
+    # Must carry every field upload.py reads off class_meta, with the SAME
+    # defaults as dataset_manager.ClassMetadata — a SimpleNamespace raises
+    # AttributeError instead of falling back, so a field added to the router but
+    # missing here fails the test with a stack trace rather than a useful
+    # assertion. The five below are the vocabulary-schema-v2 additions.
     return SimpleNamespace(
         class_uid="SOTTEST_cls", slug="test-slug", label_original="xin chào",
         language="vn", dialect="common", class_idx=1, folder_name=lambda: "class_test",
+        hands_required=None,      # 1 | 2 | None (unknown) — falls back to payload
+        semantic_label="",
+        vocabulary_scope="",      # "common" | "profile_specific" | ""
+        recognition_profile="",   # north|central|south|hoa_de|legacy_unassigned|""
+        vocabulary_group="",
     )
 
 
@@ -236,15 +264,22 @@ def test_camera_missing_frames_is_rejected(user_client):
     assert r.status_code == 200 and r.json()["success"] is False
 
 
-def test_camera_all_zero_frames_flagged_too_many_invalid(user_client):
+def test_camera_all_zero_frames_rejected_by_quality_gate(user_client):
+    # Vocabulary-schema-v2 quality gate: a sample below the minimum bar is
+    # REJECTED with 422 + a machine-readable code, and a quality event with
+    # status="rejected" is recorded. It is no longer accepted-and-flagged with
+    # 200 {"success": false} — the old shape gave the client nothing to branch
+    # on and left no record of WHY the capture was refused.
     c, _ = user_client
     with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
          patch("app.routers.upload.save_sequence_npz", return_value="/x.npz"):
         r = c.post("/api/v1/upload/camera",
                    json={"label": "x", "frames": [_zero_frame() for _ in range(60)]},
                    headers=_csrf(c))
-    assert r.status_code == 200
-    assert r.json()["success"] is False and "invalid" in r.json()["message"].lower()
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["code"] == "QC_TOO_FEW_VALID_FRAMES"
+    assert "metrics" in detail
 
 
 def test_camera_too_many_frames_rejected(user_client, monkeypatch):
@@ -276,15 +311,41 @@ def test_training_start_dispatches_and_persists(user_client):
 
 
 def test_training_start_returns_503_when_dispatch_fails(user_client):
+    """Celery chết thì trả 503, và hàng job vẫn được ghi lại là 'failed'.
+
+    Dọn bằng cách CHỤP tập job_id trước rồi xoá phần chênh. Bản trước bỏ qua
+    bước dọn với lý do ghi thẳng trong chú thích — "job id is not returned on
+    503" — và đó là một hàng rò lại sau MỖI lượt chạy suite. Sổ dấu vết trong
+    `conftest.py` tìm ra nó: `training_jobs +1` trên 1.332 test.
+
+    Không cần id trả về mới dọn được: hàng nào xuất hiện giữa hai lần chụp thì
+    chính lượt gọi này tạo ra.
+    """
     c, _ = user_client
+    truoc = {r["job_id"] for r in _fetch_all("SELECT job_id FROM training_jobs")}
+
     broken = MagicMock()
     broken.apply_async.side_effect = RuntimeError("redis down")
-    with patch("app.training_tasks.run_training_job", broken):
-        r = c.post("/api/v1/training/start", json={}, headers=_csrf(c))
-    assert r.status_code == 503
-    # the failed job is recorded as failed
-    # (job id is not returned on 503, so just assert the error surfaced)
-    assert "trainer" in r.json()["detail"].lower() or "training" in r.json()["detail"].lower()
+    try:
+        with patch("app.training_tasks.run_training_job", broken):
+            r = c.post("/api/v1/training/start", json={}, headers=_csrf(c))
+        assert r.status_code == 503
+        assert ("trainer" in r.json()["detail"].lower()
+                or "training" in r.json()["detail"].lower())
+
+        sau = {r["job_id"] for r in _fetch_all("SELECT job_id FROM training_jobs")}
+        moi = sau - truoc
+        assert len(moi) == 1, (
+            f"mong doi dung 1 job duoc ghi lai khi dispatch hong, thay {len(moi)}"
+        )
+        job_id = moi.pop()
+        rows = _fetch_all("SELECT status FROM training_jobs WHERE job_id = %s",
+                          (job_id,))
+        assert rows and rows[0]["status"] == "failed"
+    finally:
+        sau = {r["job_id"] for r in _fetch_all("SELECT job_id FROM training_jobs")}
+        for job_id in sau - truoc:
+            _execute("DELETE FROM training_jobs WHERE job_id = %s", (job_id,))
 
 
 def test_promote_unknown_job_is_404(admin_client):
@@ -317,11 +378,19 @@ def test_promote_rejects_uncompleted_job(admin_client):
         _execute("DELETE FROM training_jobs WHERE job_id = %s", (job_id,))
 
 
-def test_promote_completed_tcn_job_deploys_model(admin_client, tmp_path):
+def test_promote_completed_tcn_job_deploys_model(admin_client, tmp_path, monkeypatch):
     """Real torch checkpoint through the promote flow (external side effects —
     file copy, registry write, realtime hot-swap — are mocked)."""
     import torch
     from app.storage.metadata_db import upsert_training_job
+
+    # tmp_path must be an allowed checkpoint root: since B1 the loader refuses
+    # a path resolving outside one, because torch.load unpickles. Real jobs
+    # write to OUTPUTS_DIR, so this keeps the fixture inside the same boundary
+    # production uses rather than bypassing the check.
+    from app.routers import training as training_module
+
+    monkeypatch.setattr(training_module, "OUTPUTS_DIR", tmp_path)
 
     ckpt = tmp_path / "model.pt"
     torch.save({"model_type": "TCN", "model_state_dict": {}, "num_classes": 3,
@@ -345,7 +414,13 @@ def test_promote_completed_tcn_job_deploys_model(admin_client, tmp_path):
             r = c.post(f"/api/v1/training/jobs/{job_id}/promote", headers=_csrf(c))
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["model_id"] == f"training_{job_id}"
+        # The realtime slot is keyed by DIALECT, not by job: promoting a new
+        # "hoa-de" model REPLACES the running "hoa-de" one instead of adding a
+        # duplicate entry to the recognition tab (see routers/training.py, and
+        # the dialect-named ids in realtime_service/config/models.json). This
+        # job declares no dialect (config={}), so it lands in the "multi" slot —
+        # the same default metadata_db.py uses when it looks a promotion up.
+        assert body["model_id"] == "multi"
         assert body["registry_updated"] is True and body["realtime_reloaded"] is True
     finally:
         _execute("DELETE FROM training_jobs WHERE job_id = %s", (job_id,))

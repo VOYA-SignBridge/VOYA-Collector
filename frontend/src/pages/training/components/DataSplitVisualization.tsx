@@ -1,28 +1,50 @@
 /**
  * Step 2: Data Split Visualization - Professional Layout
  * Displays and allows customization of train/validation/test split ratios
+ *
+ * MIỄN TRỪ khỏi bảng màu trạng thái (`theme/status.ts`). Ba dải màu ở đây là
+ * ba CHUỖI DỮ LIỆU (train / validation / test) trên cùng một thanh, không phải
+ * ba mức trạng thái. Quy dải "validation" về xanh dương "thành công" sẽ làm nó
+ * trùng màu với dải bên cạnh, và người xem mất khả năng đọc tỉ lệ — đúng thứ
+ * duy nhất biểu đồ này tồn tại để hiển thị.
  */
 
 import React, { useMemo, useState } from 'react';
 import type { DatasetInfo } from '../../../hooks/useTrainingAPI';
-import { CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
+import { dialectLabel } from '../../../config/dialectLabels';
+import { useI18n } from "../../../i18n";
+import {
+  CheckCircleIcon,
+  GraduationCapIcon,
+  InfoCircleIcon,
+  SearchIcon,
+} from '../../../components/ui/Icons';
 
 interface Props {
   datasetInfo: DatasetInfo | null;
+  // Phương ngữ đã chọn ở bước trước — split chỉ áp dụng cho các phương ngữ này.
+  selectedDialects?: string[];
 }
 
 const clamp = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 
-const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
+const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects = [] }) => {
+  const { t } = useI18n();
   if (!datasetInfo) {
     return (
       <div className="flex items-center justify-center py-12">
-        <p className="text-slate-600">Đang tải thông tin dataset...</p>
+        <p className="text-slate-600">{t("Đang tải thông tin dataset...")}</p>
       </div>
     );
   }
 
-  const total = datasetInfo.total_samples;
+  // Số mẫu để chia: nếu đã chọn phương ngữ, chỉ tính các phương ngữ đó
+  // (khớp đúng dữ liệu sẽ được huấn luyện); nếu chưa chọn, dùng toàn dataset.
+  const byDialect = datasetInfo.samples_by_dialect || {};
+  const total =
+    selectedDialects.length > 0
+      ? selectedDialects.reduce((sum, d) => sum + (byDialect[d] || 0), 0)
+      : datasetInfo.total_samples;
   const [trainPct, setTrainPct] = useState<number>(70);
   const [valPct, setValPct] = useState<number>(15);
 
@@ -33,10 +55,20 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
 
   return (
     <div className="space-y-6">
+      {/* Ngữ cảnh: split áp dụng cho các phương ngữ đã chọn ở bước trước */}
+      {selectedDialects.length > 0 && (
+        <div className="rounded-lg bg-ctu-blue/5 border border-ctu-blue/20 px-4 py-3 text-sm">
+          <span className="text-slate-600">{t("Chia tập cho phương ngữ đã chọn:")} </span>
+          <span className="font-semibold text-ctu-blue">
+            {selectedDialects.map((d) => dialectLabel(d)).join(', ')}
+          </span>
+        </div>
+      )}
+
       {/* Controls */}
       <div className="rounded-xl border border-slate-200 bg-white p-6">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-6">
-          Điều Chỉnh Tỷ Lệ Chia Tập
+          {t("Điều Chỉnh Tỷ Lệ Chia Tập")}
         </h3>
 
         <div className="space-y-6">
@@ -44,7 +76,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="train-split" className="text-sm font-medium text-slate-900">
-                Tập Huấn Luyện
+                {t("Tập Huấn Luyện")}
               </label>
               <span className="text-sm font-semibold text-ctu-blue">{clamp(trainPct)}%</span>
             </div>
@@ -66,7 +98,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label htmlFor="val-split" className="text-sm font-medium text-slate-900">
-                Tập Kiểm Tra (Validation)
+                {t("Tập Kiểm Tra (Validation)")}
               </label>
               <span className="text-sm font-semibold text-emerald-600">{clamp(valPct)}%</span>
             </div>
@@ -88,7 +120,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium text-slate-900">
-                Tập Đánh Giá (Test)
+                {t("Tập Đánh Giá (Test)")}
               </label>
               <span className="text-sm font-semibold text-amber-600">{Math.max(0, testPct)}%</span>
             </div>
@@ -108,27 +140,27 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
       {/* Visual Representation */}
       <div>
         <p className="mb-3 text-sm font-semibold text-slate-900 uppercase tracking-wider">
-          Hình Ảnh Phân Chia
+          {t("Hình Ảnh Phân Chia")}
         </p>
         <div className="flex h-20 w-full overflow-hidden rounded-xl shadow-sm">
           <div
             className="flex items-center justify-center bg-gradient-to-r from-ctu-blue to-ctu-navy text-white font-semibold text-sm text-center transition-all duration-300"
             style={{ width: `${clamp(trainPct)}%` }}
-            title={`Train: ${trainCount.toLocaleString()} mẫu`}
+            title={t("Train: {p1} mẫu", { p1: trainCount.toLocaleString() })}
           >
             {clamp(trainPct) > 10 && `${clamp(trainPct)}% Train`}
           </div>
           <div
             className="flex items-center justify-center bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold text-sm text-center transition-all duration-300"
             style={{ width: `${clamp(valPct)}%` }}
-            title={`Validation: ${valCount.toLocaleString()} mẫu`}
+            title={t("Validation: {p1} mẫu", { p1: valCount.toLocaleString() })}
           >
             {clamp(valPct) > 10 && `${clamp(valPct)}% Val`}
           </div>
           <div
             className="flex items-center justify-center bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold text-sm text-center transition-all duration-300"
             style={{ width: `${Math.max(0, testPct)}%` }}
-            title={`Test: ${testCount.toLocaleString()} mẫu`}
+            title={t("Test: {p1} mẫu", { p1: testCount.toLocaleString() })}
           >
             {Math.max(0, testPct) > 10 && `${Math.max(0, testPct)}% Test`}
           </div>
@@ -138,38 +170,41 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo }) => {
       {/* Summary Cards */}
       <div className="grid gap-3 sm:grid-cols-3">
         <SplitCard
-          label="Huấn Luyện"
+          label={t("Huấn Luyện")}
           icon={<GraduationCapIcon className="h-7 w-7" />}
           count={trainCount}
           percentage={clamp(trainPct)}
           color="from-ctu-blue to-ctu-navy"
-          description="Dạy mô hình"
+          description={t("Dạy mô hình")}
         />
         <SplitCard
-          label="Kiểm Tra"
+          label={t("Kiểm Tra")}
           icon={<CheckCircleIcon className="h-7 w-7" />}
           count={valCount}
           percentage={clamp(valPct)}
           color="from-emerald-500 to-emerald-600"
-          description="Điều chỉnh"
+          description={t("Điều chỉnh")}
         />
         <SplitCard
-          label="Đánh Giá"
+          label={t("Đánh Giá")}
           icon={<SearchIcon className="h-7 w-7" />}
           count={testCount}
           percentage={Math.max(0, testPct)}
           color="from-amber-500 to-orange-600"
-          description="Kiểm định cuối"
+          description={t("Kiểm định cuối")}
         />
       </div>
 
       {/* Info */}
       <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-        <p className="font-medium">ℹ️ Hướng dẫn phân chia</p>
+        <p className="flex items-center gap-1.5 font-medium">
+            <InfoCircleIcon className="h-4 w-4"  aria-hidden="true" />
+            {t("Hướng dẫn phân chia")}
+          </p>
         <ul className="mt-2 list-inside list-disc space-y-1 text-xs">
-          <li>Train (70%): Dùng để huấn luyện mô hình</li>
-          <li>Validation (15%): Dùng để điều chỉnh hyperparameters</li>
-          <li>Test (15%): Dùng để đánh giá hiệu suất cuối cùng (không được thay đổi)</li>
+          <li>{t("Train (70%): Dùng để huấn luyện mô hình")}</li>
+          <li>{t("Validation (15%): Dùng để điều chỉnh hyperparameters")}</li>
+          <li>{t("Test (15%): Dùng để đánh giá hiệu suất cuối cùng (không được thay đổi)")}</li>
         </ul>
       </div>
     </div>
@@ -191,6 +226,7 @@ function SplitCard({
   color: string;
   description: string;
 }) {
+  const { t } = useI18n();
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between">
@@ -204,7 +240,7 @@ function SplitCard({
         </div>
       </div>
       <p className="mt-3 text-lg font-bold text-slate-900">{count.toLocaleString()}</p>
-      <p className="text-xs text-slate-500">mẫu</p>
+      <p className="text-xs text-slate-500">{t("mẫu")}</p>
     </div>
   );
 }

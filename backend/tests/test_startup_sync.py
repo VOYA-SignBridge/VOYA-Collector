@@ -51,10 +51,26 @@ MOCK_CLASS = {
 def setup_and_teardown():
     """Ensure tables exist, and any mock data is cleaned up before and after each test (Hard Delete)."""
     ensure_tables()
+    # classes.dialect carries a composite FK (tenant_id, dialect) -> dialects.
+    # MOCK_CLASS deliberately uses the synthetic en/us pair so it can never
+    # collide with real data, which means the dialect does not exist in the
+    # registry and the INSERT is rejected before the sync logic under test ever
+    # runs. Register it here (and drop it in teardown) so the test exercises the
+    # constraint instead of dodging it by borrowing a real dialect.
+    _execute(
+        "INSERT INTO dialects (tenant_id, dialect_id, display_name, language, status) "
+        "VALUES ('default', %s, 'Test (en/us)', %s, 'approved') "
+        "ON CONFLICT (tenant_id, dialect_id) DO NOTHING",
+        (MOCK_CLASS["dialect"], MOCK_CLASS["language"]),
+    )
     _execute("DELETE FROM classes WHERE class_uid = %s", (MOCK_CLASS["class_uid"],))
     yield
-    # Teardown logic
+    # Teardown logic — classes first, the dialect it references second.
     _execute("DELETE FROM classes WHERE class_uid = %s", (MOCK_CLASS["class_uid"],))
+    _execute(
+        "DELETE FROM dialects WHERE tenant_id = 'default' AND dialect_id = %s",
+        (MOCK_CLASS["dialect"],),
+    )
 
 def fake_fetch_all(query, params=None):
     """
@@ -123,9 +139,15 @@ def test_sync_soft_delete_safety(mock_raw, mock_samples, mock_labels, mock_fetch
     MOCK_CLASS_MODIFIED = dict(MOCK_CLASS)
     MOCK_CLASS_MODIFIED["slug"] = "test-slug-updated"
     mock_labels.return_value = [MOCK_CLASS_MODIFIED]
-    
-    # 4. Sync again (should update the slug but NOT touch deleted_at)
-    sync_missing_data_on_startup()
+
+    # 4. Sync again (should update the slug but NOT touch deleted_at).
+    #
+    # full=True is REQUIRED to reach the update path at all: the default sync
+    # only inserts rows missing from the DB, because no CSV carries updated_at
+    # to compare against, so re-upserting every row on every boot would be a
+    # silent overwrite. That makes full resync exactly the dangerous case for
+    # deleted_at — which is the property this test exists to pin down.
+    sync_missing_data_on_startup(full=True)
     
     # 5. Verify deleted_at is NOT NULL
     rows = original_fetch_all("SELECT slug, deleted_at FROM classes WHERE class_uid = %s", (MOCK_CLASS["class_uid"],))

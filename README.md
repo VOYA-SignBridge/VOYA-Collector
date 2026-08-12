@@ -18,7 +18,7 @@ Sign language data collection and processing system for Vietnamese Sign Language
 ## Project Overview
 
 VOYA-Collector captures sign language gesture data from:
-- **Live camera** (MediaPipe Holistic hand tracking)
+- **Live camera** (MediaPipe Hands landmark tracking, client-side)
 - **Video files** (MP4, MOV)
 
 Processed data is stored for training sign language recognition models.
@@ -31,7 +31,7 @@ Processed data is stored for training sign language recognition models.
 - **React 19** + TypeScript
 - **Vite** (build tool)
 - **Tailwind CSS v4**
-- **MediaPipe Holistic** (client-side hand tracking)
+- **MediaPipe Hands** (client-side hand tracking)
 - **Axios** (API client)
 
 ### Backend
@@ -87,6 +87,20 @@ cp .env.example .env
 # 2. Build and start
 docker compose -f docker-compose.prod.yml up --build -d
 ```
+
+#### After every deploy: check that what runs is what you built
+
+```bash
+python scripts/check_deploy_freshness.py     # exit 0 = running code == working tree
+```
+
+`docker compose ps` answers "is the process alive", not "is it the process you
+just built". A frontend image once sat five hours behind its source while all
+13 containers reported healthy — the site loaded perfectly, serving the previous
+bundle. The script compares each image against the files its Dockerfile actually
+copies, and each container against the image tag, so it separates the three
+cases that have three different fixes: rebuild, force-recreate, or restart
+(`realtime_service` bind-mounts its code, so rebuilding it does nothing).
 
 Before going live, make sure `.env` has:
 - Real `SECRET_KEY` / `AUTH_TOKEN_SECRET_KEY` (`python -c "import secrets; print(secrets.token_hex(32))"`)

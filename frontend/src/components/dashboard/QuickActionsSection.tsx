@@ -1,8 +1,15 @@
+/**
+ * Thẻ hành động nhanh trên bảng điều khiển.
+ *
+ * @i18n-key-table — `title`/`description`/`highlight` trong `baseActions` là
+ * KHOÁ từ điển, dịch lúc dựng.
+ */
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { HandIcon, TagIcon, UploadIcon, UsersIcon, DatabaseIcon } from "../ui/Icons";
 import { me } from "../../api/auth";
+import { useI18n } from "../../i18n";
 import type { AuthUser } from "../../api/auth";
 import SyncGDriveModal from "../SyncGDriveModal";
 
@@ -17,6 +24,7 @@ interface ActionCard {
 }
 
 export default function QuickActionsSection() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -85,7 +93,7 @@ export default function QuickActionsSection() {
     blue: "from-ctu-blue/10 via-white to-blue-50 border-ctu-blue/30 hover:shadow-ctu-blue/20",
     navy: "from-ctu-navy/10 via-white to-slate-50 border-ctu-navy/30 hover:shadow-ctu-navy/20",
     gold: "from-ctu-yellow/15 via-white to-amber-50 border-ctu-yellow/40 hover:shadow-ctu-yellow/30",
-    green: "from-emerald-500/10 via-white to-emerald-50 border-emerald-500/30 hover:shadow-emerald-500/20",
+    green: "from-sky-600/10 via-white to-sky-50 border-sky-600/30 hover:shadow-emerald-500/20",
     red: "from-rose-500/10 via-white to-rose-50 border-rose-500/30 hover:shadow-rose-500/20",
   };
 
@@ -93,7 +101,7 @@ export default function QuickActionsSection() {
     blue: "bg-ctu-blue/10 text-ctu-blue",
     navy: "bg-ctu-navy/10 text-ctu-navy",
     gold: "bg-ctu-yellow/20 text-ctu-navy",
-    green: "bg-emerald-500/10 text-emerald-600",
+    green: "bg-sky-600/10 text-sky-700",
     red: "bg-rose-500/10 text-rose-600",
   };
 
@@ -101,7 +109,7 @@ export default function QuickActionsSection() {
     blue: "text-ctu-navy",
     navy: "text-ctu-navy",
     gold: "text-ctu-navy",
-    green: "text-emerald-800",
+    green: "text-sky-800",
     red: "text-rose-800",
   };
 
@@ -109,7 +117,7 @@ export default function QuickActionsSection() {
     blue: "bg-ctu-blue hover:bg-ctu-navy-mid text-white",
     navy: "bg-ctu-navy hover:bg-ctu-navy-mid text-white",
     gold: "bg-ctu-yellow hover:bg-amber-400 text-ctu-navy",
-    green: "bg-emerald-600 hover:bg-emerald-700 text-white",
+    green: "bg-sky-600 hover:bg-sky-700 text-white",
     red: "bg-rose-600 hover:bg-rose-700 text-white",
   };
 
@@ -137,13 +145,13 @@ export default function QuickActionsSection() {
             </div>
 
             <h3 className={`text-2xl sm:text-3xl font-bold mb-3 ${textColorClasses[action.color]}`}>
-              {action.title}
+              {t(action.title)}
             </h3>
 
-            <p className="text-sm sm:text-base text-slate-600 mb-6 leading-relaxed">{action.description}</p>
+            <p className="text-sm sm:text-base text-slate-600 mb-6 leading-relaxed">{t(action.description)}</p>
 
             <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg ${buttonColorClasses[action.color]} font-semibold text-sm sm:text-base transition-all group-hover:gap-3`}>
-              {action.highlight}
+              {action.highlight ? t(action.highlight) : null}
               <svg className="w-5 h-5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>

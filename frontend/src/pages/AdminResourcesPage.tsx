@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import apiClient from "../api/axiosClient";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
+import { friendlyError } from "../lib/errors";
+import { tr, useI18n } from "../i18n";
+import {
+  BellOffIcon,
+  BoltIcon,
+  ChartBarIcon,
+  ChipIcon,
+  GearIcon,
+  HardDriveIcon,
+  ServerIcon,
+} from "../components/ui/Icons";
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend app/monitoring.py :: collect_resources()
@@ -65,7 +76,13 @@ interface ConfigInfo {
   services?: ServiceAlloc[];
   total_alloc_mb?: number;
 }
-interface Alert { level: "critical" | "warning"; message: string; resource?: string }
+interface Alert {
+  level: "critical" | "warning";
+  message: string;
+  /** Việc cần làm, tách khỏi `message` (chuyện đang xảy ra). */
+  hint?: string;
+  resource?: string;
+}
 interface ResourceReport {
   timestamp: string;
   host: HostInfo;
@@ -87,6 +104,18 @@ const fmtMem = (mb?: number): string => {
   const v = mb || 0;
   return v >= 1000 ? `${(v / 1000).toFixed(1)} GB` : `${v.toFixed(0)} MB`;
 };
+
+/**
+ * Phần ghi chú đứng sau một ô không có số liệu: vì sao không có.
+ *
+ * Ba khả năng, và chúng khác nhau về ý nghĩa: người ta đã TẮT cảnh báo (chủ ý,
+ * không phải hỏng), máy chủ có nói lý do, hoặc không biết gì. Gộp chung thành
+ * một dấu gạch ngang là bắt quản trị viên tự đoán xem đó là cấu hình hay sự cố.
+ */
+function noteFor(src: { ignored?: boolean; reason?: string } | null | undefined): string {
+  if (src?.ignored) return ` (${tr("Đã tắt cảnh báo")})`;
+  return src?.reason ? ` (${src.reason})` : "";
+}
 
 function statusBar(pct: number): string {
   if (pct >= 95) return "bg-red-500";
@@ -132,6 +161,7 @@ function StatTile({
 }
 
 export default function AdminResourcesPage() {
+  const { t } = useI18n();
   const [data, setData] = useState<ResourceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(true);
@@ -145,7 +175,7 @@ export default function AdminResourcesPage() {
         const res = await apiClient.get<ResourceReport>("/api/v1/admin/resources");
         if (!cancelled) { setData(res.data); setError(null); }
       } catch (e: any) {
-        if (!cancelled) setError(e?.response?.data?.detail || "Không tải được số liệu tài nguyên");
+        if (!cancelled) setError(friendlyError(e, tr("Không tải được số liệu tài nguyên")));
       }
     };
     tick();
@@ -160,13 +190,16 @@ export default function AdminResourcesPage() {
   }, [live]);
 
   const handleMuteAlert = async (resource: string) => {
-    if (!window.confirm("Bạn có chắc muốn tắt báo động cho phần cứng này không? Hành động này sẽ đánh dấu lỗi thành bỏ qua.")) return;
+    if (!window.confirm(t("Bạn có chắc muốn tắt báo động cho phần cứng này không? Hành động này sẽ đánh dấu lỗi thành bỏ qua."))) return;
     try {
       await apiClient.post("/api/v1/admin/config/ignore-hardware", { resource, ignore: true });
       // Fast refresh
       apiClient.get<ResourceReport>("/api/v1/admin/resources").then((res) => setData(res.data)).catch(console.error);
     } catch (err: any) {
-      alert("Lỗi khi tắt cảnh báo: " + (err.response?.data?.detail || err.message));
+      // `err.message` của axios là chuỗi kỹ thuật ("Request failed with status
+      // code 500") — nó nói với người vận hành đúng bằng không, và nó là đường
+      // rò cuối cùng còn lại trong tệp này.
+      setError(friendlyError(err, tr("Không tắt được cảnh báo phần cứng")));
     }
   };
 
@@ -195,9 +228,9 @@ export default function AdminResourcesPage() {
                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </div>
-            Giám sát tài nguyên
+            {t("Giám sát tài nguyên")}
           </h2>
-          <p className="text-slate-600">Tình trạng CPU · RAM · GPU · Ổ cứng và cấu hình phân phối tài nguyên hệ thống</p>
+          <p className="text-slate-600">{t("Tình trạng CPU · RAM · GPU · Ổ cứng và cấu hình phân phối tài nguyên hệ thống")}</p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-400 tabular-nums">
@@ -211,7 +244,7 @@ export default function AdminResourcesPage() {
             }`}
           >
             <span className={`w-2 h-2 rounded-full ${live ? "bg-ctu-blue animate-pulse" : "bg-slate-400"}`} />
-            {live ? "Trực tiếp" : "Tạm dừng"}
+            {live ? t("Trực tiếp") : t("Tạm dừng")}
           </button>
         </div>
       </div>
@@ -222,7 +255,7 @@ export default function AdminResourcesPage() {
 
       {!data && !error ? (
         <div className="py-20">
-          <LoadingSpinner size="lg" label="Đang tải số liệu tài nguyên..." />
+          <LoadingSpinner size="lg" label={t("Đang tải số liệu tài nguyên...")} />
         </div>
       ) : (
         <>
@@ -234,15 +267,32 @@ export default function AdminResourcesPage() {
               className={`rounded-lg px-4 py-3 text-sm font-medium border flex items-center justify-between gap-4 ${
                 a.level === "critical" ? "bg-red-50 border-red-200 text-red-700"
                                        : "bg-amber-50 border-amber-200 text-amber-700"}`}>
-              <div className="flex items-center gap-2">
-                <span>{a.level === "critical" ? "🔴" : "🟠"}</span>{a.message}
+              {/* Câu cảnh báo tới từ máy chủ và mang chính câu tiếng Việt làm
+                  khoá — đúng quy ước từ điển của dự án (docs/I18N.md §2), nên
+                  `t()` dịch được nó y như chữ viết thẳng trong giao diện. */}
+              <div className="flex items-start gap-2">
+                <span
+                  className={`mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
+                    a.level === "critical" ? "bg-red-500" : "bg-amber-500"
+                  }`}
+                  aria-hidden="true"
+                />
+                <div>
+                  <div>{t(a.message)}</div>
+                  {/* Việc-cần-làm tách khỏi chuyện-đang-xảy-ra: dòng đầu nói hệ
+                      thống đang thế nào, dòng sau mới nói phải làm gì. Gộp lại
+                      thì phần cần đọc gấp bị chôn giữa câu hướng dẫn. */}
+                  {a.hint ? (
+                    <div className="mt-1 text-xs font-normal opacity-80">{t(a.hint)}</div>
+                  ) : null}
+                </div>
               </div>
               {a.resource && (
                 <button
                   onClick={() => handleMuteAlert(a.resource as string)}
                   className="shrink-0 px-2.5 py-1.5 text-xs bg-white/60 hover:bg-white rounded-md border border-current/20 shadow-sm transition-colors opacity-90 hover:opacity-100 flex items-center gap-1.5"
                 >
-                  <span>🔕</span> Bỏ qua
+                  <BellOffIcon className="h-3.5 w-3.5"  aria-hidden="true" /> {t("Bỏ qua")}
                 </button>
               )}
             </div>
@@ -250,7 +300,7 @@ export default function AdminResourcesPage() {
         </div>
       ) : data ? (
         <div className="rounded-lg px-4 py-3 text-sm font-medium border bg-ctu-blue/10 border-ctu-blue/20 text-ctu-blue flex items-center gap-2">
-          <span>🟢</span> Tài nguyên bình thường — không có cảnh báo
+          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" /> {t("Tài nguyên bình thường — không có cảnh báo")}
         </div>
       ) : null}
 
@@ -260,37 +310,43 @@ export default function AdminResourcesPage() {
           label="CPU"
           pct={host?.cpu_pct}
           value={host?.error ? "—" : `${(host?.cpu_pct ?? 0).toFixed(0)}%`}
-          meta={host?.error ? host.error : `${host?.cpu_count ?? "?"} nhân logic`}
+          meta={host?.error ? host.error : t("{n} nhân logic", { n: host?.cpu_count ?? "?" })}
         />
         <StatTile
-          label="RAM hệ thống"
+          label={t("RAM hệ thống")}
           pct={host?.ram_pct}
           value={host?.error ? "—" : `${fmtMem(host?.ram_used_mb)} / ${fmtMem(host?.ram_total_mb)}`}
-          meta="Bộ nhớ khả dụng cho Docker"
+          meta={t("Bộ nhớ khả dụng cho Docker")}
         />
         <StatTile
-          label="VRAM GPU (toàn máy)"
+          label={t("VRAM GPU (toàn máy)")}
           pct={gpu?.available ? gpu?.vram_pct : undefined}
           value={gpu?.available ? `${fmtMem(gpu?.vram_used_mb)} / ${fmtMem(gpu?.vram_total_mb)}` : "—"}
           meta={gpu?.available
-            ? `Gồm cả Windows · VOYA: ${gpu?.processes?.length ?? 0} tiến trình`
-            : `Không có số liệu${(gpu as any)?.ignored ? " (Đã tắt cảnh báo)" : gpu?.reason ? ` (${gpu.reason})` : ""}`}
+            ? t("Gồm cả Windows · VOYA: {length} tiến trình", { length: gpu?.processes?.length ?? 0 })
+            : t("Không có số liệu") + noteFor(gpu)}
           muted={!gpu?.available}
         />
         <StatTile
-          label="Tải GPU"
+          label={t("Tải GPU")}
           pct={gpu?.available ? gpu?.util_pct : undefined}
           value={gpu?.available ? `${(gpu?.util_pct ?? 0).toFixed(0)}%` : "—"}
-          meta={gpu?.available ? `🌡️ ${gpu?.temp_c ?? "—"}°C · ⚡ ${gpu?.power_w ?? "—"} W · ${gpu?.processes?.length ?? 0} tiến trình` : undefined}
+          meta={gpu?.available
+            ? t("Nhiệt độ {nhiet}°C · Công suất {cong_suat} W · {n} tiến trình", {
+                nhiet: gpu?.temp_c ?? "—",
+                cong_suat: gpu?.power_w ?? "—",
+                n: gpu?.processes?.length ?? 0,
+              })
+            : undefined}
           muted={!gpu?.available}
         />
         <StatTile
-          label="Ổ cứng (Dataset)"
+          label={t("Ổ cứng (Dataset)")}
           pct={disk?.available ? disk?.used_pct : undefined}
           value={disk?.available ? `${(disk?.used_gb ?? 0).toFixed(1)} / ${(disk?.total_gb ?? 0).toFixed(1)} GB` : "—"}
           meta={disk?.available
-            ? `Còn trống ${(disk?.free_gb ?? 0).toFixed(1)} GB`
-            : `Không đọc được${(disk as any)?.ignored ? " (Đã tắt cảnh báo)" : disk?.reason ? ` (${disk.reason})` : ""}`}
+            ? t("Còn trống {p1} GB", { p1: (disk?.free_gb ?? 0).toFixed(1) })
+            : t("Không đọc được") + noteFor(disk)}
           muted={!disk?.available}
         />
       </div>
@@ -299,8 +355,8 @@ export default function AdminResourcesPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <span className="text-lg">🧮</span>
-            <h3 className="font-semibold text-slate-700">CPU theo nhân</h3>
+            <ChipIcon className="h-5 w-5"  aria-hidden="true" />
+            <h3 className="font-semibold text-slate-700">{t("CPU theo nhân")}</h3>
           </div>
           <span className="text-xs text-slate-400">
             {host?.cpu_count ?? "?"} nhân · dùng chung, không ghim cứng
@@ -309,7 +365,7 @@ export default function AdminResourcesPage() {
         {host?.cpu_per_core && host.cpu_per_core.length > 0 ? (
           <div className="flex items-end gap-1.5 h-24">
             {host.cpu_per_core.map((c, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`Nhân ${i}: ${c.toFixed(0)}%`}>
+              <div key={i} className="flex-1 flex flex-col items-center gap-1" title={t("Nhân {i}: {p1}%", { i, p1: c.toFixed(0) })}>
                 <div className="w-full h-full rounded-md bg-slate-100 overflow-hidden flex flex-col justify-end">
                   <div
                     className={`w-full rounded-md transition-all duration-500 ${statusBar(c)}`}
@@ -321,7 +377,7 @@ export default function AdminResourcesPage() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-slate-500">Chưa có dữ liệu CPU theo nhân</p>
+          <p className="text-sm text-slate-500">{t("Chưa có dữ liệu CPU theo nhân")}</p>
         )}
       </div>
 
@@ -329,13 +385,13 @@ export default function AdminResourcesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center gap-2 mb-4">
-            <h3 className="font-semibold text-slate-700">Huấn luyện</h3>
+            <h3 className="font-semibold text-slate-700">{t("Huấn luyện")}</h3>
           </div>
           {training?.active ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-ctu-blue/10 text-ctu-blue">
-                  <span className="w-1.5 h-1.5 rounded-full bg-ctu-blue animate-pulse" />Đang chạy
+                  <span className="w-1.5 h-1.5 rounded-full bg-ctu-blue animate-pulse" />{t("Đang chạy")}
                 </span>
                 <span className="text-xs font-mono text-slate-500">{training.model_type}</span>
                 <span className="text-xs font-mono text-slate-400 truncate">{training.job_id}</span>
@@ -358,14 +414,14 @@ export default function AdminResourcesPage() {
           ) : (
             <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
               <span className="w-2 h-2 rounded-full bg-slate-300" />
-              Không có job đang chạy — GPU rảnh, tài nguyên đã trả về hệ thống
+              {t("Không có job đang chạy — GPU rảnh, tài nguyên đã trả về hệ thống")}
             </div>
           )}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-lg">🗄️</span>
+            <ServerIcon className="h-5 w-5"  aria-hidden="true" />
             <h3 className="font-semibold text-slate-700">Redis</h3>
           </div>
           {redis?.available ? (
@@ -380,7 +436,7 @@ export default function AdminResourcesPage() {
                   <div className="h-full rounded-full bg-ctu-blue/40" style={{ width: '100%' }} />
                 </div>
               )}
-              <div className="text-xs text-slate-500">{redis.maxmemory_mb ? `Cache / broker · ${(redis.used_pct ?? 0).toFixed(0)}%` : "Không giới hạn — chỉ hiển thị dung lượng tuyệt đối"}</div>
+              <div className="text-xs text-slate-500">{redis.maxmemory_mb ? `Cache / broker · ${(redis.used_pct ?? 0).toFixed(0)}%` : t("Không giới hạn — chỉ hiển thị dung lượng tuyệt đối")}</div>
             </div>
           ) : <p className="text-sm text-slate-500">—</p>}
         </div>
@@ -394,12 +450,12 @@ export default function AdminResourcesPage() {
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">📊</span>
-              <h3 className="text-xl font-bold">Hệ thống Giám sát Enterprise (Grafana)</h3>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-ctu-blue text-white tracking-wide uppercase">New</span>
+              <ChartBarIcon className="h-6 w-6"  aria-hidden="true" />
+              <h3 className="text-xl font-bold">{t("Hệ thống giám sát chuyên sâu (Grafana)")}</h3>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-ctu-blue text-white tracking-wide uppercase">{t("Mới")}</span>
             </div>
             <p className="text-slate-300 text-sm max-w-2xl">
-              Log lỗi realtime, truy vết hành trình tác vụ (Audit Trail), và biểu đồ lưu trữ lịch sử phần cứng (Prometheus).
+              {t("Nhật ký lỗi theo thời gian thực, dấu vết kiểm toán từng tác vụ, và biểu đồ lịch sử phần cứng (Prometheus).")}
             </p>
           </div>
           <div className="flex shrink-0 gap-3">
@@ -409,7 +465,7 @@ export default function AdminResourcesPage() {
               rel="noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white text-slate-900 text-sm font-semibold hover:bg-slate-50 transition-colors shadow-sm"
             >
-              Mở Grafana Dashboard <span className="text-lg">↗</span>
+              {t("Mở Grafana Dashboard")} <span className="text-lg">↗</span>
             </a>
           </div>
         </div>
@@ -419,8 +475,8 @@ export default function AdminResourcesPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5">
           <div className="flex items-center gap-2">
-            <span className="text-lg">⚙️</span>
-            <h3 className="font-semibold text-slate-700">Cấu hình &amp; phân phối tài nguyên</h3>
+            <GearIcon className="h-5 w-5"  aria-hidden="true" />
+            <h3 className="font-semibold text-slate-700">{t("Cấu hình &amp; phân phối tài nguyên")}</h3>
           </div>
           {config?.available && (
             <span className="text-xs font-mono text-slate-400">{config.source_file}</span>
@@ -430,14 +486,14 @@ export default function AdminResourcesPage() {
         {/* Capacity chips */}
         <div className="flex flex-wrap gap-2 mb-5">
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-600">
-            🧮 {host?.cpu_count ?? "?"} nhân CPU
+            <ChipIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {host?.cpu_count ?? "?"} nhân CPU
           </span>
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-600">
-            💾 {fmtMem(budgetMb)} RAM
+            <HardDriveIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {fmtMem(budgetMb)} RAM
           </span>
           {gpu?.available && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-ctu-blue/5 border border-ctu-blue/20 text-ctu-blue">
-              🎮 {gpu.name} · {fmtMem(gpu.vram_total_mb)} → trainer
+              <BoltIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {gpu.name} · {fmtMem(gpu.vram_total_mb)} → trainer
             </span>
           )}
         </div>
@@ -450,8 +506,8 @@ export default function AdminResourcesPage() {
                   <div className="w-28 sm:w-40 shrink-0">
                     <div className="text-sm font-medium text-slate-800 truncate">{s.name}</div>
                     <div className="text-[11px] text-slate-400 truncate">
-                      {s.role}
-                      {s.concurrency ? ` · ${s.concurrency} luồng` : ""}
+                      {t(s.role)}
+                      {s.concurrency ? t(" · {concurrency} luồng", { concurrency: s.concurrency }) : ""}
                       {s.cpus ? ` · ${s.cpus} core` : ""}
                     </div>
                   </div>
@@ -476,7 +532,12 @@ export default function AdminResourcesPage() {
               <span className="text-slate-500">
                 Tổng phân bổ container:{" "}
                 <span className="font-bold text-slate-800 tabular-nums">{fmtMem(allocMb)}</span>
-                {budgetMb ? <span className="text-slate-400"> / ngân sách {fmtMem(budgetMb)}</span> : null}
+                {budgetMb ? (
+                  <span className="text-slate-400">
+                    {" "}
+                    {t("/ ngân sách {muc}", { muc: fmtMem(budgetMb) })}
+                  </span>
+                ) : null}
               </span>
               {budgetMb > 0 && (
                 <span className={`font-bold tabular-nums ${allocMb > budgetMb ? "text-orange-600" : "text-slate-600"}`}>
@@ -486,7 +547,7 @@ export default function AdminResourcesPage() {
             </div>
           </>
         ) : (
-          <p className="text-sm text-slate-500">Không đọc được cấu hình tài nguyên từ compose.</p>
+          <p className="text-sm text-slate-500">{t("Không đọc được cấu hình tài nguyên từ compose.")}</p>
         )}
       </div>
       </>

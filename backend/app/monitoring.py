@@ -39,13 +39,41 @@ GPU_SNAPSHOT_KEY = "monitor:gpu"
 GPU_SNAPSHOT_TTL = 15      # seconds — must exceed the sample interval so it never flaps
 GPU_SAMPLE_INTERVAL = 4    # seconds between nvidia-smi samples
 
+# Ngọn đèn "trainer đang chạy và KHÔNG thấy thiết bị nào" — xem
+# `_publish_absence_beacon`. TTL rộng hơn nhịp làm tươi khá nhiều để một lần
+# Redis chớp không biến "không có GPU" thành "trainer chết".
+GPU_ABSENCE_KEY = "monitor:gpu:absent"
+GPU_ABSENCE_INTERVAL = 60
+GPU_ABSENCE_TTL = 180
+
+# CPU is sampled in the background for the same reason GPU is: measuring it
+# inside the request needs a blocking window, and a window short enough not to
+# hurt the request is too short to measure anything.
+#
+# /proc/stat counts in jiffies at USER_HZ=100, so a 0.15s window gives each core
+# at most 15 ticks — a core at 3% earns 0.45 of a tick and reports exactly 0.
+# Measured on this host at idle: interval=0.15s put 3 of 12 cores above zero and
+# averaged 1.55%; interval=1.0s put 12 of 12 above zero and averaged 12.8%. The
+# admin panel was reading 0-1% while the machine was doing real work.
+CPU_SAMPLE_INTERVAL = 2.0  # seconds — long enough that per-core values resolve
+
 # Alert thresholds (percent)
 RAM_ALERT_PCT = 90
 CPU_ALERT_PCT = 92
 VRAM_ALERT_PCT = 90
 REDIS_ALERT_PCT = 90
-DISK_WARN_PCT = 85     # Soft limit — cảnh báo admin
-DISK_CRIT_PCT = 95     # Hard limit — chặn Sync, bảo vệ DB
+# Ngưỡng đĩa — HAI con số, và đây là NGUỒN DUY NHẤT của cả hai.
+#
+# Trước 2026-08-09 cùng một ngưỡng được viết ở ba nơi với ba giá trị: 85 ở đây,
+# 0.95 trong `sync_tasks.DISK_HIGH_WATERMARK`, và một phép trừ `watermark - 5`
+# trong `cli/verify_deployment.py`. Ba nơi không thể sửa cùng lúc, nên bảng
+# quản trị cảnh báo ở 85 trong khi kiểm tra sau triển khai im lặng tới 90.
+#
+# `sync_tasks` nhập DISK_CRIT_PCT từ đây chứ không ngược lại: `sync_tasks` kéo
+# theo `app.worker`, mà `app.worker` nhập chính module này — chiều ngược lại là
+# một vòng nhập khẩu.
+DISK_WARN_PCT = 85     # Cảnh báo admin.
+DISK_CRIT_PCT = 95     # Chặn Sync để bảo vệ CSDL. KHÔNG nới theo cảnh báo.
 # VRAM (MB) held by compute processes with NO active training job before we
 # flag a possible leak. A margin above 0 avoids false positives from a job that
 # is a few seconds into tearing down.
@@ -126,6 +154,57 @@ def _sample_gpu_processes() -> List[Dict[str, Any]]:
         return []
 
 
+_torch_cache: Dict[str, Any] = {}
+
+
+def _torch_verdict() -> Dict[str, Any]:
+    """Torch trên container này CÓ chạy được trên đúng con chip này không.
+
+    Vì sao đây là câu hỏi riêng, không suy ra được từ `nvidia-smi`: một wheel
+    torch chỉ mang kernel cho những kiến trúc nó được biên dịch cho.
+    `torch.cuda.is_available()` trả True trên một card mới hơn, rồi lượt phóng
+    kernel ĐẦU TIÊN chết giữa buổi huấn luyện với `no kernel image is available
+    for execution on the device` — sau khi dữ liệu đã nạp xong, và với một câu
+    lỗi đọc như lỗi lập trình chứ không như lệch bản dựng.
+
+    Cụ thể, hai máy của dự án này không cùng một chip:
+
+        máy A  RTX 3050 Laptop   Ampere    sm_86
+        máy B  RTX 5060 Ti       Blackwell sm_120
+
+    torch 2.7.1+cu128 (bản đang cài) mang `sm_75…sm_90, sm_100, sm_120`, nên cả
+    hai đều chạy được. Điều đó KHÔNG hiển nhiên và không vĩnh viễn: hạ về một
+    wheel cu121 là máy B lặng lẽ rơi xuống CPU. Nên phép so khớp này được ĐO ở
+    nơi có card và gửi kèm ảnh chụp, thay vì để ai đó nhớ.
+
+    Cache lại: `import torch` tốn vài giây và câu trả lời không đổi trong suốt
+    vòng đời container.
+    """
+    if _torch_cache:
+        return _torch_cache
+    verdict: Dict[str, Any] = {}
+    try:
+        import torch  # nặng, nên nhập trong hàm
+
+        major, minor = torch.cuda.get_device_capability(0)
+        arch = f"sm_{major}{minor}"
+        supported = list(torch.cuda.get_arch_list())
+        verdict = {
+            "compute_capability": arch,
+            "torch_version": str(torch.__version__),
+            "torch_arch_list": supported,
+            # Không có arch list (bản dựng CPU) thì không kết luận được — báo
+            # None chứ không báo False, để bên đọc phân biệt "không hỗ trợ" với
+            # "không biết".
+            "torch_supports_this_gpu": (arch in supported) if supported else None,
+        }
+    except Exception as exc:
+        logger.debug("[MONITOR] torch capability probe failed: %s", exc)
+        verdict = {"torch_supports_this_gpu": None}
+    _torch_cache.update(verdict)
+    return verdict
+
+
 def sample_gpu() -> Optional[Dict[str, Any]]:
     """Query ``nvidia-smi`` once. Returns None where no GPU / nvidia-smi is present."""
     if shutil.which("nvidia-smi") is None:
@@ -155,6 +234,7 @@ def sample_gpu() -> Optional[Dict[str, Any]]:
             "temp_c": _to_float(temp),
             "power_w": _to_float(power),
             "processes": _sample_gpu_processes(),
+            **_torch_verdict(),
         }
     except Exception as e:
         logger.debug("[MONITOR] nvidia-smi query failed: %s", e)
@@ -182,45 +262,183 @@ def _sampler_loop() -> None:
         time.sleep(GPU_SAMPLE_INTERVAL)
 
 
-def start_gpu_monitor() -> None:
-    """Start the GPU sampler thread once — only where a GPU is actually visible."""
+def _publish_absence_beacon() -> None:
+    """Ghi lại việc TRÌNH HUẤN LUYỆN đã khởi động và KHÔNG thấy thiết bị nào.
+
+    Vì sao cần một tín hiệu riêng cho việc "không có": thiếu ảnh chụp trong
+    Redis là câu trả lời chung cho ba tình huống rất khác nhau —
+
+      * máy chủ không có GPU;
+      * máy chủ CÓ GPU nhưng container trainer được dựng thiếu overlay, nên
+        thiết bị không được cấp vào trong;
+      * trainer chết hẳn, không ai chụp gì cả.
+
+    Sự cố ngày 2026-08-09 là trường hợp thứ hai, và cảnh báo gửi đi nói
+    "Nvidia GPU is missing or unreadable" — đọc lên hệt trường hợp thứ nhất.
+    Người nhận đi tìm cái card mà cái card vẫn nằm trong máy. Ngọn đèn báo
+    "tôi có chạy, và tôi không thấy thiết bị nào" tách được hai cái đầu ra
+    khỏi cái thứ ba.
+
+    Khoá riêng, KHÔNG dùng chung `monitor:gpu`: tín hiệu `worker_ready` nổ ở
+    CẢ trình xử lý video (không bao giờ có GPU) lẫn trainer, nên ghi đè lên
+    khoá chính sẽ xoá mất ảnh chụp thật của trainer mỗi lần trình xử lý video
+    khởi động lại.
+    """
+    client = _redis_client()
+    if client is None:
+        return
+    try:
+        client.set(
+            GPU_ABSENCE_KEY,
+            json.dumps({"reason": "no_device_in_container", "ts": time.time()}),
+            ex=GPU_ABSENCE_TTL,
+        )
+    except Exception as e:
+        logger.debug("[MONITOR] absence beacon not published: %s", e)
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def _absence_beacon_loop() -> None:
+    """Làm tươi ngọn đèn báo vắng mặt, và TẮT NÓ khi thiết bị xuất hiện.
+
+    Chạy chậm hơn bộ chụp thật rất nhiều: đây là một sự thật gần như không đổi
+    trong suốt vòng đời container, và mỗi nhịp tốn một lần gọi `nvidia-smi`.
+    Vẫn phải kiểm lại chứ không chỉ ghi một lần rồi thôi — trình điều khiển
+    NVIDIA trên máy trạm có thể xuất hiện lại sau một lần nâng cấp mà container
+    không hề khởi động lại, và lúc đó ngọn đèn phải tự tắt.
+    """
+    global _sampler_started
+    while True:
+        if sample_gpu() is not None:
+            with _sampler_lock:
+                if not _sampler_started:
+                    threading.Thread(target=_sampler_loop, name="gpu-monitor",
+                                     daemon=True).start()
+                    _sampler_started = True
+                    logger.info("[MONITOR] GPU xuat hien tro lai — bat bo chup")
+            return
+        _publish_absence_beacon()
+        time.sleep(GPU_ABSENCE_INTERVAL)
+
+
+def start_gpu_monitor(*, is_trainer: bool = False) -> None:
+    """Start the GPU sampler thread once — only where a GPU is actually visible.
+
+    `is_trainer` chỉ đổi hành vi khi KHÔNG có thiết bị: chỉ trainer mới được
+    thắp đèn báo vắng mặt, vì chỉ trainer mới được kỳ vọng có GPU. Trình xử lý
+    video không có GPU là chuyện bình thường, không phải sự cố.
+    """
     global _sampler_started
     with _sampler_lock:
         if _sampler_started:
             return
-        if shutil.which("nvidia-smi") is None or sample_gpu() is None:
-            logger.info("[MONITOR] no GPU visible here — sampler disabled")
+        has_device = shutil.which("nvidia-smi") is not None and sample_gpu() is not None
+        if has_device:
+            threading.Thread(target=_sampler_loop, name="gpu-monitor", daemon=True).start()
+            _sampler_started = True
+            logger.info("[MONITOR] GPU sampler thread launched")
             return
-        threading.Thread(target=_sampler_loop, name="gpu-monitor", daemon=True).start()
-        _sampler_started = True
-        logger.info("[MONITOR] GPU sampler thread launched")
+
+    logger.info("[MONITOR] no GPU visible here — sampler disabled (trainer=%s)", is_trainer)
+    if is_trainer:
+        threading.Thread(target=_absence_beacon_loop, name="gpu-absence",
+                         daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
 # Read side (runs inside the backend)
 # ---------------------------------------------------------------------------
 
+#: Vì sao GPU không đọc được, dịch sang câu người vận hành làm được việc gì đó.
+#: Đi vào cả thư cảnh báo lẫn bảng quản trị — cùng một câu, một chỗ sửa.
+GPU_ABSENCE_HINTS: Dict[str, str] = {
+    "no_device_in_container": (
+        "Trainer đang chạy nhưng không được cấp thiết bị nào. Nếu máy chủ có card "
+        "NVIDIA thì stack đã được dựng thiếu overlay GPU — chạy lại scripts/deploy.sh, "
+        "nó tự dò card. Nếu máy chủ không có card thì đây là trạng thái đúng."
+    ),
+    "no_snapshot": (
+        "Không container nào báo cáo GPU. Trainer có thể đã chết, hoặc đang chạy ảnh "
+        "cũ chưa có ngọn đèn báo vắng mặt — kiểm tra trainer còn sống không trước khi "
+        "kết luận về phần cứng."
+    ),
+    "redis_unavailable": "Không nối được Redis — đây là sự cố Redis, không phải sự cố GPU.",
+    "redis_error": "Redis trả lời lỗi — đây là sự cố Redis, không phải sự cố GPU.",
+    "parse_error": "Ảnh chụp GPU trong Redis không đọc được (hỏng định dạng).",
+}
+
+
 def read_gpu_snapshot() -> Dict[str, Any]:
     client = _redis_client()
     if client is None:
-        return {"available": False, "reason": "redis_unavailable"}
+        return {"available": False, "reason": "redis_unavailable",
+                "hint": GPU_ABSENCE_HINTS["redis_unavailable"]}
     try:
         raw = client.get(GPU_SNAPSHOT_KEY)
+        # Chỉ hỏi ngọn đèn báo vắng mặt khi KHÔNG có ảnh chụp thật. Ảnh chụp
+        # thật luôn thắng: đèn có TTL dài hơn nên nó còn sống một lúc sau khi
+        # thiết bị quay lại.
+        beacon = None if raw else client.get(GPU_ABSENCE_KEY)
     except Exception:
-        return {"available": False, "reason": "redis_error"}
+        return {"available": False, "reason": "redis_error",
+                "hint": GPU_ABSENCE_HINTS["redis_error"]}
     finally:
         try:
             client.close()
         except Exception:
             pass
     if not raw:
-        return {"available": False, "reason": "no_snapshot"}
+        reason = "no_device_in_container" if beacon else "no_snapshot"
+        return {"available": False, "reason": reason,
+                "hint": GPU_ABSENCE_HINTS[reason]}
     try:
         data = json.loads(raw)
         data["age_s"] = round(time.time() - float(data.get("ts", 0)), 1)
         return data
     except Exception:
-        return {"available": False, "reason": "parse_error"}
+        return {"available": False, "reason": "parse_error",
+                "hint": GPU_ABSENCE_HINTS["parse_error"]}
+
+
+_cpu_lock = threading.Lock()
+_cpu_latest: List[float] = []
+_cpu_sampler_started = False
+
+
+def _cpu_sampler_loop() -> None:
+    global _cpu_latest
+    import psutil
+
+    while True:
+        try:
+            # Blocking form: psutil sleeps the interval and diffs /proc/stat
+            # across it. Blocking is fine here — it is this thread's only job.
+            per_core = psutil.cpu_percent(interval=CPU_SAMPLE_INTERVAL, percpu=True)
+            with _cpu_lock:
+                _cpu_latest = list(per_core)
+        except Exception as e:
+            logger.debug("[MONITOR] cpu sampler tick error: %s", e)
+            time.sleep(CPU_SAMPLE_INTERVAL)
+
+
+def start_cpu_monitor() -> None:
+    """Start the CPU sampler thread once, in whichever process serves /resources."""
+    global _cpu_sampler_started
+    with _sampler_lock:
+        if _cpu_sampler_started:
+            return
+        try:
+            import psutil  # noqa: F401
+        except Exception:
+            logger.info("[MONITOR] psutil missing — CPU sampler disabled")
+            return
+        threading.Thread(target=_cpu_sampler_loop, name="cpu-monitor", daemon=True).start()
+        _cpu_sampler_started = True
+        logger.info("[MONITOR] CPU sampler started (interval=%ss)", CPU_SAMPLE_INTERVAL)
 
 
 def host_snapshot() -> Dict[str, Any]:
@@ -229,7 +447,13 @@ def host_snapshot() -> Dict[str, Any]:
     try:
         import psutil
 
-        per_core = psutil.cpu_percent(interval=0.15, percpu=True)
+        with _cpu_lock:
+            per_core = list(_cpu_latest)
+        if not per_core:
+            # Sampler not warm yet (first request after boot). One blocking
+            # read at a window wide enough to actually resolve, rather than
+            # reporting a zero that looks like an idle machine.
+            per_core = psutil.cpu_percent(interval=1.0, percpu=True)
         cpu = round(sum(per_core) / len(per_core), 1) if per_core else 0.0
         vm = psutil.virtual_memory()
         return {
@@ -487,7 +711,32 @@ def collect_resources() -> Dict[str, Any]:
     alerts = _build_alerts(host, gpu, training, rds, disk)
     
     if not gpu.get("available") and not gpu.get("ignored"):
-        alerts.append({"level": "critical", "message": "Mất kết nối GPU (Server không tìm thấy phần cứng đồ họa).", "resource": "gpu"})
+        # This used to read "Server không tìm thấy phần cứng đồ họa" at level
+        # critical, which was wrong twice over. The backend never looks at the
+        # hardware — it only reads a snapshot the worker publishes, and the
+        # worker publishes nothing when nvidia-smi is absent from ITS container.
+        # On this host `docker run --gpus all` prints an RTX 3050 quite happily;
+        # the stack was simply started without docker-compose.gpu.yml. And
+        # CPU-only is the documented default deploy (that overlay is opt-in
+        # precisely so hosts without the NVIDIA toolkit still come up), so
+        # flagging it critical raised a red alarm over a supported setup.
+        # Câu này KHÔNG còn chứa lệnh docker.
+        #
+        # Một dòng `docker compose -f … -f … -f … up -d` dán giữa bảng theo dõi
+        # là thứ không ai gõ được từ trình duyệt, và nó chiếm chỗ của điều thật
+        # sự cần nói: huấn luyện đang chậm hơn lẽ ra. Việc bật lại GPU thuộc về
+        # `scripts/deploy.sh`, vốn tự dò card và tự ghi COMPOSE_FILE — người vận
+        # hành chỉ cần biết CHẠY LẠI nó, không cần thuộc lòng ba tệp overlay.
+        alerts.append({
+            "level": "warning",
+            "message": "Huấn luyện đang chạy bằng CPU — container không được cấp GPU.",
+            "hint": (
+                "Nếu máy này có card NVIDIA: chạy lại scripts/deploy.sh (nó tự dò "
+                "card và bật overlay). Nếu máy không có card thì đây là trạng thái "
+                "đúng — tắt cảnh báo bằng nút bên cạnh."
+            ),
+            "resource": "gpu",
+        })
         
     if disk and not disk.get("available") and not disk.get("ignored"):
         alerts.append({"level": "critical", "message": "Mất kết nối Ổ cứng lưu trữ (Dataset volume).", "resource": "disk"})

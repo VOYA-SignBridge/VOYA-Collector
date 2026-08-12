@@ -5,6 +5,15 @@ global:
   scrape_interval: 15s
   scrape_timeout: 10s
 
+# KHÔNG có `rule_files` ở đây, và đó là chủ ý.
+#
+# Bản triển khai này không chạy Alertmanager, nên một quy tắc phía Prometheus
+# chỉ chuyển sang trạng thái ĐANG KÊU trên trang `/alerts` rồi nằm im — không
+# ai nhận được gì. Toàn bộ cảnh báo sống ở hệ hợp nhất của Grafana
+# (`logging/grafana/alerting/`), nơi đã có contact point gửi thư thật.
+#
+# Chú thích `for: 1m` ở trên nói về những quy tắc đó, không phải về tệp này.
+
 scrape_configs:
   - job_name: 'voya_backend'
     static_configs:

@@ -2,8 +2,17 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSamples } from "../../api/dataset";
 import Button from "../ui/Button";
-import { CameraIcon, ChipIcon, HeartIcon, UploadIcon } from "../ui/Icons";
+import {
+  CameraIcon,
+  ChipIcon,
+  HeartIcon,
+  MedalIcon,
+  SparkleIcon,
+  StarIcon,
+  UploadIcon,
+} from "../ui/Icons";
 import type { Session } from "../../types";
+import { useI18n } from "../../i18n";
 
 interface MyContributionStats {
   totalSamples: number;
@@ -18,6 +27,7 @@ interface MyContributionSectionProps {
 }
 
 export default function MyContributionSection({ username }: MyContributionSectionProps) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [stats, setStats] = useState<MyContributionStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -104,7 +114,7 @@ export default function MyContributionSection({ username }: MyContributionSectio
   if (!username) {
     return (
       <div className="space-y-6">
-        <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Tham gia cộng đồng</h2>
+        <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">{t("Tham gia cộng đồng")}</h2>
         <div className="bg-gradient-to-br from-ctu-blue/10 to-ctu-navy/5 rounded-2xl p-8 sm:p-10 border-2 border-ctu-blue/30 shadow-md">
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -112,22 +122,22 @@ export default function MyContributionSection({ username }: MyContributionSectio
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-ctu-blue/10 text-ctu-blue">
                   <CameraIcon className="h-6 w-6" />
                 </div>
-                <p className="font-semibold text-slate-900">Đóng góp dữ liệu VSL</p>
-                <p className="text-sm text-slate-600 mt-2">Ghi lại và tải lên mẫu Ngôn ngữ Ký hiệu Việt Nam</p>
+                <p className="font-semibold text-slate-900">{t("Đóng góp dữ liệu VSL")}</p>
+                <p className="text-sm text-slate-600 mt-2">{t("Ghi lại và tải lên mẫu Ngôn ngữ Ký hiệu Việt Nam")}</p>
               </div>
               <div className="text-center">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-ctu-navy/10 text-ctu-navy">
                   <ChipIcon className="h-6 w-6" />
                 </div>
-                <p className="font-semibold text-slate-900">Hỗ trợ nghiên cứu AI</p>
-                <p className="text-sm text-slate-600 mt-2">Giúp cải thiện hệ thống nhận dạng tự động</p>
+                <p className="font-semibold text-slate-900">{t("Hỗ trợ nghiên cứu AI")}</p>
+                <p className="text-sm text-slate-600 mt-2">{t("Giúp cải thiện hệ thống nhận dạng tự động")}</p>
               </div>
               <div className="text-center">
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-ctu-yellow/20 text-ctu-navy">
                   <HeartIcon className="h-6 w-6" />
                 </div>
-                <p className="font-semibold text-slate-900">Hỗ trợ cộng đồng</p>
-                <p className="text-sm text-slate-600 mt-2">Cùng xây dựng tài nguyên cho người khiếm thính</p>
+                <p className="font-semibold text-slate-900">{t("Hỗ trợ cộng đồng")}</p>
+                <p className="text-sm text-slate-600 mt-2">{t("Cùng xây dựng tài nguyên cho người khiếm thính")}</p>
               </div>
             </div>
 
@@ -137,14 +147,14 @@ export default function MyContributionSection({ username }: MyContributionSectio
                 className="justify-center px-8 py-3 text-base font-semibold"
                 variant="primary"
               >
-                Đăng nhập
+                {t("Đăng nhập")}
               </Button>
               <Button
                 onClick={() => navigate("/register")}
                 className="justify-center px-8 py-3 text-base font-semibold"
                 variant="ghost"
               >
-                Đăng ký tài khoản
+                {t("Đăng ký tài khoản")}
               </Button>
             </div>
           </div>
@@ -157,32 +167,37 @@ export default function MyContributionSection({ username }: MyContributionSectio
     return null;
   }
 
-  const getRankMedal = (rank: number) => {
-    if (rank === 1) return "🥇";
-    if (rank === 2) return "🥈";
-    if (rank === 3) return "🥉";
-    if (rank <= 15) return "⭐";
-    return "✨";
+  /** Hạng, vẽ bằng SVG.
+   *
+   * Ba hạng đầu dùng CHUNG một hình, khác nhau ở màu. Vàng/bạc/đồng vẽ bằng
+   * ba emoji riêng thì trên máy thiếu phông màu chúng ra ba ô vuông giống
+   * hệt nhau — mất sạch thứ tự hạng, đúng thứ duy nhất hình này để nói. */
+  const rankMedal = (rank: number) => {
+    if (rank === 1) return { Icon: MedalIcon, className: "text-amber-500" };
+    if (rank === 2) return { Icon: MedalIcon, className: "text-slate-400" };
+    if (rank === 3) return { Icon: MedalIcon, className: "text-orange-700" };
+    if (rank <= 15) return { Icon: StarIcon, className: "text-sky-500" };
+    return { Icon: SparkleIcon, className: "text-slate-400" };
   };
 
   const getRankText = (rank: number) => {
     if (rank === 1) return "Số 1 cộng tác viên";
-    if (rank <= 15) return `Top ${rank} cộng tác viên`;
+    if (rank <= 15) return t("Top {rank} cộng tác viên", { rank });
     return "Cộng tác viên tích cực";
   };
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Đóng góp của bạn</h2>
+      <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">{t("Đóng góp của bạn")}</h2>
 
       {stats.totalSamples === 0 ? (
         <div className="bg-gradient-to-br from-ctu-blue/10 to-ctu-navy/5 rounded-2xl p-8 sm:p-12 border border-ctu-blue/30 text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-ctu-blue/10 text-ctu-blue">
             <UploadIcon className="h-7 w-7" />
           </div>
-          <p className="text-xl font-bold text-slate-900 mb-2">Hãy bắt đầu đóng góp!</p>
+          <p className="text-xl font-bold text-slate-900 mb-2">{t("Hãy bắt đầu đóng góp!")}</p>
           <p className="text-slate-600 mb-6">
-            Bạn chưa có mẫu dữ liệu nào. Mỗi đóng góp giúp cải thiện hệ thống nhận dạng Ngôn ngữ Ký hiệu Việt Nam.
+            {t("Bạn chưa có mẫu dữ liệu nào. Mỗi đóng góp giúp cải thiện hệ thống nhận dạng Ngôn ngữ Ký hiệu Việt Nam.")}
           </p>
         </div>
       ) : (
@@ -190,25 +205,29 @@ export default function MyContributionSection({ username }: MyContributionSectio
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
             {/* Total Samples */}
             <div className="bg-gradient-to-br from-ctu-blue/10 to-blue-50 rounded-2xl p-6 sm:p-8 border border-ctu-blue/30 shadow-md">
-              <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">Mẫu Dữ Liệu</div>
+              <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">{t("Mẫu Dữ Liệu")}</div>
               <div className="text-4xl sm:text-5xl font-bold text-ctu-blue mb-1">{stats.totalSamples}</div>
               <p className="text-sm text-slate-600">
-                Từ <strong>{stats.sessionsCount}</strong> phiên ghi
+                {t("Từ")} <strong>{stats.sessionsCount}</strong> {t("phiên ghi")}
               </p>
             </div>
 
             {/* Labels */}
             <div className="bg-gradient-to-br from-ctu-navy/10 to-slate-50 rounded-2xl p-6 sm:p-8 border border-ctu-navy/30 shadow-md">
-              <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">Nhãn Được Ghi</div>
+              <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">{t("Nhãn Được Ghi")}</div>
               <div className="text-4xl sm:text-5xl font-bold text-ctu-navy mb-1">{stats.labels.length}</div>
-              <p className="text-sm text-slate-600">Loại ngôn ngữ ký hiệu</p>
+              <p className="text-sm text-slate-600">{t("Loại ngôn ngữ ký hiệu")}</p>
             </div>
 
             {/* Rank */}
             <div className="bg-gradient-to-br from-ctu-yellow/20 to-amber-50 rounded-2xl p-6 sm:p-8 border border-ctu-yellow/40 shadow-md">
-              <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">Xếp Hạng</div>
+              <div className="text-sm text-slate-600 mb-2 font-medium uppercase tracking-wider">{t("Xếp Hạng")}</div>
               <div className="text-3xl sm:text-4xl font-bold mb-2 text-ctu-navy">
-                {getRankMedal(stats.rank)} {stats.rank}/{stats.totalContributors}
+                {(() => {
+                  const { Icon, className } = rankMedal(stats.rank);
+                  return <Icon className={`inline h-4 w-4 -mt-0.5 ${className}`} aria-hidden="true" />;
+                })()}{" "}
+                {stats.rank}/{stats.totalContributors}
               </div>
               <p className="text-sm text-slate-600 font-semibold text-ctu-navy">{getRankText(stats.rank)}</p>
             </div>
@@ -218,7 +237,7 @@ export default function MyContributionSection({ username }: MyContributionSectio
           {stats.labels.length > 0 && (
             <div className="bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-md">
               <p className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4">
-                Các nhãn bạn đã đóng góp
+                {t("Các nhãn bạn đã đóng góp")}
               </p>
               <div className="flex flex-wrap gap-2 sm:gap-3">
                 {stats.labels.slice(0, 12).map((label) => (

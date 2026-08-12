@@ -7,7 +7,7 @@ from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
 from app.dataset_manager import get_or_register_class
-from app.dataset_samples import save_sequence_npz, count_samples_for_class
+from app.dataset_samples import save_sequence_npz, count_samples_for_class, COORD_SPACE_IMAGE
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +214,14 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                             # under a file lock for a video that yields many samples.
                             if max_per_class > 0 and (existing_total + saved_total) >= max_per_class:
                                 break
-                            path = save_sequence_npz(class_meta, aseq, meta=window_meta, augment_id=aug_id, source_type="video", upload_collector=upload_items)
+                            # This path never normalizes: extract_sequence_stream
+                            # yields MediaPipe image coordinates straight into
+                            # the window, and nothing between here and disk moves
+                            # them. Saying so is not bookkeeping — a viewer that
+                            # assumes wrist-centred data splits the two hands into
+                            # separate columns, and these hands are already in
+                            # their true relative positions.
+                            path = save_sequence_npz(class_meta, aseq, meta=window_meta, augment_id=aug_id, source_type="video", upload_collector=upload_items, coordinate_space=COORD_SPACE_IMAGE)
                             saved_paths.append(path)
                             saved_total += 1
                             if remaining_quota is not None and saved_total >= remaining_quota:
@@ -288,7 +295,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                     meta["rescue_fill"] = True
                     meta["rescue_from_completeness"] = float(round(best_comp, 4))
                     meta["rescue_from_activity"] = float(round(best_act, 6))
-                    path = save_sequence_npz(class_meta, aseq, meta=meta, augment_id=base_aug_id + i, source_type="video", upload_collector=upload_items)
+                    path = save_sequence_npz(class_meta, aseq, meta=meta, augment_id=base_aug_id + i, source_type="video", upload_collector=upload_items, coordinate_space=COORD_SPACE_IMAGE)
                     all_saved_paths.append(path)
                     saved_total += 1
 

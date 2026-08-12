@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import LabelDetailPage from "../LabelDetailPage";
 import * as api from "../../api/labelDetail";
 import * as useAuthHook from "../../hooks/useAuth";
-import { ECO_MODE_KEY } from "../../components/viewer/useRenderTier";
+import { VIEWER_TIER_KEY } from "../../components/viewer/useRenderTier";
 
 vi.mock("../../api/labelDetail", async () => {
   const actual = await vi.importActual<typeof api>("../../api/labelDetail");
@@ -147,8 +147,8 @@ describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
     );
   });
 
-  it("Eco mode → Tier video: hỏi server preview, KHÔNG tải frames", async () => {
-    localStorage.setItem(ECO_MODE_KEY, "1");
+  it("Tier video: hỏi server preview, KHÔNG tải frames", async () => {
+    localStorage.setItem(VIEWER_TIER_KEY, "video");
     render(<LabelDetailPage />);
     await screen.findAllByText("Xin chào");
     const video = await screen.findByTestId("preview-video");
@@ -158,7 +158,7 @@ describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
   });
 
   it("server đang render (202) → hiện trạng thái chờ thay vì video", async () => {
-    localStorage.setItem(ECO_MODE_KEY, "1");
+    localStorage.setItem(VIEWER_TIER_KEY, "video");
     vi.mocked(api.getPreviewStatus).mockResolvedValue("rendering");
     render(<LabelDetailPage />);
     expect(await screen.findByTestId("preview-rendering")).toBeInTheDocument();
@@ -198,7 +198,7 @@ describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
   });
 
   it("polling: 202 (đang render) → poll lại → 200 (ready) → hiện video", async () => {
-    localStorage.setItem(ECO_MODE_KEY, "1");
+    localStorage.setItem(VIEWER_TIER_KEY, "video");
     vi.mocked(api.getPreviewStatus)
       .mockResolvedValueOnce("rendering") // lần probe đầu: server mới enqueue
       .mockResolvedValue("ready"); // lần poll sau: worker đã render xong
@@ -212,7 +212,7 @@ describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
   }, 10000);
 
   it("đổi chất lượng thủ công từ dropdown → chuyển tier ngay (video → 2D)", async () => {
-    localStorage.setItem(ECO_MODE_KEY, "1"); // đang ở tier video
+    localStorage.setItem(VIEWER_TIER_KEY, "video"); // đang ở tier video
     render(<LabelDetailPage />);
     await screen.findByTestId("preview-video");
 

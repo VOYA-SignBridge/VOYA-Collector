@@ -19,8 +19,15 @@ vi.mock('../../hooks/useAuth', () => ({
   useAuth: vi.fn(),
 }));
 
+// `Link` is mocked as well as `useNavigate`: a partial mock of this module
+// throws "No 'Link' export is defined" the moment any child renders one, and
+// PageHeader's breadcrumb does. Rendering it as a plain anchor keeps the href
+// assertable without pulling a Router into every page test.
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
 }));
 
 describe('LabelsPage - Comprehensive Automation Tests (Edge Cases & Errors)', () => {

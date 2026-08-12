@@ -1,14 +1,26 @@
 /**
  * Step 7: Results & Insights - Professional Layout
  * Displays final training results and recommendations
+ *
+ * @i18n-key-table — chuỗi tiếng Việt trong các bảng/hằng của tệp này là KHOÁ
+ * từ điển, dịch tại chỗ dựng.
  */
 
 import React, { useEffect, useState } from 'react';
 import { useTrainingAPI } from '../../../hooks/useTrainingAPI';
-import type { JobEvaluation, PromoteResponse, TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
+import type { JobEvaluation, JobProvenance, PromoteResponse, TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
 import TestTrainedModelModal from './TestTrainedModelModal';
-import { ClipboardCheckIcon } from '../../../components/ui/Icons';
+import {
+  ClipboardCheckIcon,
+  CheckCircleIcon,
+  AlertTriangleIcon,
+  InfoCircleIcon,
+  CopyIcon,
+  PlayCircleIcon,
+  ArrowUpCircleIcon,
+} from '../../../components/ui/Icons';
 import { useAuth } from '../../../hooks/useAuth';
+import { useI18n } from "../../../i18n";
 
 interface Props {
   metrics: TrainingMetrics[];
@@ -22,13 +34,59 @@ const prettyLabel = (labelKey: string): string => {
   return parts[parts.length - 1] || labelKey;
 };
 
+const ProvenanceGroup: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+  <div>
+    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{title}</p>
+    <div className="space-y-1.5">{children}</div>
+  </div>
+);
+
+/** One provenance field. Renders "chưa ghi" rather than an empty cell, so a
+ *  missing value reads as a fact about the run instead of a broken UI. */
+const ProvenanceRow: React.FC<{
+  label: string;
+  value?: string | number | null;
+  mono?: boolean;
+  truncate?: boolean;
+  copyable?: boolean;
+}> = ({ label, value, mono, truncate, copyable }) => {
+  const { t } = useI18n();
+  const text = value === null || value === undefined || value === '' ? '' : String(value);
+  const shown = text && truncate && text.length > 12 ? `${text.slice(0, 12)}…` : text;
+
+  return (
+    <div className="flex items-baseline justify-between gap-2 text-sm">
+      <span className="text-slate-600 shrink-0">{label}:</span>
+      <span className="flex items-center gap-1 min-w-0">
+        <span
+          className={`${mono ? 'font-mono text-xs' : ''} ${text ? 'text-slate-900' : 'italic text-slate-400'} truncate`}
+          title={text || undefined}
+        >
+          {shown || t('chưa ghi')}
+        </span>
+        {copyable && text && (
+          <button
+            onClick={() => navigator.clipboard.writeText(text)}
+            className="shrink-0 text-slate-400 hover:text-slate-700 transition"
+            aria-label={t("Sao chép {label}", { label })}
+          >
+            <CopyIcon className="h-3 w-3" />
+          </button>
+        )}
+      </span>
+    </div>
+  );
+};
+
 const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
+  const { t } = useI18n();
   const [showTestModal, setShowTestModal] = useState(false);
   const { isAdmin } = useAuth();
-  const { getJobEvaluation } = useTrainingAPI();
+  const { getJobEvaluation, getJobProvenance } = useTrainingAPI();
   const [promoting, setPromoting] = useState(false);
   const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
   const [evaluation, setEvaluation] = useState<JobEvaluation | null>(null);
+  const [provenance, setProvenance] = useState<JobProvenance | null>(null);
 
   useEffect(() => {
     let stale = false;
@@ -36,17 +94,20 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
       getJobEvaluation(job.id).then((ev) => {
         if (!stale && ev?.available) setEvaluation(ev);
       });
+      getJobProvenance(job.id).then((pv) => {
+        if (!stale && pv?.available) setProvenance(pv);
+      });
     }
     return () => {
       stale = true;
     };
-  }, [job?.id, job?.status, getJobEvaluation]);
+  }, [job?.id, job?.status, getJobEvaluation, getJobProvenance]);
 
   if (!metrics || metrics.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <ClipboardCheckIcon className="h-12 w-12 mb-4 text-slate-300" />
-        <p className="text-slate-600">Chưa có dữ liệu kết quả. Bắt đầu huấn luyện để xem kết quả.</p>
+        <p className="text-slate-600">{t("Chưa có dữ liệu kết quả. Bắt đầu huấn luyện để xem kết quả.")}</p>
       </div>
     );
   }
@@ -60,16 +121,19 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
   const isTestMetrics = !!job?.test_acc;
 
   const getQualityLevel = (acc: number) => {
-    if (acc >= 0.95) return { level: 'Xuất Sắc', color: 'from-emerald-500 to-teal-500', bgColor: 'bg-emerald-50' };
-    if (acc >= 0.90) return { level: 'Rất Tốt', color: 'from-ctu-blue to-ctu-navy', bgColor: 'bg-ctu-blue/5' };
-    if (acc >= 0.80) return { level: 'Tốt', color: 'from-yellow-500 to-amber-500', bgColor: 'bg-yellow-50' };
-    return { level: 'Cần Cải Thiện', color: 'from-orange-500 to-red-500', bgColor: 'bg-orange-50' };
+    if (acc >= 0.95)
+      return { level: 'Xuất sắc', iconBg: 'bg-sky-100', iconColor: 'text-sky-700', badgeBg: 'bg-sky-50', badgeText: 'text-sky-800' };
+    if (acc >= 0.90)
+      return { level: 'Rất tốt', iconBg: 'bg-ctu-blue/10', iconColor: 'text-ctu-blue', badgeBg: 'bg-ctu-blue/5', badgeText: 'text-ctu-navy' };
+    if (acc >= 0.80)
+      return { level: 'Tốt', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', badgeBg: 'bg-amber-50', badgeText: 'text-amber-700' };
+    return { level: 'Cần cải thiện', iconBg: 'bg-orange-100', iconColor: 'text-orange-600', badgeBg: 'bg-orange-50', badgeText: 'text-orange-700' };
   };
 
   const quality = getQualityLevel(accuracy);
 
   const getRecommendations = () => {
-    const recs: Array<{ type: 'success' | 'warning' | 'info'; emoji: string; text: string }> = [];
+    const recs: Array<{ type: 'success' | 'warning' | 'info'; text: string }> = [];
 
     if (metrics.length > 5) {
       const recentMetrics = metrics.slice(-5);
@@ -78,14 +142,12 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
       if (recentImprovement > 0.02) {
         recs.push({
           type: 'success',
-          emoji: '✓',
           text: 'Model đang cải thiện tốt trong các epoch gần đây',
         });
       } else if (recentImprovement < -0.02) {
         recs.push({
           type: 'warning',
-          emoji: '⚠️',
-          text: 'Model có dấu hiệu overfitting — xem xét giảm số epochs hoặc thêm regularization',
+          text: 'Model có dấu hiệu overfitting — xem xét giảm số epoch hoặc thêm regularization',
         });
       }
     }
@@ -93,19 +155,16 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
     if (accuracy >= 0.9) {
       recs.push({
         type: 'success',
-        emoji: '🎉',
-        text: 'Model sẵn sàng để sử dụng trong thực tế!',
+        text: 'Model sẵn sàng để sử dụng trong thực tế',
       });
     } else if (accuracy >= 0.8) {
       recs.push({
         type: 'info',
-        emoji: '💡',
-        text: 'Cân nhân xét huấn luyện lại với dữ liệu lớn hơn hoặc điều chỉnh hyperparameters',
+        text: 'Cân nhắc huấn luyện lại với dữ liệu lớn hơn hoặc điều chỉnh hyperparameters',
       });
     } else {
       recs.push({
         type: 'warning',
-        emoji: '💡',
         text: 'Cần cải thiện — thêm dữ liệu huấn luyện và thử các kiến trúc khác',
       });
     }
@@ -117,51 +176,59 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
 
   return (
     <div className="space-y-6">
-      {/* Overall Quality Banner */}
-      <div className={`rounded-2xl bg-gradient-to-r ${quality.color} p-8 text-white shadow-lg`}>
-        <div className="text-center">
-          <div className="text-5xl mb-3">🎉</div>
-          <h2 className="text-3xl font-bold">Huấn Luyện Hoàn Tất!</h2>
-          <p className="mt-2 text-lg opacity-90">{quality.level}</p>
-          <div className="mt-4 text-4xl font-bold">{(accuracy * 100).toFixed(1)}%</div>
-          <p className="mt-1 text-sm opacity-75">
-            {isTestMetrics ? 'Độ Chính Xác Trên Tập Test' : 'Độ Chính Xác Validation (Epoch Cuối)'}
-          </p>
+      {/* Overall Quality Summary */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className={`flex h-14 w-14 items-center justify-center rounded-full ${quality.iconBg}`}>
+            <CheckCircleIcon className={`h-7 w-7 ${quality.iconColor}`} />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-slate-900">{t("Huấn luyện hoàn tất")}</h2>
+            <span className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium ${quality.badgeBg} ${quality.badgeText}`}>
+              {t(quality.level)}
+            </span>
+          </div>
+          <div className="mt-2">
+            <div className="text-4xl font-bold text-slate-900">{(accuracy * 100).toFixed(1)}%</div>
+            <p className="mt-1 text-sm text-slate-500">
+              {isTestMetrics ? t('Độ chính xác trên tập test') : t('Độ chính xác validation (epoch cuối)')}
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Key Metrics Grid */}
       <div>
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-          Chỉ Số Hiệu Suất Chính
+          {t("Chỉ số hiệu suất chính")}
         </h3>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
-            label="Accuracy (Độ Chính Xác)"
+            label={t("Độ chính xác (Accuracy)")}
             value={(accuracy * 100).toFixed(1)}
             unit="%"
-            description="Tỷ lệ dự đoán đúng"
+            description={t("Tỷ lệ dự đoán đúng")}
             color="indigo"
           />
           <MetricCard
-            label="F1 Score"
+            label={t("Điểm F1")}
             value={f1.toFixed(3)}
             unit=""
-            description="Cân bằng Precision/Recall"
+            description={t("Cân bằng giữa độ chuẩn xác và độ bao phủ")}
             color="purple"
           />
           <MetricCard
-            label="Epochs Completed"
+            label={t("Số epoch đã chạy")}
             value={finalMetric.epoch.toString()}
             unit=""
-            description={`Tổng cộng ${job?.total_epochs || 0} epochs`}
+            description={t("Tổng cộng {total_epochs} epoch", { total_epochs: job?.total_epochs || 0 })}
             color="blue"
           />
           <MetricCard
-            label="Best F1 Score"
+            label={t("Điểm F1 tốt nhất")}
             value={bestMetric.val_f1.toFixed(3)}
             unit=""
-            description={`Epoch ${bestMetric.epoch}`}
+            description={t("Tại epoch {epoch}", { epoch: bestMetric.epoch })}
             color="emerald"
           />
         </div>
@@ -172,20 +239,20 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
         <div className="space-y-6">
           <div className="rounded-2xl border border-slate-200 bg-white p-6">
             <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-1">
-              Hiệu Suất Theo Lớp (Test Set)
+              {t("Hiệu suất theo lớp (tập test)")}
             </h3>
             <p className="text-xs text-slate-500 mb-4">
-              Sắp xếp từ yếu nhất — các lớp F1 thấp cần thu thêm dữ liệu hoặc kiểm tra chất lượng mẫu.
+              {t("Sắp xếp từ yếu nhất — các lớp F1 thấp cần thu thêm dữ liệu hoặc kiểm tra chất lượng mẫu.")}
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-xs text-slate-500 uppercase">
-                    <th className="py-2 pr-3 font-medium">Lớp</th>
-                    <th className="py-2 px-3 font-medium text-right">Precision</th>
-                    <th className="py-2 px-3 font-medium text-right">Recall</th>
+                    <th className="py-2 pr-3 font-medium">{t("Lớp")}</th>
+                    <th className="py-2 px-3 font-medium text-right">{t("Độ chuẩn xác")}</th>
+                    <th className="py-2 px-3 font-medium text-right">{t("Độ bao phủ")}</th>
                     <th className="py-2 px-3 font-medium text-right">F1</th>
-                    <th className="py-2 pl-3 font-medium text-right">Mẫu test</th>
+                    <th className="py-2 pl-3 font-medium text-right">{t("Mẫu test")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,8 +266,15 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                           className={`border-b border-slate-100 ${weak ? 'bg-amber-50' : ''}`}
                         >
                           <td className="py-2 pr-3 font-medium text-slate-800">
-                            {weak && <span title="F1 dưới 0.5 — lớp yếu">⚠️ </span>}
-                            {prettyLabel(c.label_key)}
+                            <span className="inline-flex items-center gap-1.5">
+                              {weak && (
+                                <AlertTriangleIcon
+                                  className="h-3.5 w-3.5 shrink-0 text-amber-500"
+                                  aria-label={t("F1 dưới 0.5 — lớp yếu")}
+                                />
+                              )}
+                              {prettyLabel(c.label_key)}
+                            </span>
                           </td>
                           <td className="py-2 px-3 text-right tabular-nums text-slate-700">{(c.precision * 100).toFixed(1)}%</td>
                           <td className="py-2 px-3 text-right tabular-nums text-slate-700">{(c.recall * 100).toFixed(1)}%</td>
@@ -225,46 +299,48 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
       {/* Recommendations */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-          Khuyến Nghị
+          {t("Khuyến nghị")}
         </h3>
-        {recommendations.map((rec, idx) => (
-          <div
-            key={idx}
-            className={`rounded-lg border-l-4 p-4 ${
-              rec.type === 'success'
-                ? 'border-l-emerald-500 bg-emerald-50 text-emerald-900'
-                : rec.type === 'warning'
-                ? 'border-l-amber-500 bg-amber-50 text-amber-900'
-                : 'border-l-ctu-blue bg-ctu-blue/10 text-ctu-navy'
-            }`}
-          >
-            <p>
-              <span className="font-bold">{rec.emoji}</span> {rec.text}
-            </p>
-          </div>
-        ))}
+        {recommendations.map((rec, idx) => {
+          const RecIcon = rec.type === 'success' ? CheckCircleIcon : rec.type === 'warning' ? AlertTriangleIcon : InfoCircleIcon;
+          return (
+            <div
+              key={idx}
+              className={`flex items-start gap-2.5 rounded-lg border-l-4 p-4 ${
+                rec.type === 'success'
+                  ? 'border-l-emerald-500 bg-sky-50 text-sky-900'
+                  : rec.type === 'warning'
+                  ? 'border-l-amber-500 bg-amber-50 text-amber-900'
+                  : 'border-l-ctu-blue bg-ctu-blue/10 text-ctu-navy'
+              }`}
+            >
+              <RecIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{t(rec.text)}</p>
+            </div>
+          );
+        })}
       </div>
 
       {/* Model Info */}
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
         <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-3">
-          Thông Tin Model
+          {t("Thông tin model")}
         </h4>
         <div className="space-y-2 text-sm">
           <div className="flex items-center justify-between">
-            <span className="text-slate-600">Job ID:</span>
+            <span className="text-slate-600">{t("Mã tác vụ:")}</span>
             <code className="font-mono text-xs bg-white rounded px-2 py-1 border border-slate-200">
               {job?.id}
             </code>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-600">Trạng thái:</span>
-            <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+            <span className="text-slate-600">{t("Trạng thái:")}</span>
+            <span className="font-semibold text-sky-800 bg-sky-50 px-2 py-1 rounded">
               {job?.status}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-600">Thời gian tạo:</span>
+            <span className="text-slate-600">{t("Thời gian tạo:")}</span>
             <span className="text-slate-900">
               {job?.created_at
                 ? new Date(job.created_at).toLocaleString('vi-VN', {
@@ -281,7 +357,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
           {job?.checkpoint_path && (
             <div className="flex flex-col gap-2">
               <div className="flex items-start justify-between">
-                <span className="text-slate-600">Model Path:</span>
+                <span className="text-slate-600">{t("Đường dẫn model:")}</span>
                 <code className="font-mono text-xs bg-white rounded px-2 py-1 border border-slate-200 break-all">
                   {job.checkpoint_path}
                 </code>
@@ -289,18 +365,19 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => {
-                    // Copy path to clipboard
                     navigator.clipboard.writeText(job.checkpoint_path || '');
                   }}
-                  className="text-xs px-3 py-1.5 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium transition"
+                  className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium transition"
                 >
-                  📋 Copy Path
+                  <CopyIcon className="h-3.5 w-3.5" />
+                  {t("Sao chép đường dẫn")}
                 </button>
                 <button
                   onClick={() => setShowTestModal(true)}
-                  className="text-xs px-3 py-1.5 rounded bg-gradient-to-r from-ctu-blue to-ctu-navy hover:from-ctu-navy hover:to-ctu-navy-mid text-white font-medium transition shadow-sm"
+                  className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-ctu-blue hover:bg-ctu-navy text-white font-medium transition shadow-sm"
                 >
-                  🧪 Test Model Realtime
+                  <PlayCircleIcon className="h-3.5 w-3.5" />
+                  {t("Kiểm tra model (Realtime)")}
                 </button>
                 {isAdmin && onPromote && job.status === 'completed' && !job.promoted_at && (
                   <button
@@ -310,21 +387,23 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                       setPromoteMessage(null);
                       try {
                         const res = await onPromote();
-                        setPromoteMessage(res ? res.message : 'Promote thất bại — kiểm tra quyền admin hoặc log backend');
+                        setPromoteMessage(res ? res.message : t('Không thể đưa vào Realtime — kiểm tra quyền admin hoặc log backend'));
                       } finally {
                         setPromoting(false);
                       }
                     }}
                     disabled={promoting}
-                    className="text-xs px-3 py-1.5 rounded bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-medium transition shadow-sm disabled:opacity-60"
+                    className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white font-medium transition shadow-sm disabled:opacity-60"
                   >
-                    {promoting ? 'Đang đưa vào Realtime...' : '🚀 Đưa vào Realtime'}
+                    <ArrowUpCircleIcon className="h-3.5 w-3.5" />
+                    {promoting ? t('Đang đưa vào Realtime...') : t('Đưa vào Realtime')}
                   </button>
                 )}
               </div>
               {job.promoted_at && (
-                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
-                  ✅ Đã đưa vào Realtime lúc{' '}
+                <div className="flex items-center gap-1.5 rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-xs text-sky-800">
+                  <CheckCircleIcon className="h-3.5 w-3.5 shrink-0" />
+                  Đã đưa vào Realtime lúc{' '}
                   {new Date(job.promoted_at).toLocaleString('vi-VN')}
                 </div>
               )}
@@ -338,10 +417,94 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
         </div>
       </div>
 
+      {/* Provenance — what this model can be traced back to */}
+      {provenance?.available && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
+              {t("Nguồn gốc & khả năng tái lập")}
+            </h4>
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full ${
+                provenance.reproducible
+                  ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+              }`}
+            >
+              {provenance.reproducible ? (
+                <CheckCircleIcon className="h-3.5 w-3.5" />
+              ) : (
+                <AlertTriangleIcon className="h-3.5 w-3.5" />
+              )}
+              {provenance.reproducible ? t('Đủ điều kiện tái lập') : t('Chưa đủ điều kiện tái lập')}
+            </span>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ProvenanceGroup title={t("Mã nguồn & lần chạy")}>
+              <ProvenanceRow label={t("Phiên bản mã nguồn")} value={provenance.code?.git_commit} mono truncate copyable />
+              <ProvenanceRow label={t("Hạt ngẫu nhiên")} value={provenance.code?.seed} mono />
+              <ProvenanceRow label={t("Mục đích")} value={provenance.code?.run_purpose} />
+              <ProvenanceRow label={t("Tính tất định")} value={provenance.code?.determinism} />
+            </ProvenanceGroup>
+
+            <ProvenanceGroup title={t("Dữ liệu")}>
+              <ProvenanceRow label={t("Phiên bản dataset")} value={provenance.data?.dataset_version} />
+              <ProvenanceRow label={t("Phiên bản split")} value={provenance.data?.split_version} />
+              <ProvenanceRow
+                label={t("Mã băm bản kê dữ liệu")}
+                value={provenance.data?.dataset_manifest_checksum}
+                mono
+                truncate
+              />
+              <ProvenanceRow label={t("Chuẩn hoá")} value={provenance.model?.normalization_version} />
+            </ProvenanceGroup>
+
+            <ProvenanceGroup title={t("Môi trường chạy")}>
+              <ProvenanceRow label="Python" value={provenance.runtime_env?.python_version as string} />
+              <ProvenanceRow label="PyTorch" value={provenance.runtime_env?.pytorch_version as string} />
+              <ProvenanceRow label="NumPy" value={provenance.runtime_env?.numpy_version as string} />
+              <ProvenanceRow label={t("Thiết bị")} value={provenance.runtime_env?.device as string} />
+            </ProvenanceGroup>
+          </div>
+
+          {/* Reproducibility criteria — same ids the offline audit script uses */}
+          {provenance.checks && provenance.checks.length > 0 && (
+            <div className="mt-4 border-t border-slate-200 pt-3">
+              <p className="text-xs text-slate-500 mb-2">
+                {t("Tiêu chí hợp lệ nghiên cứu (mã trùng với")} <code className="font-mono">scripts/research_validity.py</code>)
+              </p>
+              <ul className="space-y-1.5">
+                {provenance.checks.map((check) => (
+                  <li key={check.id} className="flex items-start gap-2 text-sm">
+                    {check.ok ? (
+                      <CheckCircleIcon className="h-4 w-4 shrink-0 mt-0.5 text-sky-700" />
+                    ) : (
+                      <AlertTriangleIcon className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
+                    )}
+                    <span className={check.ok ? 'text-slate-700' : 'text-amber-900'}>
+                      <span className="font-mono text-xs text-slate-500 mr-1.5">{check.id}</span>
+                      {check.label}
+                      <span className="text-slate-500"> — {check.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {!provenance.reproducible && (
+                <p className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+                  {t("Model vẫn dùng được để thử nghiệm, nhưng chưa đủ dữ kiện để tái lập chính xác lần chạy này. Không nên dùng con số của nó làm kết quả báo cáo.")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Training Complete Message */}
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-center">
-        <p className="text-sm text-emerald-900">
-          ✅ Model đã được lưu và sẵn sàng để test. Nhấp nút "Test Model Realtime" để kiểm tra hiệu suất.
+      <div className="flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-5 py-3">
+        <CheckCircleIcon className="h-4 w-4 shrink-0 text-sky-700" />
+        <p className="text-sm text-sky-900">
+          {t("Model đã được lưu và sẵn sàng kiểm tra — nhấn \"Kiểm tra model (Realtime)\" để xem hiệu suất thực tế.")}
         </p>
       </div>
 
@@ -374,14 +537,14 @@ function MetricCard({
     indigo: 'border-ctu-blue/30 bg-ctu-blue/5',
     purple: 'border-purple-200 bg-purple-50',
     blue: 'border-ctu-navy/30 bg-ctu-navy/5',
-    emerald: 'border-emerald-200 bg-emerald-50',
+    emerald: 'border-sky-200 bg-sky-50',
   };
 
   const valueClasses = {
     indigo: 'text-ctu-blue',
     purple: 'text-purple-600',
     blue: 'text-ctu-navy',
-    emerald: 'text-emerald-600',
+    emerald: 'text-sky-700',
   };
 
   return (
@@ -403,6 +566,7 @@ function MetricCard({
  * predictions) is marked structurally with a ring, not a different hue.
  */
 function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: number[][] }) {
+  const { t } = useI18n();
   const n = labels.length;
   if (n === 0) return null;
 
@@ -412,8 +576,7 @@ function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: 
         Confusion Matrix (Test Set)
       </h3>
       <p className="text-xs text-slate-500 mb-4">
-        Hàng = lớp thật, cột = lớp dự đoán (theo số thứ tự). Màu đậm = tỷ lệ cao trong hàng;
-        ô viền đen trên đường chéo là dự đoán đúng. Di chuột lên ô để xem chi tiết.
+        {t("Hàng = lớp thật, cột = lớp dự đoán (theo số thứ tự). Màu đậm = tỷ lệ cao trong hàng; ô viền đen trên đường chéo là dự đoán đúng. Di chuột lên ô để xem chi tiết.")}
       </p>
       <div className="overflow-x-auto pb-2">
         <table className="border-collapse">
@@ -466,7 +629,7 @@ function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: 
           className="h-2 w-28 rounded"
           style={{ background: 'linear-gradient(to right, rgba(14,123,194,0.12), rgba(14,123,194,0.9))' }}
         />
-        <span>100% của lớp thật</span>
+        <span>{t("100% của lớp thật")}</span>
       </div>
     </div>
   );

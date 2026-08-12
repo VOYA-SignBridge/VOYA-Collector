@@ -13,6 +13,8 @@ export interface DatasetInfo {
   languages: string[];
   dialects: Record<string, string[]>;
   class_distribution: Record<string, number>;
+  // Số mẫu theo từng phương ngữ — dùng cho bước chia tập (DataSplitVisualization)
+  samples_by_dialect?: Record<string, number>;
   split_info?: { train: number; val: number; test: number };
   // Optional mapping from class uid/slug -> human label
   label_map?: Record<string, string>;
@@ -31,6 +33,62 @@ export interface TrainingConfig {
   channels: number;
   levels: number;
   kernel_size: number;
+  /** 'smoke_test' = thăm dò nhanh (mặc định); 'research' = chạy trên split đã
+   *  versioned để kết quả trích dẫn được. */
+  run_purpose?: 'smoke_test' | 'research';
+  split_version?: string | null;
+  /** Server ghi đè từ split đã chọn khi chạy chế độ research. */
+  recognition_profile?: string | null;
+}
+
+export interface ResearchSplit {
+  split_version: string;
+  dataset_version: string;
+  recognition_profile: string;
+  split_mode: string;
+  num_classes: number | null;
+  counts: { train: number | null; val: number | null; test: number | null };
+  seed: number | null;
+  dataset_manifest_checksum: string;
+}
+
+export interface ProvenanceCheck {
+  id: string;      // C1/C5/C10/C11/C13 — same ids as scripts/research_validity.py
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface JobProvenance {
+  available: boolean;
+  job_id?: string;
+  code?: {
+    git_commit: string;
+    seed: number | null;
+    run_purpose: string;
+    run_status: string;
+    determinism: string;
+    created_at: string;
+  };
+  data?: {
+    dataset_version: string;
+    split_version: string;
+    dataset_manifest_checksum: string;
+    recognition_profile: string;
+    vocabulary_schema_version: string;
+  };
+  model?: {
+    model_type: string;
+    num_classes: number | null;
+    seq_len: number | null;
+    feature_dim: number | null;
+    normalization_version: string;
+    storage_contract_version: string;
+  };
+  model_selection?: Record<string, unknown>;
+  runtime_env?: Record<string, unknown>;
+  checks?: ProvenanceCheck[];
+  reproducible?: boolean;
 }
 
 export interface TrainingMetrics {
@@ -220,6 +278,28 @@ export function useTrainingAPI() {
     }
   }, []);
 
+  // Danh sách split đã versioned — chế độ 'research' bắt buộc chọn một cái.
+  const getResearchSplits = useCallback(async (): Promise<ResearchSplit[]> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/splits`);
+      return response.data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return [];
+    }
+  }, []);
+
+  // Xuất xứ của một lần chạy: code + data + model + các kiểm tra tính tái lập.
+  const getJobProvenance = useCallback(async (jobId: string): Promise<JobProvenance | null> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/provenance`);
+      return response.data;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      return null;
+    }
+  }, []);
+
   // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc: completed/failed/cancelled)
   const deleteJob = useCallback(async (jobId: string): Promise<boolean> => {
     try {
@@ -245,6 +325,8 @@ export function useTrainingAPI() {
     cancelTraining,
     promoteJob,
     getJobEvaluation,
+    getResearchSplits,
+    getJobProvenance,
     deleteJob,
     useWebSocketProgress,
   };

@@ -265,16 +265,53 @@ def _split_sql_statements(sql: str) -> List[str]:
     A naive ``sql.split(';')`` breaks the moment a statement legitimately
     contains a ';' — e.g. a future trigger / PL-pgSQL function body wrapped in
     ``$$ ... ; ... $$`` — silently dropping half a CREATE and leaving the table
-    unbuilt. This respects single-quoted strings and ``$tag$``-dollar-quoted
-    blocks so the whole body stays one statement.
+    unbuilt. This respects single-quoted strings, ``$tag$``-dollar-quoted blocks
+    and SQL comments so the whole body stays one statement.
+
+    Comments were the gap. `--` and `/* */` were passed straight through, so a
+    prose sentence inside a schema comment split the statement in two the moment
+    it contained a semicolon — which ordinary English does, in the exact place a
+    comment is most likely to be explaining a trade-off. The failure is not a
+    syntax error at review time: the export looks fine, and the deploy applies
+    half a CREATE TABLE. Found when a comment added to `tenant_invitations` made
+    the schema round-trip to 108 statements instead of 107.
     """
     stmts: List[str] = []
     buf: List[str] = []
     i, n = 0, len(sql)
     in_squote = False
+    in_line_comment = False
+    in_block_comment = False
     dollar_tag: Optional[str] = None
     while i < n:
         ch = sql[i]
+        if in_line_comment:
+            buf.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            buf.append(ch)
+            if ch == "*" and sql.startswith("*/", i):
+                buf.append("/")
+                i += 2
+                in_block_comment = False
+            else:
+                i += 1
+            continue
+        if dollar_tag is None and not in_squote:
+            # Only outside a string: `--` inside '...' is data, not a comment.
+            if sql.startswith("--", i):
+                in_line_comment = True
+                buf.append(ch)
+                i += 1
+                continue
+            if sql.startswith("/*", i):
+                in_block_comment = True
+                buf.append(ch)
+                i += 1
+                continue
         if dollar_tag is not None:
             if sql.startswith(dollar_tag, i):
                 buf.append(dollar_tag)
@@ -317,11 +354,19 @@ def _split_sql_statements(sql: str) -> List[str]:
 
 
 def _apply_schema_sql(schema_sql: str) -> None:
-    """Run each statement idempotently; a failing stmt must not abort the rest."""
-    from app.storage.metadata_db import _execute
+    """Run each statement idempotently; a failing stmt must not abort the rest.
 
-    for stmt in _split_sql_statements(schema_sql):
-        try:
-            _execute(stmt)
-        except Exception as exc:
-            logger.warning("[SOT] schema stmt skipped: %s : %s", exc, stmt[:100])
+    Uses the migration role: this is DDL arriving from a signed snapshot, and
+    the application role is deliberately unable to alter tables (see
+    `storage/rls.py`). Before the role split this went through the shared
+    application pool, which would now log every statement as skipped and leave a
+    reader machine silently one schema version behind.
+    """
+    from app.storage.metadata_db import _migration_cursor
+
+    with _migration_cursor() as cur:
+        for stmt in _split_sql_statements(schema_sql):
+            try:
+                cur.execute(stmt)
+            except Exception as exc:
+                logger.warning("[SOT] schema stmt skipped: %s : %s", exc, stmt[:100])

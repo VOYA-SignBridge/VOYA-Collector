@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
 
+from app import audit
 from app.config import settings
 from app.dataset_manager import load_labels, ClassMetadata
+from app.tenancy import tenant_id_of
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
 from app.catalog_sync import (
@@ -25,7 +27,7 @@ from app.catalog_sync import (
     empty_sample_trash,
 )
 from app.auth import get_current_user, get_current_user_optional, require_admin
-from app.storage.metadata_db import get_sample_owner
+from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -51,14 +53,50 @@ def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> Non
         )
 
 
-def _user_owns_sample(sample_id: str, current_user: Dict[str, Any]) -> bool:
-    """Boolean ownership test (admin always True) — the counterpart to
-    _check_sample_ownership (which raises), used to filter bulk trash actions to
-    the caller's own samples. Ownership is by auth_user_id (UUID), not by name."""
+_SKIP_REASONS = {
+    "foreign": "thuộc về tài khoản khác",
+    "unowned": "chưa gắn chủ sở hữu (dữ liệu cũ) — cần admin",
+    "missing": "không có trong cơ sở dữ liệu",
+}
+
+
+def _actionable_uids(
+    uids: List[str], current_user: Dict[str, Any]
+) -> tuple[List[str], Dict[str, Any]]:
+    """Keep only the uids this caller may act on, and explain the rest.
+
+    Admin acts on everything. For anyone else this is ONE query for the whole
+    batch (partition_sample_ownership), not one per uid — a 200-sample
+    selection used to mean 200 round-trips.
+
+    The second return value is merged into the response so the UI can say WHY
+    something was left out. Silently shrinking the batch is the failure mode
+    worth avoiding: selecting 10 and being told "đã khôi phục 7" with no
+    mention of the other 3 reads as data loss.
+    """
+    uids = [str(u).strip() for u in (uids or []) if str(u or "").strip()]
     if current_user.get("is_admin"):
-        return True
-    owner_id = get_sample_owner(sample_id)
-    return owner_id is not None and str(owner_id) == str(current_user["id"])
+        return uids, {"skipped_count": 0, "skipped": {}}
+
+    split = partition_sample_ownership(uids, str(current_user.get("id") or ""))
+    skipped: Dict[str, Any] = {}
+    for bucket in ("foreign", "unowned", "missing"):
+        items = getattr(split, bucket)
+        if items:
+            skipped[bucket] = {
+                "count": len(items),
+                "reason": _SKIP_REASONS[bucket],
+                "sample_uids": items[:20],
+            }
+    return list(split.owned), {"skipped_count": len(split.skipped), "skipped": skipped}
+
+
+def _skip_note(info: Dict[str, Any]) -> str:
+    n = int(info.get("skipped_count") or 0)
+    if not n:
+        return ""
+    parts = [f"{d['count']} {d['reason']}" for d in info.get("skipped", {}).values()]
+    return f" Bỏ qua {n} mẫu: " + "; ".join(parts) + "."
 
 # ---- Models ----
 class LabelOut(BaseModel):
@@ -112,6 +150,7 @@ def _class_idx_to_meta() -> Dict[int, ClassMetadata]:
             is_common_global=bool(int(r.get("is_common_global") or 0)),
             is_common_language=bool(int(r.get("is_common_language") or 0)),
             class_idx=idx,
+            tenant_id=tenant_id_of(r),
         )
     return out
 
@@ -194,10 +233,14 @@ def update_label(
 @router.delete("/labels/{class_ref}")
 def delete_label(
     class_ref: str,
+    request: Request,
     admin_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
         result = sync_soft_delete_class(class_ref)
+        audit.record("data.class.soft_delete", actor=admin_user, request=request,
+                     target_type="class", target_id=result.get("class_uid") or class_ref,
+                     detail={"sample_count": result.get("sample_count"), "via": "labels"})
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
@@ -276,23 +319,26 @@ def bulk_restore_samples_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Restore several soft-deleted samples. Body: {sample_uids: [...]}. A
-    non-admin may only restore samples they own — foreign uids are dropped."""
-    uids = payload.get("sample_uids") or []
-    if not current_user.get("is_admin"):
-        uids = [u for u in uids if _user_owns_sample(u, current_user)]
+    non-admin may only restore samples they own; the rest are reported back in
+    `skipped` with a reason instead of vanishing from the count."""
+    uids, skip_info = _actionable_uids(payload.get("sample_uids") or [], current_user)
     result = bulk_restore_samples(uids)
-    return {"success": True, "message": f"Đã khôi phục {result['ok_count']} mẫu.", **result}
+    message = f"Đã khôi phục {result['ok_count']} mẫu." + _skip_note(skip_info)
+    return {"success": True, "message": message, **result, **skip_info}
 
 
 @router.post("/samples/trash/purge")
 def bulk_purge_samples_endpoint(
+    request: Request,
     payload: dict = Body(default={}),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete samples. Body: {sample_uids: [...]} for a selection, or
     {all: true} to empty the trash. Irreversible. A non-admin acts ONLY on their
-    own samples: {all: true} empties just their trash; foreign uids are dropped."""
+    own samples: {all: true} empties just their trash; anything else is reported
+    in `skipped` with a reason."""
     is_admin = bool(current_user.get("is_admin"))
+    skip_info: Dict[str, Any] = {"skipped_count": 0, "skipped": {}}
     if payload.get("all"):
         if is_admin:
             result = empty_sample_trash()
@@ -300,11 +346,17 @@ def bulk_purge_samples_endpoint(
             own = [s["sample_uid"] for s in list_trash_samples_for_user(str(current_user["id"]))]
             result = bulk_purge_samples(own)
     else:
-        uids = payload.get("sample_uids") or []
-        if not is_admin:
-            uids = [u for u in uids if _user_owns_sample(u, current_user)]
+        uids, skip_info = _actionable_uids(payload.get("sample_uids") or [], current_user)
         result = bulk_purge_samples(uids)
-    return {"success": True, "message": f"Đã xóa vĩnh viễn {result['ok_count']} mẫu.", **result}
+    audit.record("data.sample.purge.bulk", actor=current_user, request=request,
+                 target_type="sample", detail={
+                     "all": bool(payload.get("all")),
+                     "as_admin": is_admin,
+                     "ok_count": result.get("ok_count"),
+                     "skipped_count": skip_info.get("skipped_count"),
+                 })
+    message = f"Đã xóa vĩnh viễn {result['ok_count']} mẫu." + _skip_note(skip_info)
+    return {"success": True, "message": message, **result, **skip_info}
 
 
 @router.delete("/samples/{sample_id}")
@@ -338,12 +390,16 @@ def restore_sample_endpoint(
 @router.delete("/samples/{sample_id}/purge")
 def purge_sample_endpoint(
     sample_id: str,
+    request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete a sample (file + Drive + DB). Irreversible."""
     _check_sample_ownership(sample_id, current_user)
     try:
         result = sync_purge_sample(sample_id)
+        audit.record("data.sample.purge", actor=current_user, request=request,
+                     target_type="sample", target_id=sample_id,
+                     detail={"class_uid": result.get("class_uid")})
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

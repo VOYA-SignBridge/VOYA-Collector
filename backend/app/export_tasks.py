@@ -39,7 +39,13 @@ def _rows_to_values(rows: List[Dict[str, Any]], fieldnames: List[str]) -> List[L
     return result
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+# `platform_wide`: this reads every sample to rebuild ONE shared spreadsheet.
+# It is dispatched from inside catalog mutations — that is, from a tenant
+# request — so without this flag the tenant header would scope the read and the
+# export would quietly publish a sheet missing every other tenant's rows. See
+# app/worker.py:setup_structlog_context.
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30,
+                 platform_wide=True)
 def export_samples_to_sheets(self):
     """Mirror samples.csv to Google Sheets via FULL REPLACE.
 
@@ -125,7 +131,8 @@ def export_samples_to_sheets(self):
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60,
+                 platform_wide=True)  # one shared sheet — see export_samples_to_sheets
 def export_labels_to_sheets(self):
     """Batch sync labels.csv to Google Sheets.
 
@@ -203,7 +210,8 @@ def export_labels_to_sheets(self):
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60,
+                 platform_wide=True)  # mirrors the whole catalogue, not one tenant's
 def mirror_catalog_csvs_to_drive(self):
     """Periodically mirror local catalog CSV snapshots to Google Drive.
 
@@ -238,7 +246,8 @@ def mirror_catalog_csvs_to_drive(self):
     return {"status": "done", "results": results}
 
 
-@celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=30,
+                 platform_wide=True)  # integrity sweep over every tenant's rows
 def reconcile_samples_csv_task(self):
     """Periodic safety-net: re-add any ACTIVE Postgres sample missing from
     samples.csv (lost to a rare append-vs-catalog-rewrite race). Append-only and

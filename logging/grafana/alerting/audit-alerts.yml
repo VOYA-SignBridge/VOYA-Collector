@@ -1,0 +1,160 @@
+### Cảnh báo cho nhật ký kiểm toán.
+#
+# Vì sao ở ĐÂY chứ không phải trong `logging/alert-rules.yml` của Prometheus
+# ---------------------------------------------------------------------------
+# Prometheus đánh giá được quy tắc, nhưng bản triển khai này **không có
+# Alertmanager**, nên một quy tắc phía Prometheus chỉ chuyển sang trạng thái
+# ĐANG KÊU trên trang `/alerts` rồi nằm im ở đó. Đường gửi thư duy nhất đang
+# chạy là hệ cảnh báo hợp nhất của Grafana, qua contact point "Admin Email".
+#
+# Một quy tắc không gửi được cho ai thì tệ hơn không có quy tắc: nó tạo cảm
+# giác đang có người canh.
+#
+# Nhật ký kiểm toán hỏng theo ĐÚNG HAI cách, và một quy tắc không bắt được cả hai
+# ---------------------------------------------------------------------------
+#   * Lời gọi ghi NÉM LỖI. `audit.record` cố ý nuốt ngoại lệ — nó không được
+#     phép làm hỏng thao tác nó đang ghi lại — nên dấu vết duy nhất từng có là
+#     một dòng `[AUDIT-FAIL]` trong log, tức là chỉ tìm ra khi có người đi tìm.
+#     Bắt bằng bộ đếm.
+#   * Đường ghi BIẾN MẤT mà không ném gì. Không ngoại lệ để đếm, không dòng log
+#     để đọc — chỉ có một cái sổ ngừng dày lên, trông hệt một hệ thống yên
+#     tĩnh. Bộ đếm mù hoàn toàn với kiểu này; phải đo bằng tuổi của dòng mới nhất.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Audit Alerts
+    folder: VOYA Alerts
+    interval: 5m
+    rules:
+      - uid: audit-write-failing-rule
+        title: Không ghi được nhật ký kiểm toán
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              # Bộ đếm chỉ tăng, nên `increase(...[1h])` không bỏ sót lần hỏng
+              # nào — kể cả lần duy nhất lúc ba giờ sáng, thứ mà `rate()` sẽ
+              # làm nhoè xuống gần bằng không.
+              expr: increase(voya_audit_write_failures_total[1h])
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [0], type: gt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          summary: Có lượt ghi nhật ký kiểm toán thất bại trong một giờ qua
+          description: >-
+            `audit.record` ném lỗi và lỗi đó đã bị nuốt (tìm dòng `[AUDIT-FAIL]`
+            trong log backend). Mọi hành động rơi vào khoảng thời gian này KHÔNG
+            còn bằng chứng nào. Nguyên nhân hay gặp: một request chạy ngoài mọi
+            phạm vi tenant, hoặc bảng `audit_log` mất quyền ghi.
+        labels:
+          severity: critical
+
+      - uid: audit-log-stopped-rule
+        title: Nhật ký kiểm toán ngừng tăng
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              # `!= -1` KHÔNG phải phép so sánh cho ra đúng/sai — trong PromQL
+              # nó lọc bỏ chuỗi. Chỉ số trả -1 ở hai trạng thái "đừng suy luận
+              # gì từ tôi": sổ rỗng (bản vừa dựng) và không đọc được cơ sở dữ
+              # liệu. Lọc ở đây rồi thì `noDataState: OK` bên dưới lo phần còn
+              # lại, và chuông này không kêu vì một sự cố Postgres — sự cố đó
+              # đã có chuông riêng.
+              expr: voya_audit_log_age_seconds != -1
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                # 6 giờ. Đây là bản triển khai của một trường: ban đêm không ai
+                # đăng nhập là chuyện bình thường, và một ngưỡng một giờ sẽ kêu
+                # mỗi đêm cho tới khi có người tắt nó đi.
+                - evaluator: { params: [21600], type: gt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        for: 30m
+        annotations:
+          summary: Không có dòng kiểm toán mới nào trong hơn sáu giờ
+          description: >-
+            Không ngoại lệ nào được ném ra, nghĩa là đường ghi đã BIẾN MẤT chứ
+            không phải hỏng. Kiểm tra middleware HTTP còn đặt phạm vi tenant
+            không, và mở trang Nhật ký kiểm toán xem dòng cuối cùng là lúc nào.
+        labels:
+          severity: warning
+
+      - uid: audit-metrics-unreadable-rule
+        title: Không đọc được bảng nhật ký kiểm toán
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              # PHẢI có `and`, không được chỉ hỏi tuổi.
+              #
+              # `age == -1` mang HAI nghĩa: sổ rỗng, và không đọc được bảng.
+              # Chỉ lọc theo nó thì trên một bản triển khai có sổ rỗng — đúng
+              # tình trạng của máy này ngày 2026-08-09, `audit_log` có 0 dòng —
+              # cảnh báo kêu sau một giờ và kêu mãi cho tới khi ai đó tình cờ
+              # làm một thao tác được ghi nhật ký. Kêu sai ngay ngày đầu là
+              # cách chắc chắn nhất để một cảnh báo bị tắt vĩnh viễn.
+              #
+              # `entries_1h` tách được hai nghĩa đó: sổ rỗng cho **0** (câu
+              # truy vấn chạy được, chỉ là không có dòng nào), còn không đọc
+              # được bảng mới cho **-1**. Đòi cả hai cùng `-1` nghĩa là chỉ kêu
+              # khi thật sự không hỏi được cơ sở dữ liệu.
+              expr: voya_audit_log_age_seconds == -1 and voya_audit_log_entries_1h == -1
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator: { params: [0], type: lt }
+                  operator: { type: and }
+                  query: { params: [A] }
+                  reducer: { params: [], type: last }
+                  type: query
+              datasource: { type: __expr__, uid: __expr__ }
+              refId: B
+              type: classic_conditions
+        noDataState: OK
+        execErrState: OK
+        # Một giờ: đây là chuông canh chính hai chuông kia. Trong lúc chỉ số trả
+        # -1 thì cả hai quy tắc trên đều bị vô hiệu hoá trong im lặng, vì chúng
+        # lọc -1 ra khỏi biểu thức.
+        for: 1h
+        annotations:
+          summary: Chỉ số kiểm toán không đọc được trong hơn một giờ
+          description: >-
+            Suốt thời gian này, hai cảnh báo kiểm toán còn lại KHÔNG canh gì cả.
+            Trên một bản vừa dựng, sổ rỗng cũng cho -1 — ở đó đây là cảnh báo
+            dự kiến cho tới lần ghi kiểm toán đầu tiên.
+        labels:
+          severity: warning

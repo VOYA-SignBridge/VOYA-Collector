@@ -2,14 +2,18 @@ import { useState, useCallback, useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthToken } from "../api/axiosClient";
 import { logout as apiLogout } from "../api/auth";
+import NotificationBell from "./NotificationBell";
+import LanguageSwitcher from "./LanguageSwitcher";
 import { useAuth, hasSessionHint } from "../contexts/AuthContext";
 import { usePresence } from "../hooks/usePresence";
 import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
-import { ChipIcon, HandIcon, HomeIcon, RefreshIcon, TagIcon, UploadIcon } from "./ui/Icons";
+import { ChipIcon, GearIcon, HandIcon, HomeIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
+import { prefetchProps } from "../routes/prefetch";
+import { useI18n } from "../i18n";
 
 const AUTH_EVENT = "voya:auth-change";
 
@@ -23,6 +27,7 @@ export type NavSection = {
 export type AnyNavItem = FlatNavItem | NavSection;
 
 export default function Layout({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -30,14 +35,33 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   // Presence heartbeat + opt-in precise geolocation for the admin monitor.
   usePresence(!!user);
-  // Inactivity auto-logout (default 90 min of no real interaction → sign out).
+  // Inactivity auto-logout (default 180 min of no real interaction → sign out;
+  // stays in lockstep with the server's REFRESH_TOKEN_EXPIRE_MINUTES).
   useIdleLogout(!!user);
   // Synchronous session hint just for instant chrome painting (sidebar/header)
   // so a logged-in reload doesn't flash the guest layout while /auth/me is in
   // flight. No network — reads the token/cookie hint and updates on auth events.
   const [hasToken, setHasToken] = useState<boolean>(() => hasSessionHint());
-  const AUTH_PAGE_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
-  const isAuthPage = AUTH_PAGE_PATHS.includes(location.pathname);
+  // Các trang dựng bằng `AuthShell` — chúng tự vẽ nền và con dấu, nên khung
+  // ứng dụng (thanh bên, thanh đầu) phải rút lui. Quên thêm vào đây là lỗi im
+  // lặng: trang vẫn chạy nhưng có hai lớp chrome chồng lên nhau.
+  const AUTH_PAGE_PATHS = [
+    "/login",
+    "/register",
+    "/forgot-password",
+    "/reset-password",
+    "/recover",
+    "/invitation",
+  ];
+  // Console quản trị mang VỎ RIÊNG (`AdminShell`). Khung này phải rút lui hoàn
+  // toàn ở đó, cùng lý do như các trang `AuthShell`: hai lớp chrome chồng nhau.
+  // Dùng `startsWith` chứ không phải danh sách liệt kê — mọi trang con của
+  // `/admin` đều nằm trong console, và một danh sách sẽ thiếu ngay khi thêm
+  // trang mới, theo cách không ai nhận ra cho tới lúc nhìn màn hình.
+  const isAuthPage =
+    AUTH_PAGE_PATHS.includes(location.pathname) ||
+    location.pathname === "/admin" ||
+    location.pathname.startsWith("/admin/");
 
   useEffect(() => {
     const syncAuthState = () => {
@@ -62,41 +86,38 @@ export default function Layout({ children }: { children: ReactNode }) {
     { name: "Huấn luyện model", href: "/training", icon: <ChipIcon className={navIconClass} /> },
   ];
 
-  const adminNavigation: AnyNavItem[] = [
-    {
-      section: true,
-      name: "Quản trị",
-      icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>,
-      children: [
-        { name: "Quản lý dữ liệu", href: "/admin/data", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2 1.5 3 5 3s5-1 5-3V7M4 7c0 2 1.5 3 5 3s5-1 5-3M4 7c0-2 1.5-3 5-3s5 1 5 3m0 5c0 2 1.5 3 5 3s5-1 5-3V7c0-2-1.5-3-5-3s-5 1-5 3" /></svg> },
-        { name: "Quản lý người dùng", href: "/admin/users", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
-        { name: "Giám sát tài nguyên", href: "/admin/resources", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
-        { name: "Phiên hoạt động", href: "/admin/activity", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-3.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-3-3" /></svg> },
-        { name: "SOT & thiết bị", href: "/admin/sot", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg> },
-        { name: "Thùng rác", href: "/trash", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg> },
-      ]
-    }
-  ];
+  /**
+   * Thanh bên chỉ còn VIỆC CẦN LÀM, cộng đúng một lối vào Cài đặt.
+   *
+   * Bản trước có 11 mục cho người dùng thường và 21 cho quản trị viên, trong đó
+   * sáu mục là thiết lập một lần trong đời (Tài khoản, Tổ chức, Xác minh liên
+   * hệ, Gói dịch vụ, Tích hợp, Hỗ trợ) nằm ngang hàng với công việc hằng ngày.
+   * Một danh sách trộn hai loại như vậy thì không liếc được — phải đọc từng
+   * dòng, mỗi lần.
+   *
+   * Sáu mục đó giờ nằm trong `/settings`. Mười mục quản trị nằm trong console
+   * riêng. Xem `pages/settings/SettingsLayout.tsx` và `components/AdminShell.tsx`.
+   *
+ * @i18n-key-table — `name` của mục điều hướng là KHOÁ từ điển, dịch ở
+ * `NavItem`/`SectionNavItem`.
+ */
+  const settingsItem: FlatNavItem = {
+    name: "Cài đặt",
+    href: "/settings",
+    icon: <GearIcon className={navIconClass} />,
+  };
 
-  // A signed-in contributor gets their own Trash link (their soft-deleted
-  // recordings); admins already have it inside the "Quản trị" section above.
+  // Người đóng góp thấy thùng rác của chính họ (bản ghi đã xoá mềm). Quản trị
+  // viên có thùng rác toàn hệ thống trong console riêng — xem AdminShell.
   const userTrashItem: FlatNavItem = {
     name: "Thùng rác",
     href: "/trash",
-    icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+    icon: <TrashIcon className={navIconClass} />,
   };
-  const navigation: AnyNavItem[] = user?.is_admin
-    ? [...baseNavigation, ...adminNavigation]
-    : user
-      ? [...baseNavigation, userTrashItem]
-      : baseNavigation;
 
-  const handleNewSession = useCallback(() => {
-    setSidebarOpen(false);
-    // Hard reload for a clean, reliable fresh start (navigate(0) can no-op inside
-    // Suspense/lazy boundaries — window.location.reload always works).
-    window.location.reload();
-  }, []);
+  const navigation: AnyNavItem[] = user
+    ? [...baseNavigation, userTrashItem, settingsItem]
+    : baseNavigation;
 
   const handleLogout = useCallback(async () => {
     setSidebarOpen(false);
@@ -105,7 +126,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     await apiLogout();
     clearAuthToken();
     setHasToken(false);
-    navigate("/");
+    // `replace`, không phải push. Với push, trang vừa rời khỏi vẫn nằm trong
+    // lịch sử: bấm NÚT QUAY LẠI ngay sau khi đăng xuất sẽ dựng lại đúng màn
+    // hình đó từ bộ nhớ — vẫn còn tên người dùng, vẫn còn dữ liệu vừa xem —
+    // rồi mọi lượt gọi API bên dưới trả 401 và trang vỡ dần từng mảnh. Người
+    // dùng thấy mình "vẫn đăng nhập" trong vài giây, thứ tệ hơn hẳn một màn
+    // hình đăng xuất sạch sẽ.
+    navigate("/", { replace: true });
   }, [navigate]);
 
   const NavItem = ({ item }: { item: FlatNavItem }) => (
@@ -119,9 +146,10 @@ export default function Layout({ children }: { children: ReactNode }) {
         }`
       }
       onClick={() => setSidebarOpen(false)}
+      {...prefetchProps(item.href)}
     >
       <span className="mr-3 flex items-center">{item.icon}</span>
-      {item.name}
+      {t(item.name)}
       <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -136,7 +164,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="flex-1 h-px bg-slate-200" />
         <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0">
           {item.icon}
-          {item.name}
+          {t(item.name)}
         </span>
         <div className="flex-1 h-px bg-slate-200" />
       </div>
@@ -153,9 +181,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               }`
             }
             onClick={() => setSidebarOpen(false)}
+            {...prefetchProps(child.href)}
           >
             <span className="mr-3 flex items-center">{child.icon}</span>
-            {child.name}
+            {t(child.name)}
           </NavLink>
         ))}
       </div>
@@ -202,7 +231,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => setSidebarOpen(false)}
               className="lg:hidden rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              aria-label="Đóng sidebar"
+              aria-label={t("Đóng sidebar")}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -223,19 +252,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="mt-auto border-t border-slate-200/50 p-4">
             <div className="space-y-3 lg:hidden">
               <div className="flex items-center gap-2 text-xs text-slate-500">
-                <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-emerald-400 animate-pulse" : "bg-slate-300"}`} />
-                <span>{hasToken ? "Đã đăng nhập" : "Chế độ khách"}</span>
+                <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-sky-400 animate-pulse" : "bg-slate-300"}`} />
+                <span>{hasToken ? t("Đã đăng nhập") : t("Chế độ khách")}</span>
               </div>
-
-              <Button
-                size="sm"
-                onClick={handleNewSession}
-                title="Tải lại trang và bắt đầu một phiên làm việc mới"
-                className="w-full justify-center gap-1.5 px-3 py-2 text-xs sm:text-sm"
-              >
-                <RefreshIcon className="h-4 w-4" />
-                Phiên mới
-              </Button>
 
               {hasToken ? (
                 <Button
@@ -244,22 +263,22 @@ export default function Layout({ children }: { children: ReactNode }) {
                   onClick={handleLogout}
                   className="w-full justify-center px-3 py-2 text-xs sm:text-sm"
                 >
-                  Đăng xuất
+                  {t("Đăng xuất")}
                 </Button>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
                   <Button size="sm" onClick={() => navigate("/login")} className="w-full justify-center px-3 py-2 text-xs sm:text-sm">
-                    Đăng nhập
+                    {t("Đăng nhập")}
                   </Button>
                   <Button size="sm" onClick={() => navigate("/register")} className="w-full justify-center px-3 py-2 text-xs sm:text-sm">
-                    Đăng ký
+                    {t("Đăng ký")}
                   </Button>
                 </div>
               )}
             </div>
 
             <div className="hidden lg:block pt-4 text-xs text-slate-500 text-center">
-              Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông
+              {t("Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông")}
             </div>
           </div>
         </div>
@@ -274,7 +293,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => setSidebarOpen((current) => !current)}
                 className="btn btn-ghost p-2 text-slate-600 hover:text-slate-900"
-                aria-label="Toggle sidebar"
+                aria-label={t("Mở hoặc đóng thanh điều hướng")}
                 aria-expanded={sidebarOpen}
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -283,7 +302,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </button>
             )}
             <div className="flex min-w-0 items-center gap-2 cursor-pointer" onClick={() => navigate("/")}>
-              <img src="logo.png" alt="Đại học Cần Thơ" className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 object-contain" />
+              <img src="logo.png" alt={t("Đại học Cần Thơ")} className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 object-contain" />
               <h1 className="truncate text-sm font-bold font-display sm:text-base lg:text-lg">
                 <span className="text-ctu-blue">CTU</span>
                 <span className="text-ctu-blue-light">.SignBridge</span>
@@ -293,34 +312,48 @@ export default function Layout({ children }: { children: ReactNode }) {
 
           <div className="hidden md:flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap overflow-x-auto">
             <div className="hidden sm:flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-emerald-400 animate-pulse" : "bg-slate-300"}`} />
-              <span className="text-sm text-slate-600">{hasToken ? "Đã đăng nhập" : "Chế độ khách"}</span>
+              <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-sky-400 animate-pulse" : "bg-slate-300"}`} />
+              <span className="text-sm text-slate-600">{hasToken ? t("Đã đăng nhập") : t("Chế độ khách")}</span>
             </div>
 
+            {/* Cả khách lẫn người đã đăng nhập: người đọc tiếng Anh gặp trang
+                đăng nhập trước tiên, nên giấu nút này sau cổng đăng nhập là
+                giấu nó khỏi đúng người cần nó. */}
+            <LanguageSwitcher className="hidden lg:inline-flex" />
+
             {hasToken ? (
-              <Button size="sm" onClick={handleLogout} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
-                Đăng xuất
-              </Button>
+              <>
+                {/* Chỉ dựng khi ĐÃ đăng nhập: cái chuông tự gọi API theo chu kỳ,
+                    và ở chế độ khách mỗi lượt gọi là một lượt 401 vô ích. */}
+                <NotificationBell />
+                {user?.is_admin ? (
+                  /* Lối vào console quản trị. MỘT nút, không phải mười mục
+                     nhồi vào cuối thanh bên — xem AdminShell.tsx về vì sao hai
+                     vai phải có ranh giới nhìn thấy được. */
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => navigate("/admin")}
+                    className="whitespace-nowrap gap-1.5 px-3 py-2 text-xs sm:text-sm"
+                  >
+                    <ShieldIcon className="h-4 w-4" />
+                    {t("Quản trị")}
+                  </Button>
+                ) : null}
+                <Button size="sm" onClick={handleLogout} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
+                  {t("Đăng xuất")}
+                </Button>
+              </>
             ) : (
               <div className="flex items-center gap-2">
                 <Button size="sm" onClick={() => navigate("/login")} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
-                  Đăng nhập
+                  {t("Đăng nhập")}
                 </Button>
                 <Button size="sm" onClick={() => navigate("/register")} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
-                  Đăng ký
+                  {t("Đăng ký")}
                 </Button>
               </div>
             )}
-
-            <Button
-              size="sm"
-              onClick={handleNewSession}
-              title="Tải lại trang và bắt đầu một phiên làm việc mới"
-              className="whitespace-nowrap gap-1.5 px-3 py-2 text-xs sm:text-sm"
-            >
-              <RefreshIcon className="h-4 w-4" />
-              Phiên mới
-            </Button>
           </div>
         </header>
 

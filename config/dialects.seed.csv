@@ -1,0 +1,10 @@
+dialect_id,display_name,language,is_alphabet,is_active,status,note
+bac,Miền Bắc,vn,0,1,approved,"1 lớp / 0 mẫu — lớp có nhưng chưa thu mẫu nào"
+bang-chu-cai,Bảng chữ cái,vn,1,1,approved,"30 lớp / 2487 mẫu — bộ chữ cái ngón tay, tĩnh"
+can-tho,Cần Thơ,vn,0,1,approved,"9 lớp / 109 mẫu"
+common,Chung,vn,0,1,approved,"4 lớp / 363 mẫu — từ phổ thông, xem mục common ở HARDCODED_VOCABULARY_AUDIT"
+hoa-de,Hòa Đê,vn,0,1,approved,"8 lớp / 830 mẫu"
+nam,Miền Nam,vn,0,1,approved,"1 lớp / 0 mẫu"
+spa,Spa,vn,0,1,approved,"9 lớp / 71 mẫu — CHỜ QUYẾT: có thành recognition_profile riêng không"
+trung,Miền Trung,vn,0,1,approved,"1 lớp / 0 mẫu"
+testdatase,testdatase,vn,0,0,approved,"RÁC TEST — is_active=0 nên biến khỏi mọi dropdown; thư mục dataset/features/vn/testdatase còn đó, 0 lớp 0 mẫu, xoá được"

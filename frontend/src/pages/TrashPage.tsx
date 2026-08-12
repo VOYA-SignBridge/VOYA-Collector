@@ -3,6 +3,7 @@ import { useToast } from "../hooks/useToast";
 import { useAuth } from "../hooks/useAuth";
 import Modal from "../components/ui/Modal";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
+import { Trans, useI18n } from "../i18n";
 import {
   getClassTrash,
   getSampleTrash,
@@ -54,6 +55,7 @@ function fmtDate(v?: string) {
 }
 
 export default function TrashPage() {
+  const { t } = useI18n();
   const { toast } = useToast();
   const { isAdmin } = useAuth();
   // Contributors only have a sample trash (they don't own labels), so default
@@ -73,11 +75,11 @@ export default function TrashPage() {
     // contributor never owns a class, so skip that call (it would 403).
     const s = await getSampleTrash();
     if (s.ok) setSamples(s.data);
-    else toast.error(s.error || "Không đọc được thùng rác mẫu");
+    else toast.error(s.error || t("Không đọc được thùng rác mẫu"));
     if (isAdmin) {
       const c = await getClassTrash();
       if (c.ok) setClasses(c.data);
-      else toast.error(c.error || "Không đọc được thùng rác nhãn");
+      else toast.error(c.error || t("Không đọc được thùng rác nhãn"));
     } else {
       setClasses([]);
     }
@@ -116,10 +118,10 @@ export default function TrashPage() {
     const res = await fn();
     if (res.ok && res.data) {
       const { ok_count, failed_count } = res.data;
-      if (failed_count) toast.error(`${label}: ${ok_count} thành công, ${failed_count} lỗi`);
-      else toast.success(`${label} ${ok_count} mục`);
+      if (failed_count) toast.error(t("{label}: {ok_count} thành công, {failed_count} lỗi", { label, ok_count, failed_count }));
+      else toast.success(t("{label} {ok_count} mục", { label, ok_count }));
     } else {
-      toast.error(res.error || `${label} thất bại`);
+      toast.error(res.error || t("{label} thất bại", { label }));
     }
     await load();
     setBusy(false);
@@ -129,7 +131,7 @@ export default function TrashPage() {
     setBusy(true);
     const res = await fn();
     if (res.ok) toast.success(label);
-    else toast.error(res.error || `${label} thất bại`);
+    else toast.error(res.error || t("{label} thất bại", { label }));
     await load();
     setBusy(false);
   };
@@ -139,33 +141,39 @@ export default function TrashPage() {
   /* ---- action launchers (destructive ones go through the confirm modal) ---- */
   const askBulkPurge = () =>
     setConfirm({
-      title: "Xóa vĩnh viễn mục đã chọn",
-      message: `Bạn sắp xóa VĨNH VIỄN ${sel.size} ${tab === "classes" ? "nhãn (kèm toàn bộ mẫu bên trong)" : "mẫu"}. Hành động này không thể hoàn tác.`,
-      confirmLabel: `Xóa ${sel.size} mục`,
+      title: t("Xóa vĩnh viễn mục đã chọn"),
+      message: t("Bạn sắp xóa VĨNH VIỄN {n} {loai}. Hành động này không thể hoàn tác.", {
+        n: sel.size,
+        loai: tab === "classes" ? t("nhãn (kèm toàn bộ mẫu bên trong)") : t("mẫu"),
+      }),
+      confirmLabel: t("Xóa {size} mục", { size: sel.size }),
       onConfirm: () =>
         runBulk("Đã xóa vĩnh viễn", () => (tab === "classes" ? bulkPurgeClasses(ids()) : bulkPurgeSamples(ids()))),
     });
 
   const askEmpty = () =>
     setConfirm({
-      title: "Làm trống thùng rác",
-      message: `Xóa VĨNH VIỄN toàn bộ ${count} ${tab === "classes" ? "nhãn (kèm mẫu bên trong)" : "mẫu"} trong thùng rác. Hành động này không thể hoàn tác.`,
-      confirmLabel: "Làm trống",
+      title: t("Làm trống thùng rác"),
+      message: t("Xóa VĨNH VIỄN toàn bộ {n} {loai} trong thùng rác. Hành động này không thể hoàn tác.", {
+        n: count,
+        loai: tab === "classes" ? t("nhãn (kèm mẫu bên trong)") : t("mẫu"),
+      }),
+      confirmLabel: t("Làm trống"),
       onConfirm: () => runBulk("Đã làm trống", () => (tab === "classes" ? emptyClassTrash() : emptySampleTrash())),
     });
 
   const askPurgeClass = (c: TrashClass) =>
     setConfirm({
-      title: "Xóa vĩnh viễn nhãn",
-      message: `Xóa VĨNH VIỄN nhãn "${c.label_original || c.slug}" và ${c.sample_count ?? 0} mẫu bên trong (file + Drive). Không thể hoàn tác.`,
+      title: t("Xóa vĩnh viễn nhãn"),
+      message: t("Xóa VĨNH VIỄN nhãn \"{label_original}\" và {sample_count} mẫu bên trong (file + Drive). Không thể hoàn tác.", { label_original: c.label_original || c.slug, sample_count: c.sample_count ?? 0 }),
       confirmLabel: "Xóa vĩnh viễn",
       onConfirm: () => runSingle("Đã xóa vĩnh viễn nhãn", () => purgeClass(c.class_uid)),
     });
 
   const askPurgeSample = (s: TrashSample) =>
     setConfirm({
-      title: "Xóa vĩnh viễn mẫu",
-      message: `Xóa VĨNH VIỄN mẫu ${s.sample_uid}. Không thể hoàn tác.`,
+      title: t("Xóa vĩnh viễn mẫu"),
+      message: t("Xóa VĨNH VIỄN mẫu {sample_uid}. Không thể hoàn tác.", { sample_uid: s.sample_uid }),
       confirmLabel: "Xóa vĩnh viễn",
       onConfirm: () => runSingle("Đã xóa vĩnh viễn mẫu", () => purgeSample(s.sample_uid)),
     });
@@ -209,19 +217,27 @@ export default function TrashPage() {
           <TrashIcon className="h-6 w-6" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Thùng rác</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{t("Thùng rác")}</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl leading-relaxed">
             {isAdmin ? (
               <>
-                Nhãn và mẫu đã xóa mềm vẫn giữ nguyên dữ liệu.{" "}
-                <b className="text-slate-600">Khôi phục</b> để đưa lại, hoặc{" "}
-                <b className="text-slate-600">xóa vĩnh viễn</b> (không thể hoàn tác). Xóa vĩnh viễn một nhãn sẽ xóa luôn các mẫu bên trong.
+                <Trans
+                  k="Nhãn và mẫu đã xóa mềm vẫn giữ nguyên dữ liệu. {khoi_phuc} để đưa lại, hoặc {xoa_han} (không thể hoàn tác). Xóa vĩnh viễn một nhãn sẽ xóa luôn các mẫu bên trong."
+                  vars={{
+                    khoi_phuc: <b className="text-slate-600">{t("Khôi phục")}</b>,
+                    xoa_han: <b className="text-slate-600">{t("xóa vĩnh viễn")}</b>,
+                  }}
+                />
               </>
             ) : (
               <>
-                Thùng rác riêng của bạn — các lần quay bạn đã xóa vẫn giữ nguyên dữ liệu.{" "}
-                <b className="text-slate-600">Khôi phục</b> để đưa lại, hoặc{" "}
-                <b className="text-slate-600">xóa vĩnh viễn</b> (không thể hoàn tác).
+                <Trans
+                  k="Thùng rác riêng của bạn — các lần quay bạn đã xóa vẫn giữ nguyên dữ liệu. {khoi_phuc} để đưa lại, hoặc {xoa_han} (không thể hoàn tác)."
+                  vars={{
+                    khoi_phuc: <b className="text-slate-600">{t("Khôi phục")}</b>,
+                    xoa_han: <b className="text-slate-600">{t("xóa vĩnh viễn")}</b>,
+                  }}
+                />
               </>
             )}
           </p>
@@ -230,8 +246,8 @@ export default function TrashPage() {
 
       {/* Tabs */}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl mb-4">
-        {isAdmin && <TabPill t="classes" label="Nhãn đã xóa" n={classes.length} />}
-        <TabPill t="samples" label="Mẫu đã xóa" n={samples.length} />
+        {isAdmin && <TabPill t="classes" label={t("Nhãn đã xóa")} n={classes.length} />}
+        <TabPill t="samples" label={t("Mẫu đã xóa")} n={samples.length} />
       </div>
 
       {/* Toolbar / selection bar */}
@@ -243,7 +259,7 @@ export default function TrashPage() {
         <label className="flex items-center gap-2 pl-1 pr-2 cursor-pointer select-none">
           <Checkbox checked={allSelected} indeterminate={someSelected} onChange={toggleAll} />
           <span className="text-sm font-medium text-slate-600">
-            {sel.size > 0 ? `Đã chọn ${sel.size}` : "Chọn tất cả"}
+            {sel.size > 0 ? t("Đã chọn {size}", { size: sel.size }) : t("Chọn tất cả")}
           </span>
         </label>
 
@@ -252,7 +268,7 @@ export default function TrashPage() {
         <button
           disabled={busy || sel.size === 0}
           onClick={bulkRestore}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 ring-1 ring-emerald-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-sky-800 bg-sky-50 hover:bg-sky-100 ring-1 ring-sky-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <RestoreIcon /> Khôi phục{sel.size ? ` (${sel.size})` : ""}
         </button>
@@ -269,7 +285,7 @@ export default function TrashPage() {
           onClick={askEmpty}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-ctu-red hover:bg-red-50 ring-1 ring-red-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          Làm trống thùng rác
+          {t("Làm trống thùng rác")}
         </button>
       </div>
 
@@ -277,16 +293,16 @@ export default function TrashPage() {
       <div className="card p-0 overflow-hidden">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
-            <LoadingSpinner size="lg" label="Đang tải thùng rác…" />
+            <LoadingSpinner size="lg" label={t("Đang tải thùng rác…")} />
           </div>
         ) : count === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center px-6">
             <div className="h-16 w-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4">
               <TrashIcon className="h-8 w-8" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-700">Thùng rác trống</h3>
+            <h3 className="text-lg font-semibold text-slate-700">{t("Thùng rác trống")}</h3>
             <p className="text-sm text-slate-500 mt-1">
-              {tab === "classes" ? "Chưa có nhãn nào bị xóa." : "Chưa có mẫu nào bị xóa."}
+              {tab === "classes" ? t("Chưa có nhãn nào bị xóa.") : t("Chưa có mẫu nào bị xóa.")}
             </p>
           </div>
         ) : (
@@ -299,19 +315,19 @@ export default function TrashPage() {
                   </th>
                   {tab === "classes" ? (
                     <>
-                      <th className="py-3 px-3">Nhãn</th>
-                      <th className="py-3 px-3">Ngôn ngữ / Giọng</th>
-                      <th className="py-3 px-3">Số mẫu</th>
+                      <th className="py-3 px-3">{t("Nhãn")}</th>
+                      <th className="py-3 px-3">{t("Ngôn ngữ / Giọng")}</th>
+                      <th className="py-3 px-3">{t("Số mẫu")}</th>
                     </>
                   ) : (
                     <>
-                      <th className="py-3 px-3">Mã mẫu</th>
-                      <th className="py-3 px-3">Nhãn</th>
-                      <th className="py-3 px-3">Người đóng góp</th>
+                      <th className="py-3 px-3">{t("Mã mẫu")}</th>
+                      <th className="py-3 px-3">{t("Nhãn")}</th>
+                      <th className="py-3 px-3">{t("Người đóng góp")}</th>
                     </>
                   )}
-                  <th className="py-3 px-3">Đã xóa lúc</th>
-                  <th className="py-3 pr-4 pl-3 text-right">Thao tác</th>
+                  <th className="py-3 px-3">{t("Đã xóa lúc")}</th>
+                  <th className="py-3 pr-4 pl-3 text-right">{t("Thao tác")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -341,18 +357,18 @@ export default function TrashPage() {
                               <button
                                 disabled={busy}
                                 onClick={() => runSingle("Đã khôi phục nhãn", () => restoreClass(c.class_uid))}
-                                title="Khôi phục"
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-emerald-700 hover:bg-emerald-50 ring-1 ring-emerald-200 disabled:opacity-50 transition-colors"
+                                title={t("Khôi phục")}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sky-800 hover:bg-sky-50 ring-1 ring-sky-200 disabled:opacity-50 transition-colors"
                               >
-                                <RestoreIcon className="h-3.5 w-3.5" /> Khôi phục
+                                <RestoreIcon className="h-3.5 w-3.5" /> {t("Khôi phục")}
                               </button>
                               <button
                                 disabled={busy}
                                 onClick={() => askPurgeClass(c)}
-                                title="Xóa vĩnh viễn"
+                                title={t("Xóa vĩnh viễn")}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-ctu-red hover:bg-red-50 ring-1 ring-red-200 disabled:opacity-50 transition-colors"
                               >
-                                <TrashIcon className="h-3.5 w-3.5" /> Xóa
+                                <TrashIcon className="h-3.5 w-3.5" /> {t("Xóa")}
                               </button>
                             </div>
                           </td>
@@ -375,16 +391,16 @@ export default function TrashPage() {
                               <button
                                 disabled={busy}
                                 onClick={() => runSingle("Đã khôi phục mẫu", () => restoreSample(s.sample_uid))}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-emerald-700 hover:bg-emerald-50 ring-1 ring-emerald-200 disabled:opacity-50 transition-colors"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sky-800 hover:bg-sky-50 ring-1 ring-sky-200 disabled:opacity-50 transition-colors"
                               >
-                                <RestoreIcon className="h-3.5 w-3.5" /> Khôi phục
+                                <RestoreIcon className="h-3.5 w-3.5" /> {t("Khôi phục")}
                               </button>
                               <button
                                 disabled={busy}
                                 onClick={() => askPurgeSample(s)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-ctu-red hover:bg-red-50 ring-1 ring-red-200 disabled:opacity-50 transition-colors"
                               >
-                                <TrashIcon className="h-3.5 w-3.5" /> Xóa
+                                <TrashIcon className="h-3.5 w-3.5" /> {t("Xóa")}
                               </button>
                             </div>
                           </td>
@@ -416,7 +432,7 @@ export default function TrashPage() {
                 disabled={busy}
                 className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
-                Hủy
+                {t("Hủy")}
               </button>
               <button
                 onClick={async () => {

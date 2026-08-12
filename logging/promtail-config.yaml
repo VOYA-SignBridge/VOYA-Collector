@@ -39,7 +39,19 @@ scrape_configs:
                   level: level
                   request_id: request_id
                   task_id: task_id
+            # `level` only ever takes a handful of values, so it stays a label.
             - labels:
                 level:
+            # request_id / task_id are UNBOUNDED — one distinct value per request
+            # and per Celery task. As labels they multiply the stream count
+            # without limit, which is the classic way to make Loki fall over;
+            # they belong in structured metadata, which is indexed for lookup
+            # but does NOT create a stream. Requires Loki 3.0 + tsdb + schema
+            # v13, all of which this stack already runs (logging/loki-config.yaml).
+            #
+            # Query change: `{request_id="abc"}` no longer matches. Filter on the
+            # stream first, then the metadata:
+            #   {container=~".+_backend"} | request_id="abc"
+            - structured_metadata:
                 request_id:
                 task_id:

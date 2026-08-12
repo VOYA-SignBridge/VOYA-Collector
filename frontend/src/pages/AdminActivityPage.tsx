@@ -1,8 +1,18 @@
+/**
+ * Phiên hoạt động + nhật ký: nhãn trong `secEventBadge`, `AUDIT_FILTERS` và
+ * `auditLabel` là KHOÁ từ điển, dịch tại chỗ dựng.
+ *
+ * @i18n-key-table
+ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import apiClient from "../api/axiosClient";
 import { useToast } from "../hooks/useToast";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import BlockIpModal, { type BlockPayload } from "../components/BlockIpModal";
+import { AlertTriangleIcon, ScrollTextIcon, ShieldIcon, XCircleIcon } from "../components/ui/Icons";
+import { FOCUS_RING, toneClasses } from "../theme/status";
+import { friendlyError } from "../lib/errors";
+import { tr, useI18n } from "../i18n";
 
 interface SecurityEvent {
   ts: number;
@@ -20,12 +30,72 @@ function secEventBadge(action: string): { label: string; cls: string } {
     case "block_ip":
       return { label: "Chặn IP", cls: "bg-red-100 text-red-700" };
     case "unblock_ip":
-      return { label: "Bỏ chặn", cls: "bg-emerald-100 text-emerald-700" };
+      return { label: "Bỏ chặn", cls: "bg-sky-100 text-sky-800" };
     case "TRAINING_SYSTEM_FAILURE":
       return { label: "Training lỗi hệ thống", cls: "bg-red-100 text-red-700" };
     default:
       return { label: "Ngắt phiên", cls: "bg-amber-100 text-amber-700" };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Nhật ký kiểm toán BỀN — mirror backend app/audit.py :: record()
+//
+// Khác bảng "Nhật ký bảo mật" ở trên, vốn đọc từ một danh sách Redis cắt còn
+// 500 mục trên một instance chạy `volatile-lru`: bảng này nằm trong Postgres,
+// không bị đuổi, và giữ `ip_hash` đối chiếu được giữa các hành động.
+//
+// KHÔNG nằm trong vòng poll 3 giây. Đây là bản ghi lịch sử, không phải bảng
+// theo dõi trực tiếp; hỏi lại mỗi ba giây là bắt Postgres quét một bảng chỉ
+// tăng, để hiển thị dữ liệu gần như không đổi.
+// ---------------------------------------------------------------------------
+interface AuditRow {
+  audit_id: number;
+  created_at: string;
+  tenant_id: string | null;
+  actor_user_id: string | null;
+  actor_label: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  detail: Record<string, unknown> | null;
+  ip_hash: string | null;
+}
+
+// Mỗi tiền tố mà máy chủ thật sự ghi ra đều phải có một nút ở đây. Thiếu nút
+// thì hành động ấy không biến mất — nó vẫn nằm dưới "Tất cả" — nhưng nó không
+// LỌC RA được, và ở một bảng chỉ dài thêm theo thời gian thì "không lọc ra
+// được" và "không tìm thấy" là cùng một thứ đối với người đang cần nó.
+const AUDIT_FILTERS: { label: string; prefix: string }[] = [
+  { label: "Tất cả", prefix: "" },
+  { label: "An ninh", prefix: "security." },
+  { label: "Dữ liệu", prefix: "data." },
+  { label: "Tổ chức", prefix: "tenant." },
+  { label: "Từ vựng", prefix: "vocabulary." },
+  { label: "Pháp lý", prefix: "legal." },
+  { label: "Tài khoản", prefix: "account." },
+  { label: "Nâng quyền", prefix: "sudo." },
+  { label: "Cấu hình", prefix: "settings." },
+];
+
+// `data.class.purge` → "Xoá vĩnh viễn nhãn". Chỉ đặt tên cho những hành động
+// không hồi được; phần còn lại hiện nguyên mã hành động, vì một nhãn tiếng
+// Việt đoán mò còn khó tra hơn chuỗi gốc.
+function auditLabel(action: string): { text: string; cls: string } {
+  if (action.endsWith(".purge") || action.endsWith(".purge.bulk"))
+    return { text: action, cls: "bg-red-100 text-red-700" };
+  if (action.startsWith("sudo.") || action.startsWith("settings."))
+    return { text: action, cls: "bg-amber-100 text-amber-700" };
+  if (action.startsWith("security."))
+    return { text: action, cls: "bg-sky-100 text-sky-700" };
+  // Gộp phương ngữ đổi nhãn mẫu của người khác; gỡ thành viên cắt quyền xem
+  // chính dữ liệu họ đóng góp. Cả hai không có nút hoàn tác, nên chúng đứng
+  // cùng bậc với `purge` chứ không phải bậc "ghi chú".
+  if (action === "vocabulary.dialect.merged" || action === "tenant.member_removed")
+    return { text: action, cls: "bg-red-100 text-red-700" };
+  if (action.startsWith("tenant.") || action.startsWith("vocabulary."))
+    return { text: action, cls: "bg-violet-100 text-violet-700" };
+  return { text: action, cls: "bg-slate-100 text-slate-600" };
 }
 
 // ---------------------------------------------------------------------------
@@ -81,21 +151,54 @@ interface ActivityReport {
 
 const REFRESH_MS = 3000;
 
+// Hàm mức module → `tr`. Chuỗi nó trả về KHÔNG tự dựng lại khi đổi ngôn ngữ,
+// nhưng bảng này tự làm mới mỗi 3 giây nên chữ theo kịp trong một nhịp.
 const ago = (s: number): string => {
-  if (s < 60) return `${Math.round(s)}s trước`;
-  if (s < 3600) return `${Math.round(s / 60)} phút trước`;
-  return `${Math.round(s / 3600)} giờ trước`;
+  if (s < 60) return tr("{n}s trước", { n: Math.round(s) });
+  if (s < 3600) return tr("{n} phút trước", { n: Math.round(s / 60) });
+  return tr("{n} giờ trước", { n: Math.round(s / 3600) });
 };
 
 export default function AdminActivityPage() {
+  const { t } = useI18n();
   const [data, setData] = useState<ActivityReport | null>(null);
   const [secLog, setSecLog] = useState<SecurityEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [blockTarget, setBlockTarget] = useState<string | null>(null);
+  const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [auditPrefix, setAuditPrefix] = useState("");
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
   const { toast } = useToast();
+
+  // Số thứ tự lượt tải nhật ký gần nhất — xem `fetchAudit`.
+  const auditRun = useRef(0);
+
+  const fetchAudit = useCallback(async (prefix: string) => {
+    // Bấm nhanh qua các bộ lọc thì nhiều request cùng bay. Chúng không về theo
+    // thứ tự gửi, nên nếu không canh, một phản hồi CŨ về sau sẽ ghi đè phản hồi
+    // của bộ lọc đang chọn — bảng hiện dữ liệu của bộ lọc khác với nút đang
+    // sáng, và người đọc không có cách nào biết.
+    const run = ++auditRun.current;
+    setAuditBusy(true);
+    try {
+      const res = await apiClient.get<{ events: AuditRow[] }>(
+        "/api/v1/admin/audit-log",
+        { params: { limit: 150, action_prefix: prefix } },
+      );
+      if (run !== auditRun.current) return;
+      setAudit(res.data.events || []);
+      setAuditError(null);
+    } catch (e: any) {
+      if (run !== auditRun.current) return;
+      setAuditError(friendlyError(e, "Không tải được nhật ký kiểm toán"));
+    } finally {
+      if (run === auditRun.current) setAuditBusy(false);
+    }
+  }, []);
 
   const fetchReport = useCallback(async () => {
     try {
@@ -104,7 +207,7 @@ export default function AdminActivityPage() {
       setSecLog(rep.data.security_log || []);
       setError(null);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Không tải được dữ liệu phiên hoạt động");
+      setError(friendlyError(e, "Không tải được dữ liệu phiên hoạt động"));
     }
   }, []);
 
@@ -122,16 +225,19 @@ export default function AdminActivityPage() {
     };
   }, [live, fetchReport]);
 
+  // Tách khỏi vòng poll ở trên: chỉ nạp khi vào trang và khi đổi bộ lọc.
+  useEffect(() => { fetchAudit(auditPrefix); }, [auditPrefix, fetchAudit]);
+
   const doBlock = async (ip: string, payload: BlockPayload) => {
     setBusy(ip);
     try {
       await apiClient.post("/api/v1/admin/block-ip", {
         ip, reason: payload.reason, duration_seconds: payload.duration_seconds,
       });
-      toast.success(`Đã chặn ${ip}`);
+      toast.success(t("Đã chặn {ip}", { ip }));
       await fetchReport();
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Chặn IP thất bại");
+      toast.error(friendlyError(e, "Chặn IP thất bại"));
     } finally { setBusy(null); }
   };
 
@@ -139,23 +245,23 @@ export default function AdminActivityPage() {
     setBusy(ip);
     try {
       await apiClient.post("/api/v1/admin/unblock-ip", { ip });
-      toast.success(`Đã bỏ chặn ${ip}`);
+      toast.success(t("Đã bỏ chặn {ip}", { ip }));
       await fetchReport();
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Bỏ chặn thất bại");
+      toast.error(friendlyError(e, "Bỏ chặn thất bại"));
     } finally { setBusy(null); }
   };
 
   const forceLogout = async (userId: string, name: string) => {
-    const reason = window.prompt(`Lý do ngắt phiên "${name}" (sẽ hiển thị cho người dùng):`, "Vi phạm quy định sử dụng");
+    const reason = window.prompt(t("Lý do ngắt phiên \"{name}\" (sẽ hiển thị cho người dùng):", { name }), "Vi phạm quy định sử dụng");
     if (reason === null) return; // cancelled
     setBusy(userId);
     try {
       await apiClient.post("/api/v1/admin/force-logout", { user_id: userId, reason });
-      toast.success(`Đã đăng xuất ${name}`);
+      toast.success(t("Đã đăng xuất {name}", { name }));
       await fetchReport();
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || "Đăng xuất thất bại");
+      toast.error(friendlyError(e, "Đăng xuất thất bại"));
     } finally { setBusy(null); }
   };
 
@@ -181,18 +287,18 @@ export default function AdminActivityPage() {
                   d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-3.13a4 4 0 10-4-4 4 4 0 004 4zm6 0a3 3 0 10-3-3" />
               </svg>
             </div>
-            Phiên hoạt động
+            {t("Phiên hoạt động")}
           </h2>
-          <p className="text-slate-600">Người dùng đang kết nối, vị trí, mức sử dụng và công cụ xử lý bất thường</p>
+          <p className="text-slate-600">{t("Người dùng đang kết nối, vị trí, mức sử dụng và công cụ xử lý bất thường")}</p>
         </div>
         <button
           onClick={() => setLive((v) => !v)}
           className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-            live ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-600 border-slate-200"
+            live ? toneClasses("success", "soft") : toneClasses("neutral", "soft")
           }`}
         >
-          <span className={`w-2 h-2 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-slate-400"}`} />
-          {live ? "Trực tiếp" : "Tạm dừng"}
+          <span className={`w-2 h-2 rounded-full ${live ? "bg-sky-600 animate-pulse motion-reduce:animate-none" : "bg-slate-400"}`} />
+          {live ? t("Trực tiếp") : t("Tạm dừng")}
         </button>
       </div>
 
@@ -202,16 +308,16 @@ export default function AdminActivityPage() {
 
       {!data && !error ? (
         <div className="py-20">
-          <LoadingSpinner size="lg" label="Đang tải phiên hoạt động..." />
+          <LoadingSpinner size="lg" label={t("Đang tải phiên hoạt động...")} />
         </div>
       ) : (
         <>
           {/* Summary */}
       <div className="flex flex-wrap gap-2">
-        <Chip label="Đang online" value={data?.online_count ?? 0} tone="bg-emerald-50 border-emerald-200 text-emerald-700" />
-        <Chip label="Tổng phiên" value={sessions.length} />
-        <Chip label="IP bị chặn" value={blocked.length} tone={blocked.length ? "bg-red-50 border-red-200 text-red-700" : undefined} />
-        <Chip label="Định vị GeoIP" value={data?.geoip_enabled ? "Bật" : "Chưa có DB"} tone={data?.geoip_enabled ? "bg-ctu-blue/5 border-ctu-blue/20 text-ctu-blue" : "bg-amber-50 border-amber-200 text-amber-700"} />
+        <Chip label={t("Đang online")} value={data?.online_count ?? 0} tone="bg-sky-50 border-sky-200 text-sky-800" />
+        <Chip label={t("Tổng phiên")} value={sessions.length} />
+        <Chip label={t("IP bị chặn")} value={blocked.length} tone={blocked.length ? "bg-red-50 border-red-200 text-red-700" : undefined} />
+        <Chip label={t("Định vị GeoIP")} value={data?.geoip_enabled ? t("Bật") : t("Chưa có DB")} tone={data?.geoip_enabled ? "bg-ctu-blue/5 border-ctu-blue/20 text-ctu-blue" : "bg-amber-50 border-amber-200 text-amber-700"} />
       </div>
 
       {/* Anomaly alerts */}
@@ -222,11 +328,14 @@ export default function AdminActivityPage() {
               className={`rounded-lg px-4 py-3 text-sm font-medium border flex items-center justify-between gap-3 ${
                 a.level === "critical" ? "bg-red-50 border-red-200 text-red-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
               <span className="flex items-center gap-2">
-                <span>{a.level === "critical" ? "🔴" : "🟠"}</span>{a.message}
+                {a.level === "critical"
+                  ? <XCircleIcon className="w-4 h-4 shrink-0 text-red-600" aria-hidden="true" />
+                  : <AlertTriangleIcon className="w-4 h-4 shrink-0 text-amber-600" aria-hidden="true" />}
+                {a.message}
               </span>
               <button onClick={() => setBlockTarget(a.ip)} disabled={busy === a.ip}
                 className="shrink-0 px-2.5 py-1 rounded-md text-xs font-semibold bg-white/70 border border-current hover:bg-white transition-colors disabled:opacity-50">
-                Chặn IP
+                {t("Chặn IP")}
               </button>
             </div>
           ))}
@@ -239,33 +348,33 @@ export default function AdminActivityPage() {
           <table className="w-full text-left border-collapse text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600">
-                <th className="py-3 px-4 font-semibold">Người dùng</th>
+                <th className="py-3 px-4 font-semibold">{t("Người dùng")}</th>
                 <th className="py-3 px-4 font-semibold">IP</th>
-                <th className="py-3 px-4 font-semibold">Vị trí</th>
-                <th className="py-3 px-4 font-semibold">Trình duyệt</th>
-                <th className="py-3 px-4 font-semibold">Hoạt động</th>
+                <th className="py-3 px-4 font-semibold">{t("Vị trí")}</th>
+                <th className="py-3 px-4 font-semibold">{t("Trình duyệt")}</th>
+                <th className="py-3 px-4 font-semibold">{t("Hoạt động")}</th>
                 <th className="py-3 px-4 font-semibold text-right">req/5p</th>
-                <th className="py-3 px-4 font-semibold text-right">Thao tác</th>
+                <th className="py-3 px-4 font-semibold text-right">{t("Thao tác")}</th>
               </tr>
             </thead>
             <tbody>
               {!data ? (
-                <tr><td colSpan={7} className="py-8 text-center text-slate-400">Đang tải…</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-slate-400">{t("Đang tải…")}</td></tr>
               ) : sessions.length === 0 ? (
-                <tr><td colSpan={7} className="py-8 text-center text-slate-400">Chưa có phiên nào đang hoạt động.</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-slate-400">{t("Chưa có phiên nào đang hoạt động.")}</td></tr>
               ) : (
                 sessions.map((s) => (
                   <tr key={s.ip} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${s.blocked ? "bg-red-50/40" : ""}`}>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${s.online ? "bg-emerald-500" : "bg-slate-300"}`} title={s.online ? "Online" : "Offline"} />
+                        <span className={`w-2 h-2 rounded-full ${s.online ? "bg-sky-600" : "bg-slate-300"}`} title={s.online ? "Online" : "Offline"} />
                         {s.username ? (
                           <span className="font-medium text-slate-800">
                             {s.username}
-                            {s.is_admin && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">ADMIN</span>}
+                            {s.is_admin && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">{t("QUẢN TRỊ")}</span>}
                           </span>
                         ) : (
-                          <span className="text-slate-400 italic">Khách</span>
+                          <span className="text-slate-400 italic">{t("Khách")}</span>
                         )}
                       </div>
                     </td>
@@ -277,10 +386,10 @@ export default function AdminActivityPage() {
                         <a
                           href={`https://www.openstreetmap.org/?mlat=${s.precise.lat}&mlon=${s.precise.lon}#map=17/${s.precise.lat}/${s.precise.lon}`}
                           target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 hover:underline"
+                          className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 hover:underline"
                           title={`GPS ${s.precise.lat.toFixed(5)}, ${s.precise.lon.toFixed(5)} (±${Math.round(s.precise.accuracy)}m)`}
                         >
-                          📍 GPS ±{Math.round(s.precise.accuracy)}m · bản đồ
+                          GPS ±{Math.round(s.precise.accuracy)}m · bản đồ
                         </a>
                       )}
                     </td>
@@ -297,19 +406,19 @@ export default function AdminActivityPage() {
                         {s.user_id && !s.is_admin && (
                           <button onClick={() => forceLogout(s.user_id!, s.username || s.ip)} disabled={busy === s.user_id}
                             className="px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50">
-                            Ngắt phiên
+                            {t("Ngắt phiên")}
                           </button>
                         )}
                         {s.blocked ? (
                           <button onClick={() => unblockIp(s.ip)} disabled={busy === s.ip}
-                            className="px-2 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors disabled:opacity-50">
-                            Bỏ chặn
+                            className={`px-2 py-1 rounded-md text-xs font-medium border transition-colors disabled:opacity-50 ${toneClasses("success", "outline")} ${FOCUS_RING}`}>
+                            {t("Bỏ chặn")}
                           </button>
                         ) : (
                           <button onClick={() => setBlockTarget(s.ip)} disabled={busy === s.ip || s.geo?.local}
-                            title={s.geo?.local ? "Không thể chặn IP nội bộ" : "Chặn IP này"}
+                            title={s.geo?.local ? t("Không thể chặn IP nội bộ") : t("Chặn IP này")}
                             className="px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                            Chặn IP
+                            {t("Chặn IP")}
                           </button>
                         )}
                       </div>
@@ -325,7 +434,9 @@ export default function AdminActivityPage() {
       {/* Blocked IPs */}
       {blocked.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-          <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">🚫 IP đang bị chặn ({blocked.length})</h3>
+          <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2"><XCircleIcon className="w-4 h-4 text-red-600" aria-hidden="true" />
+            {t("IP đang bị chặn ({n})", { n: blocked.length })}
+          </h3>
           <div className="space-y-2">
             {blocked.map((b) => (
               <div key={b.ip} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm">
@@ -333,13 +444,15 @@ export default function AdminActivityPage() {
                   <span className="font-mono font-medium text-red-700">{b.ip}</span>
                   {b.reason && <span className="text-red-600"> — {b.reason}</span>}
                   <span className="text-red-400 text-xs ml-1">
-                    ({b.by ? `bởi ${b.by}` : "admin"}
-                    {b.until ? ` · đến ${new Date(b.until * 1000).toLocaleString("vi-VN")}` : " · vĩnh viễn"})
+                    ({b.by ? t("bởi {ai}", { ai: b.by }) : "admin"}
+                    {b.until
+                      ? ` · ${t("đến {khi}", { khi: new Date(b.until * 1000).toLocaleString("vi-VN") })}`
+                      : ` · ${t("vĩnh viễn")}`})
                   </span>
                 </div>
                 <button onClick={() => unblockIp(b.ip)} disabled={busy === b.ip}
-                  className="shrink-0 px-2 py-1 rounded-md text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50">
-                  Bỏ chặn
+                  className={`shrink-0 px-2 py-1 rounded-md text-xs font-medium border disabled:opacity-50 ${toneClasses("success", "outline")} ${FOCUS_RING}`}>
+                  {t("Bỏ chặn")}
                 </button>
               </div>
             ))}
@@ -350,24 +463,111 @@ export default function AdminActivityPage() {
       {/* Security audit log */}
       {secLog.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-          <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">🛡️ Nhật ký bảo mật</h3>
+          <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2"><ShieldIcon className="w-4 h-4 text-slate-500" aria-hidden="true" />{t("Nhật ký bảo mật")}</h3>
           <div className="space-y-1.5 max-h-72 overflow-y-auto">
             {secLog.map((ev, i) => {
               const badge = secEventBadge(ev.action);
               return (
                 <div key={i} className="flex items-center gap-2 text-xs text-slate-600 border-b border-slate-50 pb-1.5">
                   <span className="text-slate-400 tabular-nums shrink-0">{new Date(ev.ts * 1000).toLocaleString("vi-VN")}</span>
-                  <span className={`px-1.5 py-0.5 rounded font-semibold shrink-0 ${badge.cls}`}>{badge.label}</span>
+                  <span className={`px-1.5 py-0.5 rounded font-semibold shrink-0 ${badge.cls}`}>{t(badge.label)}</span>
                   {ev.source && <span className="font-mono text-slate-400 shrink-0">[{ev.source}]</span>}
                   <span className="font-mono text-slate-500 shrink-0 truncate max-w-[160px]">{ev.target}</span>
                   {ev.reason && <span className="truncate">— {ev.reason}</span>}
-                  <span className="text-slate-400 ml-auto shrink-0">bởi {ev.actor || "?"}</span>
+                  <span className="text-slate-400 ml-auto shrink-0">
+                    {t("bởi {ai}", { ai: ev.actor || "?" })}
+                  </span>
                 </div>
               );
             })}
           </div>
         </div>
       )}
+      {/* Nhật ký kiểm toán bền (Postgres) */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <h3 className="font-semibold text-slate-700 flex items-center gap-2">
+            <ScrollTextIcon className="w-4 h-4 text-ctu-blue" aria-hidden="true" />
+            {t("Nhật ký kiểm toán")}
+          </h3>
+          <span className="text-xs text-slate-400">
+            {t("lưu bền trong cơ sở dữ liệu — không bị đuổi như bảng phía trên")}
+          </span>
+          <div className="ml-auto flex items-center gap-1">
+            {AUDIT_FILTERS.map((f) => (
+              <button
+                key={f.prefix}
+                onClick={() => setAuditPrefix(f.prefix)}
+                className={`px-2 py-1 rounded-md text-xs font-medium border ${
+                  auditPrefix === f.prefix
+                    ? "bg-slate-800 text-white border-slate-800"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {t(f.label)}
+              </button>
+            ))}
+            <button
+              onClick={() => fetchAudit(auditPrefix)}
+              disabled={auditBusy}
+              className="px-2 py-1 rounded-md text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 disabled:opacity-50"
+            >
+              {auditBusy ? t("Đang tải…") : t("Tải lại")}
+            </button>
+          </div>
+        </div>
+
+        {auditError && (
+          <p className="text-xs text-red-600 mb-2">{auditError}</p>
+        )}
+
+        {audit.length === 0 && !auditBusy && !auditError ? (
+          <p className="text-xs text-slate-400">{t("Chưa có dòng nào.")}</p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-slate-400 text-left">
+                <tr className="border-b border-slate-100">
+                  <th className="py-1.5 pr-3 font-medium">{t("Thời điểm")}</th>
+                  <th className="py-1.5 pr-3 font-medium">{t("Hành động")}</th>
+                  <th className="py-1.5 pr-3 font-medium">{t("Người thực hiện")}</th>
+                  <th className="py-1.5 pr-3 font-medium">{t("Đối tượng")}</th>
+                  <th className="py-1.5 pr-3 font-medium" title={t("Băm HMAC của địa chỉ IP: đối chiếu được giữa các dòng, không đảo ngược ra IP")}>
+                    {t("Nguồn")}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {audit.map((row) => {
+                  const badge = auditLabel(row.action);
+                  return (
+                    <tr key={row.audit_id} className="border-b border-slate-50 align-top">
+                      <td className="py-1.5 pr-3 text-slate-400 tabular-nums whitespace-nowrap">
+                        {new Date(row.created_at).toLocaleString("vi-VN")}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`px-1.5 py-0.5 rounded font-mono font-semibold ${badge.cls}`}>
+                          {badge.text}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-3 text-slate-600 whitespace-nowrap">
+                        {row.actor_label || <span className="text-slate-300">{t("hệ thống")}</span>}
+                      </td>
+                      <td className="py-1.5 pr-3 text-slate-500 font-mono truncate max-w-[220px]"
+                          title={row.target_id || ""}>
+                        {row.target_id || "—"}
+                      </td>
+                      <td className="py-1.5 pr-3 text-slate-300 font-mono whitespace-nowrap">
+                        {row.ip_hash ? row.ip_hash.slice(0, 8) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
       </>
       )}
 

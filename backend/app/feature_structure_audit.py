@@ -20,6 +20,13 @@ def scan(root: str | None = None) -> Dict:
                 legacy.append(name)
             elif name == "global_common":
                 continue
+            elif name == "_tenants":
+                # Not a language root: one level of tenant partitions, each
+                # containing its own language tree. Auditing them means
+                # recursing one level deeper, which this scan does not do —
+                # reporting them as malformed language roots would be worse
+                # than skipping. Tracked in BACKEND_WORK_PLAN.md A4.
+                continue
             else:
                 # language root expected
                 # check its children

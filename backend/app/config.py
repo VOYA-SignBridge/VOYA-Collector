@@ -38,6 +38,175 @@ class Settings(BaseSettings):
     broker_url: str = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
     result_backend: str = os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
+    # Separate DSN for schema changes (DDL). Deliberately NOT the same role the
+    # application uses at runtime: a role that can run ALTER TABLE can also run
+    # `ALTER TABLE ... DISABLE ROW LEVEL SECURITY`, so an application role with
+    # DDL rights can switch off the very policies that isolate tenants. Splitting
+    # the two makes the isolation guarantee non-self-revocable.
+    #
+    # Empty means "not split yet" — postgres_connection falls back to
+    # database_url, so a deployment that has not run provision_db_roles keeps
+    # working exactly as before.
+    migration_database_url: str = os.getenv("MIGRATION_DATABASE_URL", "")
+
+    # Refuse to boot when row-level security is enabled but the application role
+    # can bypass it (superuser or BYPASSRLS). That combination is worse than no
+    # RLS at all: pg_policies and pg_tables.rowsecurity both report success while
+    # every query still returns every tenant's rows, so configuration-level checks
+    # go green against behaviour that provides no isolation whatsoever.
+    #
+    # Default off so switching roles and enabling policies can be sequenced
+    # without bricking a running deployment; set to 1 once DATABASE_URL points at
+    # the non-superuser role. See docs/needFix/BACKEND_WORK_PLAN.md item A2.
+    db_strict_isolation: bool = os.getenv("DB_STRICT_ISOLATION", "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+    # Ai đang QUYẾT ĐỊNH phân quyền. Ba giá trị, và thứ tự chuyển giữa chúng là
+    # nội dung của §44 PDM (Phase A → B → C):
+    #
+    #   legacy  Chỉ `users.is_admin` + `tenant_members.role`. Casbin không nạp,
+    #           không chạy, không tốn gì. Đây là hành vi TRƯỚC khi có tệp này.
+    #
+    #   shadow  Hệ cũ vẫn quyết định; Casbin chạy song song và mọi bất đồng
+    #           được ghi lại. KHÔNG có request nào bị đổi kết quả. Đây là mặc
+    #           định, và nó phải chạy đủ lâu để bộ mismatch sạch trước khi đi
+    #           tiếp — đó là toàn bộ giá trị của bước này.
+    #
+    #   casbin  Casbin quyết định. Nạp policy thất bại = tiến trình KHÔNG khởi
+    #           động (§40, hỏng-thì-đóng), vì phương án còn lại là phục vụ mà
+    #           không biết đang phục vụ cho ai.
+    #
+    # Mặc định là `shadow` chứ không phải `legacy`: một chế độ quan sát mà phải
+    # bật thủ công mới chạy thì sẽ không ai bật, và lên thẳng enforcement với
+    # mismatch chưa biết là đúng thứ trình tự này tồn tại để ngăn.
+    authz_mode: str = os.getenv("AUTHZ_MODE", "shadow").strip().lower()
+
+    # Rate limits for the write paths and for inference. Ceilings, not quotas:
+    # set well above real usage so they catch a runaway loop or crude abuse
+    # without interrupting a collector recording samples. See rate_limit_deps.py.
+    rate_limit_upload_per_hour: int = int(os.getenv("RATE_LIMIT_UPLOAD_PER_HOUR", "400"))
+    rate_limit_training_per_hour: int = int(os.getenv("RATE_LIMIT_TRAINING_PER_HOUR", "30"))
+    rate_limit_catalog_per_hour: int = int(os.getenv("RATE_LIMIT_CATALOG_PER_HOUR", "300"))
+    rate_limit_predict_per_minute: int = int(os.getenv("RATE_LIMIT_PREDICT_PER_MINUTE", "600"))
+
+    # Which tenant an UNAUTHENTICATED request reads.
+    #
+    # Several catalogue endpoints are deliberately public (the labels browser and
+    # the realtime demo read classes and samples without a session). Under
+    # row-level security an unscoped request sees nothing, so those pages would
+    # go blank; scoping anonymous traffic to one named tenant keeps them working
+    # while still making every other tenant unreachable without authentication.
+    #
+    # This is a policy, not a fallback: it is the single tenant whose catalogue
+    # is public. Set to an empty string to make anonymous requests see nothing at
+    # all, which is the right setting for a deployment with no public catalogue.
+    public_tenant_id: str = os.getenv("PUBLIC_TENANT_ID", "default")
+
+    # How long an invitation link stays usable. Long enough to survive a weekend
+    # and an email that lands in spam; short enough that a link forwarded once
+    # and forgotten does not stay a way in for a year.
+    invitation_ttl_hours: int = int(os.getenv("INVITATION_TTL_HOURS", "168"))
+
+    # Phút dùng mô hình nhận diện mỗi ngày cho khách chưa đăng nhập.
+    #
+    # Đếm PHÚT CÓ HOẠT ĐỘNG, không đếm lượt gọi — xem app/trial.py. 60 chứ không
+    # phải 30 vì đã đo: một lượt suy luận tốn 40 ms CPU (p50) và KHÔNG dùng GPU
+    # trên bản triển khai này. Nếu mô hình chuyển sang GPU thì đo lại rồi chỉnh,
+    # đừng đoán.
+    trial_minutes_per_day: int = int(os.getenv("TRIAL_MINUTES_PER_DAY", "60"))
+
+    # Múi giờ quyết định "một ngày" của hạn ngạch, tính bằng giờ lệch so với UTC.
+    #
+    # Không có giá trị này thì ranh giới ngày là nửa đêm UTC, tức **7 giờ sáng
+    # giờ Việt Nam**: người dùng lúc 6h sáng bị chặn rồi được reset một tiếng
+    # sau, còn "quay lại vào ngày mai" trong thông báo là sai. Mặc định +7 vì
+    # đây là sản phẩm phục vụ người dùng Việt Nam.
+    #
+    # Là số giờ lệch chứ không phải tên vùng: `zoneinfo` cần gói `tzdata` vốn
+    # không có sẵn trong image python:slim, và Việt Nam không có giờ mùa hè nên
+    # một độ lệch cố định là mô tả đầy đủ.
+    trial_reset_utc_offset_hours: int = int(
+        os.getenv("TRIAL_RESET_UTC_OFFSET_HOURS", "7"))
+
+    # Whether an unverified email address may hold a session.
+    #
+    # Default OFF, and that is not timidity — turning it on locks out every
+    # account whose address was never verified, which on this deployment is all
+    # of them. The intended order is: run `python -m app.cli.verify_existing_emails`
+    # to grandfather the accounts that already exist, THEN set this. The CLI
+    # exists so that sequence is a command rather than a paragraph someone has
+    # to remember.
+    require_email_verification: bool = os.getenv(
+        "REQUIRE_EMAIL_VERIFICATION", "0"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+    # --- Tự phục vụ và mặt phẳng thương mại -------------------------------
+    #
+    # Đăng ký KHÔNG kèm lời mời sẽ tạo một tenant riêng cho người đó, không
+    # bao giờ thả họ vào tenant gốc. Tắt cờ này thì đăng ký không lời mời bị
+    # từ chối thẳng — không có đường thứ ba, vì chính đường thứ ba (rơi vào
+    # tenant gốc) là lỗ hổng mà v4 sinh ra để bịt.
+    self_serve_signup: bool = os.getenv(
+        "SELF_SERVE_SIGNUP", "1"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+    # Gói cấp cho một tenant tự đăng ký. Phải tồn tại trong bảng `plans` và
+    # phải có `is_self_serve = TRUE`; `tenant_admin` kiểm cả hai và từ chối
+    # tạo tenant nếu sai, thay vì lặng lẽ cấp một gói không giới hạn.
+    self_serve_plan_code: str = os.getenv("SELF_SERVE_PLAN_CODE", "trial").strip() or "trial"
+
+    # Trần số nhãn tenant mà /metrics được phép phát. Prometheus tính chi phí
+    # theo chuỗi thời gian, và mỗi tenant nhân số chuỗi lên; xem
+    # docs/OBSERVABILITY_PLAN.md. Vượt trần thì phần dư gộp vào nhãn "_other"
+    # chứ không phải bỏ đi — tổng vẫn đúng, chỉ mất phân giải ở phần đuôi.
+    metrics_max_tenant_labels: int = int(os.getenv("METRICS_MAX_TENANT_LABELS", "25"))
+
+    # Số ngày một gói dữ liệu xuất ra còn tải được trước khi bị dọn. Bản xuất
+    # chứa toàn bộ dữ liệu của một tenant, nên để nó nằm mãi trên đĩa là tự
+    # tạo thêm một bản sao cần canh giữ.
+    tenant_export_ttl_days: int = int(os.getenv("TENANT_EXPORT_TTL_DAYS", "7"))
+
+    # Số ngày một tenant phải nằm trong trạng thái đã-xoá-mềm trước khi được
+    # phép xoá vĩnh viễn. Đây là cái phanh cho thao tác không thể hoàn tác duy
+    # nhất trong hệ thống.
+    tenant_purge_grace_days: int = int(os.getenv("TENANT_PURGE_GRACE_DAYS", "30"))
+
+    # Ân hạn sau khi một kỳ đăng ký kết thúc mà không tự gia hạn. Trong khoảng
+    # này tổ chức vẫn GHI được (`past_due` nằm trong `WRITABLE_BILLING_STATUSES`);
+    # hết khoảng này mới chuyển sang chỉ-đọc. Đặt 0 là bỏ hẳn ân hạn — hợp lệ,
+    # nhưng khi đó một hoá đơn trễ một ngày khoá quyền ghi của cả một trường.
+    subscription_grace_days: int = int(os.getenv("SUBSCRIPTION_GRACE_DAYS", "7"))
+
+    # Tắt lượt quét vòng đời đăng ký. Có mặt để một bản triển khai chưa dùng
+    # tới khái niệm kỳ hạn không bị nó chạm vào — và để tắt nhanh khi cần, thay
+    # vì phải sửa lịch beat rồi dựng lại ảnh.
+    subscription_sweep_enabled: bool = (
+        os.getenv("SUBSCRIPTION_SWEEP_ENABLED", "1").strip().lower()
+        not in ("0", "false", "no", "off")
+    )
+
+    # Key for HMAC-ing six-digit codes, held OUTSIDE the database on purpose.
+    # There is NO default: a fallback value shipped in source would be public,
+    # which is the same as no pepper at all. app/tokens.py refuses to hash a
+    # code while this is empty rather than silently storing a reversible digest.
+    otp_pepper: str = os.getenv("OTP_PEPPER", "")
+
+    # How long a six-digit code stays usable. Short, because the code is weak:
+    # ten minutes bounds an attacker's guessing window as much as the attempt cap
+    # does, and it is long enough for an SMS to arrive and be typed.
+    otp_ttl_minutes: int = int(os.getenv("OTP_TTL_MINUTES", "10"))
+
+    # Wrong guesses before the challenge dies. One million codes and unlimited
+    # attempts is a solved problem for an attacker; five is generous for a person
+    # squinting at a notification.
+    otp_max_attempts: int = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
+
+    # Minimum gap between two codes for the same person and purpose. Protects the
+    # RECIPIENT, not the endpoint — without it, anyone who knows an address can
+    # have the system text a stranger once a second.
+    otp_resend_cooldown_seconds: int = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
+
     # Postgres connection pool (used by the high-frequency metadata_db path).
     # Per-process pool; keep pool_max small so backend+worker+trainer combined
     # stay well under Postgres max_connections (default 100).
@@ -109,6 +278,29 @@ class Settings(BaseSettings):
     enable_live_aug: bool = bool(int(os.getenv("ENABLE_LIVE_AUG", 1)))
     enable_live_smoothing: bool = bool(int(os.getenv("ENABLE_LIVE_SMOOTHING", 0)))
     live_completeness_threshold: float = float(os.getenv("LIVE_COMPLETENESS", 0.5))
+    # Live-capture QC, two-tier: WARN (strict, sample saved + flagged) vs
+    # REJECT (lenient, sample refused with 422). Jitter values are in
+    # image-normalized coordinates (0..1): p95 wrist displacement per frame.
+    qc_enabled: bool = bool(int(os.getenv("QC_ENABLED", 1)))
+    qc_warn_hands_ratio: float = float(os.getenv("QC_WARN_HANDS_RATIO", 0.80))
+    qc_reject_hands_ratio: float = float(os.getenv("QC_REJECT_HANDS_RATIO", 0.30))
+    qc_warn_jitter: float = float(os.getenv("QC_WARN_JITTER", 0.12))
+    qc_reject_jitter: float = float(os.getenv("QC_REJECT_JITTER", 0.35))
+    qc_min_valid_ratio: float = float(os.getenv("QC_MIN_VALID_RATIO", 0.7))
+    # Identifies the threshold SET, not the code. Bump it whenever any qc_*
+    # value above changes, so samples collected under different thresholds stay
+    # distinguishable. The thresholds are ALSO snapshotted into every sample's
+    # metadata (see qc_threshold_snapshot) — a version string alone would let
+    # an env override change the meaning of already-collected data silently.
+    quality_config_version: str = os.getenv("QUALITY_CONFIG_VERSION", "qc_v1_heuristic_2026-07")
+    # --- Vocabulary schema v2 ---
+    # RECOGNITION_PROFILES used to be declared here as a comma-separated env
+    # override. Removed 2026-08-01: nothing ever read it, no .env ever set it,
+    # and its value ("north,central,south,hoa_de") was missing "alphabet" — so
+    # the only thing it did was suggest there was a place to configure this.
+    # The real list is the recognition_profiles table (app/vocabulary_registry).
+    # Campaign stamped on newly collected samples (lock per collection drive).
+    collection_campaign: str = os.getenv("COLLECTION_CAMPAIGN", "isds2026_v1")
     # Carry-forward missing hand frames vs zero-fill
     carry_forward_missing: bool = bool(int(os.getenv("CARRY_FORWARD_MISSING", 1)))
     # Debug logging toggle
@@ -162,6 +354,25 @@ class Settings(BaseSettings):
     refresh_token_expire_minutes: int = int(
         os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "90")
     )
+
+    # Cửa sổ ân hạn khi một refresh token vừa bị xoay lại quay về.
+    #
+    # Đây là chỗ hai yêu cầu kéo ngược chiều nhau, nên con số phải là một lựa
+    # chọn có ý thức chứ không phải mặc định tiện tay:
+    #
+    #   - Phát hiện tái sử dụng muốn ân hạn = 0: token đã revoke mà quay lại thì
+    #     coi như bị đánh cắp, đốt cả họ.
+    #   - Nhưng hai tab cùng mở sẽ đua nhau gọi /refresh một cách hoàn toàn hợp
+    #     lệ. Ân hạn = 0 nghĩa là tab thua bị đá ra, và vì cookie dùng chung cho
+    #     cả trình duyệt nên CẢ HAI tab cùng văng.
+    #
+    # 15 giây đủ dài cho một cuộc đua giữa các tab (chúng cách nhau mili-giây) và
+    # quá ngắn để làm nền cho một cuộc tấn công thật. Cái giá phải trả, nói thẳng
+    # ra: kẻ trộm dùng token trong vòng 15 giây kể từ lần xoay hợp lệ vẫn lọt.
+    #
+    # Đặt về 0 sẽ siết tối đa và đá oan người dùng nhiều tab — chỉ làm nếu khách
+    # hàng chấp nhận đánh đổi đó một cách tường minh.
+    refresh_grace_seconds: int = int(os.getenv("REFRESH_GRACE_SECONDS", "15"))
 
     # ===== AUTH COOKIES =====
     # Tokens are delivered as httpOnly cookies (JS cannot read them → XSS can't
@@ -253,6 +464,21 @@ class Settings(BaseSettings):
     tts_synth_timeout_seconds: float = float(os.getenv("TTS_SYNTH_TIMEOUT", "10"))
     tts_prewarm_on_startup: bool = bool(int(os.getenv("TTS_PREWARM_ON_STARTUP", "1")))
     tts_prewarm_top_percent: float = float(os.getenv("TTS_PREWARM_TOP_PERCENT", "0.2"))  # 20%
+
+    @validator("authz_mode")
+    def _check_authz_mode(cls, v):
+        """Từ chối một chế độ viết sai thay vì âm thầm coi như `legacy`.
+
+        `AUTHZ_MODE=cabsin` mà rơi về `legacy` là kịch bản tệ nhất có thể: người
+        vận hành tin rằng Casbin đang cưỡng chế, còn thực tế `is_admin` vẫn là
+        thứ duy nhất quyết định — và không có gì trên màn hình nói khác đi.
+        """
+        allowed = {"legacy", "shadow", "casbin"}
+        if v not in allowed:
+            raise ValueError(
+                f"AUTHZ_MODE={v!r} khong hop le; chon mot trong {sorted(allowed)}"
+            )
+        return v
 
     @validator("speed_variants", pre=True, always=True)
     def _parse_speed_variants(cls, v, values):

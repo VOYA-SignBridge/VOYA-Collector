@@ -107,3 +107,34 @@ def test_watermark_oserror_treated_as_over(
     assert mock_download.call_count == 0
     assert result["disk_stopped"] is True
     assert result["status"] == "stopped_disk_full"
+
+
+# ---------------------------------------------------------------------------
+# Một ngưỡng, một nguồn
+#
+# Trước 2026-08-09 cùng một ngưỡng sống ở ba nơi với ba giá trị: 85 trong
+# `monitoring.DISK_WARN_PCT`, 0.95 trong `sync_tasks.DISK_HIGH_WATERMARK`, và
+# một phép trừ `watermark - 5` = 90 trong `cli/verify_deployment.py`. Bảng quản
+# trị cảnh báo ở 85 trong khi kiểm tra sau triển khai im lặng tới 90, và không
+# ai sửa được cả ba cùng lúc.
+# ---------------------------------------------------------------------------
+
+def test_backpressure_dung_chung_con_so_voi_bang_quan_tri():
+    from app.monitoring import DISK_CRIT_PCT
+
+    assert DISK_HIGH_WATERMARK == DISK_CRIT_PCT / 100.0
+
+
+def test_canh_bao_thap_hon_nguong_chan():
+    """Cảnh báo phải đến TRƯỚC lúc chặn, nếu không nó chỉ là một thông báo tang lễ."""
+    from app.monitoring import DISK_CRIT_PCT, DISK_WARN_PCT
+
+    assert DISK_WARN_PCT < DISK_CRIT_PCT
+
+
+def test_hai_con_so_dung_nhu_nguoi_dung_chon():
+    """85 / 95 — người dùng chốt ngày 2026-08-09. Ghim lại để một lần 'dọn dẹp'
+    sau này không lặng lẽ đổi chính sách."""
+    from app.monitoring import DISK_CRIT_PCT, DISK_WARN_PCT
+
+    assert (DISK_WARN_PCT, DISK_CRIT_PCT) == (85, 95)

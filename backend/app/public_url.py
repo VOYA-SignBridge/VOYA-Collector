@@ -168,3 +168,20 @@ def resolve_frontend_base_url(request) -> str:
     # the same setting the cookies are scoped with.
     prefix = (settings.cookie_path_prefix or "").rstrip("/")
     return f"{forwarded_proto(request)}://{host}{prefix}"
+
+
+def frontend_url(request, path: str, *, fragment: str = "") -> str:
+    """Absolute URL to a page in the SPA, for links that leave this process.
+
+    Exists so the routes we mail out are named in ONE place. The invitation link
+    was previously assembled in the browser, which meant renaming the `/invite`
+    route silently killed every invitation issued afterwards — the failure lands
+    weeks later, on a stranger, as a blank page.
+
+    `fragment` is where a secret belongs. Browsers never transmit anything after
+    the `#`, so a token there reaches no access log, no proxy and no `Referer`
+    header — unlike a query string, which reaches all three.
+    """
+    base = resolve_frontend_base_url(request)
+    url = f"{base}/{path.lstrip('/')}"
+    return f"{url}#{fragment}" if fragment else url

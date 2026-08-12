@@ -3,17 +3,32 @@ from __future__ import annotations
 import os
 import re
 import csv
+import json
 import uuid
 import logging
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 from datetime import datetime
 from filelock import FileLock
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 from app.processing.utils import atomic_write_json
+from app.processing.quality import parse_hands_required  # re-exported for callers
+# Single source of truth for alphabet slug rules — see class_registry.
+from app.processing.class_registry import (
+    _VN_ALPHABET_SLUG,
+    assert_single_alphabet_letter,
+    is_alphabet_dialect,
+)
 
 from app.config import settings
+from app.tenancy import (
+    DEFAULT_TENANT_ID,
+    TENANT_COLUMN,
+    normalize_tenant_id,
+    tenant_id_of,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +40,159 @@ LANGUAGE_LABELS = LABELS_DIR / "labels_language.csv"
 DIALECT_LABELS = LABELS_DIR / "labels_dialect.csv"
 
 # Field order for labels_master.csv (extended to include class_idx, folder_name, timestamps)
+# NOTE: `dialect` is DEPRECATED as a semantic field (it conflated region /
+# vocabulary domain / collection campaign). It is kept because it still names
+# the physical storage directory. New code must use the vocabulary schema v2
+# columns below (see processed/shared/vocabulary.py + docs/VOCABULARY_SCHEMA_V2.md).
 LABEL_FIELDS = [
     "class_uid",
     "class_idx",
     "slug",
     "label_original",
     "language",
-    "dialect",
+    "dialect",  # deprecated semantics — physical storage dir only
     "is_common_global",
     "is_common_language",
     "folder_name",
     "created_at",
     "migrated_at",
+    "hands_required",
+    # --- vocabulary schema v2 ---
+    "semantic_label",
+    "vocabulary_scope",
+    "recognition_profile",
+    "vocabulary_group",
+    "collection_campaign",
+    "is_active",
+    "motion_type",  # static | dynamic | mixed | "" (unknown)
+    # Owning tenant. Appended LAST so the Sheets mirror's column positions are
+    # unchanged. See app/tenancy.py for why the value is a constant and not a
+    # setting, and docs/needFix/BACKEND_WORK_PLAN.md item A1 for why the SOT
+    # needs the column at all when Postgres already has it.
+    TENANT_COLUMN,
 ]
 
 
-def slugify(text: str, maxlen: int = 40) -> str:
+@lru_cache(maxsize=1)
+def _vocabulary_mapping() -> Dict[str, Dict[str, str]]:
+    """dialect -> its confirmed vocabulary-schema-v2 fields.
+
+    Reads config/legacy_vocabulary_mapping.json, the same file
+    scripts/migrate_legacy_vocabulary_schema.py used to back-fill the existing
+    classes. Only entries the owner marked ``status: confirmed`` are returned —
+    an unconfirmed dialect keeps empty cells and shows up in the review report,
+    which is the behaviour that file was designed around.
+
+    Without this, a class created through the app carries empty
+    recognition_profile / vocabulary_scope, and every split filtered by profile
+    silently omits it: the class trains nothing and nobody is told.
+    """
+    override = os.getenv("VOCABULARY_MAPPING_PATH", "").strip()
+    candidates = [Path(override)] if override else [
+        Path(__file__).resolve().parents[2] / "config" / "legacy_vocabulary_mapping.json",
+        Path("/workspace/config/legacy_vocabulary_mapping.json"),
+    ]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            raw = json.loads(path.read_text(encoding="utf-8")).get("dialect_mapping", {})
+        except Exception as exc:  # a malformed file must not block recording
+            logger.warning("[VOCAB] cannot read %s: %s", path, exc)
+            continue
+        return {
+            dialect: entry
+            for dialect, entry in raw.items()
+            if isinstance(entry, dict) and entry.get("status") == "confirmed"
+        }
+    logger.warning("[VOCAB] no vocabulary mapping found; new classes will need manual review")
+    return {}
+
+
+def _semantic_label_from_slug(slug: str) -> str:
+    """cam-on -> cam_on. Mirrors semantic_label_from_slug in
+    processed/shared/vocabulary.py, which the backend cannot import (the
+    `processed` package is not on its path and no backend module depends on it).
+    """
+    return (slug or "").strip().replace("-", "_")
+
+
+def vocabulary_defaults_for_dialect(dialect: str) -> Dict[str, str]:
+    """The v2 cells a new class in this dialect should be born with."""
+    entry = _vocabulary_mapping().get((dialect or "").strip().lower(), {})
+    return {
+        key: str(entry.get(key) or "")
+        for key in (
+            "vocabulary_scope",
+            "recognition_profile",
+            "vocabulary_group",
+            "motion_type",
+            "collection_campaign",
+        )
+    }
+
+
+def ambient_tenant() -> str:
+    """The tenant a newly created class belongs to.
+
+    Falls back to the bootstrap tenant when nothing is scoped, which is the same
+    answer `app.tenancy` gives for an absent value everywhere else: platform work
+    (the CSV import, a CLI) creates rows that provably predate multi-tenancy, and
+    those belong to the bootstrap tenant.
+
+    This is the WRITE side only. It never widens what a caller can read — that is
+    decided by the database policy, not by this function.
+    """
+    from app.tenant_context import current_tenant
+
+    return current_tenant() or DEFAULT_TENANT_ID
+
+
+def tenant_features_root(tenant_id: str) -> Path:
+    """Storage root for one tenant — the second isolation plane.
+
+    The bootstrap tenant keeps the historical layout; every other tenant gets its
+    own subtree. Two layouts coexist, split by TENANT rather than by time, and
+    that distinction is what makes this cheap:
+
+      * `ClassMetadata.hierarchy_path()` has twenty callers — previews, class
+        rename/move, the validator, oversampling, the reclassifier. Had the
+        bootstrap tenant's path changed, all twenty would need a new-then-legacy
+        fallback, and all 8.784 existing `.npz` files would sit behind that
+        fallback forever.
+      * Splitting by tenant instead gives each tenant exactly ONE layout. No read
+        path needs a fallback, no file moves, and every tenant created from here
+        on is partitioned from its first byte — the property actually claimed.
+
+    Moving the bootstrap tenant under `_tenants/default/` later is a rename of one
+    directory plus a `file_path` rewrite; nothing depends on the asymmetry.
+
+    `_tenants` is underscore-prefixed for the same reason `_profiles` and
+    `_versions` are in the registry: it namespaces a directory holding partitions
+    rather than data, and it cannot collide with a language code. Path traversal
+    is not a concern because `is_valid_tenant_id` excludes `/`, `\\` and `.` —
+    that restricted alphabet exists for exactly this reason.
+    """
+    tenant = normalize_tenant_id(tenant_id)
+    if tenant == DEFAULT_TENANT_ID:
+        return FEATURES_ROOT
+    return FEATURES_ROOT / "_tenants" / tenant
+
+
+def ambient_tenant_features_root() -> Path:
+    """Storage root for the calling tenant."""
+    return tenant_features_root(ambient_tenant())
+
+
+def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
+    """ASCII slug. preserve_vn_letters keeps Ă/Â/Đ/Ê/Ô/Ơ/Ư distinct from their
+    base letter for the fingerspelling alphabet (see class_registry.slugify)."""
+    if preserve_vn_letters:
+        # NFC first — see the note in class_registry.slugify: a decomposed "Â"
+        # otherwise misses this table and collapses into the base letter.
+        key = unicodedata.normalize("NFC", (text or "").strip()).lower()
+        if key in _VN_ALPHABET_SLUG:
+            return _VN_ALPHABET_SLUG[key]
     text = text.replace("đ", "d").replace("Đ", "D")
     text = unicodedata.normalize("NFKD", text)
     text = "".join([c for c in text if not unicodedata.combining(c)])
@@ -79,86 +231,72 @@ def parse_bool(value) -> bool:
         return False
 
 
-def normalize_dialect(dialect: Optional[str]) -> str:
-    """Normalize frontend dialect names to canonical slugs.
-    Examples: "Bắc"->"bac", "Trung"->"trung", "Nam"->"nam", "Hòa Đê"/"Hoa De"->"hoa-de".
-    Also accepts already-normalized values.
-    """
-    if not dialect:
-        return ""
-    d = str(dialect).strip().lower()
-    # Remove diacritics and extra spaces to match mapping better
-    base = "".join([c for c in d if not unicodedata.combining(c)])
-    base = re.sub(r"\s+", " ", base).strip()
-    # Try exact and base
-    return DIALECT_MAPPING.get(d, DIALECT_MAPPING.get(base, d))
-
-
-# Module-level mapping constant for reuse and testability
-DIALECT_MAPPING = {
-    "bac": "bac",
-    "bắc": "bac",
-    "mien bac": "bac",
-    "miền bắc": "bac",
-    "north": "bac",
-    "trung": "trung",
-    "miền trung": "trung",
-    "mien trung": "trung",
-    "central": "trung",
-    "nam": "nam",
-    "miền nam": "nam",
-    "mien nam": "nam",
-    "south": "nam",
-    "hoa de": "hoa-de",
-    "hòa đê": "hoa-de",
-    "hoa đê": "hoa-de",
+# Ways people TYPE an existing dialect — not identities of their own. Keys are
+# already slugified ("Miền Bắc" arrives here as "mien-bac"). Adding a NEW
+# dialect belongs in the registry, never here.
+_INPUT_ALIASES = {
+    "mien-bac": "bac", "north": "bac",
+    "mien-trung": "trung", "central": "trung",
+    "mien-nam": "nam", "south": "nam",
     "hoade": "hoa-de",
-    "hoa-de": "hoa-de",
+    "cantho": "can-tho",
     "chung": "common",
 }
 
 
+def _assert_known_dialect(dialect_id: str) -> None:
+    """Refuse to create a class in a dialect nobody registered.
+
+    This is the door that should have been shut: a sync script wrote the
+    non-existent recognition_profile "spa" into 7 classes and nothing objected,
+    because every layer accepted whatever string it was handed. Empty stays
+    allowed — an unset field shows up in the review report and gets fixed; a
+    plausible-looking wrong value never gets looked at again.
+
+    Fails OPEN when the registry is unreachable: a database blip must not stop
+    people collecting data. The FK on classes.dialect is the hard guarantee.
+    """
+    if not dialect_id:
+        return
+    try:
+        from app.vocabulary_registry import known_dialect_ids
+
+        known = known_dialect_ids()
+    except Exception as exc:
+        logger.warning("[VOCAB] không kiểm được dialect '%s' (registry lỗi: %s)", dialect_id, exc)
+        return
+    if known and dialect_id not in known:
+        raise ValueError(
+            f"Phương ngữ '{dialect_id}' chưa có trong danh mục. "
+            f"Tạo nó ở Thư viện nhãn trước, đừng gõ thẳng vào đây."
+        )
+
+
 def normalize_dialect(dialect: Optional[str]) -> str:
-    """ASCII-safe normalization for dialect values received from the API."""
-    if not dialect:
+    """Free-text dialect from the API -> a registered dialect_id.
+
+    Two near-identical copies of this function used to sit here, the second
+    silently shadowing the first (and missing "bang-chu-cai"). Both carried a
+    hand-maintained table that drifted from the data — "spa" was in neither.
+    The registry in Postgres is the list now; what stays here is only the
+    handful of INPUT SPELLINGS that are not identities: "Miền Bắc", "north" and
+    "bac" are three ways to type one dialect, not three dialects.
+
+    Unknown input passes through as its slug rather than raising: this runs on
+    every upload, and refusing here would reject data over a naming question.
+    The write-time guard in register_class is what actually blocks unknown
+    dialects, and it can explain itself.
+    """
+    from app.vocabulary_registry import resolve_dialect, slugify_dialect
+
+    slug = slugify_dialect(dialect)
+    if not slug:
         return ""
-
-    raw = str(dialect).strip()
-    if not raw:
-        return ""
-
-    lowered = raw.lower().replace("\u0111", "d")
-    ascii_base = unicodedata.normalize("NFKD", lowered)
-    ascii_base = "".join(c for c in ascii_base if not unicodedata.combining(c))
-    ascii_base = re.sub(r"[^a-z0-9]+", " ", ascii_base).strip()
-    compact = re.sub(r"\s+", " ", ascii_base)
-    slug = compact.replace(" ", "-")
-
-    robust_mapping = {
-        "bac": "bac",
-        "mien bac": "bac",
-        "trung": "trung",
-        "mien trung": "trung",
-        "nam": "nam",
-        "mien nam": "nam",
-        "north": "bac",
-        "central": "trung",
-        "south": "nam",
-        "hoa de": "hoa-de",
-        "hoade": "hoa-de",
-        "hoa-de": "hoa-de",
-        "can tho": "can-tho",
-        "cantho": "can-tho",
-        "can-tho": "can-tho",
-        "chung": "common",
-        "common": "common",
-    }
-
-    for candidate in (compact, slug):
-        if candidate in robust_mapping:
-            return robust_mapping[candidate]
-
-    return slug
+    slug = _INPUT_ALIASES.get(slug, slug)
+    try:
+        return resolve_dialect(slug)   # follow a merge, e.g. mien-bac -> bac
+    except Exception:
+        return slug                     # DB unreachable: never block a capture
 
 
 @dataclass
@@ -172,6 +310,20 @@ class ClassMetadata:
     is_common_language: bool
     folder_override: Optional[str] = None
     class_idx: Optional[int] = None
+    hands_required: Optional[int] = None  # 1 | 2 | None (unknown)
+    # --- vocabulary schema v2 (empty string = unassigned / needs review) ---
+    semantic_label: str = ""
+    vocabulary_scope: str = ""       # "common" | "profile_specific" | ""
+    recognition_profile: str = ""    # north|central|south|hoa_de|legacy_unassigned|""
+    vocabulary_group: str = ""
+    collection_campaign: str = ""
+    is_active: bool = True
+    motion_type: str = ""  # static | dynamic | mixed | "" (unknown)
+    # Owning tenant. Last field and defaulted, so every existing positional and
+    # keyword construction keeps working unchanged. Defaulting here (rather than
+    # at each call site) is what makes it impossible to register a class with no
+    # tenant: there is one constructor and it always has an answer.
+    tenant_id: str = DEFAULT_TENANT_ID
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -181,12 +333,18 @@ class ClassMetadata:
         return f"class_{self.slug}_{short_uid}"
 
     def hierarchy_path(self) -> Path:
+        """Directory holding this class's samples, partitioned by tenant.
+
+        See `tenant_features_root` for why the bootstrap tenant keeps the
+        historical layout while every other tenant gets its own subtree.
+        """
+        root = tenant_features_root(self.tenant_id)
         if self.is_common_global:
-            return FEATURES_ROOT / "global_common" / self.folder_name()
+            return root / "global_common" / self.folder_name()
         if self.is_common_language:
-            return FEATURES_ROOT / self.language / "common" / self.folder_name()
+            return root / self.language / "common" / self.folder_name()
         # dialect-specific
-        return FEATURES_ROOT / self.language / self.dialect / self.folder_name()
+        return root / self.language / self.dialect / self.folder_name()
 
     def to_label_row(self) -> Dict[str, Any]:
         return {
@@ -201,6 +359,15 @@ class ClassMetadata:
             "folder_name": self.folder_name(),
             "created_at": now_str(),
             "migrated_at": now_str(),
+            "hands_required": str(self.hands_required or ""),
+            "semantic_label": self.semantic_label or "",
+            "vocabulary_scope": self.vocabulary_scope or "",
+            "recognition_profile": self.recognition_profile or "",
+            "vocabulary_group": self.vocabulary_group or "",
+            "collection_campaign": self.collection_campaign or "",
+            "is_active": "1" if self.is_active else "0",
+            "motion_type": self.motion_type or "",
+            TENANT_COLUMN: normalize_tenant_id(self.tenant_id),
         }
 
     def write_metadata_json(self):
@@ -216,8 +383,47 @@ class ClassMetadata:
             "is_common_global": self.is_common_global,
             "is_common_language": self.is_common_language,
             "folder_name": self.folder_name(),
+            "hands_required": self.hands_required,
         }
         atomic_write_json(path, data, indent=2)
+
+
+def _upgrade_labels_header_locked():
+    """Rewrite labels.csv with the current LABEL_FIELDS header if the on-disk
+    header is missing columns. MUST be called while holding the MASTER_LABELS
+    lock. All label writers use LABEL_FIELDS directly, so appending new-schema
+    rows to an old-header file would silently misalign columns.
+    Old rows get "" for the new columns (DictReader restval) — except tenant_id,
+    which is stamped with the bootstrap tenant because an empty tenant cell in
+    the source of truth means "unassigned", and every pre-A1 class provably
+    belongs to that tenant."""
+    with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f, restval="")
+        on_disk = reader.fieldnames or []
+        if all(col in on_disk for col in LABEL_FIELDS):
+            return
+        rows = list(reader)
+    for row in rows:
+        row[TENANT_COLUMN] = tenant_id_of(row)
+    tmp = MASTER_LABELS.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, MASTER_LABELS)
+    logger.info("[CLASS] Upgraded labels.csv header to %s (%d rows preserved)", LABEL_FIELDS, len(rows))
+
+
+def _labels_header_outdated() -> bool:
+    """Cheap lock-free peek at the on-disk header (first line only)."""
+    try:
+        with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), [])
+    except (OSError, StopIteration):
+        return False
+    return bool(header) and any(col not in header for col in LABEL_FIELDS)
 
 
 def _ensure_labels_file():
@@ -231,6 +437,10 @@ def _ensure_labels_file():
                 with open(MASTER_LABELS, "w", newline="", encoding="utf-8") as f:
                     writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS)
                     writer.writeheader()
+    elif _labels_header_outdated():
+        lock = FileLock(str(MASTER_LABELS) + ".lock")
+        with lock:
+            _upgrade_labels_header_locked()
     # ensure derivative label indexes exist (generated lazily)
     for path, fields in [
         (
@@ -295,6 +505,10 @@ def _load_labels_locked() -> List[Dict[str, str]]:
 
 def append_label_row(row: Dict[str, Any]):
     """Append a label row with TOCTOU-safe Check → Lock → Write."""
+    # DictWriter's restval defaults to "", so a row dict that omits tenant_id is
+    # written as an empty cell rather than rejected. Stamp it first. Copied, not
+    # mutated — callers reuse the dict after this returns.
+    row = {**row, TENANT_COLUMN: tenant_id_of(row)}
     _ensure_labels_file()
 
     lock = FileLock(str(MASTER_LABELS) + ".lock")
@@ -375,6 +589,58 @@ def regenerate_label_indexes():
                 writer.writerows(items)
 
 
+def set_class_hands_required(class_uid: str, hands_required: int) -> bool:
+    """Persist hands_required (1|2) for a class, first-capture-wins.
+
+    Only writes when the class has no value yet. Mutates ONLY the
+    hands_required cell of the matching row (rebuilding rows via
+    to_label_row() would clobber created_at/migrated_at), then atomically
+    rewrites labels.csv. Returns True if the value was written.
+    """
+    hands_required = parse_hands_required(hands_required)
+    if hands_required is None:
+        return False
+    _ensure_labels_file()
+
+    updated_row: Optional[Dict[str, str]] = None
+    lock = FileLock(str(MASTER_LABELS) + ".lock")
+    with lock:
+        rows = _load_labels_locked()
+        for r in rows:
+            if r.get("class_uid") == class_uid:
+                if parse_hands_required(r.get("hands_required")) is not None:
+                    return False  # already set — first capture wins
+                r["hands_required"] = str(hands_required)
+                updated_row = dict(r)
+                break
+        else:
+            logger.warning("[CLASS] set_class_hands_required: class_uid=%s not found", class_uid)
+            return False
+
+        tmp = MASTER_LABELS.with_suffix(".csv.tmp")
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
+            writer.writeheader()
+            writer.writerows(rows)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, MASTER_LABELS)
+
+    logger.info("[CLASS] hands_required=%s persisted for class_uid=%s", hands_required, class_uid)
+
+    # Best-effort mirrors — never fail the caller for these
+    try:
+        from app.storage.metadata_db import upsert_class
+        upsert_class(updated_row)
+    except Exception as exc:
+        logger.warning("[CLASS] hands_required DB mirror failed: %s", exc)
+    try:
+        sync_master_labels_to_gdrive()
+    except Exception as exc:
+        logger.warning("[CLASS] hands_required Drive mirror failed: %s", exc)
+    return True
+
+
 def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
     """Construct ClassMetadata from a labels CSV row."""
     return ClassMetadata(
@@ -389,6 +655,21 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         is_common_global=parse_bool(existing.get("is_common_global")),
         is_common_language=parse_bool(existing.get("is_common_language")),
         folder_override=existing.get("folder_name") or None,
+        hands_required=parse_hands_required(existing.get("hands_required")),
+        semantic_label=(existing.get("semantic_label") or "").strip(),
+        vocabulary_scope=(existing.get("vocabulary_scope") or "").strip(),
+        recognition_profile=(existing.get("recognition_profile") or "").strip(),
+        vocabulary_group=(existing.get("vocabulary_group") or "").strip(),
+        collection_campaign=(existing.get("collection_campaign") or "").strip(),
+        is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
+        motion_type=(existing.get("motion_type") or "").strip(),
+        # Without this every class read back from labels.csv would come out as
+        # the bootstrap tenant, and since A4 derives the storage directory from
+        # this field, tenant B's samples would be written into tenant A's tree —
+        # the exact cross-tenant leak the partition exists to prevent. Blank
+        # means "written before tenants existed", which `tenant_id_of` resolves
+        # to the bootstrap tenant.
+        tenant_id=tenant_id_of(existing),
     )
 
 
@@ -424,9 +705,10 @@ def register_class(
     """
     _ensure_labels_file()
     language = language.lower().strip()
-    dialect = dialect.lower().strip()
+    dialect = normalize_dialect(dialect)
+    _assert_known_dialect(dialect)
 
-    slug = slugify(label_original)
+    slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dialect))
 
     if is_common_global:
         language_key = "global"
@@ -461,6 +743,7 @@ def register_class(
             short_uid = class_uid[:8]
             folder_name = f"class_{slug}_{short_uid}"
 
+            v2 = vocabulary_defaults_for_dialect(dialect_key)
             meta = ClassMetadata(
                 class_uid=class_uid,
                 class_idx=next_idx,
@@ -471,6 +754,19 @@ def register_class(
                 is_common_global=is_common_global,
                 is_common_language=is_common_language and not is_common_global,
                 folder_override=folder_name,
+                # Born with its schema-v2 cells filled. Leaving them empty made
+                # the class invisible to every profile-filtered split.
+                semantic_label=_semantic_label_from_slug(slug),
+                vocabulary_scope=v2["vocabulary_scope"],
+                recognition_profile=v2["recognition_profile"],
+                vocabulary_group=v2["vocabulary_group"],
+                motion_type=v2["motion_type"],
+                collection_campaign=v2["collection_campaign"],
+                # Owner of the new class. Without this every class created
+                # through the app would be born under the bootstrap tenant no
+                # matter who created it, and the storage partition — which is
+                # derived from this field — would never engage.
+                tenant_id=ambient_tenant(),
             )
 
             # 3. WRITE — append immediately after allocate
@@ -537,6 +833,18 @@ def list_classes(
                 dialect=r["dialect"],
                 is_common_global=parse_bool(r.get("is_common_global")),
                 is_common_language=parse_bool(r.get("is_common_language")),
+                hands_required=parse_hands_required(r.get("hands_required")),
+                # Same reason as in `_build_meta_from_row`: `hierarchy_path()`
+                # is derived from this, so dropping it points every listed class
+                # at the bootstrap tenant's directory tree.
+                #
+                # This is a second, partial copy of `_build_meta_from_row` that
+                # has already drifted from it (no folder_override, none of the
+                # vocabulary-v2 cells). Collapsing the two is the right fix but
+                # changes `folder_name()` for every caller of `list_classes`,
+                # which is more than this change should carry — recorded in
+                # BACKEND_WORK_PROGRESS.md §9.5 instead of done in passing.
+                tenant_id=tenant_id_of(r),
             )
         )
     return out
@@ -577,7 +885,9 @@ def get_or_register_class(
     dia = normalize_dialect(dia_input)
     if not dia:
         dia = "common" if is_common_language else ""
-    slug = slugify(label_original)
+    if is_alphabet_dialect(dia):
+        assert_single_alphabet_letter(label_original)
+    slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dia))
 
     # Search existing folder under the target hierarchy
     def _find_legacy_folder(base: Path) -> Optional[str]:
@@ -595,13 +905,19 @@ def get_or_register_class(
             return None
         return None
 
+    # Scoped to the CALLING tenant's subtree, not to FEATURES_ROOT. Searching
+    # the shared root would let tenant B adopt a directory belonging to the
+    # bootstrap tenant whenever their slugs collide — and slug collisions are
+    # the normal case here, since two deployments collecting Vietnamese sign
+    # language will both have a folder for "cam-on".
+    tenant_root = ambient_tenant_features_root()
     base_dir = None
     if is_common_global:
-        base_dir = FEATURES_ROOT / "global_common"
+        base_dir = tenant_root / "global_common"
     elif is_common_language or dia == "common":
-        base_dir = FEATURES_ROOT / lang / "common"
+        base_dir = tenant_root / lang / "common"
     elif dia:
-        base_dir = FEATURES_ROOT / lang / dia
+        base_dir = tenant_root / lang / dia
 
     if base_dir is not None:
         legacy_folder = _find_legacy_folder(base_dir)
@@ -633,6 +949,9 @@ def get_or_register_class(
                 and not is_common_global,
                 folder_override=legacy_folder,
                 class_idx=cls_idx_val,
+                # The folder was found under this tenant's own subtree (see
+                # `tenant_root` above), so it belongs to this tenant.
+                tenant_id=ambient_tenant(),
             )
             # ensure metadata.json exists for this class
             try:

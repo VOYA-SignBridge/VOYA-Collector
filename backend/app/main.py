@@ -7,31 +7,48 @@ from fastapi import FastAPI, APIRouter, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.base import BaseHTTPMiddleware
 from asgi_correlation_id import CorrelationIdMiddleware
 
 from app import activity
+from app.access_gate import access_gate
 from app.config import settings
 from app.cookie_auth import ACCESS_COOKIE, CSRF_COOKIE
 from app.rate_limit import client_ip
+# `experiments` and `dataset_exporter` are deliberately NOT imported. Both were
+# imported here and never passed to include_router — 681 lines that read as live
+# endpoints, are reachable by no URL, and were executed at import time on every
+# boot. Removing the import makes their status honest; the files are kept for now
+# pending a decision to mount or delete them (see BACKEND_WORK_PLAN.md B4).
 from app.routers import (
     admin,
     auth,
+    billing,
     classes,
     dataset,
-    dataset_exporter,
-    experiments,
     health,
     inference,
+    integrations,
     jobs,
     label_sessions,
+    legal as legal_router,
+    legal_admin,
+    notifications as notifications_router,
     realtime_proxy,
     sot_admin,
+    support,
+    tenants,
     training,
+    trial,
     tts,
+    two_factor as two_factor_router,
     upload,
+    verification,
+    vocabulary,
 )
 from app import metrics
 from app.logging_config import configure_logging
+from app.tenant_middleware import TenantScopeMiddleware
 
 # Configure logging before importing routers — some (e.g. training) connect
 # to Redis and log the result at module import time, which would otherwise
@@ -89,6 +106,27 @@ async def metrics_middleware(request: Request, call_next):
 # different origin than the SPA, set an explicit origin AND allow_credentials
 # =True so the browser will send the cookies cross-origin.
 app.add_middleware(CorrelationIdMiddleware)
+
+# Tenant scope. Starlette applies middleware in reverse registration order, so
+# what matters is that this is registered AFTER metrics/correlation-id and
+# BEFORE routing: the ContextVar is bound by the time any route, dependency or
+# query runs. The two middlewares that end up outside it (csrf_protect,
+# activity_guard) read cookies and the activity tables only — neither touches a
+# tenant-scoped table, so neither needs the scope. Anything added later that
+# does must be registered after this line.
+app.add_middleware(TenantScopeMiddleware)
+
+# Cổng truy cập: mọi endpoint đóng trừ những cái khai báo trong access_gate.
+#
+# Đăng ký TRƯỚC CORSMiddleware là có chủ ý. Starlette chèn middleware vào đầu
+# danh sách, nên cái đăng ký sau chạy ở vòng NGOÀI — đặt cổng ở đây khiến nó nằm
+# TRONG CORS, và phản hồi 401 của nó vẫn mang đủ header CORS. Đảo lại thì trình
+# duyệt thấy một lỗi mạng vô danh thay vì mã lỗi đọc được.
+#
+# Nằm ngoài TenantScopeMiddleware thì không sao: cổng chỉ đọc cookie và giải mã
+# token, còn `_identity_cursor` trong auth.py tự vào system scope.
+app.add_middleware(BaseHTTPMiddleware, dispatch=access_gate)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allowed_origins,
@@ -187,6 +225,44 @@ async def startup():
         (time.time() - started_at) * 1000,
     )
 
+    # Phân quyền. Sau `init_db()` vì nó đọc các bảng RBAC mà `ensure_tables()`
+    # vừa tạo và seed; trước khi cổng mở, vì `get_enforcer()` cố ý KHÔNG nạp
+    # lười — một lần khởi động hỏng phải lộ ra ở đây, không phải ở request đầu
+    # tiên tình cờ chạm vào một endpoint có kiểm quyền.
+    #
+    # `strict` chỉ bật ở chế độ `casbin`: khi Casbin đang thực sự quyết định,
+    # không nạp được policy nghĩa là không trả lời được, và §40 nói rõ phải
+    # hỏng-thì-đóng. Ở `shadow` thì hệ cũ vẫn quyết định, nên một lần nạp hỏng
+    # chỉ làm mất phần quan sát — bắt nó làm sập tiến trình sẽ khiến không ai
+    # dám bật shadow mode, và đó là kết cục tệ hơn nhiều.
+    if db_ready and settings.authz_mode != "legacy":
+        from app.authorization import enforcer as authz_enforcer
+        from app.authorization import policy_invalidator
+
+        strict = settings.authz_mode == "casbin"
+        try:
+            ok = authz_enforcer.startup(strict=strict)
+            logger.info(
+                "[STARTUP][AUTHZ] mode=%s policy=%s %s",
+                settings.authz_mode, "ready" if ok else "NOT READY",
+                authz_enforcer.status().get("policy"),
+            )
+            if ok:
+                policy_invalidator.start()
+        except Exception:
+            if strict:
+                raise
+            logger.exception("[STARTUP][AUTHZ] khoi tao that bai; he cu van quyet dinh")
+    else:
+        logger.info("[STARTUP][AUTHZ] mode=%s — Casbin khong duoc nap",
+                    settings.authz_mode)
+
+    # CPU for the admin monitor is sampled in a background thread: measuring it
+    # inside the request would need a blocking window, and a window short enough
+    # not to hurt the request reports 0% on an idle-looking-but-busy host.
+    from app.monitoring import start_cpu_monitor
+    start_cpu_monitor()
+
     # Initialize dedicated httpx client for realtime proxy
     # Backend starts cleanly even if inference service is offline
     realtime_proxy.init_client()
@@ -235,6 +311,15 @@ app.include_router(tts.router)
 app.include_router(training.router)
 app.include_router(admin.router)
 app.include_router(sot_admin.router)
+app.include_router(tenants.router)
+app.include_router(billing.router)
+app.include_router(integrations.router)
+app.include_router(verification.router)
+app.include_router(vocabulary.router)
+app.include_router(vocabulary.catalog_router)
+app.include_router(trial.router)
+app.include_router(legal_router.router)
+app.include_router(legal_admin.router)
 app.include_router(metrics.router)
 
 # Versioned API (do not remove unversioned endpoints; FE may depend on them)
@@ -252,6 +337,18 @@ api_v1.include_router(tts.router)
 api_v1.include_router(training.router)
 api_v1.include_router(admin.router)
 api_v1.include_router(sot_admin.router)
+api_v1.include_router(tenants.router)
+api_v1.include_router(billing.router)
+api_v1.include_router(integrations.router)
+api_v1.include_router(verification.router)
+api_v1.include_router(vocabulary.router)
+api_v1.include_router(vocabulary.catalog_router)
+api_v1.include_router(trial.router)
+api_v1.include_router(legal_router.router)
+api_v1.include_router(legal_admin.router)
+api_v1.include_router(notifications_router.router)
+api_v1.include_router(support.router)
+api_v1.include_router(two_factor_router.router)
 app.include_router(api_v1)
 
 
@@ -281,4 +378,4 @@ async def trigger_hardware_error():
     # Simulate a camera disconnecting
     hardware_error.labels(resource='test_camera_1').set(1)
     
-    return Response(status_code=204)
+    return Response(status_code=204)

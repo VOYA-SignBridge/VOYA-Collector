@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status  # pyright: ignore[reportMissingImports]
+from fastapi import APIRouter, Depends, HTTPException, Request, status  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
+from app import activity
 from app.auth import require_admin
 from app.sot import catalog_schema, keys
 from app.sot import manifest as m
 from app.storage import metadata_db as db
+from app.tenant_context import system_scope
 
 router = APIRouter(prefix="/admin/sot", tags=["admin", "sot"])
 
@@ -73,13 +75,26 @@ def _list_machines() -> List[Dict[str, Any]]:
 
 
 def _db_counts() -> Dict[str, int]:
+    """Row counts across EVERY tenant, for comparison against the published SOT.
+
+    Deliberately platform-scoped. The SOT is a whole-deployment artefact — the
+    published snapshot contains every tenant's rows — so a per-tenant count here
+    would be compared against a cross-tenant total and always look wrong. This is
+    a count, not a data read: it exposes cardinality to a platform admin, not
+    another tenant's records.
+
+    One of only a handful of `system_scope` uses outside boot/Celery/CLI, and
+    `test_tenant_isolation.py` pins the list so a new one cannot appear
+    unnoticed.
+    """
     counts: Dict[str, int] = {}
-    for table in ("classes", "samples", "raw_uploads"):
-        try:
-            rows = db._fetch_all(f"SELECT COUNT(*) AS c FROM {table} WHERE deleted_at IS NULL")
-            counts[table] = int(rows[0]["c"]) if rows else 0
-        except Exception:
-            counts[table] = -1  # -1 => query failed (table missing / DB down)
+    with system_scope("sot admin: cross-tenant catalogue counts"):
+        for table in ("classes", "samples", "raw_uploads"):
+            try:
+                rows = db._fetch_all(f"SELECT COUNT(*) AS c FROM {table} WHERE deleted_at IS NULL")
+                counts[table] = int(rows[0]["c"]) if rows else 0
+            except Exception:
+                counts[table] = -1  # -1 => query failed (table missing / DB down)
     return counts
 
 
@@ -203,12 +218,15 @@ def sot_verify(current_user: Dict[str, Any] = Depends(require_admin)):
 class RegisterMachine(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     note: Optional[str] = Field(None, max_length=500)
-    mode: str = Field("public_key", pattern="^(public_key|generate)$")
+    # `Literal`, not `Field(pattern=...)` — under pydantic 1.10 that keyword is
+    # accepted and never enforced. See `routers/verification.py`.
+    mode: Literal["public_key", "generate"] = "public_key"
     public_key: Optional[str] = Field(None, max_length=500)
 
 
 @router.post("/machines", status_code=status.HTTP_201_CREATED)
-def register_machine(payload: RegisterMachine, current_user: Dict[str, Any] = Depends(require_admin)):
+def register_machine(payload: RegisterMachine, request: Request,
+                     current_user: Dict[str, Any] = Depends(require_admin)):
     name = payload.name.strip()
     machines = _list_machines()
     if any((mm.get("name") or "").lower() == name.lower() for mm in machines):
@@ -238,6 +256,15 @@ def register_machine(payload: RegisterMachine, current_user: Dict[str, Any] = De
     except Exception as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=f"Không thể đăng ký: {exc}")
 
+    # Cấp cho một máy quyền KÝ SOT là cấp quyền công bố danh mục mà cả hệ thống
+    # tin. Bảng `sot_authorized_keys` nói máy nào ĐANG được phép; nó không nói
+    # ai đã cho phép và lúc nào — và khi một bản publish lạ xuất hiện thì đó
+    # đúng là câu hỏi đầu tiên. Vân tay khoá ghi lại, khoá riêng thì KHÔNG.
+    activity.log_security_event(
+        "sot.machine_registered", actor=current_user.get("username", ""),
+        target=fp, extra={"name": name, "mode": payload.mode},
+        actor_user=current_user, request=request)
+
     result: Dict[str, Any] = {
         "machine": {
             "name": name, "fingerprint": fp, "public_key": public_b64,
@@ -257,7 +284,8 @@ def register_machine(payload: RegisterMachine, current_user: Dict[str, Any] = De
 
 
 @router.delete("/machines/{fingerprint}")
-def revoke_machine(fingerprint: str, current_user: Dict[str, Any] = Depends(require_admin)):
+def revoke_machine(fingerprint: str, request: Request,
+                   current_user: Dict[str, Any] = Depends(require_admin)):
     # A committed-baseline key cannot be revoked from the UI (it lives in git).
     for mm in _list_machines():
         if mm.get("fingerprint") == fingerprint and mm.get("source") == "committed":
@@ -267,4 +295,10 @@ def revoke_machine(fingerprint: str, current_user: Dict[str, Any] = Depends(requ
             )
     if not db.sot_revoke_authorized_key(fingerprint):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Không tìm thấy máy đang hoạt động với fingerprint này.")
+    # Thu hồi là hành động làm một máy đang chạy mất quyền publish giữa chừng.
+    # Nếu không ai nhớ đã thu hồi, triệu chứng ở đầu kia là `sot-init` thoát mã
+    # 4 và cả stack không lên — một sự cố trông như lỗi hạ tầng.
+    activity.log_security_event(
+        "sot.machine_revoked", actor=current_user.get("username", ""),
+        target=fingerprint, actor_user=current_user, request=request)
     return {"revoked": True, "fingerprint": fingerprint}

@@ -17,6 +17,17 @@ export type TierChoice = RenderTier | "auto";
 
 export const ECO_MODE_KEY = "voya_viewer_eco";
 
+/**
+ * Explicit quality choice, remembered across visits.
+ *
+ * Someone who picked "video" because their laptop cannot handle canvas work
+ * should not have to pick it again on every sample. "auto" (the default) is
+ * not stored as a preference so hardware-based detection keeps running.
+ */
+export const VIEWER_TIER_KEY = "voya_viewer_tier";
+
+const VALID_CHOICES = new Set(["auto", "3d", "2d", "video"]);
+
 const LOW_FPS_THRESHOLD = 24;
 const LOW_FPS_SECONDS_TO_DOWNGRADE = 3;
 
@@ -37,6 +48,23 @@ export function isEcoMode(): boolean {
 export function setEcoMode(on: boolean): void {
   try {
     localStorage.setItem(ECO_MODE_KEY, on ? "1" : "0");
+  } catch {
+    /* private mode — non-fatal */
+  }
+}
+
+export function storedTierChoice(): TierChoice {
+  try {
+    const v = localStorage.getItem(VIEWER_TIER_KEY);
+    return v && VALID_CHOICES.has(v) ? (v as TierChoice) : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+function persistTierChoice(choice: TierChoice): void {
+  try {
+    localStorage.setItem(VIEWER_TIER_KEY, choice);
   } catch {
     /* private mode — non-fatal */
   }
@@ -68,7 +96,11 @@ export interface RenderTierState {
 }
 
 export function useRenderTier(): RenderTierState {
-  const [choice, setChoice] = useState<TierChoice>("auto");
+  const [choice, setChoiceState] = useState<TierChoice>(storedTierChoice);
+  const setChoice = useCallback((next: TierChoice) => {
+    setChoiceState(next);
+    persistTierChoice(next);
+  }, []);
   const [eco, setEcoState] = useState<boolean>(isEcoMode);
   const [autoTier, setAutoTier] = useState<RenderTier>(initialTier);
   const [downgraded, setDowngraded] = useState(false);
@@ -128,8 +160,20 @@ export function useRenderTier(): RenderTierState {
     setEcoState(on);
   }, []);
 
+  // Eco maps to "2d", not "video".
+  //
+  // "video" is the server-rendered mp4 path: it enqueues a render, then polls
+  // getPreviewStatus every 3s for up to 40 attempts — so on a cold sample eco
+  // could sit "rendering…" for two minutes before showing anything. That made
+  // eco the SLOWEST option to start, which is the opposite of what a user
+  // enabling an economy mode expects.
+  //
+  // "2d" draws on a canvas from the frame array the page has already fetched:
+  // no extra request, no worker, nothing to wait for, and far cheaper than the
+  // three.js "3d" tier. Video stays available as an explicit choice for devices
+  // where even canvas work is too much and hardware video decode wins.
   const tier: RenderTier =
-    choice !== "auto" ? choice : eco ? "video" : autoTier;
+    choice !== "auto" ? choice : eco ? "2d" : autoTier;
 
   return { tier, choice, setChoice, eco, setEco, reportFps, downgraded };
 }

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -31,6 +32,7 @@ from typing import Any, Dict, Optional
 
 import redis
 
+from app.checkpoint_io import load_checkpoint
 from app.worker import celery_app
 
 import logging
@@ -88,6 +90,20 @@ def _escalate_system_failure(row: Dict[str, Any], job_id: str, error: str, sourc
     except Exception as e:
         logger.warning("[TRAINER] job %s admin escalation failed: %s", job_id, e)
 
+    # Webhook `training.failed` phát ở ĐÂY chứ không ở ba chỗ gọi.
+    #
+    # Cả ba đường dẫn tới trạng thái `failed` (spawn hỏng, quá giờ, mã thoát
+    # khác 0) đều đi qua hàm này — nó đã là phễu duy nhất cho "job hỏng vì lý
+    # do hệ thống". Đặt lời gọi ở ba chỗ là ba bản sao sẽ lệch nhau ở lần thêm
+    # đường hỏng thứ tư, và cái lệch đó im lặng: khách hàng chỉ đơn giản không
+    # bao giờ nhận được thông báo cho đúng kiểu hỏng mới.
+    #
+    # `cancelled` KHÔNG đi qua đây, và đó là đúng: người dùng tự huỷ thì họ đã
+    # biết rồi, không cần hệ thống của họ được báo như một sự cố.
+    _emit_training_event(row, "training.failed", {
+        "job_id": job_id, "error": error, "source": source,
+    })
+
 
 def _insert_metric(job_id: str, m: Dict[str, Any]) -> None:
     try:
@@ -120,11 +136,80 @@ def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
         f"--metrics_file={metrics_file}",
         "--run_diagnostics",
     ]
+
+    # Chế độ nghiên cứu: chạy trên split đã versioned nên checkpoint truy ngược
+    # được về đúng phiên bản dữ liệu. Bộ lọc dialect/language KHÔNG áp dụng ở
+    # đây — split đã định nghĩa sẵn tập dữ liệu, thêm bộ lọc vào sẽ cắt bớt nó
+    # và làm checkpoint không còn khớp với split nó khai báo.
+    if str(config.get("run_purpose") or "") == "research" and config.get("split_version"):
+        split_dir = f"processed/splits/versions/{config['split_version']}"
+        cmd += [
+            "--run-purpose=research",
+            f"--split_version={config['split_version']}",
+            f"--train_csv={split_dir}/train.csv",
+            f"--val_csv={split_dir}/val.csv",
+            f"--test_csv={split_dir}/test.csv",
+            # Bắt buộc khi có --recognition_profile: trainer chuyển sang profile
+            # mode và không tự dò được thư mục features từ split CSV.
+            f"--features_root={os.getenv('FEATURES_ROOT', '/dataset/features')}",
+        ]
+        if config.get("dataset_version"):
+            cmd.append(f"--dataset_version={config['dataset_version']}")
+        if config.get("recognition_profile"):
+            cmd.append(f"--recognition_profile={config['recognition_profile']}")
+        return cmd
+
     for dialect in (config.get("dialects") or []):
         cmd.append(f"--dialect={dialect}")
     for language in (config.get("languages") or []):
         cmd.append(f"--filter_language={language}")
     return cmd
+
+
+def _split_csvs_of(cmd: list) -> list:
+    """Các tệp split mà lệnh này sắp đọc, lấy từ chính lệnh đó.
+
+    Đọc lại từ `cmd` chứ không dựng lại từ `config`: `_build_cmd` có hai nhánh
+    và một tập giá trị mặc định, nên suy diễn lần thứ hai là hai bản cài đặt
+    của cùng một quy tắc — và bản nào sai thì cổng đồng thuận soi nhầm tệp.
+    """
+    prefixes = ("--train_csv=", "--val_csv=", "--test_csv=")
+    return [arg.split("=", 1)[1] for arg in cmd if arg.startswith(prefixes)]
+
+
+def _consent_preflight(config: Dict[str, Any], cmd: list) -> Optional[str]:
+    """Trả về câu báo lỗi nếu tập huấn luyện chứa mẫu không được phép dùng.
+
+    Vì sao chặn thay vì lọc: các tệp split là ĐẦU VÀO đã đóng băng, và một
+    checkpoint huấn luyện trên tập nhỏ hơn tệp split khai báo là một checkpoint
+    nói dối về nguồn gốc của nó. Việc đúng là dựng lại split, và câu báo lỗi
+    phải nói ra điều đó.
+
+    Không có tệp split nào để soi (nhánh dialect/language chạy bằng giá trị mặc
+    định của trainer) thì cổng không kết luận gì — xem `audit_csv_files`.
+    """
+    paths = _split_csvs_of(cmd)
+    if not paths:
+        return None
+    try:
+        from app.consent_gate import audit_csv_files, scope_for_run_purpose
+
+        scope = scope_for_run_purpose(config.get("run_purpose"))
+        result = audit_csv_files(paths, scope=scope)
+    except Exception as exc:
+        # Cổng hỏng KHÔNG được làm chết mọi lượt huấn luyện. Ghi lại thật to;
+        # đây là lựa chọn có ý thức giữa "không huấn luyện được gì" và "một
+        # lượt chạy không được soi", và dấu vết phải đủ để phát hiện lựa chọn
+        # đó đã xảy ra.
+        logger.error("[CONSENT] pre-flight FAILED to run (%s) — job proceeds unchecked: %s",
+                     type(exc).__name__, exc)
+        return None
+
+    if not result.withheld:
+        logger.info("[CONSENT] pre-flight ok: %s", result.summary())
+        return None
+    return (f"Cổng đồng thuận chặn: {result.summary()}. "
+            f"Dựng lại split với mức '{result.scope}' rồi chạy lại.")
 
 
 @celery_app.task(bind=True, name="app.training_tasks.run_training_job")
@@ -167,6 +252,17 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+    cmd = _build_cmd(config, metrics_file)
+
+    # Cổng đồng thuận chạy TRƯỚC khi job chuyển sang "running": một job bị chặn
+    # vì lý do đồng thuận chưa từng bắt đầu, và trạng thái của nó phải nói đúng
+    # như vậy chứ không phải "đã chạy rồi hỏng".
+    blocked = _consent_preflight(config, cmd)
+    if blocked:
+        logger.warning("[TRAINER] job %s blocked by consent gate: %s", job_id, blocked)
+        _update_job(row, status="failed", completed_at=_now(), error_message=blocked)
+        return {"status": "failed", "reason": "consent_gate", "detail": blocked}
+
     _update_job(row, status="running", started_at=_now())
     logger.info("[TRAINER] job %s starting (model=%s epochs=%s)",
                 job_id, config.get("model_type"), config.get("epochs"))
@@ -175,7 +271,6 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
     env["PYTHONPATH"] = str(WORKSPACE_ROOT)
     env["PYTHONUNBUFFERED"] = "1"
 
-    cmd = _build_cmd(config, metrics_file)
     logger.info("[TRAINER] job %s CMD: %s (log: %s)", job_id, " ".join(cmd), log_file)
 
     log_handle = open(log_file, "w", encoding="utf-8", errors="replace")
@@ -315,22 +410,194 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
         test_f1=float(test_f1) if test_f1 is not None else None,
         evaluation=evaluation if isinstance(evaluation, dict) else None,
     )
+    _record_output_contract(job_id, row, checkpoint_path)
+
+    # Sự kiện phát SAU khi hợp đồng đầu ra đã ghi xong. Đây là sự kiện có giá
+    # trị tích hợp cao nhất trong hệ: một lượt huấn luyện chạy hàng chục phút,
+    # nên hỏi dò để biết nó xong là vừa chậm vừa tốn, còn webhook thì không.
+    _emit_training_event(row, "training.completed", {
+        "job_id": job_id, "checkpoint_path": checkpoint_path,
+        "test_acc": test_acc, "test_f1": test_f1,
+    })
+
     logger.info("[TRAINER] job %s ✓ completed checkpoint=%s acc=%s f1=%s",
                 job_id, checkpoint_path, test_acc, test_f1)
     return {"status": "completed", "checkpoint_path": checkpoint_path}
+
+
+def _emit_training_event(row: Dict[str, Any], event: str, payload: Dict[str, Any]) -> None:
+    """Phát một sự kiện huấn luyện cho tenant SỞ HỮU job.
+
+    Tenant lấy từ chính hàng job, không lấy từ ngữ cảnh đang chạy: tác vụ này
+    chạy trong container trainer dưới `platform_wide` scope, nên ngữ cảnh là
+    "toàn nền tảng" chứ không phải tenant nào cả. Dùng ngữ cảnh ở đây sẽ gửi
+    sự kiện cho sai người, hoặc không gửi cho ai.
+    """
+    try:
+        from app.webhooks import emit
+
+        emit(row.get("tenant_id") or "default", event, payload)
+    except Exception as exc:
+        logger.warning("[TRAINER] không phát được sự kiện %s: %s", event, type(exc).__name__)
+
+
+def _record_output_contract(job_id: str, row: Dict[str, Any], checkpoint_path: str) -> None:
+    """Đóng băng ánh xạ chỉ số → nhãn của model vào `training_job_classes`.
+
+    Vì sao phải lưu, khi `config` đã có sẵn: `config` chỉ chứa BỘ LỌC
+    (`{"dialects": ["bang-chu-cai"]}`), không chứa tập lớp đã giải. Giải lại bộ
+    lọc đó sau vài tháng sẽ ra danh mục của LÚC GIẢI, không phải của lúc train
+    — danh mục thay đổi liên tục. Nên "model này xuất ra nhãn nào ở chỉ số nào"
+    là thứ chỉ đúng nếu được ghi tại thời điểm nó thành sự thật.
+
+    Nguồn là `idx_to_label` trong checkpoint, không phải một truy vấn vào
+    `classes`: checkpoint LÀ hiện vật, nên nó là nơi duy nhất nói đúng model
+    thực sự học gì. Một truy vấn sẽ chỉ tái tạo một phỏng đoán.
+
+    `label` được lưu nguyên văn thay vì join sang `classes` mỗi lần đọc: đổi
+    tên một lớp không được phép đổi nhãn mà một model đã phát hành đang mang.
+
+    Không ném lỗi. Job đã chạy xong và checkpoint đã nằm trên đĩa; làm hỏng
+    một job thành công vì không ghi được bảng phụ trợ là đánh đổi sai.
+
+    Nạp qua `checkpoint_io.load_checkpoint` chứ không phải `torch.load` trần:
+    module đó kiểm đường dẫn nằm trong các gốc cho phép rồi mới thử
+    `weights_only=True`. `torch.load(..., weights_only=False)` giải pickle, tức
+    là THỰC THI mã trong file — chấp nhận được với hiện vật của chính mình,
+    nhưng chỉ sau khi đã chắc file đúng là hiện vật của chính mình.
+    """
+    if not checkpoint_path:
+        return
+    try:
+        from app.checkpoint_io import load_checkpoint
+        from app.storage import metadata_db as db
+
+        ckpt = load_checkpoint(checkpoint_path)
+        raw = ckpt.get("idx_to_label")
+        if isinstance(raw, dict):
+            pairs = [(int(k), str(v)) for k, v in raw.items()]
+        elif isinstance(raw, (list, tuple)):
+            pairs = [(i, str(v)) for i, v in enumerate(raw)]
+        else:
+            logger.warning("[TRAINER] job %s: checkpoint khong co idx_to_label — "
+                           "khong ghi duoc hop dong dau ra", job_id)
+            return
+
+        db.replace_training_job_classes(
+            job_id=job_id,
+            tenant_id=row.get("tenant_id") or "default",
+            pairs=sorted(pairs),
+        )
+        logger.info("[TRAINER] job %s: da ghi %d lop vao hop dong dau ra",
+                    job_id, len(pairs))
+    except Exception as exc:
+        logger.warning("[TRAINER] job %s: khong ghi duoc training_job_classes: %s",
+                       job_id, exc.__class__.__name__)
 
 
 # ============================================================================
 # Model backup + artifact retention
 # ============================================================================
 
-@celery_app.task(bind=True, max_retries=5, default_retry_delay=30)
-def backup_promoted_checkpoint_task(self, job_id: str, checkpoint_path: str):
-    """Mirror a PROMOTED model checkpoint to Google Drive.
+_DRIVE_UNSAFE_CHARS = re.compile(r"[/\\:*?\"<>|]+")
 
-    Only promoted models are backed up — experimental runs in outputs/ are
-    reproducible and not worth the bandwidth. Dispatched by the promote
-    endpoint; failure never blocks the promotion itself.
+
+def _drive_safe_name(raw: str, fallback: str) -> str:
+    """Make a Drive folder name from free text (tên hiển thị có dấu vẫn giữ)."""
+    cleaned = _DRIVE_UNSAFE_CHARS.sub("-", str(raw or "").strip()).strip(". ")
+    return cleaned or fallback
+
+
+def _build_deploy_manifest(
+    ckpt: Dict[str, Any],
+    *,
+    job_id: str,
+    model_id: str,
+    display_name: str,
+    dialect: str,
+    language: str,
+    promoted_at: str,
+    checkpoint_name: str,
+    checkpoint_sha256: str,
+    checkpoint_bytes: int,
+) -> Dict[str, Any]:
+    """Self-describing contract để app khác (mobile…) chạy được model này.
+
+    Gom đủ thứ một client cần mà không phải mở file .pt: nhãn theo đúng thứ tự
+    index, hợp đồng tiền xử lý, kích thước input, và hyperparams để dựng lại
+    mạng TCN.
+    """
+    idx_to_label = ckpt.get("idx_to_label")
+    if isinstance(idx_to_label, dict):
+        # Khóa có thể là str sau khi qua JSON — sắp theo index số.
+        labels = [idx_to_label[k] for k in sorted(idx_to_label, key=lambda x: int(x))]
+    elif isinstance(idx_to_label, list):
+        labels = idx_to_label
+    else:
+        labels = []
+
+    return {
+        "manifest_version": "1.0",
+        "model_id": model_id,
+        "display_name": display_name,
+        "dialect": dialect,
+        "language": language,
+        "job_id": job_id,
+        "promoted_at": promoted_at,
+        "trained_at": ckpt.get("created_at"),
+        "git_commit": ckpt.get("git_commit"),
+        "framework": "pytorch",
+        "model_type": str(ckpt.get("model_type", "TCN")),
+        "checkpoint": {
+            "filename": checkpoint_name,
+            "sha256": checkpoint_sha256,
+            "size_bytes": checkpoint_bytes,
+            "state_dict_key": "model_state_dict",
+        },
+        "input": {
+            "seq_len": ckpt.get("seq_len"),
+            "feature_dim": ckpt.get("feature_dim"),
+            "shape": [ckpt.get("seq_len"), ckpt.get("feature_dim")],
+            "dtype": "float32",
+            "normalization_version": ckpt.get("normalization_version"),
+            "preprocess_contract": ckpt.get("preprocess_contract"),
+        },
+        "output": {
+            "num_classes": ckpt.get("num_classes"),
+            "labels": labels,
+            "activation": "softmax",
+        },
+        "model_config": ckpt.get("model_config"),
+        "metrics": ckpt.get("metrics"),
+        "vocabulary_schema_version": ckpt.get("vocabulary_schema_version"),
+        "dataset_version": ckpt.get("dataset_version"),
+        "split_version": ckpt.get("split_version"),
+    }
+
+
+@celery_app.task(bind=True, max_retries=5, default_retry_delay=30)
+def backup_promoted_checkpoint_task(
+    self,
+    job_id: str,
+    checkpoint_path: str,
+    model_id: str = "",
+    display_name: str = "",
+    dialect: str = "",
+    language: str = "vn",
+    promoted_at: str = "",
+):
+    """Publish a PROMOTED model to Google Drive as a self-contained deploy folder.
+
+    Cấu trúc:  models/<Tên model>/Deploy <YYYY-MM-DD HH-MM-SS>/
+                 ├── <checkpoint>.pt          bản weights đang chạy realtime
+                 ├── <checkpoint>.json        sidecar cấu hình training (nếu có)
+                 └── deploy_manifest.json     hợp đồng inference cho client ngoài
+
+    Mỗi lần promote tạo một thư mục Deploy mới nên lịch sử triển khai giữ
+    nguyên; `models/<Tên model>/latest_manifest.json` luôn trỏ bản mới nhất để
+    mobile chỉ cần đọc một đường dẫn cố định. Chỉ model đã promote mới được đẩy
+    lên — các run thử nghiệm trong outputs/ tái tạo được, không đáng băng thông.
+    Lỗi ở đây không bao giờ chặn việc promote.
     """
     from app.config import settings
 
@@ -345,27 +612,77 @@ def backup_promoted_checkpoint_task(self, job_id: str, checkpoint_path: str):
             logger.warning("[MODEL_BACKUP] checkpoint not found: %s", checkpoint_path)
             return {"status": "skipped", "reason": "file_not_found"}
 
-        storage_key = f"models/promoted/{src.name}"
-        logger.info("[MODEL_BACKUP] job %s uploading %s -> gdrive:%s", job_id, src, storage_key)
-        url = upload_to_gdrive(str(src), storage_key, content_type="application/octet-stream", make_public=False)
+        promoted_at = promoted_at or datetime.now().isoformat()
+        folder_name = _drive_safe_name(display_name or model_id or dialect, job_id)
+        try:
+            deploy_stamp = datetime.fromisoformat(promoted_at).strftime("%Y-%m-%d %H-%M-%S")
+        except ValueError:
+            deploy_stamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        deploy_dir = f"models/{folder_name}/Deploy {deploy_stamp}"
 
-        # Sidecar JSON (metadata) if present
+        logger.info("[MODEL_BACKUP] job %s uploading %s -> gdrive:%s/", job_id, src, deploy_dir)
+        # replace_existing ở mọi upload: task này retry tới 5 lần, không có nó
+        # thì mỗi lần retry lại đẻ thêm một bản trùng tên trong cùng thư mục.
+        url = upload_to_gdrive(
+            str(src), f"{deploy_dir}/{src.name}",
+            content_type="application/octet-stream", make_public=False,
+            replace_existing=True,
+        )
+
+        # Sidecar JSON (cấu hình training gốc) nếu có
         sidecar = src.with_suffix(".json")
         if sidecar.exists():
             try:
-                upload_to_gdrive(str(sidecar), f"models/promoted/{sidecar.name}",
-                                 content_type="application/json", make_public=False)
+                upload_to_gdrive(str(sidecar), f"{deploy_dir}/{sidecar.name}",
+                                 content_type="application/json", make_public=False,
+                                 replace_existing=True)
             except Exception as e:
                 logger.warning("[MODEL_BACKUP] sidecar upload failed: %s", e)
 
-        logger.info("[MODEL_BACKUP] job %s ✓ backed up: %s", job_id, url)
-        return {"status": "success", "url": url}
+        # Manifest: đọc từ chính checkpoint đã deploy nên luôn khớp weights
+        try:
+            import hashlib
+
+            import torch
+
+            digest = hashlib.sha256()
+            with src.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    digest.update(chunk)
+
+            ckpt = load_checkpoint(str(src))
+            manifest = _build_deploy_manifest(
+                ckpt,
+                job_id=job_id,
+                model_id=model_id or dialect,
+                display_name=display_name or model_id or dialect,
+                dialect=dialect,
+                language=language,
+                promoted_at=promoted_at,
+                checkpoint_name=src.name,
+                checkpoint_sha256=digest.hexdigest(),
+                checkpoint_bytes=src.stat().st_size,
+            )
+            payload = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+
+            upload_to_gdrive(payload, f"{deploy_dir}/deploy_manifest.json",
+                             content_type="application/json", make_public=False,
+                             replace_existing=True)
+            # Con trỏ ổn định cho client ngoài — ghi đè sau mỗi lần promote
+            upload_to_gdrive(payload, f"models/{folder_name}/latest_manifest.json",
+                             content_type="application/json", make_public=False,
+                             replace_existing=True)
+        except Exception as e:
+            logger.warning("[MODEL_BACKUP] manifest build/upload failed: %s", e)
+
+        logger.info("[MODEL_BACKUP] job %s ✓ published: %s", job_id, deploy_dir)
+        return {"status": "success", "url": url, "deploy_dir": deploy_dir}
     except Exception as exc:
         logger.error("[MODEL_BACKUP] job %s failed: %s", job_id, exc)
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, platform_wide=True)  # retention sweep across all tenants
 def cleanup_training_artifacts(self):
     """Daily retention sweep (Celery beat).
 

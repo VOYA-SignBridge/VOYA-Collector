@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { tr } from "../i18n";
 
 // Simple abstraction over Web Speech API now, with a future path
 // to swap to backend-based speech recognition via VITE_STT_MODE.
@@ -89,7 +90,7 @@ export function useSpeechToText(): UseSpeechToTextValue {
     };
 
     recognition.onerror = (event: BrowserSpeechRecognitionErrorEvent) => {
-      setError(event.error || "Lỗi nhận dạng giọng nói");
+      setError(event.error || tr("Lỗi nhận dạng giọng nói"));
       setListening(false);
     };
 

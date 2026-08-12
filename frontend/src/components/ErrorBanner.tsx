@@ -1,20 +1,55 @@
+/**
+ * Dải thông báo lỗi.
+ *
+ * @i18n-key-table — `label` trong `CONFIG` là KHOÁ từ điển; bảng nằm ngoài
+ * component nên `t()` gọi ở chỗ dựng.
+ */
 import { useState, useEffect } from "react";
+import { toneClasses, type StatusTone } from "../theme/status";
+import { AlertTriangleIcon, CheckCircleIcon, InfoCircleIcon, XCircleIcon, XIcon } from "./ui/Icons";
+import { useI18n } from "../i18n";
+
+/**
+ * Dải thông báo trong luồng nội dung.
+ *
+ * Ba sửa đổi so với bản đầu:
+ *
+ * 1. **Màu theo `theme/status`** — "thành công" là xanh dương CTU.
+ * 2. **Biểu tượng là SVG.** Bản đầu dùng `❌ ⚠️ ℹ️ ✅`. Emoji được HỆ ĐIỀU HÀNH
+ *    dựng, nên cùng một dải thông báo ra bốn kiểu khác nhau trên bốn máy, và
+ *    trên máy thiếu phông emoji thì ra ô vuông rỗng. Chúng cũng không đổi màu
+ *    theo `currentColor`, nên một cảnh báo vàng vẫn kèm dấu đỏ.
+ * 3. **Tiêu đề bằng tiếng Việt.** Bản đầu in
+ *    `type.charAt(0).toUpperCase() + type.slice(1)`, tức người dùng thấy chữ
+ *    "Error" / "Warning" tiếng Anh giữa một giao diện tiếng Việt — và với
+ *    `type="info"` thì thành "Info", một từ không nói gì cả.
+ */
+
+type BannerType = "error" | "warning" | "info" | "success";
 
 type Props = {
   message: string;
   onClose?: () => void;
-  type?: "error" | "warning" | "info" | "success";
+  type?: BannerType;
   autoClose?: boolean;
   duration?: number;
 };
 
-export default function ErrorBanner({ 
-  message, 
-  onClose, 
-  type = "error", 
-  autoClose = false, 
-  duration = 5000 
+const CONFIG: Record<BannerType, { tone: StatusTone; label: string; Glyph: typeof XCircleIcon }> = {
+  error:   { tone: "danger",  label: "Có lỗi",   Glyph: XCircleIcon },
+  warning: { tone: "warning", label: "Lưu ý",    Glyph: AlertTriangleIcon },
+  info:    { tone: "neutral", label: "Thông tin", Glyph: InfoCircleIcon },
+  success: { tone: "success", label: "Đã xong",  Glyph: CheckCircleIcon },
+};
+
+export default function ErrorBanner({
+  message,
+  onClose,
+  type = "error",
+  autoClose = false,
+  duration = 5000,
 }: Props) {
+  const { t } = useI18n();
   const [isVisible, setIsVisible] = useState(true);
 
   useEffect(() => {
@@ -31,34 +66,7 @@ export default function ErrorBanner({
     }
   }, [autoClose, duration, onClose]);
 
-  const types = {
-    error: {
-      bg: "bg-red-50",
-      border: "border-red-200", 
-      text: "text-red-700",
-      icon: "❌"
-    },
-    warning: {
-      bg: "bg-yellow-50",
-      border: "border-yellow-200",
-      text: "text-yellow-700", 
-      icon: "⚠️"
-    },
-    info: {
-      bg: "bg-blue-50",
-      border: "border-blue-200",
-      text: "text-blue-700",
-      icon: "ℹ️"
-    },
-    success: {
-      bg: "bg-emerald-50",
-      border: "border-emerald-200",
-      text: "text-emerald-700",
-      icon: "✅"
-    }
-  };
-
-  const config = types[type];
+  const { tone, label, Glyph } = CONFIG[type];
 
   const handleClose = () => {
     setIsVisible(false);
@@ -68,27 +76,25 @@ export default function ErrorBanner({
   if (!isVisible) return null;
 
   return (
-    <div className={`
-      card mb-6 transition-all duration-300 ease-out animate-fade-in
-      ${config.bg} ${config.border} ${config.text}
-    `}>
+    <div
+      role={type === "error" ? "alert" : "status"}
+      aria-live={type === "error" ? "assertive" : "polite"}
+      className={`card mb-6 border transition-all duration-300 ease-out animate-fade-in motion-reduce:transition-none ${toneClasses(tone, "soft")}`}
+    >
       <div className="flex items-start gap-4">
-        <div className="text-xl flex-shrink-0 mt-0.5">{config.icon}</div>
+        <Glyph className="w-5 h-5 flex-shrink-0 mt-0.5" aria-hidden="true" />
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-slate-900 text-sm mb-1">
-            {type.charAt(0).toUpperCase() + type.slice(1)}
-          </div>
+          <div className="font-semibold text-sm mb-1">{t(label)}</div>
           <div className="text-sm leading-relaxed">{message}</div>
         </div>
         {onClose && (
           <button
+            type="button"
             onClick={handleClose}
-            className="text-slate-500 hover:text-slate-900 transition-colors p-1 rounded-md hover:bg-white/50"
-            aria-label="Close notification"
+            className="text-current opacity-60 hover:opacity-100 transition-colors p-1 rounded-md hover:bg-white/60"
+            aria-label={t("Đóng thông báo")}
           >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
+            <XIcon className="w-4 h-4" aria-hidden="true" />
           </button>
         )}
       </div>

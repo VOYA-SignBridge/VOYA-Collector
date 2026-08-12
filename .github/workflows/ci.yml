@@ -1,0 +1,187 @@
+# Cổng kiểm cho mỗi pull request: lint kiểu, dựng frontend, chạy cả hai bộ test.
+#
+# Vì sao tách khỏi `build_docker.yml`
+# -----------------------------------
+# Workflow kia chạy trên pull request và **đẩy ảnh `latest` lên Docker Hub** —
+# tức một PR bất kỳ, chưa ai duyệt, ghi đè ảnh mà máy sản xuất đang kéo về. Đó
+# là việc phải sửa ở chính tệp kia (chuyển sang `on: push: branches: [main]`).
+# Tệp này không đẩy gì cả: nó chỉ trả lời "mã này có chạy được không".
+#
+# Vì sao có bước GRANT — và vì sao thiếu nó thì mọi thứ đỏ
+# ---------------------------------------------------------
+# Bộ test chạy dưới vai `voya_app`, KHÔNG phải `postgres`/`admin`: vai
+# superuser được miễn row-level security vô điều kiện, nên chạy suite bằng nó
+# sẽ làm mọi test cô lập tenant xanh một cách vô nghĩa.
+#
+# Nhưng `ensure_tables()` dựng bảng bằng vai DDL (`MIGRATION_DATABASE_URL`), và
+# Postgres KHÔNG tự cấp quyền trên bảng mới cho vai khác. Thiếu bước GRANT thì
+# mọi test chết với `permission denied for table users` — một thông báo trỏ
+# thẳng vào mã ứng dụng trong khi nguyên nhân nằm ở phân quyền. Đo 2026-08-10:
+# thiếu GRANT → 41 lỗi chỉ trong 3 tệp; có GRANT → 0.
+#
+# Vì sao chạy trên CSDL TRỐNG là điều đáng làm, không phải điều phải né
+# ---------------------------------------------------------------------
+# Suốt từ trước, bộ test luôn chạy trên một BẢN SAO của cơ sở dữ liệu sản xuất.
+# Lần đầu chạy nó trên một CSDL dựng từ số không (chính là điều CI buộc phải
+# làm) cho ra **22 test đỏ**, và không cái nào là lỗi của test: `ensure_tables()`
+# dựng ra một lược đồ thiếu 2 bảng, 3 khoá ngoại và 14 cột so với máy đang chạy.
+# Nghĩa là mọi máy triển khai MỚI đều nhận một lược đồ yếu hơn, im lặng. Đã vá
+# ở `storage/metadata_db.py`; job này là thứ giữ cho nó không tái diễn.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Một PR đẩy liên tiếp vài commit thì chỉ lượt cuối cần chạy.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend — kiểu, test, dựng
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # `npm run typecheck`, KHÔNG phải `npx tsc --noEmit`. Lệnh sau chạy một
+      # tsconfig khác và kiểm **không tệp nào** — nó từng báo sạch trong khi
+      # `npm run build` hỏng, và giấu 14 lỗi kiểu.
+      - name: Kiểm kiểu
+        run: npm run typecheck
+
+      - name: Test
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-frontend.xml
+
+      # Dựng thật. `tsc -b` bắt được lớp lỗi mà `typecheck` không bắt (ví dụ
+      # "parameter property" dưới `erasableSyntaxOnly`), và kho này đã từng ở
+      # trạng thái dựng-không-được trong khi kiểm kiểu vẫn xanh.
+      - name: Dựng
+        run: npm run build
+
+      - name: Nộp báo cáo test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-frontend
+          path: frontend/junit-frontend.xml
+
+  backend:
+    name: Backend — pytest trên CSDL dựng mới
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: signdb_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U admin"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+    env:
+      # Vai ứng dụng, không phải superuser — xem chú thích đầu tệp.
+      DATABASE_URL: postgresql://voya_app:ci_password@localhost:5432/signdb_ci
+      MIGRATION_DATABASE_URL: postgresql://admin:admin@localhost:5432/signdb_ci
+      VOYA_APP_DB_PASSWORD: ci_password
+      REDIS_URL: redis://localhost:6379/12
+      CELERY_BROKER_URL: redis://localhost:6379/12
+      CELERY_RESULT_BACKEND: redis://localhost:6379/12
+      TTS_REDIS_URL: redis://localhost:6379/12
+      PYTHONPATH: ${{ github.workspace }}/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Cài phụ thuộc
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Lập vai ứng dụng
+        run: |
+          psql "postgresql://admin:admin@localhost:5432/signdb_ci" -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE voya_app LOGIN PASSWORD 'ci_password';"
+
+      - name: Dựng lược đồ
+        working-directory: backend
+        run: python -c "from app.storage.metadata_db import ensure_tables; ensure_tables()"
+
+      # PHẢI chạy SAU `ensure_tables`: Postgres không tự cấp quyền trên bảng
+      # được tạo sau lệnh GRANT. `ALTER DEFAULT PRIVILEGES` lo phần bảng sinh
+      # thêm trong lúc chạy test.
+      - name: Cấp quyền cho vai ứng dụng
+        run: |
+          psql "postgresql://admin:admin@localhost:5432/signdb_ci" -v ON_ERROR_STOP=1 <<'SQL'
+          GRANT USAGE ON SCHEMA public TO voya_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO voya_app;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO voya_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO voya_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO voya_app;
+          SQL
+
+      # Cổng thật, và cố ý đứng TRƯỚC pytest: nó bắt đúng lớp lỗi mà 22 test đỏ
+      # hôm 10/08 đã phơi ra — lược đồ dựng mới khác lược đồ máy đang chạy — và
+      # bắt bằng một thông báo nói thẳng ra cái thiếu, thay vì bằng hai chục
+      # test đỏ rải rác mà mỗi cái nói về một triệu chứng khác nhau.
+      #
+      # Chạy SAU bước GRANT, không phải chung với bước dựng lược đồ: hàm này
+      # đọc qua `DATABASE_URL` (vai `voya_app`), và vai đó chưa có quyền gì cho
+      # tới khi GRANT chạy xong.
+      - name: Kiểm nợ lược đồ
+        working-directory: backend
+        run: |
+          python -c "
+          from app.storage.metadata_db import schema_debt
+          from app.tenant_context import system_scope
+          with system_scope('ci: kiem no luoc do'):
+              debt = schema_debt()
+          print('schema_debt:', debt)
+          assert not any(debt.values()), f'luoc do dung moi con no: {debt}'
+          "
+
+      # `VOYA_TEST_VIDEO` cố ý KHÔNG đặt: kho clip 2,7 GB không có trên runner,
+      # nên test trích npz từ video sẽ skip. Đó là lần skip DUY NHẤT được chấp
+      # nhận ở đây, và nó hiện ra trong báo cáo chứ không biến mất.
+      - name: Test
+        working-directory: backend
+        run: python -m pytest -q --junitxml=junit-backend.xml
+
+      - name: Nộp báo cáo test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-backend
+          path: backend/junit-backend.xml

@@ -2,11 +2,15 @@
  * Training History — landing view của trang Huấn Luyện (kiểu Roboflow).
  * Gồm: bảng so sánh model tốt nhất theo dialect + lịch sử toàn bộ jobs.
  * Click một job → mở kết quả (Step 7) hoặc tiến độ (Step 6).
+ *
+ * @i18n-key-table — `STATUS_BADGE` và nhãn phương ngữ là KHOÁ từ điển.
  */
 
 import React, { useMemo } from 'react';
 import type { TrainingJobListItem } from '../../../hooks/useTrainingAPI';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
+import { CrownIcon, RocketIcon, TrashIcon } from '../../../components/ui/Icons';
+import { useI18n } from "../../../i18n";
 
 interface Props {
   jobs: TrainingJobListItem[];
@@ -22,7 +26,7 @@ const isDeletable = (status: string) => !['pending', 'queued', 'running'].includ
 const STATUS_BADGE: Record<string, { text: string; cls: string }> = {
   queued: { text: 'Đang chờ', cls: 'bg-slate-100 text-slate-700' },
   running: { text: 'Đang chạy', cls: 'bg-ctu-blue/10 text-ctu-blue' },
-  completed: { text: 'Hoàn thành', cls: 'bg-emerald-50 text-emerald-700' },
+  completed: { text: 'Hoàn thành', cls: 'bg-sky-50 text-sky-800' },
   failed: { text: 'Thất bại', cls: 'bg-red-50 text-red-700' },
   cancelled: { text: 'Đã hủy', cls: 'bg-amber-50 text-amber-700' },
 };
@@ -52,6 +56,7 @@ const fmtDate = (iso?: string): string => {
 };
 
 const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh, onDeleteJob }) => {
+  const { t } = useI18n();
   // So sánh model theo dialect: chỉ jobs completed có test_acc,
   // mỗi (dialect, model) giữ run tốt nhất
   const comparison = useMemo(() => {
@@ -76,7 +81,7 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
   if (loading && jobs.length === 0) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-500">
-        <LoadingSpinner size="md" label="Đang tải lịch sử training..." />
+        <LoadingSpinner size="md" label={t("Đang tải lịch sử training...")} />
       </div>
     );
   }
@@ -87,11 +92,10 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
       {comparison.length > 0 && (
         <div className="rounded-2xl border border-slate-200 bg-white p-6">
           <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-1">
-            Model Tốt Nhất Theo Phương Ngữ
+            {t("Model Tốt Nhất Theo Phương Ngữ")}
           </h3>
           <p className="text-xs text-slate-500 mb-4">
-            Run tốt nhất của mỗi kiến trúc, trong cùng phương ngữ (chỉ so sánh trong cùng một hàng —
-            khác phương ngữ là khác dữ liệu).
+            {t("Run tốt nhất của mỗi kiến trúc, trong cùng phương ngữ (chỉ so sánh trong cùng một hàng — khác phương ngữ là khác dữ liệu).")}
           </p>
           <div className="space-y-3">
             {comparison.map(({ dialect, entries }) => (
@@ -103,17 +107,19 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
                   <button
                     key={job.id}
                     onClick={() => onOpenJob(job)}
-                    title={`Job ${job.id} — ${fmtDate(job.created_at)}. Bấm để xem chi tiết.`}
+                    title={t("Lượt {id} — {khi}. Bấm để xem chi tiết.", { id: job.id, khi: fmtDate(job.created_at) })}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition hover:shadow-sm ${
                       rank === 0
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        ? 'border-sky-300 bg-sky-50 text-sky-800'
                         : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    {rank === 0 && <span aria-hidden>👑</span>}
+                    {rank === 0 && <CrownIcon className="h-4 w-4 text-amber-500" aria-hidden="true" />}
                     <span className="font-medium">{MODEL_LABELS[job.config?.model_type || ''] || job.config?.model_type}</span>
                     <span className="tabular-nums">{((job.test_acc ?? 0) * 100).toFixed(1)}%</span>
-                    {job.promoted_at && <span title="Đã đưa vào Realtime">🚀</span>}
+                    {job.promoted_at && (
+                <RocketIcon className="h-4 w-4 text-sky-600" aria-label={t("Đã đưa vào Realtime")} />
+              )}
                   </button>
                 ))}
               </div>
@@ -127,36 +133,38 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-              Lịch Sử Huấn Luyện
+              {t("Lịch Sử Huấn Luyện")}
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">{jobs.length} jobs gần nhất — bấm vào một dòng để xem chi tiết</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {t("{n} lượt gần nhất — bấm vào một dòng để xem chi tiết", { n: jobs.length })}
+            </p>
           </div>
           <button
             onClick={onRefresh}
             className="text-xs px-3 py-1.5 rounded bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium transition"
           >
-            ⟳ Làm mới
+            {t("⟳ Làm mới")}
           </button>
         </div>
 
         {jobs.length === 0 ? (
           <div className="px-6 pb-8 pt-4 text-center text-sm text-slate-500">
-            Chưa có phiên huấn luyện nào. Bấm "Bắt Đầu Huấn Luyện Mới" để chạy lần đầu.
+            {t("Chưa có phiên huấn luyện nào. Bấm \"Bắt Đầu Huấn Luyện Mới\" để chạy lần đầu.")}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-y border-slate-200 bg-slate-50 text-left text-xs text-slate-500 uppercase">
-                  <th className="px-6 py-2.5 font-medium">Thời gian</th>
-                  <th className="px-3 py-2.5 font-medium">Model</th>
-                  <th className="px-3 py-2.5 font-medium">Phương ngữ</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Epochs</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Test Acc</th>
+                  <th className="px-6 py-2.5 font-medium">{t("Thời gian")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("Mô hình")}</th>
+                  <th className="px-3 py-2.5 font-medium">{t("Phương ngữ")}</th>
+                  <th className="px-3 py-2.5 font-medium text-right">{t("Số vòng")}</th>
+                  <th className="px-3 py-2.5 font-medium text-right">{t("Độ chính xác kiểm tra")}</th>
                   <th className="px-3 py-2.5 font-medium text-right">F1</th>
-                  <th className="px-3 py-2.5 font-medium">Trạng thái</th>
-                  <th className="px-6 py-2.5 font-medium">Người chạy</th>
-                  <th className="px-3 py-2.5 font-medium text-right">Xóa</th>
+                  <th className="px-3 py-2.5 font-medium">{t("Trạng thái")}</th>
+                  <th className="px-6 py-2.5 font-medium">{t("Người chạy")}</th>
+                  <th className="px-3 py-2.5 font-medium text-right">{t("Xóa")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -176,11 +184,14 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
                           {MODEL_LABELS[job.config?.model_type || ''] || job.config?.model_type || '—'}
                         </span>
                         {job.promoted_at && (
-                          <span className="ml-1.5" title={`Đã đưa vào Realtime lúc ${fmtDate(job.promoted_at)}`}>🚀</span>
+                          <RocketIcon
+                className="ml-1.5 inline h-4 w-4 text-sky-600"
+                aria-label={t("Đã đưa vào Realtime lúc {p1}", { p1: fmtDate(job.promoted_at) })}
+              />
                         )}
                       </td>
-                      <td className="px-3 py-3 text-slate-600 max-w-[160px] truncate" title={dialectKey(job)}>
-                        {dialectKey(job)}
+                      <td className="px-3 py-3 text-slate-600 max-w-[160px] truncate" title={t(dialectKey(job))}>
+                        {t(dialectKey(job))}
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums text-slate-600">
                         {job.status === 'running' ? `${job.current_epoch}/${job.total_epochs}` : job.total_epochs}
@@ -193,7 +204,7 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
                       </td>
                       <td className="px-3 py-3">
                         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.cls}`}>
-                          {badge.text}
+                          {t(badge.text)}
                         </span>
                       </td>
                       <td className="px-6 py-3 text-slate-600">{job.username || '—'}</td>
@@ -203,15 +214,15 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!deletable) return;
-                            if (window.confirm(`Xóa phiên huấn luyện này khỏi lịch sử? Hành động này không thể hoàn tác.`)) {
+                            if (window.confirm(t("Xóa phiên huấn luyện này khỏi lịch sử? Hành động này không thể hoàn tác."))) {
                               onDeleteJob(job);
                             }
                           }}
                           disabled={!deletable}
-                          title={deletable ? 'Xóa khỏi lịch sử huấn luyện' : 'Hủy phiên đang chạy trước khi xóa'}
+                          title={deletable ? t('Xóa khỏi lịch sử huấn luyện') : t('Hủy phiên đang chạy trước khi xóa')}
                           className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
                         >
-                          🗑️
+                          <TrashIcon className="h-4 w-4"  aria-hidden="true" />
                         </button>
                       </td>
                     </tr>

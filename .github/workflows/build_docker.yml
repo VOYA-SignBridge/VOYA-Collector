@@ -1,40 +1,67 @@
-name: Rebuild Backend Docker Image on PR
+# Dựng và đẩy ảnh backend. CHỈ chạy sau khi đã vào `main`.
+#
+# Hai thay đổi so với bản trước, cả hai đều là lỗi vận hành chứ không phải sở
+# thích:
+#
+# 1. **Kích hoạt là `push` vào `main`, không phải `pull_request`.** Bản trước
+#    chạy trên mỗi PR và đẩy thẳng tag `latest`. Nghĩa là một pull request bất
+#    kỳ — chưa ai duyệt, đến từ bất kỳ ai mở được PR — ghi đè đúng cái ảnh mà
+#    máy sản xuất đang kéo về. Kiểm mã thì thuộc về `ci.yml`; đẩy ảnh thì phải
+#    đợi mã được nhận vào.
+#
+# 2. **Gắn tag theo commit.** Bản trước liệt kê `:latest` HAI LẦN trong khối
+#    `tags` — gần như chắc chắn là dấu vết của một dòng `sha-<short>` từng có
+#    rồi bị thay nhầm. Hệ quả: không có cách nào biết một ảnh sinh ra từ commit
+#    nào, và đó chính là gốc rễ của triệu chứng "container healthy nhưng đang
+#    chạy mã cũ" — thứ đã tốn nhiều lượt chẩn đoán. `sha-<short>` cho phép ghim
+#    một lần triển khai vào đúng một commit, và lùi lại được khi hỏng.
+
+name: Build & push backend image
 
 on:
-  pull_request:
-    branches:
-      - main
+  push:
+    branches: [main]
     paths:
       - 'backend/**'
+      - '.github/workflows/build_docker.yml'
+  # Cho phép dựng lại bằng tay khi cần phát hành lại cùng một commit.
+  workflow_dispatch:
 
 jobs:
-  rebuild-backend:
+  build-and-push:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4.2.0
+      - name: Checkout code
+        uses: actions/checkout@v4.2.0
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3.8.0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.8.0
 
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3.3.0
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3.3.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Build and push backend Docker image
-      uses: docker/build-push-action@v6.12.0
-      with:
-        context: ./backend
-        file: ./backend/Dockerfile
-        push: true
-        tags: |
-          ${{ secrets.DOCKER_USERNAME }}/voya_backend:latest
-          ${{ secrets.DOCKER_USERNAME }}/voya_backend:latest
+      - name: Build and push backend Docker image
+        uses: docker/build-push-action@v6.12.0
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          # `latest` để đường triển khai hiện tại không phải đổi, và
+          # `sha-<short>` để mỗi ảnh truy được về đúng một commit. Hai tag trỏ
+          # cùng một ảnh; cái thứ hai mới là cái ghim được.
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/voya_backend:latest
+            ${{ secrets.DOCKER_USERNAME }}/voya_backend:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-    - name: Log success message
-      run: |
-        echo "Backend image rebuilt and pushed successfully"
-        echo "Tag: ${{ secrets.DOCKER_USERNAME }}/voya_backend:latest"
+      - name: Ghi lại ảnh vừa đẩy
+        run: |
+          echo "### Ảnh đã đẩy" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`voya_backend:latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`voya_backend:sha-${GITHUB_SHA}\` ← ghim vào đây khi triển khai" >> "$GITHUB_STEP_SUMMARY"

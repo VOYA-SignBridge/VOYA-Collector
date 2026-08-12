@@ -11,7 +11,25 @@ actually corrupt.
 
 from unittest.mock import patch
 
+import pytest
+
 from app.db import init_db
+
+
+@pytest.fixture(autouse=True)
+def _no_real_catalog_writes():
+    """Keep init_db()'s filesystem side effects away from the real dataset.
+
+    init_db() migrates dataset/samples.csv (adding auth_user_id) before syncing,
+    and settings.dataset_root points at the REPO's catalog when the suite runs
+    on the host — so an unmocked call here rewrites 3860 production rows. It did
+    exactly that once, on 2026-08-01, before this fixture existed.
+
+    Autouse rather than a fifth @patch on each test: the next side effect added
+    to init_db() would otherwise reintroduce the same landmine silently.
+    """
+    with patch("app.dataset_samples.ensure_samples_column") as m:
+        yield m
 
 
 @patch("app.db.sync_missing_data_on_startup")

@@ -30,7 +30,12 @@ export default function PageHeader({ title, subtitle, actions, breadcrumb }: Pag
                     {item.label}
                   </Link>
                 ) : (
-                  <span className={isLast ? "text-slate-800 font-medium" : "hover:text-slate-700"}>
+                  // No href, or it is the current page: plain text, and NO hover
+                  // styling. A crumb that lights up under the cursor and then
+                  // goes nowhere reads as a broken link rather than as a label —
+                  // which is exactly how the un-linked "Dashboard" crumb was
+                  // reported. Only render the affordance when the click works.
+                  <span className={isLast ? "text-slate-800 font-medium" : undefined}>
                     {item.label}
                   </span>
                 )}

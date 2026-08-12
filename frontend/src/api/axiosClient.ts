@@ -1,3 +1,4 @@
+import { tr } from "../i18n";
 import axios from "axios";
 
 /**
@@ -146,12 +147,36 @@ function refreshSession(): Promise<unknown> {
   return refreshPromise;
 }
 
+/**
+ * Phát số phút dùng thử còn lại ra cho giao diện.
+ *
+ * Cổng gác gắn `X-Trial-Minutes-Remaining` vào MỌI phản hồi đi qua phiếu dùng
+ * thử. Bắt ở đây — một chỗ duy nhất — thay vì bắt tại từng lời gọi: trang nhận
+ * dạng bắn request liên tục, và bắt tại chỗ gọi thì đồng hồ hoặc phải nhận thêm
+ * một vòng `/trial/status` cho mỗi khung hình (gấp đôi lưu lượng để hiện một
+ * con số), hoặc phải luồn tham số qua bốn lớp không liên quan gì tới hạn ngạch.
+ *
+ * Không import từ `api/trial.ts` để tránh vòng phụ thuộc — tệp đó import
+ * `axiosClient`. Tên sự kiện lặp lại ở hai nơi, và đó là cái giá rẻ hơn.
+ */
+function broadcastTrialMinutes(headers: unknown): void {
+  const h = headers as Record<string, string> | undefined;
+  if (!h) return;
+  const remaining = Number(h["x-trial-minutes-remaining"]);
+  const limit = Number(h["x-trial-minutes-limit"]);
+  if (!Number.isFinite(remaining) || !Number.isFinite(limit)) return;
+  window.dispatchEvent(
+    new CustomEvent("voya:trial-minutes", { detail: { remaining, limit } }),
+  );
+}
+
 // Response logger + transparent refresh-on-401 + error normalization.
 axiosClient.interceptors.response.use(
   (res) => {
     if (import.meta.env.DEV) {
       console.debug("[api] Response OK:", res.config.url, res.status);
     }
+    broadcastTrialMinutes(res.headers);
     return res;
   },
   async (err) => {
@@ -161,6 +186,21 @@ axiosClient.interceptors.response.use(
     const message = err?.message || "unknown error";
     const data = err?.response?.data;
 
+    // Hết phút dùng thử. Cổng gác không gắn header ở nhánh từ chối — nó đặt
+    // con số vào THÂN phản hồi — nên phải bắt riêng, nếu không đồng hồ trên
+    // màn hình đứng ở số cuối cùng đọc được và người dùng không hiểu vì sao
+    // trang ngừng chạy.
+    if (status === 401 && data?.code === "trial_exhausted") {
+      window.dispatchEvent(
+        new CustomEvent("voya:trial-minutes", {
+          detail: {
+            remaining: 0,
+            limit: Number(data.minutes_limit) || 0,
+            exhausted: true,
+          },
+        }),
+      );
+    }
     // Admin blocked this client's IP → tell the user (reason + expiry). Handled
     // by a top-level <SecurityNotices> listener that shows a full-screen notice.
     if (status === 403 && data && data.blocked) {
@@ -191,31 +231,31 @@ axiosClient.interceptors.response.use(
 
     // Normalize error message for better UX
     if (err?.message === "Network Error" && !err?.response) {
-      err.userMessage = "Server đang offline hoặc không thể kết nối. Vui lòng thử lại sau.";
+      err.userMessage = tr("Không kết nối được máy chủ. Hãy kiểm tra kết nối mạng rồi thử lại.");
     } else if (err?.response?.status === 0) {
-      err.userMessage = "Connection refused. Backend may be offline.";
+      err.userMessage = tr("Máy chủ từ chối kết nối. Có thể hệ thống đang tạm dừng.");
     } else if (err?.code === "ECONNABORTED") {
-      err.userMessage = "Request timeout. Backend may be slow or offline.";
+      err.userMessage = tr("Máy chủ phản hồi quá lâu. Vui lòng thử lại.");
     } else if (err?.response?.status === 401) {
       const reqUrl = err?.config?.url || "";
       const isAuthEndpoint = reqUrl.includes("/auth/login") || reqUrl.includes("/auth/register");
       if (isAuthEndpoint) {
-        err.userMessage = "Username, email hoặc mật khẩu không đúng.";
+        err.userMessage = tr("Tên đăng nhập, email hoặc mật khẩu không đúng.");
       } else {
         // Session gone (refresh already attempted above). Public pages stay
         // usable; ProtectedRoute sends logged-out users to /login.
-        err.userMessage = "Bạn cần đăng nhập để thực hiện thao tác này.";
+        err.userMessage = tr("Bạn cần đăng nhập để thực hiện thao tác này.");
       }
     } else if (err?.response?.status === 403) {
-      err.userMessage = "Bạn không có quyền truy cập tài nguyên này.";
+      err.userMessage = tr("Bạn không có quyền truy cập tài nguyên này.");
     } else if (err?.response?.status === 404) {
-      err.userMessage = "Không tìm thấy tài nguyên yêu cầu.";
+      err.userMessage = tr("Không tìm thấy tài nguyên yêu cầu.");
     } else if (err?.response?.status === 413) {
-      err.userMessage = "Dữ liệu quá lớn, không thể tải lên.";
+      err.userMessage = tr("Dữ liệu quá lớn, không thể tải lên.");
     } else if (err?.response?.status === 429) {
-      err.userMessage = "Bạn gửi quá nhiều yêu cầu, vui lòng thử lại sau.";
+      err.userMessage = tr("Bạn gửi quá nhiều yêu cầu, vui lòng thử lại sau.");
     } else if (err?.response?.status >= 500) {
-      err.userMessage = "Hệ thống không thể kết nối, vui lòng thử lại sau.";
+      err.userMessage = tr("Hệ thống không thể kết nối, vui lòng thử lại sau.");
     }
 
     return Promise.reject(err);

@@ -3,8 +3,11 @@ import json
 import unicodedata
 from pathlib import Path
 from filelock import FileLock
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from app import audit
+from app.rate_limit_deps import limit_catalog
 from app.dataset_manager import get_or_register_class, list_classes, normalize_dialect
+from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
@@ -20,7 +23,9 @@ from app.catalog_sync import (
     empty_class_trash,
 )
 from app.config import settings
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, require_tenant_editor
+from app.quota_deps import guard_quota, tenant_of
+from app.webhooks import emit
 
 router = APIRouter(prefix="/classes", tags=["classes"])
 
@@ -56,7 +61,12 @@ def _save_prefs(data: dict) -> None:
 # Text normalization for prefix matching (remove diacritics)
 # ---------------------------------------------------------------------------
 def _normalize_search(text: str) -> str:
-    """Normalize text for prefix search: lowercase, remove diacritics."""
+    """Normalize text for prefix search: lowercase, remove diacritics.
+
+    Correct for word signs \u2014 typing "tom" should find "t\u00f4m". NOT correct for the
+    fingerspelling alphabet, where \u0102/\u00c2/\u0110/\u00ca/\u00d4/\u01a0/\u01af are distinct letters; use
+    _normalize_alphabet_search there instead.
+    """
     if not text:
         return ""
     t = text.strip().lower()
@@ -66,19 +76,54 @@ def _normalize_search(text: str) -> str:
     return t
 
 
-@router.post("/register")
-def register_class(payload: dict = Body(...)):
+def _normalize_alphabet_search(text: str) -> str:
+    """Diacritic-PRESERVING normalization for fingerspelling labels.
+
+    Suggesting "A" to someone who typed "\u00c2" walks them into recording the wrong
+    class, which is the same letter collision the slug fix removed \u2014 this time
+    committed by the recorder rather than the code. Case and Unicode form are
+    still normalized so "\u00e2" and a decomposed "\u00c2" match the same entry.
+    """
+    return unicodedata.normalize("NFC", (text or "").strip()).lower()
+
+
+@router.post("/register", dependencies=[Depends(limit_catalog)])
+def register_class(
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(require_tenant_editor),
+):
+    """Thêm một lớp từ vựng vào danh mục của tổ chức.
+
+    Cổng quyền là `require_tenant_editor`, không phải `get_current_user`: đây
+    là ghi vào danh mục dùng chung của cả tổ chức, không phải dữ liệu riêng
+    của người gọi. Xem chú thích ở chính dependency đó về lỗ hổng nó bịt.
+    """
+    guard_quota(current_user, "classes")
     label = validate_label(payload.get("label"))
     language = validate_language(payload.get("language", "vn"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "")))
     is_common_global = bool(payload.get("is_common_global", False))
     is_common_language = bool(payload.get("is_common_language", False))
-    meta = get_or_register_class(
-        label_original=label,
-        language=language,
-        dialect=dialect,
-        is_common_global=is_common_global,
-        is_common_language=is_common_language,
+    try:
+        meta = get_or_register_class(
+            label_original=label,
+            language=language,
+            dialect=dialect,
+            is_common_global=is_common_global,
+            is_common_language=is_common_language,
+        )
+    except AlphabetLabelError as exc:
+        # A typo in a fingerspelling label, surfaced to the recorder rather than
+        # accepted as a new class that would collide with a real letter.
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    emit(
+        tenant_of(current_user), "class.created",
+        {
+            "class_uid": meta.class_uid, "slug": meta.slug,
+            "label": meta.label_original, "language": meta.language,
+            "dialect": meta.dialect,
+        },
     )
     return {
         "success": True,
@@ -121,15 +166,18 @@ def suggest_labels(
 
     unique_labels.sort()
 
-    query_norm = _normalize_search(q)
+    # The fingerspelling alphabet is a closed set of distinct letters, so its
+    # search must not fold Â into A. Word signs keep the forgiving match.
+    normalize = (
+        _normalize_alphabet_search if is_alphabet_dialect(dialect or "") else _normalize_search
+    )
+    query_norm = normalize(q)
 
     if not query_norm:
         return {"suggestions": unique_labels[:limit]}
 
     matches = [
-        label
-        for label in unique_labels
-        if _normalize_search(label).startswith(query_norm)
+        label for label in unique_labels if normalize(label).startswith(query_norm)
     ]
     return {"suggestions": matches[:limit]}
 
@@ -173,26 +221,65 @@ def search_collectors(
     return {"collectors": matches[:limit]}
 
 
+def _prefs_bucket(current_user: Dict[str, Any]) -> str:
+    """Khoá ngăn riêng của một tài khoản trong tệp tuỳ chọn dùng chung.
+
+    Tệp mang tên `user_preferences.json` nhưng tới trước v4 nó KHÔNG theo người
+    dùng: mọi khoá nằm chung ở mức trên cùng, nên ngôn ngữ và phương ngữ vừa
+    chọn của một người ghi đè lên của tất cả những người còn lại — kể cả người
+    ở tenant khác. Không phải rò rỉ dữ liệu nhạy cảm, nhưng là trạng thái dùng
+    chung xuyên biên giới tenant, đúng thứ mà phần còn lại của hệ thống bỏ
+    công ngăn.
+
+    Ngăn theo tenant lẫn tài khoản: chỉ theo tài khoản là đủ để cô lập, nhưng
+    có tenant trong khoá khiến việc xoá sạch một tenant lúc purge thành một
+    phép lọc tiền tố thay vì phải dò từng id người dùng.
+    """
+    from app.tenancy import normalize_tenant_id
+
+    tenant = normalize_tenant_id(current_user.get("tenant_id"))
+    return f"{tenant}::{current_user.get('id')}"
+
+
 @router.get("/preferences")
-def get_preference(key: str = Query(..., description="Preference key")):
+def get_preference(
+    key: str = Query(..., description="Preference key"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """Get a user preference value by key."""
     prefs = _load_prefs()
-    value = prefs.get(key)
-    return {"key": key, "value": value}
+    mine = prefs.get(_prefs_bucket(current_user)) or {}
+    if key in mine:
+        return {"key": key, "value": mine[key]}
+    # Rơi về giá trị cũ ở mức trên cùng, MỘT LẦN: những khoá đó do bản trước
+    # v4 ghi và là tuỳ chọn thật của ai đó. Đọc được nhưng không ghi vào nữa,
+    # nên chúng tắt dần khi mỗi người lưu lại lựa chọn của mình.
+    legacy = prefs.get(key)
+    return {"key": key, "value": legacy if not isinstance(legacy, dict) else None}
 
 
 @router.post("/preferences")
-def set_preference(payload: dict = Body(...)):
+def set_preference(
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """Set a user preference key-value pair."""
     key = payload.get("key", "").strip()
     value = payload.get("value")
     if not key:
         raise HTTPException(status_code=400, detail="Key is required")
 
+    bucket = _prefs_bucket(current_user)
     lock = FileLock(_PREFS_LOCK)
     with lock:
         prefs = _load_prefs()
-        prefs[key] = value
+        mine = prefs.get(bucket)
+        # Một khoá cũ ở mức trên cùng có thể trùng tên với một ngăn; kiểm kiểu
+        # ở đây để dữ liệu cũ không biến thành ngăn của ai đó.
+        if not isinstance(mine, dict):
+            mine = {}
+        mine[key] = value
+        prefs[bucket] = mine
         _save_prefs(prefs)
 
     return {"success": True, "key": key, "value": value}
@@ -264,7 +351,7 @@ def balance_plan(target: int | None = None):
     return plan
 
 
-@router.put("/{class_ref}")
+@router.put("/{class_ref}", dependencies=[Depends(limit_catalog)])
 def update_class(
     class_ref: str,
     payload: dict = Body(...),
@@ -298,7 +385,7 @@ def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"Kh\u00f4ng \u0111\u1ecdc \u0111\u01b0\u1ee3c th\u00f9ng r\u00e1c: {exc}")
 
 
-@router.post("/trash/restore")
+@router.post("/trash/restore", dependencies=[Depends(limit_catalog)])
 def bulk_restore_classes_endpoint(
     payload: dict = Body(...),
     current_user: Dict[str, Any] = Depends(require_admin),
@@ -309,8 +396,9 @@ def bulk_restore_classes_endpoint(
     return {"success": True, "message": f"\u0110\u00e3 kh\u00f4i ph\u1ee5c {result['ok_count']} nh\u00e3n.", **result}
 
 
-@router.post("/trash/purge")
+@router.post("/trash/purge", dependencies=[Depends(limit_catalog)])
 def bulk_purge_classes_endpoint(
+    request: Request,
     payload: dict = Body(default={}),
     current_user: Dict[str, Any] = Depends(require_admin),
 ):
@@ -320,17 +408,27 @@ def bulk_purge_classes_endpoint(
         result = empty_class_trash()
     else:
         result = bulk_purge_classes(payload.get("class_uids") or [])
+    audit.record("data.class.purge.bulk", actor=current_user, request=request,
+                 target_type="class", detail={
+                     "all": bool(payload.get("all")),
+                     "requested": payload.get("class_uids") or [],
+                     "ok_count": result.get("ok_count"),
+                 })
     return {"success": True, "message": f"\u0110\u00e3 x\u00f3a v\u0129nh vi\u1ec5n {result['ok_count']} nh\u00e3n.", **result}
 
 
-@router.delete("/{class_ref}")
+@router.delete("/{class_ref}", dependencies=[Depends(limit_catalog)])
 def delete_class(
     class_ref: str,
+    request: Request,
     current_user: Dict[str, Any] = Depends(require_admin),
 ):
     """Soft-delete a class to Trash (restorable). Files/Drive are kept until purge."""
     try:
         result = sync_soft_delete_class(class_ref)
+        audit.record("data.class.soft_delete", actor=current_user, request=request,
+                     target_type="class", target_id=result.get("class_uid") or class_ref,
+                     detail={"sample_count": result.get("sample_count")})
         return {
             "success": True,
             "message": f"\u0110\u00e3 chuy\u1ec3n nh\u00e3n v\u00e0o th\u00f9ng r\u00e1c ({result.get('sample_count', 0)} m\u1eabu). C\u00f3 th\u1ec3 kh\u00f4i ph\u1ee5c.",
@@ -347,7 +445,7 @@ def delete_class(
         }
 
 
-@router.post("/{class_uid}/restore")
+@router.post("/{class_uid}/restore", dependencies=[Depends(limit_catalog)])
 def restore_class_endpoint(
     class_uid: str,
     current_user: Dict[str, Any] = Depends(require_admin),
@@ -360,14 +458,24 @@ def restore_class_endpoint(
         return {"success": False, "message": f"L\u1ed7i kh\u00f4i ph\u1ee5c nh\u00e3n: {str(exc)}", "error_code": exc.error_code}
 
 
-@router.delete("/{class_uid}/purge")
+@router.delete("/{class_uid}/purge", dependencies=[Depends(limit_catalog)])
 def purge_class_endpoint(
     class_uid: str,
+    request: Request,
     current_user: Dict[str, Any] = Depends(require_admin),
 ):
-    """Permanently delete a class (files + Drive + DB). Irreversible."""
+    """Permanently delete a class (files + Drive + DB). Irreversible.
+
+    Ghi một dòng kiểm toán BỀN. Đây là hành động không hồi được duy nhất ở mặt
+    phẳng dữ liệu, và cho tới bản này nó không để lại dấu vết nào ngoài
+    `operation_logs` phù du: lần purge `lop-thu-70eb62` ngày 2026-08-08 không
+    có dòng nào trong `audit_log` để tra lại ai đã làm và lúc nào.
+    """
     try:
         result = sync_purge_class(class_uid)
+        audit.record("data.class.purge", actor=current_user, request=request,
+                     target_type="class", target_id=class_uid,
+                     detail={"op_id": result.get("op_id")})
         return {"success": True, "message": "\u0110\u00e3 x\u00f3a v\u0129nh vi\u1ec5n nh\u00e3n.", **result}
     except CatalogSyncError as exc:
         return {"success": False, "message": f"L\u1ed7i x\u00f3a v\u0129nh vi\u1ec5n: {str(exc)}", "error_code": exc.error_code}

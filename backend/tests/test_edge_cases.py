@@ -14,10 +14,16 @@ def test_missing_auth_header_metrics():
     assert response.status_code == 200
 
 def test_invalid_uuid_format():
-    """Edge Case: Passing non-UUID string where UUID is expected."""
+    """Edge Case: Passing non-UUID string where UUID is expected.
+
+    401 is now in the accepted set, and that is a real behaviour change worth
+    stating rather than papering over. `access_gate` runs BEFORE routing, so it
+    cannot tell a mistyped path from a real one — an unauthenticated caller gets
+    401 for both. The upside is that route existence is no longer discoverable
+    without a session; the cost is that a typo reads as an auth failure.
+    """
     response = client.get("/api/v1/users/not-a-valid-uuid")
-    # Should be 404 (route not found) or 422 (validation error)
-    assert response.status_code in (404, 422)
+    assert response.status_code in (401, 404, 422)
 
 def test_extreme_pagination_params():
     """Edge Case: Out of bounds pagination limits."""

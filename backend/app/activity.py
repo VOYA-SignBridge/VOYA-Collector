@@ -409,19 +409,71 @@ def list_blocked() -> List[Dict[str, Any]]:
 # Security audit log (admin actions) — capped Redis list
 # ---------------------------------------------------------------------------
 def log_security_event(action: str, actor: str = "", target: str = "",
-                       reason: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
-    c = _client()
-    if c is None:
-        return
+                       reason: str = "", extra: Optional[Dict[str, Any]] = None,
+                       actor_user: Optional[Dict[str, Any]] = None,
+                       request: Any = None) -> None:
+    """Ghi một hành động quản trị vào CẢ HAI nhật ký, và đó là chủ ý.
+
+    Hai kho, hai câu hỏi khác nhau
+    ------------------------------
+    Danh sách Redis `sec:log` trả lời *"vừa có chuyện gì?"* — nó nhanh, rẻ, và
+    là thứ trang Hoạt động hiển thị. Nó cũng bị `ltrim` về 500 mục và nằm trên
+    một Redis chạy `volatile-lru`, nên nó **có thể mất dòng**.
+
+    Bảng `audit_log` trả lời *"ai đã làm gì, tháng trước"*. Nó có RLS, có chỉ
+    mục, không bị đuổi, và không xoá được bằng một lần `FLUSHDB`.
+
+    Trước bản này chỉ có nhánh Redis. Hệ quả cụ thể: mọi lần khoá tài khoản,
+    chặn IP, hay ép đăng xuất — bảy lối gọi — chỉ tồn tại trong một danh sách
+    500 mục mà hệ thống được phép tự xoá khi cần chỗ. Đó không phải dấu vết
+    kiểm toán.
+
+    Vì sao ghi hai chỗ chứ không chuyển hẳn sang Postgres: đường Redis đang
+    phục vụ giao diện và không hỏng; thay nó là đổi một thứ đang chạy để lấy
+    một thứ chưa chạy. Ghi thêm thì cộng dồn, không trừ đi.
+
+    `actor` là **chuỗi tên** để hiển thị; `actor_user` là dict người dùng đầy
+    đủ để `audit.record` điền được khoá ngoại `actor_user_id`. Hai tham số chứ
+    không phải một vì nhánh Redis chỉ cần chuỗi, và ép mọi lối gọi phải có
+    dict là ép thêm việc lên những chỗ không có sẵn.
+
+    Ghi hỏng ở một nhánh KHÔNG được kéo nhánh kia xuống theo — mỗi nhánh có
+    `try` riêng. Cùng lập luận với `audit.record`: nhật ký hỏng không được biến
+    một hành động quản trị đã thành công thành lỗi 500.
+    """
+    # Bản BỀN ghi trước. Cửa sổ giữa hai lượt ghi chỉ vài mili giây, nhưng nếu
+    # tiến trình chết đúng lúc đó thì thứ tự quyết định cái nào sống sót — và
+    # cái đáng giữ là cái không bị đuổi khỏi bộ nhớ.
     try:
-        entry = {"ts": time.time(), "action": action, "actor": actor,
-                 "target": target, "reason": reason}
-        if extra:
-            entry.update(extra)
-        c.lpush("sec:log", json.dumps(entry))
-        c.ltrim("sec:log", 0, 499)
+        from app import audit
+
+        detail: Dict[str, Any] = dict(extra or {})
+        if reason:
+            detail["reason"] = reason
+        audit.record(
+            f"security.{action}",
+            actor=actor_user or ({"username": actor} if actor else None),
+            target_type="security",
+            target_id=target or None,
+            detail=detail or None,
+            request=request,
+        )
     except Exception:
+        # `audit.record` đã tự nuốt lỗi; cái `try` này chỉ che trường hợp import
+        # hỏng ở môi trường cắt gọn.
         pass
+
+    c = _client()
+    if c is not None:
+        try:
+            entry = {"ts": time.time(), "action": action, "actor": actor,
+                     "target": target, "reason": reason}
+            if extra:
+                entry.update(extra)
+            c.lpush("sec:log", json.dumps(entry))
+            c.ltrim("sec:log", 0, 499)
+        except Exception:
+            pass
 
 
 def list_security_log(limit: int = 100) -> List[Dict[str, Any]]:
@@ -448,20 +500,71 @@ def force_logout_user(user_id: str, by: str = "", reason: str = "") -> bool:
 
     A fresh login afterwards works (its token iat is newer than the marker).
     Stores the reason so the client can tell the user why they were logged out.
+
+    Ghi mốc vào CẢ Redis lẫn Postgres. Redis là đường nhanh (mỗi request đọc một
+    lần), Postgres là đường bền. Trước đây mốc CHỈ nằm ở Redis, nghĩa là Redis
+    khởi động lại — hoặc chỉ cần nấc một cái — là mọi lệnh thu hồi phiên của
+    quản trị viên bốc hơi mà không có dòng nhật ký nào cho biết cơ chế đang mù.
     """
     if not user_id:
         return False
     ttl = int(settings.access_token_expire_minutes) * 60 + 120
+    marker = time.time()
     c = _client()
     if c is not None:
         try:
             c.set(f"forcelogout:{user_id}",
-                  json.dumps({"ts": time.time(), "by": by, "reason": reason}), ex=ttl)
+                  json.dumps({"ts": marker, "by": by, "reason": reason}), ex=ttl)
         except Exception:
             pass
+    _persist_force_logout_marker(user_id, marker)
     _revoke_all_refresh_tokens(user_id)
     logger.info("[ACTIVITY] force-logout user=%s by=%s", user_id, by)
     return True
+
+
+def _persist_force_logout_marker(user_id: str, marker: float) -> None:
+    """Hạ mốc force-logout xuống `users.sessions_invalid_before`.
+
+    Chỉ tiến, không lùi (`GREATEST`): hai lệnh thu hồi gần nhau không được phép
+    làm mốc trẻ lại, vì như thế là hồi sinh những token vừa bị đá.
+    """
+    try:
+        from app.storage.postgres_connection import connect_postgres
+        from app.storage.rls import apply_scope
+        from app.tenant_context import system_scope
+
+        # `apply_scope` là bắt buộc, không phải nghi thức: `users` có row-level
+        # security, nên một kết nối KHÔNG scope không bị từ chối — nó chỉ đơn
+        # giản khớp 0 dòng. Bản đầu thiếu dòng này và lệnh thu hồi phiên lặng lẽ
+        # không ghi được gì; test `test_force_logout_ghi_ca_xuong_postgres` bắt.
+        #
+        # Thu hồi phiên là việc của mặt phẳng danh tính, chạy trước khi biết
+        # tenant nào — cùng lý do với `auth._identity_cursor`.
+        with system_scope("activity: thu hoi phien, mat phang danh tinh"):
+            conn = connect_postgres(connect_timeout=5)
+            try:
+                with conn:
+                    with conn.cursor() as cur:
+                        apply_scope(cur)
+                        cur.execute(
+                            "UPDATE users SET sessions_invalid_before = "
+                            "GREATEST(COALESCE(sessions_invalid_before, to_timestamp(0)), "
+                            "to_timestamp(%s)) WHERE id = %s",
+                            (marker, user_id),
+                        )
+                        if cur.rowcount == 0:
+                            logger.error(
+                                "[ACTIVITY] moc force-logout khong ghi duoc dong nao "
+                                "cho user=%s — kiem tra scope/RLS", user_id,
+                            )
+            finally:
+                conn.close()
+    except Exception as exc:
+        logger.error(
+            "[ACTIVITY] KHONG ghi duoc moc force-logout ben cho user=%s: %s — "
+            "lenh thu hoi nay chi song trong Redis", user_id, exc,
+        )
 
 
 def get_force_logout(user_id: str) -> Optional[Dict[str, Any]]:
@@ -481,12 +584,137 @@ def get_force_logout(user_id: str) -> Optional[Dict[str, Any]]:
 
 
 def is_user_denied(user_id: str, token_iat: Any) -> bool:
-    """True if this token was issued before an active force-logout marker."""
+    """True if this token was issued before an active force-logout marker.
+
+    Đường NHANH, đọc Redis. Vế bền nằm ở `auth.get_current_user_optional`, nơi
+    nó đi ké truy vấn `_fetch_user_by_id` vốn đã chạy sẵn mỗi request — xem
+    `token_predates_marker` bên dưới.
+
+    Vì sao KHÔNG hỏi Postgres ngay tại đây, dù đó là chỗ trông có vẻ đúng nhất:
+    hàm này chạy trên mọi request, và mở thêm một kết nối mỗi lần là đổi một lỗ
+    bảo mật lấy một nút thắt cổ chai.
+    """
+    if not user_id:
+        return False
     fl = get_force_logout(user_id)
     if not fl:
         return False
     try:
         return float(token_iat or 0) < float(fl.get("ts", 0))
+    except Exception:
+        return False
+
+
+def token_predates_marker(token_iat: Any, marker: Any) -> bool:
+    """Token cấp trước mốc thu hồi phiên chưa?
+
+    `marker` là `users.sessions_invalid_before` — mốc BỀN, đọc kèm hồ sơ người
+    dùng nên không tốn thêm truy vấn nào. Đây là vế cứu khi Redis chết hoặc khởi
+    động lại: khoá Redis có TTL, còn cột Postgres thì không, nên một lệnh thu hồi
+    đặt lúc Redis đang nghỉ vẫn có hiệu lực.
+    """
+    if marker is None:
+        return False
+    try:
+        if hasattr(marker, "timestamp"):
+            marker_ts = marker.timestamp()
+        else:
+            marker_ts = float(marker)
+        return float(token_iat or 0) < marker_ts
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Access-token denylist (logout kills THIS session, not every device)
+# ---------------------------------------------------------------------------
+_JTI_DENY_PREFIX = "denyjti:"
+_FAM_DENY_PREFIX = "denyfam:"
+
+
+def deny_access_token(jti: str, expires_at: Any = None) -> bool:
+    """Chặn đúng một access token cho tới khi nó tự hết hạn.
+
+    TTL đặt bằng phần đời còn lại của chính token, nên danh sách chặn tự dọn —
+    không có tác vụ quét nào phải viết, và bộ nhớ chiếm dụng có trần cứng bằng
+    số phiên đang mở nhân với 60 phút.
+    """
+    if not jti:
+        return False
+    c = _client()
+    if c is None:
+        # Không im lặng bỏ qua: đăng xuất mà không chặn được token nghĩa là nút
+        # "Đăng xuất" không làm đúng điều nó hứa, và người dùng phải biết cơ chế
+        # đang mù chứ không phải đoán.
+        logger.error("[ACTIVITY] khong co Redis — access token %s KHONG bi chan", jti)
+        return False
+    try:
+        ttl = int(settings.access_token_expire_minutes) * 60 + 120
+        if expires_at is not None:
+            try:
+                remaining = int(float(expires_at) - time.time()) + 5
+                if remaining > 0:
+                    ttl = min(ttl, remaining)
+            except Exception:
+                pass
+        c.set(f"{_JTI_DENY_PREFIX}{jti}", "1", ex=max(1, ttl))
+        return True
+    except Exception as exc:
+        logger.error("[ACTIVITY] chan access token %s that bai: %s", jti, exc)
+        return False
+
+
+def deny_token_family(family_id: str) -> bool:
+    """Chặn mọi access token thuộc một HỌ (một lần đăng nhập = một họ).
+
+    Dùng khi phát hiện refresh token bị dùng lại: cả nhánh phiên đó không còn
+    đáng tin, nhưng các thiết bị khác của cùng người dùng thì vẫn đáng tin.
+    Đó là khác biệt giữa hàm này và `force_logout_user`.
+    """
+    if not family_id:
+        return False
+    c = _client()
+    if c is None:
+        logger.error("[ACTIVITY] khong co Redis — ho token %s KHONG bi chan", family_id)
+        return False
+    try:
+        # TTL bằng một vòng đời access token: sau chừng đó mọi token của họ đều
+        # đã tự hết hạn, và refresh token thì đã chết trong Postgres vĩnh viễn
+        # (`reuse_detected_at`), nên khoá Redis hết hạn không hồi sinh được gì.
+        ttl = int(settings.access_token_expire_minutes) * 60 + 120
+        c.set(f"{_FAM_DENY_PREFIX}{family_id}", "1", ex=ttl)
+        return True
+    except Exception as exc:
+        logger.error("[ACTIVITY] chan ho token %s that bai: %s", family_id, exc)
+        return False
+
+
+def is_token_family_denied(family_id: str) -> bool:
+    if not family_id:
+        return False
+    c = _client()
+    if c is None:
+        return False
+    try:
+        return c.get(f"{_FAM_DENY_PREFIX}{family_id}") is not None
+    except Exception:
+        return False
+
+
+def is_access_token_denied(jti: str) -> bool:
+    """True nếu token này đã bị đăng xuất. Redis chết thì trả False (fail-open).
+
+    Fail-open ở đây chấp nhận được vì nó chỉ nới cho token đã bị đăng xuất sống
+    nốt phần đời tối đa 60 phút — đúng bằng hành vi TRƯỚC bản vá này, chứ không
+    mở thêm gì mới.
+    """
+    if not jti:
+        return False
+    c = _client()
+    if c is None:
+        return False
+    try:
+        return c.get(f"{_JTI_DENY_PREFIX}{jti}") is not None
     except Exception:
         return False
 
@@ -764,14 +992,18 @@ def detect_anomalies(sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     c = _client()
     if c is not None:
         try:
-            from app.rate_limit import LOGIN_MAX_ATTEMPTS
+            # Same threshold the limiter itself warns at. Deliberately NOT the
+            # per-pair backoff trigger: a handful of failures from one address
+            # is a typo, and campus/VPN networks put hundreds of users behind
+            # one IP — flagging those as "critical" buries the real bursts.
+            from app.rate_limit import LOGIN_IP_WARN_ATTEMPTS
 
             for key in c.scan_iter(match="ratelimit:login:ip:*", count=200):
                 try:
                     cnt = int(c.get(key) or 0)
                 except Exception:
                     continue
-                if cnt >= LOGIN_MAX_ATTEMPTS:
+                if cnt >= LOGIN_IP_WARN_ATTEMPTS:
                     ip = key.split(":")[-1]
                     out.append({
                         "level": "critical",

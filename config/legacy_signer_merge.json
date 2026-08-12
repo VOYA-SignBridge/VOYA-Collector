@@ -1,0 +1,29 @@
+{
+  "_comment": "Chi chua cac phep gop DA DUOC CHU DU LIEU XAC NHAN. scripts/apply_signer_merges.py doc file nay va TU NO KHONG SUY DOAN TEN NAO. Moi lan them mot nhom, ghi ro ai xac nhan va ngay nao.",
+  "merges": [
+    {
+      "canonical_signer_id": "S003",
+      "canonical_display_name": "Trâm",
+      "absorbed_signer_ids": [],
+      "all_names": ["Trâm", "Tram", "trâm", "tram"],
+      "confirmed_by": "chu du lieu",
+      "confirmed_at": "2026-07-31",
+      "reason": "Cung mot nguoi, khac dau. KHONG lien quan den 'Trân' (S001) — do la nguoi khac."
+    },
+    {
+      "canonical_signer_id": "S006",
+      "canonical_display_name": "Thu Ngân",
+      "absorbed_signer_ids": [],
+      "all_names": ["Thu Ngân", "Thungan", "Ngan", "thu ngân", "thungan", "ngan"],
+      "confirmed_by": "chu du lieu",
+      "confirmed_at": "2026-07-31",
+      "reason": "Hai tai khoan email khong ton tai nen phai tao tai khoan moi; 'Ngan' cung la nguoi nay."
+    }
+  ],
+  "explicitly_not_merged": [
+    {
+      "names": ["Trân", "Trâm"],
+      "note": "HAI NGUOI KHAC NHAU. Trân -> S001 (da map tu truoc). Dung bao gio gop chi vi chuoi gan giong."
+    }
+  ]
+}

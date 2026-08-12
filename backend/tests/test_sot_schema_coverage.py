@@ -39,7 +39,11 @@ def _written_columns(tuple_name: str) -> list[str]:
     source = _METADATA_DB.read_text(encoding="utf-8")
     match = re.search(rf"^{tuple_name}\s*=\s*\((.*?)\)", source, re.S | re.M)
     assert match, f"{tuple_name} not found in metadata_db.py"
-    raw = match.group(1).replace("\n", " ")
+    # Drop comments BEFORE flattening: a "# vocabulary schema v2" line inside the
+    # tuple would otherwise be glued onto the name that follows it and reported
+    # as a phantom missing column, which says nothing about coverage.
+    body = "\n".join(line.split("#", 1)[0] for line in match.group(1).splitlines())
+    raw = body.replace("\n", " ")
     return [c.strip().strip("\"'") for c in raw.split(",") if c.strip().strip("\"'")]
 
 

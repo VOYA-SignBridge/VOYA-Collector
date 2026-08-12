@@ -28,6 +28,7 @@ from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
 from app.logging_utils import get_logger as get_structured_logger, OperationStatus, OperationType
 from app.processing.utils import atomic_write_json
 from app.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
+from app.tenancy import TENANT_COLUMN, tenant_id_of
 from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
@@ -152,6 +153,28 @@ def _replace_prefix(value: Any, old_prefix: str, new_prefix: str) -> Any:
     return value
 
 
+def _purge_raw_archive(sample_file: Optional[Path], sample_uid: str) -> None:
+    """Delete a purged sample's raw recording along with its features file.
+
+    Contract v3 stores the recording in a parallel tree, and a purge that only
+    removed the features half would leave the landmarks — the actual record of a
+    person signing — on disk after the sample was destroyed at the contributor's
+    request. Purge is the hard-delete path; soft delete does not reach here and
+    keeps both halves, which is what makes Trash restorable.
+    """
+    if sample_file is None:
+        return
+    try:
+        from app.dataset_samples import raw_archive_path
+
+        archived = raw_archive_path(sample_file)
+        if archived.exists():
+            archived.unlink()
+            logger.info("[CATALOG] purged raw archive for %s", sample_uid)
+    except Exception as exc:
+        logger.warning("[CATALOG] raw archive purge failed for %s: %s", sample_uid, exc)
+
+
 def _resolve_sample_file_path(row: Dict[str, Any]) -> Optional[Path]:
     file_path = row.get("file_path") or ""
     if not file_path:
@@ -181,6 +204,10 @@ def _build_class_meta_from_row(row: Dict[str, Any]) -> ClassMetadata:
         is_common_global=parse_bool(row.get("is_common_global")),
         is_common_language=parse_bool(row.get("is_common_language")),
         folder_override=row.get("folder_name") or None,
+        # `hierarchy_path()` is derived from this. Dropping it makes every
+        # class-move, rename and trash/restore in this module read and write the
+        # bootstrap tenant's directory tree regardless of who owns the class.
+        tenant_id=tenant_id_of(row),
     )
 
 
@@ -232,6 +259,9 @@ def _build_updated_class_meta(row: Dict[str, Any], payload: Dict[str, Any]) -> C
         is_common_global=is_common_global,
         is_common_language=is_common_language and not is_common_global,
         folder_override=folder_override,
+        # The retarget keeps the class with its owner: a move must not be able
+        # to relocate a class into another tenant's tree.
+        tenant_id=tenant_id_of(row),
     )
 
 
@@ -953,6 +983,10 @@ def _db_class_row_to_label_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
     row["class_idx"] = "" if dbrow.get("class_idx") in (None, "") else str(dbrow.get("class_idx"))
     row["is_common_global"] = str(int(bool(dbrow.get("is_common_global"))))
     row["is_common_language"] = str(int(bool(dbrow.get("is_common_language"))))
+    # This projection fills "" for anything the DB row lacks, and it feeds the
+    # restore-from-trash path — so a query that forgets tenant_id would write an
+    # unassigned class back into the source of truth. Force a concrete owner.
+    row[TENANT_COLUMN] = tenant_id_of(row)
     return row
 
 
@@ -960,7 +994,14 @@ def _db_sample_row_to_csv_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
     from app.dataset_samples import _samples_fieldnames
 
     hdr = _samples_fieldnames()
-    return {f: (dbrow.get(f) if dbrow.get(f) is not None else "") for f in hdr}
+    row = {f: (dbrow.get(f) if dbrow.get(f) is not None else "") for f in hdr}
+    # Same reason as _db_class_row_to_label_row: restoring a soft-deleted sample
+    # must not put a tenant-less row back into samples.csv. Only stamp when the
+    # on-disk header actually has the column — before the migration runs it does
+    # not, and adding a key the header lacks would raise in csv.DictWriter.
+    if TENANT_COLUMN in hdr:
+        row[TENANT_COLUMN] = tenant_id_of(row)
+    return row
 
 
 def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
@@ -1423,6 +1464,7 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
                 sidecar = sample_file.with_suffix(".json")
                 if sidecar.exists():
                     sidecar.unlink()
+            _purge_raw_archive(sample_file, sample_uid)
         except Exception as exc:
             logger.warning("[CATALOG] purge sample file remove failed for %s: %s", sample_uid, exc)
 
@@ -1501,6 +1543,7 @@ def sync_delete_sample(sample_uid: str) -> Dict[str, Any]:
             sample_json = sample_file.with_suffix(".json") if sample_file else None
             if sample_json and sample_json.exists():
                 sample_json.unlink()
+            _purge_raw_archive(sample_file, sample_uid)
 
             remaining_rows = [row for row in rows if row.get("sample_uid") != sample_uid]
             _write_samples_csv(remaining_rows)

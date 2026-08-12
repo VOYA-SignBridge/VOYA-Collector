@@ -1,6 +1,8 @@
 /**
  * Training Pipeline Page - Professional UI/UX Design
  * 7-Step Training Workflow with Real-time Feedback
+ *
+ * @i18n-key-table — `title`/`description` trong `STEP_LABELS` là KHOÁ từ điển.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,6 +29,13 @@ import DialectSelector from './components/DialectSelector';
 import TrainingSettings from './components/TrainingSettings';
 import TrainingProgress from './components/TrainingProgress';
 import ResultsInsights from './components/ResultsInsights';
+import { useI18n } from "../../i18n";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  ClipboardIcon,
+  RocketIcon,
+} from '../../components/ui/Icons';
 
 type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -34,9 +43,9 @@ const STEP_ICON_CLASS = 'h-6 w-6 sm:h-7 sm:w-7';
 
 const STEP_LABELS: Record<number, { title: string; icon: ReactNode; description: string }> = {
   1: { title: 'Dữ Liệu', icon: <DatabaseIcon className={STEP_ICON_CLASS} />, description: 'Xem thông tin dataset' },
-  2: { title: 'Chia Tập', icon: <SplitIcon className={STEP_ICON_CLASS} />, description: 'Phân tách train/val/test' },
-  3: { title: 'Tăng Cường', icon: <SparkleIcon className={STEP_ICON_CLASS} />, description: 'Xem trước augmentation' },
-  4: { title: 'Chọn Dialect', icon: <GlobeIcon className={STEP_ICON_CLASS} />, description: 'Lựa chọn phương ngữ' },
+  2: { title: 'Chọn Dialect', icon: <GlobeIcon className={STEP_ICON_CLASS} />, description: 'Lựa chọn phương ngữ' },
+  3: { title: 'Chia Tập', icon: <SplitIcon className={STEP_ICON_CLASS} />, description: 'Phân tách train/val/test' },
+  4: { title: 'Tăng Cường', icon: <SparkleIcon className={STEP_ICON_CLASS} />, description: 'Xem trước augmentation' },
   5: { title: 'Cấu Hình', icon: <GearIcon className={STEP_ICON_CLASS} />, description: 'Điều chỉnh hyperparameters' },
   6: { title: 'Huấn Luyện', icon: <ChipIcon className={STEP_ICON_CLASS} />, description: 'Quá trình training' },
   7: { title: 'Kết Quả', icon: <ClipboardCheckIcon className={STEP_ICON_CLASS} />, description: 'Phân tích kết quả' },
@@ -45,6 +54,7 @@ const STEP_LABELS: Record<number, { title: string; icon: ReactNode; description:
 type View = 'landing' | 'wizard';
 
 const TrainingPipeline: React.FC = () => {
+  const { t } = useI18n();
   const [view, setView] = useState<View>('landing');
   const [historyJobs, setHistoryJobs] = useState<TrainingJobListItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -93,7 +103,7 @@ const TrainingPipeline: React.FC = () => {
   const handleDeleteJob = async (item: TrainingJobListItem) => {
     const ok = await api.deleteJob(item.id);
     if (!ok) {
-      window.alert(api.error || 'Không thể xóa phiên huấn luyện này.');
+      window.alert(api.error || t('Không thể xóa phiên huấn luyện này.'));
       return;
     }
     await refreshHistory();
@@ -158,12 +168,12 @@ const TrainingPipeline: React.FC = () => {
     switch (currentStep) {
       case 1: // Dataset Info - always valid
         return !!datasetInfo;
-      case 2: // Data Split - always valid
-        return true;
-      case 3: // Augmentation Preview - always valid
-        return true;
-      case 4: // Dialect Selector - must select at least one
+      case 2: // Dialect Selector - must select at least one (moved before split)
         return selectedDialects.length > 0;
+      case 3: // Data Split - always valid
+        return true;
+      case 4: // Augmentation Preview - always valid
+        return true;
       case 5: // Training Settings - always valid
         return selectedDialects.length > 0;
       case 6: // Training Progress - automatic
@@ -178,8 +188,9 @@ const TrainingPipeline: React.FC = () => {
   const getNextButtonText = (): string => {
     if (!isStepValid()) {
       switch (currentStep) {
-        case 4:
-          return '⚠️ Chọn Phương Ngữ Trước';
+        // Dialect is step 2 now, so the "pick a dialect first" hint moves with it.
+        case 2:
+          return 'Chọn phương ngữ trước';
         default:
           return 'Hoàn thành bước này';
       }
@@ -223,14 +234,15 @@ const TrainingPipeline: React.FC = () => {
     return (
       <div className="space-y-8">
         <PageHeader
-          title="Huấn Luyện Mô Hình"
-          subtitle="Lịch sử các lần huấn luyện, so sánh model và bắt đầu run mới"
-          breadcrumb={['Dashboard', 'Huấn luyện']}
+          title={t("Huấn Luyện Mô Hình")}
+          subtitle={t("Lịch sử các lần huấn luyện, so sánh model và bắt đầu run mới")}
+          breadcrumb={[{ label: 'Dashboard', href: '/' }, 'Huấn luyện']}
         />
 
         <div className="flex justify-end">
           <Button variant="primary" onClick={handleNewTraining}>
-            🚀 Bắt Đầu Huấn Luyện Mới
+            <RocketIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" />
+            {t("Bắt đầu huấn luyện mới")}
           </Button>
         </div>
 
@@ -248,9 +260,9 @@ const TrainingPipeline: React.FC = () => {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Huấn Luyện Mô Hình"
-        subtitle="Quy trình 7 bước để huấn luyện mô hình nhận diện ký hiệu với hiệu suất tối ưu"
-        breadcrumb={['Dashboard', 'Huấn luyện']}
+        title={t("Huấn Luyện Mô Hình")}
+        subtitle={t("Quy trình 7 bước để huấn luyện mô hình nhận diện ký hiệu với hiệu suất tối ưu")}
+        breadcrumb={[{ label: 'Dashboard', href: '/' }, 'Huấn luyện']}
       />
 
       {/* Progress Bar - Minimal & Clean */}
@@ -268,7 +280,7 @@ const TrainingPipeline: React.FC = () => {
           <button
             onClick={() => {}}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 hover:bg-ctu-blue/20 transition-colors flex-shrink-0"
-            title="Hiển thị các bước"
+            title={t("Hiển thị các bước")}
           >
             <span className="font-bold text-ctu-blue text-lg">{currentStep}</span>
             <span className="text-slate-500">/</span>
@@ -281,10 +293,10 @@ const TrainingPipeline: React.FC = () => {
           <div className="flex-shrink-0 text-ctu-blue">{STEP_LABELS[currentStep].icon}</div>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg sm:text-xl font-bold text-slate-900">
-              {STEP_LABELS[currentStep].title}
+              {t(STEP_LABELS[currentStep].title)}
             </h2>
             <p className="text-sm text-slate-600 line-clamp-1 sm:line-clamp-2">
-              {STEP_LABELS[currentStep].description}
+              {t(STEP_LABELS[currentStep].description)}
             </p>
           </div>
         </div>
@@ -297,21 +309,26 @@ const TrainingPipeline: React.FC = () => {
           <div className="px-6 py-6 sm:px-8 sm:py-8 min-h-[500px]">
             {error && (
               <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-                <div className="font-semibold">⚠️ Lỗi</div>
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <AlertTriangleIcon className="h-4 w-4"  aria-hidden="true" />
+                  {t("Lỗi")}
+                </div>
                 <div className="mt-1">{error}</div>
               </div>
             )}
 
             {currentStep === 1 && <DatasetInfo datasetInfo={datasetInfo} loading={loading} />}
-            {currentStep === 2 && <DataSplitVisualization datasetInfo={datasetInfo} />}
-            {currentStep === 3 && <AugmentationPreview />}
-            {currentStep === 4 && (
+            {currentStep === 2 && (
               <DialectSelector
                 dialects={datasetInfo?.dialects || {}}
                 selected={selectedDialects}
                 onChange={setSelectedDialects}
               />
             )}
+            {currentStep === 3 && (
+              <DataSplitVisualization datasetInfo={datasetInfo} selectedDialects={selectedDialects} />
+            )}
+            {currentStep === 4 && <AugmentationPreview />}
             {currentStep === 5 && (
               <TrainingSettings config={trainingConfig} onChange={setTrainingConfig} />
             )}
@@ -354,9 +371,10 @@ const TrainingPipeline: React.FC = () => {
                 variant="secondary"
                 onClick={() => setView('landing')}
                 size="sm"
-                title="Quay về danh sách lịch sử training"
+                title={t("Quay về danh sách lịch sử training")}
               >
-                📋 Lịch sử
+                <ClipboardIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" />
+                {t("Lịch sử")}
               </Button>
               <Button
                 variant="secondary"
@@ -364,7 +382,7 @@ const TrainingPipeline: React.FC = () => {
                 disabled={currentStep === 1 || currentStep >= 6}
                 size="sm"
               >
-                ← Quay lại
+                {t("← Quay lại")}
               </Button>
             </div>
 
@@ -375,9 +393,10 @@ const TrainingPipeline: React.FC = () => {
                   onClick={handleNext}
                   disabled={!isStepValid()}
                   size="sm"
-                  title={!isStepValid() ? 'Vui lòng hoàn thành bước hiện tại' : 'Chuyển sang bước tiếp theo'}
+                  title={!isStepValid() ? t('Vui lòng hoàn thành bước hiện tại') : t('Chuyển sang bước tiếp theo')}
                 >
-                  {getNextButtonText()} ✓
+                  {getNextButtonText()}{" "}
+                  <CheckIcon className="inline h-4 w-4 -mt-0.5"  aria-hidden="true" />
                 </Button>
               )}
 
@@ -387,9 +406,13 @@ const TrainingPipeline: React.FC = () => {
                   onClick={handleStartTraining}
                   disabled={selectedDialects.length === 0 || isTraining}
                   size="sm"
-                  title={selectedDialects.length === 0 ? 'Vui lòng chọn ít nhất một phương ngữ' : 'Bắt đầu quá trình huấn luyện'}
+                  title={selectedDialects.length === 0 ? t('Vui lòng chọn ít nhất một phương ngữ') : t('Bắt đầu quá trình huấn luyện')}
                 >
-                  {isTraining ? '⏳ Đang xử lý...' : '🚀 Bắt Đầu Huấn Luyện'}
+                  {isTraining ? (
+                    'Đang xử lý…'
+                  ) : (
+                    <><RocketIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" /> {t("Bắt đầu huấn luyện")}</>
+                  )}
                 </Button>
               )}
 
@@ -398,9 +421,9 @@ const TrainingPipeline: React.FC = () => {
                   variant="primary"
                   onClick={() => setCurrentStep(7)}
                   size="sm"
-                  title="Xem kết quả chi tiết của huấn luyện"
+                  title={t("Xem kết quả chi tiết của huấn luyện")}
                 >
-                  Xem Kết Quả →
+                  {t("Xem Kết Quả →")}
                 </Button>
               )}
 
@@ -409,9 +432,10 @@ const TrainingPipeline: React.FC = () => {
                   variant="primary"
                   onClick={() => setView('landing')}
                   size="sm"
-                  title="Hoàn tất và quay về màn hình chính"
+                  title={t("Hoàn tất và quay về màn hình chính")}
                 >
-                  Hoàn tất ✓
+                  Hoàn tất{" "}
+                  <CheckIcon className="inline h-4 w-4 -mt-0.5"  aria-hidden="true" />
                 </Button>
               )}
 

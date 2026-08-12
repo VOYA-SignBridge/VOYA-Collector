@@ -12,10 +12,24 @@ import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import { SearchIcon, TagIcon } from "../components/ui/Icons";
 import { useAuth } from "../hooks/useAuth";
+import { dialectLabel } from "../config/dialectLabels";
+import DialectBadge from "../components/DialectBadge";
+import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
+import { StarIcon, XIcon } from "../components/ui/Icons";
+import { useI18n } from "../i18n";
 
 export default function LabelsPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { loading: authLoading, isAdmin } = useAuth();
+  // The four dialect pickers below used to be four hand-written <option> lists
+  // that disagreed with each other and could never offer a newly approved
+  // dialect. They all read this now.
+  const { dialects: registryDialects } = useVocabularyRegistry();
+  const dialectOptions = useMemo(
+    () => registryDialects.filter((d) => d.is_active !== false).map((d) => d.dialect_id),
+    [registryDialects],
+  );
   const [labels, setLabels] = useState<Label[]>([]);
   const [classes, setClasses] = useState<ClassRow[] | null>(null);
   const [sampleCounts, setSampleCounts] = useState<Record<string, number>>({});
@@ -50,21 +64,13 @@ export default function LabelsPage() {
   
   const getLanguageName = (lang?: string): string => {
     const l = (lang || language);
-    return l === 'vn' ? 'Tiếng Việt' : l === 'en' ? 'English' : l;
+    return l === 'vn' ? t('Tiếng Việt') : l === 'en' ? 'English' : l;
   };
   
-  const getDialectName = (dialect?: string): string => {
-    const d = (dialect || 'common');
-    const map: Record<string, string> = {
-      'common': 'Chung',
-      'bac': 'Miền Bắc',
-      'nam': 'Miền Nam',
-      'trung': 'Miền Trung',
-      'hoa-de': 'Hòa Đê',
-      'can-tho': 'Cần Thơ',
-    };
-    return map[d] || d;
-  };
+  // The slug is the label — see config/dialectLabels.ts. The hand-written map
+  // that used to live here could not show a dialect approved through the
+  // registry, because nobody would have added it.
+  const getDialectName = (dialect?: string): string => dialectLabel(dialect || 'common');
   const [search, setSearch] = useState<string>("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [editTarget, setEditTarget] = useState<RenderItem | null>(null);
@@ -80,28 +86,16 @@ export default function LabelsPage() {
   const [createDialect, setCreateDialect] = useState<string>("common");
   const [createSaving, setCreateSaving] = useState(false);
 
-  // Dialect normalization helper: map various forms to canonical slugs used by BE
-  const normalizeDialect = (d?: string) => {
-    if (!d) return '';
-    const s = String(d).toLowerCase().trim();
-    // common variants map
-    const map: Record<string, string> = {
-      'chung': 'common',
-      'common': 'common',
-      'bac': 'bac',
-      'bắc': 'bac',
-      'nam': 'nam',
-      'trung': 'trung',
-      'hoa-de': 'hoa-de',
-      'hoa de': 'hoa-de',
-      'hoade': 'hoa-de',
-      'cần thơ': 'can-tho',
-      'can tho': 'can-tho',
-      'cantho': 'can-tho',
-      'can-tho': 'can-tho',
-    };
-    return map[s] ?? s;
-  };
+  // Applied to dialect values coming FROM the backend, which already returns
+  // canonical ids — so this is defensive tidying only.
+  //
+  // It used to carry a table of spelling variants ('bắc' -> 'bac', 'cần thơ' ->
+  // 'can-tho', …). That table was written for an era when a dialect could be
+  // typed by hand; every picker now offers ids from GET /vocabulary/registry,
+  // and the table could never have learned a newly approved dialect anyway.
+  // Verified before removing it: no non-slug dialect exists in classes,
+  // samples, raw_uploads or dataset/samples.csv.
+  const normalizeDialect = (d?: string) => (d ? String(d).toLowerCase().trim() : '');
 
   // Normalize either `classes` (new BE) or legacy `labels` into a common render shape
   type RenderItem = {
@@ -322,13 +316,13 @@ export default function LabelsPage() {
         is_common_global: false,
       });
       if (!result.ok) {
-        setError(result.error || "Không thể tạo nhãn.");
+        setError(result.error || t("Không thể tạo nhãn."));
         return;
       }
 
       const updated = result.data;
       setStatusMessage(
-        `Đã tạo nhãn "${updated.label_original || nextLabel}" (${getLanguageName(updated.language || createLanguage)} / ${getDialectName(updated.dialect || createDialect)})`
+        t("Đã tạo nhãn \"{label_original}\" ({p1} / {p2})", { label_original: updated.label_original || nextLabel, p1: getLanguageName(updated.language || createLanguage), p2: getDialectName(updated.dialect || createDialect) })
       );
       
       setClasses((prev) => prev ? [updated, ...prev] : [updated]);
@@ -341,7 +335,7 @@ export default function LabelsPage() {
       setCreateDialect("common");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || "Không thể tạo nhãn.");
+      setError(msg || t("Không thể tạo nhãn."));
     } finally {
       setCreateSaving(false);
     }
@@ -367,7 +361,7 @@ export default function LabelsPage() {
         is_common_language: editDialect === "common",
       });
       if (!result.ok) {
-        setError(result.error || "Không thể cập nhật nhãn.");
+        setError(result.error || t("Không thể cập nhật nhãn."));
         setOperationLogs(extractOperationLogs(result));
         setShowOperationLogs(true);
         return;
@@ -384,12 +378,12 @@ export default function LabelsPage() {
         updated.dialect || editDialect,
       );
       setStatusMessage(
-        `Đã cập nhật nhãn "${updated.label_original || nextLabel}" (${getLanguageName(updated.language || editLanguage)} / ${getDialectName(updated.dialect || editDialect)})`
+        t("Đã cập nhật nhãn \"{label_original}\" ({p1} / {p2})", { label_original: updated.label_original || nextLabel, p1: getLanguageName(updated.language || editLanguage), p2: getDialectName(updated.dialect || editDialect) })
       );
       setEditTarget(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || "Không thể cập nhật nhãn.");
+      setError(msg || t("Không thể cập nhật nhãn."));
     } finally {
       setEditSaving(false);
     }
@@ -404,7 +398,7 @@ export default function LabelsPage() {
       const classRef = getClassRef(deleteTarget);
       const result = await deleteClass(classRef);
       if (!result.ok) {
-        setError(result.error || "Không thể xóa nhãn.");
+        setError(result.error || t("Không thể xóa nhãn."));
         setOperationLogs(extractOperationLogs(result));
         setShowOperationLogs(true);
         return;
@@ -414,12 +408,12 @@ export default function LabelsPage() {
       const logs = extractOperationLogs(result);
       setOperationLogs(logs);
       setStatusMessage(
-        `Đã xóa nhãn "${deleteTarget.label_original}" (${getLanguageName(deleteTarget.language)} / ${getDialectName(deleteTarget.dialect)})`
+        t("Đã xóa nhãn \"{label_original}\" ({p1} / {p2})", { label_original: deleteTarget.label_original, p1: getLanguageName(deleteTarget.language), p2: getDialectName(deleteTarget.dialect) })
       );
       setDeleteTarget(null);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || "Không thể xóa nhãn.");
+      setError(msg || t("Không thể xóa nhãn."));
     } finally {
       setDeleteSaving(false);
     }
@@ -435,9 +429,9 @@ export default function LabelsPage() {
   return (
     <div className="space-y-6">
       <PageHeader 
-        title="Thư viện nhãn" 
-        subtitle="Quản lý và tìm kiếm các nhãn ngôn ngữ ký hiệu."
-        breadcrumb={["Dữ liệu", "Nhãn"]}
+        title={t("Thư viện nhãn")} 
+        subtitle={t("Quản lý và tìm kiếm các nhãn ngôn ngữ ký hiệu.")}
+        breadcrumb={[{ label: "Dashboard", href: "/" }, "Dữ liệu", "Nhãn"]}
       />
 
       {error && (
@@ -450,11 +444,11 @@ export default function LabelsPage() {
       )}
 
       {statusMessage && !error && (
-        <div className="fixed bottom-4 left-4 right-4 z-40 sm:left-auto sm:right-6 sm:max-w-md rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div className="fixed bottom-4 left-4 right-4 z-40 sm:left-auto sm:right-6 sm:max-w-md rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-800 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">{statusMessage}</div>
-            <button onClick={() => setStatusMessage(null)} className="mt-0.5 text-green-600 hover:text-green-700">
-              ✕
+            <button onClick={() => setStatusMessage(null)} className="mt-0.5 text-sky-700 hover:text-sky-800" aria-label={t("Đóng thông báo")}>
+              <XIcon className="h-4 w-4"  aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -462,12 +456,12 @@ export default function LabelsPage() {
       {operationLogs && operationLogs.length > 0 && (
         <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
           <div className="flex items-center justify-between mb-2">
-            <div className="font-medium text-sm text-gray-800">Hoạt động (logs)</div>
+            <div className="font-medium text-sm text-gray-800">{t("Hoạt động (logs)")}</div>
             <button
               onClick={() => setShowOperationLogs(!showOperationLogs)}
               className="px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded transition-colors"
             >
-              {showOperationLogs ? '▼ Ẩn' : '▶ Hiển thị'}
+              {showOperationLogs ? t('▼ Ẩn') : t('▶ Hiển thị')}
             </button>
           </div>
           {showOperationLogs && (
@@ -480,33 +474,33 @@ export default function LabelsPage() {
       {!loading && renderItems.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
           <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-ctu-blue/10 to-blue-50 border-ctu-blue/30">
-            <div className="text-sm font-medium text-ctu-blue">Tổng nhãn</div>
+            <div className="text-sm font-medium text-ctu-blue">{t("Tổng nhãn")}</div>
             <div className="text-xl sm:text-3xl font-bold text-ctu-navy mt-1">{renderItems.length}</div>
-            <div className="text-xs text-ctu-blue mt-2">trong {language === 'vn' ? 'Tiếng Việt' : 'English'}</div>
+            <div className="text-xs text-ctu-blue mt-2">trong {language === 'vn' ? t('Tiếng Việt') : 'English'}</div>
           </div>
 
-          <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-emerald-50 to-emerald-100 border-emerald-200">
-            <div className="text-sm font-medium text-emerald-600">Tổng mẫu</div>
-            <div className="text-xl sm:text-3xl font-bold text-emerald-900 mt-1">
+          <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-sky-50 to-sky-100 border-sky-200">
+            <div className="text-sm font-medium text-sky-700">{t("Tổng mẫu")}</div>
+            <div className="text-xl sm:text-3xl font-bold text-sky-900 mt-1">
               {renderItems.reduce((sum, item) => sum + (item.samples_count ?? 0), 0)}
             </div>
-            <div className="text-xs text-emerald-600 mt-2">video samples</div>
+            <div className="text-xs text-sky-700 mt-2">{t("mẫu video")}</div>
           </div>
 
           <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-ctu-yellow/15 to-amber-50 border-ctu-yellow/40">
-            <div className="text-sm font-medium text-ctu-navy">Phổ biến</div>
+            <div className="text-sm font-medium text-ctu-navy">{t("Phổ biến")}</div>
             <div className="text-xl sm:text-3xl font-bold text-ctu-navy mt-1">
               {renderItems.filter(item => item.is_common_language || item.is_common_global).length}
             </div>
-            <div className="text-xs text-ctu-navy/80 mt-2">nhãn phổ biến</div>
+            <div className="text-xs text-ctu-navy/80 mt-2">{t("nhãn phổ biến")}</div>
           </div>
 
           <div className="card card-compact p-3 sm:p-4 bg-gradient-to-br from-ctu-navy/10 to-slate-50 border-ctu-navy/30">
-            <div className="text-sm font-medium text-ctu-navy">Phương ngữ</div>
+            <div className="text-sm font-medium text-ctu-navy">{t("Phương ngữ")}</div>
             <div className="text-xl sm:text-3xl font-bold text-ctu-navy mt-1">
               {new Set(renderItems.map(item => item.dialect)).size}
             </div>
-            <div className="text-xs text-ctu-navy/80 mt-2">vùng miền</div>
+            <div className="text-xs text-ctu-navy/80 mt-2">{t("vùng miền")}</div>
           </div>
         </div>
       )}
@@ -529,14 +523,14 @@ export default function LabelsPage() {
                 <>
                   {isAdmin && (
                     <Button variant="primary" size="sm" onClick={() => setCreateTarget(true)}>
-                      <span className="text-xs">Tạo nhãn mới</span>
+                      <span className="text-xs">{t("Tạo nhãn mới")}</span>
                     </Button>
                   )}
                   <Button variant="secondary" size="sm" onClick={exportJSON}>
-                    <span className="text-xs">Xuất JSON</span>
+                    <span className="text-xs">{t("Xuất JSON")}</span>
                   </Button>
                   <Button variant="secondary" size="sm" onClick={downloadCSV}>
-                    <span className="text-xs">Xuất CSV</span>
+                    <span className="text-xs">{t("Xuất CSV")}</span>
                   </Button>
                 </>
               )}
@@ -546,19 +540,16 @@ export default function LabelsPage() {
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center">
             <div className="min-w-0">
               <select className="input text-sm py-2.5" value={language} onChange={(e) => setLanguage(e.target.value)}>
-                <option value="vn">🇻🇳 Tiếng Việt</option>
-                <option value="en">🇬🇧 English</option>
+                <option value="vn">{t("🇻🇳 Tiếng Việt")}</option>
+                <option value="en">{t("🇬🇧 Tiếng Anh")}</option>
               </select>
             </div>
             <div className="min-w-0">
               <select className="input text-sm py-2.5" value={dialect} onChange={(e) => setDialect(e.target.value)}>
-                <option value="">🗺️ Tất cả vùng</option>
-                <option value="common">Chung</option>
-                <option value="bac">Miền Bắc</option>
-                <option value="nam">Miền Nam</option>
-                <option value="can-tho">Cần Thơ</option>
-                <option value="trung">Miền Trung</option>
-                <option value="hoa-de">Hòa Đê</option>
+                <option value="">{t("Tất cả vùng")}</option>
+                {dialectOptions.map((d) => (
+                  <option key={d} value={d}>{dialectLabel(d)}</option>
+                ))}
               </select>
             </div>
             
@@ -568,9 +559,9 @@ export default function LabelsPage() {
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Tìm kiếm nhãn, slug hoặc ID..."
+                placeholder={t("Tìm kiếm nhãn, slug hoặc ID...")}
                 className="input w-full pl-9 text-sm py-2.5"
-                aria-label="Tìm kiếm nhãn"
+                aria-label={t("Tìm kiếm nhãn")}
               />
             </div>
             
@@ -580,7 +571,7 @@ export default function LabelsPage() {
                   viewMode === 'grid' ? 'bg-ctu-blue text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
                 onClick={() => setViewMode('grid')}
-                title="Xem dạng lưới"
+                title={t("Xem dạng lưới")}
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
@@ -591,7 +582,7 @@ export default function LabelsPage() {
                   viewMode === 'list' ? 'bg-ctu-blue text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
                 }`}
                 onClick={() => setViewMode('list')}
-                title="Xem dạng danh sách"
+                title={t("Xem dạng danh sách")}
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
@@ -603,12 +594,12 @@ export default function LabelsPage() {
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <LoadingSpinner size="lg" label="Đang tải danh sách nhãn..." />
+            <LoadingSpinner size="lg" label={t("Đang tải danh sách nhãn...")} />
           </div>
         ) : renderItems.length === 0 ? (
           <EmptyState 
-            title="Không tìm thấy nhãn" 
-            description="Thử điều chỉnh bộ lọc hoặc tìm kiếm với từ khóa khác."
+            title={t("Không tìm thấy nhãn")} 
+            description={t("Thử điều chỉnh bộ lọc hoặc tìm kiếm với từ khóa khác.")}
           />
         ) : (
           <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-3 sm:gap-4' : 'space-y-3'}>
@@ -648,39 +639,11 @@ export default function LabelsPage() {
                             #{item.class_idx}
                           </span>
                         )}
-                        {item.dialect === 'common' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-800">
-                            Chung
-                          </span>
-                        )}
-                        {item.dialect === 'bac' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-800">
-                            Miền Bắc
-                          </span>
-                        )}
-                        {item.dialect === 'nam' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
-                            Miền Nam
-                          </span>
-                        )}
-                        {item.dialect === 'trung' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-                            Miền Trung
-                          </span>
-                        )}
-                        {item.dialect === 'hoa-de' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-100 text-purple-800">
-                            Hòa Đê
-                          </span>
-                        )}
-                        {item.dialect === 'can-tho' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-100 text-cyan-800">
-                            Cần Thơ
-                          </span>
-                        )}
+                        <DialectBadge dialect={item.dialect} size="sm" />
                         {item.is_common_global && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800">
-                            ⭐ Toàn cầu
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-100 text-sky-800">
+                            <StarIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" />
+                    {t("Toàn cầu")}
                           </span>
                         )}
                       </div>
@@ -693,7 +656,7 @@ export default function LabelsPage() {
                       return (
                       <div className="mt-2.5">
                         <div className="flex items-center justify-between text-[11px] font-medium text-gray-600 mb-1">
-                          <span>Tiến độ thu thập</span>
+                          <span>{t("Tiến độ thu thập")}</span>
                           <span className={`${isCompleted ? 'text-ctu-blue font-bold' : 'text-gray-900'}`}>{sessions} / 5</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1.5 overflow-hidden">
@@ -703,11 +666,13 @@ export default function LabelsPage() {
                           ></div>
                         </div>
                         {!isCompleted ? (
-                          <div className="text-[10px] text-amber-600 font-medium">Cần thêm {5 - sessions} lần quay</div>
+                          <div className="text-[10px] text-amber-600 font-medium">
+                            {t("Cần thêm {n} lần quay", { n: 5 - sessions })}
+                          </div>
                         ) : (
                           <div className="text-[10px] text-ctu-blue font-medium flex items-center gap-1">
                             <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                            Đã đủ điều kiện huấn luyện
+                            {t("Đã đủ điều kiện huấn luyện")}
                           </div>
                         )}
                       </div>
@@ -724,26 +689,11 @@ export default function LabelsPage() {
                             #{item.class_idx}
                           </span>
                         )}
-                        {item.dialect === 'common' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">Chung</span>
-                        )}
-                        {item.dialect === 'bac' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">Miền Bắc</span>
-                        )}
-                        {item.dialect === 'nam' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Miền Nam</span>
-                        )}
-                        {item.dialect === 'trung' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Miền Trung</span>
-                        )}
-                        {item.dialect === 'hoa-de' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">Hòa Đê</span>
-                        )}
-                        {item.dialect === 'can-tho' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800">Cần Thơ</span>
-                        )}
+                        <DialectBadge dialect={item.dialect} size="md" />
                         {item.is_common_global && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">⭐ Toàn cầu</span>
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800">
+                    <StarIcon className="mr-1 h-3.5 w-3.5"  aria-hidden="true" />
+                    {t("Toàn cầu")}</span>
                         )}
                       </div>
                       
@@ -754,7 +704,7 @@ export default function LabelsPage() {
                         return (
                           <div className="flex flex-col min-w-[140px]">
                             <div className="flex items-center justify-between text-[11px] mb-1">
-                              <span className="text-gray-500 font-medium">Tiến độ</span>
+                              <span className="text-gray-500 font-medium">{t("Tiến độ")}</span>
                               <span className={`font-bold ${isCompleted ? 'text-ctu-blue' : 'text-gray-900'}`}>{sessions}/5</span>
                             </div>
                             <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1 overflow-hidden">
@@ -764,11 +714,13 @@ export default function LabelsPage() {
                               ></div>
                             </div>
                             {!isCompleted ? (
-                              <div className="text-[10px] text-amber-600 font-medium text-right">Thiếu {5 - sessions} lần quay</div>
+                              <div className="text-[10px] text-amber-600 font-medium text-right">
+                                {t("Thiếu {n} lần quay", { n: 5 - sessions })}
+                              </div>
                             ) : (
                               <div className="text-[10px] text-ctu-blue font-medium text-right flex items-center justify-end gap-1">
                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                                Đã đủ
+                                {t("Đã đủ")}
                               </div>
                             )}
                           </div>
@@ -785,7 +737,7 @@ export default function LabelsPage() {
                         className="w-full justify-center px-2 py-2 text-xs"
                         onClick={() => navigateToDetails(item)}
                       >
-                        Chi tiết
+                        {t("Chi tiết")}
                       </Button>
                       <Button
                         variant="secondary"
@@ -793,7 +745,7 @@ export default function LabelsPage() {
                         className="w-full justify-center px-2 py-2 text-xs"
                         onClick={() => openEdit(item)}
                       >
-                        Sửa
+                        {t("Sửa")}
                       </Button>
                       <Button
                         variant="danger"
@@ -801,7 +753,7 @@ export default function LabelsPage() {
                         className="w-full justify-center px-2 py-2 text-xs"
                         onClick={() => openDelete(item)}
                       >
-                        Xóa
+                        {t("Xóa")}
                       </Button>
                     </div>
                   ) : (
@@ -812,10 +764,10 @@ export default function LabelsPage() {
                         className="w-full justify-center px-3 py-2 text-xs"
                         onClick={() => navigateToDetails(item)}
                       >
-                        Chi tiết
+                        {t("Chi tiết")}
                       </Button>
                       <div className="mt-1 text-xs text-gray-500 italic text-center">
-                        Chỉ quản trị viên có thể chỉnh sửa
+                        {t("Chỉ quản trị viên có thể chỉnh sửa")}
                       </div>
                     </div>
                   )}
@@ -829,59 +781,56 @@ export default function LabelsPage() {
       <Modal
         isOpen={createTarget}
         onClose={() => !createSaving && setCreateTarget(false)}
-        title="Tạo nhãn mới"
+        title={t("Tạo nhãn mới")}
       >
         <div className="space-y-4">
           <div className="rounded-lg border border-ctu-blue/30 bg-ctu-blue/10 p-4 text-sm text-ctu-navy">
-            Nhãn mới sẽ được lưu vào cơ sở dữ liệu và đồng bộ vào file CSV gốc. Bạn cần thu thập ít nhất 5 mẫu cho nhãn này để có thể huấn luyện (Train) mô hình AI.
+            {t("Nhãn mới sẽ được lưu vào cơ sở dữ liệu và đồng bộ vào file CSV gốc. Bạn cần thu thập ít nhất 5 mẫu cho nhãn này để có thể huấn luyện (Train) mô hình AI.")}
           </div>
           <div>
-            <label className="mb-2 block text-sm font-medium text-gray-700">Tên nhãn (Tiếng Việt/English)</label>
+            <label className="mb-2 block text-sm font-medium text-gray-700">{t("Tên nhãn (Tiếng Việt/English)")}</label>
             <input
               className="input w-full"
               value={createValue}
               onChange={(e) => setCreateValue(e.target.value)}
-              placeholder="Ví dụ: Xin chào, Cảm ơn..."
+              placeholder={t("Ví dụ: Xin chào, Cảm ơn...")}
               disabled={createSaving}
               autoFocus
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">Ngôn ngữ</label>
+              <label className="mb-2 block text-sm font-medium text-gray-700">{t("Ngôn ngữ")}</label>
               <select
                 className="input w-full"
                 value={createLanguage}
                 onChange={(e) => setCreateLanguage(e.target.value)}
                 disabled={createSaving}
               >
-                <option value="vn">🇻🇳 Tiếng Việt</option>
-                <option value="en">🇬🇧 English</option>
+                <option value="vn">{t("🇻🇳 Tiếng Việt")}</option>
+                <option value="en">{t("🇬🇧 Tiếng Anh")}</option>
               </select>
             </div>
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">Phương ngữ (Dialect)</label>
+              <label className="mb-2 block text-sm font-medium text-gray-700">{t("Phương ngữ (Dialect)")}</label>
               <select
                 className="input w-full"
                 value={createDialect}
                 onChange={(e) => setCreateDialect(e.target.value)}
                 disabled={createSaving}
               >
-                <option value="common">Chung (Sử dụng toàn quốc)</option>
-                <option value="bac">Miền Bắc</option>
-                <option value="nam">Miền Nam</option>
-                <option value="trung">Miền Trung</option>
-                <option value="can-tho">Cần Thơ</option>
-                <option value="hoa-de">Hòa Đê</option>
+                {dialectOptions.map((d) => (
+                  <option key={d} value={d}>{dialectLabel(d)}</option>
+                ))}
               </select>
             </div>
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-6">
             <Button variant="ghost" onClick={() => setCreateTarget(false)} disabled={createSaving}>
-              Hủy
+              {t("Hủy")}
             </Button>
             <Button variant="primary" onClick={saveCreate} loading={createSaving}>
-              Tạo nhãn
+              {t("Tạo nhãn")}
             </Button>
           </div>
         </div>
@@ -890,69 +839,66 @@ export default function LabelsPage() {
       <Modal
         isOpen={Boolean(editTarget)}
         onClose={() => !editSaving && setEditTarget(null)}
-        title={editTarget ? `Chỉnh sửa nhãn #${editTarget.class_idx}` : "Chỉnh sửa nhãn"}
+        title={editTarget ? t("Chỉnh sửa nhãn #{class_idx}", { class_idx: editTarget.class_idx }) : t("Chỉnh sửa nhãn")}
       >
         {editTarget && (
           <div className="space-y-4">
             <div className="rounded-lg border border-ctu-blue/30 bg-ctu-blue/10 p-4 text-sm text-ctu-navy">
-              Thay đổi này sẽ được đồng bộ xuống CSV, Postgres và các mirror storage liên quan.
+              {t("Thay đổi này sẽ được đồng bộ xuống CSV, Postgres và các mirror storage liên quan.")}
             </div>
             <div>
-              <label className="mb-2 block text-sm font-medium text-gray-700">Tên nhãn</label>
+              <label className="mb-2 block text-sm font-medium text-gray-700">{t("Tên nhãn")}</label>
               <input
                 className="input w-full"
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
-                placeholder="Nhập tên nhãn mới"
+                placeholder={t("Nhập tên nhãn mới")}
                 disabled={editSaving}
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Ngôn ngữ</label>
+                <label className="mb-2 block text-sm font-medium text-gray-700">{t("Ngôn ngữ")}</label>
                 <select
                   className="input w-full"
                   value={editLanguage}
                   onChange={(e) => setEditLanguage(e.target.value)}
                   disabled={editSaving}
                 >
-                  <option value="vn">🇻🇳 Tiếng Việt</option>
-                  <option value="en">🇬🇧 English</option>
+                  <option value="vn">{t("🇻🇳 Tiếng Việt")}</option>
+                  <option value="en">{t("🇬🇧 Tiếng Anh")}</option>
                 </select>
               </div>
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Phương ngữ</label>
+                <label className="mb-2 block text-sm font-medium text-gray-700">{t("Phương ngữ")}</label>
                 <select
                   className="input w-full"
                   value={editDialect}
                   onChange={(e) => setEditDialect(e.target.value)}
                   disabled={editSaving}
                 >
-                  <option value="common">Chung</option>
-                  <option value="bac">Miền Bắc</option>
-                  <option value="nam">Miền Nam</option>
-                  <option value="trung">Miền Trung</option>
-                  <option value="can-tho">Cần Thơ</option>
-                  <option value="hoa-de">Hòa Đê</option>
+                  {dialectOptions.map((d) => (
+                    <option key={d} value={d}>{dialectLabel(d)}</option>
+                  ))}
                 </select>
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 text-sm text-gray-600 sm:grid-cols-2">
               <div className="rounded-lg bg-gray-50 p-3">
-                <div className="text-xs uppercase tracking-wide text-gray-400">Slug hiện tại</div>
+                <div className="text-xs uppercase tracking-wide text-gray-400">{t("Slug hiện tại")}</div>
                 <div className="mt-1 font-mono text-gray-800">{editTarget.slug}</div>
               </div>
               <div className="rounded-lg bg-gray-50 p-3">
-                <div className="text-xs uppercase tracking-wide text-gray-400">Số mẫu</div>
+                <div className="text-xs uppercase tracking-wide text-gray-400">{t("Số mẫu")}</div>
                 <div className="mt-1 font-mono text-gray-800">{editTarget.samples_count ?? 0}</div>
               </div>
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <Button variant="ghost" onClick={() => setEditTarget(null)} disabled={editSaving}>
-                Hủy
+                {t("Hủy")}
               </Button>
               <Button variant="primary" onClick={saveEdit} loading={editSaving}>
-                Lưu thay đổi
+                {t("Lưu thay đổi")}
               </Button>
             </div>
           </div>
@@ -962,25 +908,25 @@ export default function LabelsPage() {
       <Modal
         isOpen={Boolean(deleteTarget)}
         onClose={() => !deleteSaving && setDeleteTarget(null)}
-        title={deleteTarget ? `Xóa nhãn #${deleteTarget.class_idx}` : "Xóa nhãn"}
+        title={deleteTarget ? t("Xóa nhãn #{class_idx}", { class_idx: deleteTarget.class_idx }) : t("Xóa nhãn")}
         size="sm"
       >
         {deleteTarget && (
           <div className="space-y-4">
             <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-              Xóa nhãn này sẽ xóa luôn các mẫu liên quan và cập nhật lại các mirror storage đã đồng bộ.
+              {t("Xóa nhãn này sẽ xóa luôn các mẫu liên quan và cập nhật lại các mirror storage đã đồng bộ.")}
             </div>
             <div className="space-y-2 text-sm text-gray-700">
-              <div><span className="font-medium">Nhãn:</span> {deleteTarget.label_original}</div>
-              <div><span className="font-medium">Slug:</span> {deleteTarget.slug}</div>
-              <div><span className="font-medium">Số mẫu:</span> {deleteTarget.samples_count ?? 0}</div>
+              <div><span className="font-medium">{t("Nhãn:")}</span> {deleteTarget.label_original}</div>
+              <div><span className="font-medium">{t("Định danh:")}</span> {deleteTarget.slug}</div>
+              <div><span className="font-medium">{t("Số mẫu:")}</span> {deleteTarget.samples_count ?? 0}</div>
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteSaving}>
-                Hủy
+                {t("Hủy")}
               </Button>
               <Button variant="danger" onClick={confirmDelete} loading={deleteSaving}>
-                Xác nhận xóa
+                {t("Xác nhận xóa")}
               </Button>
             </div>
           </div>

@@ -4,7 +4,15 @@
  */
 
 import React, { useState } from 'react';
-import DIALECT_LABELS from '../../../config/dialectLabels';
+import { dialectLabel } from '../../../config/dialectLabels';
+import { useI18n } from "../../../i18n";
+import {
+  AlertTriangleIcon,
+  AlphabetIcon,
+  CheckIcon,
+  MapPinIcon,
+  XIcon,
+} from '../../../components/ui/Icons';
 
 interface Props {
   dialects: Record<string, string[]>;
@@ -13,6 +21,7 @@ interface Props {
 }
 
 const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
+  const { t } = useI18n();
   const [viewMode, setViewMode] = useState<'group' | 'alpha'>('group');
   const allDialects = Object.values(dialects).flat();
   const isAllSelected = selected.length === allDialects.length;
@@ -34,16 +43,16 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
-            Chọn Phương Ngữ Để Huấn Luyện
+            {t("Chọn Phương Ngữ Để Huấn Luyện")}
           </h3>
           <p className="mt-1 text-sm text-slate-600">
-            Chọn một hoặc nhiều phương ngữ để bao gồm trong quá trình huấn luyện
+            {t("Chọn một hoặc nhiều phương ngữ để bao gồm trong quá trình huấn luyện")}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* View Mode Toggle */}
-          <div className="rounded-lg bg-slate-100 p-1 flex items-center gap-1" role="tablist" aria-label="Chế độ hiển thị">
+          <div className="rounded-lg bg-slate-100 p-1 flex items-center gap-1" role="tablist" aria-label={t("Chế độ hiển thị")}>
             <button
               role="tab"
               aria-selected={viewMode === 'group'}
@@ -54,7 +63,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              📍 Theo Vùng
+              <MapPinIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" /> {t("Theo Vùng")}
             </button>
             <button
               role="tab"
@@ -66,7 +75,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              🔤 Bảng Chữ Cái
+              <AlphabetIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" /> {t("Bảng Chữ Cái")}
             </button>
           </div>
 
@@ -79,7 +88,14 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                 : 'bg-ctu-blue/10 text-ctu-blue hover:bg-ctu-blue/20'
             }`}
           >
-            {isAllSelected ? '✕ Bỏ chọn tất cả' : `✓ Chọn tất cả (${allDialects.length})`}
+            {isAllSelected ? (
+            <><XIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {t("Bỏ chọn tất cả")}</>
+          ) : (
+            <>
+              <CheckIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />{" "}
+              {t("Chọn tất cả ({n})", { n: allDialects.length })}
+            </>
+          )}
           </button>
         </div>
       </div>
@@ -89,30 +105,34 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
         {viewMode === 'group' ? (
           // Group by Language/Region
           Object.entries(dialects).map(([language, langDialects]) => {
-            const GROUP_LABELS: Record<string, string> = {
-              'mien-bac': '🌞 Miền Bắc',
-              'mien-nam': '🌴 Miền Nam',
-              'mien-trung': '⛰️ Miền Trung',
+            // These groups are keyed by LANGUAGE, not dialect. The map here
+            // used to also carry 'mien-bac'/'mien-nam'/'mien-trung' — legacy
+            // dialect ids that dataset_manager merges into 'bac'/'nam'/'trung'
+            // — so they could never match a language key, and a `default:` entry
+            // sat next to them that the `[language]` lookup could never reach.
+            // @i18n-key-table — tên ngôn ngữ là KHOÁ, dịch ở chỗ dựng bên dưới.
+            const LANGUAGE_LABELS: Record<string, string> = {
+              vn: '🇻🇳 Tiếng Việt',
               vi: '🇻🇳 Tiếng Việt',
-              default: language,
+              en: '🇬🇧 English',
             };
 
-            const groupLabel = GROUP_LABELS[language] ?? language;
+            const groupLabel = LANGUAGE_LABELS[language] ?? language;
             const groupSelected = langDialects.filter((d) => selected.includes(d)).length;
 
             return (
               <div key={language} className="rounded-xl border border-slate-200 bg-white p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h4 className="font-semibold text-slate-900">{groupLabel}</h4>
+                    <h4 className="font-semibold text-slate-900">{t(groupLabel)}</h4>
                     <p className="text-xs text-slate-500 mt-1">
                       {langDialects.length} phương ngữ • {groupSelected} được chọn
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     {groupSelected === langDialects.length ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 text-xs font-medium text-emerald-700">
-                        ✓ Đã chọn hết
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-sky-100 text-xs font-medium text-sky-800">
+                        <CheckIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" /> {t("Đã chọn hết")}
                       </span>
                     ) : groupSelected > 0 ? (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-ctu-blue/10 text-xs font-medium text-ctu-blue">
@@ -124,13 +144,9 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
 
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {langDialects.map((dialect) => {
-                    const display =
-                      DIALECT_LABELS[dialect] ??
-                      dialect
-                        .replace(/-/g, ' ')
-                        .split(' ')
-                        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-                        .join(' ');
+                    // The slug is the label — it is what samples.csv, the sample
+                    // folders and the realtime model_id all use.
+                    const display = dialectLabel(dialect);
                     const isSelected = selected.includes(dialect);
 
                     return (
@@ -182,19 +198,13 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
         ) : (
           // Alphabetical view
           (() => {
-            const map = DIALECT_LABELS;
-            const unique = Array.from(new Set(allDialects)).sort(
-              (a, b) =>
-                (map[a] ?? a.replace(/-/g, ' ')).localeCompare(
-                  map[b] ?? b.replace(/-/g, ' '),
-                  'vi'
-                )
+            const unique = Array.from(new Set(allDialects)).sort((a, b) =>
+              dialectLabel(a).localeCompare(dialectLabel(b), 'vi')
             );
 
             const groups: Record<string, string[]> = {};
             unique.forEach((d) => {
-              const label = map[d] ?? d.replace(/-/g, ' ');
-              const first = label.charAt(0).toUpperCase();
+              const first = dialectLabel(d).charAt(0).toUpperCase();
               if (!groups[first]) groups[first] = [];
               groups[first].push(d);
             });
@@ -204,7 +214,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                 <h4 className="font-semibold text-slate-900 mb-4">{letter}</h4>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {items.map((dialect) => {
-                    const display = map[dialect] ?? dialect.replace(/-/g, ' ');
+                    const display = dialectLabel(dialect);
                     const isSelected = selected.includes(dialect);
 
                     return (
@@ -260,23 +270,25 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
       {isNoneSelected ? (
         <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-4">
           <div className="flex gap-3">
-            <span className="text-xl">⚠️</span>
+            <AlertTriangleIcon className="h-5 w-5"  aria-hidden="true" />
             <div>
-              <p className="font-semibold text-yellow-900">Chưa chọn phương ngữ</p>
+              <p className="font-semibold text-yellow-900">{t("Chưa chọn phương ngữ")}</p>
               <p className="text-sm text-yellow-800 mt-1">
-                Vui lòng chọn ít nhất một phương ngữ để có thể bắt đầu huấn luyện.
+                {t("Vui lòng chọn ít nhất một phương ngữ để có thể bắt đầu huấn luyện.")}
               </p>
             </div>
           </div>
         </div>
       ) : (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4">
+        <div className="rounded-lg bg-sky-50 border border-sky-200 p-4">
           <div className="flex gap-3">
-            <span className="text-xl">✓</span>
+            <CheckIcon className="h-5 w-5"  aria-hidden="true" />
             <div>
-              <p className="font-semibold text-emerald-900">Đã chọn {selected.length} phương ngữ</p>
-              <p className="text-sm text-emerald-800 mt-1">
-                Mô hình sẽ được huấn luyện sử dụng các phương ngữ đã chọn.
+              <p className="font-semibold text-sky-900">
+                {t("Đã chọn {n} phương ngữ", { n: selected.length })}
+              </p>
+              <p className="text-sm text-sky-800 mt-1">
+                {t("Mô hình sẽ được huấn luyện sử dụng các phương ngữ đã chọn.")}
               </p>
             </div>
           </div>

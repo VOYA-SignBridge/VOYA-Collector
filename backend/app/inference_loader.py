@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Dict
 from app.dataset_manager import load_labels, ClassMetadata
+from app.tenancy import tenant_id_of
 
 def load_inference_classes(language: str, dialect: str) -> List[ClassMetadata]:
     rows = load_labels()
@@ -24,6 +25,7 @@ def load_inference_classes(language: str, dialect: str) -> List[ClassMetadata]:
                 dialect=dia,
                 is_common_global=is_global,
                 is_common_language=is_lang_common,
+                tenant_id=tenant_id_of(r),
             ))
     return out
 

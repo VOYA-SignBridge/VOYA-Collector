@@ -28,6 +28,10 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.auth import get_current_user, get_user_from_token, require_admin
+from app.checkpoint_io import load_checkpoint
+from app.quota_deps import guard_quota
+from app.rate_limit_deps import limit_predict, limit_training
+from app.vocabulary_registry import assert_can_use_dialect, dialect_owner
 from app.cookie_auth import ACCESS_COOKIE
 
 logger = logging.getLogger(__name__)
@@ -67,6 +71,8 @@ _MODEL_NAME_TO_REGISTRY_KEY = {
     "bigru_attention": "bigru_attention",
     "handgcn": "handgcn",
     "hdgcn": "handgcn",
+    "hd-gcn": "handgcn",   # model.get_model_name() returns "HD-GCN"
+    "hd_gcn": "handgcn",
     "tcn": "tcn",
 }
 
@@ -90,7 +96,7 @@ def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Opti
 
     Returns: (model, ckpt)
     """
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt = load_checkpoint(checkpoint_path)
 
     # Determine model type saved by train_tcn.py (e.g. "CNN", "BiGRU + Attention")
     model_type = model_type_override or ckpt.get("model_type", "TCN")
@@ -122,17 +128,24 @@ def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Opti
                 f"{checkpoint_path.name}: {e}"
             ) from e
     else:
-        # TCN (or legacy checkpoint without model_type): inline TCNClassifier
-        # matches the TCNModel state-dict layout.
-        model = TCNClassifier(
-            feature_dim=feature_dim,
-            num_classes=num_classes,
-            channels=model_config.get("channels", 64),
-            levels=model_config.get("levels", 3),
-            kernel_size=model_config.get("kernel_size", 5),
-            dropout=model_config.get("dropout", 0.3),
-        )
-        logger.info("Loaded TCN model (checkpoint model_type=%s)", model_type)
+        # TCN (or legacy checkpoint without model_type): build from the SAME
+        # training registry so the Step 7 test modal always matches the trained
+        # architecture — including the temporal_pool head (gap/attention/mean_max).
+        # The old inline TCNClassifier was gap-only and broke on attention models.
+        try:
+            models_module = _import_models_registry()
+            model = models_module.get_model_class("tcn").from_config(
+                input_dim=feature_dim,
+                output_dim=num_classes,
+                config=model_config,  # carries temporal_pool; absent -> "gap"
+            ).to("cpu")
+            logger.info("Loaded TCN model from registry (temporal_pool=%s)",
+                        model_config.get("temporal_pool", "gap"))
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to build TCN model from registry for checkpoint "
+                f"{checkpoint_path.name}: {e}"
+            ) from e
 
     try:
         model.load_state_dict(ckpt["model_state_dict"])
@@ -147,6 +160,11 @@ def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Opti
 # ============================================================================
 # TCN Model Classes (for training model inference)
 # ============================================================================
+# DEPRECATED / UNUSED (2026-07-20): the inline Chomp1d/TemporalBlock/TCNClassifier
+# below are a legacy gap-only copy. The Step 7 test loader now builds the TCN
+# from the training registry (processed/train_utils/models/tcn.py) so it always
+# matches the trained architecture — including the temporal_pool head. Do NOT
+# reintroduce a fourth TCN implementation here; extend the registry model.
 
 class Chomp1d(nn.Module):
     def __init__(self, chomp_size: int):
@@ -246,6 +264,7 @@ class DatasetInfo(BaseModel):
     languages: List[str]
     dialects: Dict[str, List[str]]  # language -> dialects
     class_distribution: Dict[str, int]  # class_name -> count
+    samples_by_dialect: Dict[str, int] = {}  # dialect -> sample count (for split viz)
     split_info: Optional[Dict[str, int]] = None  # train, val, test counts
 
 
@@ -261,6 +280,19 @@ class TrainingConfig(BaseModel):
     channels: int = 64
     levels: int = 3
     kernel_size: int = 5
+
+    # Chế độ nghiên cứu. Mặc định smoke_test là CỐ Ý (xem scripts/research_validity.py
+    # C1): job thăm dò dựng subset tạm từ bộ lọc dialect, nhanh nhưng không truy
+    # ngược được về một phiên bản dữ liệu cố định nên không trích dẫn được.
+    # Đặt run_purpose="research" + split_version để chạy trên split đã versioned;
+    # khi đó dialects/languages bị bỏ qua vì split đã định nghĩa sẵn tập dữ liệu.
+    run_purpose: str = "smoke_test"
+    split_version: Optional[str] = None
+    # Suy ra từ metadata của split ở phía server, không nhận từ client — nếu để
+    # client tự khai, checkpoint có thể khai một dataset_version khác với dữ
+    # liệu thực sự đã train.
+    dataset_version: Optional[str] = None
+    recognition_profile: Optional[str] = None
 
 
 class TrainingJob(BaseModel):
@@ -278,6 +310,10 @@ class TrainingJob(BaseModel):
     test_f1: Optional[float] = None  # Test F1 score from checkpoint
     error_message: Optional[str] = None  # Failure/cancellation reason
     promoted_at: Optional[str] = None  # When admin promoted this model to realtime
+    # Set when a LATER promotion for the same dialect took over the realtime
+    # slot. "Đang phục vụ" is promoted_at set AND superseded_at unset — with one
+    # slot per dialect, promoted_at alone no longer answers that question.
+    superseded_at: Optional[str] = None
 
 
 class TrainingMetrics(BaseModel):
@@ -371,6 +407,7 @@ def _job_from_db_row(row: Dict[str, Any]) -> TrainingJob:
         test_f1=row.get("test_f1"),
         error_message=row.get("error_message"),
         promoted_at=_iso(row.get("promoted_at")),
+        superseded_at=_iso(row.get("superseded_at")),
     )
 
 
@@ -520,6 +557,94 @@ def _get_dialects_by_language() -> Dict[str, List[str]]:
     return {lang: sorted(list(dialects)) for lang, dialects in dialects_map.items()}
 
 
+def _trainable_dialects_from_splits() -> Dict[str, int]:
+    """Đọc split train.csv hiện tại, trả về {dialect: số_class}.
+
+    Legacy training lọc frozen splits theo cột `dialect`; một dialect chỉ train
+    được khi có >= 2 class trong split. Dialect có trong labels.csv nhưng KHÔNG
+    có mẫu trong split (chưa chia lại sau khi thu) sẽ không xuất hiện ở đây —
+    dùng để chặn sớm với thông báo rõ ràng thay vì để subprocess fail rc=1.
+    """
+    import csv as _csv
+
+    train_csv = SPLITS_DIR / "train.csv"
+    counts: Dict[str, set] = {}
+    if not train_csv.exists():
+        return {}
+    try:
+        with open(train_csv, newline="", encoding="utf-8") as f:
+            for row in _csv.DictReader(f):
+                dialect = (row.get("dialect") or "").strip()
+                cls = (row.get("class_idx") or row.get("label_key") or "").strip()
+                if dialect and cls:
+                    counts.setdefault(dialect, set()).add(cls)
+    except Exception as exc:
+        logger.warning("[TRAIN_VALIDATE] không đọc được train split: %s", exc)
+        return {}
+    return {d: len(classes) for d, classes in counts.items()}
+
+
+def _research_splits() -> List[Dict[str, Any]]:
+    """Các split đã versioned dùng được cho chế độ nghiên cứu.
+
+    Chỉ nhận split "phẳng" (train/val/test ngay trong thư mục) — các bộ LOSO /
+    matched-leak chia theo fold con là giao thức đánh giá nhiều lần chạy, không
+    phải một job huấn luyện đơn lẻ, nên không liệt kê ở đây.
+
+    Bỏ qua split có valid_for_research=false: train_tcn.py sẽ từ chối chúng ở
+    _enforce_research_preconditions, nên hiện ra chỉ để người dùng chọn rồi
+    thất bại là vô ích.
+    """
+    versions_dir = WORKSPACE_ROOT / "processed" / "splits" / "versions"
+    if not versions_dir.is_dir():
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for d in sorted(versions_dir.iterdir()):
+        meta_path = d / "split_metadata.json"
+        if not d.is_dir() or not (d / "train.csv").exists() or not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("[SPLITS] bỏ qua %s: metadata không đọc được (%s)", d.name, exc)
+            continue
+
+        if not meta.get("valid_for_research"):
+            continue
+        checksum = str(meta.get("dataset_manifest_checksum") or "").strip()
+        if not checksum:
+            continue
+
+        # dataset_version suy ra từ tên manifest: .../dataset_manifest_isds2026_v5.csv
+        manifest = str(meta.get("dataset_manifest") or "")
+        dataset_version = ""
+        stem = Path(manifest).stem
+        if stem.startswith("dataset_manifest_"):
+            dataset_version = stem[len("dataset_manifest_"):]
+
+        counts = meta.get("counts") or {}
+        out.append({
+            "split_version": d.name,
+            "dataset_version": dataset_version,
+            "recognition_profile": str(meta.get("recognition_profile") or ""),
+            "split_mode": str(meta.get("split_mode") or ""),
+            "num_classes": meta.get("num_classes"),
+            "counts": {k: counts.get(k) for k in ("train", "val", "test")},
+            "seed": meta.get("seed"),
+            "dataset_manifest_checksum": checksum,
+        })
+    return out
+
+
+@router.get("/splits")
+async def list_research_splits(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    """Split đã versioned mà chế độ nghiên cứu có thể chạy trên đó."""
+    return await asyncio.to_thread(_research_splits)
+
+
 def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optional[Path] = None) -> Optional[str]:
     """Copy checkpoint (+ JSON sidecar) sang thư mục deployment."""
     try:
@@ -549,12 +674,33 @@ def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optio
     return None
 
 
+def _registry_display_name(dialect: str) -> str:
+    """Tên hiển thị của model đang phục vụ dialect này trong models.json ("" nếu chưa có)."""
+    try:
+        if not REGISTRY_PATH.exists():
+            return ""
+        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("Không đọc được registry để lấy tên hiển thị: %s", e)
+        return ""
+
+    for m in registry_data.get("models", []):
+        if isinstance(m, dict) and m.get("dialect") == dialect:
+            name = str(m.get("name") or "").strip()
+            if name:
+                return name
+    return ""
+
+
 def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
                      ckpt: Dict[str, Any], dialect: str, language: str) -> bool:
     """Update models.json registry để realtime service load model mới.
 
     Entry được build từ chính checkpoint để pass validate_checkpoint_vs_registry
     của realtime service (normalization_version, seq_len, feature_dim phải khớp).
+
+    Mỗi dialect chỉ có đúng một entry: promote model mới cho một dialect sẽ THAY
+    THẾ entry cũ (giữ nguyên tên hiển thị) thay vì thêm model trùng vào danh sách.
     """
     try:
         if not REGISTRY_PATH.exists():
@@ -567,9 +713,15 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
         seq_len = int(ckpt.get("seq_len", 60))
         feature_dim = int(ckpt.get("feature_dim", 126))
 
+        existing = [m for m in registry_data.get("models", []) if isinstance(m, dict)]
+
+        # Giữ tên hiển thị của entry đang phục vụ dialect này (vd "Hòa đê") để
+        # dropdown realtime không đổi nhãn sau mỗi lần promote.
+        kept_name = _registry_display_name(dialect)
+
         model_entry = {
             "id": model_id,
-            "name": display_name,
+            "name": kept_name or display_name,
             "checkpoint_path": checkpoint_rel_path,  # relative to config dir, e.g. "checkpoints/x.pt"
             "language": language,
             "dialect": dialect,
@@ -591,13 +743,12 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
             }
         }
 
-        if "models" not in registry_data:
-            registry_data["models"] = []
-
-        # Remove existing model with same ID
-        registry_data["models"] = [m for m in registry_data["models"] if m.get("id") != model_id]
-
-        # Add new model
+        # Thay thế mọi entry cũ của dialect này (kể cả entry "training_<job_id>"
+        # do các bản promote trước để lại) — một dialect = một model.
+        registry_data["models"] = [
+            m for m in existing
+            if m.get("id") != model_id and m.get("dialect") != dialect
+        ]
         registry_data["models"].append(model_entry)
 
         # Write updated registry
@@ -611,7 +762,8 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
     return False
 
 
-def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version_string: str) -> bool:
+def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version_string: str,
+                                    dialect: str = "", language: str = "vn") -> bool:
     """Notify realtime service to reload/add model via /reload endpoint"""
     realtime_service_url = os.getenv("REALTIME_SERVICE_URL", "http://realtime_service:8010")
 
@@ -623,14 +775,18 @@ def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version
                     "model_id": model_id,
                     "checkpoint_path": checkpoint_path,
                     "version_string": version_string,
-                    "language": "vn",
+                    "dialect": dialect or model_id,
+                    "language": language,
                 },
             )
             if response.status_code == 200:
                 logger.info("Realtime service reloaded model: %s", model_id)
                 return True
             else:
-                logger.warning("Realtime service reload failed: %s", response.status_code)
+                logger.warning(
+                    "Realtime service reload failed: status=%s body=%s",
+                    response.status_code, response.text[:500],
+                )
                 return False
     except Exception as e:
         logger.error("Failed to notify realtime service: %s", e)
@@ -685,18 +841,32 @@ async def get_dataset_info(
             if class_uid:
                 class_counts[class_uid] = class_counts.get(class_uid, 0) + 1
 
+        # Per-dialect sample counts so the split step can show numbers for the
+        # SELECTED dialects instead of the whole dataset.
+        uid_to_dialect = {
+            (lb.get("class_uid", "").strip()): (lb.get("dialect", "").strip())
+            for lb in labels
+            if lb.get("class_uid", "").strip()
+        }
+        samples_by_dialect: Dict[str, int] = {}
+        for sample in samples:
+            d = uid_to_dialect.get(sample.get("class_uid", "").strip(), "")
+            if d:
+                samples_by_dialect[d] = samples_by_dialect.get(d, 0) + 1
+
         return DatasetInfo(
             total_samples=len(samples),
             total_classes=len(class_counts),
             languages=list(dialects_map.keys()),
             dialects=dialects_map,
             class_distribution=class_counts,
+            samples_by_dialect=samples_by_dialect,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
 
 
-@router.post("/start", response_model=TrainingJob)
+@router.post("/start", response_model=TrainingJob, dependencies=[Depends(limit_training)])
 async def start_training(
     config: TrainingConfig,
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -705,8 +875,77 @@ async def start_training(
     Bắt đầu training job (enqueue to queue)
 
     Tạo job ID, thêm vào queue, return job info
+
+    Ba hạn mức được kiểm trước mọi thứ khác, và chúng là chỗ duy nhất giữ công
+    bằng tài nguyên giữa các tenant. Hàng đợi `training` chỉ có một chỗ chạy
+    (concurrency 1) và phục vụ theo thứ tự đến, nên nếu không có trần thì một
+    tổ chức xếp hai mươi lượt là mọi tổ chức khác chờ hết hai mươi lượt đó.
+    Trần số lượt CHỜ là thứ thực sự chặn chuyện này; trần số lượt CHẠY và trần
+    theo tháng là để chặn hai kiểu vượt mức khác.
+
+    Đây là công bằng bằng hạn ngạch, không phải bằng lịch biểu: nó không xen
+    kẽ lượt giữa các tenant, chỉ giới hạn mỗi tenant chiếm bao nhiêu hàng đợi.
+    Lập lịch chia lượt thật cần bộ chạy tự chọn job thay vì nhận từ hàng đợi
+    Celery — thay đổi lớn hơn nhiều và chưa cần ở quy mô này.
     """
+    guard_quota(current_user, "training_jobs_this_month")
+    guard_quota(current_user, "training_jobs_running")
+    guard_quota(current_user, "training_jobs_queued")
+
     try:
+        if config.run_purpose == "research":
+            # Chặn sớm với thông báo rõ, thay vì để train_tcn.py SystemExit ở
+            # _enforce_research_preconditions sau khi job đã vào hàng đợi.
+            if not config.split_version:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Chế độ nghiên cứu cần chọn một split đã versioned.",
+                )
+            available = {s["split_version"]: s for s in _research_splits()}
+            chosen = available.get(config.split_version)
+            if not chosen:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Split '{config.split_version}' không dùng được cho nghiên cứu "
+                        f"(không tồn tại, thiếu checksum manifest, hoặc valid_for_research=false). "
+                        f"Đang dùng được: {sorted(available) or 'chưa có'}."
+                    ),
+                )
+            # Khoá provenance theo đúng split đã chọn.
+            config.dataset_version = chosen["dataset_version"]
+            config.recognition_profile = chosen["recognition_profile"]
+
+        # Chặn sớm: lựa chọn dialect không có đủ dữ liệu trong split hiện tại sẽ
+        # khiến subprocess train fail âm thầm (rc=1). Báo lỗi rõ ràng ngay đây.
+        # Chế độ nghiên cứu không lọc theo dialect — split đã định nghĩa dữ liệu.
+        selected_dialects = [] if config.run_purpose == "research" else list(config.dialects or [])
+
+        # A dialect awaiting admin approval belongs to whoever asked for it, and
+        # so does everything derived from it. Training on someone else's
+        # unapproved vocabulary would produce a model whose label set describes a
+        # vocabulary nobody has agreed exists — and promoting it would put that
+        # into the shared realtime list. Owner-only until approved.
+        for d in selected_dialects:
+            try:
+                assert_can_use_dialect(d, str(current_user.get("id") or ""))
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+
+        if selected_dialects:
+            trainable = _trainable_dialects_from_splits()
+            empty = [d for d in selected_dialects if trainable.get(d, 0) < 2]
+            if empty:
+                available = sorted(d for d, n in trainable.items() if n >= 2)
+                detail = (
+                    f"Các phương ngữ đã chọn không đủ dữ liệu để huấn luyện "
+                    f"(cần ≥2 lớp có mẫu trong tập chia): {empty}. "
+                    f"Phương ngữ đang huấn luyện được: {available or 'chưa có'}. "
+                    f"Nếu bạn vừa thu dữ liệu mới, hãy chia lại tập "
+                    f"(processed/splits/make_splits.py) trước khi huấn luyện."
+                )
+                raise HTTPException(status_code=400, detail=detail)
+
         job_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
 
@@ -830,9 +1069,7 @@ async def get_job_status(
                 logger.debug("job=%s loading checkpoint from %s, exists=%s", job_id, ckpt_path, ckpt_path.exists())
                 if ckpt_path.exists():
                     # In thread — torch.load on a large checkpoint would block the event loop
-                    ckpt = await run_in_threadpool(
-                        torch.load, ckpt_path, map_location="cpu", weights_only=False
-                    )
+                    ckpt = await run_in_threadpool(load_checkpoint, ckpt_path)
                     metrics = ckpt.get("metrics", {})
                     logger.debug("job=%s checkpoint metrics keys: %s", job_id, list(metrics.keys()))
                     job.test_acc = float(metrics.get("test_acc", 0)) if metrics.get("test_acc") is not None else None
@@ -900,6 +1137,143 @@ async def get_job_evaluation(
     return {"available": True, "job_id": job_id, **evaluation}
 
 
+def _determinism_summary(determinism: Any) -> str:
+    """Gộp khối determinism thành một dòng đọc được.
+
+    train_tcn.py ghi nó dạng dict (cudnn_deterministic, deterministic_algorithms,
+    cublas_workspace_config, warnings). Giao diện chỉ cần biết: đã bật đủ chưa,
+    và có cảnh báo nào không.
+    """
+    if not isinstance(determinism, dict):
+        return str(determinism or "")
+
+    full = bool(determinism.get("cudnn_deterministic")) and bool(
+        determinism.get("deterministic_algorithms")
+    )
+    warnings = determinism.get("warnings") or []
+    text = "đầy đủ" if full else "một phần"
+    if warnings:
+        text += f" ({len(warnings)} cảnh báo)"
+    return text
+
+
+def _provenance_checks(ckpt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Các tiêu chí tái lập trả lời được CHỈ từ checkpoint.
+
+    Dùng lại đúng mã C1/C5/C10/C11/C13 của scripts/research_validity.py để một
+    lần chạy được đánh giá giống nhau dù xem trên web hay chạy audit bằng script.
+    """
+    runtime_env = ckpt.get("runtime_env") or {}
+    selection = ckpt.get("model_selection") or {}
+    missing_env = [
+        k for k in ("python_version", "pytorch_version", "numpy_version", "device")
+        if not (runtime_env or {}).get(k)
+    ]
+    purpose = str(ckpt.get("run_purpose") or "")
+
+    return [
+        {
+            "id": "C1",
+            "label": "Chạy nghiên cứu (không phải smoke test)",
+            "ok": purpose == "research",
+            "detail": f"run_purpose = '{purpose or 'không ghi'}'",
+        },
+        {
+            "id": "C5",
+            "label": "Có checksum manifest dữ liệu",
+            "ok": bool(str(ckpt.get("dataset_manifest_checksum") or "").strip()),
+            "detail": str(ckpt.get("dataset_manifest_checksum") or "") or "trống",
+        },
+        {
+            "id": "C10",
+            "label": "Ghi đủ môi trường chạy",
+            "ok": not missing_env,
+            "detail": "đầy đủ" if not missing_env else f"thiếu: {', '.join(missing_env)}",
+        },
+        {
+            "id": "C11",
+            "label": "Ghim được commit sinh ra model",
+            "ok": bool(str(ckpt.get("git_commit") or "").strip()),
+            "detail": str(ckpt.get("git_commit") or "") or "trống",
+        },
+        {
+            "id": "C13",
+            "label": "Metrics lấy từ checkpoint val tốt nhất",
+            "ok": bool(selection.get("restored_best_state")),
+            "detail": (
+                f"tiêu chí {selection.get('criterion')}, epoch {selection.get('best_epoch')}"
+                if selection else "không ghi model_selection"
+            ),
+        },
+    ]
+
+
+@router.get("/jobs/{job_id}/provenance")
+async def get_job_provenance(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> dict:
+    """Nguồn gốc & khả năng tái lập của model (Step 7).
+
+    Đọc thẳng từ checkpoint chứ không từ bảng job: checkpoint mới là thứ được
+    promote, xuất bản và nạp lại — nên cái nó mang theo mới là cái thực sự tái
+    lập được. Trả {"available": false} cho job cũ chưa ghi provenance, giống
+    cách endpoint evaluation xử lý.
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
+        return {"available": False, "job_id": job_id}
+
+    try:
+        ckpt = await asyncio.to_thread(load_checkpoint, str(job.checkpoint_path))
+    except Exception as e:
+        logger.warning("job=%s không đọc được provenance: %s", job_id, e)
+        return {"available": False, "job_id": job_id}
+
+    if not isinstance(ckpt, dict) or "git_commit" not in ckpt:
+        # Checkpoint có trước khi provenance được ghi — nói rõ thay vì hiện ô trống.
+        return {"available": False, "job_id": job_id}
+
+    checks = _provenance_checks(ckpt)
+    return {
+        "available": True,
+        "job_id": job_id,
+        "code": {
+            "git_commit": ckpt.get("git_commit") or "",
+            "seed": ckpt.get("seed"),
+            "run_purpose": ckpt.get("run_purpose") or "",
+            "run_status": ckpt.get("run_status") or "",
+            # determinism là dict (cudnn/cublas/algorithms) — rút thành một câu
+            # đọc được thay vì đổ nguyên object ra giao diện.
+            "determinism": _determinism_summary(ckpt.get("determinism")),
+            "created_at": ckpt.get("created_at") or "",
+        },
+        "data": {
+            "dataset_version": ckpt.get("dataset_version") or "",
+            "split_version": ckpt.get("split_version") or "",
+            "dataset_manifest_checksum": ckpt.get("dataset_manifest_checksum") or "",
+            "recognition_profile": ckpt.get("recognition_profile") or "",
+            "vocabulary_schema_version": ckpt.get("vocabulary_schema_version") or "",
+        },
+        "model": {
+            "model_type": ckpt.get("model_type") or "",
+            "num_classes": ckpt.get("num_classes"),
+            "seq_len": ckpt.get("seq_len"),
+            "feature_dim": ckpt.get("feature_dim"),
+            "normalization_version": ckpt.get("normalization_version") or "",
+            "storage_contract_version": ckpt.get("storage_contract_version") or "",
+        },
+        "model_selection": ckpt.get("model_selection") or {},
+        "runtime_env": ckpt.get("runtime_env") or {},
+        "checks": checks,
+        "reproducible": all(c["ok"] for c in checks),
+    }
+
+
 @router.get("/queue/status")
 async def get_queue_status(
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -964,6 +1338,40 @@ async def cancel_training_job(
     return job
 
 
+@router.delete("/jobs/{job_id}")
+async def delete_training_job_endpoint(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Xóa training job khỏi lịch sử huấn luyện.
+
+    Chỉ cho phép xóa job đã kết thúc (completed/failed/cancelled) — job đang
+    chạy/đang chờ phải hủy trước (xem cancel_training_job). Không xóa
+    checkpoint file trên đĩa (xem delete_training_job trong metadata_db.py).
+    """
+    job_info = await _ensure_job_loaded(job_id)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+    if job.status not in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chỉ xóa được job đã kết thúc (trạng thái hiện tại: {job.status}). Hãy hủy job trước.",
+        )
+
+    try:
+        from app.storage.metadata_db import delete_training_job
+
+        await asyncio.to_thread(delete_training_job, job_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không xóa được job: {e}")
+
+    training_jobs.pop(job_id, None)
+    logger.info("job=%s deleted from history by user=%s", job_id, current_user.get("username"))
+    return {"success": True, "job_id": job_id}
+
+
 class PromoteResponse(BaseModel):
     """Kết quả promote model lên realtime"""
     job: TrainingJob
@@ -974,7 +1382,7 @@ class PromoteResponse(BaseModel):
     message: str
 
 
-@router.post("/jobs/{job_id}/promote", response_model=PromoteResponse)
+@router.post("/jobs/{job_id}/promote", response_model=PromoteResponse, dependencies=[Depends(limit_training)])
 async def promote_training_job(
     job_id: str,
     current_user: Dict[str, Any] = Depends(require_admin),
@@ -1000,27 +1408,47 @@ async def promote_training_job(
     if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
         raise HTTPException(status_code=404, detail="Không tìm thấy checkpoint của job này")
 
-    # Load checkpoint để validate model type — realtime service hiện chỉ
-    # hỗ trợ kiến trúc TCN (model_loader từ chối model_type khác)
+    # Load checkpoint để validate model type. Realtime service dựng kiến trúc
+    # ngoài TCN từ chính registry đã huấn luyện nó, nên chỉ cần chặn những
+    # model_type không nhận ra — /reload vẫn validate + warmup trước khi swap.
     src_path = Path(job.checkpoint_path)
     try:
-        ckpt = await asyncio.to_thread(
-            torch.load, str(src_path), map_location="cpu", weights_only=False
-        )
+        ckpt = await asyncio.to_thread(load_checkpoint, str(src_path))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không đọc được checkpoint: {e}")
 
     model_type = str(ckpt.get("model_type", "TCN")).replace(" (legacy)", "").strip()
-    if model_type.lower() != "tcn":
+    if model_type.lower() not in _MODEL_NAME_TO_REGISTRY_KEY:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Realtime service hiện chỉ hỗ trợ kiến trúc TCN — model này là '{model_type}'. "
+                f"Không nhận ra kiến trúc '{model_type}' — realtime service hỗ trợ: "
+                f"{', '.join(sorted(set(_MODEL_NAME_TO_REGISTRY_KEY.values())))}. "
                 "Model vẫn dùng được qua nút Test Model ở Step 7."
             ),
         )
 
-    model_id = f"training_{job_id}"
+    # Slot realtime được đánh khóa theo dialect (giống lúc startup load từ DB):
+    # promote model mới cho "hoa-de" sẽ thay model "hoa-de" đang chạy, không
+    # thêm một lựa chọn trùng vào tab nhận diện.
+    dialect = (job.config.dialects[0] if job.config.dialects else "multi")
+    language = (job.config.languages[0] if job.config.languages else "vn")
+    model_id = dialect
+
+    # Promoting means "everyone now sees this in the realtime tab". A model
+    # trained on a dialect still waiting for approval must not get there: its
+    # label set describes a vocabulary only one person has proposed. Approve the
+    # dialect first, then promote — the order matters, not the permission of the
+    # admin doing it.
+    owner = dialect_owner(dialect)
+    if owner is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Phương ngữ '{dialect}' đang chờ duyệt nên model của nó chỉ người tạo "
+                f"dùng được. Duyệt phương ngữ trước, rồi mới promote."
+            ),
+        )
 
     # 1. Copy đúng checkpoint của job vào thư mục realtime service đọc được
     deployed_path = await asyncio.to_thread(
@@ -1032,9 +1460,7 @@ async def promote_training_job(
     fname = Path(deployed_path).name
 
     # 2. Ghi models.json (bền vững — realtime restart vẫn load được)
-    dialect = (job.config.dialects[0] if job.config.dialects else "multi")
-    language = (job.config.languages[0] if job.config.languages else "vn")
-    display_name = f"{model_type.upper()} {dialect} ({job_id})"
+    display_name = _registry_display_name(dialect) or f"{model_type.upper()} {dialect} ({job_id})"
     registry_updated = await asyncio.to_thread(
         _update_registry,
         model_id,
@@ -1051,20 +1477,56 @@ async def promote_training_job(
         model_id,
         f"{REALTIME_CONTAINER_CHECKPOINTS}/{fname}",
         f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        dialect,
+        language,
     )
 
     # 4. Ghi nhận promotion. checkpoint_path trỏ sang bản deployed để:
     #    - retention sweep dọn outputs/ không thể phá model đã promote
     #    - Step 7 test modal vẫn hoạt động sau khi outputs/ bị dọn
     job.promoted_at = datetime.now().isoformat()
+    job.superseded_at = None
     job.checkpoint_path = deployed_path
     await _persist_job(job)
 
-    # 5. Backup bản promoted lên Google Drive (background, best-effort)
+    # 4b. One dialect = one realtime slot, so the job that used to hold this
+    #     slot is no longer serving. _update_registry already dropped its entry
+    #     from models.json; without this the database still called it promoted,
+    #     and two jobs showed as live for one dialect.
+    try:
+        from app.storage.metadata_db import supersede_other_promotions
+
+        retired = await asyncio.to_thread(supersede_other_promotions, job_id, dialect)
+        # The in-memory cache never re-reads a terminal job (see
+        # _ensure_job_loaded), so a DB-only update would keep serving the stale
+        # flag until the backend restarts.
+        stamp = datetime.now().isoformat()
+        for old_id in retired:
+            cached = training_jobs.get(old_id)
+            if cached:
+                cached["job"].superseded_at = stamp
+        if retired:
+            logger.info("job=%s superseded %d earlier promotion(s) for dialect=%s",
+                        job_id, len(retired), dialect)
+    except Exception as e:
+        # Promotion itself already succeeded; a bookkeeping failure must not
+        # undo a model that is now serving traffic.
+        logger.warning("job=%s không đánh dấu được promotion cũ của '%s': %s", job_id, dialect, e)
+
+    # 5. Publish bản promoted lên Google Drive (background, best-effort):
+    #    models/<tên model>/Deploy <thời điểm>/ gồm checkpoint + manifest inference
     try:
         from app.training_tasks import backup_promoted_checkpoint_task
 
-        backup_promoted_checkpoint_task.delay(job_id=job_id, checkpoint_path=deployed_path)
+        backup_promoted_checkpoint_task.delay(
+            job_id=job_id,
+            checkpoint_path=deployed_path,
+            model_id=model_id,
+            display_name=display_name,
+            dialect=dialect,
+            language=language,
+            promoted_at=job.promoted_at,
+        )
         logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
     except Exception as e:
         logger.warning("job=%s GDrive backup dispatch failed (promotion vẫn OK): %s", job_id, e)
@@ -1175,7 +1637,7 @@ class TrainedModelPredictResponse(BaseModel):
     label_key: str
 
 
-@router.post("/jobs/{job_id}/predict", response_model=TrainedModelPredictResponse)
+@router.post("/jobs/{job_id}/predict", response_model=TrainedModelPredictResponse, dependencies=[Depends(limit_predict)])
 async def predict_trained_model(
     job_id: str,
     request_data: TrainedModelPredictRequest,

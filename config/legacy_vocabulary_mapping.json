@@ -1,0 +1,54 @@
+{
+  "_comment": "dialect -> cac o vocabulary-schema-v2 ma mot lop MOI trong phuong ngu do phai duoc sinh ra kem theo. Chi entry co status='confirmed' moi gan gia tri; dialect khong co trong file nay se de o trong va roi vao bao cao can ra soat. Doc boi backend/app/dataset_manager.py::_vocabulary_mapping va scripts/migrate_legacy_vocabulary_schema.py.",
+
+  "_provenance": "File goc DA MAT (khong bao gio duoc track vi luat '*.json' trong .gitignore, cung nguyen nhan lam mat config/legacy_signer_mapping.json). Dung lai ngay 2026-07-31 tu KET QUA ma chinh no da ghi vao dataset/labels.csv: theo migrate_legacy_vocabulary_schema.py, chi status='confirmed' moi lam vocabulary_scope khac rong, va chi status='unassign' moi dat recognition_profile='legacy_unassigned' voi scope rong. Nen cac entry duoi day la doc nguoc tu du lieu that, khong phai suy doan. Hai dialect 'bang-chu-cai' va 'hoa-de' con duoc doi chieu doc lap voi backend/tests/test_class_vocabulary_defaults.py.",
+
+  "_needs_owner_review": {
+    "spa": "DA THONG NHAT 2026-08-01: ca 9 lop dung status='unassign' (profile='legacy_unassigned', group='spa'). 7 lop tung mang recognition_profile='spa' la LOI cua script dong bo dataset (no lay dialect lam profile khi o do rong); 'spa' khong nam trong RECOGNITION_PROFILES nen 7 dong do vi pham validate_label_v2 -> da sua lai. Quyet dinh CON LAI cho chu du lieu: co muon spa tro thanh mot recognition_profile that (phai them vao RECOGNITION_PROFILES trong processed/shared/vocabulary.py va huan luyen model rieng) hay cu de la vocabulary_group.",
+    "common": "4 lop, moi o v2 deu rong. Chua bao gio duoc gan.",
+    "trung": "Chi 1 lop. Da suy ra duoc scope/profile/group tu du lieu nhung motion_type con rong -> chu du lieu nen xac nhan lai truoc khi thu them lop 'trung'."
+  },
+
+  "dialect_mapping": {
+    "bang-chu-cai": {
+      "status": "confirmed",
+      "vocabulary_scope": "profile_specific",
+      "recognition_profile": "alphabet",
+      "vocabulary_group": "fingerspelling_alphabet",
+      "motion_type": "static",
+      "_evidence": "28/30 lop trong labels.csv mang dung bo gia tri nay"
+    },
+    "hoa-de": {
+      "status": "confirmed",
+      "vocabulary_scope": "profile_specific",
+      "recognition_profile": "hoa_de",
+      "vocabulary_group": "hoa_de_vocabulary",
+      "motion_type": "dynamic",
+      "_evidence": "8/8 lop trong labels.csv mang dung bo gia tri nay"
+    },
+    "trung": {
+      "status": "confirmed",
+      "vocabulary_scope": "profile_specific",
+      "recognition_profile": "central",
+      "vocabulary_group": "central_vocabulary",
+      "motion_type": "",
+      "_evidence": "1/1 lop; motion_type rong -> xem _needs_owner_review"
+    },
+    "can-tho": {
+      "status": "unassign",
+      "recognition_profile": "legacy_unassigned",
+      "vocabulary_group": "can_tho_collection",
+      "_evidence": "9/9 lop co scope rong + profile 'legacy_unassigned'"
+    },
+    "bac": {
+      "status": "unassign",
+      "recognition_profile": "legacy_unassigned",
+      "_evidence": "1/1 lop"
+    },
+    "nam": {
+      "status": "unassign",
+      "recognition_profile": "legacy_unassigned",
+      "_evidence": "1/1 lop"
+    }
+  }
+}

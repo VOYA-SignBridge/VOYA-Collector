@@ -1,19 +1,21 @@
 import { useNavigate } from "react-router-dom";
+import { useI18n } from "../i18n";
 
 export default function Footer() {
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   const quickLinks = [
-    { name: "Trang chủ", href: "/" },
-    { name: "Nhận dạng realtime", href: "/realtime" },
-    { name: "Đăng nhập", href: "/login" },
-    { name: "Đăng ký", href: "/register" },
+    { name: t("Trang chủ"), href: "/" },
+    { name: t("Nhận dạng realtime"), href: "/realtime" },
+    { name: t("Đăng nhập"), href: "/login" },
+    { name: t("Đăng ký"), href: "/register" },
   ];
 
   const projectLinks = [
-    { name: "Đóng góp dữ liệu", href: "/upload" },
-    { name: "Thư viện nhãn", href: "/labels" },
-    { name: "Huấn luyện model", href: "/training" },
+    { name: t("Đóng góp dữ liệu"), href: "/upload" },
+    { name: t("Thư viện nhãn"), href: "/labels" },
+    { name: t("Huấn luyện model"), href: "/training" },
   ];
 
   return (
@@ -30,12 +32,11 @@ export default function Footer() {
                   <span className="text-ctu-blue">CTU</span>
                   <span className="text-blue-300">.SignBridge</span>
                 </div>
-                <div className="text-xs text-slate-400">Đại học Cần Thơ</div>
+                <div className="text-xs text-slate-400">{t("Đại học Cần Thơ")}</div>
               </div>
             </div>
             <p className="text-sm text-slate-400 leading-relaxed mb-6">
-              Nền tảng thu thập và nhận dạng Ngôn ngữ Ký hiệu Việt Nam (VSL)
-              sử dụng công nghệ AI, phục vụ nghiên cứu và cộng đồng.
+              {t("Nền tảng thu thập và nhận dạng Ngôn ngữ Ký hiệu Việt Nam (VSL) sử dụng công nghệ AI, phục vụ nghiên cứu và cộng đồng.")}
             </p>
             {/* Social / University links */}
             <div className="flex items-center gap-3">
@@ -56,7 +57,7 @@ export default function Footer() {
           {/* Quick Links */}
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
-              Truy cập nhanh
+              {t("Truy cập nhanh")}
             </h3>
             <ul className="space-y-3">
               {quickLinks.map((link) => (
@@ -76,7 +77,7 @@ export default function Footer() {
           {/* Project Links */}
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
-              Dự án
+              {t("Dự án")}
             </h3>
             <ul className="space-y-3">
               {projectLinks.map((link) => (
@@ -96,21 +97,21 @@ export default function Footer() {
           {/* Contact / University Info */}
           <div>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
-              Liên hệ
+              {t("Liên hệ")}
             </h3>
             <ul className="space-y-3 text-sm text-slate-400">
               <li className="flex items-start gap-3">
                 <svg className="w-5 h-5 text-ctu-blue shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
-                <span>Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông, Đại học Cần Thơ</span>
+                <span>{t("Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông, Đại học Cần Thơ")}</span>
               </li>
               <li className="flex items-start gap-3">
                 <svg className="w-5 h-5 text-ctu-blue shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                <span>Khu II, Đ. 3/2, Xuân Khánh, Ninh Kiều, Cần Thơ</span>
+                <span>{t("Khu II, Đ. 3/2, Xuân Khánh, Ninh Kiều, Cần Thơ")}</span>
               </li>
             </ul>
           </div>
@@ -121,7 +122,7 @@ export default function Footer() {
       <div className="border-t border-white/10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-center justify-center gap-4">
           <p className="text-sm text-slate-500 text-center">
-            Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông
+            {t("Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông")}
           </p>
         </div>
       </div>

@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.config import settings
 from app import dataset_samples
@@ -83,6 +84,38 @@ def _make_meta() -> ClassMetadata:
         class_uid="testuid123456", slug="xin-chao", label_original="xin chao",
         language="vn", dialect="bac", is_common_global=False, is_common_language=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _restore_module_roots():
+    """Undo `_patch_dataset_root` after every test in this module.
+
+    It assigns module attributes directly rather than through monkeypatch, so
+    without this the redirected roots survive the test and every later test in
+    the same process sees a `dataset/` that points at a deleted temp directory.
+    That leak is invisible here — these tests set the values they need — and
+    only shows up as an unrelated failure somewhere further down the run order,
+    which is the most expensive kind of test defect to track down.
+
+    Restoring is done here rather than by rewriting the seven call sites, which
+    take a plain `tmp` string inside `with tempfile...` blocks and have no
+    monkeypatch fixture to hand.
+    """
+    saved = (
+        dataset_manager.FEATURES_ROOT,
+        dataset_samples.DATASET_ROOT,
+        dataset_samples.SAMPLES_DIR,
+        dataset_samples.SAMPLES_CSV,
+    )
+    try:
+        yield
+    finally:
+        (
+            dataset_manager.FEATURES_ROOT,
+            dataset_samples.DATASET_ROOT,
+            dataset_samples.SAMPLES_DIR,
+            dataset_samples.SAMPLES_CSV,
+        ) = saved
 
 
 def _patch_dataset_root(tmp: str) -> None:

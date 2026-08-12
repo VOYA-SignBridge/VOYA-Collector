@@ -258,8 +258,13 @@ def get_session_frames(
         raise HTTPException(status_code=404, detail="File dữ liệu .npz không còn trên hệ thống")
 
     try:
-        with np.load(npz_path, allow_pickle=True) as data:
-            sequence = np.asarray(data["sequence"], dtype=np.float32)
+        # Raw landmarks when the sample has them: `sequence` is the model's
+        # input, not a picture of the recording — it drops where the hands were
+        # relative to each other and flattens depth. See load_display_sequence.
+        from app.dataset_samples import load_display_sequence, load_world_sequence
+
+        sequence, landmark_source = load_display_sequence(npz_path)
+        world = load_world_sequence(npz_path)
     except Exception as exc:
         logger.error("[FRAMES] npz read failed %s: %s", npz_path, exc)
         raise HTTPException(status_code=500, detail="File .npz bị hỏng, không đọc được")
@@ -274,9 +279,21 @@ def get_session_frames(
         "frames": int(sequence.shape[0]),
         "dim": int(sequence.shape[1]),
         "fps": sample_fps(row),
+        # "raw" = as recorded. "normalized" = wrist-centred model input, which
+        # has no relative hand position and a flattened z; the viewer says so
+        # instead of presenting it as a faithful picture.
+        "landmark_source": landmark_source,
         # 5 decimals ≈ 0.001% of the coordinate range — halves the JSON size.
         "sequence": np.round(sequence, 5).tolist(),
     }
+    # Metric 3D, when the sample was recorded with it. Sent alongside rather
+    # than instead of `sequence`: world landmarks are centred on each hand, so
+    # they carry true shape and depth but no relative hand position. The 2D
+    # view needs the position, the 3D view needs the depth, and neither array
+    # has both. Absent for every sample older than the capture-side change.
+    if world is not None and world.ndim == 2 and world.shape[0] == sequence.shape[0]:
+        # Metres, so the fifth decimal is 10 microns — well past hand detail.
+        payload["sequence_world"] = np.round(world, 5).tolist()
     return JSONResponse(payload, headers={"Cache-Control": _CACHE_HEADER})
 
 

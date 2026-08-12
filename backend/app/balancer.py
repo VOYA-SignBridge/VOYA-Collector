@@ -4,6 +4,7 @@ from typing import Dict
 from collections import defaultdict
 from app.dataset_samples import list_samples
 from app.dataset_manager import load_labels, ClassMetadata
+from app.tenancy import tenant_id_of
 
 def count_samples_per_class() -> Dict[str, int]:
     samples = list_samples()
@@ -26,6 +27,9 @@ def load_class_meta_map() -> Dict[str, ClassMetadata]:
             dialect=r["dialect"],
             is_common_global=bool(int(r["is_common_global"])),
             is_common_language=bool(int(r["is_common_language"])),
+            # oversample_balance reads `hierarchy_path()` off these, so without
+            # the owner it would oversample into the bootstrap tenant's tree.
+            tenant_id=tenant_id_of(r),
         )
     return out
 

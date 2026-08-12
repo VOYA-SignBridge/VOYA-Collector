@@ -22,8 +22,13 @@ vi.mock("../../api/dataset", () => ({
 vi.mock("../../hooks/useAuth", () => ({ useAuth: vi.fn() }));
 
 const mockNavigate = vi.fn();
+// `Link` too — PageHeader's breadcrumb renders one, and a partial mock of this
+// module throws rather than falling back to the real export.
 vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate,
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
+  ),
 }));
 
 describe("LabelsPage → LabelDetailPage — điều hướng Chi tiết (Phase 1 → Phase 2)", () => {

@@ -57,6 +57,41 @@ def test_split_ignores_semicolon_inside_string_literal():
     assert out == ["INSERT INTO t VALUES ('a;b')", "SELECT 1"]
 
 
+def test_split_ignores_semicolon_inside_a_line_comment():
+    """A semicolon in prose is not a statement boundary.
+
+    Comments were passed straight through, so an English sentence in a schema
+    comment — the place a trade-off is most likely to be explained, and where a
+    semicolon is most likely to appear — split the statement in two. The export
+    still looked fine; the deploy applied half a CREATE TABLE.
+    """
+    sql = (
+        "CREATE TABLE t (\n"
+        "    a int,  -- one thing; and another\n"
+        "    b int\n"
+        ");\n"
+        "CREATE INDEX i ON t(a)"
+    )
+    out = _split_sql_statements(sql)
+    print(f"\n[evidence] commented ';' split -> {len(out)} statements")
+    assert len(out) == 2
+    assert "CREATE TABLE" in out[0] and "b int" in out[0]
+    assert out[1].strip() == "CREATE INDEX i ON t(a)"
+
+
+def test_split_ignores_semicolon_inside_a_block_comment():
+    out = _split_sql_statements("CREATE TABLE t (a int /* x; y */); SELECT 1")
+    assert len(out) == 2
+    assert out[1].strip() == "SELECT 1"
+
+
+def test_split_does_not_treat_a_quoted_dash_dash_as_a_comment():
+    """`--` inside a string literal is data. Treating it as a comment would
+    swallow the rest of the line, including the closing quote."""
+    out = _split_sql_statements("INSERT INTO t VALUES ('a--b'); SELECT 1")
+    assert out == ["INSERT INTO t VALUES ('a--b')", "SELECT 1"]
+
+
 def test_real_catalog_schema_splits_into_every_statement():
     # The real thing the server applies at deploy: prove it round-trips to the
     # exact number of statements, and that the core tables are among them.

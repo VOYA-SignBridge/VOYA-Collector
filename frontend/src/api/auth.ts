@@ -1,4 +1,4 @@
-import axiosClient from "./axiosClient";
+import axiosClient, { clearAuthToken, setAuthToken } from "./axiosClient";
 
 export type AuthUser = {
   id: string;
@@ -7,12 +7,41 @@ export type AuthUser = {
   is_active?: boolean;
   is_admin?: boolean;
   created_at?: string | null;
+  /**
+   * Tổ chức nhà của tài khoản.
+   *
+   * `UserOut` phía máy chủ đã trả trường này từ đợt v4, nhưng kiểu ở đây chưa
+   * khai nên không màn hình nào dùng được. Trang "Tổ chức của tôi" cần nó: đó là
+   * thứ duy nhất cho biết phải hỏi API về tenant NÀO — giao diện không được đoán,
+   * và cũng không được để người dùng gõ vào.
+   */
+  tenant_id?: string | null;
 };
 
 export type RegisterPayload = {
   username: string;
   email: string;
   password: string;
+  /** Tên tổ chức, dùng để đặt tên cho tenant mà lượt đăng ký này tạo ra. */
+  organization_name?: string;
+  /**
+   * Số hiệu bản văn bản mà người dùng vừa đọc và đồng ý.
+   *
+   * Máy chủ đối chiếu lại số hiệu này với bản đang hiệu lực; gửi số cũ sẽ bị
+   * từ chối với mã `stale_version` chứ không được ghi nhận. Bỏ trống là hợp lệ
+   * khi hệ thống chưa công bố văn bản nào — công bố chính là hành động bật
+   * cưỡng chế.
+   */
+  accepted_terms_version?: string;
+  accepted_privacy_version?: string;
+  /**
+   * Mã lời mời, khi người này gia nhập một tổ chức có sẵn thay vì tự lập.
+   *
+   * Máy chủ kiểm mã **trước khi** tạo tài khoản, và đòi địa chỉ email khớp với
+   * địa chỉ lời mời được phát cho. Lời mời nêu đích danh một người; ai cầm
+   * được đường liên kết cũng không vì thế mà thành người đó.
+   */
+  invitation_token?: string;
 };
 
 export type LoginPayload = {
@@ -27,8 +56,36 @@ export async function register(payload: RegisterPayload): Promise<AuthUser> {
 
 /** Login sets httpOnly auth cookies server-side and returns the user profile
  *  (no token in the body — the browser can't read the httpOnly cookies). */
-export async function login(payload: LoginPayload): Promise<AuthUser> {
+/**
+ * Kết quả bước một. Hai hình dạng, và phải phân biệt được ở kiểu dữ liệu.
+ *
+ * Nếu gộp làm một kiểu với vài trường tuỳ chọn, chỗ gọi sẽ đọc `user.username`
+ * của một phản hồi chỉ có vé — TypeScript im lặng, giao diện hiện `undefined`.
+ */
+export type LoginResult =
+  | { kind: "session"; user: AuthUser }
+  | { kind: "two_factor"; challenge: string };
+
+export async function login(payload: LoginPayload): Promise<LoginResult> {
   const res = await axiosClient.post("/api/v1/auth/login", payload);
+  // Purge any legacy localStorage Bearer token from the pre-cookie era: if it
+  // lingered, every request would carry a stale Authorization header alongside
+  // the fresh cookie and could shadow the new session.
+  clearAuthToken();
+  setAuthToken(null);
+
+  const data = res.data as Record<string, unknown>;
+  if (data?.two_factor_required) {
+    return { kind: "two_factor", challenge: String(data.challenge ?? "") };
+  }
+  return { kind: "session", user: res.data as AuthUser };
+}
+
+/** Bước hai: đổi vé + mã (TOTP hoặc mã khôi phục) lấy một phiên thật. */
+export async function loginTwoFactor(
+  challenge: string, code: string,
+): Promise<AuthUser> {
+  const res = await axiosClient.post("/api/v1/auth/login/2fa", { challenge, code });
   return res.data as AuthUser;
 }
 
@@ -46,10 +103,43 @@ export async function me(): Promise<AuthUser> {
   return res.data as AuthUser;
 }
 
+/**
+ * Kết quả một lượt đổi tên tài khoản.
+ *
+ * `rows` là số hàng đã đổi ở từng chỗ cái tên bị chép tới — `samples.username`,
+ * `raw_uploads.*`, `signers.display_name`, cột `user_id` trong `samples.csv`.
+ * Nó có mặt trong phản hồi vì đổi tên KHÔNG phải một câu `UPDATE users`: nó
+ * chạm vào dữ liệu đã đóng góp, và người bấm nút xứng đáng được thấy điều đó
+ * thay vì tin lời.
+ *
+ * `changed: false` nghĩa là tên mới trùng tên cũ — không phải lỗi, và không có
+ * hàng nào bị chạm.
+ */
+export type RenameResult = {
+  changed: boolean;
+  old_username: string;
+  new_username: string;
+  rows: Record<string, number>;
+};
+
+export async function updateUsername(username: string): Promise<RenameResult> {
+  const res = await axiosClient.patch("/api/v1/auth/me", { username });
+  return res.data as RenameResult;
+}
+
 export type MessageResponse = {
   message: string;
 };
 
+/**
+ * Đặt lại mật khẩu bằng ĐƯỜNG LIÊN KẾT gửi vào hộp thư.
+ *
+ * **Không màn hình nào còn gọi hàm này.** Từ 10/08/2026 luồng quên mật khẩu
+ * chạy bằng mã sáu chữ số (`api/verification.ts`) — một cửa duy nhất, vì hai
+ * cửa trả lời cùng một câu hỏi chỉ bắt người dùng chọn giữa hai chi tiết triển
+ * khai. Hàm và endpoint được giữ lại để những liên kết đã gửi đi còn dùng được
+ * (xem `/reset-password`), không phải để nối lại vào giao diện.
+ */
 export async function forgotPassword(identifier: string): Promise<MessageResponse> {
   const res = await axiosClient.post("/api/v1/auth/forgot-password", { identifier });
   return res.data as MessageResponse;

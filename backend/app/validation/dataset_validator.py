@@ -5,6 +5,7 @@ import numpy as np
 from collections import defaultdict
 
 from app.dataset_manager import load_labels, ClassMetadata
+from app.tenancy import tenant_id_of
 from app.config import settings
 
 SEQ_LEN = int(getattr(settings, 'seq_len', 60))
@@ -27,6 +28,10 @@ def load_class_meta(language: str | None, dialect: str | None):
             dialect=r['dialect'],
             is_common_global=bool(int(r['is_common_global'])),
             is_common_language=bool(int(r['is_common_language'])),
+            # validate_class() checks `hierarchy_path().exists()`; without the
+            # owner every class of every non-bootstrap tenant is reported as
+            # `missing_folder`.
+            tenant_id=tenant_id_of(r),
         ))
     return out
 

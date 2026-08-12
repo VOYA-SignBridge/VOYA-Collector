@@ -96,10 +96,20 @@ describe("useRenderTier — hạ cấp mềm khi FPS tụt kéo dài (máy nóng
     expect(result.current.tier).toBe("3d");
   });
 
-  it("bật Eco lưu vào localStorage và chuyển sang video", () => {
+  // Eco used to map to "video". That made it the slowest tier to start: the
+  // video path enqueues a server render and polls for up to two minutes before
+  // anything appears. "2d" draws from frames the page already has, so it is
+  // both instant and cheaper than 3d — which is what an economy mode should be.
+  it("bật Eco lưu vào localStorage và chuyển sang 2d (không phải video)", () => {
     const { result } = renderHook(() => useRenderTier());
     act(() => result.current.setEco(true));
-    expect(result.current.tier).toBe("video");
+    expect(result.current.tier).toBe("2d");
     expect(localStorage.getItem(ECO_MODE_KEY)).toBe("1");
+  });
+
+  it("vẫn chọn được video thủ công — eco không còn là đường duy nhất tới nó", () => {
+    const { result } = renderHook(() => useRenderTier());
+    act(() => result.current.setChoice("video"));
+    expect(result.current.tier).toBe("video");
   });
 });
