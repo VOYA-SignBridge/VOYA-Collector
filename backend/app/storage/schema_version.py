@@ -109,7 +109,138 @@ SCHEMA_VERSION_DDL: tuple[str, ...] = (
     """,
     f"CREATE INDEX IF NOT EXISTS ix_{SCHEMA_VERSION_TABLE}_version "
     f"ON {SCHEMA_VERSION_TABLE} (version DESC)",
+    # Thêm sau, nên phải là ALTER: bảng đã tồn tại trên sản xuất từ 12/08/2026
+    # với bốn cột đầu. Cột này KHÔNG có DEFAULT và cố ý để NULL trên dòng cũ —
+    # NULL nghĩa là "chưa ai xác nhận", và nó phải khác với "đã xác nhận".
+    f"ALTER TABLE {SCHEMA_VERSION_TABLE} "
+    f"ADD COLUMN IF NOT EXISTS migration_checksum TEXT",
 )
+
+
+# ---------------------------------------------------------------------------
+# Checksum: nội dung một migration ĐÃ ÁP DỤNG là bất biến
+# ---------------------------------------------------------------------------
+#
+# Vì sao chỉ tính trên PHẦN MỘT CHIỀU
+# ===================================
+# Không phải trên toàn bộ DDL. `ensure_tables()` được phép thêm bảng, thêm cột,
+# cài lại chính sách RLS ở mỗi lần khởi động — đó là hợp đồng hiện tại. Nếu
+# checksum phủ cả phần đó thì thêm một bảng mới sẽ làm gate đỏ và buộc bump
+# phiên bản cho một thay đổi thuần cộng thêm. Cổng sẽ kêu quá nhiều, và một cổng
+# kêu quá nhiều thì bị gỡ.
+#
+# Phần MỘT CHIỀU thì khác hẳn: nó bỏ bảng, chép dữ liệu lịch sử sang hình dạng
+# mới, ghi đè giá trị cũ. Sau khi đã chạy trên một cơ sở dữ liệu, sửa nội dung
+# của nó nghĩa là hai máy mang cùng nhãn "v5" nhưng đã đi qua hai lượt biến đổi
+# khác nhau — và không có cách nào phát hiện bằng cách nhìn lược đồ.
+#
+# Vì sao phải CHUẨN HOÁ trước khi băm
+# ===================================
+# Băm thẳng chuỗi Python thì một lần sửa chính tả trong chú thích SQL cũng làm
+# sản xuất từ chối khởi động. Cái giá của việc đó không phải là phiền: nó dạy
+# người vận hành rằng gate hay báo nhầm, và lần báo THẬT sẽ bị bỏ qua.
+#
+# Nên chuẩn hoá bỏ chú thích `--` và gộp khoảng trắng — nhưng CHỈ ngoài chuỗi
+# nháy đơn. Trong chuỗi thì mọi ký tự đều có nghĩa: `RAISE EXCEPTION 'a--b'`
+# không được biến thành `RAISE EXCEPTION 'a`.
+
+
+class MigrationChecksumMismatch(SchemaVersionError):
+    """Nội dung migration đã đổi sau khi phiên bản đó được áp dụng."""
+
+
+class MigrationChecksumMissing(SchemaVersionError):
+    """Phiên bản đã đóng dấu nhưng chưa có checksum, và chưa qua adoption."""
+
+
+def canonical_sql(statement: str) -> str:
+    """Dạng chuẩn của một câu lệnh, để băm.
+
+    Bỏ chú thích `--` và gộp khoảng trắng ở phần MÃ; giữ nguyên từng ký tự bên
+    trong chuỗi nháy đơn. Thân `$$ ... $$` được coi là mã chứ không phải chuỗi,
+    vì đó chính là mã plpgsql và chú thích trong đó cũng chỉ là chú thích.
+    """
+    out: list[str] = []
+    i, n = 0, len(statement)
+    in_single = False
+    pending_space = False
+
+    def emit(ch: str) -> None:
+        nonlocal pending_space
+        if pending_space and out:
+            out.append(" ")
+        pending_space = False
+        out.append(ch)
+
+    while i < n:
+        ch = statement[i]
+
+        if in_single:
+            out.append(ch)
+            if ch == "'":
+                if i + 1 < n and statement[i + 1] == "'":
+                    out.append("'")      # '' escape ben trong chuoi
+                    i += 2
+                    continue
+                in_single = False
+            i += 1
+            continue
+
+        if ch == "'":
+            emit(ch)
+            in_single = True
+            i += 1
+            continue
+
+        if ch == "-" and i + 1 < n and statement[i + 1] == "-":
+            nl = statement.find("\n", i)
+            i = n if nl == -1 else nl
+            pending_space = True
+            continue
+
+        if ch.isspace():
+            pending_space = True
+            i += 1
+            continue
+
+        emit(ch)
+        i += 1
+
+    return "".join(out).strip()
+
+
+def migration_payload() -> list[str]:
+    """Các câu MỘT CHIỀU, ĐÚNG thứ tự thực thi.
+
+    Thứ tự lấy từ chính các danh sách mà `_apply_schema` chạy, không lấy từ
+    `one_way_statements()` — cái đó là `frozenset`, và thứ tự lặp của một set
+    không ổn định giữa các tiến trình. Băm một tập không thứ tự sẽ cho checksum
+    đổi ngẫu nhiên giữa hai lần khởi động, tức là gate đỏ vô cớ.
+    """
+    from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
+    from app.storage.metadata_db import (
+        DDL_STATEMENTS, INDEX_STATEMENTS, MIGRATION_STATEMENTS, one_way_statements,
+    )
+
+    one_way = one_way_statements()
+    ordered: list[str] = []
+    for group in (DDL_STATEMENTS, MIGRATION_STATEMENTS,
+                  INDEX_STATEMENTS, AUTHZ_DDL_STATEMENTS):
+        ordered.extend(s for s in group if s in one_way)
+    return ordered
+
+
+def migration_checksum() -> str:
+    """SHA-256 của payload một chiều đã chuẩn hoá, kèm số câu.
+
+    Số câu nằm trong phần được băm để việc GỘP hai câu thành một — hoặc tách
+    một câu làm hai — cũng đổi checksum, dù chuỗi nối lại có thể giống nhau.
+    """
+    import hashlib
+
+    payload = [canonical_sql(s) for s in migration_payload()]
+    blob = f"{len(payload)}\n" + "\n".join(payload)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def read_schema_version(cur) -> int | None:
@@ -127,6 +258,83 @@ def read_schema_version(cur) -> int | None:
     cur.execute(f"SELECT max(version) FROM {SCHEMA_VERSION_TABLE}")
     row = cur.fetchone()
     return row[0] if row else None
+
+
+def read_recorded_checksum(cur) -> tuple[int | None, str | None, bool]:
+    """`(version, checksum_da_ghi, cot_ton_tai)` của lần đóng dấu MỚI NHẤT.
+
+    Trả về cả cờ "cột có tồn tại không" vì trên một cơ sở dữ liệu chưa chạy
+    `ensure_tables()` của ảnh này, cột `migration_checksum` chưa có — và đó khác
+    hẳn với "cột có nhưng để NULL". Cái đầu là chưa nâng cấp; cái sau là đã nâng
+    cấp nhưng chưa ai xác nhận nội dung migration.
+    """
+    cur.execute("SELECT to_regclass(%s)", (f"public.{SCHEMA_VERSION_TABLE}",))
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return (None, None, False)
+
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = %s AND column_name = 'migration_checksum'",
+        (SCHEMA_VERSION_TABLE,))
+    has_column = cur.fetchone() is not None
+    if not has_column:
+        return (read_schema_version(cur), None, False)
+
+    cur.execute(
+        f"SELECT version, migration_checksum FROM {SCHEMA_VERSION_TABLE} "
+        f"ORDER BY version DESC, applied_at DESC LIMIT 1")
+    row = cur.fetchone()
+    if not row:
+        return (None, None, True)
+    return (row[0], row[1], True)
+
+
+def checksum_problem(cur) -> SchemaVersionError | None:
+    """Lý do KHÔNG được chạy tiếp vì lý do checksum, hoặc None.
+
+    Ba trạng thái, và chúng phải khác nhau:
+
+      * chưa đóng dấu phiên bản nào  -> không phải việc của hàm này (None)
+      * đã ghi checksum, khớp        -> None
+      * đã ghi checksum, LỆCH        -> `MigrationChecksumMismatch`
+      * đã đóng dấu, checksum NULL   -> `MigrationChecksumMissing`
+
+    Trạng thái cuối là trạng thái của sản xuất ngay sau khi ảnh này lên: dòng
+    v5 được ghi ngày 12/08/2026, trước khi cột checksum tồn tại. Nó KHÔNG được
+    tự điền. Một cơ chế "nếu NULL thì điền giá trị hiện tại" sẽ khiến một
+    migration ĐÃ BỊ SỬA tự hợp thức hoá ở lần khởi động kế tiếp — đúng thứ mà
+    checksum sinh ra để ngăn. Phải đi qua `--adopt-checksum`, nơi có kiểm chứng.
+    """
+    version, recorded, has_column = read_recorded_checksum(cur)
+    if version is None:
+        return None
+
+    current = migration_checksum()
+
+    if not has_column:
+        return MigrationChecksumMissing(
+            f"So dang ba chua co cot `migration_checksum` (co so du lieu cu hon "
+            f"anh nay). Chay `ensure_tables()` mot lan roi:\n"
+            f"    python -m app.cli.migrate --adopt-checksum")
+
+    if recorded is None:
+        return MigrationChecksumMissing(
+            f"v{version} da duoc dong dau nhung CHUA co checksum. Khong tu dien: "
+            f"lam vay thi mot migration da bi sua se tu hop thuc hoa.\n"
+            f"Xac nhan mot lan, co kiem chung:\n"
+            f"    EXPECTED_DATABASE=<ten_db> python -m app.cli.migrate --adopt-checksum")
+
+    if recorded != current:
+        return MigrationChecksumMismatch(
+            f"NOI DUNG MIGRATION v{version} DA DOI sau khi no duoc ap dung.\n"
+            f"    da ghi   : {recorded}\n"
+            f"    hien tai : {current}\n"
+            f"Mot phien ban da ap dung la BAT BIEN. Neu can sua, tao phien ban "
+            f"v{version + 1} chu khong sua lai v{version}. Neu ban tin rang thay "
+            f"doi nay vo hai va co chu y, xem docs/AUTHORIZATION.md muc migration.")
+
+    return None
 
 
 def stamp_schema_version(cur, version: int = APP_SCHEMA_VERSION,
@@ -147,14 +355,17 @@ def stamp_schema_version(cur, version: int = APP_SCHEMA_VERSION,
         or None
     )
 
+    checksum = migration_checksum()
     cur.execute(
         f"INSERT INTO {SCHEMA_VERSION_TABLE} "
-        f"(version, applied_by, applied_on, note) VALUES (%s, %s, %s, %s)",
-        (version, applied_by, applied_on, note),
+        f"(version, applied_by, applied_on, note, migration_checksum) "
+        f"VALUES (%s, %s, %s, %s, %s)",
+        (version, applied_by, applied_on, note, checksum),
     )
     logger.warning(
-        "[SCHEMA-VERSION] da dong dau version=%s applied_by=%s applied_on=%s note=%s",
-        version, applied_by, applied_on or "(khong biet)", note or "-",
+        "[SCHEMA-VERSION] da dong dau version=%s applied_by=%s applied_on=%s "
+        "checksum=%s note=%s",
+        version, applied_by, applied_on or "(khong biet)", checksum[:16], note or "-",
     )
 
 
@@ -214,4 +425,28 @@ def assert_startup_compatible(cur) -> int:
 
     if error:
         raise error
+
+    # Checksum, sau khi phiên bản đã khớp. Hai mức, cố ý khác nhau:
+    #
+    #   LỆCH   -> ném. Nội dung migration đã đổi sau khi áp dụng, nên cái nhãn
+    #             "v5" trên cơ sở dữ liệu này và cái "v5" trong mã không còn
+    #             chỉ cùng một lượt biến đổi. Không nhìn lược đồ mà phát hiện
+    #             được, nên đây là chỗ duy nhất bắt được.
+    #
+    #   THIẾU  -> chỉ cảnh báo. Sản xuất mang một dòng v5 ghi ngày 12/08/2026,
+    #             trước khi cột checksum tồn tại. Nếu chặn khởi động ở đây thì
+    #             chính lượt triển khai mang cột này lên sẽ làm sập sản xuất
+    #             trước khi có ảnh nào chạy được `--adopt-checksum`. Đường chặn
+    #             nằm ở `app.cli.migrate`, chạy TRƯỚC khi stack lên và dừng hẳn
+    #             lượt triển khai — không có gì lọt qua.
+    problem = checksum_problem(cur)
+    if isinstance(problem, MigrationChecksumMismatch):
+        logger.error("[SCHEMA-VERSION] %s", " ".join(str(problem).split()))
+        raise problem
+    if isinstance(problem, MigrationChecksumMissing):
+        logger.warning(
+            "[SCHEMA-VERSION] v%s CHUA co checksum — chay "
+            "`python -m app.cli.migrate --adopt-checksum` de xac nhan mot lan.",
+            db_version)
+
     return db_version

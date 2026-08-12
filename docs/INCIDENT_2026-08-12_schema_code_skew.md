@@ -294,7 +294,66 @@ liệu hoàn toàn đúng.
 `missing_objects()` còn trả về mục — đóng dấu một lược đồ dở dang biến cổng
 thành đồ trang trí, mà một cổng trang trí còn tệ hơn không có cổng.
 
-### 6.7 Cái vẫn còn hở
+### 6.7 Migration đã áp dụng là BẤT BIẾN — cưỡng chế bằng checksum
+
+Cổng phiên bản trả lời "cơ sở dữ liệu này ở phiên bản nào". Nó không trả lời
+được câu hỏi nguy hiểm hơn: **v5 trên máy này có phải cùng một lượt biến đổi
+với v5 trong mã hôm nay không?**
+
+Hai máy cùng nhãn v5 mà đi qua hai payload khác nhau sẽ giống hệt nhau ở mọi
+phép kiểm cấu trúc — đủ bảng, đủ ràng buộc, đủ trigger — trong khi dữ liệu đã
+được biến đổi khác nhau. Không nhìn lược đồ mà phát hiện được.
+
+```
+schema_migrations
+  version · applied_at · applied_by · applied_on · migration_checksum · note
+```
+
+Quy tắc: **một phiên bản đã áp dụng ở bất kỳ môi trường nào thì nội dung của nó
+đóng băng.** Cần sửa thì tạo `N+1`, không sửa lại `N`.
+
+**Băm cái gì.** Chỉ **payload một chiều** (11 câu), không phải toàn bộ DDL.
+`ensure_tables()` được phép thêm bảng, thêm cột, cài lại RLS ở mỗi lần khởi
+động — nếu checksum phủ cả phần đó thì thêm một bảng mới sẽ làm gate đỏ và buộc
+bump phiên bản cho một thay đổi thuần cộng thêm. Một cổng kêu quá nhiều là một
+cổng bị gỡ.
+
+**Chuẩn hoá trước khi băm**, nếu không thì sửa chính tả trong một chú thích SQL
+cũng làm sản xuất từ chối khởi động. Bỏ chú thích `--` và gộp khoảng trắng, chỉ
+ở phần MÃ — trong chuỗi nháy đơn thì giữ nguyên từng ký tự, vì
+`RAISE EXCEPTION 'a--b'` không được cắt thành `RAISE EXCEPTION 'a`. Số câu nằm
+trong phần được băm, để việc gộp hai câu thành một cũng bị bắt.
+
+Đo trên cơ sở dữ liệu vứt đi:
+
+| thay đổi | số câu | checksum | gate |
+|---|---|---|---|
+| thêm một dòng chú thích | 11 | không đổi | xanh |
+| `IF n = 0` → `IF n <= 0` | 11 | đổi | **đỏ** |
+| đổi xuống dòng / thụt lề | 11 | không đổi | xanh |
+
+**NULL không tự hợp thức hoá.** Sản xuất mang một dòng v5 ghi ngày 12/08/2026,
+trước khi cột checksum ra đời. Một cơ chế "nếu NULL thì điền giá trị hiện tại"
+sẽ khiến một migration ĐÃ BỊ SỬA tự hợp thức hoá ở lần khởi động kế tiếp — mất
+đúng thứ cả cơ chế này sinh ra để giữ. Phải đi qua `--adopt-checksum`, và cửa
+đó kiểm ba điều trước khi ghi: đã có phiên bản đóng dấu, phiên bản nằm trong
+khoảng ảnh này hỗ trợ, và `missing_objects()` rỗng. Nó **không bao giờ ghi đè**
+một checksum đã có, kể cả khi lệch — ghi đè lúc lệch chính là xoá bằng chứng.
+
+Hai mức nghiêm khắc, cố ý khác nhau:
+
+| trạng thái | `migrate --to` | khởi động backend |
+|---|---|---|
+| khớp | chạy | lên |
+| **lệch** | từ chối | **ném, không lên** |
+| NULL (chưa xác nhận) | từ chối | cảnh báo lớn, vẫn lên |
+
+Cột thứ ba ở dòng NULL là chủ ý: nếu chặn khởi động thì chính lượt triển khai
+mang cột checksum lên sẽ làm sập sản xuất trước khi có ảnh nào chạy được lệnh
+xác nhận. Đường chặn nằm ở `migrate`, chạy **trước** khi stack lên và dừng hẳn
+lượt triển khai — không có gì lọt qua.
+
+### 6.8 Cái vẫn còn hở
 
 `ensure_tables()` bây giờ chỉ thêm, nhưng nó **vẫn chạy khá nhiều DDL**:
 `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, cài lại chính sách

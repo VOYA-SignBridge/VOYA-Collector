@@ -607,12 +607,31 @@ def pytest_sessionstart(session):
         db.migrate_database(stamp=False)
 
         from app.storage.schema_version import (
-            APP_SCHEMA_VERSION, read_schema_version, stamp_schema_version,
+            APP_SCHEMA_VERSION, read_recorded_checksum, read_schema_version,
+            stamp_schema_version,
         )
 
+        need_adopt = False
         with db._migration_cursor() as cur:
             if read_schema_version(cur) is None:
                 stamp_schema_version(cur, APP_SCHEMA_VERSION, note="pytest bootstrap")
+            else:
+                _, recorded, has_column = read_recorded_checksum(cur)
+                need_adopt = has_column and recorded is None
+
+        # Cơ sở dữ liệu test đã được đóng dấu TRƯỚC khi cột checksum ra đời —
+        # cùng trạng thái với sản xuất. Đi qua ĐÚNG cửa `cmd_adopt_checksum()`
+        # chứ không tự `UPDATE`: cửa đó kiểm lược đồ có đầy đủ không trước khi
+        # ghi, và nó từ chối ghi đè một checksum đã có.
+        #
+        # Viết một `UPDATE ... WHERE migration_checksum IS NULL` ở đây thì
+        # nhanh hơn, nhưng nó dựng đúng cái mẫu mà cả cơ chế này cấm — và mẫu
+        # trong conftest là mẫu người ta chép.
+        if need_adopt:
+            from app.cli.migrate import cmd_adopt_checksum
+
+            if cmd_adopt_checksum() != 0:
+                print("[conftest] KHONG xac nhan duoc checksum — xem thong bao tren")
 
         _ARTIFACT_BEFORE = _artifact_snapshot()
     except Exception as exc:  # pragma: no cover

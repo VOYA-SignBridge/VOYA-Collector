@@ -74,26 +74,126 @@ def _schema_looks_complete() -> list[str]:
 
 
 def cmd_status() -> int:
+    from app.storage.metadata_db import _migration_cursor
+    from app.storage.schema_version import (
+        checksum_problem, migration_checksum, migration_payload,
+        read_recorded_checksum,
+    )
+
     version, database = _current_version()
     missing = _schema_looks_complete()
     error = compatibility_error(version)
+
+    with _migration_cursor() as cur:
+        _, recorded, has_column = read_recorded_checksum(cur)
+        ck_problem = checksum_problem(cur)
+    current_ck = migration_checksum()
 
     print(f"co so du lieu    : {database}")
     print(f"phien ban luoc do: "
           f"{version if version is not None else '(chua dong dau)'}")
     print(f"anh nay ho tro   : v{MIN_SUPPORTED_SCHEMA_VERSION}..v{APP_SCHEMA_VERSION}")
+    print(f"payload mot chieu: {len(migration_payload())} cau")
+    print(f"checksum hien tai: {current_ck}")
+    print(f"checksum da ghi  : "
+          f"{recorded if recorded else ('(NULL)' if has_column else '(chua co cot)')}")
     print(f"doi tuong thieu  : {len(missing)}")
     for name in missing[:20]:
         print(f"    - {name}")
     if len(missing) > 20:
         print(f"    ... con {len(missing) - 20} muc nua")
 
-    if error is None:
+    if error is None and ck_problem is None:
         print("\nKET LUAN: khop — backend khoi dong duoc tren co so du lieu nay.")
         return 0
 
-    print(f"\nKET LUAN: KHONG KHOP\n{error}")
+    print("\nKET LUAN: KHONG KHOP")
+    if error:
+        print(error)
+    if ck_problem:
+        print(ck_problem)
     return 1
+
+
+def cmd_adopt_checksum() -> int:
+    """Xác nhận MỘT LẦN checksum cho một phiên bản đã đóng dấu trước khi có cột.
+
+    Vì sao phải là một lệnh riêng thay vì tự điền khi thấy NULL
+    -----------------------------------------------------------
+    Vì "nếu NULL thì điền giá trị hiện tại" hợp thức hoá mọi thứ. Một migration
+    đã bị sửa cũng cho ra NULL trên máy chưa nâng cấp, và lượt khởi động kế tiếp
+    sẽ ghi nội dung ĐÃ SỬA vào sổ như thể đó là bản gốc. Từ đó không ai còn phát
+    hiện được gì — chính là điều checksum sinh ra để ngăn.
+
+    Nên lệnh này kiểm ba điều trước khi ghi, và từ chối nếu bất kỳ điều nào sai:
+
+      1. Đã có một phiên bản được đóng dấu (không phải cơ sở dữ liệu trắng).
+      2. Phiên bản đó nằm trong khoảng ảnh này hỗ trợ — nếu không thì checksum
+         của ảnh này không mô tả lượt biến đổi mà cơ sở dữ liệu đã đi qua.
+      3. Lược đồ ĐẦY ĐỦ: `missing_objects()` rỗng. Đây là bằng chứng gián tiếp
+         nhưng thật rằng migration đã chạy trọn vẹn, chứ không dừng giữa chừng.
+
+    Và nó chỉ ghi khi checksum đang NULL. Đã có giá trị thì KHÔNG ghi đè, kể cả
+    khi lệch — ghi đè lúc lệch chính là xoá bằng chứng.
+    """
+    from app.storage.metadata_db import _migration_cursor
+    from app.storage.schema_version import (
+        SCHEMA_VERSION_TABLE, migration_checksum, read_recorded_checksum,
+    )
+
+    version, database = _current_version()
+    if version is None:
+        print(f"TU CHOI: {database!r} chua dong dau phien ban nao. "
+              f"Day khong phai viec cua --adopt-checksum.\n"
+              f"    Chay:  python -m app.cli.migrate --to {APP_SCHEMA_VERSION}")
+        return 2
+
+    if not (MIN_SUPPORTED_SCHEMA_VERSION <= version <= APP_SCHEMA_VERSION):
+        print(f"TU CHOI: luoc do o v{version}, anh nay ho tro "
+              f"v{MIN_SUPPORTED_SCHEMA_VERSION}..v{APP_SCHEMA_VERSION}. "
+              f"Checksum cua anh nay khong mo ta lan bien doi ma co so du lieu "
+              f"nay da di qua.")
+        return 2
+
+    missing = _schema_looks_complete()
+    if missing:
+        print(f"TU CHOI: luoc do con thieu {len(missing)} doi tuong, nen khong "
+              f"the khang dinh migration v{version} da chay tron ven:")
+        for name in missing[:20]:
+            print(f"    - {name}")
+        return 2
+
+    with _migration_cursor() as cur:
+        _, recorded, has_column = read_recorded_checksum(cur)
+        if not has_column:
+            print("TU CHOI: cot `migration_checksum` chua ton tai. Chay backend "
+                  "mot lan (hoac `--to`) de `ensure_tables()` them cot, roi thu lai.")
+            return 2
+
+        current = migration_checksum()
+        if recorded is not None:
+            if recorded == current:
+                print(f"v{version} da co checksum va KHOP — khong can lam gi.")
+                return 0
+            print(f"TU CHOI: v{version} DA co checksum va no LECH.\n"
+                  f"    da ghi   : {recorded}\n"
+                  f"    hien tai : {current}\n"
+                  f"Lenh nay khong ghi de. Ghi de luc lech chinh la xoa bang chung.\n"
+                  f"Hoac hoan nguyen noi dung migration ve dung ban da ap dung, "
+                  f"hoac tao phien ban v{version + 1}.")
+            return 2
+
+        cur.execute(
+            f"UPDATE {SCHEMA_VERSION_TABLE} SET migration_checksum = %s, "
+            f"note = coalesce(note || ' | ', '') || %s "
+            f"WHERE version = %s AND migration_checksum IS NULL",
+            (current, "checksum adopted (one-time)", version))
+        touched = cur.rowcount
+
+    print(f"Da ghi checksum cho v{version} tren {database!r}: {current}")
+    print(f"    so dong duoc xac nhan: {touched}")
+    print("Tu gio noi dung migration v%d la BAT BIEN: sua no se lam gate do." % version)
+    return 0
 
 
 def cmd_adopt(force: bool = False) -> int:
@@ -156,6 +256,45 @@ def cmd_migrate(target: int, dry_run: bool = False, note: str | None = None) -> 
               f"docs/BACKUP_RESTORE.md.")
         return 2
 
+    # Checksum, TRƯỚC khi chạy bất kỳ câu nào.
+    #
+    # Nếu nội dung migration đã đổi so với lúc nó được áp dụng, thì chạy lại nó
+    # không phải là "chạy lại" — nó là chạy một lượt biến đổi KHÁC dưới cùng một
+    # nhãn phiên bản. Bắt ở đây, trước khi có câu nào chạm vào cơ sở dữ liệu.
+    #
+    # Trường hợp NULL cũng dừng ở đây, và đây là chỗ ĐÚNG để dừng: `deploy.sh`
+    # chạy lệnh này trước khi dựng stack, nên một lượt triển khai lên máy chưa
+    # xác nhận checksum sẽ dừng lại sạch sẽ — container cũ vẫn chạy mã cũ — kèm
+    # đúng lệnh cần gõ.
+    from app.storage.metadata_db import _migration_cursor
+    from app.storage.schema_version import (
+        MigrationChecksumMismatch, MigrationChecksumMissing, checksum_problem,
+    )
+
+    with _migration_cursor() as cur:
+        problem = checksum_problem(cur)
+
+    if isinstance(problem, MigrationChecksumMismatch):
+        print(f"TU CHOI: {problem}")
+        return 2
+
+    if isinstance(problem, MigrationChecksumMissing):
+        # KHÔNG chặn ở đây, và lý do là một vòng chết có thật.
+        #
+        # Cột `migration_checksum` do chính lượt migration này tạo ra (nó nằm
+        # trong `SCHEMA_VERSION_DDL`). Nếu "chưa có checksum" là điều kiện chặn
+        # thì trên mọi cơ sở dữ liệu đóng dấu trước khi cột ra đời — tức là
+        # sản xuất — lệnh sẽ từ chối chạy chính lượt migration duy nhất có thể
+        # thêm cột đó. Không lệnh nào thoát ra được.
+        #
+        # Bỏ chặn ở đây KHÔNG mở đường cho việc tự hợp thức hoá, vì hai lẽ:
+        # lượt chạy này kết thúc bằng `stamp_schema_version`, ghi một dòng MỚI
+        # kèm checksum hiện tại — một hành động do người gõ ra, có
+        # `EXPECTED_DATABASE`, và có kiểm `missing_objects()` ngay sau đó. Còn
+        # nếu payload ĐÃ bị sửa mà dòng cũ CÓ checksum, nhánh trên đã chặn rồi.
+        print(f"LUU Y: {' '.join(str(problem).split())[:200]}")
+        print("       Lenh nay se ghi mot dong moi kem checksum hien tai.\n")
+
     one_way = one_way_statements()
     if dry_run:
         from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
@@ -216,6 +355,10 @@ def main(argv: list[str] | None = None) -> int:
                        help=f"Migrate len phien ban N (anh nay: {APP_SCHEMA_VERSION}).")
     group.add_argument("--adopt", action="store_true",
                        help="Dong dau mot luoc do da dung san nhung chua co dau.")
+    group.add_argument("--adopt-checksum", action="store_true",
+                       help="Xac nhan MOT LAN checksum cho phien ban da dong dau "
+                            "truoc khi cot checksum ton tai. Co kiem chung, va "
+                            "khong bao gio ghi de mot checksum da co.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Voi --to: in ra cac cau mot chieu se chay, roi thoat.")
     parser.add_argument("--force", action="store_true",
@@ -248,6 +391,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
+        if args.adopt_checksum:
+            return cmd_adopt_checksum()
         if args.adopt:
             return cmd_adopt(force=args.force)
         return cmd_migrate(args.to, dry_run=args.dry_run, note=args.note)

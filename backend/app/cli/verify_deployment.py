@@ -88,6 +88,39 @@ def main() -> int:
     except Exception as exc:
         record(WARN, "phien ban luoc do", f"khong kiem tra duoc: {exc}")
 
+    # ---- 0b. noi dung migration co con nguyen nhu luc ap dung -------------
+    #
+    # Phiên bản khớp KHÔNG có nghĩa nội dung khớp. Hai máy cùng mang nhãn v5 mà
+    # đi qua hai payload khác nhau sẽ giống hệt nhau ở mọi phép kiểm cấu trúc
+    # bên dưới — số bảng, ràng buộc, trigger đều đúng — trong khi dữ liệu đã
+    # được biến đổi khác nhau. Đây là chỗ duy nhất trong toàn bộ báo cáo này
+    # nhìn thấy sự khác biệt đó.
+    try:
+        from app.storage.metadata_db import _migration_cursor
+        from app.storage.schema_version import (
+            MigrationChecksumMismatch, checksum_problem, migration_checksum,
+            migration_payload, read_recorded_checksum,
+        )
+
+        with _migration_cursor() as cur:
+            _, recorded, has_column = read_recorded_checksum(cur)
+            ck_problem = checksum_problem(cur)
+        current = migration_checksum()
+        n_stmt = len(migration_payload())
+
+        if ck_problem is None:
+            record(PASS, "checksum migration",
+                   f"{n_stmt} cau mot chieu, {current[:16]}… khop")
+        elif isinstance(ck_problem, MigrationChecksumMismatch):
+            record(FAIL, "checksum migration",
+                   f"NOI DUNG DA DOI sau khi ap dung — ghi {str(recorded)[:16]}… "
+                   f"nhung hien tai {current[:16]}…")
+        else:
+            record(FAIL, "checksum migration",
+                   "chua xac nhan — chay `python -m app.cli.migrate --adopt-checksum`")
+    except Exception as exc:
+        record(WARN, "checksum migration", f"khong kiem tra duoc: {exc}")
+
     # ---- 1. tables ------------------------------------------------------
     expected_tables = {
         "users", "classes", "samples", "raw_uploads", "training_jobs",

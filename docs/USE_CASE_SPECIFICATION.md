@@ -91,6 +91,23 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 
 ## 2. Danh sách use case
 
+Hệ thống có **7 nhóm nghiệp vụ chính**, tổng **75 use case**. Ranh giới giữa các
+nhóm không phải là màn hình mà là **thứ đang bị quản lý**: danh tính, dữ liệu
+thô, danh mục từ vựng, mô hình, tổ chức, nền tảng, và dịch vụ quanh nó.
+
+| Gói | Nhóm nghiệp vụ | Câu hỏi nhóm đó trả lời | Số UC | Actor chính |
+|---|---|---|---|---|
+| **A** | Danh tính và truy cập | Anh là ai, và anh đã đồng ý những gì? | 14 | Guest, Registered User |
+| **B** | Thu thập dữ liệu | Mẫu vào hệ thống bằng đường nào, và mất đi bằng đường nào? | 13 | Data Contributor |
+| **C** | Danh mục từ vựng | Được phép thu **lớp** nào, theo phương ngữ nào? | 10 | Data Editor, Platform Admin |
+| **D** | Huấn luyện và suy luận | Từ dữ liệu ra mô hình, rồi mô hình phục vụ ai? | 9 | Data Editor |
+| **E** | Tổ chức và đăng ký dịch vụ | Ai thuộc về tổ chức nào, trong hạn mức nào? | 8 | Tenant Admin |
+| **F** | Quản trị nền tảng | Ai vận hành cả hệ thống, và lấy gì làm bằng chứng? | 15 | Platform Administrator |
+| **G** | Hỗ trợ và tích hợp | Khi hỏng thì kêu ai, và máy khác nối vào thế nào? | 6 | Registered User, Tenant Admin |
+
+Ba nhóm A/B/C là **vòng đời của một mẫu dữ liệu**; D là chỗ dữ liệu thành sản
+phẩm; E/F là hai vòng quản trị **không** lồng nhau (xem §1.1); G là vành ngoài.
+
 ### Gói A — Danh tính và truy cập (Access & Identity)
 
 | ID | Use case | Main actor | Priority |
@@ -108,6 +125,7 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC011 | Accept legal document | Registered User | Essential |
 | UC012 | Withdraw consent | Registered User | Essential |
 | UC013 | Use trial recognition | Guest | Optional |
+| UC064 | View legal document | Guest | Essential |
 
 ### Gói B — Thu thập dữ liệu (Data Collection)
 
@@ -125,6 +143,7 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC023 | Delete sample | Data Contributor | Essential |
 | UC024 | Manage trash | Data Contributor | Important |
 | UC025 | Export dataset snapshot | Platform Administrator | Important |
+| UC065 | Set capture preferences | Data Contributor | Optional |
 
 ### Gói C — Danh mục từ vựng (Vocabulary Catalog)
 
@@ -136,6 +155,10 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC029 | Propose dialect | Data Editor | Optional |
 | UC030 | Moderate dialect proposal | Platform Administrator | Optional |
 | UC031 | View collection statistics | Data Contributor | Important |
+| UC066 | Merge classes | Data Editor | Important |
+| UC067 | Maintain community catalog template | Platform Administrator | Important |
+| UC068 | Publish community catalog version | Platform Administrator | Important |
+| UC069 | Clone catalog into an organisation | Platform Administrator | Important |
 
 ### Gói D — Huấn luyện và suy luận (Training & Inference)
 
@@ -148,6 +171,8 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC036 | Promote model version | Platform Administrator | Important |
 | UC037 | Recognize sign in realtime | Data Contributor | Essential |
 | UC038 | Speak recognized text | Data Contributor | Optional |
+| UC070 | Test trained model | Data Editor | Important |
+| UC071 | Prepare research release | Data Editor | Important |
 
 ### Gói E — Tổ chức và đăng ký dịch vụ (Organization & Subscription)
 
@@ -177,6 +202,10 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC055 | Monitor system health | Platform Administrator | Important |
 | UC056 | Synchronize storage and database | Platform Administrator | Important |
 | UC057 | Manage billing plans | Platform Administrator | Optional |
+| UC072 | Draft and review legal document | Platform Administrator | Important |
+| UC073 | Review consent records | Platform Administrator | Important |
+| UC074 | Back up and restore data | Platform Administrator | Essential |
+| UC075 | Verify deployment freshness | Platform Administrator | Important |
 
 ### Gói G — Hỗ trợ và tích hợp (Support & Integration)
 
@@ -214,6 +243,7 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC057 Manage billing plans | UC047 Elevate privileges | `require_sudo` — hạ gói hay treo một tổ chức là thao tác gây hậu quả. |
 | UC056 Synchronize storage and database | UC054 Verify source-of-truth integrity | Muốn sửa thì trước hết phải biết ba nơi lệch nhau ở đâu. |
 | UC060 Handle support queue | UC059 Reply to support ticket | Trực hàng đợi luôn kết thúc bằng một lượt trả lời. |
+| UC011 Accept legal document | UC064 View legal document | Phải đọc được văn bản thì mới ký được nó. |
 
 **Ba chỗ CỐ Ý không phải include** — dễ ghi nhầm, nên nói rõ:
 
@@ -239,6 +269,9 @@ Guest ── (không kế thừa; tách riêng vì chưa có danh tính)
 | UC022 Reassign session signer | UC019 View label detail | Khi phát hiện phiên thu gán sai người ký. |
 | UC024 Manage trash | UC023 Delete sample, UC028 Remove class | Khi cần hoàn tác hoặc xoá vĩnh viễn: xoá mềm tạo ra điểm mở rộng. |
 | UC038 Speak recognized text | UC037 Recognize sign in realtime | Khi người dùng bật đầu ra giọng nói. |
+| UC066 Merge classes | UC027 Update class | Khi việc cần làm là gộp hai lớp trùng, không phải đổi tên một lớp. |
+| UC069 Clone catalog into an organisation | UC039 Manage tenants | Khi tổ chức vừa tạo cần danh mục mồi để bắt đầu thu. |
+| UC070 Test trained model | UC035 Review evaluation and provenance | Khi muốn thử một mẫu thật trước khi quyết định thăng hạng. |
 
 ### 3.3 Generalization
 
@@ -603,7 +636,7 @@ flowchart LR
 
 **Relationship:**
 - **Association:** Registered User – Accept legal document
-- **Include:** None
+- **Include:** UC064 View legal document
 - **Extend:** None *(UC012 mở rộng use case này)*
 - **Generalization:** None
 
@@ -1114,7 +1147,7 @@ flowchart LR
 **Relationship:**
 - **Association:** Data Editor – Update class
 - **Include:** None
-- **Extend:** None
+- **Extend:** None *(UC066 mở rộng use case này)*
 - **Generalization:** None
 
 **Normal flow:**
@@ -1361,7 +1394,7 @@ flowchart LR
 **Relationship:**
 - **Association:** Data Editor – Review evaluation and provenance
 - **Include:** None
-- **Extend:** None
+- **Extend:** None *(UC070 mở rộng use case này)*
 - **Generalization:** None
 
 **Normal flow:**
@@ -1487,7 +1520,7 @@ flowchart LR
 **Relationship:**
 - **Association:** Platform Administrator – Manage tenants
 - **Include:** None
-- **Extend:** None
+- **Extend:** None *(UC069 mở rộng use case này)*
 - **Generalization:** None
 
 **Normal flow:**
@@ -2074,9 +2107,10 @@ flowchart LR
 6. System writes an audit entry and displays the platform-wide usage against the plans.
 
 **Exceptional flow:**
-1. **Lowering a quota below current usage:** In step 4, System warns that the organisations already above the new limit keep their data but cannot add more.
-2. **Plan in use:** In step 3, a plan assigned to organisations cannot be deleted; it can only be edited or retired.
-3. **Rate limit:** In step 3, catalogue writes share the same rate limit as the other catalogue operations.
+1. **Suspending an organisation:** From step 5, the Administrator may also set the organisation's commercial state. Suspension stops writes while leaving reads and exports working — that state lives on the **commercial** axis (`billing_status`), and it is not the same thing as the administrative lock of an account in UC048. The schema deliberately expresses "stop writing, keep reading" here and nowhere else.
+2. **Lowering a quota below current usage:** In step 4, System warns that the organisations already above the new limit keep their data but cannot add more.
+3. **Plan in use:** In step 3, a plan assigned to organisations cannot be deleted; it can only be edited or retired.
+4. **Rate limit:** In step 3, catalogue writes share the same rate limit as the other catalogue operations.
 
 ---
 
@@ -2261,7 +2295,392 @@ flowchart LR
 
 ---
 
-## 12. Ghi chú áp dụng
+## 12. Use case phát sinh sau rà soát (UC064–UC075)
+
+*Bổ sung sau khi quét toàn bộ endpoint đang được mount và bộ công cụ vận hành.
+Mười hai use case dưới đây có endpoint hoặc script thật đứng sau nhưng bản đầu
+tiên bỏ sót. Số hiệu nối tiếp để ID cũ không phải đánh lại; cột "Gói" nói chúng
+thuộc về nhóm nghiệp vụ nào.*
+
+| ID | Use case | Gói | Main actor | Nguồn trong mã |
+|---|---|---|---|---|
+| UC064 | View legal document | A | Guest | `GET /legal/documents`, `/legal/{kind}/content`, `/file` |
+| UC065 | Set capture preferences | B | Data Contributor | `GET,POST /classes/preferences` |
+| UC066 | Merge classes | C | Data Editor | `POST /dataset/labels/merge` |
+| UC067 | Maintain community catalog template | C | Platform Administrator | `GET /vocabulary/catalog`, `PATCH .../dialects`, `.../profiles`, `POST .../seed` |
+| UC068 | Publish community catalog version | C | Platform Administrator | `POST /vocabulary/catalog/publish`, `GET .../versions` |
+| UC069 | Clone catalog into an organisation | C | Platform Administrator | `POST /vocabulary/catalog/clone` |
+| UC070 | Test trained model | D | Data Editor | `POST /training/jobs/{job_id}/predict` |
+| UC071 | Prepare research release | D | Data Editor | `scripts/prepare_research_release.py` |
+| UC072 | Draft and review legal document | F | Platform Administrator | `/admin/legal/drafts*` (5 endpoint) |
+| UC073 | Review consent records | F | Platform Administrator | `GET /admin/legal/consents/{user_id}`, `/admin/legal/events` |
+| UC074 | Back up and restore data | F | Platform Administrator | `scripts/pg_backup.sh`, `scripts/pg_restore.sh` |
+| UC075 | Verify deployment freshness | F | Platform Administrator | `scripts/check_deploy_freshness.py`, `cli/verify_deployment.py` |
+
+---
+
+### UC064 — View legal document
+
+| **Use Case** | View legal document | **ID** | UC064 |
+|---|---|---|---|
+| **Main actor** | Guest | **Priority** | Essential |
+| **Trigger** | Guest | **Type** | external |
+
+**Brief description:** *Anyone, signed in or not, reads the legal documents the platform has published: terms of service, privacy policy and the data-collection consent. Reading is public; accepting (UC011) is not.*
+
+**Relationship:**
+- **Association:** Guest – View legal document
+- **Include:** None
+- **Extend:** None *(UC011 dùng lại use case này qua «include»)*
+- **Generalization:** None
+
+**Normal flow:**
+1. The Guest opens the legal section; System lists the documents in force with their kind, version and effective date.
+2. The Guest selects a document.
+3. System returns the body of the published version, rendered for reading in the browser.
+4. The Guest may download the document file instead of reading it on screen.
+5. System serves the file of that exact version.
+
+**Exceptional flow:**
+1. **Unknown kind:** In step 3, if the requested kind has no published version, System returns "not found" rather than an empty page.
+2. **Older version requested:** In step 2, only the version in force is public; reading a superseded version is an administrator action (UC072).
+3. **No file attached:** In step 5, if the version was published as body text with no uploaded file, System says so and keeps the on-screen rendering available.
+
+---
+
+### UC065 — Set capture preferences
+
+| **Use Case** | Set capture preferences | **ID** | UC065 |
+|---|---|---|---|
+| **Main actor** | Data Contributor | **Priority** | Optional |
+| **Trigger** | Data Contributor | **Type** | external |
+
+**Brief description:** *The Data Contributor stores the language and dialect they normally record in, so that the capture screens stop asking the same two questions at every session.*
+
+**Relationship:**
+- **Association:** Data Contributor – Set capture preferences
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Contributor opens the capture screen; System reads the stored preference and pre-selects the language and the dialect.
+2. The Contributor changes the selection.
+3. The Contributor saves it as their default.
+4. System stores the preference against the account.
+5. System applies it to the capture, upload and catalog screens from then on.
+
+**Exceptional flow:**
+1. **No preference yet:** In step 1, System falls back to the organisation's default rather than to a blank selection.
+2. **Dialect no longer approved:** In step 1, if the stored dialect was rejected or removed meanwhile, System drops back to the language default and says why.
+3. **Preference is not a permission:** In step 5, the preference only decides what is pre-selected; it never widens what the account is allowed to write.
+
+---
+
+### UC066 — Merge classes
+
+| **Use Case** | Merge classes | **ID** | UC066 |
+|---|---|---|---|
+| **Main actor** | Data Editor | **Priority** | Important |
+| **Trigger** | Data Editor | **Type** | external |
+
+**Brief description:** *The Data Editor folds one class into another when the catalog turns out to hold two entries for the same sign. The samples of the source class move to the destination class instead of being lost.*
+
+**Relationship:**
+- **Association:** Data Editor – Merge classes
+- **Include:** None
+- **Extend:** UC027 Update class
+- **Generalization:** None
+
+**Normal flow:**
+1. The Editor opens a class and chooses "Merge into another class".
+2. The Editor picks the destination class.
+3. System displays how many samples will move and warns that the source class disappears from the catalog.
+4. The Editor confirms.
+5. System moves every sample of the source class to the destination class, in the registry and in the database together.
+6. System retires the source class and writes an audit entry naming both classes.
+7. System displays the destination class with the combined sample count.
+
+**Exceptional flow:**
+1. **Different language or dialect:** In step 4, System refuses to merge across languages or dialects; two entries that differ there are not duplicates.
+2. **Class index:** In step 6, the destination keeps its own class index and the source index is retired, never reused — a reused index would silently relabel every model trained before the merge.
+3. **Merge into itself:** In step 2, System refuses.
+4. **Conflicting capture requirements:** In step 3, if the two classes disagree on the number of hands required, System states which requirement the merged samples will be judged against.
+
+---
+
+### UC067 — Maintain community catalog template
+
+| **Use Case** | Maintain community catalog template | **ID** | UC067 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Important |
+| **Trigger** | Platform Administrator | **Type** | external |
+
+**Brief description:** *The Platform Administrator edits the community template — the shared dialects and capture profiles that every organisation starts from. The template is the live, editable plane; it is not what organisations consume until it is frozen into a version (UC068).*
+
+**Relationship:**
+- **Association:** Platform Administrator – Maintain community catalog template
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator opens the community catalog; System displays the live dialects and profiles, the content hash of the live template, and the last published version with its own hash.
+2. The Administrator compares the two hashes to see whether the template has been edited since the last publication.
+3. The Administrator edits a dialect or a capture profile.
+4. System validates the change and stores it on the live template, recording who changed it.
+5. System recomputes the content hash so the difference against the published version stays visible.
+
+**Exceptional flow:**
+1. **Unknown dialect or profile:** In step 4, System returns "not found" for an identifier that is not in the template.
+2. **Invalid value:** In step 4, System refuses and leaves the template untouched.
+3. **Refill from the seed files:** The Administrator may re-run the first-install seed. It only inserts what is missing — rows an administrator has since edited are left alone. There is deliberately **no** endpoint that overwrites administrator edits from the seed files, so this is a gap-filler, not a reset.
+4. **Not a tenant action:** In step 3, only platform administrators reach this plane; an organisation edits its **own** registry, never the shared template.
+
+---
+
+### UC068 — Publish community catalog version
+
+| **Use Case** | Publish community catalog version | **ID** | UC068 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Important |
+| **Trigger** | Platform Administrator | **Type** | external |
+
+**Brief description:** *The Platform Administrator freezes the live template into an immutable, numbered version. Versions are what organisations and trained artefacts refer to, so freezing is what makes a catalog state citable.*
+
+**Relationship:**
+- **Association:** Platform Administrator – Publish community catalog version
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator opens the catalog and reads the version history: version number, content hash, author and note.
+2. The Administrator writes a note describing what changed.
+3. The Administrator publishes.
+4. System computes the content hash of the live template and compares it with the last published version.
+5. System mints a new immutable version holding that content and reports the version number.
+6. System reports whether a new version was actually created.
+
+**Exceptional flow:**
+1. **Nothing changed:** In step 5, publishing an unchanged template mints **no** duplicate: System returns the version that already holds that content and reports that nothing was created, so the screen can say "v7 already holds this" instead of a misleading success.
+2. **Version is immutable:** After step 5, the content of a published version is never edited; a correction is a new version.
+3. **Unknown version requested:** In step 1, reading a version number that does not exist returns "not found".
+
+---
+
+### UC069 — Clone catalog into an organisation
+
+| **Use Case** | Clone catalog into an organisation | **ID** | UC069 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Important |
+| **Trigger** | Platform Administrator | **Type** | external |
+
+**Brief description:** *The Platform Administrator bootstraps a new organisation's registry from the community template, so that the organisation starts with usable dialects and capture profiles instead of an empty catalog.*
+
+**Relationship:**
+- **Association:** Platform Administrator – Clone catalog into an organisation
+- **Include:** None
+- **Extend:** UC039 Manage tenants
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator selects the organisation to bootstrap.
+2. System displays what the template currently contains.
+3. The Administrator confirms the clone.
+4. System copies the template rows into the organisation's registry, inserting only what is not already there.
+5. System reports how many dialects and profiles were created.
+
+**Exceptional flow:**
+1. **Run twice:** In step 4, a second run is harmless but fills gaps only. It is **not a repair tool**: an organisation that has diverged from the template keeps its own rows, and the template does not overwrite them.
+2. **Unknown organisation:** In step 4, the registry rows carry no foreign key to the organisation table, so cloning to an identifier that does not exist would create rows nobody can reach — System validates the identifier itself before writing.
+3. **Missing identifier:** In step 3, System refuses without an organisation identifier.
+
+---
+
+### UC070 — Test trained model
+
+| **Use Case** | Test trained model | **ID** | UC070 |
+|---|---|---|---|
+| **Main actor** | Data Editor | **Priority** | Important |
+| **Trigger** | Data Editor | **Type** | external |
+
+**Brief description:** *The Data Editor runs a sample through the model produced by a finished training job, before deciding whether it deserves to be promoted. The job's own checkpoint answers, not the model currently serving realtime recognition.*
+
+**Relationship:**
+- **Association:** Data Editor – Test trained model
+- **Include:** None
+- **Extend:** UC035 Review evaluation and provenance
+- **Generalization:** None
+
+**Normal flow:**
+1. The Editor opens a finished job and selects "Try this model".
+2. The Editor supplies a landmark window, either recorded on the spot or picked from existing samples.
+3. System checks the prediction quota.
+4. System loads the checkpoint of that job and runs the window through it.
+5. System displays the predicted label, the confidence, and the label index the model actually used.
+6. The Editor compares the answer with the expected label and decides whether to promote (UC036).
+
+**Exceptional flow:**
+1. **Job not finished:** In step 4, a job with no checkpoint cannot answer; System says the job produced no model.
+2. **Quota exhausted:** In step 3, System refuses and displays the prediction limit of the plan.
+3. **Shape mismatch:** In step 4, if the supplied window does not match the input the model was trained on, System reports the mismatch instead of returning a meaningless label.
+4. **Label index drift:** In step 5, if the catalog changed after training, System shows the model's own label index; the class the index points at today may differ from the one it was trained on, and that is exactly what this screen exists to reveal.
+
+---
+
+### UC071 — Prepare research release
+
+| **Use Case** | Prepare research release | **ID** | UC071 |
+|---|---|---|---|
+| **Main actor** | Data Editor | **Priority** | Important |
+| **Trigger** | Data Editor runs the release chain | **Type** | external |
+
+**Brief description:** *The Data Editor builds a citable research release: validate the samples, freeze a dataset manifest, derive the splits, and record every step. The chain stops at the first failure so a release is never half-built.*
+
+**Relationship:**
+- **Association:** Data Editor – Prepare research release
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Editor runs the release chain on the deployment host, naming the campaign and the manifest version.
+2. System validates the pilot samples of the campaign.
+3. System audits the dataset for duplicate samples.
+4. System creates the dataset manifest — never overwriting an existing version.
+5. System validates the manifest, including the checksum of every file it lists.
+6. System derives the sample-level split, then attempts the signer-disjoint split for each capture profile.
+7. System aggregates the experiment results and writes a release log holding every command, its exit code and the resulting checksums.
+
+**Exceptional flow:**
+1. **A step fails:** At any step, the chain stops at the first failure; the steps after it do not run, so a release is either complete or absent.
+2. **Not enough signer diversity:** In step 6, a failure of the signer-disjoint split is **reported, not fatal** — too few signers is a fact about the dataset, not a bug in the pipeline, and hiding it would be the actual error.
+3. **Manifest version exists:** In step 4, System refuses to overwrite; a new release takes a new version.
+4. **Training is not part of this:** After step 7, no model is trained. An official run must be launched explicitly with the research purpose, so nobody trains a paper model by accident.
+
+---
+
+### UC072 — Draft and review legal document
+
+| **Use Case** | Draft and review legal document | **ID** | UC072 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Important |
+| **Trigger** | Platform Administrator | **Type** | external |
+
+**Brief description:** *The Platform Administrator writes a legal document as a draft, moves it through review, and only then publishes it. Everything before publication is freely editable; publication is the one-way door (UC052).*
+
+**Relationship:**
+- **Association:** Platform Administrator – Draft and review legal document
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator opens the drafts list; System displays each draft with its kind, its state and who last touched it.
+2. The Administrator creates a draft, or opens an existing one.
+3. The Administrator edits the body and the metadata and saves; System stores the change.
+4. The Administrator moves the draft to the next state, for example from writing to review.
+5. A reviewer reads the draft and the versions already published for that kind, and compares them.
+6. When the draft is accepted, the Administrator publishes it from the draft (UC052), which mints an immutable version.
+
+**Exceptional flow:**
+1. **Publishing needs re-authentication:** In step 6, publication demands the password again; drafting and reviewing do not.
+2. **Draft deleted:** In step 3, a draft may be discarded at any time and leaves nothing behind — only publication is irreversible.
+3. **Comparing with a superseded version:** In step 5, administrators may read any past version, including ones no longer in force; the public may not (UC064).
+4. **Two administrators edit at once:** In step 3, the last save wins and the draft records who made it, which is why review happens on drafts rather than on published text.
+
+---
+
+### UC073 — Review consent records
+
+| **Use Case** | Review consent records | **ID** | UC073 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Important |
+| **Trigger** | Platform Administrator | **Type** | external |
+
+**Brief description:** *The Platform Administrator inspects who accepted which version of which document, and when a consent was withdrawn — the evidence behind every release decision the platform makes.*
+
+**Relationship:**
+- **Association:** Platform Administrator – Review consent records
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator opens the legal administration section and reads the publication events: which version of which kind became effective when, and by whom.
+2. The Administrator looks up an account.
+3. System displays that account's consents: document kind, version, content hash, acceptance time and withdrawal time when there is one.
+4. The Administrator uses the record to explain why a given sample is or is not included in a release.
+
+**Exceptional flow:**
+1. **No consent on file:** In step 3, System reports the account has none; that is the state that makes its samples unreleasable, and it must not be confused with a consent that was withdrawn.
+2. **Withdrawn consent:** In step 3, the withdrawal is shown **beside** the original acceptance, not instead of it — the acceptance really happened, and erasing it would destroy the evidence.
+3. **Hash mismatch:** In step 3, if the stored hash does not match the version it names, System flags the record instead of rendering it as valid.
+
+---
+
+### UC074 — Back up and restore data
+
+| **Use Case** | Back up and restore data | **ID** | UC074 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Essential |
+| **Trigger** | Platform Administrator, or the scheduler | **Type** | external |
+
+**Brief description:** *The Platform Administrator takes database backups and, when needed, restores one. Restoring into production is deliberately harder than rehearsing a restore, because the two have opposite consequences.*
+
+**Relationship:**
+- **Association:** Platform Administrator – Back up and restore data; Processing Worker / Scheduler (S07)
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator runs the backup tool, which dumps the database and only then compresses the result.
+2. System writes the archive to the backup store and reports its size and checksum.
+3. To verify a backup, the Administrator runs a **rehearsal** restore, which loads the archive into a scratch database instead of production.
+4. System reports what the rehearsal found: whether the archive loads, and what it contains.
+5. To restore for real, the Administrator names the target explicitly and passes the flag that forces a production restore.
+6. System restores the archive and reports the outcome.
+
+**Exceptional flow:**
+1. **A listing is not a verification:** In step 3, reading the table of contents of an archive does **not** detect a truncated file; only loading it does. This is why the rehearsal exists as its own mode.
+2. **Restoring into production by accident:** In step 5, the tool refuses to touch production unless the forcing flag is given; every other invocation lands in a scratch database.
+3. **Encrypted archive:** In step 6, an encrypted archive must be decrypted first; encryption and the off-disk copy exist but are off by default, so an operator must not assume either is in place.
+4. **Scheduled backups:** In step 1, the scheduler can run the same tool unattended; a schedule that was configured but never fired leaves no archive at all, so the store must be checked, not assumed.
+
+---
+
+### UC075 — Verify deployment freshness
+
+| **Use Case** | Verify deployment freshness | **ID** | UC075 |
+|---|---|---|---|
+| **Main actor** | Platform Administrator | **Priority** | Important |
+| **Trigger** | Platform Administrator | **Type** | external |
+
+**Brief description:** *After a deployment, the Platform Administrator checks that the code actually running is the code in the working tree. A health check answers "is the process alive", never "is it the process you just built".*
+
+**Relationship:**
+- **Association:** Platform Administrator – Verify deployment freshness
+- **Include:** None
+- **Extend:** None
+- **Generalization:** None
+
+**Normal flow:**
+1. The Administrator runs the freshness check on the deployment host. The check is read-only.
+2. System compares what each running container is serving against what the working tree currently holds.
+3. System reports every service that is stale, and why it is stale.
+4. System exits with a success code only when everything running is current.
+5. The Administrator rebuilds and redeploys whatever the report named.
+
+**Exceptional flow:**
+1. **Everything healthy but stale:** In step 2, containers may report healthy while serving an image hours old; that is the exact situation this check exists for, and health status is no substitute.
+2. **One image behind several services:** In step 3, several services share one image, so a single stale build makes all of them stale — the report names each of them rather than only the one that was noticed.
+3. **Environment file changed:** In step 5, a changed environment file is not picked up by a restart; the containers must be recreated, and the check reports the difference rather than hiding it.
+
+---
+
+## 13. Ghi chú áp dụng
 
 **Ba chỗ dễ mô hình hoá sai** — đã kiểm bằng mã nguồn, không phải suy đoán:
 
@@ -2299,7 +2718,24 @@ luận văn không mô tả thứ chưa có:
 - **Nâng quyền chỉ hỏi mật khẩu.** UC047 không hỏi yếu tố thứ hai; mô-đun mã
   một lần đã có sẵn nhưng đường nâng quyền chưa gọi tới.
 
-**Khi đưa vào quyển luận văn:** mỗi khối use case ở §5–§11 khớp 1-1 với ô trong
+**Endpoint không thành use case riêng — và vì sao.** Bản rà soát đối chiếu từng
+endpoint đang được mount với danh sách use case. Những nhóm dưới đây **cố ý**
+nằm trong luồng của một use case khác chứ không tách ra, vì chúng không phải là
+mục tiêu của ai cả:
+
+| Endpoint | Nằm trong | Lý do |
+|---|---|---|
+| `POST /auth/refresh` | UC005 | Gia hạn phiên là việc trình duyệt tự làm, không ai "muốn" gia hạn phiên. |
+| `GET /auth/me`, `/2fa/status`, `/trial/status` | UC010, UC009, UC013 | Đọc trạng thái để vẽ màn hình. |
+| `GET /health/*`, `/metrics` | UC055 | Đầu dò cho máy khác gọi, không có người dùng. |
+| `GET /admin/activity`, `/security-log` | UC050, UC049 | Cùng một mục tiêu "đọc dấu vết", khác nguồn. |
+| `GET /training/splits`, `/dataset-info`, `/queue/status` | UC032, UC033 | Số liệu để cấu hình và theo dõi một lượt chạy. |
+| `GET /classes/suggest`, `/collectors`, `/balance` | UC018, UC022, UC031 | Trợ giúp bên trong một màn hình đã có use case. |
+| `POST /dataset/samples/add` | UC014 | Cùng đường ghi mẫu, khác điểm vào. |
+| `GET /tenants/invitations/inspect` | UC041 | Bước đọc token trước khi nhận lời mời. |
+| `POST /upload/video/process` | UC015 | Bước hai của cùng một hành vi tải lên. |
+
+**Khi đưa vào quyển luận văn:** mỗi khối use case ở §5–§12 khớp 1-1 với ô trong
 mẫu (Use Case / ID / Main actor / Priority / Brief description / Trigger / Type /
 Relationship / Normal flow / Exceptional flow). Bảng ở đầu mỗi mục là bốn ô trên
 cùng của mẫu; phần còn lại giữ nguyên thứ tự.
