@@ -171,46 +171,137 @@ lại bằng **3 vòng × 4 tiến trình song song → 0 cảnh báo**.
 Đây là lỗi có sẵn từ trước, không phải hồi quy của v5 — nhưng nó chỉ lộ ra khi
 có người thật sự ĐỌC nhật ký khởi động, và lý do phải đọc là vì đang có sự cố.
 
-## 6. Việc còn lại — nguyên nhân gốc chưa xử lý
+## 6. Nguyên nhân gốc — đã xử lý 12/08/2026
 
-**`ensure_tables()` vẫn kiêm hai vai.** Nó làm được cả việc bỏ bảng, tạo view,
-backfill dữ liệu và cho role nghỉ hưu — vượt xa nghĩa "bảo đảm các bảng tồn
-tại". Chốt chặn ở §4.1 chỉ chặn lỗi **nhắm sai đích**; nó không chặn được việc
-một lần khởi động vô tình thực hiện migration cấu trúc lớn.
+**Vấn đề.** `ensure_tables()` kiêm hai vai. Nó bỏ bảng, tạo view, backfill dữ
+liệu và cho role nghỉ hưu — vượt xa nghĩa "bảo đảm các bảng tồn tại". Chốt chặn
+ở §4.1 chỉ chặn lỗi **nhắm sai đích**; nó không chặn được việc một lần khởi
+động vô tình thực hiện migration cấu trúc lớn. Chừng nào còn như vậy thì mọi
+`docker compose up` đều là một lượt migration không công bố.
 
-### Phương án
-
-`authz_schema.py` đã gom sẵn mọi thao tác phá huỷ vào **một danh sách duy
-nhất**: `_DATA_MIGRATION_DDL` (chép dữ liệu → bỏ 6 bảng cũ → tạo view). Nên việc
-tách không phải là viết lại, mà là đặt một cổng trước đúng danh sách đó:
+### 6.1 Hợp đồng mới
 
 ```
-startup ensure      chỉ chạy phần CỘNG THÊM và idempotent.
-                    Nếu còn việc phá huỷ chưa làm → GHI RÕ và TỪ CHỐI,
-                    không tự chạy.
-
-explicit migration  python -m app.cli.migrate — chạy mọi thứ, và là chỗ
-                    duy nhất `_DATA_MIGRATION_DDL` được phép chạy.
+lệnh migration rõ ràng
+    → đổi lược đồ / dữ liệu
+    → đóng dấu phiên bản          schema_migrations
+    → kiểm chứng                  --status, verify_deployment
+    → triển khai ảnh tương thích
+    → ứng dụng khởi động
+    → ensure_tables()             CHỈ thêm / bổ khuyết / không phá
 ```
 
-`missing_objects()` đã đủ sức trả lời "còn việc gì chưa làm", nên phần phát hiện
-không cần viết mới.
+Ranh giới, nói bằng một câu: **thêm thì tự làm, ĐỔI và BỎ thì phải có người ra
+lệnh.**
 
-### Đánh đổi phải cân, và vì sao chưa tự quyết
+### 6.2 Cổng hai chiều, và vì sao phải là hai chiều
 
-Tách như trên **đổi hợp đồng triển khai**: một máy dựng từ số không sẽ không còn
-tự lên lược đồ khi khởi động backend — `scripts/deploy.sh` phải gọi bước migrate
-trước. Hai hệ quả ngược chiều nhau:
+`app/storage/schema_version.py` giữ hai hằng số và một khoảng:
 
-* **Được:** không lần khởi động nào có thể tự ý đổi cấu trúc. Đúng thứ đã hỏng
-  ngày 12/08.
-* **Mất:** thêm một bước bắt buộc mà nếu quên thì backend từ chối khởi động —
-  và trên một máy mới, triệu chứng sẽ là "deploy xong nhưng không lên", đúng
-  loại lỗi mà ghi chép `fresh-boot-schema-drift` đã trả giá một lần.
+```
+MIN_SUPPORTED_SCHEMA_VERSION  ≤  phiên bản DB  ≤  APP_SCHEMA_VERSION
+```
 
-Cái thứ hai xử lý được (deploy.sh gọi migrate; verify_deployment báo rõ), nhưng
-nó là một quyết định về quy trình vận hành chứ không phải một lựa chọn kỹ thuật
-thuần tuý — nên nó chờ người quyết, không tự làm.
+Ngoài khoảng đó, ở **cả hai đầu**, backend từ chối khởi động.
+
+Chặn "cơ sở dữ liệu quá cũ" là phản xạ tự nhiên và nó chỉ bắt được một nửa. Sự
+cố này có hình dạng ngược lại: **lược đồ v5 + ảnh ứng dụng cũ**. Một ảnh cũ
+chạy trên lược đồ mới hơn không "thiếu tính năng" — nó đọc và ghi theo một hình
+dạng đã đổi, phần lớn đường đi vẫn trả 200, và chỗ sai nằm ở những đường ít
+người đi nhất. Nếu chỉ kiểm một chiều thì đúng cái đã xảy ra vẫn lọt.
+
+Đo được, trên `gate_probe` dựng từ số không:
+
+| bước | mong đợi | kết quả |
+|---|---|---|
+| DB trống → `init_db()` | từ chối | `SchemaNotMigrated` |
+| `migrate --to 5` không đặt `EXPECTED_DATABASE` | từ chối | mã thoát 2 |
+| `EXPECTED_DATABASE=signdb` nhưng nối `gate_probe` | từ chối | `WrongMigrationTarget` |
+| `EXPECTED_DATABASE=gate_probe migrate --to 5` | chạy | v5, **0 đối tượng thiếu** |
+| `init_db()` sau migrate | lên | lên |
+| đóng dấu v99 → `init_db()` | từ chối | `SchemaTooNew` |
+| `migrate --to 5` khi DB ở v99 | từ chối | "khôi phục từ sao lưu" |
+
+Dòng thứ tư đáng chú ý riêng: lệnh migration dựng được **một máy từ số không**
+tới lược đồ đầy đủ. Đó là thứ trả lời cho cái giá nêu ở phần dưới.
+
+### 6.3 Tách bằng TẬP CON, không phải bằng hai danh sách
+
+`AUTHZ_DDL_STATEMENTS` có bốn ràng buộc thứ tự, mỗi cái đổi lấy một lần hỏng
+thật (xem chú thích ngay trên nó). Hai danh sách rời sẽ có hai thứ tự, và thứ
+tự thứ hai sẽ trôi khỏi thứ tự thứ nhất mà không ai thấy.
+
+Nên cách tách là một **tập con**: `one_way_statements()` liệt kê 11 câu, lượt
+migration chạy nguyên danh sách gốc, lượt khởi động chạy cùng danh sách đó bỏ
+bớt phần tử. Thứ tự tương đối giữ nguyên theo định nghĩa, và có test canh
+(`test_filtering_preserves_relative_order`).
+
+11 câu đó, và mỗi câu vì sao một chiều:
+
+| câu | phá gì |
+|---|---|
+| `_DROP_PRE_REGISTRY_DIALECTS` | bỏ bảng `dialects` đời cũ |
+| `_DROP_DEAD_USER_PROFILES` | bỏ bảng `user_profiles` (chỉ khi rỗng) |
+| `_DROP_GLOBAL_CLASS_UNIQUES` ×2 | bỏ 2 chỉ mục duy nhất toàn cục |
+| `_DROP_VESTIGIAL_ROLE_NAME` | bỏ cột `roles.name` |
+| `_MIGRATE_MEMBERSHIPS` | chép dữ liệu lịch sử sang hình dạng mới |
+| `_MIGRATE_ASSIGNMENTS` | như trên |
+| `_DROP_LEGACY_MEMBERSHIP_TABLES` | bỏ 6 bảng phân quyền cũ |
+| `_LEGACY_ROLE_RETIREMENT_DDL` ×3 | ghi đè `legacy_role`, siết ràng buộc |
+
+`_TENANT_MEMBERS_VIEW` **không** nằm trong danh sách này: `CREATE OR REPLACE
+VIEW` không phá gì, và định nghĩa view đi theo MÃ chứ không theo dữ liệu — một
+ảnh mới phải mang được định nghĩa view của chính nó lên.
+
+### 6.4 Cái lưới, chứ không phải danh sách kiểm
+
+Danh sách 11 câu ở trên sẽ lỗi thời. Thứ không lỗi thời là
+`test_no_irreversible_statement_survives_the_filter`: nó quét toàn bộ danh sách
+chạy lúc khởi động và đỏ khi bất kỳ `DROP TABLE` / `DROP COLUMN` / `DROP INDEX`
+/ `TRUNCATE` / `DELETE FROM` nào lọt vào — kể cả câu chưa ai nghĩ tới hôm nay.
+
+`DROP POLICY` / `DROP TRIGGER` / `DROP CONSTRAINT` cố ý **không** bị bắt: chúng
+là nửa đầu của mẫu "drop rồi tạo lại ngay trong cùng lượt", tức bổ khuyết chứ
+không phá.
+
+### 6.5 Cái giá, và nó được trả ở đâu
+
+Hợp đồng mới **đổi cách triển khai**: máy dựng từ số không không còn tự lên
+lược đồ khi khởi động backend. Quên bước migrate thì triệu chứng là "deploy
+xong nhưng không lên" — đúng loại lỗi mà `fresh-boot-schema-drift` đã trả giá
+một lần.
+
+Ba chỗ trả cái giá đó:
+
+* `scripts/deploy.sh` gọi migrate như một bước riêng, **trước** khi dựng ứng
+  dụng, và dừng hẳn với mã thoát 4 nếu migration không xong — container cũ vẫn
+  chạy mã cũ, triển khai không nằm ở trạng thái nửa vời. Nó lấy tên cơ sở dữ
+  liệu từ **DSN** chứ không từ `POSTGRES_DB`; đó là chính sự cố này viết thành
+  một dòng script.
+* `verify_deployment` kiểm phiên bản **đầu tiên**, trước mọi mục khác — vì nếu
+  lược đồ và ảnh không cùng phiên bản thì một dòng "PASS" chỉ có nghĩa "khớp
+  với kỳ vọng SAI", và thế còn tệ hơn một dòng FAIL.
+* Thông điệp từ chối in ra **đúng lệnh cần chạy**. Một cổng chặn mà không chỉ
+  đường thì lượt triển khai kế tiếp sẽ được "sửa" bằng cách gỡ cổng.
+
+### 6.6 `--adopt`: cửa dùng đúng một lần cho mỗi máy
+
+Sản xuất đã ở v5 **từ trước** khi sổ đăng bạ ra đời. Không có `--adopt` thì
+lượt triển khai đầu tiên sau lượt này sẽ từ chối khởi động trên một cơ sở dữ
+liệu hoàn toàn đúng.
+
+`--adopt` không đổi gì trong lược đồ; nó chỉ đóng dấu. Và nó **từ chối** khi
+`missing_objects()` còn trả về mục — đóng dấu một lược đồ dở dang biến cổng
+thành đồ trang trí, mà một cổng trang trí còn tệ hơn không có cổng.
+
+### 6.7 Cái vẫn còn hở
+
+`ensure_tables()` bây giờ chỉ thêm, nhưng nó **vẫn chạy khá nhiều DDL**:
+`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, cài lại chính sách
+RLS. Đó là chủ ý — một ảnh mới mang theo bảng mới của nó phải lên được mà không
+cần nghi thức — nhưng nó có nghĩa là ranh giới nằm ở *loại* thao tác, không
+phải ở *lượng*. Cái lưới ở §6.4 là thứ giữ ranh giới đó, và nó chỉ mạnh bằng
+danh sách từ khoá của nó.
 
 ## 7. Vật phẩm khôi phục
 

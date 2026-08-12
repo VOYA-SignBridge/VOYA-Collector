@@ -36,6 +36,53 @@ tệp, 11 container còn lại dựng lại sau đó bằng `docker compose up -
 
 Sinh khoá: `openssl rand -hex 32`.
 
+## 2b. Migration là một BƯỚC RIÊNG, và nó chạy trước ứng dụng
+
+Từ 12/08/2026, `deploy.sh` chạy theo thứ tự:
+
+```
+dựng ảnh  →  chỉ postgres + redis lên  →  MIGRATION  →  cả stack lên
+```
+
+Bước migration gọi `python -m app.cli.migrate --to <N>` trong một container
+dùng-một-lần, với `EXPECTED_DATABASE` lấy từ **DSN** chứ không phải từ
+`POSTGRES_DB`. Nếu nó không xong, `deploy.sh` **dừng hẳn với mã thoát 4** và
+không dựng gì thêm — container cũ vẫn chạy mã cũ, triển khai không nằm ở trạng
+thái nửa vời.
+
+**Vì sao phải nhớ điều này.** Backend bây giờ **từ chối khởi động** khi phiên
+bản lược đồ không khớp ảnh, ở cả hai chiều. Nếu bạn dựng stack bằng
+`docker compose up -d` trần trên một máy chưa migrate, triệu chứng sẽ là
+backend restart liên tục với dòng:
+
+```
+[SCHEMA-VERSION] db=(chua dong dau) anh ho tro=[5..5] -> TU CHOI KHOI DONG
+```
+
+Cách chữa là chạy migration, không phải gỡ cổng:
+
+```bash
+EXPECTED_DATABASE=signdb docker compose run --rm backend \
+  python -m app.cli.migrate --to 5
+```
+
+Hỏi trạng thái mà không đổi gì (lệnh này **không** cần `EXPECTED_DATABASE`):
+
+```bash
+docker compose run --rm backend python -m app.cli.migrate --status
+```
+
+**Máy đã chạy v5 từ trước khi có sổ đăng bạ** thì dùng `--adopt` — nó chỉ đóng
+dấu, không đổi lược đồ, và tự từ chối nếu lược đồ còn thiếu đối tượng:
+
+```bash
+EXPECTED_DATABASE=signdb docker compose run --rm backend \
+  python -m app.cli.migrate --adopt
+```
+
+Lý lẽ đầy đủ ở
+[INCIDENT_2026-08-12_schema_code_skew.md §6](INCIDENT_2026-08-12_schema_code_skew.md).
+
 ## 3. GPU: chip khác đời thì phải kiểm, không phải đoán
 
 `torch.cuda.is_available()` trả lời *"có driver chạy được không"*, **không** trả

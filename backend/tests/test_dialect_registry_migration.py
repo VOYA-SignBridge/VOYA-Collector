@@ -50,11 +50,27 @@ def test_legacy_cleanup_runs_before_the_create():
 
 
 def test_ensure_tables_applies_ddl_before_migrations():
-    """Pins the execution order the test above depends on."""
+    """Pins the execution order the test above depends on.
+
+    Đọc `_apply_schema` chứ không phải `ensure_tables`: từ 12/08/2026 thân hàm
+    chuyển sang đó, và `ensure_tables()` chỉ còn là một trong hai cửa vào
+    (cửa kia là `migrate_database()`). Thứ tự cần ghim vẫn nằm ở thân chung.
+    """
     import inspect
 
-    src = inspect.getsource(mdb.ensure_tables)
+    src = inspect.getsource(mdb._apply_schema)
     assert src.index("DDL_STATEMENTS") < src.index("MIGRATION_STATEMENTS")
+
+
+def test_the_legacy_drop_is_one_way():
+    """`DROP TABLE dialects` không được chạy lúc khởi động.
+
+    Nó có canh kỹ và đã chạy đúng — nhưng đó không phải câu hỏi. Câu hỏi là ai
+    cho phép nó chạy, và từ 12/08/2026 câu trả lời không còn là "bất kỳ ai gõ
+    `docker compose up`".
+    """
+    assert _legacy_stmt() in mdb.one_way_statements()
+    assert _legacy_stmt() not in mdb.startup_safe(mdb.DDL_STATEMENTS)
 
 
 def test_cleanup_is_guarded_on_the_legacy_shape():

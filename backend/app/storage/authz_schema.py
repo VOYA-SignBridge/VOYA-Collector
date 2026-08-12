@@ -351,6 +351,28 @@ _HIERARCHY_DDL: list[str] = [
 # 2. RBAC — nguồn sự thật
 # ---------------------------------------------------------------------------
 
+#: Bỏ cột `roles.name` đã thành vết tích. MỘT CHIỀU — xem `AUTHZ_ONE_WAY_DDL`.
+#: Toàn bộ lý lẽ về ba điều kiện canh và về `IF` lồng nằm ở chỗ dùng nó trong
+#: `_RBAC_DDL` ngay dưới đây.
+_DROP_VESTIGIAL_ROLE_NAME = """
+    DO $$
+    DECLARE
+        stuck BIGINT;
+    BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'roles' AND column_name = 'name')
+           AND EXISTS (SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'roles' AND column_name = 'role_code') THEN
+            EXECUTE 'SELECT count(*) FROM roles WHERE role_code IS NULL AND name IS NOT NULL'
+               INTO stuck;
+            IF stuck = 0 THEN
+                ALTER TABLE roles DROP COLUMN name;
+            END IF;
+        END IF;
+    END $$
+    """
+
+
 _RBAC_DDL: list[str] = [
     # `roles` đã tồn tại với hình dạng `(id, name UNIQUE, description)` và ba
     # dòng hạt giống mà — theo chú thích ở `metadata_db.py` — chưa có mã nào
@@ -441,23 +463,7 @@ _RBAC_DDL: list[str] = [
     #
     # `EXECUTE` hoãn việc phân giải tới lúc chạy, và nó chỉ được chạy khi nhánh
     # ngoài đã xác nhận cả hai cột cùng có mặt.
-    """
-    DO $$
-    DECLARE
-        stuck BIGINT;
-    BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'roles' AND column_name = 'name')
-           AND EXISTS (SELECT 1 FROM information_schema.columns
-                        WHERE table_name = 'roles' AND column_name = 'role_code') THEN
-            EXECUTE 'SELECT count(*) FROM roles WHERE role_code IS NULL AND name IS NOT NULL'
-               INTO stuck;
-            IF stuck = 0 THEN
-                ALTER TABLE roles DROP COLUMN name;
-            END IF;
-        END IF;
-    END $$
-    """,
+    _DROP_VESTIGIAL_ROLE_NAME,
     "ALTER TABLE roles ADD COLUMN IF NOT EXISTS tenant_id TEXT",
     "ALTER TABLE roles ADD COLUMN IF NOT EXISTS role_code TEXT",
     "ALTER TABLE roles ADD COLUMN IF NOT EXISTS role_name TEXT",
@@ -1656,6 +1662,35 @@ AUTHZ_DDL_STATEMENTS: list[str] = [
     *_PASSCODE_DDL,
     *_OUTBOX_DDL,
 ]
+
+
+#: Những câu MỘT CHIỀU trong danh sách trên: chép dữ liệu lịch sử, bỏ bảng cũ,
+#: ghi đè giá trị cũ. Chúng chỉ chạy dưới `python -m app.cli.migrate`, KHÔNG
+#: chạy khi backend khởi động.
+#:
+#: Vì sao tách bằng một tập con thay vì hai danh sách rời
+#: -----------------------------------------------------
+#: Vì THỨ TỰ của `AUTHZ_DDL_STATEMENTS` là tài sản, và nó được biện minh dài
+#: dòng ngay phía trên: bốn ràng buộc thứ tự, mỗi cái đổi lấy một lần hỏng thật
+#: đã gặp. Hai danh sách rời sẽ có hai thứ tự, và thứ tự thứ hai sẽ trôi khỏi
+#: thứ tự thứ nhất mà không ai thấy. Một tập con thì không thể trôi: lượt chạy
+#: migration dùng nguyên danh sách gốc, lượt khởi động dùng cùng danh sách đó
+#: bỏ bớt phần tử — thứ tự tương đối giữ nguyên theo định nghĩa.
+#:
+#: Vì sao `_TENANT_MEMBERS_VIEW` KHÔNG có ở đây
+#: --------------------------------------------
+#: Nó là `CREATE OR REPLACE VIEW`: không phá gì, và định nghĩa view là thứ đổi
+#: theo mã chứ không theo dữ liệu. Để nó ở đường khởi động nghĩa là một ảnh mới
+#: mang theo định nghĩa view mới của chính nó. Trên cơ sở dữ liệu chưa migrate
+#: câu này sẽ thất bại (bảng `tenant_members` cũ còn đó) — không sao, vì cổng
+#: phiên bản đã chặn backend từ trước khi tới được đây.
+AUTHZ_ONE_WAY_DDL: frozenset[str] = frozenset((
+    _DROP_VESTIGIAL_ROLE_NAME,
+    _MIGRATE_MEMBERSHIPS,
+    _MIGRATE_ASSIGNMENTS,
+    _DROP_LEGACY_MEMBERSHIP_TABLES,
+    *_LEGACY_ROLE_RETIREMENT_DDL,
+))
 
 
 # ---------------------------------------------------------------------------

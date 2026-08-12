@@ -56,6 +56,38 @@ def main() -> int:
     def scalar(sql: str):
         return list(_fetch_all(sql)[0].values())[0]
 
+    # ---- 0. phien ban luoc do vs ANH DANG CHAY ---------------------------
+    #
+    # Kiểm ĐẦU TIÊN, vì nó quyết định mọi kết luận bên dưới có nghĩa hay không.
+    # Mọi mục còn lại đọc lược đồ và so với thứ mã này kỳ vọng — nếu hai bên
+    # không cùng phiên bản thì một dòng "PASS" chỉ có nghĩa "khớp với kỳ vọng
+    # SAI", và đó tệ hơn một dòng FAIL.
+    #
+    # Câu hỏi ở đây không phải "cơ sở dữ liệu đã migrate chưa" mà là **ảnh này
+    # có chạy được trên lược đồ này không**, hai chiều. Sự cố 12/08/2026 nằm ở
+    # chiều ít ai nghĩ tới: lược đồ MỚI hơn ảnh.
+    try:
+        from app.storage.metadata_db import _migration_cursor
+        from app.storage.schema_version import (
+            APP_SCHEMA_VERSION, MIN_SUPPORTED_SCHEMA_VERSION,
+            compatibility_error, read_schema_version,
+        )
+
+        with _migration_cursor() as cur:
+            db_version = read_schema_version(cur)
+        problem = compatibility_error(db_version)
+        window = f"anh ho tro v{MIN_SUPPORTED_SCHEMA_VERSION}..v{APP_SCHEMA_VERSION}"
+        shown = db_version if db_version is not None else "chua dong dau"
+
+        if problem is None:
+            record(PASS, "phien ban luoc do", f"DB v{db_version}, {window}")
+        else:
+            record(FAIL, "phien ban luoc do",
+                   f"DB {shown}, {window} — "
+                   f"{' '.join(str(problem).split())[:160]}")
+    except Exception as exc:
+        record(WARN, "phien ban luoc do", f"khong kiem tra duoc: {exc}")
+
     # ---- 1. tables ------------------------------------------------------
     expected_tables = {
         "users", "classes", "samples", "raw_uploads", "training_jobs",

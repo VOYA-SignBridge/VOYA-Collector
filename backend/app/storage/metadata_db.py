@@ -192,6 +192,48 @@ def _ts_or_none(value: Any) -> Any:
     return text or None
 
 
+#: Bỏ bảng `dialects` đời tiền-registry. MỘT CHIỀU: xem `ONE_WAY_STATEMENTS`.
+_DROP_PRE_REGISTRY_DIALECTS = """
+    DO $$
+    BEGIN
+        IF EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'dialects' AND column_name = 'code'
+        ) AND NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'dialects' AND column_name = 'dialect_id'
+        ) THEN
+            DROP TABLE dialects;
+            RAISE NOTICE 'dropped legacy dialects table (pre-registry schema)';
+        END IF;
+    END $$;
+    """
+
+
+#: Bỏ bảng `user_profiles` đã chết, chỉ khi nó RỖNG. MỘT CHIỀU.
+_DROP_DEAD_USER_PROFILES = """
+    DO $$
+    DECLARE n bigint;
+    BEGIN
+        IF to_regclass('public.user_profiles') IS NOT NULL THEN
+            EXECUTE 'SELECT count(*) FROM user_profiles' INTO n;
+            IF n = 0 THEN
+                DROP TABLE user_profiles;
+            END IF;
+        END IF;
+    END $$
+    """
+
+
+#: Hai chỉ mục DUY NHẤT ở phạm vi TOÀN CỤC, bị thay bằng bản theo tenant. Bỏ
+#: chúng là một chiều: dựng lại được, nhưng chỉ khi dữ liệu còn thoả — mà sau
+#: khi hai tenant cùng có một `class_idx` thì nó không còn thoả nữa.
+_DROP_GLOBAL_CLASS_UNIQUES: tuple[str, ...] = (
+    "DROP INDEX IF EXISTS uq_classes_slug_lang_dialect",
+    "DROP INDEX IF EXISTS uq_classes_class_idx",
+)
+
+
 DDL_STATEMENTS = [
     # MUST stay first. An older schema shipped a `dialects` table shaped
     # (code PK, language_code FK->languages, name), and `CREATE TABLE IF NOT
@@ -213,21 +255,12 @@ DDL_STATEMENTS = [
     # run BEFORE the CREATE below: putting it in MIGRATION_STATEMENTS would
     # drop the table only after the CREATE had already no-opped, leaving the
     # machine with no dialects table at all until the next start.
-    """
-    DO $$
-    BEGIN
-        IF EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'dialects' AND column_name = 'code'
-        ) AND NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'dialects' AND column_name = 'dialect_id'
-        ) THEN
-            DROP TABLE dialects;
-            RAISE NOTICE 'dropped legacy dialects table (pre-registry schema)';
-        END IF;
-    END $$;
-    """,
+    #
+    # Vị trí "phải đứng đầu" chính là lý do câu này được TÁCH RA làm hằng số
+    # thay vì chuyển sang một danh sách migration riêng: nó một chiều, nhưng nó
+    # cũng phải chạy trước `CREATE TABLE dialects` ngay bên dưới. Giữ nó đúng
+    # chỗ và lọc theo `ONE_WAY_STATEMENTS` bảo toàn cả hai tính chất.
+    _DROP_PRE_REGISTRY_DIALECTS,
     # -----------------------------------------------------------------------
     # `languages` và `roles` — hai bảng CHỈ tồn tại trên máy đang chạy, không
     # có định nghĩa nào trong mã cho tới 2026-08-10.
@@ -1580,9 +1613,9 @@ MIGRATION_STATEMENTS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_tenant_class_idx "
     "ON classes(tenant_id, class_idx) WHERE deleted_at IS NULL AND class_idx IS NOT NULL",
     # Retire the global predecessors only AFTER the scoped ones exist, so the
-    # guarantee is never absent in between.
-    "DROP INDEX IF EXISTS uq_classes_slug_lang_dialect",
-    "DROP INDEX IF EXISTS uq_classes_class_idx",
+    # guarantee is never absent in between. Một chiều, nên chỉ chạy dưới lệnh
+    # migration — xem `ONE_WAY_STATEMENTS`.
+    *_DROP_GLOBAL_CLASS_UNIQUES,
     """
     DO $$ BEGIN
         ALTER TABLE samples ADD CONSTRAINT samples_uid_is_hex10
@@ -1988,18 +2021,7 @@ MIGRATION_STATEMENTS = [
     # Hai `IF` LỒNG NHAU, không phải `IF ... AND ...`: PL/pgSQL lập kế hoạch cả
     # biểu thức trước khi chạy, nên vế phải vẫn bị phân tích sau khi bảng đã bị
     # xoá và đẻ ra cảnh báo mỗi lần khởi động. `EXECUTE` hoãn việc đó lại.
-    """
-    DO $$
-    DECLARE n bigint;
-    BEGIN
-        IF to_regclass('public.user_profiles') IS NOT NULL THEN
-            EXECUTE 'SELECT count(*) FROM user_profiles' INTO n;
-            IF n = 0 THEN
-                DROP TABLE user_profiles;
-            END IF;
-        END IF;
-    END $$
-    """,
+    _DROP_DEAD_USER_PROFILES,
     # =====================================================================
     # v4 — MẶT PHẲNG THƯƠNG MẠI VÀ VÒNG ĐỜI KHÁCH HÀNG
     #
@@ -2977,9 +2999,73 @@ def _seed_authorization(cur) -> None:
         logger.error("[AUTHZ-SEED] that bai: %s: %s", exc.__class__.__name__, exc)
 
 
+def one_way_statements() -> frozenset[str]:
+    """Mọi câu KHÔNG được chạy khi backend khởi động.
+
+    "Một chiều" ở đây nghĩa là: chạy xong thì không có câu nào trong mã đưa cơ
+    sở dữ liệu về lại trạng thái cũ. Bỏ bảng, bỏ chỉ mục duy nhất, chép dữ liệu
+    lịch sử sang hình dạng mới, ghi đè giá trị cũ. Chúng đều được canh cẩn thận
+    và đều đã chạy đúng — vấn đề không phải chúng sai, mà là **ai cho phép
+    chúng chạy**. Trước 12/08/2026 câu trả lời là "bất kỳ ai gõ `docker compose
+    up`", kể cả khi người đó chỉ định khởi động lại một service.
+
+    Nạp muộn `authz_schema` vì `metadata_db` được nó nhập ngược lại ở tầng
+    module; nhập sớm sẽ thành vòng.
+    """
+    from app.storage.authz_schema import AUTHZ_ONE_WAY_DDL
+
+    return frozenset((
+        _DROP_PRE_REGISTRY_DIALECTS,
+        _DROP_DEAD_USER_PROFILES,
+        *_DROP_GLOBAL_CLASS_UNIQUES,
+    )) | AUTHZ_ONE_WAY_DDL
+
+
+def startup_safe(statements) -> list[str]:
+    """Cùng danh sách đó, bỏ đi phần một chiều. Thứ tự tương đối giữ nguyên."""
+    one_way = one_way_statements()
+    return [stmt for stmt in statements if stmt not in one_way]
+
+
 def ensure_tables():
+    """Đường KHỞI ĐỘNG: chỉ thêm, chỉ bổ khuyết, không phá gì.
+
+    Chạy ở mỗi lần backend lên, bốn lần song song (bốn worker gunicorn). Sau
+    12/08/2026 nó KHÔNG còn là công cụ migration: phần một chiều bị lọc ra và
+    chỉ `python -m app.cli.migrate` mới chạy được chúng.
+
+    Nó vẫn chạy khá nhiều DDL, và đó là chủ ý: `CREATE TABLE IF NOT EXISTS`,
+    `ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, cài lại chính
+    sách RLS. Tất cả đều bổ khuyết chứ không đổi hình dạng, nên một ảnh mới
+    mang theo bảng mới của nó vẫn lên được mà không cần nghi thức. Ranh giới
+    nằm ở chỗ: thêm thì tự làm, ĐỔI và BỎ thì phải có người ra lệnh.
+    """
+    _apply_schema(include_one_way=False)
+
+
+def migrate_database(note: str | None = None, stamp: bool = True) -> None:
+    """Đường MIGRATION: chạy đủ, kể cả phần một chiều, rồi đóng dấu phiên bản.
+
+    Chỉ được gọi từ `app.cli.migrate` và từ bộ test. Đây chính là hành vi mà
+    `ensure_tables()` từng có — không có gì mới ở đây, chỉ là bây giờ nó có một
+    cái tên và một người phải gõ ra cái tên đó.
+    """
+    from app.storage.schema_version import APP_SCHEMA_VERSION, stamp_schema_version
+
+    _apply_schema(include_one_way=True)
+
+    if stamp:
+        with _migration_cursor() as cur:
+            stamp_schema_version(cur, APP_SCHEMA_VERSION, note=note)
+
+
+def _apply_schema(*, include_one_way: bool):
     from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
     from app.storage.rls import rls_ddl
+    from app.storage.schema_version import SCHEMA_VERSION_DDL
+
+    def wanted(statements):
+        return list(statements) if include_one_way else startup_safe(statements)
 
     # One migration connection for the whole run rather than one per statement:
     # these lists hold well over a hundred statements and each used to pay a
@@ -3027,9 +3113,13 @@ def ensure_tables():
         # vẫn giữ khoá riêng của chúng mà không tự chặn mình.
         cur.execute("SELECT pg_advisory_lock(%s)", (SEED_LOCK_KEY,))
         try:
+            # Sổ đăng bạ phiên bản trước mọi thứ khác: cổng khởi động đọc nó,
+            # và một cổng không đọc được thì fail-closed trên máy cài mới —
+            # tức là chặn cả đường đi đúng.
+            _run_ddl(cur, SCHEMA_VERSION_DDL, "schema version")
             # Applied one-by-one so a later failure won't undo earlier successes.
-            _run_ddl(cur, DDL_STATEMENTS, "DDL")
-            _run_ddl(cur, MIGRATION_STATEMENTS, "migration")
+            _run_ddl(cur, wanted(DDL_STATEMENTS), "DDL")
+            _run_ddl(cur, wanted(MIGRATION_STATEMENTS), "migration")
         finally:
             cur.execute("SELECT pg_advisory_unlock(%s)", (SEED_LOCK_KEY,))
 
@@ -3064,7 +3154,7 @@ def ensure_tables():
 
         cur.execute("SELECT pg_advisory_lock(%s)", (SEED_LOCK_KEY,))
         try:
-            _run_ddl(cur, AUTHZ_DDL_STATEMENTS, "authz")
+            _run_ddl(cur, wanted(AUTHZ_DDL_STATEMENTS), "authz")
 
             # Lần phát thứ BA của vòng lặp khoá ngoại tenant, và cần đúng như
             # hai lần trước cần: `MIGRATION_STATEMENTS` chạy nó ở hai vị trí,
@@ -3084,8 +3174,14 @@ def ensure_tables():
             cur.execute("SELECT pg_advisory_unlock(%s)", (SEED_LOCK_KEY,))
 
         # Create indexes safely: check referenced columns exist first.
+        #
+        # Qua `wanted()` như ba danh sách trên, dù hôm nay không câu nào ở đây
+        # là một chiều: bộ lọc phải phủ MỌI danh sách chạy lúc khởi động, nếu
+        # không thì `test_no_irreversible_statement_survives_the_filter` sẽ
+        # kiểm một tập khác với tập thực sự chạy — và một cái lưới đặt sai chỗ
+        # chỉ tạo cảm giác an toàn.
         idx_re = re.compile(r"ON\s+([a-zA-Z_][\w]*)\s*\(([^)]+)\)", re.IGNORECASE)
-        for stmt in INDEX_STATEMENTS:
+        for stmt in wanted(INDEX_STATEMENTS):
             m = idx_re.search(stmt)
             if not m:
                 # If we cannot parse, try to run but guard with exception

@@ -4,8 +4,29 @@ import uuid
 from datetime import datetime, timezone
 
 from app.storage.rls import IsolationPostureError
+from app.storage.schema_version import SchemaVersionError
 
 logger = logging.getLogger("db.init")
+
+
+def assert_schema_version_compatible():
+    """Từ chối khởi động nếu lược đồ và ảnh này không dùng được với nhau.
+
+    Đọc bằng DSN MIGRATION chứ không phải DSN ứng dụng, vì hai lý do độc lập.
+    `schema_migrations` do vai DDL tạo ra và vai ứng dụng chưa chắc đã được cấp
+    quyền đọc trên nó — `provision_db_roles` cấp quyền theo danh sách bảng tại
+    thời điểm chạy, nên một bảng mới sinh sau đó thì không có trong danh sách.
+    Và cổng này phải trả lời được cả khi vai ứng dụng chưa tồn tại: trên máy
+    cài mới, `provision_db_roles` chạy SAU lượt migration đầu tiên.
+
+    Nó cũng là chỗ duy nhất trong đường khởi động đọc phiên bản, nên dòng log
+    `[SCHEMA-VERSION]` xuất hiện đúng một lần cho mỗi worker.
+    """
+    from app.storage.metadata_db import _migration_cursor
+    from app.storage.schema_version import assert_startup_compatible
+
+    with _migration_cursor() as cur:
+        return assert_startup_compatible(cur)
 
 
 def check_isolation_posture():
@@ -70,6 +91,19 @@ def _init_db(full_resync: bool | None = None):
     try:
         from app.storage.metadata_db import ensure_tables, drop_all_tables, _column_exists
         ensure_tables()
+
+        # Cổng phiên bản lược đồ, SAU `ensure_tables()` và TRƯỚC mọi thứ khác.
+        #
+        # Sau, vì `ensure_tables()` là nơi tạo bảng `schema_migrations`: hỏi
+        # trước thì trên một máy cài mới cổng sẽ đọc một bảng chưa tồn tại và
+        # từ chối vĩnh viễn. Trước mọi thứ khác, vì phần còn lại của `_init_db`
+        # đồng bộ CSV->DB, chạy kiểm toàn vẹn và seed danh mục — tức là **ghi**
+        # vào một cơ sở dữ liệu mà ta chưa biết mã này có hiểu đúng hay không.
+        #
+        # Ném lỗi, không phải cảnh báo. Sự cố 12/08/2026 là "lược đồ mới, mã
+        # cũ", và hình dạng đó không hỏng ồn ào — nó phục vụ được phần lớn
+        # request và chỉ sai ở những đường ít người đi nhất.
+        assert_schema_version_compatible()
         logger.info("[DB_INIT][SUCCESS] duration_ms=%.1f", (time.time() - started_at) * 1000)
 
         # Is the isolation guarantee actually in force? ensure_tables() has just
@@ -201,6 +235,13 @@ def _init_db(full_resync: bool | None = None):
             return False
 
         return True
+    except SchemaVersionError:
+        # Cùng lý do với `IsolationPostureError` ngay dưới, và một lý do nữa:
+        # "cơ sở dữ liệu là tuỳ chọn" đúng khi Postgres KHÔNG có — ứng dụng
+        # phục vụ được từ CSV. Nó KHÔNG đúng khi Postgres có mặt và mang một
+        # lược đồ mà ảnh này không hiểu: khi đó mỗi lượt ghi là một lượt ghi
+        # theo hình dạng sai, và CSV không cứu được gì.
+        raise
     except IsolationPostureError:
         # The one failure that must NOT be downgraded to "DB is optional".
         # Everything else here is best-effort because the app can serve from CSV

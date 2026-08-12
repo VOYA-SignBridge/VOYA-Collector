@@ -46,6 +46,17 @@ STANDALONE_BY_DESIGN = {
     # Nguyên tắc: MỘT SỔ ĐĂNG BẠ KHÔNG ĐƯỢC CẢN CHÍNH HÀNH ĐỘNG NÓ GHI LẠI.
     # Danh tính người thao tác giữ ở `actor_label`, điền ngay lúc ghi.
     "legal_document_events",
+    # Sổ đăng bạ phiên bản LƯỢC ĐỒ. Nó đứng ở một bậc khác với mọi bảng còn
+    # lại: những bảng kia mô tả dữ liệu, bảng này mô tả *hình dạng* của chúng.
+    # Không có gì để trỏ tới — `applied_by` là tên vai Postgres (`voya_app`,
+    # `admin`), không phải một hàng trong `users`, và `applied_on` là định danh
+    # MÁY.
+    #
+    # Nó cũng phải đọc được KHI mọi thứ khác còn chưa tồn tại: cổng phiên bản
+    # ở `app/db.py` hỏi nó trên một cơ sở dữ liệu có thể chưa có bảng nào khác.
+    # Một khoá ngoại ở đây sẽ biến "hỏi phiên bản" thành "phụ thuộc vào bảng
+    # được trỏ tới", đúng vòng phụ thuộc mà cổng tồn tại để cắt.
+    "schema_migrations",
 }
 
 

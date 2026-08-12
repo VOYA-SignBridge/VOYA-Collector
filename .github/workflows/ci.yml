@@ -133,9 +133,30 @@ jobs:
           psql "postgresql://admin:admin@localhost:5432/signdb_ci" -v ON_ERROR_STOP=1 -c \
             "CREATE ROLE voya_app LOGIN PASSWORD 'ci_password';"
 
-      - name: Dựng lược đồ
+      # `app.cli.migrate`, KHÔNG phải `ensure_tables()`.
+      #
+      # Từ 12/08/2026 `ensure_tables()` chỉ còn THÊM: phần một chiều (bỏ bảng
+      # cũ, chép dữ liệu sang `memberships`, bỏ chỉ mục toàn cục) chỉ chạy dưới
+      # lệnh migration. Một máy CI dựng từ số không cần đúng phần đó — gọi
+      # `ensure_tables()` ở đây sẽ để lại `tenant_members` là BẢNG chứ không
+      # phải view, và bộ test sẽ đỏ theo cách không nói ra nguyên nhân.
+      #
+      # `EXPECTED_DATABASE` bắt buộc, và ở đây nó cũng có ích thật: nếu ai đó
+      # đổi DSN trong workflow mà quên đổi chỗ này, lệnh huỷ thay vì migrate
+      # nhầm cơ sở dữ liệu.
+      #
+      # Phiên bản đích hỏi chính MÃ chứ không viết cứng ở đây, giống hệt
+      # `scripts/deploy.sh` hỏi ảnh. Một con số trong tệp workflow sẽ trôi khỏi
+      # `APP_SCHEMA_VERSION` đúng vào lần bump đầu tiên, và nó trôi trong im
+      # lặng cho tới khi ai đó đọc log CI.
+      - name: Dựng lược đồ (lệnh migration rõ ràng)
         working-directory: backend
-        run: python -c "from app.storage.metadata_db import ensure_tables; ensure_tables()"
+        env:
+          EXPECTED_DATABASE: signdb_ci
+        run: |
+          target=$(python -c "from app.storage.schema_version import APP_SCHEMA_VERSION; print(APP_SCHEMA_VERSION)")
+          echo "luoc do dich: v$target"
+          python -m app.cli.migrate --to "$target"
 
       # PHẢI chạy SAU `ensure_tables`: Postgres không tự cấp quyền trên bảng
       # được tạo sau lệnh GRANT. `ALTER DEFAULT PRIVILEGES` lo phần bảng sinh

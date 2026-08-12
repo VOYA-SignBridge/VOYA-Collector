@@ -589,7 +589,31 @@ def pytest_sessionstart(session):
     try:
         from app.storage import metadata_db as db
 
-        db.ensure_tables()
+        # `migrate_database()` chứ không phải `ensure_tables()`, và đây là chỗ
+        # DUY NHẤT trong bộ test gọi nó.
+        #
+        # Từ 12/08/2026 `ensure_tables()` chỉ còn THÊM: phần một chiều (chép dữ
+        # liệu sang `memberships`, bỏ bảng cũ, bỏ chỉ mục toàn cục) chỉ chạy
+        # dưới lệnh migration. Khoảng ba mươi tệp test có fixture riêng gọi
+        # `ensure_tables()`, và tất cả vẫn đúng — vì hook này chạy TRƯỚC hết,
+        # nên tới lượt chúng thì cơ sở dữ liệu đã ở phiên bản hiện hành và
+        # "thêm cho đủ" là vừa đủ.
+        #
+        # `stamp=False` rồi đóng dấu CÓ ĐIỀU KIỆN: bộ test chạy trên cơ sở dữ
+        # liệu phát triển dùng chung, và một dòng `schema_migrations` mới sau
+        # mỗi lượt chạy sẽ biến sổ đăng bạ — thứ để đọc khi có sự cố — thành
+        # nhật ký của pytest. Nhưng phải có ĐÚNG MỘT dấu, nếu không mọi test
+        # gọi `init_db()` sẽ vấp cổng phiên bản.
+        db.migrate_database(stamp=False)
+
+        from app.storage.schema_version import (
+            APP_SCHEMA_VERSION, read_schema_version, stamp_schema_version,
+        )
+
+        with db._migration_cursor() as cur:
+            if read_schema_version(cur) is None:
+                stamp_schema_version(cur, APP_SCHEMA_VERSION, note="pytest bootstrap")
+
         _ARTIFACT_BEFORE = _artifact_snapshot()
     except Exception as exc:  # pragma: no cover
         _ARTIFACT_BEFORE = {}

@@ -25,15 +25,28 @@ cái nào là lỗi của test: `ensure_tables()` dựng ra một lược đồ 
 khoá ngoại và 14 cột so với máy đang chạy — tức mọi máy triển khai mới đều nhận
 một lược đồ yếu hơn, trong im lặng. Đã vá. Chi tiết ở §1.2.
 
+**Dựng lược đồ bằng `python -m app.cli.migrate --to <N>`, không phải
+`ensure_tables()`.** Từ 12/08/2026 `ensure_tables()` chỉ còn THÊM: phần một
+chiều — chép dữ liệu sang `memberships`, bỏ 6 bảng phân quyền cũ, bỏ chỉ mục
+duy nhất toàn cục — chỉ chạy dưới lệnh migration. Gọi `ensure_tables()` trên
+một cơ sở dữ liệu trống sẽ để lại `tenant_members` là **BẢNG** chứ không phải
+view, và bộ test đỏ theo cách không nói ra nguyên nhân. Lệnh này bắt buộc đặt
+`EXPECTED_DATABASE`.
+
+Bộ test tự lo phần đó: `conftest.pytest_sessionstart` gọi `migrate_database()`
+một lần trước mọi fixture, nên khoảng ba mươi tệp test có fixture riêng gọi
+`ensure_tables()` vẫn đúng — tới lượt chúng thì cơ sở dữ liệu đã ở phiên bản
+hiện hành và "thêm cho đủ" là vừa đủ.
+
 **Bước GRANT là bắt buộc trên nền thứ hai.** Bộ test chạy dưới vai `voya_app`
-(không phải superuser — superuser được miễn RLS vô điều kiện), nhưng
-`ensure_tables()` dựng bảng bằng vai DDL, và Postgres không tự cấp quyền trên
-bảng mới cho vai khác. Thiếu GRANT → **41 lỗi chỉ trong 3 tệp**, tất cả là
+(không phải superuser — superuser được miễn RLS vô điều kiện), nhưng lược đồ
+được dựng bằng vai DDL, và Postgres không tự cấp quyền trên bảng mới cho vai
+khác. Thiếu GRANT → **41 lỗi chỉ trong 3 tệp**, tất cả là
 `permission denied for table users`, một thông báo trỏ thẳng vào mã ứng dụng
 trong khi nguyên nhân nằm ở phân quyền.
 
 ```bash
-# sau ensure_tables(), TRƯỚC khi chạy pytest
+# sau bước dựng lược đồ, TRƯỚC khi chạy pytest
 psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
 GRANT USAGE ON SCHEMA public TO voya_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO voya_app;

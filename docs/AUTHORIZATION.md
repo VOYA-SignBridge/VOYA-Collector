@@ -621,7 +621,42 @@ liệu qua ranh giới bằng UPDATE thay vì INSERT.
 
 ---
 
-## 16. Chưa làm — sau lượt này
+## 16. Lược đồ phân quyền đổi bằng LỆNH, không bằng lần khởi động
+
+Từ 12/08/2026 thì `ensure_tables()` **không còn** chạy được phần một chiều của
+mặt phẳng này. Cụ thể, năm câu sau chỉ chạy dưới `python -m app.cli.migrate`:
+
+```
+_DROP_VESTIGIAL_ROLE_NAME        bỏ cột roles.name
+_MIGRATE_MEMBERSHIPS             chép tenant_members → memberships
+_MIGRATE_ASSIGNMENTS             chép 4 bảng gán → role_assignments
+_DROP_LEGACY_MEMBERSHIP_TABLES   bỏ 6 bảng cũ
+_LEGACY_ROLE_RETIREMENT_DDL      'viewer' → NULL, rồi siết ràng buộc
+```
+
+Chúng gom trong `AUTHZ_ONE_WAY_DDL` — một **tập con** của
+`AUTHZ_DDL_STATEMENTS`, không phải một danh sách thứ hai. Lý do nằm ở bốn ràng
+buộc thứ tự ghi ngay trên `AUTHZ_DDL_STATEMENTS`: mỗi cái đổi lấy một lần hỏng
+thật, và một danh sách thứ hai sẽ trôi khỏi thứ tự đó trong im lặng. Lọc phần
+tử thì thứ tự tương đối giữ nguyên theo định nghĩa.
+
+`_TENANT_MEMBERS_VIEW` **không** ở trong tập đó. `CREATE OR REPLACE VIEW` không
+phá gì, và định nghĩa view đi theo mã chứ không theo dữ liệu — một ảnh mới phải
+mang được định nghĩa view của chính nó lên mà không cần nghi thức migration.
+
+**Hệ quả khi làm việc trên mặt phẳng này.** Thêm một bảng, một cột, một chỉ mục,
+một chính sách RLS: cứ viết vào `AUTHZ_DDL_STATEMENTS`, khởi động sẽ tự cài.
+Nhưng nếu câu mới bỏ đi thứ gì hoặc viết đè dữ liệu cũ, phải thêm nó vào
+`AUTHZ_ONE_WAY_DDL` — nếu quên,
+`test_no_irreversible_statement_survives_the_filter` sẽ đỏ và nói ra đúng câu
+nào.
+
+Toàn bộ lý lẽ, số đo và bảy ca kiểm chứng nằm ở
+[INCIDENT_2026-08-12_schema_code_skew.md §6](INCIDENT_2026-08-12_schema_code_skew.md).
+
+---
+
+## 17. Chưa làm — sau lượt này
 
 * **Router chưa chuyển.** `is_admin` vẫn đọc ở 12 tệp; các route ghi vẫn không
   gọi `authorize()`. Đó là Phase D, và nó là điều kiện để gỡ cổng chặn ở §12.
