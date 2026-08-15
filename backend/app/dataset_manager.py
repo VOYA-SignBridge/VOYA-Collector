@@ -43,7 +43,7 @@ DIALECT_LABELS = LABELS_DIR / "labels_dialect.csv"
 # NOTE: `dialect` is DEPRECATED as a semantic field (it conflated region /
 # vocabulary domain / collection campaign). It is kept because it still names
 # the physical storage directory. New code must use the vocabulary schema v2
-# columns below (see processed/shared/vocabulary.py + docs/VOCABULARY_SCHEMA_V2.md).
+# columns below (see processed/shared/vocabulary.py + docs/02-data/VOCABULARY_SCHEMA_V2.md).
 LABEL_FIELDS = [
     "class_uid",
     "class_idx",
@@ -67,10 +67,56 @@ LABEL_FIELDS = [
     "motion_type",  # static | dynamic | mixed | "" (unknown)
     # Owning tenant. Appended LAST so the Sheets mirror's column positions are
     # unchanged. See app/tenancy.py for why the value is a constant and not a
-    # setting, and docs/needFix/BACKEND_WORK_PLAN.md item A1 for why the SOT
+    # setting, and docs/11-worklog/BACKEND_WORK_PLAN.md item A1 for why the SOT
     # needs the column at all when Postgres already has it.
     TENANT_COLUMN,
+    # Vùng miền địa lý của KÝ HIỆU — trục riêng, không phải `dialect`.
+    #
+    # `dialect` trước đây gánh cả ba nghĩa (xem chú thích ở đầu LABEL_FIELDS);
+    # ba lớp dùng nó để chứa vùng miền đã được gỡ ngày 14/08/2026, xem
+    # E:\CTU_ProjectOutside\voya_lop_vung_2026-08-14\. Cột này tách nghĩa đó ra
+    # để `dialect` chỉ còn là tên thư mục lưu trữ.
+    #
+    # Giá trị chuẩn hoá: "bac" | "trung" | "nam" | "" (chưa biết).
+    # KHÔNG dùng "" như "vùng chung" — chưa biết thì để trống, đừng suy từ nơi
+    # thu hay từ người ký. Vùng của NGƯỜI KÝ là cột khác: signers.regional_group.
+    #
+    # Đặt sau TENANT_COLUMN nên vị trí các cột cũ trên bản chiếu Sheets không đổi.
+    "region",
 ]
+
+# Giá trị hợp lệ cho `region`. Định dạng: chữ thường, không dấu, không khoảng
+# trắng — cùng quy ước với dialect_id và profile_id.
+#: Mã vùng chưa qua phân loại. KHÁC `common`, và khác biệt đó là cả điểm của
+#: thiết kế: `unclassified` nghĩa là "chưa ai xác minh", `common` nghĩa là "đã
+#: xác minh rằng không cần phân biệt vùng". Gộp hai thứ này thì không bao giờ
+#: trả lời được "còn bao nhiêu nhãn đang chờ phân loại".
+#:
+#: Chọn `unclassified` chứ không `unknown`: "unknown" đọc lên như một sự thật
+#: vĩnh viễn, còn đây là một BƯỚC trong quy trình — nhãn đã vào hệ thống nhưng
+#: chưa qua khâu phân loại vùng, và sẽ có người xử lý.
+REGION_UNCLASSIFIED = "unclassified"
+
+#: Nguồn sự thật là bảng `regions` (theo tenant). Tuple này chỉ là bộ lọc đầu
+#: vào ở tầng ứng dụng cho năm mã của nền tảng — nó KHÔNG được phép là nơi
+#: định nghĩa tập giá trị, vì tenant thêm được vùng riêng (`tay-nguyen`,
+#: `tay-nam-bo`) mà không sửa mã.
+VALID_REGIONS = (REGION_UNCLASSIFIED, "common", "bac", "trung", "nam")
+
+
+def normalize_region(value: Any) -> str:
+    """Chuẩn hoá về một mã vùng; giá trị lạ hoặc rỗng thành `unclassified`.
+
+    Không bao giờ trả NULL hay chuỗi rỗng: cột `classes.region` là NOT NULL kể
+    từ v3.19, và "chưa biết" đã có một mã riêng để nói. Giá trị lạ KHÔNG bị
+    đoán thành một vùng cụ thể — nó rơi về `unclassified` để người phân loại
+    còn thấy mà xử lý, thay vì biến mất thành một vùng nào đó.
+    """
+    v = (str(value or "")).strip().lower()
+    v = {"bắc": "bac", "trung bộ": "trung", "nam bộ": "nam",
+         "north": "bac", "central": "trung", "south": "nam",
+         "chung": "common", "": REGION_UNCLASSIFIED}.get(v, v)
+    return v if v in VALID_REGIONS else REGION_UNCLASSIFIED
 
 
 @lru_cache(maxsize=1)
@@ -319,6 +365,7 @@ class ClassMetadata:
     collection_campaign: str = ""
     is_active: bool = True
     motion_type: str = ""  # static | dynamic | mixed | "" (unknown)
+    region: str = REGION_UNCLASSIFIED   # xem VALID_REGIONS / bảng `regions`
     # Owning tenant. Last field and defaulted, so every existing positional and
     # keyword construction keeps working unchanged. Defaulting here (rather than
     # at each call site) is what makes it impossible to register a class with no
@@ -368,6 +415,7 @@ class ClassMetadata:
             "is_active": "1" if self.is_active else "0",
             "motion_type": self.motion_type or "",
             TENANT_COLUMN: normalize_tenant_id(self.tenant_id),
+            "region": normalize_region(self.region),
         }
 
     def write_metadata_json(self):
@@ -663,6 +711,7 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         collection_campaign=(existing.get("collection_campaign") or "").strip(),
         is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
         motion_type=(existing.get("motion_type") or "").strip(),
+        region=normalize_region(existing.get("region")),
         # Without this every class read back from labels.csv would come out as
         # the bootstrap tenant, and since A4 derives the storage directory from
         # this field, tenant B's samples would be written into tenant A's tree —
@@ -692,6 +741,7 @@ def register_class(
     dialect: str,
     is_common_global: bool = False,
     is_common_language: bool = False,
+    region: str = REGION_UNCLASSIFIED,
 ) -> ClassMetadata:
     """Register or fetch existing class with TOCTOU-safe locking.
 
@@ -724,11 +774,26 @@ def register_class(
     with lock:
         # 1. CHECK — read fresh state from disk while holding lock
         rows = _load_labels_locked()
+        region_key = normalize_region(region)
         for r in rows:
             if (
                 r.get("language") == language_key
                 and r.get("dialect") == dialect_key
                 and r.get("slug") == slug
+                # `region` phải nằm TRONG phép so, không đứng ngoài.
+                #
+                # Thiếu nó thì phép tìm này dùng khoá (slug, language, dialect)
+                # trong khi cơ sở dữ liệu định danh lớp bằng (…, region) — hai
+                # định nghĩa khác nhau về "lớp nào". Hệ quả đo được: tạo
+                # `ăn|pho-thong|bac` rồi tạo `ăn|pho-thong|nam` thì lần thứ hai
+                # KHÔNG tạo gì cả, nó trả về lớp `bac` — cùng `class_uid`, cùng
+                # `region='bac'`. Người dùng tưởng đã có biến thể miền Nam, và
+                # mọi mẫu họ thu sau đó rơi vào lớp miền Bắc.
+                #
+                # Im lặng hoàn toàn: không lỗi, không cảnh báo, API trả 200 kèm
+                # một lớp trông hợp lệ. Với 483 từ có biến thể miền trong từ
+                # điển quốc gia, đây là đường nhập QIPEDC gộp sạch chúng lại.
+                and normalize_region(r.get("region")) == region_key
             ):
                 # Class already exists — return it
                 meta = _build_meta_from_row(r)
@@ -762,6 +827,11 @@ def register_class(
                 vocabulary_group=v2["vocabulary_group"],
                 motion_type=v2["motion_type"],
                 collection_campaign=v2["collection_campaign"],
+                # Vùng do người tạo chọn; bỏ trống thì `unclassified` — và đó
+                # là một trạng thái CÓ NGHĨA, không phải chỗ trống: "đã vào hệ
+                # thống, chưa qua khâu phân loại vùng". Nó cố ý KHÔNG đoán
+                # thành một vùng cụ thể, để người phân loại còn thấy mà xử lý.
+                region=normalize_region(region),
                 # Owner of the new class. Without this every class created
                 # through the app would be born under the bootstrap tenant no
                 # matter who created it, and the storage partition — which is
@@ -834,6 +904,14 @@ def list_classes(
                 is_common_global=parse_bool(r.get("is_common_global")),
                 is_common_language=parse_bool(r.get("is_common_language")),
                 hands_required=parse_hands_required(r.get("hands_required")),
+                # `region` phải đi theo, không được để rơi về mặc định.
+                #
+                # Thiếu dòng này thì `list_classes()` trả về `unclassified` cho
+                # MỌI lớp, và `/classes/list` — thứ giao diện dựng danh sách từ
+                # đó — không phân biệt nổi hai biến thể miền của cùng một từ.
+                # Hai dòng `ăn` sẽ hiện ra giống hệt nhau. Với 483 từ có biến
+                # thể miền trong từ điển quốc gia, đó là hỏng ngay ở lối vào.
+                region=normalize_region(r.get("region")),
                 # Same reason as in `_build_meta_from_row`: `hierarchy_path()`
                 # is derived from this, so dropping it points every listed class
                 # at the bootstrap tenant's directory tree.
@@ -873,6 +951,7 @@ def get_or_register_class(
     dialect: str = "",
     is_common_global: bool = False,
     is_common_language: bool = False,
+    region: str = REGION_UNCLASSIFIED,
 ) -> ClassMetadata:
     """Convenience wrapper used by pipelines & routes.
     If class exists returns metadata, else registers.
@@ -949,6 +1028,7 @@ def get_or_register_class(
                 and not is_common_global,
                 folder_override=legacy_folder,
                 class_idx=cls_idx_val,
+                region=normalize_region(region),
                 # The folder was found under this tenant's own subtree (see
                 # `tenant_root` above), so it belongs to this tenant.
                 tenant_id=ambient_tenant(),
@@ -967,6 +1047,7 @@ def get_or_register_class(
         dialect=dia,
         is_common_global=is_common_global,
         is_common_language=is_common_language,
+        region=region,
     )
 
 

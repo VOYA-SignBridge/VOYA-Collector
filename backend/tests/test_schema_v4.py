@@ -99,7 +99,7 @@ class TestPlanColumnCannotBeNull:
         """
         default = _columns("tenants")["plan_code"]["column_default"]
         assert default is not None, "plan_code NOT NULL nhưng không có mặc định"
-        assert "trial" in default, default
+        assert "free" in default, default
 
     def test_the_bootstrap_insert_does_not_use_on_conflict(self):
         """Nguyên nhân gốc của lỗi trên, chốt ở dạng đọc được từ mã.
@@ -122,16 +122,23 @@ class TestPlanColumnCannotBeNull:
 class TestSeededPlans:
     def test_the_four_plans_are_present(self):
         codes = {r["plan_code"] for r in db._fetch_all("SELECT plan_code FROM plans")}
-        assert {"internal", "trial", "school", "institution"} <= codes
+        assert {"enterprise", "free", "plus", "pro"} <= codes
 
-    def test_the_internal_plan_is_not_offered_for_self_serve(self):
+    def test_the_enterprise_plan_is_not_offered_for_self_serve(self):
         """Nó không có hạn mức nào. Để nó tự đăng ký được là phát gói không
-        giới hạn cho bất kỳ ai điền đúng một trường trong biểu mẫu."""
+        giới hạn cho bất kỳ ai điền đúng một trường trong biểu mẫu.
+
+        v6 tách đôi hai cờ này, và chúng KHÔNG còn đi cùng nhau. `internal`
+        trước kia vừa ẩn vừa cấm tự đăng ký, nên một khẳng định gộp là đủ. Sau
+        khi nó thành `enterprise`, gói này phải HIỆN trên bảng giá — đó là bậc
+        cao nhất, khách hàng cần thấy để liên hệ — nhưng vẫn không được tự đăng
+        ký. Cờ giữ cửa là `is_self_serve`; `is_listed` chỉ là chuyện trưng bày.
+        """
         row = db._fetch_all(
-            "SELECT is_self_serve, is_listed FROM plans WHERE plan_code = 'internal'"
+            "SELECT is_self_serve, is_listed FROM plans WHERE plan_code = 'enterprise'"
         )[0]
         assert row["is_self_serve"] is False
-        assert row["is_listed"] is False
+        assert row["is_listed"] is True
 
     def test_the_default_tenant_is_on_the_unlimited_plan(self):
         """Nó giữ dữ liệu thật và không bao giờ nên bị một hạn mức thương mại
@@ -141,7 +148,7 @@ class TestSeededPlans:
         row = db._fetch_all(
             "SELECT plan_code FROM tenants WHERE tenant_id = %s", (DEFAULT_TENANT_ID,)
         )[0]
-        assert row["plan_code"] == "internal"
+        assert row["plan_code"] == "enterprise"
 
     def test_every_live_tenant_has_exactly_one_open_subscription(self):
         """Chỉ mục duy nhất một phần ép điều này; test canh rằng backfill v4.3

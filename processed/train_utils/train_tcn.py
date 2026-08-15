@@ -136,6 +136,15 @@ except Exception:  # pragma: no cover
     sys.path.append(str(_P(__file__).resolve().parents[2]))
     from processed.train_utils.dataset_loader import NPZSignDataset # type: ignore
 
+# Ở NGOÀI khối try/except trên, và đó không phải chi tiết vặt: bản trước lỡ đặt
+# nó trong nhánh `except`, nên chạy bằng `python -m` (nhánh `try` thành công)
+# thì hai tên này không bao giờ được nạp — `NameError` ngay lúc dựng checkpoint,
+# tức sau khi đã huấn luyện xong. Bộ kiểm đơn vị không thấy vì không cái nào
+# chạy `main()`; smoke đầu-cuối bắt được ngay lượt đầu.
+from processed.train_utils.label_mapping import (  # noqa: E402
+    CHECKPOINT_MAPPING_KEY, build_checkpoint_mapping,
+)
+
 try:
     try:
         from .tracking_client import TrackingClient as _TrackingClient  # type: ignore
@@ -477,6 +486,7 @@ def build_loader(
     *,
     features_root: Optional[Path] = None,
     label_to_index_json: Optional[Path] = None,
+    class_uid_to_target_idx: Optional[Dict[str, int]] = None,
     feature_dim: Optional[int] = None,
     seed: int = 42,
 ) -> DataLoader:
@@ -484,6 +494,7 @@ def build_loader(
         csv_path,
         root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=class_uid_to_target_idx,
         to_tensor=True,
         augment_fn=augment_fn,
     )
@@ -922,6 +933,7 @@ def build_checkpoint(
     te_f1=None,
     te_hand_metrics=None,
     stamp="",
+    index_to_label: Optional[Dict[int, object]] = None,
     contract_extra: Optional[Dict[str, object]] = None,
 ):
     ckpt = {
@@ -949,10 +961,13 @@ def build_checkpoint(
 
         "num_classes": num_classes,
 
-        "idx_to_label": {
+        # `index_to_label` ở đường vận hành mang cả tên hiển thị; đường
+        # legacy vẫn ra chuỗi như cũ. `normalize_idx_to_label` phía suy
+        # luận xử lý được cả hai kiểu.
+        "idx_to_label": (index_to_label if index_to_label else {
             int(v): k
             for k, v in label_map.items()
-        },
+        }),
 
         "label_to_idx": label_map,
 
@@ -1196,6 +1211,20 @@ def main() -> None:
     # IMPORTANT: default behavior remains unchanged when no subset args are provided.
     features_root: Optional[Path] = None
     label_to_index_json: Optional[Path] = None
+    #: `{class_uid: target_idx}` khi và chỉ khi split tự khai `purpose=operational`.
+    #: `None` nghĩa là đường nghiên cứu/legacy — giữ nguyên mọi hành vi cũ.
+    declared_mapping: Optional[Dict[str, int]] = None
+    #: Mục `classes` nguyên văn của split, giữ để chép `slug/dialect/region`
+    #: sang checkpoint. Chỉ để ĐỌC — không tham gia quyết định chỉ số.
+    declared_classes: List[Dict[str, object]] = []
+    #: `index_to_label` mang metadata hiển thị, chỉ đặt ở đường vận hành.
+    i2l_for_ckpt: Dict[int, object] = {}
+    #: Nguồn gốc hiện vật, chép nguyên văn từ bản khai của split và đóng băng
+    #: vào checkpoint. Khác `label_mapping` ở chỗ khối kia được TÍNH LẠI từ ánh
+    #: xạ mà trainer thật sự dùng, còn khối này là điều hiện vật ĐÃ KHAI. Hai
+    #: khối phải khớp; đối chiếu chúng là cách phát hiện trainer đã đổi tập lớp
+    #: hoặc đổi ánh xạ trên đường đi.
+    declared_provenance: Dict[str, object] = {}
     subset_tag = ""
     subset_dir: Optional[Path] = None
     common_labels: List[str] = []
@@ -1395,9 +1424,92 @@ def main() -> None:
         sub_val = _prep_one(cfg.val_csv, "val")
         sub_test = _prep_one(cfg.test_csv, "test")
 
-        # Build label maps from TRAIN split only (common practice).
-        train_rows, _ = _read_csv_rows(sub_train)
-        l2i, i2l = _build_subset_label_maps(train_rows, default_language=str(args.language or "vn"))
+        # ------------------------------------------------------------------
+        # Đường VẬN HÀNH: danh tính lớp là `class_uid`, do split KHAI BÁO.
+        #
+        # Chỉ chạy khi `split_metadata.json` cạnh split gốc tự khai
+        # `purpose="operational"`. Không split nào khai như vậy tính đến
+        # 14/08/2026, nên nhánh này hiện KHÔNG đổi hành vi của bất kỳ lượt chạy
+        # nào — nó chờ sẵn cho hiện vật vận hành đầu tiên.
+        #
+        # Vì sao phải có: `_build_subset_label_maps` dựng ánh xạ bằng
+        # `enumerate` trên `label_key = vn/<dialect>/<slug>` gom theo THỨ TỰ
+        # HÀNG. Hai hệ quả, cả hai đều im lặng:
+        #   - đổi thứ tự hàng trong CSV là đổi ngữ nghĩa đầu ra của mô hình;
+        #   - `label_key` KHÔNG chứa region, trong khi CSDL cho phép
+        #     `ăn|bac` và `ăn|nam` cùng một dialect — hai lớp hợp lệ bị GỘP
+        #     làm một, không lỗi, không cảnh báo, và độ chính xác vẫn ra số.
+        #
+        # Ánh xạ được truyền THẲNG xuống `NPZSignDataset(class_uid_to_target_idx=…)`.
+        #
+        # Bản trước của khối này dùng một cầu tạm: ghi đè `label_key := class_uid`
+        # trong bản sao ở run dir để `_resolve_target` cũ tra trúng. Nó chạy
+        # đúng, nhưng làm hỏng provenance — split gốc khai một đằng, còn tệp
+        # trainer thật sự đọc là một bản ĐÃ BỊ SỬA trường ngữ nghĩa. Membership
+        # không đổi, nhưng hiện vật được tiêu thụ không còn khớp từng byte với
+        # hiện vật đã khai, nên mã băm mất ý nghĩa làm bằng chứng. Đã gỡ.
+        # ------------------------------------------------------------------
+        from processed.train_utils.label_mapping import (
+            consume_declared, partitions_agree, read_declared,
+        )
+
+        khai_bao = read_declared(Path(cfg.train_csv).resolve().parent)
+        van_hanh = bool(khai_bao) and str(khai_bao.get("purpose") or "") == "operational"
+
+        if van_hanh:
+            anh_xa = consume_declared(khai_bao)
+
+            # ĐỌC, không GHI. Tệp split đi tới trainer nguyên vẹn.
+            theo_phan = {ten: _read_csv_rows(duong_dan)[0]
+                         for duong_dan, ten in ((sub_train, "train"),
+                                                (sub_val, "val"),
+                                                (sub_test, "test"))}
+
+            # Ba phần phải nói cùng một chuyện, và không phần nào được chứa
+            # class_uid ngoài bản khai. KHÔNG lọc chúng đi — một lượt chạy trên
+            # tập khác với tập đã khai là một lượt chạy nói sai về nguồn gốc.
+            partitions_agree(theo_phan, anh_xa)
+
+            declared_mapping = dict(anh_xa)
+            declared_classes = list(khai_bao.get('classes') or [])
+            declared_provenance = {
+                k: khai_bao.get(k) for k in
+                ("split_id", "purpose", "class_set_hash", "class_mapping_hash",
+                 "num_classes", "scope", "files", "policy", "generated_at")
+                if khai_bao.get(k) is not None
+            }
+            l2i = dict(anh_xa)
+            _mo_ta = {str(m.get('class_uid') or ''): m for m in declared_classes}
+            # Mang theo tên hiển thị: nếu chỉ có `class_uid`, giao diện
+            # thời gian thực sẽ hiện UID thô — `normalize_idx_to_label`
+            # tra từ vựng hiện tại theo `label_key`, mà UID thì không
+            # khớp gì cả. Danh tính vẫn là class_uid; đây chỉ là nhãn đọc.
+            i2l = {}
+            for k, v in anh_xa.items():
+                _m = _mo_ta.get(k, {})
+                _slug = str(_m.get('slug') or '')
+                _vung = str(_m.get('region') or '')
+                # Tên người đọc lấy từ bản khai nếu có; nếu không thì dựng từ
+                # slug + vùng. Vùng phải xuất hiện được, vì `ăn [bac]` và
+                # `ăn [nam]` là hai lớp khác nhau và người xem cần phân biệt.
+                _goc = str(_m.get('label_original') or '').strip()
+                i2l[v] = {
+                    "label_key": k,
+                    "class_uid": k,
+                    "label_slug": _slug,
+                    "label_original": _goc or (f"{_slug} [{_vung}]" if _vung else _slug),
+                    "language": "vn",
+                    "dialect": str(_m.get('dialect') or ''),
+                    "region": _vung,
+                }
+            i2l_for_ckpt = dict(i2l)
+            print(f"[OPERATIONAL] ánh xạ theo class_uid từ bản khai: "
+                  f"{len(l2i)} lớp, hash={khai_bao.get('class_mapping_hash', '')[:16]}…")
+        else:
+            # Build label maps from TRAIN split only (common practice).
+            train_rows, _ = _read_csv_rows(sub_train)
+            l2i, i2l = _build_subset_label_maps(train_rows, default_language=str(args.language or "vn"))
+
         if len(l2i) < 2:
             raise SystemExit(f"Subset '{subset_tag}': need at least 2 classes to train; got {len(l2i)}.")
 
@@ -1414,8 +1526,13 @@ def main() -> None:
                 raise SystemExit(f"Subset '{subset_tag}': {name} split became empty after removing unseen labels.")
             _write_csv_rows(src_csv, rows, fieldnames)
 
-        _filter_to_known_labels(sub_val, "val")
-        _filter_to_known_labels(sub_test, "test")
+        if not van_hanh:
+            # Đường vận hành KHÔNG lọc: `partitions_agree` phía trên đã từ chối
+            # hẳn nếu có class_uid ngoài bản khai. Lọc lặng lẽ ở đây sẽ khiến
+            # lượt chạy học một tập nhỏ hơn tập mà split khai báo — đúng thứ
+            # `_consent_preflight` đã cấm, và checkpoint sẽ nói sai nguồn gốc.
+            _filter_to_known_labels(sub_val, "val")
+            _filter_to_known_labels(sub_test, "test")
 
         label_to_index_json = subset_dir / "label_to_index.json"
         index_to_label_json = subset_dir / "index_to_label.json"
@@ -1433,14 +1550,31 @@ def main() -> None:
         raise SystemExit(f"feature_dim must be {EXPECTED_FEATURE_DIM}; got {requested_dim}.")
     in_dim = EXPECTED_FEATURE_DIM
     # infer number of classes from label_to_index if present
-    ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
+    ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root,
+                            label_to_index_json=label_to_index_json,
+                            class_uid_to_target_idx=declared_mapping, to_tensor=True)
     label_map = ds_tmp.label_to_index or {}
 
     if not label_map:
         raise SystemExit(
             "label_map is empty; ensure labels.csv or label_to_index.json is present and valid."
         )
-    if ds_tmp.index_to_label:
+    if declared_mapping is not None:
+        # Đường VẬN HÀNH: số lớp đến từ chính bản khai, không suy từ dữ liệu.
+        # Kích thước tầng đầu ra và ánh xạ nhãn phải đến từ CÙNG một nguồn —
+        # nếu không thì vẫn có thể xảy ra "ánh xạ nói 22 lớp, đầu ra dựng 23".
+        num_classes = len(declared_mapping)
+        chi_so = sorted(int(v) for v in declared_mapping.values())
+        if chi_so != list(range(num_classes)):
+            raise SystemExit(
+                f"target_idx đã khai không phải 0..{num_classes - 1} liên tục: {chi_so}")
+        if len(label_map) != num_classes:
+            raise SystemExit(
+                f"ánh xạ mà dataset đọc lên ({len(label_map)} lớp) không khớp bản "
+                f"khai ({num_classes} lớp) — hiện vật đã lệch giữa hai bước.")
+        if num_classes < 2:
+            raise SystemExit(f"Need at least 2 classes, got {num_classes}")
+    elif ds_tmp.index_to_label:
         num_classes = len(ds_tmp.index_to_label)
         if num_classes < 2:
             raise SystemExit(
@@ -1500,6 +1634,7 @@ def main() -> None:
         num_workers=cfg.num_workers,
         features_root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=declared_mapping,
         feature_dim=in_dim,
         seed=cfg.seed,
         augment_fn=train_augment,
@@ -1511,6 +1646,7 @@ def main() -> None:
         num_workers=cfg.num_workers,
         features_root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=declared_mapping,
         feature_dim=in_dim,
         seed=cfg.seed,
         augment_fn=None,
@@ -1522,6 +1658,7 @@ def main() -> None:
         num_workers=cfg.num_workers,
         features_root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=declared_mapping,
         feature_dim=in_dim,
         seed=cfg.seed,
         augment_fn=None,
@@ -1720,6 +1857,17 @@ def main() -> None:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg_json_for_ckpt = {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(cfg).items()}
     contract_extra = {
+        # Mắt xích cuối: ánh xạ ngữ nghĩa đóng băng trong chính checkpoint.
+        # Suy luận giải mã bằng nó, KHÔNG bằng `labels.csv` lúc đó.
+        **({CHECKPOINT_MAPPING_KEY: build_checkpoint_mapping(
+              declared_mapping, declared_classes)}
+           if declared_mapping is not None else {}),
+        # Nguồn gốc hiện vật. Đây là nửa còn lại của bằng chứng: khối
+        # `label_mapping` phía trên được tính lại từ ánh xạ trainer thật sự
+        # dùng, khối này là điều split đã khai. Bằng nhau nghĩa là trainer
+        # không đổi membership hay ánh xạ trên đường đi; lệch nhau là có một
+        # bước ở giữa đã sửa hiện vật.
+        **({"split_provenance": declared_provenance} if declared_provenance else {}),
         "vocabulary_schema_version": "v2" if profile_mode else "v1_legacy",
         "recognition_profile": (args.recognition_profile or ("unified" if args.unified else "")),
         "include_common": bool(args.include_common),
@@ -1760,6 +1908,7 @@ def main() -> None:
         te_f1=te_f1,
         te_hand_metrics=te_hand_metrics,
         stamp=stamp,
+        index_to_label=(i2l_for_ckpt or None),
         contract_extra=contract_extra,
     )
     # Use actual model name instead of hardcoded "tcn"

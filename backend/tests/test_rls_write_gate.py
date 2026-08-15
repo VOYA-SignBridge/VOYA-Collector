@@ -30,7 +30,7 @@ nghĩa, vì `InsufficientPrivilege` là mã lỗi RIÊNG của vi phạm row-lev
 security, khác với `UniqueViolation`.
 
 Liên quan: ``app/storage/rls.py``, ``app/storage/authz_schema.py``,
-``docs/AUTHORIZATION.md``.
+``docs/03-security/AUTHORIZATION.md``.
 """
 
 from __future__ import annotations
@@ -97,9 +97,16 @@ def rls_write_fixture():
         _purge(cur)
 
         for tenant in _ALL_TENANTS:
+            # KHÔNG khai `plan_code`, để cột tự lấy giá trị mặc định.
+            #
+            # Bản trước ghim cứng `'internal'`, và Billing v6 bỏ đúng mã gói
+            # đó — bảy test RLS đỏ vì một khoá ngoại chẳng liên quan gì tới
+            # điều chúng kiểm. Một test về cách ly tenant không được biết mô
+            # hình giá đang có những mã nào; biết là tự buộc mình vào một hợp
+            # đồng khác, và hợp đồng đó sẽ đổi.
             cur.execute(
-                "INSERT INTO tenants (tenant_id, display_name, slug, plan_code) "
-                "VALUES (%s, %s, %s, 'internal')", (tenant, tenant, tenant))
+                "INSERT INTO tenants (tenant_id, display_name, slug) "
+                "VALUES (%s, %s, %s)", (tenant, tenant, tenant))
         cur.execute(
             "INSERT INTO users SELECT (jsonb_populate_record(NULL::users, "
             "  to_jsonb(u) || jsonb_build_object('id', gen_random_uuid()::text, "

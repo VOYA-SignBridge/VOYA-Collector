@@ -16,7 +16,7 @@
  * 3. **Không có mã QR.** Dự án không có thư viện sinh QR ở phía giao diện, và
  *    thêm một phụ thuộc chỉ để vẽ ô vuông thì không đáng. Bí mật hiện dạng nhóm
  *    4 ký tự — mọi ứng dụng xác thực đều nhập tay được, và đó cũng là đường dự
- *    phòng khi máy ảnh hỏng. Ghi rõ trong docs/TWO_FACTOR.md là hạn chế đã biết.
+ *    phòng khi máy ảnh hỏng. Ghi rõ trong docs/03-security/TWO_FACTOR.md là hạn chế đã biết.
  */
 
 import { useCallback, useEffect, useState } from "react";

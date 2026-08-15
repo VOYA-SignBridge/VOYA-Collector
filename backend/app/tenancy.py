@@ -33,8 +33,8 @@ tenant row, repoint the children, retire the old row), not a config edit. Making
 it look like a config edit would invite exactly the silent split this module is
 meant to prevent.
 
-Related: :doc:`docs/needFix/MULTITENANT_ARCHITECTURE.md`,
-``docs/needFix/BACKEND_WORK_PLAN.md`` (item A1).
+Related: :doc:`docs/01-architecture/MULTITENANT_ARCHITECTURE.md`,
+``docs/11-worklog/BACKEND_WORK_PLAN.md`` (item A1).
 """
 
 from __future__ import annotations

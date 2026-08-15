@@ -69,7 +69,7 @@ def _fernet():
 
     ĐÁNH ĐỔI phải nói rõ: đổi SECRET_KEY làm mọi bí mật đã lưu không giải mã
     được nữa, và toàn bộ người dùng phải đăng ký lại 2FA. Quy trình xoay khoá bí
-    mật vì thế phải xử lý bảng này — ghi trong docs/TWO_FACTOR.md.
+    mật vì thế phải xử lý bảng này — ghi trong docs/03-security/TWO_FACTOR.md.
     """
     from cryptography.fernet import Fernet
 

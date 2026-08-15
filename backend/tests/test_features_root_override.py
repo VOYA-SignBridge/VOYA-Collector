@@ -126,6 +126,10 @@ def test_the_real_ablation_split_resolves_into_the_arm_trees():
     if not split.exists() or v2 is None:
         pytest.skip("zfix ablation not built on this machine")
     rows = list(csv.DictReader(split.open(encoding="utf-8-sig")))
+    # Có tệp split nhưng KHÔNG có dòng nào là một trạng thái khác hẳn "chưa
+    # dựng ablation" — cái sau đã `skip` ở trên. Không chốt thì một split rỗng
+    # cho test xanh mà chưa phân giải đường dẫn nào.
+    assert rows, f"{split} không có dòng nào"
     ds = _dataset(v2)
     for row in rows[:25]:
         assert str(ds._resolve_feature_path(row)).startswith(str(v2))

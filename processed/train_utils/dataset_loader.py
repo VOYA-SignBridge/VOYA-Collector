@@ -45,7 +45,28 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         feature_key_priority: Optional[List[str]] = None,
         dtype: str = "float32",
         augment_fn: Optional[Any] = None,
+        class_uid_to_target_idx: Optional[Dict[str, int]] = None,
     ) -> None:
+        # `class_uid_to_target_idx` BẬT chế độ VẬN HÀNH, và nó thay đổi hẳn
+        # cách một hàng thành nhãn: `row['class_uid']` tra thẳng vào ánh xạ do
+        # split KHAI BÁO. Không nhìn `label_key`, không nhìn `class_idx`, không
+        # đọc `labels.csv`.
+        #
+        # Vì sao phải cắt cả ba: mỗi cái là một nguồn sự thật cạnh tranh, và
+        # cả ba đều sai theo cách im lặng.
+        #   `label_key`   = `vn/<dialect>/<slug>` — KHÔNG chứa region, trong khi
+        #                   CSDL cho phép `ăn|bac` và `ăn|nam` cùng dialect. Hai
+        #                   lớp hợp lệ gộp làm một, không lỗi, không cảnh báo.
+        #   `class_idx-1` = định danh danh mục TOÀN CỤC và THƯA. `{17,103,812}`
+        #                   thành `{16,102,811}` trong khi `num_classes = 3`.
+        #   `labels.csv`  = từ vựng HIỆN TẠI, không phải từ vựng lúc huấn luyện.
+        #                   Một checkpoint cũ sẽ bị giải mã bằng danh mục mới.
+        #
+        # `None` giữ nguyên toàn bộ hành vi cũ cho đường nghiên cứu/legacy —
+        # các hiện vật đã đóng băng cần đúng hành vi lịch sử để tái lập được.
+        self._declared_mapping: Optional[Dict[str, int]] = (
+            dict(class_uid_to_target_idx) if class_uid_to_target_idx else None
+        )
         self.csv_path = Path(csv_path)
         # Whether the caller NAMED a features root, as opposed to us guessing one.
         # An explicit root has to outrank the `file_path` column (see
@@ -106,61 +127,72 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         self.label_to_index: Dict[str, int] = {}
         self.index_to_label: Dict[int, Dict[str, str]] = {}
         self._class_idx_to_label: Dict[int, Dict[str, str]] = {}
-        if label_to_index_json:
-            l2i_path = Path(label_to_index_json)
+        if self._declared_mapping is not None:
+            # CHẾ ĐỘ VẬN HÀNH: ánh xạ đã được resolve ở tầng trên và truyền
+            # thẳng vào đây. Không đi tìm ở đâu nữa — mỗi chỗ tìm là một
+            # nguồn sự thật cạnh tranh. Xem chú thích ở __init__.
+            self.label_to_index = dict(self._declared_mapping)
+            self.index_to_label = {
+                int(v): {'label_key': k, 'class_uid': k, 'label_slug': '',
+                         'label_original': '', 'language': 'vn', 'dialect': ''}
+                for k, v in self._declared_mapping.items()
+            }
         else:
+            if label_to_index_json:
+                l2i_path = Path(label_to_index_json)
+            else:
+                try:
+                    from train_model.dataset_versioning import get_analysis_dir
+                    l2i_path = get_analysis_dir() / 'label_to_index.json'
+                except Exception:
+                    l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
+            i2l_path = l2i_path.with_name('index_to_label.json')
             try:
-                from train_model.dataset_versioning import get_analysis_dir
-                l2i_path = get_analysis_dir() / 'label_to_index.json'
+                self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))
             except Exception:
-                l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
-        i2l_path = l2i_path.with_name('index_to_label.json')
-        try:
-            self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))
-        except Exception:
-            self.label_to_index = {}
-        try:
-            raw = json.loads(i2l_path.read_text(encoding='utf-8'))
-            # keys may be strings in json; convert to int
-            self.index_to_label = {int(k): v for k, v in raw.items()}
-        except Exception:
-            self.index_to_label = {}
+                self.label_to_index = {}
+            try:
+                raw = json.loads(i2l_path.read_text(encoding='utf-8'))
+                # keys may be strings in json; convert to int
+                self.index_to_label = {int(k): v for k, v in raw.items()}
+            except Exception:
+                self.index_to_label = {}
 
-        # fallback to labels.csv if mapping JSON is missing or empty
-        if not self.label_to_index:
-            try:
-                from train_model.dataset_versioning import get_labels_csv, get_data_root
-                labels_csv = get_labels_csv(get_data_root())
-            except Exception:
-                labels_csv = Path(__file__).resolve().parents[1].parent / 'dataset' / 'labels.csv'
-            if labels_csv.exists():
-                with labels_csv.open('r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for r in reader:
-                        try:
-                            class_idx = int((r.get('class_idx') or '').strip())
-                        except Exception:
-                            continue
-                        slug = (r.get('slug') or '').strip()
-                        language = (r.get('language') or 'vn').strip()
-                        dialect = (r.get('dialect') or '').strip()
-                        label_key = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
-                        self.label_to_index[label_key] = class_idx - 1
-                        self._class_idx_to_label[class_idx] = {
-                            'label_key': label_key,
-                            'label_slug': slug,
-                            'label_original': (r.get('label_original') or '').strip(),
-                            'language': language,
-                            'dialect': dialect,
-                        }
-                if self.label_to_index:
-                    self.index_to_label = {v: {
-                        'label_key': k,
-                        'label_slug': (self._class_idx_to_label.get(v + 1, {}).get('label_slug') or ''),
-                        'label_original': (self._class_idx_to_label.get(v + 1, {}).get('label_original') or ''),
-                        'language': (self._class_idx_to_label.get(v + 1, {}).get('language') or 'vn'),
-                        'dialect': (self._class_idx_to_label.get(v + 1, {}).get('dialect') or ''),
-                    } for k, v in self.label_to_index.items()}
+            # fallback to labels.csv if mapping JSON is missing or empty
+            if not self.label_to_index:
+                try:
+                    from train_model.dataset_versioning import get_labels_csv, get_data_root
+                    labels_csv = get_labels_csv(get_data_root())
+                except Exception:
+                    labels_csv = Path(__file__).resolve().parents[1].parent / 'dataset' / 'labels.csv'
+                if labels_csv.exists():
+                    with labels_csv.open('r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for r in reader:
+                            try:
+                                class_idx = int((r.get('class_idx') or '').strip())
+                            except Exception:
+                                continue
+                            slug = (r.get('slug') or '').strip()
+                            language = (r.get('language') or 'vn').strip()
+                            dialect = (r.get('dialect') or '').strip()
+                            label_key = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
+                            self.label_to_index[label_key] = class_idx - 1
+                            self._class_idx_to_label[class_idx] = {
+                                'label_key': label_key,
+                                'label_slug': slug,
+                                'label_original': (r.get('label_original') or '').strip(),
+                                'language': language,
+                                'dialect': dialect,
+                            }
+                    if self.label_to_index:
+                        self.index_to_label = {v: {
+                            'label_key': k,
+                            'label_slug': (self._class_idx_to_label.get(v + 1, {}).get('label_slug') or ''),
+                            'label_original': (self._class_idx_to_label.get(v + 1, {}).get('label_original') or ''),
+                            'language': (self._class_idx_to_label.get(v + 1, {}).get('language') or 'vn'),
+                            'dialect': (self._class_idx_to_label.get(v + 1, {}).get('dialect') or ''),
+                        } for k, v in self.label_to_index.items()}
 
         # load CSV rows
         with self.csv_path.open('r', encoding='utf-8') as f:
@@ -199,6 +231,12 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
 
         # normalize labels to 0-based if inputs are 1-based
         self._label_offset = 0
+        if self._declared_mapping is not None:
+            # Ánh xạ đã khai LUÔN là 0..K-1 (`consume_declared` từ chối nếu
+            # không). Suy đoán offset ở đây sẽ là một phép sửa lên một giá trị
+            # đã đúng — và nếu suy sai thì mọi nhãn lệch đi một, âm thầm.
+            self._label_offset = 0
+            return
         try:
             if self.label_to_index:
                 vals = list(self.label_to_index.values())
@@ -223,6 +261,27 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         return len(self.rows)
 
     def _resolve_target(self, row: Dict[str, str]) -> int:
+        # CHẾ ĐỘ VẬN HÀNH: một đường, không có đường thứ hai.
+        #
+        # Cố ý KHÔNG rơi sang `label_key`, `class_idx` hay `labels.csv` khi tra
+        # trượt. Rơi sang được nghĩa là một hàng lạ vẫn học được dưới một nhãn
+        # đoán ra — và đó chính là cách ba nguồn sự thật cũ cùng tồn tại mà
+        # không ai phát hiện.
+        if self._declared_mapping is not None:
+            uid = (row.get('class_uid') or '').strip()
+            if not uid:
+                raise ValueError(
+                    "hàng không có `class_uid` trong khi split khai chế độ vận "
+                    "hành — danh tính lớp phải là class_uid, không suy từ "
+                    "slug/dialect/region")
+            idx = self._declared_mapping.get(uid)
+            if idx is None:
+                raise ValueError(
+                    f"class_uid {uid!r} không nằm trong ánh xạ đã khai của split. "
+                    f"Không đoán nhãn thay: hãy chia lại split, hoặc bỏ hàng này "
+                    f"khỏi split một cách tường minh.")
+            return int(idx)
+
         # Prefer explicit label_key (language/dialect/slug) via mapping.
         label_key = (row.get('label_key') or '').strip()
         if label_key and self.label_to_index:

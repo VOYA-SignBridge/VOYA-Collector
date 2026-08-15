@@ -21,7 +21,7 @@ z tests below pin the CURRENT behaviour on purpose: whoever fixes it must see
 them go red and update both copies plus the retraining decision, rather than
 patch one file and ship a silent feature change.
 
-See docs/KNOWN_ISSUES.md ("Chờ quyết định nghiệp vụ") and the raw archive
+See docs/10-issues/KNOWN_ISSUES.md ("Chờ quyết định nghiệp vụ") and the raw archive
 (contract v3), which is what makes the fix affordable at all — the
 un-normalized landmarks were kept, so the features can be rebuilt without
 re-recording anyone.

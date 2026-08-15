@@ -183,7 +183,7 @@ _send(
     to,
     f"[VOYA] Dia Docker: {level}",
     f"{why}\n\n{summary}\n\n"
-    f"Chi tiet quy trinh: docs/DEPLOY_SECOND_MACHINE.md, muc 'Dung luong Docker'.\n"
+    f"Chi tiet quy trinh: docs/06-operations/DEPLOY_SECOND_MACHINE.md, muc 'Dung luong Docker'.\n"
     f"Nhat ky: voya_backups/docker_watch.log\n",
     loggable=True,
 )

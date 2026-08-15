@@ -22,7 +22,7 @@
 #
 # Phép kiểm mạnh hơn — khôi phục thật vào một cơ sở dữ liệu nháp rồi đếm dòng —
 # nằm ở `scripts/pg_restore.sh --drill`. Nó không chạy ở đây vì nó cần vài phút
-# và cần quyền tạo database; xem `docs/BACKUP_RESTORE.md` về nhịp diễn tập.
+# và cần quyền tạo database; xem `docs/06-operations/BACKUP_RESTORE.md` về nhịp diễn tập.
 #
 # Vì sao định dạng custom (-Fc)
 # ------------------------------
@@ -122,7 +122,7 @@ preflight() {
     if [ "$caps" != "t" ]; then
         log "LỖI: vai '$PGUSER' không vượt được RLS (rolsuper=f, rolbypassrls=f)."
         log "      Hơn hai mươi bảng bật FORCE ROW LEVEL SECURITY; pg_dump bằng vai"
-        log "      này sẽ thất bại hoặc bỏ sót dữ liệu. Xem docs/BACKUP_RESTORE.md."
+        log "      này sẽ thất bại hoặc bỏ sót dữ liệu. Xem docs/06-operations/BACKUP_RESTORE.md."
         return 1
     fi
     log "tiền kiểm: vai '$PGUSER' đọc được mọi dòng"

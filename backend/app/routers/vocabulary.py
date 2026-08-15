@@ -30,6 +30,11 @@ def get_registry(current_user: Optional[Dict[str, Any]] = Depends(get_current_us
         "registry_version": vr.registry_version(),
         "dialects": vr.list_dialects(viewer_id=viewer),
         "profiles": vr.list_profiles(),
+        # Vùng miền đi kèm ở đây thay vì một lời gọi riêng: màn hình nào dựng
+        # ô chọn phương ngữ thì cũng cần ô chọn vùng, và hai thứ phải đến từ
+        # cùng một ảnh chụp — lệch nhau thì người dùng thấy một tổ hợp không
+        # tồn tại.
+        "regions": vr.list_regions(),
     }
 
 
@@ -42,7 +47,7 @@ def create_dialect(
 
     Pending means: usable right now by its creator (so collection never waits on
     an admin), invisible to everyone else until approved. Rejecting it later is
-    a merge, not a deletion — see docs/needFix/DIALECT_LIFECYCLE.md §3.5.
+    a merge, not a deletion — see docs/02-data/DIALECT_LIFECYCLE.md §3.5.
     """
     try:
         row, created = vr.create_dialect(
@@ -172,7 +177,7 @@ def update_dialect(
 # The SYSTEM CATALOG: system-managed configuration templates (dialects,
 # recognition profiles) that a new tenant is cloned from. Separate router
 # prefix, separate guard, and nothing here is reachable by a tenant user — see
-# docs/needFix/REGISTRY_ARCHITECTURE.md §2.
+# docs/01-architecture/REGISTRY_ARCHITECTURE.md §2.
 #
 # NOT the Community Data Commons. These endpoints were briefly mounted at
 # /vocabulary/community, which was wrong twice over: this holds no contributed
@@ -180,7 +185,7 @@ def update_dialect(
 # squatted on the namespace the real commons needs. "Community" in
 # CTU-SignBridge means data people contributed and the governance around it
 # (submission, review, licence, grants, withdrawal); see
-# docs/needFix/COMMUNITY_DATA_COMMONS.md. The physical tables are still named
+# docs/01-architecture/COMMUNITY_DATA_COMMONS.md. The physical tables are still named
 # community_* because renaming them is a migration, not a rename — the domain
 # name is what had to stop being wrong first.
 #

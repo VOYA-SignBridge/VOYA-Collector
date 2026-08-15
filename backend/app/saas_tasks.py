@@ -82,7 +82,7 @@ def sweep_subscriptions(self):
     ai kiểm được.
 
     KHÔNG thu tiền: hệ thống không có cổng thanh toán. `auto_renew` chỉ nói
-    "mở kỳ tiếp theo". Xem `docs/SUBSCRIPTION_LIFECYCLE.md`.
+    "mở kỳ tiếp theo". Xem `docs/07-business/SUBSCRIPTION_LIFECYCLE.md`.
     """
     from app.subscription_lifecycle import sweep
 

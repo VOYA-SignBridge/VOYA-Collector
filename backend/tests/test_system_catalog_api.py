@@ -2,7 +2,7 @@
 
 The service layer already existed (`seed_system_catalog`,
 `publish_catalog_version`, `clone_catalog_to_tenant`) but nothing exposed it,
-so the promise in docs/needFix/REGISTRY_ARCHITECTURE.md §2 — "admin sửa trong
+so the promise in docs/01-architecture/REGISTRY_ARCHITECTURE.md §2 — "admin sửa trong
 app, redeploy không ghi đè" — could not actually be kept: the only way to change
 the template was to edit a CSV and reinstall, which `ON CONFLICT DO NOTHING`
 then ignored.
@@ -10,7 +10,7 @@ then ignored.
 These endpoints were first written at /vocabulary/community. That was wrong:
 this plane holds dialect and profile CONFIGURATION — no video, no landmarks, no
 consent record, no attribution — while "Community" in CTU-SignBridge means
-contributed data and its governance (docs/needFix/COMMUNITY_DATA_COMMONS.md).
+contributed data and its governance (docs/01-architecture/COMMUNITY_DATA_COMMONS.md).
 The namespace has been handed back; the physical tables keep their
 `community_*` names until a migration renames them.
 
@@ -301,7 +301,7 @@ def test_catalog_holds_configuration_only_never_contributed_data():
         leaked = sorted(cols & forbidden)
         assert not leaked, (
             f"{table} grew {leaked} — that is contributed data, and it needs the "
-            f"Community Data Commons (docs/needFix/COMMUNITY_DATA_COMMONS.md), "
+            f"Community Data Commons (docs/01-architecture/COMMUNITY_DATA_COMMONS.md), "
             f"not the system catalogue"
         )
 
@@ -311,7 +311,7 @@ def test_community_is_a_reserved_tenant_under_the_same_rules():
 
     Bản trước của test này khẳng định điều NGƯỢC LẠI: không được có tenant tên
     `community`. PDM v5 chọn hướng kia, và lý do nằm ở
-    `docs/needFix/COMMUNITY_DATA_COMMONS.md §10`: là một tenant, Community thừa
+    `docs/01-architecture/COMMUNITY_DATA_COMMONS.md §10`: là một tenant, Community thừa
     hưởng nguyên bốn lớp phòng thủ đã có thay vì đòi một trục phân quyền song
     song với bốn cơ chế nhân đôi.
 
@@ -395,7 +395,7 @@ def test_is_system_reserved_is_never_read_by_authorisation():
 
     assert not offenders, (
         f"is_system_reserved bi doc ngoai noi dinh nghia: {offenders}. "
-        f"Xem docs/needFix/COMMUNITY_DATA_COMMONS.md §10 — no la nhan, khong "
+        f"Xem docs/01-architecture/COMMUNITY_DATA_COMMONS.md §10 — no la nhan, khong "
         f"phai quyen, va khong bao gio duoc lam duong vong phan quyen."
     )
 

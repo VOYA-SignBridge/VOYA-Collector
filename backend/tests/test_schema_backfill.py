@@ -1,7 +1,7 @@
 """Backfill: chuyển đúng, và những chỗ CỐ Ý để trống thì phải còn trống.
 
 Tách từ `test_schema_v3.py` (593 dòng, bốn mối quan tâm không liên quan gộp
-chung). Bối cảnh đầy đủ của đợt vá lược đồ: `docs/needFix/SAAS_SCHEMA_DESIGN.md`
+chung). Bối cảnh đầy đủ của đợt vá lược đồ: `docs/02-data/SAAS_SCHEMA_DESIGN.md`
 §9sexies.
 """
 

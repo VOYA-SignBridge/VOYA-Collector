@@ -268,11 +268,25 @@ def test_sample_fields_end_with_tenant_id():
     assert SAMPLE_FIELDS.count(TENANT_COLUMN) == 1
 
 
-def test_label_fields_end_with_tenant_id():
+def test_label_fields_never_shift_existing_columns():
+    """Bất biến thật là *cột cũ không xê dịch*, không phải *tenant_id đứng cuối*.
+
+    Bài này trước đây khẳng định `LABEL_FIELDS[-1] == TENANT_COLUMN`, đúng vào
+    lúc `tenant_id` là cột mới nhất. Ngày 14/08/2026 thêm cột `region` (tách
+    vùng miền khỏi `dialect`) và nó phải nằm SAU `tenant_id` — đúng theo chính
+    lý do nêu ở bài kiểm phía trên: cột mới chèn vào bất kỳ đâu ngoài vị trí
+    cuối sẽ đẩy mọi cột Sheets hiện có sang phải một ô.
+
+    Nên ghim thứ hai thứ: `tenant_id` vẫn ở đúng chỉ số cũ (không bị đẩy), và
+    cột mới nhất đứng cuối.
+    """
     from app.dataset_manager import LABEL_FIELDS
 
-    assert LABEL_FIELDS[-1] == TENANT_COLUMN
     assert LABEL_FIELDS.count(TENANT_COLUMN) == 1
+    # 19 là vị trí của tenant_id từ khi nó được thêm; thay đổi số này nghĩa là
+    # một cột đã bị chèn vào giữa và bản chiếu Sheets đã lệch.
+    assert LABEL_FIELDS.index(TENANT_COLUMN) == 19
+    assert LABEL_FIELDS[-1] == "region"
 
 
 def test_raw_upload_fields_end_with_tenant_id():

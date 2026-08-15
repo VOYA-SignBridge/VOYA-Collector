@@ -22,7 +22,7 @@
 # bản, hoặc phát hiện sự cố tệ hơn ta tưởng sau khi đã đè, đều là chuyện có
 # thật. Bản dump an toàn ở bước đầu là đường lui duy nhất.
 #
-# Cách chạy: xem docs/BACKUP_RESTORE.md
+# Cách chạy: xem docs/06-operations/BACKUP_RESTORE.md
 
 set -eu
 
@@ -357,7 +357,7 @@ case "$MODE" in
             --clean --if-exists --no-owner --no-privileges --exit-on-error "$DUMP_FILE" \
             || die "khôi phục thất bại. Đường lui: $safety"
 
-        verify_legal "$PGDATABASE" || log "CẢNH BÁO: kho pháp lý không khớp — xem docs/BACKUP_RESTORE.md"
+        verify_legal "$PGDATABASE" || log "CẢNH BÁO: kho pháp lý không khớp — xem docs/06-operations/BACKUP_RESTORE.md"
         log "khôi phục xong. Kho tệp pháp lý PHẢI giải nén riêng:"
         log "  tar -xzf $LEGAL_FILE -C $LEGAL_DIR"
         log "Sau đó khởi động lại backend để nạp lại bộ nhớ đệm."

@@ -43,7 +43,7 @@ def _warn_if_legacy_catalog_present() -> None:
                 "[CATALOG] Máy này còn %d dòng ở layout đã bị bỏ (%s). Những dòng đó "
                 "KHÔNG được đọc — catalog chuẩn là %s. Gộp chúng rồi đổi tên file cũ "
                 "thành *.pre_merge_bak trước khi chạy tiếp "
-                "(xem docs/KNOWN_ISSUES.md, mục 2026-07-20).",
+                "(xem docs/10-issues/KNOWN_ISSUES.md, mục 2026-07-20).",
                 rows, _LEGACY_SAMPLES_CSV, SAMPLES_CSV,
             )
     except Exception:  # pragma: no cover - cảnh báo không bao giờ được làm sập app

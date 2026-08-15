@@ -47,9 +47,33 @@ def main() -> int:
         check(f"{version}: sha256 unchanged", sha256_file(manifest) == recorded)
     check("at least one released manifest present", found >= 1, found)
 
-    print("[F2 legacy root splits untouched by v2 tooling]")
-    for name in ("train.csv", "val.csv", "test.csv"):
-        check(f"legacy {name} still present", (SPLITS_DIR / name).exists())
+    print("[F2 frozen research splits — checksum, not just presence]")
+    # Bản trước của mục này chỉ hỏi "tệp còn đó không". Tên nó là
+    # "untouched by v2 tooling" nhưng nó KHÔNG phát hiện được việc ghi đè —
+    # một lượt `make_splits.py` vô tình vẫn đè được mà bộ kiểm vẫn xanh. Đây là
+    # phần cưỡng chế còn thiếu: chống-ghi bằng ĐỐI CHIẾU.
+    #
+    # docs/02-data/VOCABULARY_SCHEMA_V2.md:107 đã tuyên bố ba tệp này bất biến
+    # từ trước; tới 14/08/2026 mới có thứ bắt được khi ai đó phá tuyên bố đó.
+    registry = SPLITS_DIR / "FROZEN_RESEARCH_SPLITS.json"
+    check("sổ đóng băng tồn tại", registry.exists(), str(registry))
+    if registry.exists():
+        khai = json.loads(registry.read_text(encoding="utf-8"))
+        check("sổ tự khai purpose=research",
+              khai.get("purpose") == "research", khai.get("purpose"))
+        for name, muc in sorted((khai.get("files") or {}).items()):
+            p = SPLITS_DIR / name
+            if not p.exists():
+                check(f"frozen {name} còn tồn tại", False, str(p))
+                continue
+            that = sha256_file(p)
+            check(
+                f"frozen {name} chưa bị đổi",
+                that == muc.get("sha256"),
+                f"HIỆN VẬT NGHIÊN CỨU ĐÓNG BĂNG ĐÃ ĐỔI. Đừng dựng lại hay ghi "
+                f"đè tệp này — split vận hành thuộc về một hiện vật riêng có "
+                f"split_id. khai={muc.get('sha256')} thật={that}",
+            )
 
     print("[F3 split versions reference their manifest checksum]")
     for meta_path in sorted((SPLITS_DIR / "versions").glob("*/split_metadata.json")):
@@ -74,3 +98,27 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# Vỏ pytest, và ĐÍNH CHÍNH cho bản đầu của chú thích này.
+#
+# Bản đầu viết rằng tệp này "chưa từng được kiểm trong CI". SAI. Nó nằm trong
+# `conftest.STANDALONE_SUITES` từ trước, và `test_research_suites.py` chạy nó
+# như một TIẾN TRÌNH CON, lấy mã thoát làm phán quyết. Phép quét AST chỉ đo
+# được "pytest thu 0 hàm test_* từ tệp này" — đúng, nhưng KHÔNG đồng nghĩa với
+# "không chạy", vì bộ chạy nằm ở chỗ khác.
+#
+# Vỏ này vẫn có ích, chỉ là vì lý do khiêm tốn hơn: gọi thẳng
+# `pytest <tệp này>` giờ chạy được thay vì thu 0 ca. Bộ chạy thật vẫn là
+# `test_research_suites.py`.
+#
+# Chốt `assert PASSED or FAILED` thì đáng giữ, và nó đã bắt được một ca thật:
+# một kịch bản in "SKIP:" rồi `return 0` sẽ thành XANH ở CẢ HAI đường.
+# ---------------------------------------------------------------------------
+
+def test_toan_bo_kich_ban() -> None:
+    ma = main()
+    assert PASSED or FAILED, (
+        "không ca nào chạy — kịch bản trả về xanh mà chưa kiểm gì cả")
+    assert ma == 0, "; ".join(f"{n}: {d}" for n, d in FAILED)

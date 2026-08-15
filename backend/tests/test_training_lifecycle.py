@@ -44,7 +44,7 @@ def client(monkeypatch):
     monkeypatch.setattr(training_module, "_persist_job", _no_db_persist)
     # Every dialect is trainable unless a test says otherwise.
     monkeypatch.setattr(
-        training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 7}
+        training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 7}
     )
 
     training_jobs.clear()
@@ -136,7 +136,7 @@ def test_submit_marks_job_failed_when_the_queue_is_down(client, monkeypatch):
 
 def test_submit_rejects_dialects_without_enough_data(client, monkeypatch):
     """Caught up front — otherwise the trainer subprocess fails later with rc=1."""
-    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 1})
+    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 1})
 
     with patch("app.training_tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config(dialects=["hoa-de"]))
@@ -217,7 +217,7 @@ def test_research_mode_pins_provenance_from_the_chosen_split(client, monkeypatch
 def test_research_mode_skips_the_dialect_data_check(client, monkeypatch):
     """The split defines the data, so an unrelated empty dialect must not block it."""
     monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
-    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 1})
+    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 1})
 
     with patch("app.training_tasks.run_training_job"):
         response = client.post(

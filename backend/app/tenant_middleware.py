@@ -31,7 +31,7 @@ Note what is deliberately absent: no header or query parameter can choose the
 tenant. Honouring a client-supplied `X-Tenant-Id` would make the isolation
 boundary a request field. When per-request tenant selection is introduced for
 users who belong to several tenants, it has to be validated against membership
-before it reaches this function — see docs/needFix/MULTITENANT_ARCHITECTURE.md
+before it reaches this function — see docs/01-architecture/MULTITENANT_ARCHITECTURE.md
 §4.3.
 """
 

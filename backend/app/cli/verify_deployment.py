@@ -572,7 +572,7 @@ def main() -> int:
     # `docker-compose.yml` mot minh KHONG dat mem_limit cho dich vu nao;
     # `docker-compose.prod.yml` moi dat. Tren may 12 GB nay, mot container
     # khong tran bo nho la dieu da tung giet dockerd mot lan (xem
-    # docs/KNOWN_ISSUES.md), va no khong de lai trieu chung nao cho toi luc do.
+    # docs/10-issues/KNOWN_ISSUES.md), va no khong de lai trieu chung nao cho toi luc do.
     #
     # Do bang cgroup CUA CHINH MINH thay vi hoi docker: container nay khong co
     # docker socket, va mot phep do tu ben trong khong the bi lech so voi thuc

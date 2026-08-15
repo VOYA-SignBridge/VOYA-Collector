@@ -37,7 +37,7 @@ def tenant():
         db._execute(
             "INSERT INTO tenant_subscriptions "
             "(subscription_id, tenant_id, plan_code, status) VALUES (%s, %s, %s, 'active')",
-            (str(uuid.uuid4()), tid, "school"))
+            (str(uuid.uuid4()), tid, "plus"))
     yield tid
     # Dọn từng câu riêng — một câu hỏng không được chặn câu sau.
     with system_scope("test cleanup: gỡ tenant thử"):
@@ -71,22 +71,26 @@ class TestKyHan:
         assert row["current_period_end"] is not None
         assert row["current_period_start"] is not None
 
-    def test_ky_dau_dai_bang_thoi_gian_dung_thu(self, tenant):
-        """Gói `school` có `trial_days = 14` và `billing_period = monthly`.
+    def test_ky_dau_dai_bang_dung_mot_ky_tinh_cuoc(self, tenant):
+        """Gói `plus` có `billing_period = monthly` và `trial_days = 0`.
 
-        Kỳ đầu phải là 14 ngày, không phải 30 — và cũng không phải 44. Cộng dồn
-        hai khoảng là tặng không nửa tháng cho mỗi khách hàng mới.
+        Kỳ đầu phải là đúng 30 ngày. Bản trước khẳng định 14, vì gói `school`
+        khi đó có `trial_days = 14` và kỳ đầu được rút ngắn về đúng thời gian
+        dùng thử. v6 bỏ hẳn khái niệm dùng thử (`trial_days = 0` ở cả bốn gói),
+        nên phép cộng dồn không còn đường sai nào để chặn — điều duy nhất còn
+        phải giữ là kỳ đầu không dài hơn một kỳ tính cước, tức không phải 44.
         """
         at = datetime(2026, 1, 1, tzinfo=timezone.utc)
         sub.start_period(tenant, now=at)
         row = _sub_of(tenant)
-        assert (row["current_period_end"] - at).days == 14
-        # Và mốc dùng thử được ghi lại, chứ không chỉ suy ra được.
-        assert row["trial_ends_at"] is not None
+        assert (row["current_period_end"] - at).days == 30
+        # Không còn mốc dùng thử để ghi: một ngày ở đây nghĩa là hệ thống vẫn
+        # tin có bản dùng thử, và sẽ có nơi nào đó đi đòi nó hết hạn.
+        assert row["trial_ends_at"] is None
 
     def test_goi_khong_ky_han_thi_de_trong_chu_khong_dat_nam_2999(self, tenant):
         """`none` nghĩa là KHÔNG ÁP DỤNG. Một ngày rất xa trông như dữ liệu hỏng."""
-        _set(tenant, plan_code="internal")
+        _set(tenant, plan_code="enterprise")
         sub.start_period(tenant)
         assert _sub_of(tenant)["current_period_end"] is None
 
@@ -256,7 +260,7 @@ class TestTuHuy:
 class TestMoTaChoGiaoDien:
     def test_goi_vinh_vien_tra_None_chu_khong_phai_0(self, tenant):
         """"Còn 0 ngày" trên một gói vĩnh viễn là câu sai đủ để người dùng gọi điện."""
-        _set(tenant, plan_code="internal")
+        _set(tenant, plan_code="enterprise")
         sub.start_period(tenant)
         assert sub.describe(tenant)["days_left"] is None
 

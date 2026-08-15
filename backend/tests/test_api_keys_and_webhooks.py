@@ -32,7 +32,7 @@ def two_tenants():
     for _ in range(2):
         tenant_id = f"kw{uuid.uuid4().hex[:10]}"
         tenant_admin.create_tenant(
-            tenant_id, display_name="Key Test", clone_catalog=False, plan_code="school"
+            tenant_id, display_name="Key Test", clone_catalog=False, plan_code="plus"
         )
         ids.append(tenant_id)
     plans._clear_caches()

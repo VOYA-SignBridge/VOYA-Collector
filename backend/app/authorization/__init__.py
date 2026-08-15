@@ -12,7 +12,7 @@
     policy_invalidator.py    làm sao các tiến trình khác biết policy đã đổi
 
 Schema nằm ở `app/storage/authz_schema.py`, backfill ở
-`app/cli/backfill_authz.py`, tài liệu ở `docs/AUTHORIZATION.md`.
+`app/cli/backfill_authz.py`, tài liệu ở `docs/03-security/AUTHORIZATION.md`.
 
 Bốn ranh giới đừng làm mờ
 --------------------------

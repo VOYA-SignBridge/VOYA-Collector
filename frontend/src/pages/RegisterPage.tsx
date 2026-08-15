@@ -46,7 +46,7 @@ function readableDetail(err: unknown): { message: string; code?: string } {
     const obj = detail as { message?: string; code?: string };
     if (obj.message) return { message: obj.message, code: obj.code };
   }
-  // Hàm mức module → `tr` (xem docs/I18N.md §3), `t` không tồn tại ở đây.
+  // Hàm mức module → `tr` (xem docs/05-frontend/I18N.md §3), `t` không tồn tại ở đây.
   return { message: e.userMessage || e.message || tr("Không thể đăng ký") };
 }
 

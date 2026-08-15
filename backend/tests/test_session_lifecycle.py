@@ -1,6 +1,6 @@
 """Vòng đời phiên đăng nhập: xoay token, phát hiện tái sử dụng, đăng xuất thật.
 
-Bốn lỗ được rà ngày 2026-07-31 (`docs/needFix/AUTH_TOKEN_LIFECYCLE.md`) và vá
+Bốn lỗ được rà ngày 2026-07-31 (`docs/03-security/AUTH_TOKEN_LIFECYCLE.md`) và vá
 ngày 2026-08-10. Bộ này ghim đúng những tính chất mà bản vá hứa, và — quan trọng
 hơn — ghim cả cái GIÁ của nó, vì hai yêu cầu ở đây kéo ngược chiều nhau:
 

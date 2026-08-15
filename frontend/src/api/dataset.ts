@@ -152,7 +152,7 @@ export const getClassesList = async (language?: string, dialect?: string): Promi
   }
 };
 
-export const registerClass = async (payload: { label: string; language?: string; dialect?: string; is_common_global?: boolean; is_common_language?: boolean; }): Promise<Result<ClassRow>> => {
+export const registerClass = async (payload: { label: string; language?: string; dialect?: string; is_common_global?: boolean; is_common_language?: boolean; region?: string; }): Promise<Result<ClassRow>> => {
   const res = await axiosClient.post('/classes/register', payload);
   const raw = res.data;
   // Try to normalize the returned registration into a ClassRow

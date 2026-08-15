@@ -268,7 +268,7 @@ export default function AdminResourcesPage() {
                 a.level === "critical" ? "bg-red-50 border-red-200 text-red-700"
                                        : "bg-amber-50 border-amber-200 text-amber-700"}`}>
               {/* Câu cảnh báo tới từ máy chủ và mang chính câu tiếng Việt làm
-                  khoá — đúng quy ước từ điển của dự án (docs/I18N.md §2), nên
+                  khoá — đúng quy ước từ điển của dự án (docs/05-frontend/I18N.md §2), nên
                   `t()` dịch được nó y như chữ viết thẳng trong giao diện. */}
               <div className="flex items-start gap-2">
                 <span

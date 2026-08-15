@@ -122,6 +122,60 @@ def _insert_metric(job_id: str, m: Dict[str, Any]) -> None:
         logger.warning("[TRAINER] job %s metric epoch=%s DB write failed: %s", job_id, m.get("epoch"), e)
 
 
+SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
+
+
+def _resolve_for_run(config: Dict[str, Any]):
+    """Hiện vật mà lượt chạy này SẼ đọc. Một cửa, gọi đúng một lần.
+
+    Trả `None` chỉ ở đúng một trường hợp — nhánh tương thích legacy mà hiện vật
+    nghiên cứu không xác minh được — và trường hợp đó được ghi nhật ký ở mức
+    ERROR chứ không im lặng.
+
+    Vì sao phải tập trung ở đây: trước lượt này có BA cách hiểu khác nhau về
+    câu hỏi "lượt này đọc tệp nào" — mặc định của `train_tcn`, nhánh nghiên cứu
+    của `_build_cmd`, và `_split_csvs_of` (trả rỗng cho legacy). Ba cách hiểu
+    lệch nhau được mà không ai biết, và khi lệch thì cổng đồng thuận soi tệp A
+    trong khi trainer đọc tệp B — mỗi tầng vẫn "đúng" mà cả hệ thống sai.
+    """
+    from processed.train_utils.split_artifact import (
+        PURPOSE_OPERATIONAL, PURPOSE_RESEARCH, SplitArtifactError,
+        resolve_split_artifact,
+    )
+
+    split_id = str(config.get("operational_split_id") or "").strip()
+    muc_dich = str(config.get("run_purpose") or "").strip()
+
+    if muc_dich == PURPOSE_OPERATIONAL or split_id:
+        # FAIL-CLOSED. Không rơi về ba tệp nghiên cứu, không tự chọn "split mới
+        # nhất", không suy từ dialect. Một lượt vận hành học trên mốc nghiên cứu
+        # đóng băng là một checkpoint khai sai nguồn gốc.
+        return resolve_split_artifact(
+            purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR, split_id=split_id)
+
+    if muc_dich == PURPOSE_RESEARCH:
+        # Nhánh nghiên cứu ghim `split_version` riêng (thư mục versioned), đã có
+        # hợp đồng của nó — resolver không quản.
+        return None
+
+    # Legacy/smoke_test: hiện vật nghiên cứu đóng băng, nhưng nói RA thay vì để
+    # trainer tự lấy mặc định. Chính vì nó im lặng mà `_split_csvs_of` trả rỗng
+    # và cổng đồng thuận không soi lượt legacy nào.
+    try:
+        return resolve_split_artifact(
+            purpose=PURPOSE_RESEARCH, splits_root=SPLITS_DIR)
+    except SplitArtifactError as exc:
+        # KHÔNG chặn ở đây, và đây là lựa chọn có ý thức: legacy là hợp đồng
+        # tương thích, ba tệp này vốn đã là mặc định của trainer, nên chặn lại
+        # sẽ giết mọi lượt chạy cũ vì một sổ băm thiếu. Cái mất là khả năng soi
+        # — đúng bằng hiện trạng — nên dấu vết phải đủ to để thấy điều đó.
+        logger.error(
+            "[TRAINER] không xác minh được hiện vật nghiên cứu đóng băng (%s) — "
+            "lượt legacy chạy tiếp bằng mặc định của trainer và KHÔNG được cổng "
+            "đồng thuận soi: %s", type(exc).__name__, exc)
+        return None
+
+
 def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
     cmd = [
         "python", "-m", "processed.train_utils.train_tcn",
@@ -159,10 +213,34 @@ def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
             cmd.append(f"--recognition_profile={config['recognition_profile']}")
         return cmd
 
+    # Từ đây trở xuống là nhánh vận hành + legacy. Cả hai đi qua CÙNG một
+    # resolver, nên `_split_csvs_of(cmd)` — thứ cổng đồng thuận soi — luôn trả
+    # đúng tệp trainer sẽ đọc.
+    artifact = _resolve_for_run(config)
+    if artifact is not None:
+        cmd += [
+            f"--train_csv={artifact.train_csv}",
+            f"--val_csv={artifact.val_csv}",
+            f"--test_csv={artifact.test_csv}",
+        ]
+
     for dialect in (config.get("dialects") or []):
         cmd.append(f"--dialect={dialect}")
     for language in (config.get("languages") or []):
         cmd.append(f"--filter_language={language}")
+
+    # `--dialect` là thứ đưa trainer vào chế độ subset, và chế độ subset là nơi
+    # nhánh vận hành (`class_uid → target_idx`) sống. Một hiện vật vận hành đã
+    # được lọc sẵn theo phương ngữ, nên bộ lọc này là phép đồng nhất — nhưng
+    # thiếu nó thì trainer không vào nhánh đó và quay về `enumerate` theo thứ
+    # tự hàng. Suy từ chính bản khai chứ không bắt người gọi nhớ.
+    if artifact is not None and artifact.purpose == "operational":
+        if not any(a.startswith("--dialect=") for a in cmd):
+            pham_vi = (artifact.metadata.get("scope") or {}).get("dialects") or []
+            for d in pham_vi:
+                cmd.append(f"--dialect={d}")
+        cmd.append(f"--features_root={os.getenv('FEATURES_ROOT', '/dataset/features')}")
+
     return cmd
 
 
@@ -172,6 +250,12 @@ def _split_csvs_of(cmd: list) -> list:
     Đọc lại từ `cmd` chứ không dựng lại từ `config`: `_build_cmd` có hai nhánh
     và một tập giá trị mặc định, nên suy diễn lần thứ hai là hai bản cài đặt
     của cùng một quy tắc — và bản nào sai thì cổng đồng thuận soi nhầm tệp.
+
+    Sau khi `_build_cmd` đi qua `_resolve_for_run`, `cmd` LUÔN mang đường dẫn
+    tường minh (trừ nhánh legacy không xác minh được hiện vật, đã ghi ERROR).
+    Nghĩa là hàm này không còn trả rỗng cho lượt vận hành, và bất biến
+    *"hiện vật được preflight == hiện vật trainer thật sự đọc"* được bảo đảm
+    bằng thứ mạnh nhất có thể: chính argv của tiến trình con.
     """
     prefixes = ("--train_csv=", "--val_csv=", "--test_csv=")
     return [arg.split("=", 1)[1] for arg in cmd if arg.startswith(prefixes)]
@@ -252,7 +336,17 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
         except Exception:
             pass
 
-    cmd = _build_cmd(config, metrics_file)
+    try:
+        cmd = _build_cmd(config, metrics_file)
+    except Exception as exc:
+        # Hiện vật không phân giải được thì job DỪNG ở đây, chưa từng "running".
+        # Chạy tiếp bằng mặc định của trainer là đúng thứ fail-closed sinh ra để
+        # chặn: lượt vận hành sẽ lặng lẽ học trên mốc nghiên cứu đóng băng.
+        loi = f"Không phân giải được tập chia cho lượt chạy này: {exc}"
+        logger.error("[TRAINER] job %s: %s", job_id, loi)
+        _update_job(row, status="failed", completed_at=_now(), error_message=loi)
+        _escalate_system_failure(row, job_id, loi, source="split_artifact")
+        return {"status": "failed", "reason": "split_artifact", "detail": loi}
 
     # Cổng đồng thuận chạy TRƯỚC khi job chuyển sang "running": một job bị chặn
     # vì lý do đồng thuận chưa từng bắt đầu, và trạng thái của nó phải nói đúng

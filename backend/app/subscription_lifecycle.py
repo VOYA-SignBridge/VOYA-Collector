@@ -16,7 +16,7 @@ có bút toán. `auto_renew = TRUE` nghĩa là *"tới hạn thì mở tiếp k�
 KHÔNG phải *"trừ tiền thẻ"* — việc thu tiền diễn ra ngoài hệ thống, và đăng ký
 ở đây chỉ ghi lại quyết định đó. Đặt tên là `auto_renew` mà bên dưới không có
 giao dịch nào là chỗ dễ hiểu nhầm nhất của cả module, nên nó được viết ra ở
-đây, ở docstring của `sweep()`, và trong `docs/SUBSCRIPTION_LIFECYCLE.md`.
+đây, ở docstring của `sweep()`, và trong `docs/07-business/SUBSCRIPTION_LIFECYCLE.md`.
 
 Bốn trạng thái, và ranh giới giữa chúng
 ----------------------------------------

@@ -67,6 +67,28 @@ PASSWORD_ENV = "VOYA_APP_DB_PASSWORD"
 #: be worth withholding, and no code path uses either.
 TABLE_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE"
 
+#: Danh mục THAM CHIẾU toàn cục: vai ứng dụng chỉ được ĐỌC.
+#:
+#: Chúng không mang `tenant_id` nên không nằm trong phạm vi RLS, và đó là đúng
+#: — `bac` hay `vn` không phải dữ liệu của ai. Nhưng "ngoài RLS" cộng với
+#: "ghi được" thì thành một đường vòng thật, không phải rủi ro lý thuyết:
+#:
+#:   classes.region   -> regions(code)     ON UPDATE CASCADE
+#:   classes.language -> languages(code)   ON UPDATE CASCADE
+#:
+#: Một câu `UPDATE regions SET code = ...` chạy dưới vai ứng dụng sẽ ghi lại
+#: `classes` của MỌI tenant cùng lúc — và lượt ghi đó KHÔNG chạm bảng
+#: `classes`, nên không policy nào của nó được hỏi tới. Cô lập tenant bị đi
+#: vòng qua một bảng mà bản thân nó chẳng chứa dữ liệu tenant nào.
+#:
+#: `DELETE` cũng phải chặn: xoá một mã đang được tham chiếu sẽ bị khoá ngoại từ
+#: chối, nhưng xoá một mã CHƯA ai dùng thì lọt, và nó âm thầm thu hẹp tập giá
+#: trị hợp lệ của mọi tenant.
+#:
+#: Sửa danh mục là việc của vai migration. Thêm bảng tham chiếu mới thì thêm
+#: tên vào đây — `tests/test_db_role_isolation.py` canh danh sách này.
+REFERENCE_TABLES: tuple[str, ...] = ("regions", "languages")
+
 
 def _statements(role: str, password: str) -> list[tuple[str, tuple]]:
     """Idempotent provisioning DDL, in dependency order.
@@ -112,6 +134,14 @@ def _statements(role: str, password: str) -> list[tuple[str, tuple]]:
         # revoked explicitly rather than merely not granted, because PUBLIC held
         # it by default on PostgreSQL 14 and older.
         (f"REVOKE CREATE ON SCHEMA public FROM {quoted}", ()),
+        # Thu lại quyền GHI trên các danh mục tham chiếu. Phải đứng SAU câu
+        # `GRANT ... ON ALL TABLES` ở trên, vì câu đó quét cả những bảng này —
+        # xem REFERENCE_TABLES để biết vì sao ghi được chúng là một đường vòng
+        # qua cô lập tenant.
+        *[
+            (f"REVOKE INSERT, UPDATE, DELETE ON {t} FROM {quoted}", ())
+            for t in REFERENCE_TABLES
+        ],
     ]
 
 
@@ -145,12 +175,74 @@ def check(conn) -> dict:
     return posture
 
 
+#: SQLSTATE 42501. Bắt theo mã chứ không theo lớp ngoại lệ: tệp này nhận `conn`
+#: từ bên ngoài và cố ý không phụ thuộc vào một driver cụ thể.
+_INSUFFICIENT_PRIVILEGE = "42501"
+
+#: Bốn thuộc tính mà câu `ALTER ROLE ... NOSUPERUSER ...` đặt. Giữ thành hằng số
+#: để phép kiểm "trạng thái mong muốn đã đúng chưa" không lệch khỏi câu lệnh.
+_ROLE_ATTRIBUTES = ("rolsuper", "rolbypassrls", "rolcreatedb", "rolcreaterole")
+
+
+def _desired_attributes_already_hold(cur, role: str) -> bool:
+    cur.execute(
+        f"SELECT {', '.join(_ROLE_ATTRIBUTES)} FROM pg_roles WHERE rolname = %s",
+        (role,),
+    )
+    row = cur.fetchone()
+    return row is not None and not any(row)
+
+
 def provision(conn, password: str) -> None:
-    """Create/repair the application role. Idempotent."""
+    """Tạo/sửa vai ứng dụng. Idempotent.
+
+    Vì sao hai câu `ALTER ROLE` được phép thất bại
+    ----------------------------------------------
+    Vai là đối tượng của CẢ CỤM, không thuộc cơ sở dữ liệu nào; còn các GRANT
+    bên dưới thì thuộc về cơ sở dữ liệu đang kết nối. Nên khi hàm này chạy lần
+    thứ hai — trên một cơ sở dữ liệu KHÁC, để cấp quyền bảng ở đó — vai đã tồn
+    tại sẵn với đúng thuộc tính cần có, và hai câu `ALTER ROLE` không còn việc
+    gì để làm ngoài việc đòi quyền SUPERUSER.
+
+    Đó chính là tình huống của `test_tenant_isolation.py`: nó dựng một cơ sở dữ
+    liệu nháp rồi gọi hàm này để cấp quyền bảng trong đó. Bắt nó phải có một
+    danh tính superuser chỉ để chạy lại hai câu lệnh vô tác dụng là đánh đổi
+    toàn bộ lớp cô lập lấy không gì cả.
+
+    Nới lỏng này KHÔNG che được sự cố mà câu lệnh tồn tại để chữa. Ta chỉ bỏ
+    qua khi trạng thái mong muốn ĐÃ đúng, đo bằng `pg_roles`. Nếu ai đó thật sự
+    cấp SUPERUSER cho vai ứng dụng thì `_desired_attributes_already_hold` trả
+    về False và lỗi thiếu quyền được ném lại nguyên vẹn — vẫn phải có người
+    superuser vào sửa, đúng như trước.
+    """
     with conn:
         with conn.cursor() as cur:
             for sql, params in _statements(APP_ROLE, password):
-                cur.execute(sql, params)
+                if not sql.startswith("ALTER ROLE"):
+                    cur.execute(sql, params)
+                    continue
+                # Savepoint: không có nó thì một câu thất bại sẽ huỷ cả giao
+                # dịch, và mọi GRANT phía sau — phần việc THẬT ở cơ sở dữ liệu
+                # này — sẽ đổ theo.
+                cur.execute("SAVEPOINT provision_role_attr")
+                try:
+                    cur.execute(sql, params)
+                except Exception as exc:
+                    if getattr(exc, "pgcode", None) != _INSUFFICIENT_PRIVILEGE:
+                        raise
+                    cur.execute("ROLLBACK TO SAVEPOINT provision_role_attr")
+                    if not _desired_attributes_already_hold(cur, APP_ROLE):
+                        raise
+                    # Mật khẩu không đọc lại được để so sánh (nó đã băm). Bỏ
+                    # qua an toàn vì sai mật khẩu lộ ra ngay ở lượt kết nối kế
+                    # tiếp bằng chính vai này, chứ không âm thầm.
+                    logger.info(
+                        "[DB_ROLES] bo qua '%s...': thieu quyen o muc cum, nhung "
+                        "thuoc tinh cua %s da dung san",
+                        sql[:32], APP_ROLE,
+                    )
+                else:
+                    cur.execute("RELEASE SAVEPOINT provision_role_attr")
     logger.info("[DB_ROLES] role %s provisioned", APP_ROLE)
 
 

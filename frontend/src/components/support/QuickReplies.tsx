@@ -11,7 +11,7 @@ import { useI18n } from "../../i18n";
  *
  * Chip là chữ GIAO DIỆN nên chúng đi qua `t()`. Chúng đến từ máy chủ (để luôn
  * khớp bảng luật của trợ lý) và mang chính câu tiếng Việt làm khoá — đúng quy
- * ước từ điển của dự án, xem docs/I18N.md.
+ * ước từ điển của dự án, xem docs/05-frontend/I18N.md.
  */
 export default function QuickReplies({
   items,

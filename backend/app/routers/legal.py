@@ -22,7 +22,7 @@ Vì sao bây giờ nội dung ĐI qua API
 Bản trước của tệp này viết: "Nội dung nằm ở file tĩnh do nginx phục vụ, không
 nhét qua API". Lập luận ấy đi kèm một quyết định lưu trữ đã bị thay: file tĩnh
 đó chưa từng tồn tại, thân văn bản không được lưu ở đâu cả, và ``url`` trỏ vào
-404. Từ v5 thân văn bản nằm trong cơ sở dữ liệu — xem ``docs/LEGAL_DOCUMENTS.md``
+404. Từ v5 thân văn bản nằm trong cơ sở dữ liệu — xem ``docs/04-legal/LEGAL_DOCUMENTS.md``
 — nên API là đường đọc duy nhất, và ``content_hash`` đi kèm mỗi phản hồi để bên
 đọc tự đối chiếu được.
 
@@ -347,7 +347,7 @@ def withdraw_document(
 
     Rút `data_contribution` thì đồng thuận của người ký bị rút theo, và cổng
     dữ liệu loại mẫu của họ khỏi lượt chọn TIẾP THEO ở mọi mức. Nó không xoá
-    tệp đã có — xem `docs/CONSENT_ENFORCEMENT.md` §5.
+    tệp đã có — xem `docs/04-legal/CONSENT_ENFORCEMENT.md` §5.
     """
     _reject_unknown_kind(kind)
     if kind in legal.REQUIRED_AT_REGISTRATION:

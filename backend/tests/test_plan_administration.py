@@ -64,12 +64,20 @@ class TestUpdatePlan:
 
         assert plans.get_plan(scratch_plan)["max_samples"] is None
 
-    def test_nullOnAFieldThatCannotBeUnlimited_isRefused(self, scratch_plan):
-        """`max_api_keys` NULL sẽ có nghĩa "vô hạn khoá", thứ bảng giá không
-        định nghĩa. Cột NOT NULL sẽ chặn ở tầng cơ sở dữ liệu, nhưng thông điệp
-        Postgres không nói được cho người vận hành phải làm gì."""
+    def test_nullOnAFieldThatIsNotACeiling_isRefused(self, scratch_plan):
+        """NULL nghĩa là "không giới hạn", và chỉ TRẦN mới mang được nghĩa đó.
+
+        Bản trước dùng `max_api_keys` làm ví dụ, vì khi ấy nó là trần duy nhất
+        không được phép vô hạn. v6 gỡ ràng buộc đó — gói Enterprise là "custom",
+        nên MỌI trần đều nhận NULL — và cùng lượt đó ví dụ cũ hết hiệu lực.
+
+        Luật thì không đổi, chỉ đổi chỗ áp dụng: `display_name` không phải một
+        trần, nên NULL ở đó không có nghĩa gì cả. Cột NOT NULL sẽ chặn ở tầng
+        cơ sở dữ liệu, nhưng thông điệp Postgres không nói được cho người vận
+        hành phải làm gì.
+        """
         with pytest.raises(plans.PlanError) as caught:
-            plans.update_plan(scratch_plan, {"max_api_keys": None})
+            plans.update_plan(scratch_plan, {"display_name": None})
 
         assert caught.value.status_code == 422
 

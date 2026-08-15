@@ -20,7 +20,7 @@
  * 3. **`lang` trên thẻ `<html>` phải đổi theo.** Đây là chỗ hầu hết bản cài đặt
  *    quên. Trình đọc màn hình chọn giọng đọc theo thuộc tính đó; để nguyên
  *    `lang="vi"` rồi hiện chữ tiếng Anh nghĩa là người khiếm thị nghe tiếng Anh
- *    đọc bằng bộ phát âm tiếng Việt. WCAG 3.1.1 — xem docs/ACCESSIBILITY.md.
+ *    đọc bằng bộ phát âm tiếng Việt. WCAG 3.1.1 — xem docs/05-frontend/ACCESSIBILITY.md.
  */
 
 import React, {

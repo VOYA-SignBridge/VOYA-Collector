@@ -34,12 +34,28 @@ SKIPPED: list[tuple[str, str]] = []
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
+    """Ghi nhan ket qua, VA nem khi sai.
+
+    Cau `raise` la bat buoc, khong phai trang tri. Tep nay von la script chay
+    tay: verdict nam o `sys.exit(1 if FAILED else 0)` cuoi `main()`, nen
+    `check` chi can ghi vao danh sach. Nhung pytest KHONG goi `main()` - no
+    thu tung ham `test_*` mot. Khong co `raise` thi moi ham o day xanh vo
+    dieu kien, ke ca khi moi phep kiem ben trong deu sai.
+
+    Da do, khong phai suy doan: sua mot dieu kien thanh hang sai roi chay
+    `pytest ...::test_config_defaults` van ra "1 passed".
+
+    `main()` boc try/except quanh tung test nen che do chay tay van nguyen;
+    khac biet duy nhat la no dung o phep kiem sai DAU TIEN trong mot ham thay
+    vi gom het - dung cach pytest van bao loi.
+    """
     if cond:
         PASSED.append(name)
         print(f"  PASS  {name}")
-    else:
-        FAILED.append((name, str(detail)))
-        print(f"  FAIL  {name}  -> {detail}")
+        return
+    FAILED.append((name, str(detail)))
+    print(f"  FAIL  {name}  -> {detail}")
+    raise AssertionError(f"{name}" + (f"  -> {detail}" if detail else ""))
 
 
 # --------------------------------------------------------------------------- #
@@ -64,8 +80,20 @@ def test_no_double_serialization():
     print("[test_no_double_serialization]")
     src = inspect.getsource(dataset_samples.save_sequence_npz)
     check("save_sequence_npz has no BytesIO", "BytesIO" not in src, "BytesIO still referenced")
-    check("save_sequence_npz compresses exactly once", src.count("savez_compressed") == 1,
-          f"savez_compressed count = {src.count('savez_compressed')}")
+
+    # Phep kiem nay soi MA NGUON, nen no lac hau theo moi lan tach ham. Da xay
+    # ra: ban truoc dem `savez_compressed` trong than `save_sequence_npz`, roi
+    # duong ghi duoc tach ra `_atomic_write_npz` va so dem tut ve 0. Neu luc do
+    # `check` con nem, no da bao ngay; vi no khong nem nen phep kiem nay im
+    # lang mat tac dung, khong ai biet.
+    #
+    # Nen kiem CA HAI: uy quyen dung cho ai, va noi do nen dung mot lan.
+    check("save_sequence_npz uy quyen cho _atomic_write_npz",
+          "_atomic_write_npz" in src, "khong con goi _atomic_write_npz")
+    writer = inspect.getsource(dataset_samples._atomic_write_npz)
+    check("_atomic_write_npz compresses exactly once",
+          writer.count("savez_compressed") == 1,
+          f"savez_compressed count = {writer.count('savez_compressed')}")
 
 
 def test_download_chunk_configurable():

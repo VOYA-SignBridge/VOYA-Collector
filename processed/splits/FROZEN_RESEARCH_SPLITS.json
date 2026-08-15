@@ -1,0 +1,37 @@
+{
+  "_doc": [
+    "Ba tệp train/val/test.csv NGAY TRONG thư mục này là HIỆN VẬT NGHIÊN CỨU ĐÓNG BĂNG.",
+    "Chúng KHÔNG được dựng lại. docs/02-data/VOCABULARY_SCHEMA_V2.md:107 đã nói vậy từ",
+    "trước, nhưng cho tới 14/08/2026 không có gì cưỡng chế: test_frozen_artifacts.py mục",
+    "F2 mang tên 'legacy root splits untouched' mà chỉ khẳng định ba tệp CÒN TỒN TẠI —",
+    "không có mã băm, nên một lượt `make_splits.py` vô tình vẫn ghi đè được mà bộ kiểm",
+    "vẫn xanh. Tệp này là phần cưỡng chế còn thiếu.",
+    "",
+    "Split VẬN HÀNH không được ghi vào đây. Chúng thuộc về một hiện vật bất biến riêng,",
+    "có split_id, và nhánh vận hành phải truyền đường dẫn tường minh chứ không rơi về",
+    "mặc định của trainer. Xem docs/10-issues/KNOWN_ISSUES.md.",
+    "",
+    "Nếu một ngày phải thay ba tệp này thật, hãy đổi số ở đây TRONG CÙNG commit và nói",
+    "rõ vì sao. Cập nhật mã băm mà không giải thích thì đúng bằng việc không có tệp này."
+  ],
+  "purpose": "research",
+  "frozen_at": "2026-08-14",
+  "note": "Số đo lúc đóng băng, chưa áp sàn mẫu nào (min_samples_per_class=0).",
+  "files": {
+    "train.csv": {
+      "sha256": "0e43e087b2eaee7b2fac88154f9de58194d8b8e8965a53d373abce7370b86b8f",
+      "rows": 771,
+      "bytes": 319682
+    },
+    "val.csv": {
+      "sha256": "ab958f7c8305f6191a3674c8b59e6ce31f9168522d2803d8334a303d9c6a2c5c",
+      "rows": 122,
+      "bytes": 50208
+    },
+    "test.csv": {
+      "sha256": "f346150d40bcc964f2c4a39f137178d46c69b4bf5500a968699e9d9eef3a87b9",
+      "rows": 164,
+      "bytes": 67659
+    }
+  }
+}

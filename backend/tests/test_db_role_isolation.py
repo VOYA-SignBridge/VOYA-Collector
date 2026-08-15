@@ -516,3 +516,287 @@ class TestCheckCommand:
         )
         assert provision_db_roles.main(["--check"]) == 3
         assert "row-level security" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Lớp 3 của việc cô lập bộ test: ranh giới quyền ở tầng PostgreSQL
+# ---------------------------------------------------------------------------
+#
+# Lớp 1 đổi DSN (`scripts/run_tests.sh`), lớp 2 là cổng đích trong `conftest`.
+# Cả hai là mã, và ngày 13/08/2026 đã chứng minh mã đó viết sai được: một hook
+# của pytest chạy `migrate_database()` lên `signdb` sản xuất, áp một phần
+# Billing v6 chưa hoàn chỉnh và đóng dấu một phiên bản không có thật.
+#
+# Lớp này không tin lớp nào ở trên: danh tính mà bộ test dùng KHÔNG có quyền
+# CONNECT vào cơ sở dữ liệu sản xuất. DSN có trỏ nhầm thì PostgreSQL từ chối.
+
+_PRODUCTION_DATABASE = "signdb"
+_TEST_ROLE_PASSWORD_ENV = {
+    "voya_test_app": "VOYA_TEST_APP_PASSWORD",
+    "voya_test_owner": "VOYA_TEST_OWNER_PASSWORD",
+}
+
+
+def _server_address() -> tuple[str, int]:
+    import os
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(os.environ["DATABASE_URL"])
+    return parsed.hostname or "localhost", parsed.port or 5432
+
+
+def _password_for(role: str) -> str:
+    import os
+
+    password = os.environ.get(_TEST_ROLE_PASSWORD_ENV[role], "")
+    if not password:
+        pytest.skip(
+            f"chua cap phat role test ({_TEST_ROLE_PASSWORD_ENV[role]} trong). "
+            f"Chay: sh scripts/provision_test_db_roles.sh")
+    return password
+
+
+def _try_connect(role: str, database: str):
+    """Nối THẬT bằng đúng credential đó. Trả về None nếu được, lỗi nếu không."""
+    import psycopg2
+
+    host, port = _server_address()
+    try:
+        conn = psycopg2.connect(host=host, port=port, dbname=database,
+                                user=role, password=_password_for(role),
+                                connect_timeout=10)
+    except psycopg2.OperationalError as exc:
+        return exc
+    conn.close()
+    return None
+
+
+@pytest.mark.integration
+class TestTestRolesCannotReachProduction:
+    """Đo bằng một lần kết nối thật, không bằng truy vấn danh mục dưới `admin`.
+
+    `has_database_privilege()` trả lời câu hỏi danh mục. Câu hỏi thật là "một
+    tiến trình pytest cầm credential này có mở được kết nối tới sản xuất
+    không", và chỉ có cách thử mới trả lời được.
+    """
+
+    @pytest.mark.parametrize("role", ["voya_test_app", "voya_test_owner"])
+    def test_a_test_role_is_refused_by_production(self, role):
+        error = _try_connect(role, _PRODUCTION_DATABASE)
+
+        assert error is not None, (
+            f"{role} MO DUOC ket noi toi {_PRODUCTION_DATABASE}. Lop quyen "
+            f"khong con, va hai lop tren deu la ma co the viet sai.")
+        assert "permission denied for database" in str(error).lower(), (
+            f"{role} bi tu choi, nhung KHONG phai vi quyen: {error}")
+
+    @pytest.mark.parametrize("role", ["voya_test_app", "voya_test_owner"])
+    def test_a_test_role_is_accepted_by_the_test_database(self, role):
+        """Đối chứng dương, và nó là thứ làm hai test trên có nghĩa.
+
+        Không có nó, một mật khẩu sai cũng làm test kia xanh — lúc đó ta đang
+        chứng minh "credential hỏng" chứ không phải "ranh giới quyền có thật".
+        """
+        import os
+
+        database = os.environ.get("POSTGRES_DB", "signdb_test")
+        assert _try_connect(role, database) is None
+
+
+@pytest.mark.integration
+class TestSuiteRunsUnderTheTestApplicationRole:
+    """Vai chạy bộ test phải phản chiếu vai runtime, nếu không suite RLS xanh giả."""
+
+    def test_the_suite_connects_as_the_test_application_role(self):
+        from app.storage.metadata_db import _cursor
+
+        with _cursor() as cur:
+            cur.execute("SELECT current_user")
+            assert cur.fetchone()[0] == "voya_test_app"
+
+    @pytest.mark.parametrize("role", ["voya_test_app", "voya_test_owner"])
+    def test_a_test_role_matches_runtime_rls_properties(self, role):
+        """Bốn thuộc tính, và mỗi cái chặn một kiểu hỏng khác nhau.
+
+        `rolbypassrls` là cái nguy hiểm nhất: bật nó lên thì MỌI test RLS xanh
+        mà không kiểm được gì — một kiểu hỏng không để lại dấu vết nào trong
+        kết quả chạy.
+
+        `rolcreaterole` phải tắt ở CẢ HAI vai, kể cả vai chủ sở hữu. Đó là thứ
+        làm cho "conftest không thể tự cấp phát hạ tầng" trở thành một sự thật
+        của PostgreSQL chứ không phải một quy ước — và chuỗi sự cố vừa rồi xảy
+        ra đúng vì một hook khởi động có nhiều quyền hơn việc nó cần làm.
+
+        `rolcreatedb` thì KHÁC, và bản đầu của phép kiểm này gộp nhầm hai thứ.
+        Vai chủ sở hữu cần nó: `test_tenant_isolation.py` dựng một cơ sở dữ
+        liệu nháp cho mỗi module để cài chính sách RLS thật lên đó, và không
+        chạy chung cơ sở dữ liệu được vì phép kiểm đụng tới chính các câu DDL
+        sửa chính sách.
+
+        Hai quyền này không cùng hạng về hậu quả:
+
+          * CREATEDB sinh ra cơ sở dữ liệu RỖNG từ `template1`. Nó không mở
+            đường nào tới `signdb` — CONNECT đã bị thu hồi, và nhân bản bằng
+            TEMPLATE cũng không đi được vì `signdb` không phải template và
+            thuộc `admin`. Kiểm ở `TestTestRolesCannotReachProduction`.
+          * CREATEROLE cho đổi mật khẩu của một vai không-superuser KHÁC, kể cả
+            `voya_app` — vai duy nhất còn CONNECT được vào sản xuất. Đó là một
+            đường leo thang thật, chỉ hai bước, nên nó ở lại danh sách cấm.
+        """
+        from app.storage.metadata_db import _migration_cursor
+
+        with _migration_cursor() as cur:
+            cur.execute(
+                "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb "
+                "FROM pg_roles WHERE rolname = %s", (role,))
+            row = cur.fetchone()
+
+        assert row is not None, f"chua cap phat {role}"
+        super_, bypassrls, createrole, createdb = row
+        assert (super_, bypassrls, createrole) == (False, False, False), (
+            f"{role} mang quyen no khong duoc co: super={super_} "
+            f"bypassrls={bypassrls} createrole={createrole}")
+        # Đúng một vai được phép, và phải là vai chủ sở hữu: vai ỨNG DỤNG chạy
+        # phần lớn bộ kiểm, và nó phải giống hệt `voya_app` trên sản xuất.
+        expected_createdb = role == "voya_test_owner"
+        assert createdb is expected_createdb, (
+            f"{role}: createdb={createdb}, mong doi {expected_createdb}")
+
+    def test_migration_runs_under_a_different_identity(self):
+        """Vai migration sở hữu bảng (ALTER TABLE đòi sở hữu); vai ứng dụng thì
+        không được. Trộn hai vai làm một là cho đường ghi của ứng dụng quyền
+        đổi hình dạng lược đồ."""
+        import os
+        import urllib.parse
+
+        migration_user = urllib.parse.urlparse(
+            os.environ.get("MIGRATION_DATABASE_URL", "")).username
+        runtime_user = urllib.parse.urlparse(os.environ["DATABASE_URL"]).username
+
+        assert migration_user == "voya_test_owner"
+        assert runtime_user == "voya_test_app"
+        assert migration_user != runtime_user
+
+
+# ---------------------------------------------------------------------------
+# Danh mục toàn cục không được thành đường ghi vào dữ liệu của tenant
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalCatalogueIsNotAWritePath:
+    """RLS KHÔNG thay thế GRANT/REVOKE — và đây là bằng chứng thực nghiệm.
+
+    Lỗ tìm được 14/08: `voya_app` có đủ bốn quyền trên `regions` và `languages`
+    vì `provision_db_roles` cấp `ON ALL TABLES`. Hai bảng đó không mang
+    `tenant_id` nên nằm ngoài RLS — đúng, chúng không phải dữ liệu của ai.
+    Nhưng `classes` trỏ tới cả hai bằng khoá ngoại, nên một câu
+
+        UPDATE regions SET code = ...
+
+    ghi lại `classes` của MỌI tenant, mà lượt ghi đó không chạm bảng `classes`
+    nên không policy nào của nó được hỏi tới.
+
+    Bài học đặt tên được để còn rà: một bảng KHÔNG chứa dữ liệu tenant vẫn là
+    ranh giới cô lập, nếu thao tác trên nó làm thay đổi được dữ liệu thuộc về
+    tenant. Gọi là ĐƯỜNG GHI BẮC CẦU.
+    """
+
+    def test_the_app_role_can_only_read_the_reference_catalogues(self):
+        """Ngược chiều với `REFERENCE_TABLES`: đọc quyền THẬT trong cơ sở dữ
+        liệu, không đọc lại danh sách trong mã.
+
+        Khuôn hiện tại là "GRANT rộng rồi REVOKE ngoại lệ", nên người thêm một
+        danh mục mới (`countries`, `license_types`, …) rất dễ quên khoá ghi.
+        Phép kiểm này là thứ bắt họ.
+        """
+        from app.cli.provision_db_roles import REFERENCE_TABLES
+        from app.storage.metadata_db import _cursor
+
+        with _cursor() as cur:
+            cur.execute("SELECT current_user")
+            app_role = cur.fetchone()[0]
+            cur.execute(
+                "SELECT table_name, privilege_type "
+                "  FROM information_schema.role_table_grants "
+                " WHERE grantee = %s AND table_name = ANY(%s)",
+                (app_role, list(REFERENCE_TABLES)),
+            )
+            cap = {}
+            for bang, quyen in cur.fetchall():
+                cap.setdefault(bang, set()).add(quyen)
+
+        for bang in REFERENCE_TABLES:
+            co = cap.get(bang, set())
+            assert "SELECT" in co, f"{app_role} không đọc được {bang}"
+            thua = co & {"INSERT", "UPDATE", "DELETE"}
+            assert not thua, (
+                f"{app_role} GHI được danh mục toàn cục {bang}: {sorted(thua)}. "
+                f"Sửa danh mục là việc của vai migration — xem REFERENCE_TABLES.")
+
+    def test_no_direct_global_to_tenant_fk_cascade(self):
+        """Bất biến CẤU TRÚC cho khoá ngoại TRỰC TIẾP, một cạnh.
+
+        Tên hàm nói đúng phạm vi, và đó là chủ ý. Bộ kiểm này KHÔNG chứng minh
+        "không tồn tại mọi đường ghi bắc cầu" — nó chỉ soi đúng một hình dạng:
+
+            bảng KHÔNG có tenant_id  --FK ON UPDATE CASCADE-->  bảng CÓ tenant_id
+
+        Những hình dạng nó KHÔNG thấy, và người sau đừng tưởng đã được phủ:
+        cascade nhiều chặng (toàn cục A → toàn cục B → tenant C), trigger, hàm
+        lưu sẵn, `ON DELETE CASCADE`, và mọi cơ chế đồng bộ hoá ở tầng ứng dụng.
+        Lược đồ hiện tại chưa có những đường đó, nên chưa mở rộng; nhưng
+        "đã kiểm một lớp nguy cơ" khác hẳn "đã chứng minh không còn đường nào".
+
+        Thu quyền chặn được vai ứng dụng; `ON UPDATE RESTRICT` chặn thêm cả mã
+        chạy dưới vai migration. Hai lớp cho cùng một lỗi, vì nó im lặng.
+
+        `code` là ĐỊNH DANH MÁY, không phải nhãn hiển thị — `bac` cố định, còn
+        `name_vi` mới là thứ người ta đổi. Nên cascade ở đây gần như không có
+        công dụng thật, chỉ có rủi ro.
+        """
+        from app.storage.metadata_db import _migration_cursor
+
+        # NGOẠI LỆ TẠM THỜI ĐÃ RÀ, KHÔNG PHẢI KIẾN TRÚC ĐƯỢC CHẤP NHẬN.
+        #
+        # `plans` không thể là chỉ-đọc: endpoint quản trị bảng giá cần ghi thật.
+        # Nhưng cascade ở đây cũng KHÔNG phải thứ nghiệp vụ đang dựa vào — lượt
+        # đổi mã gói v6 tự `UPDATE tenants` và `UPDATE tenant_subscriptions`
+        # bằng câu riêng. Nó chỉ là một đường ghi thứ hai.
+        #
+        # `plans.code` là định danh máy bền, y như `regions.code`. Một endpoint
+        # quản trị chạy `UPDATE plans SET code='school-v2' WHERE code='school'`
+        # không nên có quyền âm thầm viết lại trạng thái đăng ký của TOÀN hệ
+        # thống chỉ nhờ khoá ngoại. Với tính cước thì càng phải ép việc đổi mã
+        # thành một migration có chủ ý.
+        #
+        # ĐIỀU KIỆN GỠ: có bộ kiểm hồi quy cho lượt đổi mã gói, rồi chuyển cả
+        # hai sang ON UPDATE RESTRICT và xoá hẳn danh sách này.
+        DUOC_PHEP = {"fk_tenants_plan", "tenant_subscriptions_plan_code_fkey"}
+
+        with _migration_cursor() as cur:
+            cur.execute("""
+                WITH fk AS (
+                  SELECT c.conname, c.confupdtype,
+                         src.relname AS con, tgt.relname AS cha
+                    FROM pg_constraint c
+                    JOIN pg_class src ON src.oid = c.conrelid
+                    JOIN pg_class tgt ON tgt.oid = c.confrelid
+                   WHERE c.contype = 'f'
+                ), co_tenant AS (
+                  SELECT c.relname FROM pg_class c
+                    JOIN pg_attribute a ON a.attrelid = c.oid
+                   WHERE a.attname = 'tenant_id' AND a.attnum > 0
+                     AND NOT a.attisdropped
+                )
+                SELECT conname, cha, con FROM fk
+                 WHERE confupdtype = 'c'
+                   AND cha NOT IN (SELECT relname FROM co_tenant)
+                   AND con IN (SELECT relname FROM co_tenant)
+            """)
+            duong = [(r[0], r[1], r[2]) for r in cur.fetchall()]
+
+        la = [d for d in duong if d[0] not in DUOC_PHEP]
+        assert not la, (
+            "đường ghi bắc cầu MỚI từ bảng toàn cục vào dữ liệu tenant: "
+            + ", ".join(f"{c} ({cha} -> {con} qua {c})" for c, cha, con in la)
+            + ". Đổi sang ON UPDATE RESTRICT, hoặc thêm vào DUOC_PHEP kèm lý do.")

@@ -22,9 +22,16 @@ from conftest import STANDALONE_SUITES
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parents[1]
 
-# Suites that need artifacts which may legitimately be absent (they skip
-# themselves with exit 0 when so) are still asserted on exit code — a skip is
-# an exit 0, a genuine failure is exit 1.
+#: Mã thoát nghĩa là "đã bỏ qua có lý do", không phải "đã kiểm và đạt".
+#:
+#: Trước 14/08/2026 các suite cần hiện vật có thể vắng mặt sẽ in "SKIP:" rồi
+#: `return 0`, và chú thích ở đây ghi thẳng rằng "a skip is an exit 0". Nghĩa
+#: là trong bảng kết quả, một suite CHƯA KIỂM GÌ trông hệt một suite đã kiểm và
+#: đạt. Đó chính là false assurance: người đọc tưởng X đang được bảo vệ.
+#:
+#: 77 là quy ước của automake cho "skip", chọn vì nó đã có nghĩa sẵn và không
+#: đụng mã thoát nào Python tự sinh.
+EXIT_SKIP = 77
 
 
 @pytest.mark.parametrize("suite", STANDALONE_SUITES)
@@ -51,14 +58,23 @@ def test_standalone_suite(suite: str) -> None:
         errors="replace",
         timeout=900,
     )
+    if proc.returncode == EXIT_SKIP:
+        ly_do = [ln for ln in (proc.stdout or "").splitlines()
+                 if ln.strip().startswith("SKIP")]
+        pytest.skip(ly_do[-1].strip() if ly_do else f"{suite} tự báo bỏ qua")
+
     if proc.returncode != 0:
         out = (proc.stdout or "")[-4000:]
         err = (proc.stderr or "")[-2000:]
         pytest.fail(f"{suite} exited {proc.returncode}\n--- stdout ---\n{out}\n"
                     f"--- stderr ---\n{err}")
 
-    # Surface the assertion count so a suite that silently stops asserting is
-    # visible in -v output rather than looking like a pass.
+    # Mã thoát 0 CHƯA đủ để gọi là đạt: một suite ngừng khẳng định giữa chừng
+    # cũng thoát 0. Đòi bằng chứng là nó có chạy phép kiểm nào không.
     tail = [ln for ln in (proc.stdout or "").splitlines() if "passed," in ln]
-    if tail:
-        print(f"{suite}: {tail[-1].strip()}")
+    assert tail, (
+        f"{suite} thoát 0 nhưng không in dòng tổng kết nào — không có bằng "
+        f"chứng phép kiểm nào đã chạy. Nếu nó cố ý không kiểm gì thì phải "
+        f"thoát {EXIT_SKIP} kèm một dòng 'SKIP: ...'.\n"
+        f"--- stdout ---\n{(proc.stdout or '')[-2000:]}")
+    print(f"{suite}: {tail[-1].strip()}")

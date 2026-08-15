@@ -922,6 +922,9 @@ export const EN: Record<string, string> = {
   "Vùng": "Region",
   "Vùng lãnh thổ được đại diện": "Territories represented",
   "Vùng miền": "Region",
+  "Chưa phân loại": "Unclassified",
+  "Cùng một từ có thể có nhiều biến thể vùng; mỗi biến thể là một nhãn riêng.":
+    "One word can have several regional variants; each variant is its own label.",
   "Vùng nguy hiểm": "Danger zone",
   "Văn bản này bắt buộc để dùng hệ thống nên không rút riêng được. Nếu bạn muốn dừng hẳn, hãy yêu cầu xoá tài khoản.": "This document is required to use the system, so it cannot be withdrawn on its own. If you want to stop entirely, request account deletion.",
   "Văn bản pháp lý": "Legal documents",

@@ -5,8 +5,8 @@ Công bố CHÍNH LÀ hành động bật cưỡng chế: khi chưa có bản n�
 chiếu ở server.
 
     python -m app.cli.register_legal_document \\
-        --kind terms --version 2026-08-07 \\
-        --file docs/legal/terms-2026-08-07.md \\
+        --kind terms --version 2026-08-08 \\
+        --file docs/04-legal/published/terms-2026-08-08.md \\
         --url /legal/terms
 
     python -m app.cli.register_legal_document --list

@@ -229,7 +229,7 @@ def send_password_reset_email(to_email: str, username: str, reset_link: str) -> 
 #
 # Cả hai thư dưới đây đều `loggable=True`. Chúng KHÔNG chở nội dung phiếu —
 # chỉ tiêu đề, người gửi và số lượng. Nội dung trao đổi hỗ trợ là dữ liệu của
-# tenant và không được rơi vào nhật ký chung; xem `docs/OBSERVABILITY_PLAN.md`.
+# tenant và không được rơi vào nhật ký chung; xem `docs/06-operations/OBSERVABILITY_PLAN.md`.
 # ---------------------------------------------------------------------------
 def send_support_ticket_email(
     to_email: str, *, ticket_id: str, subject: str, category: str,

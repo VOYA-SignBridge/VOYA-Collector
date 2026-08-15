@@ -40,7 +40,7 @@ it. ContextVars are also copied into anyio worker threads, so the sync database
 code FastAPI runs in a threadpool sees the value the async request set.
 
 Related: ``storage/rls.py`` (the policies), ``tenant_middleware.py`` (the HTTP
-entry point), docs/needFix/BACKEND_WORK_PLAN.md item A3.
+entry point), docs/11-worklog/BACKEND_WORK_PLAN.md item A3.
 """
 
 from __future__ import annotations

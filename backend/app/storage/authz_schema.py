@@ -74,7 +74,7 @@ Ba câu hỏi khác nhau, ba cơ chế khác nhau, không cái nào thay đượ
     Composite FK   quan hệ này có được phép TỒN TẠI?   (INTEGRITY_FK_SPECS)
     Casbin         chủ thể này có NĂNG LỰC nghiệp vụ?  (authorization/)
 
-Liên quan: :doc:`docs/AUTHORIZATION.md`, ``app/authorization/``,
+Liên quan: :doc:`docs/03-security/AUTHORIZATION.md`, ``app/authorization/``,
 ``app/cli/backfill_authz.py``.
 """
 

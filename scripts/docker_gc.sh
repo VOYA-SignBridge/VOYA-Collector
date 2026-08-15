@@ -130,7 +130,7 @@ bk="/e/CTU_ProjectOutside/voya_backups/signdb_PRE_gc_${ts}.dump"
 if docker ps --format '{{.Names}}' | grep -q voya_postgres; then
   docker exec voya_postgres pg_dump -U admin -Fc signdb > "$bk" 2>/dev/null
   # `pg_restore --list` KHONG bat duoc tep cut (muc luc nam o DAU tep). Phai doc
-  # het tep moi biet no lanh — xem docs/BACKUP_RESTORE.md.
+  # het tep moi biet no lanh — xem docs/06-operations/BACKUP_RESTORE.md.
   if docker run --rm -v "E:/CTU_ProjectOutside/voya_backups:/b" postgres:17-alpine \
        pg_restore -f /dev/null "/b/$(basename "$bk")" 2>/dev/null; then
     echo "   $bk — tu kiem DAT"

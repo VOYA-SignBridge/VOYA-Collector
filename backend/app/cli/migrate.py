@@ -73,6 +73,27 @@ def _schema_looks_complete() -> list[str]:
         return list(missing_objects(cur.connection))
 
 
+def _retired_leftovers() -> list[str]:
+    """Đối tượng ĐÁNG LẼ ĐÃ BỊ GỠ mà vẫn còn. Rỗng = đã dọn xong.
+
+    Hợp đồng migration có HAI tập, không phải một:
+
+        required_objects   phải CÓ MẶT
+        retired_objects    phải VẮNG MẶT
+
+    Trước 15/08/2026 chỉ có tập thứ nhất, nên trạng thái `chỉ mục mới có +
+    chỉ mục cũ VẪN còn` được `--status` kết luận là *"khớp"* — trong khi lược
+    đồ thực tế sai. Đo đúng như vậy trên `signdb`.
+
+    Một câu retire chạy hụt không để lại dấu vết nào khác; nếu không hỏi câu
+    này thì không có gì phát hiện được nó.
+    """
+    from app.storage.metadata_db import _migration_cursor, retired_still_present
+
+    with _migration_cursor() as cur:
+        return list(retired_still_present(cur))
+
+
 def cmd_status() -> int:
     from app.storage.metadata_db import _migration_cursor
     from app.storage.schema_version import (
@@ -82,6 +103,7 @@ def cmd_status() -> int:
 
     version, database = _current_version()
     missing = _schema_looks_complete()
+    con_sot = _retired_leftovers()
     error = compatibility_error(version)
 
     with _migration_cursor() as cur:
@@ -102,8 +124,19 @@ def cmd_status() -> int:
         print(f"    - {name}")
     if len(missing) > 20:
         print(f"    ... con {len(missing) - 20} muc nua")
+    print(f"doi tuong con sot: {len(con_sot)}")
+    for name in con_sot[:20]:
+        print(f"    - {name}")
+    if len(con_sot) > 20:
+        print(f"    ... con {len(con_sot) - 20} muc nua")
 
-    if error is None and ck_problem is None:
+    # Hai tập đều tham gia KẾT LUẬN, và cả hai đều là thay đổi của 15/08/2026.
+    #
+    # `missing` trước đây được IN RA nhưng không đổi được kết luận — một lược
+    # đồ thiếu đối tượng vẫn được báo "khớp". `con_sot` thì chưa từng tồn tại.
+    # Cả hai đều là "lược đồ không ở trạng thái đích", nên cả hai phải làm
+    # `--status` trả mã khác 0.
+    if error is None and ck_problem is None and not missing and not con_sot:
         print("\nKET LUAN: khop — backend khoi dong duoc tren co so du lieu nay.")
         return 0
 
@@ -112,6 +145,11 @@ def cmd_status() -> int:
         print(error)
     if ck_problem:
         print(ck_problem)
+    if missing:
+        print(f"Luoc do con thieu {len(missing)} doi tuong.")
+    if con_sot:
+        print(f"Luoc do con {len(con_sot)} doi tuong dang le da bi go. "
+              f"Chay: python -m app.cli.migrate --to {APP_SCHEMA_VERSION}")
     return 1
 
 
@@ -160,6 +198,17 @@ def cmd_adopt_checksum() -> int:
         print(f"TU CHOI: luoc do con thieu {len(missing)} doi tuong, nen khong "
               f"the khang dinh migration v{version} da chay tron ven:")
         for name in missing[:20]:
+            print(f"    - {name}")
+        return 2
+
+    # Nửa còn lại của cùng một câu hỏi. Đóng dấu checksum cho một lược đồ vẫn
+    # còn đối tượng đáng lẽ đã retire là ghi nhận rằng lần biến đổi ấy đã chạy
+    # trọn vẹn — trong khi nó chưa.
+    con_sot = _retired_leftovers()
+    if con_sot:
+        print(f"TU CHOI: luoc do con {len(con_sot)} doi tuong dang le da bi go, "
+              f"nen migration v{version} CHUA chay tron ven:")
+        for name in con_sot[:20]:
             print(f"    - {name}")
         return 2
 
@@ -253,7 +302,7 @@ def cmd_migrate(target: int, dry_run: bool = False, note: str | None = None) -> 
     if version is not None and version > target:
         print(f"TU CHOI: luoc do dang o v{version}, khong migration lui ve "
               f"v{target}.\nCach quay lui duy nhat la khoi phuc tu sao luu — xem "
-              f"docs/BACKUP_RESTORE.md.")
+              f"docs/06-operations/BACKUP_RESTORE.md.")
         return 2
 
     # Checksum, TRƯỚC khi chạy bất kỳ câu nào.

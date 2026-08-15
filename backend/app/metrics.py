@@ -51,7 +51,7 @@ training_system_failures_total = Counter(
 # Prometheus tính chi phí theo CHUỖI THỜI GIAN, và mỗi tenant nhân số chuỗi
 # lên: bốn chỉ số × N tenant. Với hai mươi tenant thì không sao; với hai nghìn
 # tenant tự đăng ký thì đây là cách làm nổ Prometheus, và đúng loại lỗi mà
-# docs/OBSERVABILITY_PLAN.md đã cảnh báo về promtail.
+# docs/06-operations/OBSERVABILITY_PLAN.md đã cảnh báo về promtail.
 #
 # Phần vượt trần được GỘP vào nhãn `_other` chứ không bị bỏ: tổng toàn nền tảng
 # vẫn cộng ra đúng, chỉ mất phân giải ở phần đuôi. Bỏ hẳn thì biểu đồ tổng sẽ

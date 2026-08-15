@@ -108,11 +108,23 @@ docker info >/dev/null 2>&1 || fail "cannot talk to the Docker daemon — is Doc
 #
 # Why it is a FAIL and not a warning: on 2026-08-05 a `docker compose build`
 # started with ~1 GB free and killed `dockerd` outright, while Docker Desktop
-# kept drawing containers in the UI as if nothing had happened. A full build of
-# this stack writes on the order of 15-20 GB before it settles.
+# kept drawing containers in the UI as if nothing had happened.
+#
+# These two numbers are "free space needed before a CLEAN build", not the space
+# this stack needs to RUN. A running stack needs almost nothing; a build with a
+# cold cache is what eats the drive.
+#
+# Where 55 comes from: the cache-less rebuild on 2026-08-12 grew the vhdx from
+# 24.4 GB to 67.5 GB — 43 GB for one build. The first draft of this guard said
+# 20 GB, which is under half of a single measured build. 55 GB is that 43 GB
+# times 1.28, i.e. one full build plus room to be wrong.
+#
+# When more clean builds get measured, replace this with `worst observed x 1.25`
+# rather than nudging the number by feel. One measurement with a margin is
+# honest; a number that drifts because it "felt tight" is not.
 # ---------------------------------------------------------------------------
-DISK_FAIL_GB=20
-DISK_WARN_GB=40
+DISK_FAIL_GB=55
+DISK_WARN_GB=65
 
 docker_disk_report() {
   # Windows/WSL2: find the vhdx, report its drive. Prints "<free_gb> <vhdx_gb>".
@@ -139,8 +151,9 @@ if [ -n "$disk_line" ]; then
   note "Docker disk: ${drive}: has ${free_gb} GB free, vhdx is ${vhdx_gb} GB"
 
   if [ "$free_int" -lt "$DISK_FAIL_GB" ]; then
-    fail "only ${free_gb} GB free on ${drive}: — a full build needs ~15-20 GB and "\
-"has killed dockerd here before. Reclaim space FIRST:  bash scripts/docker_gc.sh"
+    fail "only ${free_gb} GB free on ${drive}: — one measured clean build grew "\
+"the vhdx by 43 GB, and a build that runs out has killed dockerd here before. "\
+"Reclaim space FIRST:  bash scripts/docker_gc.sh"
   elif [ "$free_int" -lt "$DISK_WARN_GB" ]; then
     note "[warn] under ${DISK_WARN_GB} GB free — run \`bash scripts/docker_gc.sh\` soon."
   fi

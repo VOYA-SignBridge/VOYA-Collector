@@ -18,7 +18,7 @@ alternative — one `hash_token()` helper — is how a six-digit code ends up
 protected like a 256-bit one, and nothing about the call site looks wrong.
 
 Neither the raw token nor the raw code is ever logged, returned in an error, or
-put in a metric label. See `docs/needFix/TENANT_LIFECYCLE.md` §"What is never
+put in a metric label. See `docs/01-architecture/TENANT_LIFECYCLE_AND_OTP.md` §"What is never
 written down".
 """
 

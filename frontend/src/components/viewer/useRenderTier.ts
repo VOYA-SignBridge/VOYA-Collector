@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Tiered rendering (docs/PHASE2_PLAN_3D_VIEWER.md §3–4):
+ * Tiered rendering (Extra_docs/PHASE2_PLAN_3D_VIEWER.md §3–4):
  *   "3d"    — flesh 3D hands (three.js)          — strong devices
  *   "2d"    — 2D canvas skeleton                 — mid devices
  *   "video" — server pre-rendered skeleton mp4   — weak/hot devices, Eco mode

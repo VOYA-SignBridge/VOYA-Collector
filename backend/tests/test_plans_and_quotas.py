@@ -29,7 +29,7 @@ def throwaway_tenant():
 
     tenant_id = f"qt{uuid.uuid4().hex[:10]}"
     tenant_admin.create_tenant(
-        tenant_id, display_name="Quota Test", clone_catalog=False, plan_code="trial"
+        tenant_id, display_name="Quota Test", clone_catalog=False, plan_code="free"
     )
     plans._clear_caches()
     yield tenant_id
@@ -50,13 +50,13 @@ class TestNullMeansUnlimited:
     def test_the_internal_plan_has_no_ceiling_at_all(self):
         """Tenant gốc giữ dữ liệu thật và không bao giờ được một hạn mức
         thương mại chặn giữa chừng."""
-        plan = plans.get_plan("internal")
+        plan = plans.get_plan("enterprise")
         assert plan is not None
         for column in ("max_samples", "max_seats", "max_classes", "max_storage_mb"):
             assert plan[column] is None, f"{column} phải là NULL (không giới hạn)"
 
     def test_a_null_limit_never_raises(self, throwaway_tenant):
-        _set_plan(throwaway_tenant, "internal")
+        _set_plan(throwaway_tenant, "enterprise")
         # Không ném là toàn bộ nội dung khẳng định ở đây.
         plans.check_quota(throwaway_tenant, "samples", adding=10_000_000)
 
@@ -71,7 +71,7 @@ class TestQuotaArithmetic:
         cho một tenant ở mức 499/500 sẽ cho lọt trọn một lô 5 mẫu, vì mỗi mẫu
         đơn lẻ đều "chưa chạm trần" tại thời điểm được hỏi.
         """
-        _set_plan(throwaway_tenant, "trial")  # max_samples = 500
+        _set_plan(throwaway_tenant, "free")  # max_samples = 500
         # 0 mẫu thật, nên xin thêm 501 phải bị từ chối còn 500 thì không.
         plans.check_quota(throwaway_tenant, "samples", adding=500)
         with pytest.raises(plans.QuotaExceeded):
@@ -82,7 +82,7 @@ class TestQuotaArithmetic:
     ):
         """Giao diện cần con số để vẽ "đã dùng X/Y", và nó không được phép
         moi con số đó ra từ chuỗi tiếng Việt — chuỗi sẽ đổi."""
-        _set_plan(throwaway_tenant, "trial")
+        _set_plan(throwaway_tenant, "free")
         with pytest.raises(plans.QuotaExceeded) as caught:
             plans.check_quota(throwaway_tenant, "samples", adding=99_999)
         assert caught.value.metric == "samples"
@@ -135,7 +135,7 @@ class TestSeats:
     def test_a_full_tenant_refuses_one_more_member(self, throwaway_tenant):
         from app import auth, tenant_admin
 
-        _set_plan(throwaway_tenant, "trial")  # max_seats = 3
+        _set_plan(throwaway_tenant, "free")  # max_seats = 3
         created = []
         try:
             for _ in range(3):
@@ -177,24 +177,24 @@ class TestSeats:
         nâng gói."""
         from app import auth, tenant_admin
 
-        _set_plan(throwaway_tenant, "trial")
+        _set_plan(throwaway_tenant, "free")
         name = f"seat{uuid.uuid4().hex[:9]}"
         user = auth.create_user(
             username=name, email=f"{name}@example.com", password="@Minh123456"
         )
         try:
             tenant_admin.add_member(throwaway_tenant, user["id"])
-            _set_plan(throwaway_tenant, "trial")
+            _set_plan(throwaway_tenant, "free")
             with system_scope("test: shrink the plan to exactly the seats in use"):
                 db._execute(
-                    "UPDATE plans SET max_seats = 1 WHERE plan_code = 'trial'"
+                    "UPDATE plans SET max_seats = 1 WHERE plan_code = 'free'"
                 )
             plans._clear_caches()
             # Đã là thành viên → không tiêu thêm ghế → phải qua.
             tenant_admin.add_member(throwaway_tenant, user["id"], "admin")
         finally:
             with system_scope("test cleanup: restore the trial plan and the account"):
-                db._execute("UPDATE plans SET max_seats = 3 WHERE plan_code = 'trial'")
+                db._execute("UPDATE plans SET max_seats = 3 WHERE plan_code = 'free'")
                 for table in ("tenant_members", "refresh_tokens", "user_consents"):
                     try:
                         db._execute(f"DELETE FROM {table} WHERE user_id = %s", (user["id"],))
@@ -212,8 +212,8 @@ class TestPlanChangesAreRecorded:
         đóng-trước-mở-sau trong `_open_subscription` không bị đảo."""
         from app import tenant_admin
 
-        tenant_admin.change_plan(throwaway_tenant, "school", note="nâng gói")
-        tenant_admin.change_plan(throwaway_tenant, "trial", note="hạ lại")
+        tenant_admin.change_plan(throwaway_tenant, "plus", note="nâng gói")
+        tenant_admin.change_plan(throwaway_tenant, "free", note="hạ lại")
 
         with system_scope("test: read the subscription history"):
             rows = db._fetch_all(
@@ -223,7 +223,7 @@ class TestPlanChangesAreRecorded:
             )
         open_rows = [r for r in rows if r["ended_at"] is None]
         assert len(open_rows) == 1
-        assert open_rows[0]["plan_code"] == "trial"
+        assert open_rows[0]["plan_code"] == "free"
         # Lịch sử phải còn nguyên: một tranh chấp hoá đơn hỏi "ngày đó họ ở gói
         # nào", và câu đó chỉ trả lời được nếu các dòng cũ vẫn ở đấy.
         assert len(rows) == 3, [dict(r) for r in rows]
@@ -237,16 +237,16 @@ class TestPlanChangesAreRecorded:
         from app import tenant_admin
 
         with system_scope("test: pretend the plan is already exceeded"):
-            db._execute("UPDATE plans SET max_samples = 0 WHERE plan_code = 'trial'")
+            db._execute("UPDATE plans SET max_samples = 0 WHERE plan_code = 'free'")
         plans._clear_caches()
         try:
-            tenant_admin.change_plan(throwaway_tenant, "trial")  # không ném
+            tenant_admin.change_plan(throwaway_tenant, "free")  # không ném
             with pytest.raises(plans.QuotaExceeded):
                 plans.check_quota(throwaway_tenant, "samples", adding=1)
         finally:
             with system_scope("test cleanup: restore the trial plan"):
                 db._execute(
-                    "UPDATE plans SET max_samples = 500 WHERE plan_code = 'trial'"
+                    "UPDATE plans SET max_samples = 500 WHERE plan_code = 'free'"
                 )
             plans._clear_caches()
 
@@ -260,5 +260,5 @@ class TestLookupFailsClosed:
         xảy ra.
         """
         plan = plans.plan_for_tenant("khong-ton-tai-dau")
-        assert plan["plan_code"] == "trial"
+        assert plan["plan_code"] == "free"
         assert plan["max_samples"] == 500

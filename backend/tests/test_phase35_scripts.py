@@ -25,8 +25,17 @@ FAILED: list = []
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
+    """Ghi nhan ket qua, VA nem khi sai.
+
+    Cau `raise` la bat buoc. Tep nay von la script chay tay, verdict nam o ma
+    thoat cua `main()`. Pytest KHONG goi `main()` - no thu tung ham `test_*`
+    mot - nen khong co `raise` thi moi ham o day xanh vo dieu kien, ke ca khi
+    moi phep kiem ben trong deu sai. Xem chu thich day du o test_quality.py.
+    """
     (PASSED if cond else FAILED).append((name, detail))
     print(f"  {'PASS' if cond else 'FAIL'}  {name}" + ("" if cond else f"  -> {detail}"))
+    if not cond:
+        raise AssertionError(f"{name}" + (f"  -> {detail}" if detail else ""))
 
 
 def _run(script: str, *argv):

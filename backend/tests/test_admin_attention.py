@@ -127,10 +127,16 @@ class TestMoiTruyVanChayDuocTrenLuocDoThat:
         lệch theo kiểu im lặng: huy hiệu chỉ đơn giản không hiện ra.
         """
         counts = _dem()
+        # Chốt không-rỗng, và nó không thừa: mọi khẳng định của phép kiểm này
+        # nằm TRONG vòng lặp, nên `_dem()` trả về rỗng là test xanh mà chưa so
+        # một khoá nào — đúng kiểu "lệch im lặng" mà docstring vừa cảnh báo.
+        assert counts, "_dem() không trả về mục nào — không có gì để đối chiếu"
         for key in counts:
             assert key.startswith("/admin/"), f"{key!r} không phải một href"
 
     def test_moi_con_so_deu_la_so_nguyen_khong_am(self, scope):
-        for key, n in _dem().items():
+        counts = _dem()
+        assert counts, "_dem() không trả về mục nào — không có gì để đối chiếu"
+        for key, n in counts.items():
             assert isinstance(n, int), f"{key}: {n!r} không phải số nguyên"
             assert n >= 0

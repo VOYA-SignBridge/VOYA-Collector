@@ -146,17 +146,19 @@ def plan_for_tenant(tenant_id: Optional[str]) -> Dict[str, Any]:
             (tenant,),
         )
     code = (rows[0].get("plan_code") if rows else None) or settings.self_serve_plan_code
-    plan = get_plan(code) or get_plan("trial")
+    plan = get_plan(code) or get_plan("free")
     if plan is None:
         # Bảng giá trống. Xảy ra được duy nhất khi migration chưa chạy xong;
         # trả về một gói bằng 0 để đường ghi đóng lại chứ không mở ra.
         logger.error("[PLANS] bảng plans trống — áp hạn mức bằng 0 cho %s", tenant)
         return {
-            "plan_code": "unknown", "display_name": "Không xác định",
+            "plan_code": "unknown", "display_name": "unknown",
             "max_seats": 0, "max_samples": 0, "max_storage_mb": 0, "max_classes": 0,
             "max_training_jobs_per_month": 0, "max_concurrent_training_jobs": 0,
             "max_queued_training_jobs": 0, "max_api_keys": 0,
             "max_webhook_endpoints": 0,
+            "max_workspaces": 0, "max_projects": 0,
+            "included_training_credits": 0, "audit_retention_days": 0,
         }
     return plan
 
@@ -177,11 +179,23 @@ EDITABLE_PLAN_FIELDS: Dict[str, bool] = {
     "max_storage_mb": True,
     "max_classes": True,
     "max_training_jobs_per_month": True,
-    "max_concurrent_training_jobs": False,
-    "max_queued_training_jobs": False,
-    "max_api_keys": False,
-    "max_webhook_endpoints": False,
-    "price_cents": False,
+    # v6 gỡ NOT NULL khỏi bốn trần này: gói Enterprise là "custom", và custom
+    # nghĩa là mọi trần đều có thể là không giới hạn.
+    "max_concurrent_training_jobs": True,
+    "max_queued_training_jobs": True,
+    "max_api_keys": True,
+    "max_webhook_endpoints": True,
+    # v6 — hạn mức của mô hình Free/Plus/Pro/Enterprise. Chưa cổng nào cưỡng
+    # chế chúng (workspace/project chờ v7, training credits chờ v8, retention
+    # chờ cơ chế purge), nhưng người vận hành phải sửa được từ bây giờ —
+    # ngược lại thì bảng gói mới chỉ tồn tại trong tài liệu.
+    "max_workspaces": True,
+    "max_projects": True,
+    "included_training_credits": True,
+    "audit_retention_days": True,
+    # NULL ở giá nghĩa là CHƯA CÔNG BỐ, khác hẳn 0 nghĩa là miễn phí. Không có
+    # phân biệt này thì bảng giá công khai in "Miễn phí" cho Plus và Pro.
+    "price_cents": True,
     "is_self_serve": False,
     "is_listed": False,
     "trial_days": False,
@@ -249,16 +263,38 @@ def update_plan(plan_code: str, changes: Dict[str, Any]) -> Dict[str, Any]:
     return get_plan(plan_code) or plan
 
 
-def billing_status_of(tenant_id: Optional[str]) -> str:
+def _billing_row(tenant_id: Optional[str]) -> Dict[str, Any]:
+    """`billing_status` và `billing_exempt` của một tenant, trong MỘT lượt đọc.
+
+    Hai cột đi cùng nhau ở mọi chỗ gọi, và đây là đường ghi nóng: tách thành
+    hai hàm là nhân đôi số lượt truy vấn cho mỗi lượt tải lên.
+    """
     from app.storage.metadata_db import _fetch_all
     from app.tenant_context import system_scope
 
     tenant = normalize_tenant_id(tenant_id) if tenant_id else DEFAULT_TENANT_ID
     with system_scope("plans: read the billing status of a tenant"):
         rows = _fetch_all(
-            "SELECT billing_status FROM tenants WHERE tenant_id = %s", (tenant,)
+            "SELECT billing_status, billing_exempt FROM tenants "
+            "WHERE tenant_id = %s",
+            (tenant,),
         )
-    return (rows[0].get("billing_status") if rows else None) or "active"
+    return dict(rows[0]) if rows else {}
+
+
+def billing_status_of(tenant_id: Optional[str]) -> str:
+    return _billing_row(tenant_id).get("billing_status") or "active"
+
+
+def is_billing_exempt(tenant_id: Optional[str]) -> bool:
+    """Tenant được miễn mọi hạn mức thương mại.
+
+    Thay cho gói `internal` đã bị bỏ ở v6: tenant nền tảng là một THUỘC TÍNH
+    của tenant, không phải một bậc trong bảng giá. Một gói giả trong bảng giá
+    có hai vấn đề — nó xuất hiện ở mọi chỗ liệt kê gói, và nó khiến "miễn trừ"
+    trở thành thứ chuyển đổi được bằng đường đổi gói thông thường.
+    """
+    return bool(_billing_row(tenant_id).get("billing_exempt"))
 
 
 # --------------------------------------------------------------------------- usage
@@ -369,7 +405,10 @@ def usage_snapshot(tenant_id: str) -> Dict[str, Dict[str, Any]]:
 
 def assert_writable(tenant_id: str) -> None:
     """Chặn mọi đường ghi của một tenant bị treo hoặc đã huỷ."""
-    status = billing_status_of(tenant_id)
+    row = _billing_row(tenant_id)
+    if row.get("billing_exempt"):
+        return
+    status = row.get("billing_status") or "active"
     if status not in WRITABLE_BILLING_STATUSES:
         raise TenantSuspended(
             "Tổ chức của bạn đang tạm ngưng dịch vụ "
@@ -388,6 +427,11 @@ def check_quota(tenant_id: str, metric: str, *, adding: int = 1) -> None:
     if spec is None:
         raise KeyError(f"chỉ số không biết: {metric!r}")
     limit_column, _sql, label = spec
+
+    # Miễn trừ đi trước cả việc tra gói: một tenant miễn trừ không có trần nào
+    # để so, và bắt nó đi qua đường tra cứu chỉ để bỏ kết quả là thừa.
+    if is_billing_exempt(tenant_id):
+        return
 
     plan = plan_for_tenant(tenant_id)
     limit = plan.get(limit_column) if limit_column else None

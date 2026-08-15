@@ -60,7 +60,7 @@ trong một bản báo cáo.
 Cái module này CỐ Ý không làm
 -----------------------------
 Không xoá gì cả. Rút đồng thuận ở đây nghĩa là "không đi vào lượt chọn mẫu tiếp
-theo", không phải "biến mất khỏi ổ đĩa". `docs/needFix/COMMUNITY_DATA_COMMONS.md`
+theo", không phải "biến mất khỏi ổ đĩa". `docs/01-architecture/COMMUNITY_DATA_COMMONS.md`
 tách bốn nghĩa của thu hồi và nói rõ vì sao không được hứa nghĩa mạnh nhất; đây
 là nghĩa thứ hai trong bốn nghĩa đó.
 """

@@ -22,14 +22,14 @@ That is NOT what "Community" means in CTU-SignBridge. The Community Data
 Commons is data people contributed plus the governance around it: submission,
 rights and consent review, immutable releases, licences, access grants,
 attribution, withdrawal. It does not exist yet; see
-docs/needFix/COMMUNITY_DATA_COMMONS.md.
+docs/01-architecture/COMMUNITY_DATA_COMMONS.md.
 
 The functions here are therefore named `*_catalog_*`. The table names still say
 `community_*` because renaming them is a migration with a deploy window, and the
 domain name is what had to stop being wrong first. Do not "fix" the function
 names back to match the tables.
 
-See docs/needFix/DIALECT_LIFECYCLE.md and REGISTRY_ARCHITECTURE.md §2.
+See docs/02-data/DIALECT_LIFECYCLE.md and REGISTRY_ARCHITECTURE.md §2.
 """
 
 from __future__ import annotations
@@ -144,6 +144,27 @@ def list_profiles(tenant_id: str = DEFAULT_TENANT) -> List[Dict[str, Any]]:
         "SELECT * FROM recognition_profiles WHERE tenant_id = %s AND is_active = TRUE "
         "ORDER BY display_order, profile_id",
         (tenant_id,),
+    )
+
+
+def list_regions() -> List[Dict[str, Any]]:
+    """Các vùng miền dùng được, đọc từ bảng `regions`.
+
+    Đọc từ bảng chứ không từ `VALID_REGIONS` trong `dataset_manager`: tuple đó
+    tự nói nó chỉ là bộ lọc đầu vào ở tầng ứng dụng, còn nguồn sự thật là bảng
+    này. Cứng hoá danh sách vào giao diện là lặp lại đúng lỗi mà bảng tra
+    phương ngữ viết tay đã mắc — nó không bao giờ học được một giá trị mới
+    thêm sau khi mã được viết.
+
+    `regions` KHÔNG có `tenant_id`: đây là danh mục tham chiếu toàn nền tảng,
+    vai ứng dụng chỉ được đọc (xem `REFERENCE_TABLES`).
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    return _fetch_all(
+        "SELECT code, name_vi, name_en, sort_order FROM regions "
+        "WHERE is_active = TRUE AND status = 'approved' "
+        "ORDER BY sort_order, code"
     )
 
 
@@ -442,7 +463,7 @@ def set_dialect_active(dialect_id: str, active: bool, tenant_id: str = DEFAULT_T
 def record_merge(old_id: str, new_id: str, merged_by: Optional[str] = None,
                  tenant_id: str = DEFAULT_TENANT) -> None:
     """Catalogue half of a merge: alias + retire. Moving files is a separate,
-    resumable task — see docs/needFix/DIALECT_LIFECYCLE.md §3.5."""
+    resumable task — see docs/02-data/DIALECT_LIFECYCLE.md §3.5."""
     from app.storage.metadata_db import _execute
 
     _execute(
@@ -941,6 +962,9 @@ def clone_catalog_to_tenant(tenant_id: str, created_by: Optional[str] = None) ->
     from app.storage.metadata_db import _execute, _fetch_all
 
     catalog_version = publish_catalog_version(created_by, note=f"clone -> {tenant_id}")
+    # `regions` KHÔNG được nhân bản ở đây: nó là bảng toàn cục, cùng hình dạng
+    # với `languages`. Xem khối v3.19 trong metadata_db để biết vì sao bản theo
+    # tenant bị bỏ.
     counts = {"dialects": 0, "profiles": 0}
 
     for r in _fetch_all("SELECT * FROM community_dialects ORDER BY display_order, dialect_id"):
@@ -986,3 +1010,102 @@ def seed_from_csv(csv_path: Optional[Path] = None, tenant_id: str = DEFAULT_TENA
     counts = seed_system_catalog()
     clone_catalog_to_tenant(tenant_id)
     return counts["dialects"]
+
+
+# ---------------------------------------------------------------------------
+# Phân loại vùng: chuyển một lớp từ `unclassified` sang vùng đã xác minh
+# ---------------------------------------------------------------------------
+
+class RegionReclassifyError(Exception):
+    """Không chuyển được, kèm lý do đọc được cho người vận hành."""
+
+    def __init__(self, message: str, *, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def reclassify_class_region(
+    class_uid: str,
+    target_region: str,
+    *,
+    tenant_id: Optional[str] = None,
+    actor: Optional[Dict[str, Any]] = None,
+    note: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Đổi vùng của MỘT lớp, giữ nguyên mọi thứ khác.
+
+    Đây là trường hợp TỐT: bản ghi `unclassified` hoá ra chính là biến thể của
+    một miền cụ thể, nên chỉ cần đổi phân loại. `class_uid` giữ nguyên, nên
+    mẫu, tệp npz, video và lịch sử đều đi theo mà không phải chép hay dời gì.
+
+    Trường hợp KHÔNG xử lý được ở đây: một bản ghi `unclassified` thực chất
+    chứa dữ liệu lẫn của nhiều vùng. Lúc đó đổi phân loại là nói dối về phần
+    dữ liệu còn lại — phải TÁCH thành nhiều lớp rồi chia mẫu về đúng chỗ, và
+    việc đó cần người quyết định từng mẫu chứ không phải một hàm. Hàm này cố ý
+    KHÔNG đoán: nó chỉ đổi nhãn, và người gọi phải biết mình đang đổi cái gì.
+
+    Hai cửa chặn, và cả hai đều cần thiết:
+
+      * Đích phải có trong `regions` của ĐÚNG tenant và đang bật. Khoá ngoại
+        đã chặn mã không tồn tại, nhưng nó không phân biệt được "chưa có" với
+        "đã nghỉ hưu" — chuyển vào một vùng đã tắt là tạo dữ liệu không hiện ra
+        ở đâu cả.
+      * Không được đụng một lớp đã tồn tại ở đúng (slug, language, dialect,
+        vùng đích). Khoá duy nhất sẽ ném, nhưng thông báo của Postgres không
+        nói được cho người vận hành rằng việc cần làm là GỘP chứ không phải
+        đổi. Bắt trước để trả lời đúng câu hỏi đó.
+    """
+    from app import audit
+    from app.storage.metadata_db import _execute, _fetch_all
+    from app.tenancy import DEFAULT_TENANT_ID, normalize_tenant_id
+
+    tid = normalize_tenant_id(tenant_id) if tenant_id else DEFAULT_TENANT_ID
+    dich = (target_region or "").strip().lower()
+    if not dich:
+        raise RegionReclassifyError("thiếu vùng đích")
+
+    rows = _fetch_all(
+        "SELECT slug, language, dialect, region, label_original FROM classes "
+        "WHERE tenant_id = %s AND class_uid = %s AND deleted_at IS NULL",
+        (tid, class_uid),
+    )
+    if not rows:
+        raise RegionReclassifyError(f"không có lớp {class_uid!r}", status_code=404)
+    lop = rows[0]
+    nguon = (lop.get("region") or "").strip()
+    if nguon == dich:
+        return {"class_uid": class_uid, "from": nguon, "to": dich, "changed": False}
+
+    hop_le = _fetch_all("SELECT is_active FROM regions WHERE code = %s", (dich,))
+    if not hop_le:
+        raise RegionReclassifyError(f"vùng {dich!r} không có trong danh mục")
+    if not hop_le[0].get("is_active", True):
+        raise RegionReclassifyError(f"vùng {dich!r} đã nghỉ hưu, không nhận lớp mới")
+
+    dung = _fetch_all(
+        "SELECT class_uid FROM classes WHERE tenant_id = %s AND slug = %s "
+        "AND language = %s AND dialect = %s AND region = %s "
+        "AND deleted_at IS NULL AND class_uid <> %s",
+        (tid, lop["slug"], lop["language"], lop["dialect"], dich, class_uid),
+    )
+    if dung:
+        raise RegionReclassifyError(
+            f"đã có lớp {dung[0]['class_uid']!r} cho {lop['slug']!r} ở vùng "
+            f"{dich!r} — việc cần làm là GỘP hai lớp, không phải đổi phân loại",
+            status_code=409,
+        )
+
+    _execute(
+        "UPDATE classes SET region = %s WHERE tenant_id = %s AND class_uid = %s",
+        (dich, tid, class_uid),
+    )
+    audit.record(
+        "class.region.reclassify",
+        actor=actor,
+        target_type="class",
+        target_id=class_uid,
+        detail={"from": nguon, "to": dich, "label": lop.get("label_original"),
+                "note": note},
+        tenant_id=tid,
+    )
+    return {"class_uid": class_uid, "from": nguon, "to": dich, "changed": True}

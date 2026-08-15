@@ -1,7 +1,7 @@
 """Hợp đồng đầu ra của model: ánh xạ chỉ số → nhãn, đóng băng lúc train xong.
 
 Tách từ `test_schema_v3.py` (593 dòng, bốn mối quan tâm không liên quan gộp
-chung). Bối cảnh đầy đủ của đợt vá lược đồ: `docs/needFix/SAAS_SCHEMA_DESIGN.md`
+chung). Bối cảnh đầy đủ của đợt vá lược đồ: `docs/02-data/SAAS_SCHEMA_DESIGN.md`
 §9sexies.
 """
 

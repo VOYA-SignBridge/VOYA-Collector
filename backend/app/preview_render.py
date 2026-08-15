@@ -5,7 +5,7 @@ video instead of running the 3D/2D viewer. The video is drawn from the SAME
 126-dim keypoint data the viewers use (2 hands x 21 landmarks x 3 coords), so
 it never exposes the contributor's face — unlike the raw upload video.
 
-Design constraints (see docs/PHASE2_PLAN_3D_VIEWER.md):
+Design constraints (see Extra_docs/PHASE2_PLAN_3D_VIEWER.md):
     - Render ONCE per session, store next to the class's .npz files so the
       catalog_sync move/delete flows carry it along with the class folder.
     - CPU-only, small footprint: 480px canvas, OpenCV drawing, then an ffmpeg

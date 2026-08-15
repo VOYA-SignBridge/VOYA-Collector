@@ -14,7 +14,7 @@ import uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 import torch
@@ -288,6 +288,14 @@ class TrainingConfig(BaseModel):
     # khi đó dialects/languages bị bỏ qua vì split đã định nghĩa sẵn tập dữ liệu.
     run_purpose: str = "smoke_test"
     split_version: Optional[str] = None
+    #: Hiện vật VẬN HÀNH mà lượt chạy này ghim. Bắt buộc khi
+    #: `run_purpose="operational"`; đặt nó ở bất kỳ purpose nào khác research
+    #: cũng chuyển lượt chạy sang hợp đồng vận hành.
+    #:
+    #: KHÔNG có mặc định và KHÔNG có "split mới nhất". Nhận một trường rỗng rồi
+    #: tự chọn hộ là mở lại đúng chỗ vừa bịt: lượt vận hành sẽ lặng lẽ học trên
+    #: ba tệp nghiên cứu đóng băng và checkpoint khai sai nguồn gốc.
+    operational_split_id: Optional[str] = None
     # Suy ra từ metadata của split ở phía server, không nhận từ client — nếu để
     # client tự khai, checkpoint có thể khai một dataset_version khác với dữ
     # liệu thực sự đã train.
@@ -557,7 +565,7 @@ def _get_dialects_by_language() -> Dict[str, List[str]]:
     return {lang: sorted(list(dialects)) for lang, dialects in dialects_map.items()}
 
 
-def _trainable_dialects_from_splits() -> Dict[str, int]:
+def _trainable_dialects_from_splits(thu_muc: Optional[Path] = None) -> Dict[str, int]:
     """Đọc split train.csv hiện tại, trả về {dialect: số_class}.
 
     Legacy training lọc frozen splits theo cột `dialect`; một dialect chỉ train
@@ -567,7 +575,7 @@ def _trainable_dialects_from_splits() -> Dict[str, int]:
     """
     import csv as _csv
 
-    train_csv = SPLITS_DIR / "train.csv"
+    train_csv = (Path(thu_muc) if thu_muc is not None else SPLITS_DIR) / "train.csv"
     counts: Dict[str, set] = {}
     if not train_csv.exists():
         return {}
@@ -582,6 +590,229 @@ def _trainable_dialects_from_splits() -> Dict[str, int]:
         logger.warning("[TRAIN_VALIDATE] không đọc được train split: %s", exc)
         return {}
     return {d: len(classes) for d, classes in counts.items()}
+
+
+def _eligible_class_counts(
+    dialects: Sequence[str], nguong: int
+) -> Dict[str, int]:
+    """{phương ngữ: số lớp có ĐỦ `nguong` mẫu còn sống}.
+
+    Đếm lớp ĐẠT chứ không đếm lớp thiếu, và khác biệt đó là cả một quyết định
+    thiết kế. Bản đầu từ chối cả phiên nếu có BẤT KỲ lớp nào dưới ngưỡng — bộ
+    test bắt được ngay: `hoa-de` có 7/8 lớp đạt, một lớp 16 mẫu, và cả phương
+    ngữ thành không huấn luyện được. Nặng hơn nữa: `pho-thong` nhập từ từ điển
+    mang hàng nghìn mục 0 mẫu, nên nó sẽ VĨNH VIỄN bị khoá.
+    Một lớp thu dở không được phép khoá cả phương ngữ.
+
+    Ngưỡng ≥2 lớp giữ nguyên ngữ nghĩa của cổng đã có ở trên — dưới hai lớp thì
+    không có bài toán phân loại nào để học.
+
+    Đếm từ CƠ SỞ DỮ LIỆU chứ không từ split: split là ảnh chụp của lần chia gần
+    nhất, còn câu hỏi ở đây thuộc về hiện tại. Dùng split sẽ báo thiếu cho lớp
+    vừa thu xong mà chưa chia lại.
+    """
+    if not dialects or nguong <= 0:
+        return {}
+    from app.storage.metadata_db import _fetch_all
+
+    try:
+        rows = _fetch_all(
+            "SELECT dialect, count(*) AS n FROM ("
+            "  SELECT c.dialect, c.class_uid, "
+            "         count(s.sample_uid) FILTER (WHERE s.deleted_at IS NULL) AS m "
+            "    FROM classes c "
+            "    LEFT JOIN samples s ON s.class_uid = c.class_uid "
+            "   WHERE c.deleted_at IS NULL AND c.dialect = ANY(%s) "
+            "   GROUP BY c.dialect, c.class_uid"
+            ") t WHERE m >= %s GROUP BY dialect",
+            (list(dialects), nguong),
+        )
+    except Exception as exc:
+        # Cổng an toàn hỏng phải ồn ào, không được im lặng cho qua.
+        logger.error("[TRAIN_VALIDATE] không đếm được mẫu theo lớp: %s", exc)
+        raise
+    return {(r.get("dialect") or ""): int(r.get("n") or 0) for r in rows}
+
+
+def _split_class_uids(dialects: Sequence[str], thu_muc: Optional[Path] = None) -> Dict[str, str]:
+    """{class_uid: dialect} — các lớp mà trainer SẼ đọc.
+
+    Đọc cả ba tệp train/val/test chứ không chỉ train: một lớp chỉ nằm ở val vẫn
+    chiếm một chiều trong không gian nhãn của lượt chạy.
+
+    `thu_muc` là hiện vật ĐÃ GHIM của lượt chạy. Mặc định `SPLITS_DIR` giữ
+    nguyên hành vi legacy. Bốn cổng đều nhận tham số này vì nếu chúng cứ đọc ba
+    tệp gốc trong khi lượt chạy ghim một hiện vật vận hành thì cổng duyệt một
+    tập lớp còn trainer học một tập khác — đúng loại sai mà từng tầng vẫn "đúng".
+    """
+    import csv as _csv
+
+    goc = Path(thu_muc) if thu_muc is not None else SPLITS_DIR
+    chon = {d for d in dialects if d}
+    ra: Dict[str, str] = {}
+    for ten in ("train", "val", "test"):
+        p = goc / f"{ten}.csv"
+        if not p.exists():
+            continue
+        try:
+            with open(p, newline="", encoding="utf-8") as f:
+                for row in _csv.DictReader(f):
+                    d = (row.get("dialect") or "").strip()
+                    uid = (row.get("class_uid") or "").strip()
+                    if uid and d and (not chon or d in chon):
+                        ra[uid] = d
+        except Exception as exc:
+            logger.warning("[TRAIN_VALIDATE] không đọc được split %s: %s", ten, exc)
+    return ra
+
+
+def _split_classes_below_floor(
+    dialects: Sequence[str], nguong: int, thu_muc: Optional[Path] = None
+) -> List[Tuple[str, str, int]]:
+    """Các lớp CÓ TRONG SPLIT nhưng chưa đủ `nguong` mẫu. [(tên, uid, số_mẫu)]
+
+    Đây là cổng khác hẳn với `_eligible_class_counts`, và cần cả hai. Cổng kia
+    hỏi "phương ngữ này có đủ lớp đạt để học không" — điều kiện CẦN. Cổng này
+    hỏi "tập lớp mà trainer sắp đọc có lẫn lớp chưa đủ mẫu không" — điều kiện
+    ĐỦ. Một phương ngữ 22 lớp đạt lẫn 1 lớp 5 mẫu qua được cổng kia dễ dàng, và
+    đó chính là `bang-chu-cai` trên đĩa lúc này.
+
+    Vì sao TỪ CHỐI chứ không tự lọc: `_consent_preflight` trong
+    `training_tasks.py` đã chốt nguyên tắc rồi — split là đầu vào đã đóng băng,
+    và một checkpoint huấn luyện trên tập nhỏ hơn tệp split khai báo là một
+    checkpoint nói dối về nguồn gốc của nó. Áp cùng nguyên tắc ở đây, kể cả khi
+    tự lọc thì tiện hơn cho người dùng.
+    """
+    if nguong <= 0:
+        return []
+    trong_split = _split_class_uids(dialects, thu_muc)
+    if not trong_split:
+        return []
+
+    from app.storage.metadata_db import _fetch_all
+
+    try:
+        rows = _fetch_all(
+            "SELECT c.class_uid, c.label_original, c.slug, "
+            "       count(s.sample_uid) FILTER (WHERE s.deleted_at IS NULL) AS n "
+            "  FROM classes c "
+            "  LEFT JOIN samples s ON s.class_uid = c.class_uid "
+            " WHERE c.class_uid = ANY(%s) "
+            " GROUP BY c.class_uid, c.label_original, c.slug "
+            "HAVING count(s.sample_uid) FILTER (WHERE s.deleted_at IS NULL) < %s "
+            " ORDER BY 4 ASC",
+            (sorted(trong_split), nguong),
+        )
+    except Exception as exc:
+        # Cổng an toàn hỏng phải ồn ào. Xem `_eligible_class_counts`.
+        logger.error("[TRAIN_VALIDATE] không đối chiếu được split với CSDL: %s", exc)
+        raise
+
+    ra: List[Tuple[str, str, int]] = []
+    for r in rows:
+        uid = (r.get("class_uid") or "").strip()
+        ten = (r.get("label_original") or r.get("slug") or uid).strip()
+        ra.append((ten, uid, int(r.get("n") or 0)))
+    return ra
+
+
+def _split_row_counts(dialects: Sequence[str],
+                      thu_muc: Optional[Path] = None) -> Dict[str, Dict[str, int]]:
+    """{class_uid: {'train': n, 'val': n, 'test': n}} đếm THẲNG trong tệp split.
+
+    Khác `_split_classes_below_floor` ở nguồn bằng chứng, và cần cả hai. Hàm kia
+    hỏi CSDL: "lớp này đã thu đủ chưa". Hàm này hỏi chính tệp sắp được đọc:
+    "tệp này có đúng chừng ấy hàng không". Một tệp bị sửa tay, cắt cụt, hay ghi
+    hỏng giữa chừng sẽ qua được câu hỏi thứ nhất và trượt ở câu thứ hai.
+    """
+    import csv as _csv
+
+    goc = Path(thu_muc) if thu_muc is not None else SPLITS_DIR
+    chon = {d for d in dialects if d}
+    ra: Dict[str, Dict[str, int]] = {}
+    for ten in ("train", "val", "test"):
+        p = goc / f"{ten}.csv"
+        if not p.exists():
+            continue
+        try:
+            with open(p, newline="", encoding="utf-8") as f:
+                for row in _csv.DictReader(f):
+                    d = (row.get("dialect") or "").strip()
+                    uid = (row.get("class_uid") or "").strip()
+                    if not uid or not d or (chon and d not in chon):
+                        continue
+                    ra.setdefault(uid, {"train": 0, "val": 0, "test": 0})[ten] += 1
+        except Exception as exc:
+            logger.warning("[TRAIN_VALIDATE] không đọc được split %s: %s", ten, exc)
+    return ra
+
+
+def _split_evidence_problems(
+    dialects: Sequence[str], nguong: int, thu_muc: Optional[Path] = None
+) -> List[str]:
+    """Những gì NỘI DUNG tệp split tự tố cáo. Rỗng nghĩa là không có gì để nói.
+
+    Lời khai trong `split_metadata.json` có thể sai — vì lỗi, vì sửa tay, vì
+    tệp CSV bị thay sau khi khai. Nên cổng phải kiểm cả hai: lời khai VÀ chứng
+    cứ. Ở đây chỉ có chứng cứ.
+
+    Hai bất biến:
+
+      1. Tổng ba phần của một lớp phải đạt sàn. Một lớp `3+1+1=5` bị từ chối dù
+         lời khai có ghi sàn 25.
+      2. Mỗi lớp phải có mặt ở CẢ BA phần. Với sàn 25 và tỉ lệ 70/15/15 thì
+         luôn đủ chỗ, nên phần rỗng nghĩa là bộ chia hỏng — đúng hình dạng của
+         sự cố `hoa_de_signer_disjoint_v1/_v3` (val=0, test=0) đã lọt lên đĩa
+         và trông như thành công.
+
+    CHỈ áp cho split vận hành. Split nghiên cứu đã versioned đi đường khác và
+    có giao thức riêng: ép luật vận hành lên chúng sẽ phá tính lặp lại của
+    chính kết quả đã công bố.
+    """
+    dem = _split_row_counts(dialects, thu_muc)
+    if not dem:
+        return []
+
+    thieu_tong: List[str] = []
+    thieu_phan: List[str] = []
+    for uid, phan in sorted(dem.items()):
+        tong = phan["train"] + phan["val"] + phan["test"]
+        if nguong > 0 and tong < nguong:
+            thieu_tong.append(f"{uid} ({tong} hàng)")
+        rong = [t for t in ("train", "val", "test") if phan[t] == 0]
+        if rong:
+            thieu_phan.append(f"{uid} (rỗng ở {'/'.join(rong)})")
+
+    van_de: List[str] = []
+    if thieu_tong:
+        van_de.append(
+            f"{len(thieu_tong)} lớp có tổng số hàng dưới sàn {nguong}: "
+            f"{', '.join(thieu_tong[:5])}"
+            + (f" và {len(thieu_tong) - 5} lớp nữa" if len(thieu_tong) > 5 else ""))
+    if thieu_phan:
+        van_de.append(
+            f"{len(thieu_phan)} lớp vắng mặt ở ít nhất một phần: "
+            f"{', '.join(thieu_phan[:5])}"
+            + (f" và {len(thieu_phan) - 5} lớp nữa" if len(thieu_phan) > 5 else ""))
+    return van_de
+
+
+def _split_snapshot(thu_muc: Optional[Path] = None) -> Dict[str, Any]:
+    """Bản khai báo tập lớp mà `make_splits.py` ghi cạnh split legacy.
+
+    Trả về `{}` khi chưa có — split dựng trước khi cơ chế này tồn tại vẫn chạy
+    được, chỉ là không tự khai được nó đã dùng sàn nào. Cổng phía trên vẫn kết
+    luận đúng nhờ đối chiếu thẳng với CSDL; tệp này chỉ làm câu báo lỗi nói
+    được nguyên nhân.
+    """
+    p = (Path(thu_muc) if thu_muc is not None else SPLITS_DIR) / "split_metadata.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("[SPLITS] khai báo split không đọc được: %s", exc)
+        return {}
 
 
 def _research_splits() -> List[Dict[str, Any]]:
@@ -893,6 +1124,82 @@ async def start_training(
     guard_quota(current_user, "training_jobs_queued")
 
     try:
+        # ------------------------------------------------------------------
+        # Hợp đồng nguồn dữ liệu, chốt TRƯỚC mọi cổng khác.
+        #
+        # Ba đường, và chúng không được lẫn:
+        #   research     → split đã versioned, ghim bằng `split_version`
+        #   operational  → hiện vật bất biến, ghim bằng `operational_split_id`
+        #   legacy       → ba tệp nghiên cứu đóng băng (tương thích ngược)
+        #
+        # `hien_vat` là thư mục mà BỐN cổng phía dưới sẽ soi. Trước lượt này
+        # chúng luôn đọc `SPLITS_DIR`, nên một lượt vận hành ghim hiện vật X
+        # vẫn được duyệt dựa trên nội dung ba tệp nghiên cứu — cổng duyệt một
+        # tập lớp, trainer học một tập khác, và từng tầng vẫn tự thấy mình đúng.
+        # ------------------------------------------------------------------
+        hien_vat: Optional[Path] = None
+        van_hanh = (config.run_purpose == "operational"
+                    or bool(str(config.operational_split_id or "").strip()))
+
+        if van_hanh and config.run_purpose == "research":
+            raise HTTPException(
+                status_code=400,
+                detail=("Không thể vừa là lượt nghiên cứu vừa ghim hiện vật vận "
+                        "hành. Hai hợp đồng này khác nhau: nghiên cứu cần tính "
+                        "lặp lại, vận hành cần tính hợp lệ hiện tại."),
+            )
+
+        if van_hanh:
+            split_id = str(config.operational_split_id or "").strip()
+            if not split_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=("Lượt huấn luyện vận hành phải ghim một hiện vật: "
+                            "thiếu `operational_split_id`. Hệ thống KHÔNG tự chọn "
+                            "hiện vật mới nhất và KHÔNG rơi về ba tệp nghiên cứu "
+                            "đóng băng — học trên chúng rồi khai là lượt vận hành "
+                            "là khai sai nguồn gốc. Dựng hiện vật bằng "
+                            "processed/splits/make_splits.py "
+                            "--operational_split_id=<ID>."),
+                )
+            from processed.train_utils.split_artifact import (
+                PURPOSE_OPERATIONAL, SplitArtifactError, resolve_split_artifact,
+            )
+
+            try:
+                art = await run_in_threadpool(
+                    lambda: resolve_split_artifact(
+                        purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR,
+                        split_id=split_id),
+                )
+            except SplitArtifactError as exc:
+                # Phân giải ở ĐÂY chứ không chỉ ở worker, để người gọi nhận lỗi
+                # đồng bộ. Worker vẫn phân giải lại — đó không phải thừa: giữa
+                # lúc duyệt và lúc chạy, hiện vật có thể bị đổi.
+                raise HTTPException(status_code=400, detail=str(exc))
+            hien_vat = Path(art.train_csv).parent
+            config.run_purpose = "operational"
+
+            # Phạm vi phương ngữ đến từ chính hiện vật, không từ người gọi.
+            #
+            # Hai lý do. Thứ nhất, `--dialect` là thứ đưa trainer vào chế độ
+            # subset — nơi nhánh `class_uid → target_idx` sống — nên bỏ trống
+            # là lặng lẽ quay về `enumerate` theo thứ tự hàng. Thứ hai, bốn
+            # cổng phía dưới đều nằm trong `if selected_dialects:`, nên bỏ
+            # trống cũng là bỏ qua cả bốn.
+            pham_vi = list((art.metadata.get("scope") or {}).get("dialects") or [])
+            xin = [d for d in (config.dialects or []) if d]
+            if xin and pham_vi and set(xin) - set(pham_vi):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"Hiện vật '{split_id}' chỉ chứa phương ngữ "
+                            f"{pham_vi}, nhưng lượt chạy xin {sorted(set(xin))}. "
+                            f"Lọc thêm sẽ làm checkpoint học một tập nhỏ hơn tập "
+                            f"hiện vật khai báo."),
+                )
+            if not xin:
+                config.dialects = pham_vi
+
         if config.run_purpose == "research":
             # Chặn sớm với thông báo rõ, thay vì để train_tcn.py SystemExit ở
             # _enforce_research_preconditions sau khi job đã vào hàng đợi.
@@ -933,7 +1240,7 @@ async def start_training(
                 raise HTTPException(status_code=403, detail=str(exc))
 
         if selected_dialects:
-            trainable = _trainable_dialects_from_splits()
+            trainable = _trainable_dialects_from_splits(hien_vat)
             empty = [d for d in selected_dialects if trainable.get(d, 0) < 2]
             if empty:
                 available = sorted(d for d, n in trainable.items() if n >= 2)
@@ -945,6 +1252,83 @@ async def start_training(
                     f"(processed/splits/make_splits.py) trước khi huấn luyện."
                 )
                 raise HTTPException(status_code=400, detail=detail)
+
+            # Cổng thứ hai, ở mức LỚP. Cổng phía trên đếm số lớp trong một
+            # phương ngữ; cổng này đếm số mẫu trong một lớp. Hai câu hỏi khác
+            # nhau, và một phương ngữ có 30 lớp vẫn có thể chứa một lớp 3 mẫu.
+            #
+            # Vì sao nó phải nằm ở đây chứ không ở giao diện: thư viện nhãn
+            # nhập từ từ điển quốc gia mang `class_idx` thật (theo chủ ý —
+            # `class_idx` là ĐỊNH DANH, không phải trạng thái sẵn sàng), nên
+            # không có gì khác ngăn một lớp 0 mẫu đi vào tập huấn luyện. Nhãn
+            # "Đã đủ điều kiện huấn luyện" trên giao diện là thông tin, không
+            # phải hàng rào — người dùng gọi thẳng API thì nó không tồn tại.
+            from app.config import settings as _cfg
+
+            nguong = int(_cfg.min_samples_per_class_for_training or 0)
+            if nguong > 0:
+                du = _eligible_class_counts(selected_dialects, nguong)
+                ngheo = [d for d in selected_dialects if du.get(d, 0) < 2]
+                if ngheo:
+                    chi_tiet = ", ".join(f"{d} ({du.get(d, 0)} lớp đạt)" for d in ngheo)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Không đủ lớp đã thu đủ mẫu để huấn luyện: {chi_tiet}. "
+                            f"Một lớp phải có ≥{nguong} npz "
+                            f"(≈{nguong // 5} lần quay) mới được tính, và mỗi "
+                            f"phương ngữ cần ≥2 lớp như vậy."
+                        ),
+                    )
+
+                # Cổng thứ ba, và là cổng duy nhất nhìn vào thứ trainer THẬT SỰ
+                # đọc. Hai cổng trên hỏi về CSDL; tệp split trên đĩa mới là đầu
+                # vào. Chúng lệch nhau được, và khi lệch thì lượt chạy học một
+                # tập nhãn khác với tập nhãn vừa được duyệt.
+                lan = _split_classes_below_floor(selected_dialects, nguong, hien_vat)
+                if lan:
+                    khai = _split_snapshot(hien_vat)
+                    san_split = khai.get("min_samples_per_class")
+                    vi_du = "; ".join(f"{ten} ({n} mẫu)" for ten, _uid, n in lan[:5])
+                    them = f" và {len(lan) - 5} lớp nữa" if len(lan) > 5 else ""
+                    if san_split is None:
+                        ly_do = ("Tập chia hiện tại không khai báo sàn nào "
+                                 "(dựng trước khi có cơ chế này).")
+                    elif int(san_split or 0) < nguong:
+                        ly_do = (f"Tập chia được dựng với sàn {san_split}, "
+                                 f"thấp hơn sàn đang áp ({nguong}).")
+                    else:
+                        ly_do = (f"Tập chia khai sàn {san_split} nhưng dữ liệu đã đổi "
+                                 f"từ lúc chia — có mẫu bị xoá sau đó.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Tập chia còn {len(lan)} lớp chưa đủ {nguong} mẫu: "
+                            f"{vi_du}{them}. {ly_do} "
+                            f"Hãy chia lại trước khi huấn luyện: "
+                            f"python processed/splits/make_splits.py "
+                            f"--min_samples_per_class={nguong}. "
+                            f"Hệ thống KHÔNG tự lọc các lớp này ra, vì một checkpoint "
+                            f"huấn luyện trên tập nhỏ hơn tệp split khai báo là một "
+                            f"checkpoint nói sai về nguồn gốc của nó."
+                        ),
+                    )
+
+                # Cổng thứ tư: CHỨNG CỨ, không phải lời khai. Ba cổng trên tin
+                # vào CSDL và vào `split_metadata.json`; cổng này chỉ đọc nội
+                # dung tệp split. Lời khai sai — vì lỗi, vì sửa tay, vì tệp bị
+                # thay sau khi khai — thì chỉ chỗ này bắt được.
+                bang_chung = _split_evidence_problems(selected_dialects, nguong, hien_vat)
+                if bang_chung:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Nội dung tập chia không khớp với chính sách nó khai báo: "
+                            + "; ".join(bang_chung)
+                            + f". Chia lại: python processed/splits/make_splits.py "
+                              f"--min_samples_per_class={nguong}."
+                        ),
+                    )
 
         job_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()

@@ -52,12 +52,28 @@ CFG = SimpleNamespace(
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
+    """Ghi nhan ket qua, VA nem khi sai.
+
+    Cau `raise` la bat buoc, khong phai trang tri. Tep nay von la script chay
+    tay: verdict nam o `sys.exit(1 if FAILED else 0)` cuoi `main()`, nen
+    `check` chi can ghi vao danh sach. Nhung pytest KHONG goi `main()` - no
+    thu tung ham `test_*` mot. Khong co `raise` thi moi ham o day xanh vo
+    dieu kien, ke ca khi moi phep kiem ben trong deu sai.
+
+    Da do, khong phai suy doan: sua mot dieu kien thanh hang sai roi chay
+    `pytest ...::test_config_defaults` van ra "1 passed".
+
+    `main()` boc try/except quanh tung test nen che do chay tay van nguyen;
+    khac biet duy nhat la no dung o phep kiem sai DAU TIEN trong mot ham thay
+    vi gom het - dung cach pytest van bao loi.
+    """
     if cond:
         PASSED.append(name)
         print(f"  PASS  {name}")
-    else:
-        FAILED.append((name, str(detail)))
-        print(f"  FAIL  {name}  -> {detail}")
+        return
+    FAILED.append((name, str(detail)))
+    print(f"  FAIL  {name}  -> {detail}")
+    raise AssertionError(f"{name}" + (f"  -> {detail}" if detail else ""))
 
 
 def make_seq(

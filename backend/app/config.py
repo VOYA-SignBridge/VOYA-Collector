@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     #
     # Default off so switching roles and enabling policies can be sequenced
     # without bricking a running deployment; set to 1 once DATABASE_URL points at
-    # the non-superuser role. See docs/needFix/BACKEND_WORK_PLAN.md item A2.
+    # the non-superuser role. See docs/11-worklog/BACKEND_WORK_PLAN.md item A2.
     db_strict_isolation: bool = os.getenv("DB_STRICT_ISOLATION", "0").strip().lower() in {
         "1", "true", "yes", "on",
     }
@@ -154,11 +154,14 @@ class Settings(BaseSettings):
     # Gói cấp cho một tenant tự đăng ký. Phải tồn tại trong bảng `plans` và
     # phải có `is_self_serve = TRUE`; `tenant_admin` kiểm cả hai và từ chối
     # tạo tenant nếu sai, thay vì lặng lẽ cấp một gói không giới hạn.
-    self_serve_plan_code: str = os.getenv("SELF_SERVE_PLAN_CODE", "trial").strip() or "trial"
+    # v6: gói tự đăng ký là `free` — vĩnh viễn, không hết hạn. Gói `trial` đã
+    # bị đổi tên thành nó, và cùng lượt đó khái niệm "dùng thử" biến mất khỏi
+    # sản phẩm. Xem `docs/07-business/BILLING_MODEL_V6.md`.
+    self_serve_plan_code: str = os.getenv("SELF_SERVE_PLAN_CODE", "free").strip() or "free"
 
     # Trần số nhãn tenant mà /metrics được phép phát. Prometheus tính chi phí
     # theo chuỗi thời gian, và mỗi tenant nhân số chuỗi lên; xem
-    # docs/OBSERVABILITY_PLAN.md. Vượt trần thì phần dư gộp vào nhãn "_other"
+    # docs/06-operations/OBSERVABILITY_PLAN.md. Vượt trần thì phần dư gộp vào nhãn "_other"
     # chứ không phải bỏ đi — tổng vẫn đúng, chỉ mất phân giải ở phần đuôi.
     metrics_max_tenant_labels: int = int(os.getenv("METRICS_MAX_TENANT_LABELS", "25"))
 
@@ -326,6 +329,20 @@ class Settings(BaseSettings):
     speed_variants_raw: str = os.getenv("SPEED_VARIANTS", "1.0")
     # Maximum number of saved samples per class per job
     max_samples_per_class: int = int(os.getenv("MAX_SAMPLES_PER_CLASS", 200))
+    # Số npz TỐI THIỂU của một lớp trước khi nó được phép vào huấn luyện.
+    #
+    # 25 = 5 lần quay × 5 npz mỗi lần. Giao diện đã hiển thị đúng quy ước này
+    # (`Math.floor(samples_count / 5)` rồi so với 5, ở LabelsPage), nhưng cho
+    # tới nay nó CHỈ là một nhãn: backend không kiểm gì ở mức lớp, nên huấn
+    # luyện một lớp 3 mẫu vẫn chạy. Hằng số nằm ở đây để có đúng MỘT nguồn sự
+    # thật, thay vì hai bản chép trong .tsx.
+    #
+    # Con số 25 là ngưỡng chọn theo kinh nghiệm, không phải kết quả đo. Nó ở
+    # dạng cấu hình được vì mức đủ thật sự phụ thuộc số người ký và độ khó của
+    # ký hiệu — hai thứ chưa có đủ dữ liệu để chốt.
+    min_samples_per_class_for_training: int = int(
+        os.getenv("MIN_SAMPLES_PER_CLASS_FOR_TRAINING", 25)
+    )
     # How many npz per batched Drive-upload Celery task (video pipeline).
     npz_upload_batch_size: int = int(os.getenv("NPZ_UPLOAD_BATCH_SIZE", 50))
     # Parsed list of speed variants; populated in __init__

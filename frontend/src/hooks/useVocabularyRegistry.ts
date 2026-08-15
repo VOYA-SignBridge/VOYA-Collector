@@ -13,6 +13,7 @@ import {
   getVocabularyRegistry,
   type RegistryDialect,
   type RegistryProfile,
+  type RegistryRegion,
   type VocabularyRegistry,
 } from "../api/vocabulary";
 
@@ -24,6 +25,7 @@ export interface RegistryState {
   registryVersion: number;
   dialects: RegistryDialect[];
   profiles: RegistryProfile[];
+  regions: RegistryRegion[];
 }
 
 const EMPTY: RegistryState = {
@@ -32,6 +34,7 @@ const EMPTY: RegistryState = {
   registryVersion: 0,
   dialects: [],
   profiles: [],
+  regions: [],
 };
 
 let cache: RegistryState = EMPTY;
@@ -57,6 +60,10 @@ function load(force = false): Promise<void> {
           registryVersion: data.registry_version,
           dialects: data.dialects,
           profiles: data.profiles,
+          // Cố ý KHÔNG có danh sách vùng dự phòng viết tay ở đây. Xem chú
+          // thích ở nhánh lỗi ngay dưới: một danh sách cứng là thứ đã làm hai
+          // bảng tra phương ngữ trôi khỏi cơ sở dữ liệu.
+          regions: data.regions ?? [],
         });
       } else {
         // Deliberately NOT falling back to a hardcoded list. A silent fallback

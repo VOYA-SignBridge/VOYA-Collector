@@ -46,7 +46,7 @@ self-revocable and hence not a guarantee. Hence the split between
 ``DATABASE_URL`` (DML only) and ``MIGRATION_DATABASE_URL`` (DDL), provisioned by
 ``app.cli.provision_db_roles``.
 
-Related: docs/needFix/BACKEND_WORK_PLAN.md items A2 and A3.
+Related: docs/11-worklog/BACKEND_WORK_PLAN.md items A2 and A3.
 """
 
 from __future__ import annotations

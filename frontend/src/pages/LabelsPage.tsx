@@ -15,7 +15,7 @@ import { useAuth } from "../hooks/useAuth";
 import { dialectLabel } from "../config/dialectLabels";
 import DialectBadge from "../components/DialectBadge";
 import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
-import { StarIcon, XIcon } from "../components/ui/Icons";
+import { StarIcon, XIcon, GlobeIcon } from "../components/ui/Icons";
 import { useI18n } from "../i18n";
 
 export default function LabelsPage() {
@@ -25,7 +25,19 @@ export default function LabelsPage() {
   // The four dialect pickers below used to be four hand-written <option> lists
   // that disagreed with each other and could never offer a newly approved
   // dialect. They all read this now.
-  const { dialects: registryDialects } = useVocabularyRegistry();
+  const { dialects: registryDialects, regions: registryRegions } = useVocabularyRegistry();
+  // Vùng miền đọc từ chính bản đăng ký, KHÔNG cứng hoá. Bảng tra phương ngữ
+  // viết tay trước đây đã bị gỡ vì đúng lý do này: nó không bao giờ học được
+  // một giá trị được thêm sau khi mã đã viết.
+  const regionOptions = useMemo(
+    () => (registryRegions.length > 0
+      ? registryRegions
+      : [{ code: "unclassified", name_vi: t("Chưa phân loại") }]),
+    [registryRegions, t],
+  );
+  const regionLabel = (code?: string): string =>
+    registryRegions.find((r) => r.code === code)?.name_vi || code || "";
+
   const dialectOptions = useMemo(
     () => registryDialects.filter((d) => d.is_active !== false).map((d) => d.dialect_id),
     [registryDialects],
@@ -77,6 +89,11 @@ export default function LabelsPage() {
   const [editValue, setEditValue] = useState<string>("");
   const [editLanguage, setEditLanguage] = useState<string>("vn");
   const [editDialect, setEditDialect] = useState<string>("common");
+  // Vùng KHỞI ĐẦU là `unclassified`, và đó là một trạng thái có nghĩa chứ
+  // không phải chỗ trống: "đã vào hệ thống, chưa qua khâu phân loại vùng".
+  // Cố ý không đoán thành `common` — `common` nghĩa là "đã xác minh rằng
+  // không cần phân biệt vùng", một khẳng định mạnh hơn hẳn.
+  const [editRegion, setEditRegion] = useState<string>("unclassified");
   const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RenderItem | null>(null);
   const [deleteSaving, setDeleteSaving] = useState(false);
@@ -84,6 +101,7 @@ export default function LabelsPage() {
   const [createValue, setCreateValue] = useState<string>("");
   const [createLanguage, setCreateLanguage] = useState<string>("vn");
   const [createDialect, setCreateDialect] = useState<string>("common");
+  const [createRegion, setCreateRegion] = useState<string>("unclassified");
   const [createSaving, setCreateSaving] = useState(false);
 
   // Applied to dialect values coming FROM the backend, which already returns
@@ -106,6 +124,7 @@ export default function LabelsPage() {
     language?: string;
     created_at?: string;
     dialect?: string;
+    region?: string;
     folder_name?: string;
     samples_count?: number;
     is_common_language?: boolean;
@@ -132,6 +151,7 @@ export default function LabelsPage() {
           language: c.language,
           created_at: c.created_at,
           dialect: cDialect || c.dialect,
+          region: c.region,
           folder_name: c.folder_name,
           samples_count: sampleCounts[c.class_uid] ?? 0,
           is_common_language: String(c.is_common_language) === '1' || c.is_common_language === true,
@@ -261,6 +281,7 @@ export default function LabelsPage() {
     setEditValue(item.label_original || "");
     setEditLanguage(item.language || language || "vn");
     setEditDialect(item.dialect || dialect || "common");
+    setEditRegion(item.region || "unclassified");
   };
 
   const navigateToDetails = (item: RenderItem) => {
@@ -312,6 +333,7 @@ export default function LabelsPage() {
         label: nextLabel,
         language: createLanguage,
         dialect: createDialect,
+        region: createRegion,
         is_common_language: createDialect === "common",
         is_common_global: false,
       });
@@ -333,6 +355,7 @@ export default function LabelsPage() {
       setCreateValue("");
       setCreateLanguage("vn");
       setCreateDialect("common");
+      setCreateRegion("unclassified");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg || t("Không thể tạo nhãn."));
@@ -358,6 +381,7 @@ export default function LabelsPage() {
         label_original: nextLabel,
         language: editLanguage,
         dialect: editDialect,
+        region: editRegion,
         is_common_language: editDialect === "common",
       });
       if (!result.ok) {
@@ -640,6 +664,18 @@ export default function LabelsPage() {
                           </span>
                         )}
                         <DialectBadge dialect={item.dialect} size="sm" />
+                        {/* Vùng miền: chỉ hiện khi ĐÃ phân loại.
+                            `unclassified` là mặc định của gần như mọi nhãn cũ, nên
+                            hiện nó ở mọi dòng là nhiễu mà không thêm thông tin.
+                            Ngược lại, hai biến thể vùng của cùng một từ đều mang
+                            vùng thật, nên cả hai đều hiện — và đó đúng là lúc cần
+                            phân biệt, vì slug và phương ngữ của chúng giống hệt nhau. */}
+                        {item.region && item.region !== "unclassified" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 text-gray-700">
+                            <GlobeIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />
+                            {regionLabel(item.region)}
+                          </span>
+                        )}
                         {item.is_common_global && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-100 text-sky-800">
                             <StarIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" />
@@ -690,6 +726,18 @@ export default function LabelsPage() {
                           </span>
                         )}
                         <DialectBadge dialect={item.dialect} size="md" />
+                        {/* Vùng miền: chỉ hiện khi ĐÃ phân loại.
+                            `unclassified` là mặc định của gần như mọi nhãn cũ, nên
+                            hiện nó ở mọi dòng là nhiễu mà không thêm thông tin.
+                            Ngược lại, hai biến thể vùng của cùng một từ đều mang
+                            vùng thật, nên cả hai đều hiện — và đó đúng là lúc cần
+                            phân biệt, vì slug và phương ngữ của chúng giống hệt nhau. */}
+                        {item.region && item.region !== "unclassified" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 text-gray-700">
+                            <GlobeIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />
+                            {regionLabel(item.region)}
+                          </span>
+                        )}
                         {item.is_common_global && (
                           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800">
                     <StarIcon className="mr-1 h-3.5 w-3.5"  aria-hidden="true" />
@@ -824,6 +872,22 @@ export default function LabelsPage() {
                 ))}
               </select>
             </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">{t("Vùng miền")}</label>
+              <select
+                className="input w-full"
+                value={createRegion}
+                onChange={(e) => setCreateRegion(e.target.value)}
+                disabled={createSaving}
+              >
+                {regionOptions.map((r) => (
+                  <option key={r.code} value={r.code}>{r.name_vi || r.code}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                {t("Cùng một từ có thể có nhiều biến thể vùng; mỗi biến thể là một nhãn riêng.")}
+              </p>
+            </div>
           </div>
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-6">
             <Button variant="ghost" onClick={() => setCreateTarget(false)} disabled={createSaving}>
@@ -879,6 +943,19 @@ export default function LabelsPage() {
                 >
                   {dialectOptions.map((d) => (
                     <option key={d} value={d}>{dialectLabel(d)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">{t("Vùng miền")}</label>
+                <select
+                  className="input w-full"
+                  value={editRegion}
+                  onChange={(e) => setEditRegion(e.target.value)}
+                  disabled={editSaving}
+                >
+                  {regionOptions.map((r) => (
+                    <option key={r.code} value={r.code}>{r.name_vi || r.code}</option>
                   ))}
                 </select>
               </div>

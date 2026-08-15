@@ -108,13 +108,23 @@ class TestKhopLuat:
     def test_moi_chip_mo_dau_deu_khop_mot_luat(self):
         """Một chip không khớp luật nào là một cái bẫy: người dùng bấm vào rồi
         nhận đúng câu "tôi chưa hiểu"."""
-        for chip in support_bot.starters():
+        starters = support_bot.starters()
+        # Không có chốt này thì `starters()` trả rỗng là test xanh mà chưa bấm
+        # thử chip nào — đúng cái bẫy mà docstring vừa mô tả.
+        assert starters, "starters() không trả chip nào"
+        for chip in starters:
             assert support_bot.match(chip) is not None, chip
 
     def test_moi_chip_goi_y_deu_khop_mot_luat(self):
+        assert support_bot.RULES, "không có luật nào để đối chiếu"
+        da_kiem = 0
         for rule in support_bot.RULES:
             for chip in rule.suggestions:
                 assert support_bot.match(chip) is not None, chip
+                da_kiem += 1
+        # Vòng lặp LỒNG: `RULES` không rỗng vẫn chưa đủ, vì mọi luật đều có thể
+        # có `suggestions` rỗng và thân trong không chạy lần nào.
+        assert da_kiem, "không luật nào có chip gợi ý để kiểm"
 
 
 # ===========================================================================

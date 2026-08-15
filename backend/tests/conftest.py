@@ -568,6 +568,96 @@ def _restore_dataset_files():
 _ARTIFACT_BEFORE: dict = {}
 
 
+# ---------------------------------------------------------------------------
+# CỔNG ĐÍCH — bộ test không được phép chạm cơ sở dữ liệu sản xuất
+# ---------------------------------------------------------------------------
+#
+# Ngày 13/08/2026, `pytest_sessionstart` gọi `migrate_database()` trong khi DSN
+# trỏ vào `signdb`. Nó áp một phần Billing v6 dang dở lên sản xuất và ghi một
+# dòng `schema_migrations` version=6 — đủ để lần khởi động lại kế tiếp bị
+# TỪ CHỐI. Phải khôi phục bằng một lượt sửa ngược có kiểm chứng trên clone.
+#
+# Vì sao cổng ở ĐÂY chứ không phải sửa cái fixture đã gây ra chuyện:
+# sửa fixture đó chỉ ngăn ĐÚNG một fixture. Bộ test còn hàng chục nơi khác
+# ghi vào cơ sở dữ liệu — `ensure_tables()` trong ba mươi tệp, các fixture dọn
+# dẹp, các hàm seed. Bất kỳ cái nào trong số đó, viết sai một lần, đều lặp lại
+# đúng sự cố này. Cổng phải nằm ở chỗ CHUNG và chặn TRƯỚC fixture đầu tiên.
+#
+# Đây mới là lớp thứ nhất. Lớp thứ hai phải ở tầng PostgreSQL: role mà bộ test
+# dùng KHÔNG có quyền CONNECT vào cơ sở dữ liệu sản xuất, để một lỗi Python
+# nữa cũng không đi tới đâu. Xem docs/08-testing/TESTING.md.
+
+#: Tên chính xác được phép.
+ALLOWED_TEST_DATABASES = frozenset({
+    "signdb_test",       # cơ sở dữ liệu test thường trực
+    "gate_probe",        # dựng-rồi-bỏ, dùng chứng minh cổng phiên bản
+    "checksum_probe",    # dựng-rồi-bỏ, dùng chứng minh checksum
+})
+
+#: Tiền tố được phép, cho các cơ sở dữ liệu dựng-rồi-bỏ.
+#:
+#: `signdb_repairclone` từng ở đây trong lượt khôi phục 13/08/2026 và đã được
+#: gỡ ngay khi clone bị bỏ. Một ngoại lệ chết là ngoại lệ nguy hiểm: nó để ngỏ
+#: một cái tên không ai còn dùng, và người sau đặt trúng tên đó sẽ thấy cửa mở.
+ALLOWED_TEST_DATABASE_PREFIXES = ("signdb_pytest_",)
+
+#: Chặn tuyệt đối, kể cả khi ai đó vô tình thêm nó vào danh sách trên. Một
+#: danh sách cho phép sai một lần là một lượt sự cố; hai lớp thì phải sai hai
+#: lần cùng lúc.
+FORBIDDEN_DATABASES = frozenset({"signdb", "postgres", "template1"})
+
+
+def _current_database_name() -> str | None:
+    """Tên cơ sở dữ liệu mà bộ test sắp ghi vào, hoặc None nếu không nối được.
+
+    Không nối được KHÔNG phải lỗi: `pytest -m "not integration"` chạy được mà
+    không cần Postgres, và một cổng làm hỏng đường đó sẽ bị gỡ trong tuần.
+    Cổng này chỉ chặn khi nó THỰC SỰ chạm được vào một cơ sở dữ liệu và tên
+    của nó sai.
+    """
+    try:
+        from app.storage.metadata_db import _migration_cursor
+
+        with _migration_cursor() as cur:
+            cur.execute("SELECT current_database()")
+            return cur.fetchone()[0]
+    except Exception:
+        return None
+
+
+def _refuse_if_database_is_not_a_test_database() -> None:
+    import pytest
+
+    name = _current_database_name()
+    if name is None:
+        return
+
+    allowed = (name in ALLOWED_TEST_DATABASES
+               or name.startswith(ALLOWED_TEST_DATABASE_PREFIXES))
+    if allowed and name not in FORBIDDEN_DATABASES:
+        return
+
+    pytest.exit(
+        f"\n"
+        f"{'=' * 70}\n"
+        f"  BO TEST TU CHOI CHAY: dich la `{name}`\n"
+        f"{'=' * 70}\n"
+        f"\n"
+        f"  Bo test GHI vao co so du lieu: migrate, ensure_tables, seed, don dep.\n"
+        f"  Ngay 13/08/2026 mot luot chay tro vao `signdb` da ap mot phan\n"
+        f"  Billing v6 chua hoan chinh len san xuat va dong dau version=6.\n"
+        f"\n"
+        f"  Duoc phep : {', '.join(sorted(ALLOWED_TEST_DATABASES))}\n"
+        f"              hoac tien to {', '.join(ALLOWED_TEST_DATABASE_PREFIXES)}\n"
+        f"\n"
+        f"  Chay lai voi mot dich rieng, vi du:\n"
+        f"      docker run --rm --env-file .env.test ... voya_backend_test\n"
+        f"\n"
+        f"  DUNG them `{name}` vao ALLOWED_TEST_DATABASES de qua cong nay.\n",
+        returncode=3,
+    )
+
+
 def pytest_sessionstart(session):
     """Chụp ảnh vạch xuất phát, SAU khi lược đồ đã đầy đủ.
 
@@ -586,6 +676,12 @@ def pytest_sessionstart(session):
     đặt vạch xuất phát và đủ muộn để in được.
     """
     global _ARTIFACT_BEFORE
+
+    # TRƯỚC mọi thứ, và cố ý NGOÀI khối `try` bên dưới. Khối đó nuốt lỗi để
+    # một máy không có Postgres vẫn chạy được phần test thuần Python — nếu cổng
+    # đích nằm trong đó thì `pytest.exit` sẽ bị nuốt và cổng thành vô nghĩa.
+    _refuse_if_database_is_not_a_test_database()
+
     try:
         from app.storage import metadata_db as db
 
@@ -611,11 +707,35 @@ def pytest_sessionstart(session):
             stamp_schema_version,
         )
 
+        # Đóng dấu CHỈ khi chưa có dấu nào. Không bao giờ nâng phiên bản.
+        #
+        # Bản trước của khối này nâng dấu khi `stamped < APP_SCHEMA_VERSION`,
+        # với lý lẽ nghe rất xuôi: `migrate_database()` vừa chạy xong toàn bộ
+        # payload nên cơ sở dữ liệu ĐÃ ở phiên bản đó, không đóng dấu thì mọi
+        # test đi qua cổng phiên bản sẽ đỏ.
+        #
+        # Lý lẽ đó sai ở một chỗ chết người: bộ test trỏ vào `signdb` — cùng cơ
+        # sở dữ liệu mà sản xuất đang dùng. Ngày 13/08/2026 một lượt chạy suite
+        # đã ghi một dòng `version=6, note='pytest bootstrap'` lên đó. Ảnh đang
+        # chạy hiểu tới v5, nên `max(version)=6` biến thành `SchemaTooNew` và
+        # lần khởi động lại kế tiếp sẽ bị TỪ CHỐI — một sự cố sản xuất do một
+        # hook của pytest gây ra.
+        #
+        # Nâng phiên bản là việc của người vận hành, qua `app.cli.migrate`, có
+        # `EXPECTED_DATABASE`, có kiểm chứng. Ở đây thì đỏ to và nói ra lệnh
+        # cần chạy — một lượt đỏ đọc được tốt hơn một lượt xanh có giá đó.
         need_adopt = False
         with db._migration_cursor() as cur:
-            if read_schema_version(cur) is None:
+            stamped = read_schema_version(cur)
+            if stamped is None:
                 stamp_schema_version(cur, APP_SCHEMA_VERSION, note="pytest bootstrap")
             else:
+                if stamped < APP_SCHEMA_VERSION:
+                    print(
+                        f"[conftest] co so du lieu test dang o v{stamped}, ma o "
+                        f"v{APP_SCHEMA_VERSION}. KHONG tu dong dau — chay:\n"
+                        f"    EXPECTED_DATABASE=<ten_db> python -m app.cli.migrate "
+                        f"--to {APP_SCHEMA_VERSION}")
                 _, recorded, has_column = read_recorded_checksum(cur)
                 need_adopt = has_column and recorded is None
 
@@ -636,7 +756,15 @@ def pytest_sessionstart(session):
         _ARTIFACT_BEFORE = _artifact_snapshot()
     except Exception as exc:  # pragma: no cover
         _ARTIFACT_BEFORE = {}
+        # Traceback đầy đủ, không chỉ thông điệp. Khối `try` này bao cả
+        # `migrate_database()`, nên một lần ném ở đây có nghĩa là CẢ SUITE chạy
+        # trên một lược đồ chưa migrate — và dòng một câu trước đây ("name X is
+        # not defined") không nói được nó ném ở đâu. Mất mười lăm phút để tìm
+        # ra chỗ đó một lần; in ra thì không mất lần nào nữa.
+        import traceback
+
         print(f"[so dau vet] khong chup duoc anh truoc suite: {exc}")
+        traceback.print_exc()
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
@@ -987,7 +1115,7 @@ def free_legal_kinds():
     """Các loại văn bản pháp lý hiện KHÔNG có bản nháp nào đang mở.
 
     Vì sao cần chọn động thay vì viết cứng `"data_contribution"`: bộ test chạy
-    trên BẢN SAO của cơ sở dữ liệu thật (xem docs/TESTING.md §2.4), và ở đó
+    trên BẢN SAO của cơ sở dữ liệu thật (xem docs/08-testing/TESTING.md §2.4), và ở đó
     `legal_document_drafts` có thể đang giữ một bản nháp thật do người soạn mở
     dở. Đúng tình huống 2026-08-09: sản xuất có một bản nháp `data_contribution`
     đang mở, và ba test viết cứng đúng loại đó cùng đỏ với thông báo

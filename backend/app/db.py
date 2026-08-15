@@ -168,7 +168,7 @@ def _init_db(full_resync: bool | None = None):
         # belongs to the bootstrap tenant, the Postgres column is NOT NULL, and
         # a blank cell would read back as "unassigned" — which is how the
         # rebuild-from-CSV path in this same function would lose another
-        # tenant's partition. See docs/needFix/BACKEND_WORK_PLAN.md item A1.
+        # tenant's partition. See docs/11-worklog/BACKEND_WORK_PLAN.md item A1.
         try:
             from app.dataset_samples import ensure_samples_column
             from app.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN

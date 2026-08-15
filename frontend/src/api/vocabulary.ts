@@ -37,10 +37,20 @@ export interface RegistryProfile {
   is_active?: boolean;
 }
 
+/** Một vùng miền dùng được, đọc từ bảng `regions` chứ không cứng hoá. */
+export interface RegistryRegion {
+  code: string;
+  name_vi: string;
+  name_en?: string;
+  sort_order?: number;
+}
+
 export interface VocabularyRegistry {
   registry_version: number;
   dialects: RegistryDialect[];
   profiles: RegistryProfile[];
+  /** Tuỳ chọn: một backend cũ hơn không trả trường này. */
+  regions?: RegistryRegion[];
 }
 
 export interface PendingDialect extends RegistryDialect {

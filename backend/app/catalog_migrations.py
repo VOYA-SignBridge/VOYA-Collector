@@ -13,7 +13,7 @@ Order is deliberate — cheap and reversible first, expensive and remote last:
 Going the other way is how orphans are made. Every step after the first is
 idempotent, so a retry resumes instead of duplicating.
 
-See docs/needFix/DIALECT_LIFECYCLE.md §3.5.
+See docs/02-data/DIALECT_LIFECYCLE.md §3.5.
 """
 
 from __future__ import annotations

@@ -275,13 +275,15 @@ class TestSignupNeverLandsInTheBootstrapTenant:
                 (tenant_id,),
             )
 
-        assert tenant["plan_code"] == "trial"
+        assert tenant["plan_code"] == "free"
         assert str(tenant["owner_user_id"]) == str(body["id"])
         assert tenant["is_self_serve"] is True
-        # `trial` có `trial_days = 30`, nên trạng thái phải phản ánh điều đó
-        # thay vì mặc định 'active' — nếu không, bảng "sắp hết hạn dùng thử"
-        # sẽ không bao giờ liệt kê ai.
-        assert tenant["billing_status"] == "trialing"
+        # v6: `free` là gói VĨNH VIỄN, không phải bản dùng thử. Nên trạng thái
+        # đúng là 'active' — 'trialing' sẽ hứa một cái hạn không bao giờ tới,
+        # và bảng "sắp hết hạn dùng thử" sẽ liệt kê mọi người dùng miễn phí mãi
+        # mãi. Xem docs/07-business/BILLING_MODEL_V6.md, mục "`free` là gói
+        # vĩnh viễn".
+        assert tenant["billing_status"] == "active"
         assert member and member[0]["role"] == "admin"
         assert len(subscription) == 1, "phải có đúng một dòng đăng ký đang mở"
 

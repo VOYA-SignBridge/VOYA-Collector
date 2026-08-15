@@ -329,7 +329,7 @@ function ConsentSection() {
                     })}
                   </p>
                   {/* Nói đúng những gì cơ chế thật sự làm. Xem
-                      docs/CONSENT_ENFORCEMENT.md §5 — rút chặn ở MỌI mức, kể cả
+                      docs/04-legal/CONSENT_ENFORCEMENT.md §5 — rút chặn ở MỌI mức, kể cả
                       nội bộ, nhưng KHÔNG xoá tệp đã có. Hứa xoá ở đây là hứa
                       một việc hệ thống không làm. */}
                   <ul className="mt-2 list-disc space-y-1 pl-5">

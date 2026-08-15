@@ -157,6 +157,12 @@ export interface ClassRow {
   created_at?: string;
   migrated_at?: string | null;
   hands_required?: number | string | null; // BE returns ""/"1"/"2" strings, FE normalizes
+  /** Vùng miền của ký hiệu — trục RIÊNG với `dialect`.
+   *
+   * Hai nhãn cùng `slug` + `language` + `dialect` mà khác `region` là hai lớp
+   * hợp lệ, khác nhau (khoá duy nhất ở cơ sở dữ liệu gồm cả năm cột). Bỏ qua
+   * trường này là hiện ra hai dòng trông giống hệt nhau. */
+  region?: string;
 }
 
 export interface ClassesListResponse {

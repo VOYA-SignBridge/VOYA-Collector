@@ -57,6 +57,17 @@ logger = logging.getLogger(__name__)
 #: Tăng con số này khi một lượt thay đổi làm mã CŨ không còn đọc đúng cơ sở dữ
 #: liệu MỚI. Thêm một bảng rời thì không cần tăng — mã cũ vẫn đúng, chỉ là
 #: không biết bảng đó. Đổi tên cột, gộp bảng, biến bảng thành view thì CÓ.
+#:
+#: **Con số này KHÔNG được tăng vì lý do phân loại lại DDL.** Ngày 13/08/2026
+#: tôi đã định làm vậy — bộ phân loại `startup_ddl_policy` tìm ra 43 câu không
+#: chứng minh được là an toàn lúc khởi động, đưa chúng vào tập một chiều thì
+#: payload đổi, nên "phải lên phiên bản mới".
+#:
+#: Lập luận đó lộn ngược nhân quả. `v6` đã có nghĩa nghiệp vụ: mô hình gói
+#: Free/Plus/Pro/Enterprise (`docs/07-business/BILLING_MODEL_V6.md`). Còn việc phân loại
+#: DDL khởi động là *kiến trúc triển khai*, không phải một phiên bản nghiệp vụ
+#: của lược đồ. Nếu phân loại lại làm checksum đổi thì lỗi nằm ở chỗ
+#: `migration_payload()` được dựng từ một tập DẪN XUẤT — xem chú thích ở đó.
 APP_SCHEMA_VERSION = 5
 
 #: Lược đồ CŨ NHẤT mà ảnh này còn chạy đúng trên đó.
@@ -209,36 +220,34 @@ def canonical_sql(statement: str) -> str:
     return "".join(out).strip()
 
 
-def migration_payload() -> list[str]:
-    """Các câu MỘT CHIỀU, ĐÚNG thứ tự thực thi.
+def migration_payload(version: int = APP_SCHEMA_VERSION) -> list[str]:
+    """Các câu thuộc migration `version`, ĐÚNG thứ tự thực thi.
 
-    Thứ tự lấy từ chính các danh sách mà `_apply_schema` chạy, không lấy từ
-    `one_way_statements()` — cái đó là `frozenset`, và thứ tự lặp của một set
-    không ổn định giữa các tiến trình. Băm một tập không thứ tự sẽ cho checksum
-    đổi ngẫu nhiên giữa hai lần khởi động, tức là gate đỏ vô cớ.
+    Bản đầu của hàm này lọc bốn danh sách DDL theo `one_way_statements()`. Nó
+    chạy đúng đúng một ngày. Vấn đề: `one_way_statements()` là một phép PHÂN
+    LOẠI, và phân loại thì tiến hoá — khi `startup_ddl_policy` bắt thêm 43 câu
+    nguy hiểm, payload "v5" nhảy từ 11 lên 63 câu. Tức là *quá khứ* tự viết
+    lại theo hiểu biết của hiện tại, và checksum — thứ sinh ra để chứng minh
+    quá khứ không đổi — mất sạch ý nghĩa.
+
+    Nay payload đến từ `migration_history`, nơi mỗi phiên bản là một dãy tường
+    minh viết tay. Bộ phân loại có bắt thêm bao nhiêu câu cũng không chạm được
+    vào con số của v5.
     """
-    from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
-    from app.storage.metadata_db import (
-        DDL_STATEMENTS, INDEX_STATEMENTS, MIGRATION_STATEMENTS, one_way_statements,
-    )
+    from app.storage.migration_history import migration_payload as historical
 
-    one_way = one_way_statements()
-    ordered: list[str] = []
-    for group in (DDL_STATEMENTS, MIGRATION_STATEMENTS,
-                  INDEX_STATEMENTS, AUTHZ_DDL_STATEMENTS):
-        ordered.extend(s for s in group if s in one_way)
-    return ordered
+    return historical(version)
 
 
-def migration_checksum() -> str:
-    """SHA-256 của payload một chiều đã chuẩn hoá, kèm số câu.
+def migration_checksum(version: int = APP_SCHEMA_VERSION) -> str:
+    """SHA-256 của payload đã chuẩn hoá, kèm số câu.
 
     Số câu nằm trong phần được băm để việc GỘP hai câu thành một — hoặc tách
     một câu làm hai — cũng đổi checksum, dù chuỗi nối lại có thể giống nhau.
     """
     import hashlib
 
-    payload = [canonical_sql(s) for s in migration_payload()]
+    payload = [canonical_sql(s) for s in migration_payload(version)]
     blob = f"{len(payload)}\n" + "\n".join(payload)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -310,6 +319,17 @@ def checksum_problem(cur) -> SchemaVersionError | None:
     if version is None:
         return None
 
+    # Checksum chỉ so được với payload của CHÍNH phiên bản đã ghi. Ảnh này chỉ
+    # dựng được payload của `APP_SCHEMA_VERSION`, nên trên một cơ sở dữ liệu
+    # đóng dấu phiên bản khác, so sánh sẽ luôn lệch — và lệch vì một lý do
+    # không liên quan gì tới "migration đã bị sửa".
+    #
+    # Chuyện lệch phiên bản đã có cổng riêng (`compatibility_error`) với thông
+    # điệp đúng việc. Trả về None ở đây KHÔNG nới lỏng gì: `assert_startup_
+    # compatible` chạy cổng phiên bản TRƯỚC và đã ném lỗi rồi.
+    if version != APP_SCHEMA_VERSION:
+        return None
+
     current = migration_checksum()
 
     if not has_column:
@@ -332,7 +352,7 @@ def checksum_problem(cur) -> SchemaVersionError | None:
             f"    hien tai : {current}\n"
             f"Mot phien ban da ap dung la BAT BIEN. Neu can sua, tao phien ban "
             f"v{version + 1} chu khong sua lai v{version}. Neu ban tin rang thay "
-            f"doi nay vo hai va co chu y, xem docs/AUTHORIZATION.md muc migration.")
+            f"doi nay vo hai va co chu y, xem docs/03-security/AUTHORIZATION.md muc migration.")
 
     return None
 

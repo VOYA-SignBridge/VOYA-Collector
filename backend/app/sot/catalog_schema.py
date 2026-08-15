@@ -31,6 +31,8 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         # multi-tenant (A1) — the upsert writes it, so a reader whose schema
         # lacks it passes verification and then fails mid-import.
         "tenant_id",
+        # v3.17 — vùng miền của ký hiệu, tách khỏi `dialect`.
+        "region",
     ],
     "samples": [
         "sample_uid", "class_uid", "slug", "label_original", "language", "dialect",

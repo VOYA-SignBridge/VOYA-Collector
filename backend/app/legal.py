@@ -30,7 +30,7 @@ chưa bao giờ tồn tại. Hệ quả: hash không đối chiếu được v�
 nào đọc được bản văn mà người ta vừa đồng ý.
 
 Lý do chọn cơ sở dữ liệu chứ không phải hệ tệp: chữ ký và bản văn được ký phải
-sao lưu và khôi phục CÙNG NHAU. Xem `docs/LEGAL_DOCUMENTS.md`.
+sao lưu và khôi phục CÙNG NHAU. Xem `docs/04-legal/LEGAL_DOCUMENTS.md`.
 """
 
 from __future__ import annotations

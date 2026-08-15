@@ -37,7 +37,7 @@ def doomed_tenant():
 
     tenant_id = f"lc{uuid.uuid4().hex[:10]}"
     tenant_admin.create_tenant(
-        tenant_id, display_name="Sắp Đóng Cửa", clone_catalog=False, plan_code="school"
+        tenant_id, display_name="Sắp Đóng Cửa", clone_catalog=False, plan_code="plus"
     )
     plans._clear_caches()
     yield tenant_id
@@ -100,7 +100,7 @@ class TestExport:
         from conftest import purge_tenant
 
         stranger = f"lc{uuid.uuid4().hex[:10]}"
-        tenant_admin.create_tenant(stranger, clone_catalog=False, plan_code="trial")
+        tenant_admin.create_tenant(stranger, clone_catalog=False, plan_code="free")
         plans._clear_caches()
         try:
             job = tenant_lifecycle.request_export(doomed_tenant)
@@ -254,7 +254,7 @@ class TestPurgeExecution:
 
         survivor_tenant = f"lc{uuid.uuid4().hex[:10]}"
         tenant_admin.create_tenant(
-            survivor_tenant, clone_catalog=False, plan_code="school"
+            survivor_tenant, clone_catalog=False, plan_code="plus"
         )
         plans._clear_caches()
 

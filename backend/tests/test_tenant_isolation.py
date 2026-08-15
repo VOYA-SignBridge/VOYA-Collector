@@ -170,6 +170,18 @@ def _seed(conn) -> None:
     registry to prove a row-visibility property.
     """
     with conn.cursor() as cur:
+        # Gieo dữ liệu cho HAI tenant, nên phải ở phạm vi hệ thống — đúng thứ
+        # `rls.py` định nghĩa cho việc nền tảng làm xuyên tenant.
+        #
+        # Trước đây dòng này không cần, và đó mới là điều đáng nói: fixture chạy
+        # bằng `admin`, một superuser, nên nó MIỄN TRỪ khỏi RLS và phần gieo dữ
+        # liệu chưa bao giờ đi qua chính sách. Khi lượt chạy đổi sang vai chủ sở
+        # hữu thường, `FORCE ROW LEVEL SECURITY` lập tức chặn — tức chính sách
+        # vẫn đúng, chỉ là bộ kiểm đã đứng ngoài nó suốt.
+        #
+        # `SET` chứ không `SET LOCAL`: kết nối này đang autocommit, không có
+        # giao dịch nào để `LOCAL` bám vào.
+        cur.execute(f"SET {rls.SYSTEM_SCOPE_GUC} = '{rls.SYSTEM_SCOPE_ON}'")
         for tenant in (TENANT_A, TENANT_B):
             cur.execute(
                 "INSERT INTO tenants(tenant_id, display_name, slug) VALUES (%s, %s, %s) "
@@ -787,3 +799,97 @@ class TestRequestTenantResolution:
         assert list(inspect.signature(resolve_tenant).parameters) == [
             "access_cookie", "bearer",
         ]
+
+
+# ---------------------------------------------------------------------------
+# Vùng: danh mục toàn cục KHÔNG được thành đường vòng qua cô lập tenant
+# ---------------------------------------------------------------------------
+
+
+class TestRegionIsNotABypass:
+    """`regions` nằm NGOÀI RLS, và đó là đúng — `bac` không phải dữ liệu của ai.
+
+    Nhưng "ngoài RLS" cộng với "ghi được" thì thành một đường vòng thật, vì
+    `classes.region -> regions(code)` là ON UPDATE CASCADE: đổi một mã vùng sẽ
+    ghi lại `classes` của MỌI tenant, mà lượt ghi đó không chạm bảng `classes`
+    nên không policy nào của nó được hỏi tới.
+
+    Phân biệt phải giữ cho rõ: DỮ LIỆU THAM CHIẾU TOÀN CỤC không phải DỮ LIỆU
+    TENANT DÙNG CHUNG. Cái trước đọc chung được; cái sau thì không bao giờ.
+    """
+
+    def test_the_app_role_can_read_the_catalogue(self, app_conn):
+        cur = _scoped(app_conn, TENANT_A)
+        cur.execute("SELECT code FROM regions ORDER BY sort_order")
+        codes = [r[0] for r in cur.fetchall()]
+        app_conn.rollback()
+        # `unclassified` và `common` phải là HAI mã khác nhau: cái đầu nghĩa là
+        # chưa ai xác minh, cái sau nghĩa là đã xác minh không cần phân vùng.
+        assert {"unclassified", "common", "bac", "trung", "nam"} <= set(codes)
+
+    @pytest.mark.parametrize("sql, params", [
+        ("INSERT INTO regions(code, name_vi) VALUES ('xx', 'X')", ()),
+        ("UPDATE regions SET code = 'bac2' WHERE code = 'bac'", ()),
+        ("DELETE FROM regions WHERE code = 'common'", ()),
+    ])
+    def test_the_app_role_cannot_write_the_catalogue(self, app_conn, sql, params):
+        """Sửa danh mục là việc của vai migration, không phải của ứng dụng.
+
+        `UPDATE` là câu nguy hiểm nhất trong ba câu: nhờ ON UPDATE CASCADE, một
+        lượt đổi mã vùng ghi lại lớp của mọi tenant cùng lúc.
+        """
+        cur = _scoped(app_conn, TENANT_A)
+        with pytest.raises(psycopg2.errors.InsufficientPrivilege):
+            cur.execute(sql, params)
+        app_conn.rollback()
+
+    def test_a_tenant_cannot_confirm_another_tenants_class_exists(self, app_conn):
+        """0 hàng, KHÔNG phải "403 lớp này của tenant khác".
+
+        Một câu trả lời phân biệt được "không tồn tại" với "tồn tại nhưng của
+        người khác" đã rò rỉ chính thứ cần giấu. Tầng HTTP phải dịch 0 hàng
+        thành 404 chứ không phải 403.
+        """
+        cur = _scoped(app_conn, TENANT_A)
+        cur.execute(
+            "SELECT class_uid FROM classes WHERE class_uid = %s", (f"cls-{TENANT_B}",))
+        assert cur.fetchall() == []
+        app_conn.rollback()
+
+    def test_reclassifying_another_tenants_class_touches_nothing(self, app_conn):
+        """Đúng hình dạng của `reclassify_class_region`, nhưng bỏ mọi lớp lọc ở
+        tầng ứng dụng — còn lại một mình policy."""
+        cur = _scoped(app_conn, TENANT_A)
+        cur.execute(
+            "UPDATE classes SET region = 'bac' WHERE class_uid = %s",
+            (f"cls-{TENANT_B}",))
+        assert cur.rowcount == 0
+        app_conn.commit()
+
+        check = _scoped(app_conn, TENANT_B)
+        check.execute(
+            "SELECT region FROM classes WHERE class_uid = %s", (f"cls-{TENANT_B}",))
+        assert check.fetchone()[0] != "bac"
+        app_conn.rollback()
+
+    def test_a_tenant_cannot_write_a_row_into_another_tenant(self, app_conn):
+        """`WITH CHECK`, không phải `USING`. Nhiều hệ thống chỉ kiểm đường ĐỌC
+        rồi quên đường GHI, và khi đó một tenant đẩy được hàng sang tenant khác
+        dù không đọc nổi hàng nào của họ."""
+        cur = _scoped(app_conn, TENANT_A)
+        with pytest.raises(psycopg2.errors.Error):
+            cur.execute(
+                "INSERT INTO classes(class_uid, tenant_id, slug, language, region) "
+                "VALUES ('cls-smuggled', %s, 'smuggled', 'vn', 'bac')",
+                (TENANT_B,))
+        app_conn.rollback()
+
+    def test_a_tenant_cannot_move_its_own_row_to_another_tenant(self, app_conn):
+        """Đường thoát kín đáo hơn: hàng hợp lệ lúc đọc, nhưng bị đẩy sang tenant
+        khác lúc ghi. `WITH CHECK` phải xét giá trị MỚI, không phải giá trị cũ."""
+        cur = _scoped(app_conn, TENANT_A)
+        with pytest.raises(psycopg2.errors.Error):
+            cur.execute(
+                "UPDATE classes SET tenant_id = %s WHERE class_uid = %s",
+                (TENANT_B, f"cls-{TENANT_A}"))
+        app_conn.rollback()

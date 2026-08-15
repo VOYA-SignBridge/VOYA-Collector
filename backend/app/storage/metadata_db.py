@@ -234,6 +234,198 @@ _DROP_GLOBAL_CLASS_UNIQUES: tuple[str, ...] = (
 )
 
 
+#: Chỉ mục duy nhất KHÔNG có `region`, bị thay bằng bản có. Bỏ là một chiều:
+#: dựng lại được, nhưng chỉ khi dữ liệu còn thoả — mà sau khi ba biến thể miền
+#: của cùng một từ cùng tồn tại thì nó không còn thoả nữa.
+_DROP_PRE_REGION_CLASS_UNIQUE: tuple[str, ...] = (
+    "DROP INDEX IF EXISTS uq_classes_tenant_slug_lang_dialect",
+)
+
+
+#: Bản `coalesce(region,'')` của chỉ mục duy nhất, dựng khi `region` còn nhận
+#: NULL. v3.19 đặt cột thành NOT NULL nên `coalesce` hết việc — nhưng phải BỎ
+#: bản cũ trước, vì `CREATE UNIQUE INDEX IF NOT EXISTS` KHÔNG thay thế một chỉ
+#: mục cùng tên có định nghĩa khác: nó lặng lẽ không làm gì. Bỏ sót bước này
+#: thì máy đã chạy giữ bản `coalesce`, máy dựng mới có bản trần, và hai lược đồ
+#: trôi khỏi nhau mà không ai báo.
+_DROP_COALESCE_REGION_UNIQUE: tuple[str, ...] = (
+    "DROP INDEX IF EXISTS uq_classes_tenant_slug_lang_dialect_region",
+)
+
+
+#: Lược đồ v6 — mô hình gói `free / plus / pro / enterprise`.
+#:
+#: Xem `docs/07-business/BILLING_MODEL_V6.md`. Bước MỘT của kế hoạch, và nó cố ý **không
+#: đụng tới một giá trị hạn mức nào đang có hiệu lực**: chỉ đổi mã gói, thêm
+#: cột cho các hạn mức của mô hình mới, và gỡ khái niệm dùng thử.
+#:
+#: Vì sao hạn mức không đổi ở đây
+#: -------------------------------
+#: Bảng gói mới nói "sample không giới hạn, chặn bằng dung lượng". Đặt
+#: `max_samples = NULL` ngay bây giờ sẽ gỡ trần ghi DUY NHẤT đang có, trong khi
+#: cổng dung lượng thay thế nó phải tới v7 mới tồn tại — tức là một cửa sổ
+#: triển khai mà gói Free không có trần nào cả. Nên v6 giữ nguyên các con số
+#: hiện hành dưới tên mới, và v7 lật chúng CÙNG LÚC với `enforce` dung lượng.
+#: Các cột mới bên dưới mang sẵn giá trị đích vì chưa có ai đọc chúng.
+#:
+#: Vì sao đổi tên chứ không tạo mới rồi xoá
+#: -----------------------------------------
+#: `tenants.plan_code` và `tenant_subscriptions.plan_code` đều có khoá ngoại
+#: `ON UPDATE CASCADE` trỏ vào `plans.plan_code`, nên một câu `UPDATE` lan sang
+#: cả lịch sử đăng ký. Đường ngược lại — chèn gói mới rồi `DELETE` gói cũ — bị
+#: `ON DELETE RESTRICT` chặn đúng ở những dòng lịch sử đó.
+#:
+#: Đổi mã bốn gói cũ sang bốn gói của v6, CHỊU ĐƯỢC trạng thái lẫn.
+#:
+#: Bản đầu là bốn câu `UPDATE plans SET plan_code = ...`, và nó vỡ ở đúng một
+#: trạng thái có thật: khi cả mã cũ lẫn mã mới cùng tồn tại. Lúc đó câu đổi tên
+#: đụng khoá chính và cả lượt migration dừng. Trạng thái đó không phải giả
+#: thuyết — nó đã xuất hiện trên cơ sở dữ liệu phát triển của máy này ngày
+#: 13/08/2026, khi câu seed (chèn bốn mã MỚI) và câu đổi tên (đổi bốn mã CŨ)
+#: chạy trong hai lượt khác nhau, xen kẽ nhau.
+#:
+#: Nên nó phải là hợp nhất chứ không phải đổi tên: mã mới đã có thì chuyển mọi
+#: tham chiếu sang đó rồi bỏ mã cũ; chưa có thì đổi tên như cũ (rẻ hơn, và
+#: `ON UPDATE CASCADE` tự lo phần tham chiếu).
+#:
+#: `to_regclass` chứ không giả định bảng tồn tại: trên một cơ sở dữ liệu trắng,
+#: khối này chạy TRƯỚC khi `tenants` và `tenant_subscriptions` ra đời.
+#:
+#: DO $$ được `startup_ddl_policy` xếp vào nhóm an toàn theo HÌNH DẠNG, nên câu
+#: này phải được đăng ký tay ở `one_way_statements()` — nó chuyển dữ liệu, và
+#: một lượt `docker compose up` không được phép làm việc đó.
+_BILLING_V6_RENAME_PLANS = """
+DO $$
+DECLARE
+    pair RECORD;
+BEGIN
+    FOR pair IN
+        SELECT * FROM (VALUES
+            ('internal',    'enterprise'),
+            ('trial',       'free'),
+            ('school',      'plus'),
+            ('institution', 'pro')
+        ) AS t(old_code, new_code)
+    LOOP
+        IF NOT EXISTS (SELECT 1 FROM plans WHERE plan_code = pair.old_code) THEN
+            CONTINUE;
+        END IF;
+
+        IF EXISTS (SELECT 1 FROM plans WHERE plan_code = pair.new_code) THEN
+            IF to_regclass('public.tenants') IS NOT NULL THEN
+                UPDATE tenants SET plan_code = pair.new_code
+                 WHERE plan_code = pair.old_code;
+            END IF;
+            IF to_regclass('public.tenant_subscriptions') IS NOT NULL THEN
+                UPDATE tenant_subscriptions SET plan_code = pair.new_code
+                 WHERE plan_code = pair.old_code;
+            END IF;
+            DELETE FROM plans WHERE plan_code = pair.old_code;
+        ELSE
+            UPDATE plans SET plan_code = pair.new_code
+             WHERE plan_code = pair.old_code;
+        END IF;
+    END LOOP;
+END $$
+"""
+
+
+#: Câu nào ở đây chạy lúc khởi động, câu nào không, là việc của
+#: `startup_ddl_policy` chứ không của cái tên biến này: mọi `UPDATE ... SET`
+#: bên dưới bị xếp vào nhóm chỉ-migration (và vì thế nằm trong checksum), còn
+#: bốn câu `DROP NOT NULL` là nới lỏng ràng buộc — không hỏng được vì dữ liệu
+#: đang có — nên chúng chạy cả lúc khởi động.
+#:
+#: Khối chia làm HAI vì thứ tự trong `MIGRATION_STATEMENTS` là thứ tự thật:
+#: phần `plans` phải chạy TRƯỚC câu seed gói (ngược lại thì trên cơ sở dữ liệu
+#: đã có, seed chèn `free` xong rồi câu đổi tên `trial -> free` đụng khoá
+#: chính), còn phần `tenants` phải chạy SAU khi bảng `tenants`,
+#: `tenant_subscriptions` và các cột của chúng đã tồn tại — trên một cơ sở dữ
+#: liệu trắng, chúng chưa có ở thời điểm khối `plans` chạy.
+_BILLING_V6_PLANS: tuple[str, ...] = (
+    # NULL phải diễn đạt được "không giới hạn" ở mọi trần, không chỉ ở bốn trần
+    # đã nullable từ v4. Enterprise là gói custom: mọi trần của nó là NULL.
+    "ALTER TABLE plans ALTER COLUMN max_concurrent_training_jobs DROP NOT NULL",
+    "ALTER TABLE plans ALTER COLUMN max_queued_training_jobs DROP NOT NULL",
+    "ALTER TABLE plans ALTER COLUMN max_api_keys DROP NOT NULL",
+    "ALTER TABLE plans ALTER COLUMN max_webhook_endpoints DROP NOT NULL",
+    # Giá: NULL nghĩa là CHƯA CÔNG BỐ, khác hẳn 0 nghĩa là miễn phí. Không có
+    # phân biệt này thì bảng giá công khai in "Miễn phí" cho Plus và Pro.
+    "ALTER TABLE plans ALTER COLUMN price_cents DROP NOT NULL",
+    # Bốn cặp đổi tên. `internal` thành `enterprise` vì hạn mức của nó vốn đã
+    # NULL toàn phần — đúng nghĩa "custom" — và vì sau lượt này phải KHÔNG còn
+    # gói nào tên `internal`: tenant nền tảng được nhận diện bằng
+    # `tenants.billing_exempt`, không bằng một gói giả.
+    _BILLING_V6_RENAME_PLANS,
+    # Tên hiển thị là tên thương hiệu, cùng một chuỗi ở mọi ngôn ngữ. Phần mô
+    # tả để RỖNG có chủ ý: giao diện dựng nó từ `plan_code` qua i18n, nên một
+    # câu tiếng Việt nằm trong cơ sở dữ liệu sẽ là chuỗi duy nhất không bao giờ
+    # dịch được. Gói do người vận hành tự tạo vẫn dùng được cột này.
+    "UPDATE plans SET display_name = initcap(plan_code), description = '' "
+    "WHERE plan_code IN ('free', 'plus', 'pro', 'enterprise')",
+    # Giá thương mại chưa chốt. Free là 0 thật; ba gói còn lại về NULL.
+    "UPDATE plans SET price_cents = 0 WHERE plan_code = 'free'",
+    "UPDATE plans SET price_cents = NULL "
+    "WHERE plan_code IN ('plus', 'pro', 'enterprise')",
+    # Enterprise: mọi trần là NULL.
+    "UPDATE plans SET max_concurrent_training_jobs = NULL, "
+    "max_queued_training_jobs = NULL, max_api_keys = NULL, "
+    "max_webhook_endpoints = NULL WHERE plan_code = 'enterprise'",
+    # Hạn mức của mô hình mới. Chưa có cổng nào đọc chúng — v7 mới cưỡng chế —
+    # nên đặt thẳng giá trị đích ở đây là an toàn, và nó làm cái đích nhìn thấy
+    # được thay vì nằm trong một tài liệu.
+    "UPDATE plans SET max_workspaces = 1, max_projects = 5, "
+    "included_training_credits = 60, audit_retention_days = 7 "
+    "WHERE plan_code = 'free'",
+    "UPDATE plans SET max_workspaces = 5, max_projects = 25, "
+    "included_training_credits = 250, audit_retention_days = 30 "
+    "WHERE plan_code = 'plus'",
+    "UPDATE plans SET max_workspaces = 20, max_projects = 100, "
+    "included_training_credits = 1000, audit_retention_days = 180 "
+    "WHERE plan_code = 'pro'",
+    "UPDATE plans SET max_workspaces = NULL, max_projects = NULL, "
+    "included_training_credits = NULL, audit_retention_days = NULL "
+    "WHERE plan_code = 'enterprise'",
+    # Sắp xếp lại bảng giá theo bậc.
+    "UPDATE plans SET sort_order = 10, is_self_serve = TRUE, is_listed = TRUE "
+    "WHERE plan_code = 'free'",
+    "UPDATE plans SET sort_order = 20, is_self_serve = FALSE, is_listed = TRUE "
+    "WHERE plan_code = 'plus'",
+    "UPDATE plans SET sort_order = 30, is_self_serve = FALSE, is_listed = TRUE "
+    "WHERE plan_code = 'pro'",
+    "UPDATE plans SET sort_order = 40, is_self_serve = FALSE, is_listed = TRUE "
+    "WHERE plan_code = 'enterprise'",
+    # Free là gói VĨNH VIỄN, nên không gói nào còn thời gian dùng thử. Đây là
+    # chỗ khái niệm "trial" chấm dứt: `plans.trial_days` là thứ duy nhất từng
+    # sinh ra `trial_ends_at`.
+    "UPDATE plans SET trial_days = 0",
+)
+
+
+#: Phần v6 chạm tới `tenants` và `tenant_subscriptions`. Chạy SAU khi hai bảng
+#: đó và các cột của chúng đã được tạo — xem chú thích ở `_BILLING_V6_PLANS`.
+_BILLING_V6_TENANTS: tuple[str, ...] = (
+    # Tổ chức đang ở `trialing` chuyển thẳng sang `active`. Không còn gói nào
+    # có thời gian dùng thử thì `trialing` là trạng thái không ai thoát ra
+    # được: lượt quét vòng đời chỉ rời khỏi nó khi một kỳ hết hạn, mà gói Free
+    # không có kỳ nào.
+    "UPDATE tenants SET billing_status = 'active', trial_ends_at = NULL "
+    "WHERE billing_status = 'trialing'",
+    "UPDATE tenants SET trial_ends_at = NULL WHERE trial_ends_at IS NOT NULL",
+    "UPDATE tenant_subscriptions SET trial_ends_at = NULL "
+    "WHERE trial_ends_at IS NOT NULL",
+    # Tenant nền tảng: miễn trừ bằng thuộc tính, không bằng một gói riêng.
+    #
+    # Một chiều chứ không chạy lúc khởi động: nếu người vận hành cố ý bỏ cờ này
+    # đi, một lượt `docker compose up` không được phép bật lại nó.
+    f"UPDATE tenants SET billing_exempt = TRUE "
+    f"WHERE tenant_id = '{DEFAULT_TENANT_ID}'",
+    # Mặc định mới. Vẫn là gói CHẶT NHẤT trong bốn gói, nên một đường chèn quên
+    # nêu gói vẫn sai theo hướng chặn — cùng lý do như khi mặc định là `trial`.
+    "ALTER TABLE tenants ALTER COLUMN plan_code SET DEFAULT 'free'",
+)
+
+
 DDL_STATEMENTS = [
     # MUST stay first. An older schema shipped a `dialects` table shaped
     # (code PK, language_code FK->languages, name), and `CREATE TABLE IF NOT
@@ -571,9 +763,9 @@ INTEGRITY_FK_SPECS: tuple[str, ...] = (
     "samples~fk_samples_capture_session~FOREIGN KEY (capture_session_id) "
     "REFERENCES capture_sessions(capture_session_id) ON DELETE SET NULL",
     "samples~fk_samples_language~FOREIGN KEY (language) REFERENCES languages(code) "
-    "ON UPDATE CASCADE",
+    "ON UPDATE RESTRICT",
     "classes~fk_classes_language~FOREIGN KEY (language) REFERENCES languages(code) "
-    "ON UPDATE CASCADE",
+    "ON UPDATE RESTRICT",
     "classes~fk_classes_recognition_profile~FOREIGN KEY (tenant_id, recognition_profile) "
     "REFERENCES recognition_profiles(tenant_id, profile_id) ON UPDATE CASCADE",
     "classes~fk_classes_vocabulary_group~FOREIGN KEY (tenant_id, vocabulary_group) "
@@ -591,10 +783,10 @@ INTEGRITY_FK_SPECS: tuple[str, ...] = (
     "samples~samples_dialect_fkey~FOREIGN KEY (tenant_id, dialect) "
     "REFERENCES dialects(tenant_id, dialect_id) ON UPDATE CASCADE",
     "raw_uploads~fk_raw_uploads_language~FOREIGN KEY (language) REFERENCES languages(code) "
-    "ON UPDATE CASCADE",
+    "ON UPDATE RESTRICT",
     # danh mục tự tham chiếu
     "dialects~fk_dialects_language~FOREIGN KEY (language) REFERENCES languages(code) "
-    "ON UPDATE CASCADE",
+    "ON UPDATE RESTRICT",
     "dialects~fk_dialects_merged_into~FOREIGN KEY (tenant_id, merged_into) "
     "REFERENCES dialects(tenant_id, dialect_id) ON UPDATE CASCADE",
     # `old_dialect_id` CỐ Ý không có khoá ngoại: nó trỏ tới phương ngữ đã bị gộp
@@ -760,6 +952,110 @@ def schema_debt() -> Dict[str, Any]:
 
 MIGRATION_STATEMENTS = [
     # -----------------------------------------------------------------------
+    # v3.17 — tách vùng miền ra khỏi `dialect`.
+    #
+    # `dialect` gánh ba nghĩa cùng lúc: tập vốn từ (`bang-chu-cai`, `spa`,
+    # `can-tho`, `hoa-de`), phạm vi (`common`), và vùng miền (`bac`/`nam`/
+    # `trung`). Chính `app/dataset_manager.py` đã ghi "DEPRECATED as a semantic
+    # field (it conflated region / vocabulary domain / collection campaign)" —
+    # cột này hoàn tất việc tách đó.
+    #
+    # `dialect` KHÔNG bị đụng tới: nó vẫn là tên thư mục lưu trữ
+    # (`features/{language}/{dialect}/{folder}`) và vẫn nằm trong `storage_key`
+    # của từng mẫu. Đổi nó sẽ kéo theo chuyển tệp trên đĩa, ghi lại storage_key
+    # và đồng bộ lại Drive — nên không đổi.
+    #
+    # Chỉ THÊM cột, không ràng buộc CHECK: giá trị hợp lệ được chuẩn hoá ở
+    # `normalize_region()` phía ứng dụng. Thêm CHECK ở đây sẽ làm mọi hàng cũ
+    # (region NULL) hợp lệ nhưng chặn mọi lượt ghi sai chính tả một cách im
+    # lặng ở tầng dưới, khó lần ra hơn là để tầng ứng dụng từ chối.
+    "ALTER TABLE classes ADD COLUMN IF NOT EXISTS region TEXT",
+    # -----------------------------------------------------------------------
+    # v3.19 — `region` thành NOT NULL với danh mục riêng, và `unclassified`
+    # tách hẳn khỏi `common`.
+    #
+    # v3.17/v3.18 để `region` nhận NULL và chuỗi rỗng cùng nghĩa "chưa biết".
+    # Hai vấn đề, và cái thứ hai nặng hơn:
+    #
+    #   1. Khoá duy nhất phải bọc `coalesce(region,'')`, vì hai NULL không đụng
+    #      nhau — một workaround che một lỗ, không phải một thiết kế.
+    #   2. "Chưa xác minh thuộc vùng nào" và "đã xác minh là không phân biệt
+    #      vùng" bị gộp làm một. Đó là hai TRẠNG THÁI QUY TRÌNH khác hẳn nhau,
+    #      và gộp chúng thì không bao giờ trả lời được "còn bao nhiêu nhãn chờ
+    #      phân loại" — câu hỏi vận hành duy nhất đáng hỏi ở đây.
+    #
+    # Nên: `unclassified` = chưa qua phân loại; `common` = đã kiểm chứng là
+    # dùng chung; `bac`/`trung`/`nam` = đã kiểm chứng là biến thể vùng. Chuyển
+    # trạng thái luôn đi từ `unclassified` sang một trong bốn cái còn lại.
+    #
+    # KHÔNG dùng ENUM của PostgreSQL. `tay-nguyen`, `tay-nam-bo`, hay cách chia
+    # vùng riêng của một tenant đều sẽ tới, và `ALTER TYPE ... ADD VALUE` khoá
+    # bảng, không quay lui được trong giao dịch, cũng không xoá được giá trị.
+    # Bảng danh mục thì thêm/nghỉ hưu một dòng là xong.
+    #
+    # Bảng TOÀN CỤC, không có `tenant_id` — cùng hình dạng với `languages`, mà
+    # `classes.language` đã trỏ tới bằng `fk_classes_language`.
+    #
+    # Bản đầu tôi làm nó theo tenant, khuôn `community_dialects` -> `dialects`.
+    # Sai, và bộ test bắt ngay: 11 lỗi khoá ngoại từ những chỗ chèn thẳng một
+    # hàng `tenants` bằng SQL thô (test làm vậy, và migration cũng vậy). Một
+    # tenant không có dòng `regions` nào thì KHÔNG tạo nổi một lớp nào — đúng
+    # cái bẫy "khoá ngoại làm tenant mới vô dụng" đã gặp một lần với `dialects`.
+    #
+    # Vùng địa lý của tiếng Việt không phải thứ mỗi tổ chức định nghĩa lại,
+    # y như mã ngôn ngữ. Khi nào thật sự có tenant cần cách chia riêng thì thêm
+    # một bảng phủ theo tenant — rẻ hơn nhiều so với việc bây giờ bắt mọi
+    # đường tạo tenant phải nhớ gieo năm hàng.
+    """CREATE TABLE IF NOT EXISTS regions (
+        code          TEXT PRIMARY KEY,
+        name_vi       TEXT NOT NULL,
+        name_en       TEXT NOT NULL DEFAULT '',
+        status        TEXT NOT NULL DEFAULT 'approved',
+        sort_order    INTEGER NOT NULL DEFAULT 0,
+        is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+        note          TEXT,
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )""",
+    """INSERT INTO regions(code, name_vi, name_en, sort_order, note) VALUES
+        ('unclassified', 'Chưa phân loại', 'Unclassified', 0,
+         'Đã nhập vào hệ thống nhưng CHƯA qua bước phân loại vùng. Khác hẳn common.'),
+        ('common',       'Chung',          'Common',       1,
+         'ĐÃ kiểm chứng là không cần phân biệt vùng.'),
+        ('bac',          'Bắc',            'North',        2, NULL),
+        ('trung',        'Trung',          'Central',      3, NULL),
+        ('nam',          'Nam',            'South',        4, NULL)
+       ON CONFLICT (code) DO NOTHING""",
+    # Backfill TRƯỚC khi đặt NOT NULL. Cả NULL lẫn chuỗi rỗng đều là "chưa
+    # phân loại" theo nghĩa cũ, nên cả hai về `unclassified`.
+    "UPDATE classes SET region = 'unclassified' "
+    "WHERE region IS NULL OR btrim(region) = ''",
+    "ALTER TABLE classes ALTER COLUMN region SET DEFAULT 'unclassified'",
+    "ALTER TABLE classes ALTER COLUMN region SET NOT NULL",
+    # Khoá ngoại đúng hình dạng `fk_classes_language`: một cột, bảng toàn cục.
+    #
+    # ON UPDATE RESTRICT, KHÔNG phải CASCADE — và đây là bài học từ một lỗ thật
+    # đã bắt được ngày 14/08, không phải sự cẩn thận thừa.
+    # ------------------------------------------------------------------------
+    # Với CASCADE, một câu `UPDATE regions SET code = ...` ghi lại `classes` của
+    # MỌI tenant cùng lúc, mà lượt ghi đó KHÔNG chạm bảng `classes` nên không
+    # policy RLS nào của nó được hỏi tới. Một bảng không chứa dữ liệu tenant nào
+    # vẫn trở thành ranh giới cô lập, nếu thao tác trên nó làm thay đổi được dữ
+    # liệu thuộc về tenant. Gọi tên nó ra thì dễ rà: ĐƯỜNG GHI BẮC CẦU.
+    #
+    # Thu quyền ghi của vai ứng dụng đã chặn được đường khai thác đó, nhưng
+    # RESTRICT chặn thêm một tầng nữa — cho cả mã chạy dưới vai migration.
+    #
+    # Cái giá gần như bằng không, vì `code` là ĐỊNH DANH MÁY chứ không phải nhãn
+    # hiển thị: `bac` cố định, còn `name_vi`/`name_en` mới là thứ người ta đổi.
+    # Đổi `bac` thành `north` phải là một migration có chủ ý, không phải hệ quả
+    # phụ của một lượt ghi nghiệp vụ.
+    "ALTER TABLE classes ADD CONSTRAINT classes_region_fkey "
+    "FOREIGN KEY (region) REFERENCES regions(code) ON UPDATE RESTRICT",
+    # Bỏ bản `coalesce` TRƯỚC khi bản trần được dựng phía dưới. Không có
+    # khoảng trống về đảm bảo: `NOT NULL` + khoá ngoại vừa đặt ở trên đã chặn
+    # đúng cái mà `coalesce` từng chặn.
+    *_DROP_COALESCE_REGION_UNIQUE,
+    # -----------------------------------------------------------------------
     # v3.16 — trợ lý tự động trả lời trước khi có người trực.
     #
     # `is_staff` là một cờ HAI giá trị, và kênh hỗ trợ giờ có BA loại người
@@ -844,7 +1140,7 @@ MIGRATION_STATEMENTS = [
     """,
 
     # -----------------------------------------------------------------------
-    # v3.14 — vòng đời phiên đăng nhập (xem docs/needFix/AUTH_TOKEN_LIFECYCLE.md).
+    # v3.14 — vòng đời phiên đăng nhập (xem docs/03-security/AUTH_TOKEN_LIFECYCLE.md).
     #
     # Ba cột này biến việc xoay refresh token từ "đúng một nửa" thành đủ: xoay
     # mà KHÔNG phát hiện tái sử dụng thì kết quả bị lộn ngược — kẻ trộm gọi
@@ -956,7 +1252,7 @@ MIGRATION_STATEMENTS = [
     # change yet. What this buys now is the part that is expensive to retrofit
     # later — a tenant key on every data-plane row, and uniqueness scoped to it.
     #
-    # Read docs/needFix/MULTITENANT_PREP.md before wiring tenant_id into the
+    # Read docs/11-worklog/MULTITENANT_PREP.md before wiring tenant_id into the
     # write paths: the schema is the easy half, and the things still assuming a
     # single tenant (dataset/ layout, Drive folder, class_idx, checkpoints)
     # are listed there.
@@ -1010,13 +1306,13 @@ MIGRATION_STATEMENTS = [
     # deliberately left in place — dropping uniqueness on a live auth table is
     # not a change to slip in ahead of a second tenant existing. Until they are
     # dropped, tenant B genuinely cannot register a username tenant A already
-    # took. That drop is step 3 in docs/needFix/MULTITENANT_PREP.md.
+    # took. That drop is step 3 in docs/11-worklog/MULTITENANT_PREP.md.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_tenant_username ON users(tenant_id, username)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_tenant_email ON users(tenant_id, email)",
     # ---------------------------------------------------------------------
     # Vocabulary registry. Postgres is the SOURCE OF TRUTH here, unlike
     # labels/samples where the CSV is — because only a FK can actually refuse a
-    # bad value at write time. See docs/needFix/DIALECT_LIFECYCLE.md.
+    # bad value at write time. See docs/02-data/DIALECT_LIFECYCLE.md.
     #
     # dialect_id is IMMUTABLE: it names a directory on disk
     # (features/<lang>/<dialect>/), a checkpoint file, and a published split
@@ -1608,10 +1904,45 @@ MIGRATION_STATEMENTS = [
     #
     # Both are scoped by tenant_id — see the multi-tenant block above. With one
     # tenant they are exactly equivalent to the global versions they replace.
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_tenant_slug_lang_dialect "
-    "ON classes(tenant_id, slug, language, dialect) WHERE deleted_at IS NULL",
+    # `uq_classes_tenant_slug_lang_dialect` (không có `region`) ĐÃ ĐƯỢC GỠ khỏi
+    # đây, không chỉ thêm một câu DROP. Lý do, và nó là một bài học đắt:
+    #
+    # Câu DROP nằm trong danh sách MỘT CHIỀU nên KHÔNG chạy lúc khởi động —
+    # đúng thiết kế, khởi động chỉ được phép THÊM. Nhưng câu CREATE thì lại
+    # chạy mọi lần khởi động. Kết quả: migration bỏ chỉ mục cũ, rồi backend
+    # khởi động lại và dựng nó lên nguyên vẹn, và ba biến thể vùng lại bị chặn.
+    # Đã đo đúng như vậy trên `signdb` ngày 14/08.
+    #
+    # Quy tắc rút ra: retire một đối tượng thì phải GỠ câu tạo nó, chứ thêm
+    # câu xoá là chưa đủ.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_tenant_class_idx "
     "ON classes(tenant_id, class_idx) WHERE deleted_at IS NULL AND class_idx IS NOT NULL",
+    # -----------------------------------------------------------------------
+    # v3.18 — `region` bước vào ĐỊNH DANH của lớp, không chỉ là chú thích.
+    #
+    # v3.17 thêm cột `region` nhưng để nguyên khoá duy nhất. Hệ quả đo được:
+    # ba dạng miền của cùng một từ (từ điển quốc gia ghi nhận 483 từ như vậy)
+    # có chung `slug`, `language` và `dialect`, nên dòng thứ hai và thứ ba bị
+    # khoá duy nhất từ chối. Cột `region` khi đó chỉ ghi chú được cho những lớp
+    # vốn đã một dạng — đúng thứ nó sinh ra để khắc phục thì lại chưa làm được.
+    #
+    # `region` trần, KHÔNG `coalesce`
+    # -------------------------------
+    # Bản đầu phải bọc `coalesce(region,'')`, vì cột khi đó nhận NULL và hai
+    # NULL không đụng nhau trong chỉ mục duy nhất — tức hai lớp trùng hệt nhau
+    # lọt qua chỉ bằng cách để `region` là NULL. v3.19 đặt `NOT NULL` kèm khoá
+    # ngoại tới `regions`, nên lỗ đó không còn tồn tại để phải bọc.
+    #
+    # Chỗ lưu KHÔNG đổi: `folder_name()` là `class_{slug}_{class_uid[:8]}`, mà
+    # ba biến thể có ba `class_uid`, nên chúng đã tự tách thư mục. Không phải
+    # di dời tệp nào.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_tenant_slug_lang_dialect_region "
+    "ON classes(tenant_id, slug, language, dialect, region) "
+    "WHERE deleted_at IS NULL",
+    # Retire bản không có `region` chỉ SAU khi bản có đã tồn tại, để không có
+    # khoảnh khắc nào cả hai cùng vắng. Một chiều, nên chỉ chạy dưới lệnh
+    # migration — xem `one_way_statements()`.
+    *_DROP_PRE_REGION_CLASS_UNIQUE,
     # Retire the global predecessors only AFTER the scoped ones exist, so the
     # guarantee is never absent in between. Một chiều, nên chỉ chạy dưới lệnh
     # migration — xem `ONE_WAY_STATEMENTS`.
@@ -1635,7 +1966,7 @@ MIGRATION_STATEMENTS = [
     # thêm rồi xoá lại đúng ràng buộc đó.
     # =====================================================================
     # Schema v3 — 2026-08-08. Bảng mồ côi, liên kết mồ côi, bảng trung gian.
-    # Thiết kế, số đo và ERD: docs/needFix/SAAS_SCHEMA_DESIGN.md §9sexies.
+    # Thiết kế, số đo và ERD: docs/02-data/SAAS_SCHEMA_DESIGN.md §9sexies.
     #
     # Nguyên tắc của cả khối: THÊM, KHÔNG SỬA. Không câu nào ở đây ghi đè hay
     # xoá dữ liệu đang có. Ba chỗ cố ý để trống thay vì đoán — 997 mẫu
@@ -2091,34 +2422,80 @@ MIGRATION_STATEMENTS = [
         END IF;
     END $$
     """,
+    # -----------------------------------------------------------------------
+    # v6 — hạn mức của mô hình Free/Plus/Pro/Enterprise.
+    #
+    # Thuần THÊM, nên chúng chạy được ở `ensure_tables()`. Chưa cổng nào đọc
+    # bốn cột này: `max_workspaces` và `max_projects` chờ v7 (workspace/project
+    # còn chưa có đường tạo), `included_training_credits` chờ v8, và
+    # `audit_retention_days` chờ cơ chế purge chưa tồn tại. Chúng có mặt từ v6
+    # để một chỗ duy nhất mô tả gói, thay vì một nửa ở bảng và một nửa ở doc.
+    "ALTER TABLE plans ADD COLUMN IF NOT EXISTS max_workspaces INTEGER",
+    "ALTER TABLE plans ADD COLUMN IF NOT EXISTS max_projects INTEGER",
+    "ALTER TABLE plans ADD COLUMN IF NOT EXISTS included_training_credits INTEGER",
+    "ALTER TABLE plans ADD COLUMN IF NOT EXISTS audit_retention_days INTEGER",
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                       WHERE conname = 'ck_plans_v6_limits_non_negative') THEN
+            ALTER TABLE plans ADD CONSTRAINT ck_plans_v6_limits_non_negative CHECK (
+                coalesce(max_workspaces, 0) >= 0
+                AND coalesce(max_projects, 0) >= 0
+                AND coalesce(included_training_credits, 0) >= 0
+                AND coalesce(audit_retention_days, 0) >= 0
+            );
+        END IF;
+    END $$
+    """,
+    # Khối chuyển đổi gói của v6, và nó phải đứng TRƯỚC câu seed bên dưới. Đảo lại
+    # thì trên một cơ sở dữ liệu đã có, seed chèn `free` trước rồi câu đổi tên
+    # `trial -> free` đụng khoá chính. Xem `_BILLING_V6_PLANS`.
+    *_BILLING_V6_PLANS,
     # Bốn gói hạt giống. `ON CONFLICT DO NOTHING` chứ không phải `DO UPDATE`:
     # người vận hành sửa hạn mức bằng API quản trị, và một migration ghi đè
     # lại mỗi lần khởi động sẽ âm thầm huỷ mọi chỉnh tay đó.
     #
-    # `internal` không có hạn mức nào và không hiện trên bảng giá — nó dành cho
-    # tenant gốc đang giữ dữ liệu thật, thứ không bao giờ nên bị một hạn mức
-    # thương mại chặn lại giữa chừng.
+    # Trên một cơ sở dữ liệu ĐÃ CÓ, câu này không chèn gì: khối một chiều bên
+    # trên vừa đổi tên bốn gói cũ thành đúng bốn mã này. Trên một cơ sở dữ liệu
+    # TRẮNG, nó là nơi bốn gói ra đời, và khối một chiều không khớp dòng nào.
+    # Hai đường hội tụ về cùng một trạng thái — đó là điều kiện để `--adopt`
+    # trên máy mới và `--to 6` trên máy cũ cho ra cùng một lược đồ.
+    #
+    # `description` để RỖNG: giao diện dựng phần mô tả từ `plan_code` qua i18n.
+    # Một câu tiếng Việt nằm trong bảng là chuỗi duy nhất không đi qua từ điển
+    # được, và nó sẽ hiện nguyên tiếng Việt trong bản tiếng Anh.
+    #
+    # Các trần của Free/Plus/Pro dưới đây là con số ĐANG CHẠY của trial/school/
+    # institution, không phải bảng gói mới: v6 không đổi hạn mức nào đang có
+    # hiệu lực. Xem chú thích ở `_BILLING_V6_ONE_WAY`.
     """
     INSERT INTO plans (
         plan_code, display_name, description,
         max_seats, max_samples, max_storage_mb, max_classes,
         max_training_jobs_per_month, max_concurrent_training_jobs,
         max_queued_training_jobs, max_api_keys, max_webhook_endpoints,
+        max_workspaces, max_projects, included_training_credits,
+        audit_retention_days,
         price_cents, currency, billing_period, is_self_serve, is_listed,
         trial_days, sort_order
     ) VALUES
-        ('internal', 'Nội bộ', 'Tenant gốc của nền tảng — không áp hạn mức.',
-         NULL, NULL, NULL, NULL, NULL, 4, 64, 32, 16,
-         0, 'VND', 'none', FALSE, FALSE, 0, 0),
-        ('trial', 'Dùng thử', 'Gói mặc định khi tự đăng ký. Đủ để đánh giá, không đủ để vận hành.',
+        ('free', 'Free', '',
          3, 500, 2048, 30, 5, 1, 2, 1, 0,
-         0, 'VND', 'none', TRUE, TRUE, 30, 10),
-        ('school', 'Trường học', 'Một cơ sở giáo dục thu dữ liệu thường xuyên.',
+         1, 5, 60, 7,
+         0, 'VND', 'none', TRUE, TRUE, 0, 10),
+        ('plus', 'Plus', '',
          25, 20000, 51200, 500, 50, 1, 5, 5, 3,
-         150000000, 'VND', 'monthly', TRUE, TRUE, 14, 20),
-        ('institution', 'Tổ chức', 'Nhiều cơ sở, có nhu cầu tích hợp qua API.',
+         5, 25, 250, 30,
+         NULL, 'VND', 'monthly', FALSE, TRUE, 0, 20),
+        ('pro', 'Pro', '',
          200, 200000, 512000, 5000, 300, 2, 20, 25, 10,
-         600000000, 'VND', 'monthly', FALSE, TRUE, 0, 30)
+         20, 100, 1000, 180,
+         NULL, 'VND', 'monthly', FALSE, TRUE, 0, 30),
+        ('enterprise', 'Enterprise', '',
+         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+         NULL, NULL, NULL, NULL,
+         NULL, 'VND', 'none', FALSE, TRUE, 0, 40)
     ON CONFLICT (plan_code) DO NOTHING
     """,
     # ---------------------------------------------------------------------
@@ -2245,6 +2622,18 @@ MIGRATION_STATEMENTS = [
           WHERE s.tenant_id = t.tenant_id AND s.ended_at IS NULL
       )
     """,
+    # ---------------------------------------------------------------------
+    # v6 — miễn trừ thanh toán, và phần một chiều chạm `tenants`.
+    #
+    # `billing_exempt` thay cho gói `internal` đã bị đổi tên: tenant nền tảng
+    # là một THUỘC TÍNH của tenant, không phải một bậc trong bảng giá. Cột thuần
+    # THÊM nên nó ở đây; câu bật cờ cho tenant gốc là một chiều nên nó nằm
+    # trong `_BILLING_V6_TENANTS`.
+    #
+    # Mặc định FALSE: một tenant mới không được im lặng thoát khỏi mọi hạn mức.
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_exempt "
+    "BOOLEAN NOT NULL DEFAULT FALSE",
+    *_BILLING_V6_TENANTS,
     # ---------------------------------------------------------------------
     # v4.4 — Số đo mức dùng, gộp theo NGÀY chứ không lưu từng sự kiện.
     #
@@ -2439,7 +2828,7 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE legal_documents ADD COLUMN IF NOT EXISTS body_format TEXT NOT NULL "
     "DEFAULT 'markdown'",
     # Ngôn ngữ của BẢN VĂN NÀY. Không phải chiều dịch thuật: xem
-    # docs/LEGAL_DOCUMENTS.md §"Bản dịch" để biết vì sao bản dịch KHÔNG phải
+    # docs/04-legal/LEGAL_DOCUMENTS.md §"Bản dịch" để biết vì sao bản dịch KHÔNG phải
     # một dòng nữa ở đây.
     "ALTER TABLE legal_documents ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'vi'",
     # Tóm tắt "bản này khác bản trước ở chỗ nào". Bắt người ta đồng ý lại mà
@@ -3009,16 +3398,119 @@ def one_way_statements() -> frozenset[str]:
     chúng chạy**. Trước 12/08/2026 câu trả lời là "bất kỳ ai gõ `docker compose
     up`", kể cả khi người đó chỉ định khởi động lại một service.
 
-    Nạp muộn `authz_schema` vì `metadata_db` được nó nhập ngược lại ở tầng
-    module; nhập sớm sẽ thành vòng.
+    Tập này có HAI nguồn, và nguồn thứ hai mới là biên giới thật:
+
+      * **Danh sách tay** (`_DROP_*`, `AUTHZ_ONE_WAY_DDL`) — mười một câu đã
+        được đọc từng chữ trong lượt vá 12/08/2026. Giữ lại làm lớp đỡ: nếu bộ
+        phân loại có ngày phân loại sai, mười một câu này vẫn không lên được
+        đường khởi động.
+      * **Bộ phân loại** (`startup_ddl_policy`) — mọi câu KHÔNG chứng minh
+        được là thuộc một hình dạng an toàn. Danh sách tay chỉ mạnh bằng trí
+        nhớ của người viết nó; đo lại ngày 13/08/2026 thì có thêm ba mươi hai
+        câu không ai đăng ký mà vẫn đổi dữ liệu hoặc đổi hình dạng cột ở mỗi
+        lần khởi động — trong đó có đổi tên năm role, tắt role, đổi kiểu một
+        cột sang `uuid`, và hai câu `RENAME COLUMN`.
+
+    Nạp muộn cả hai vì `metadata_db` được chúng nhập ngược lại ở tầng module;
+    nhập sớm sẽ thành vòng.
     """
     from app.storage.authz_schema import AUTHZ_ONE_WAY_DDL
+    from app.storage.startup_ddl_policy import migration_only_statements
 
-    return frozenset((
+    by_hand = frozenset((
         _DROP_PRE_REGISTRY_DIALECTS,
         _DROP_DEAD_USER_PROFILES,
         *_DROP_GLOBAL_CLASS_UNIQUES,
+        *_DROP_PRE_REGION_CLASS_UNIQUE,
+        *_DROP_COALESCE_REGION_UNIQUE,
+        # v6: hợp nhất bốn mã gói cũ vào bốn mã mới. Bộ phân loại xếp `DO $$`
+        # vào nhóm an toàn theo hình dạng — đúng với các khối tạo ràng buộc,
+        # sai với khối này, vì nó CHUYỂN dữ liệu giữa các bảng. Đăng ký tay là
+        # cách duy nhất để nó không lên đường khởi động.
+        _BILLING_V6_RENAME_PLANS,
     )) | AUTHZ_ONE_WAY_DDL
+
+    return by_hand | migration_only_statements()
+
+
+#: `DROP INDEX [CONCURRENTLY] [IF EXISTS] <tên>` — bắt tên chỉ mục bị bỏ.
+_RE_DROP_INDEX = re.compile(
+    r"^\s*DROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?"
+    r"([A-Za-z_][A-Za-z0-9_.\"]*)", re.IGNORECASE)
+
+#: `CREATE [UNIQUE] INDEX [CONCURRENTLY] [IF NOT EXISTS] <tên>`
+_RE_CREATE_INDEX = re.compile(
+    r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_.\"]*)", re.IGNORECASE)
+
+
+def _all_schema_statements() -> list[str]:
+    """Mọi câu DDL của lược đồ, gộp từ ba danh sách. Chỉ để SOI, không chạy."""
+    from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
+
+    ra: list[str] = []
+    for ds in (DDL_STATEMENTS, INDEX_STATEMENTS, MIGRATION_STATEMENTS,
+               AUTHZ_DDL_STATEMENTS):
+        ra += [s for s in ds if isinstance(s, str)]
+    return ra
+
+
+def retired_indexes() -> frozenset[str]:
+    """Chỉ mục ĐÃ RETIRE: bị một câu một chiều bỏ, và KHÔNG được tạo lại ở đâu.
+
+    Suy ra từ chính các câu DDL chứ không liệt kê tay, và đó là cả điểm của
+    hàm này. Sự cố 14/08 đã chứng minh liệt kê tay không đủ: câu
+    `DROP INDEX uq_classes_tenant_slug_lang_dialect` được thêm vào danh sách
+    một chiều, nhưng câu `CREATE` của chính chỉ mục đó vẫn nằm trong đường khởi
+    động — nên migration bỏ nó, backend khởi động lại dựng nó lên nguyên vẹn,
+    và ba biến thể vùng lại bị chặn. Không ai được báo.
+
+    Điều kiện "và KHÔNG được tạo lại" là thứ phân biệt RETIRE với THAY THẾ:
+    `uq_classes_tenant_slug_lang_dialect_region` cũng có một câu DROP (bản
+    `coalesce` cũ phải bị bỏ trước khi dựng bản trần, vì
+    `CREATE ... IF NOT EXISTS` lặng lẽ không thay thế một chỉ mục cùng tên).
+    Nó bị bỏ RỒI TẠO LẠI, nên nó phải CÓ MẶT — không phải retire.
+
+    Hệ quả có chủ ý: thêm một câu DROP mà quên gỡ câu CREATE thì hàm này trả
+    về rỗng cho chỉ mục đó. Đúng ngữ nghĩa — một đối tượng vừa bị bỏ vừa được
+    tạo là đối tượng đang được thay thế, và trạng thái đích của nó là CÓ MẶT.
+    Cái bẫy 14/08 nằm ở chỗ khác: người viết TƯỞNG mình đã retire nó. Phép
+    kiểm bắt được chuyện đó là `test_migration_retired_objects`, nó khẳng định
+    danh sách này không rỗng và có chứa đúng chỉ mục ấy.
+    """
+    tao = set()
+    for s in _all_schema_statements():
+        m = _RE_CREATE_INDEX.match(s)
+        if m:
+            tao.add(m.group(1).strip('"').lower())
+
+    bo = set()
+    for s in one_way_statements():
+        m = _RE_DROP_INDEX.match(s)
+        if m:
+            bo.add(m.group(1).strip('"').lower())
+
+    return frozenset(bo - tao)
+
+
+def retired_still_present(cur) -> list[str]:
+    """Đối tượng đáng lẽ đã biến mất mà vẫn còn trên cơ sở dữ liệu này.
+
+    Đây là NỬA THỨ HAI của hợp đồng migration, và trước 15/08/2026 nó không tồn
+    tại. `--status` chỉ chứng minh được "đối tượng CẦN CÓ đang có", nên trạng
+    thái `chỉ mục mới có + chỉ mục cũ VẪN còn` được báo là *"khớp"* — trong khi
+    lược đồ thực tế sai và biến thể vùng vẫn bị chặn.
+
+    Một câu retire chạy hụt không để lại dấu vết nào khác. Nếu không có phép
+    kiểm này thì không có gì phát hiện được nó.
+    """
+    ten = retired_indexes()
+    if not ten:
+        return []
+    cur.execute(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() "
+        "AND lower(indexname) = ANY(%s)", (sorted(ten),))
+    return [f"CHI MUC DA RETIRE VAN CON: {r[0]}" for r in cur.fetchall()]
 
 
 def startup_safe(statements) -> list[str]:
@@ -3258,11 +3750,13 @@ _INTEGRITY_CONSTRAINTS = {
         "GROUP BY tenant_id, class_idx HAVING count(*) > 1) d",
         "hai lop dung chung class_idx trong cung mot tenant (= chung mot o dau ra cua model)",
     ),
-    "uq_classes_tenant_slug_lang_dialect": (
+    "uq_classes_tenant_slug_lang_dialect_region": (
         "classes",
         "SELECT coalesce(sum(n - 1), 0) FROM (SELECT count(*) AS n FROM classes "
-        "WHERE deleted_at IS NULL GROUP BY tenant_id, slug, language, dialect HAVING count(*) > 1) d",
-        "hai lop trung (slug, language, dialect) trong cung mot tenant",
+        "WHERE deleted_at IS NULL "
+        "GROUP BY tenant_id, slug, language, dialect, coalesce(region, '') "
+        "HAVING count(*) > 1) d",
+        "hai lop trung (slug, language, dialect, region) trong cung mot tenant",
     ),
 }
 
@@ -3502,6 +3996,9 @@ _CLASS_DB_KEYS = (
     # vocabulary schema v2
     "semantic_label", "vocabulary_scope", "recognition_profile", "vocabulary_group",
     "collection_campaign", "is_active", "motion_type",
+    # Vùng miền của ký hiệu — trục riêng, tách khỏi `dialect`. Xem
+    # app/dataset_manager.py VALID_REGIONS.
+    "region",
     # Spelled as a literal, not TENANT_COLUMN, on purpose: tests/
     # test_sot_schema_coverage.py reads these three tuples as SOURCE TEXT (so it
     # runs on a bare checkout with no DB), and a symbol here makes it extract the

@@ -1,6 +1,6 @@
 """Tests for the Phase 2 label-detail viewer API + preview renderer.
 
-Covers the risk scenarios from docs/PHASE2_PLAN_3D_VIEWER.md:
+Covers the risk scenarios from Extra_docs/PHASE2_PLAN_3D_VIEWER.md:
     - session grouping (incl. legacy rows without session_id)
     - original-sample selection (augment_id 0 wins)
     - frames endpoint payload shape + 7-day private cache header

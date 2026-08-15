@@ -6,7 +6,12 @@ from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from app import audit
 from app.rate_limit_deps import limit_catalog
-from app.dataset_manager import get_or_register_class, list_classes, normalize_dialect
+from app.dataset_manager import (
+    get_or_register_class,
+    list_classes,
+    normalize_dialect,
+    normalize_region,
+)
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
 from app.dataset_samples import list_samples
 from app.balancer import build_balance_plan
@@ -104,6 +109,12 @@ def register_class(
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "")))
     is_common_global = bool(payload.get("is_common_global", False))
     is_common_language = bool(payload.get("is_common_language", False))
+    # Vùng của KÝ HIỆU, trục riêng với `dialect`. Bỏ trống thì `unclassified`,
+    # và đó là trạng thái có nghĩa chứ không phải chỗ trống — xem
+    # `REGION_UNCLASSIFIED`. Nhận ở đây là điều kiện để hai biến thể miền của
+    # cùng một từ tạo được qua giao diện; thiếu nó thì mọi lớp mới sinh ra đều
+    # `unclassified` và lớp thứ hai đụng khoá duy nhất.
+    region = normalize_region(payload.get("region"))
     try:
         meta = get_or_register_class(
             label_original=label,
@@ -111,6 +122,7 @@ def register_class(
             dialect=dialect,
             is_common_global=is_common_global,
             is_common_language=is_common_language,
+            region=region,
         )
     except AlphabetLabelError as exc:
         # A typo in a fingerspelling label, surfaced to the recorder rather than
@@ -122,7 +134,7 @@ def register_class(
         {
             "class_uid": meta.class_uid, "slug": meta.slug,
             "label": meta.label_original, "language": meta.language,
-            "dialect": meta.dialect,
+            "dialect": meta.dialect, "region": meta.region,
         },
     )
     return {
@@ -131,6 +143,7 @@ def register_class(
         "slug": meta.slug,
         "language": meta.language,
         "dialect": meta.dialect,
+        "region": meta.region,
     }
 
 

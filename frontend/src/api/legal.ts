@@ -96,7 +96,7 @@ export interface ConsentCoverage {
   version: string | null;
   accounts: number;
   accepted: number;
-  /** Tách riêng vì một dòng ghi hộ KHÔNG phải chữ ký. Xem docs/LEGAL_DOCUMENTS.md. */
+  /** Tách riêng vì một dòng ghi hộ KHÔNG phải chữ ký. Xem docs/04-legal/LEGAL_DOCUMENTS.md. */
   accepted_by_user: number;
   missing: number;
 }

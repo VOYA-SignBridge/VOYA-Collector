@@ -902,7 +902,7 @@ def rotate_refresh_token(
     outcome is inverted: a thief who calls /refresh first walks away with a
     valid new token while the real user's next refresh 401s and logs them out.
     RFC 9700 §4.14.2 asks for the whole family to be revoked instead. See
-    docs/needFix/AUTH_TOKEN_LIFECYCLE.md §1 for the full attack trace.
+    docs/03-security/AUTH_TOKEN_LIFECYCLE.md §1 for the full attack trace.
     """
     if not raw_token:
         return None

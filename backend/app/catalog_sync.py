@@ -22,6 +22,7 @@ from app.dataset_manager import (
     regenerate_label_indexes,
     slugify,
     normalize_dialect,
+    normalize_region,
     parse_bool,
 )
 from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
@@ -245,11 +246,25 @@ def _build_updated_class_meta(row: Dict[str, Any], payload: Dict[str, Any]) -> C
     else:
         dialect = normalize_dialect(str(dialect_input)) or str(dialect_input).strip().lower()
 
+    # `region` phải được MANG THEO, không được để rơi về mặc định.
+    #
+    # `ClassMetadata.region` mặc định là `unclassified`, nên dựng lại object mà
+    # không truyền trường này biến MỌI lần sửa nhãn thành một lần xoá vùng:
+    # đổi chính tả của `ăn [bac]` là nó thành `ăn [unclassified]`, im lặng, và
+    # bản ghi không còn phân biệt được với biến thể miền Nam. Với dữ liệu QIPEDC
+    # — nơi hàng trăm từ chỉ khác nhau ở đúng trường này — đó là mất dữ liệu chứ
+    # không phải phiền toái.
+    #
+    # Người gọi ĐƯỢC đổi vùng, nhưng phải nói ra; im lặng nghĩa là giữ nguyên.
+    region = normalize_region(
+        payload["region"] if "region" in payload else row.get("region"))
+
     slug = slugify(label_original)
     class_uid = row["class_uid"]
     class_idx = int(row["class_idx"]) if str(row.get("class_idx") or "").strip() else None
     folder_override = f"class_{slug}_{class_uid[:8]}"
     return ClassMetadata(
+        region=region,
         class_uid=class_uid,
         class_idx=class_idx,
         slug=slug,
