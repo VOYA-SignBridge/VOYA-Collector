@@ -449,10 +449,66 @@ def csdl_trong(cur):
     try:
         yield ten
     finally:
+        _bo_csdl_tam(cur, ten)
+
+
+def _bo_csdl_tam(cur, ten: str, so_lan: int = 10) -> None:
+    """Xoá cơ sở dữ liệu nháp, chịu được đường đua dọn kết nối của PostgreSQL.
+
+    Vì sao bản đơn giản KHÔNG chạy ổn định
+    --------------------------------------
+    Bài kiểm ở lớp này gọi `app.cli.migrate` bằng TIẾN TRÌNH RIÊNG, và tiến
+    trình ấy nối vào cơ sở dữ liệu nháp bằng CẢ HAI vai: `voya_test_owner` cho
+    DSN migration và `voya_test_app` cho DSN ứng dụng. Khi tiến trình con thoát,
+    PostgreSQL không dọn backend của nó tức khắc — trong một khoảng ngắn,
+    `pg_stat_activity` vẫn còn dòng của vai ỨNG DỤNG.
+
+    Dọn dẹp ở đây chạy dưới `voya_test_owner`, một vai NOSUPERUSER. Bắn
+    `pg_terminate_backend` vào một backend thuộc vai khác thì PostgreSQL ném
+    `InsufficientPrivilege` — và vì câu ấy giết cả lô trong MỘT lượt gọi, một
+    dòng lạ làm hỏng toàn bộ lượt dọn, kể cả những backend mà vai này thừa
+    quyền giết.
+
+    Kết quả là một bài kiểm đỏ theo xác suất, đỏ vì đường đua dọn dẹp chứ không
+    vì điều nó khẳng định. Đó là kiểu hỏng đắt nhất trong kho này: nó dạy người
+    đọc rằng đỏ ở nhóm cách ly là chuyện thường, và lần đỏ THẬT sẽ bị bỏ qua.
+
+    Ba tính chất
+    ------------
+    * **Giết TỪNG backend một**, nuốt lỗi từng cái. Vai này giết được cái nào
+      thì giết cái đó; cái thuộc vai khác để PostgreSQL tự dọn.
+    * **Thử lại `DROP`**, vì đường đua chỉ kéo dài vài chục mili giây.
+    * **Hỏng thì NÓI RA ai đang giữ.** Nếu hết lượt vẫn không xoá được thì đây
+      là rò kết nối thật, không phải đường đua — và thông báo phải đủ để chẩn
+      đoán trong một lần đọc, chứ không phải một `InsufficientPrivilege` trần.
+    """
+    import time
+
+    for lan in range(so_lan):
         cur.execute(
-            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "SELECT pid FROM pg_stat_activity "
             "WHERE datname = %s AND pid <> pg_backend_pid()", (ten,))
-        cur.execute(f'DROP DATABASE IF EXISTS "{ten}"')
+        for (pid,) in cur.fetchall():
+            try:
+                cur.execute("SELECT pg_terminate_backend(%s)", (pid,))
+            except Exception:                                    # noqa: BLE001
+                # Backend của vai khác. Không giết được, và không cần giết —
+                # nó sắp tự biến mất.
+                pass
+        try:
+            cur.execute(f'DROP DATABASE IF EXISTS "{ten}"')
+            return
+        except Exception:                                        # noqa: BLE001
+            if lan == so_lan - 1:
+                cur.execute(
+                    "SELECT usename, state, application_name FROM pg_stat_activity "
+                    "WHERE datname = %s AND pid <> pg_backend_pid()", (ten,))
+                con_giu = cur.fetchall()
+                raise AssertionError(
+                    f"khong xoa duoc co so du lieu nhap {ten!r} sau {so_lan} lan thu. "
+                    f"Ket noi con giu: {con_giu}. Day la RO KET NOI, khong phai "
+                    f"duong dua don dep — tim cho mo ket noi ma khong dong.")
+            time.sleep(0.2)
 
 
 class TestBanCaiMoi:
@@ -491,7 +547,11 @@ class TestBanCaiMoi:
 
         import psycopg2
 
-        with psycopg2.connect(mig) as conn:
+        # `with psycopg2.connect(...)` KHÔNG đóng kết nối — nó chỉ kết thúc giao
+        # dịch. Kết nối còn sống thì lượt dọn ở `csdl_trong` phải giết chính nó,
+        # và bài kiểm tự tạo ra đường đua mà nó sắp phải chịu.
+        conn = psycopg2.connect(mig)
+        try:
             conn.autocommit = True
             with conn.cursor() as c:
                 c.execute("SELECT set_config('app.system_scope', 'on', false)")
@@ -542,6 +602,8 @@ class TestBanCaiMoi:
                     "SELECT attnotnull FROM pg_attribute "
                     "WHERE attrelid = 'classes'::regclass AND attname = 'region'")
                 assert c.fetchone()[0] is True, "classes.region chua NOT NULL"
+        finally:
+            conn.close()
 
     def test_status_xanh_ngay_sau_lan_migrate_dau_tien(self, csdl_trong):
         """Một bản cài mới phải tự nhận là đã xong, không cần lượt chạy thứ hai."""
