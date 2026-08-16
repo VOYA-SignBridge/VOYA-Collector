@@ -1,0 +1,202 @@
+erDiagram
+
+    %% Logical Data Model — CTU.SignBridge
+    %% Reverse-engineered from the running PostgreSQL 17 instance:
+    %% information_schema.columns for names/types/nullability,
+    %% pg_constraint for primary, unique and foreign keys with their delete rules.
+    %% Solid connectors (--) are foreign keys the database enforces.
+    %% Dashed connectors (..) are relations the application maintains but the
+    %% schema does not declare; see the note at the end of this file.
+
+
+    %% =====================================================
+    %% IDENTITY AND ACCESS
+    %% =====================================================
+
+    USERS {
+        UUID id PK
+        TEXT username UK
+        TEXT email UK
+        TEXT password_hash
+        BOOLEAN is_active
+        BOOLEAN is_admin
+        TIMESTAMPTZ created_at
+    }
+
+    REFRESH_TOKENS {
+        TEXT token_hash PK
+        UUID user_id FK "-> users.id, on delete cascade"
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ revoked_at
+        TIMESTAMPTZ created_at
+    }
+
+    PASSWORD_RESET_TOKENS {
+        TEXT token_hash PK
+        UUID user_id FK "-> users.id, on delete cascade"
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ used_at
+        TIMESTAMPTZ created_at
+    }
+
+    %% =====================================================
+    %% DATASET CATALOGUE
+    %% =====================================================
+
+    CLASSES {
+        TEXT class_uid PK
+        INTEGER class_idx
+        TEXT slug
+        TEXT label_original
+        TEXT language
+        TEXT dialect
+        BOOLEAN is_common_global
+        BOOLEAN is_common_language
+        TEXT folder_name
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ migrated_at
+        TIMESTAMPTZ deleted_at
+        INTEGER hands_required
+        TEXT semantic_label
+        TEXT vocabulary_scope
+        TEXT recognition_profile
+        TEXT vocabulary_group
+        TEXT collection_campaign
+        BOOLEAN is_active
+        TEXT motion_type
+    }
+
+    SIGNERS {
+        TEXT signer_id PK
+        TEXT display_name
+        TEXT regional_group
+        TEXT external_user_id
+        BOOLEAN is_active
+        TIMESTAMPTZ created_at
+    }
+
+    SAMPLES {
+        TEXT sample_uid PK
+        TEXT class_uid "-> classes.class_uid, no FK constraint"
+        TEXT slug
+        TEXT label_original
+        TEXT language
+        TEXT dialect
+        TEXT source_type
+        TEXT user_id
+        UUID auth_user_id FK "-> users.id, on delete set null"
+        TEXT session_id
+        TEXT fps_original
+        TEXT fps_processed
+        INTEGER seq_len
+        INTEGER augment_id
+        REAL completeness
+        TEXT file_path
+        TEXT storage_url
+        TEXT checksum
+        TIMESTAMPTZ created_at
+        BOOLEAN gdrive_synced
+        BOOLEAN sheets_synced
+        TIMESTAMPTZ deleted_at
+        REAL left_hand_ratio
+        REAL right_hand_ratio
+        REAL both_hands_ratio
+        REAL jitter
+        TEXT quality_flags
+        TEXT signer_id "-> signers.signer_id, no FK constraint"
+        TEXT collection_campaign
+        BOOLEAN raw_landmarks_available
+        TEXT normalization_version
+        TEXT preprocess_contract_version
+        INTEGER sequence_length_original
+        TEXT quality_status
+    }
+
+    RAW_UPLOADS {
+        TEXT upload_uid PK
+        TEXT class_uid "-> classes.class_uid, no FK constraint"
+        TEXT slug
+        TEXT label_original
+        TEXT language
+        TEXT dialect
+        TEXT source_type
+        TEXT user_id
+        UUID auth_user_id FK "-> users.id, on delete set null"
+        TEXT session_id
+        TEXT original_filename
+        TEXT local_path
+        TEXT storage_key
+        TEXT storage_url
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ updated_at
+        TIMESTAMPTZ deleted_at
+    }
+
+    %% =====================================================
+    %% EXPERIMENT LIFECYCLE
+    %% =====================================================
+
+    TRAINING_JOBS {
+        TEXT job_id PK
+        TEXT status
+        TEXT model_type
+        JSONB config
+        UUID auth_user_id FK "-> users.id, on delete set null"
+        TIMESTAMPTZ created_at
+        TIMESTAMPTZ started_at
+        TIMESTAMPTZ completed_at
+        INTEGER current_epoch
+        INTEGER total_epochs
+        TEXT checkpoint_path
+        REAL test_acc
+        REAL test_f1
+        TEXT error_message
+        TIMESTAMPTZ promoted_at
+        JSONB evaluation
+        JSONB split_provenance
+    }
+
+    TRAINING_METRICS {
+        TEXT job_id PK "-> training_jobs.job_id, no FK constraint"
+        INTEGER epoch PK
+        REAL train_loss
+        REAL train_acc
+        REAL val_loss
+        REAL val_acc
+        REAL val_f1
+        TIMESTAMPTZ created_at
+    }
+
+    %% =====================================================
+    %% SUPPORTING SYNCHRONISATION
+    %% =====================================================
+
+    GOOGLE_SHEETS_SYNC_STATUS {
+        INTEGER id PK
+        VARCHAR table_name UK "length 50"
+        VARCHAR current_spreadsheet_id "length 100"
+        INTEGER current_sheet_index
+        INTEGER current_data_rows
+        INTEGER max_rows_per_sheet
+        TIMESTAMPTZ updated_at
+    }
+
+    %% =====================================================
+    %% RELATIONSHIPS ENFORCED BY FOREIGN-KEY CONSTRAINTS
+    %% All five point at USERS; there are no others in the schema.
+    %% =====================================================
+
+    USERS ||--o{ REFRESH_TOKENS : "owns"
+    USERS ||--o{ PASSWORD_RESET_TOKENS : "owns"
+    USERS |o--o{ SAMPLES : "contributes"
+    USERS |o--o{ RAW_UPLOADS : "uploads"
+    USERS |o--o{ TRAINING_JOBS : "submits"
+
+    %% =====================================================
+    %% LOGICAL RELATIONSHIPS ONLY — no FK constraint exists
+    %% =====================================================
+
+    CLASSES |o..o{ SAMPLES : "categorises"
+    CLASSES |o..o{ RAW_UPLOADS : "categorises"
+    SIGNERS |o..o{ SAMPLES : "performs"
+    TRAINING_JOBS ||..o{ TRAINING_METRICS : "records"

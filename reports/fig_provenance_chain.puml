@@ -1,0 +1,102 @@
+@startuml fig_provenance_chain
+' Signer-Independent Evaluation and Provenance Design
+' UML 2.5 Component Diagram over the artefact chain.
+' Verified against processed/splits/versions/*/split_metadata.json,
+' backend/app/routers/training.py (_research_splits, _provenance_checks)
+' and scripts/research_validity.py (evaluate_checkpoint, C1-C14).
+
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 17
+skinparam shadowing false
+skinparam linetype ortho
+skinparam roundcorner 4
+skinparam nodesep 55
+skinparam ranksep 65
+skinparam ArrowColor #333333
+skinparam ArrowFontSize 14
+skinparam ComponentBackgroundColor #FFFFFF
+skinparam ComponentBorderColor #333333
+skinparam ComponentFontSize 17
+skinparam ArtifactBackgroundColor #FFFFFF
+skinparam ArtifactBorderColor #333333
+skinparam DatabaseBackgroundColor #FFFFFF
+skinparam DatabaseBorderColor #333333
+skinparam PackageBackgroundColor #FCFCFC
+skinparam PackageBorderColor #777777
+skinparam PackageFontSize 18
+skinparam PackageFontStyle bold
+skinparam NoteBackgroundColor #FAFAFA
+skinparam NoteBorderColor #999999
+skinparam NoteFontSize 14
+skinparam LegendBackgroundColor #FAFAFA
+skinparam LegendBorderColor #999999
+skinparam LegendFontSize 14
+
+package "Partitioning" as P1 {
+  database "Sample corpus\nsamples, signers" as CORPUS
+  component "Split generator" as GEN
+  artifact "Versioned split directory\ntrain.csv / val.csv / test.csv" as SPLITDIR
+  artifact "split_metadata.json\nsplit_mode, signer_disjoint,\nsigners per partition, counts,\nvalid_for_research" as META
+}
+
+package "Admission" as P2 {
+  component "Gate 1 — Backend API\n_research_splits()" as G1
+  component "Gate 2 — Trainer subprocess\n_enforce_research_preconditions()" as G2
+}
+
+package "Recorded provenance" as P3 {
+  database "training_jobs.split_provenance\njsonb" as PROV
+  artifact "Checkpoint contract fields\ndataset_version, split_version,\ndataset_manifest_checksum, git_commit,\nruntime environment, recognition_profile" as CONTRACT
+}
+
+package "On-demand assessment" as P4 {
+  component "evaluate_checkpoint()\ncriteria C1 to C14" as EVAL
+  artifact "Verdict\nvalid | invalid | undecidable" as VERDICT
+}
+
+CORPUS -down-> GEN
+GEN -down-> SPLITDIR
+GEN -down-> META
+
+META -down-> G1
+G1 -down-> G2
+G2 -down-> PROV : freeze
+G2 -down-> CONTRACT : stamp
+
+PROV -down-> EVAL
+CONTRACT -down-> EVAL
+EVAL -down-> VERDICT
+
+note right of META
+  The generator writes train.csv, val.csv and test.csv over
+  **disjoint sets of signers**, and records which signer went
+  where. Disjointness covers the **validation** partition as well
+  as the test partition, so model selection never sees a signer
+  that is later used to report the result.
+end note
+
+note right of G1
+  Gate 1 offers only flat, research-valid splits. LOSO and
+  matched-leak fold sets are deliberately withheld: they are
+  multi-run evaluation protocols, not a single training job.
+  Splits flagged valid_for_research = false are withheld too,
+  because Gate 2 would reject them anyway.
+end note
+
+note bottom of VERDICT
+  Three-valued, fail-closed. A criterion that cannot be decided from the
+  artefact yields **undecidable**, but only when no criterion has definitely
+  failed; a definite failure always outranks an undecidable one.
+end note
+
+legend bottom
+  What the fourteen criteria cover — C1 run intent (research, not the smoke_test default) | C2, C3 augmentation and
+  checkpoint contract fields | C4, C5 dataset and split versioning plus manifest checksum | C6, C7, C12 split metadata
+  present, research-valid, and a non-empty test set | C8, C9 recognition profile matches the labels, with no
+  cross-profile leakage | C10, C11 runtime environment and git commit recorded | C13, C14 metrics taken from the
+  restored best-validation checkpoint of a run that did not fail.
+  The assessment is never run inside training: it reads the stored checkpoint only when a user asks for it, and its
+  outcome is not written back to training_jobs.
+endlegend
+
+@enduml

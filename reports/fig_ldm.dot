@@ -1,0 +1,195 @@
+digraph ldm {
+  graph [rankdir=TB, splines=polyline, nodesep=0.65, ranksep=0.95,
+         bgcolor="white", fontname="Times New Roman,", fontsize=13];
+  node  [shape=plaintext, fontname="Times New Roman,", fontsize=12];
+  edge  [color="#333333", penwidth=1.1, arrowsize=1.0, dir=both];
+
+  classes [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>classes</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="class_uid" ALIGN="LEFT"><B>class_uid</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="class_idx" ALIGN="LEFT">class_idx</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="slug" ALIGN="LEFT">slug</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="label_original" ALIGN="LEFT">label_original</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="language" ALIGN="LEFT">language</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="dialect" ALIGN="LEFT">dialect</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="is_common_global" ALIGN="LEFT">is_common_global</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="is_common_language" ALIGN="LEFT">is_common_language</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="folder_name" ALIGN="LEFT">folder_name</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="migrated_at" ALIGN="LEFT">migrated_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="deleted_at" ALIGN="LEFT">deleted_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="hands_required" ALIGN="LEFT">hands_required</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="semantic_label" ALIGN="LEFT">semantic_label</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="vocabulary_scope" ALIGN="LEFT">vocabulary_scope</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="recognition_profile" ALIGN="LEFT">recognition_profile</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="vocabulary_group" ALIGN="LEFT">vocabulary_group</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="collection_campaign" ALIGN="LEFT">collection_campaign</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="is_active" ALIGN="LEFT">is_active</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="motion_type" ALIGN="LEFT">motion_type</TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  google_sheets_sync_status [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>google_sheets_sync_status</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="id" ALIGN="LEFT"><B>id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">VARCHAR(50)</FONT></TD><TD PORT="table_name" ALIGN="LEFT"><B>table_name</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">UK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">VARCHAR(100)</FONT></TD><TD PORT="current_spreadsheet_id" ALIGN="LEFT">current_spreadsheet_id <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="current_sheet_index" ALIGN="LEFT">current_sheet_index <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="current_data_rows" ALIGN="LEFT">current_data_rows <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="max_rows_per_sheet" ALIGN="LEFT">max_rows_per_sheet <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="updated_at" ALIGN="LEFT">updated_at</TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  password_reset_tokens [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>password_reset_tokens</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="token_hash" ALIGN="LEFT"><B>token_hash</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">UUID</FONT></TD><TD PORT="user_id" ALIGN="LEFT"><B>user_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">FK cascade</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="expires_at" ALIGN="LEFT">expires_at <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="used_at" ALIGN="LEFT">used_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  raw_uploads [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>raw_uploads</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="upload_uid" ALIGN="LEFT"><B>upload_uid</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="class_uid" ALIGN="LEFT">class_uid</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="slug" ALIGN="LEFT">slug</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="label_original" ALIGN="LEFT">label_original</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="language" ALIGN="LEFT">language</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="dialect" ALIGN="LEFT">dialect</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="source_type" ALIGN="LEFT">source_type</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="user_id" ALIGN="LEFT">user_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">UUID</FONT></TD><TD PORT="auth_user_id" ALIGN="LEFT"><B>auth_user_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">FK set null</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="session_id" ALIGN="LEFT">session_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="original_filename" ALIGN="LEFT">original_filename</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="local_path" ALIGN="LEFT">local_path</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="storage_key" ALIGN="LEFT">storage_key</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="storage_url" ALIGN="LEFT">storage_url</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="updated_at" ALIGN="LEFT">updated_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="deleted_at" ALIGN="LEFT">deleted_at</TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  refresh_tokens [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>refresh_tokens</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="token_hash" ALIGN="LEFT"><B>token_hash</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">UUID</FONT></TD><TD PORT="user_id" ALIGN="LEFT"><B>user_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">FK cascade</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="expires_at" ALIGN="LEFT">expires_at <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="revoked_at" ALIGN="LEFT">revoked_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  samples [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>samples</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="sample_uid" ALIGN="LEFT"><B>sample_uid</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="class_uid" ALIGN="LEFT">class_uid</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="slug" ALIGN="LEFT">slug</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="label_original" ALIGN="LEFT">label_original</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="language" ALIGN="LEFT">language</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="dialect" ALIGN="LEFT">dialect</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="source_type" ALIGN="LEFT">source_type</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="user_id" ALIGN="LEFT">user_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">UUID</FONT></TD><TD PORT="auth_user_id" ALIGN="LEFT"><B>auth_user_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">FK set null</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="session_id" ALIGN="LEFT">session_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="fps_original" ALIGN="LEFT">fps_original</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="fps_processed" ALIGN="LEFT">fps_processed</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="seq_len" ALIGN="LEFT">seq_len</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="augment_id" ALIGN="LEFT">augment_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="completeness" ALIGN="LEFT">completeness</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="file_path" ALIGN="LEFT">file_path</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="storage_url" ALIGN="LEFT">storage_url</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="checksum" ALIGN="LEFT">checksum</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="gdrive_synced" ALIGN="LEFT">gdrive_synced</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="sheets_synced" ALIGN="LEFT">sheets_synced</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="deleted_at" ALIGN="LEFT">deleted_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="left_hand_ratio" ALIGN="LEFT">left_hand_ratio</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="right_hand_ratio" ALIGN="LEFT">right_hand_ratio</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="both_hands_ratio" ALIGN="LEFT">both_hands_ratio</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="jitter" ALIGN="LEFT">jitter</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="quality_flags" ALIGN="LEFT">quality_flags</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="signer_id" ALIGN="LEFT">signer_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="collection_campaign" ALIGN="LEFT">collection_campaign</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="raw_landmarks_available" ALIGN="LEFT">raw_landmarks_available</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="normalization_version" ALIGN="LEFT">normalization_version</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="preprocess_contract_version" ALIGN="LEFT">preprocess_contract_version</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="sequence_length_original" ALIGN="LEFT">sequence_length_original</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="quality_status" ALIGN="LEFT">quality_status</TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  signers [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>signers</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="signer_id" ALIGN="LEFT"><B>signer_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="display_name" ALIGN="LEFT">display_name</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="regional_group" ALIGN="LEFT">regional_group</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="external_user_id" ALIGN="LEFT">external_user_id</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="is_active" ALIGN="LEFT">is_active</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  training_jobs [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>training_jobs</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="job_id" ALIGN="LEFT"><B>job_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="status" ALIGN="LEFT">status <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="model_type" ALIGN="LEFT">model_type</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">JSONB</FONT></TD><TD PORT="config" ALIGN="LEFT">config</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">UUID</FONT></TD><TD PORT="auth_user_id" ALIGN="LEFT"><B>auth_user_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">FK set null</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="started_at" ALIGN="LEFT">started_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="completed_at" ALIGN="LEFT">completed_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="current_epoch" ALIGN="LEFT">current_epoch <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="total_epochs" ALIGN="LEFT">total_epochs <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="checkpoint_path" ALIGN="LEFT">checkpoint_path</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="test_acc" ALIGN="LEFT">test_acc</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="test_f1" ALIGN="LEFT">test_f1</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="error_message" ALIGN="LEFT">error_message</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="promoted_at" ALIGN="LEFT">promoted_at</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">JSONB</FONT></TD><TD PORT="evaluation" ALIGN="LEFT">evaluation</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">JSONB</FONT></TD><TD PORT="split_provenance" ALIGN="LEFT">split_provenance</TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  training_metrics [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>training_metrics</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="job_id" ALIGN="LEFT"><B>job_id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">INTEGER</FONT></TD><TD PORT="epoch" ALIGN="LEFT"><B>epoch</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="train_loss" ALIGN="LEFT">train_loss</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="train_acc" ALIGN="LEFT">train_acc</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="val_loss" ALIGN="LEFT">val_loss</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="val_acc" ALIGN="LEFT">val_acc</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">REAL</FONT></TD><TD PORT="val_f1" ALIGN="LEFT">val_f1</TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  users [label=<
+    <TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#333333">
+      <TR><TD COLSPAN="3" BGCOLOR="#E8E8E8" ALIGN="CENTER"><B>users</B></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">UUID</FONT></TD><TD PORT="id" ALIGN="LEFT"><B>id</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">PK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="username" ALIGN="LEFT"><B>username</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">UK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="email" ALIGN="LEFT"><B>email</B></TD><TD ALIGN="CENTER"><FONT COLOR="#555555">UK</FONT></TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TEXT</FONT></TD><TD PORT="password_hash" ALIGN="LEFT">password_hash <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="is_active" ALIGN="LEFT">is_active <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">BOOLEAN</FONT></TD><TD PORT="is_admin" ALIGN="LEFT">is_admin <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+      <TR><TD ALIGN="LEFT"><FONT COLOR="#555555">TIMESTAMPTZ</FONT></TD><TD PORT="created_at" ALIGN="LEFT">created_at <FONT COLOR="#777777">*</FONT></TD><TD ALIGN="CENTER"> </TD></TR>
+    </TABLE>>];
+
+  // Declared foreign keys, enforced by PostgreSQL
+  users:id:w -> password_reset_tokens:user_id:w [arrowtail=teetee, arrowhead=crowodot];
+  users:id:w -> raw_uploads:auth_user_id:w [arrowtail=teeodot, arrowhead=crowodot];
+  users:id:w -> refresh_tokens:user_id:w [arrowtail=teetee, arrowhead=crowodot];
+  users:id:w -> samples:auth_user_id:w [arrowtail=teeodot, arrowhead=crowodot];
+  users:id:w -> training_jobs:auth_user_id:w [arrowtail=teeodot, arrowhead=crowodot];
+
+  // Logical relations with no FK constraint in the schema
+  classes:class_uid:w -> samples:class_uid:w [style=dashed, color="#777777", arrowtail=teeodot, arrowhead=crowodot];
+  signers:signer_id:w -> samples:signer_id:w [style=dashed, color="#777777", arrowtail=teeodot, arrowhead=crowodot];
+  classes:class_uid:w -> raw_uploads:class_uid:w [style=dashed, color="#777777", arrowtail=teeodot, arrowhead=crowodot];
+  training_jobs:job_id:w -> training_metrics:job_id:w [style=dashed, color="#777777", arrowtail=teetee, arrowhead=crowodot];
+}

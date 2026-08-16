@@ -1,0 +1,135 @@
+erDiagram
+
+    %% Logical Data Model — CTU.SignBridge (abridged view)
+    %% Keys, relationship-bearing columns and research-relevant attributes only.
+    %% Purely descriptive attributes, denormalised label copies, storage plumbing,
+    %% synchronisation flags and soft-delete timestamps are omitted; the omitted
+    %% count is stated per table below and the full model is in fig_ldm.mmd.
+    %% Schema read from the running PostgreSQL 17 instance:
+    %% information_schema.columns for names, types and nullability;
+    %% pg_constraint for primary, unique and foreign keys with their delete rules.
+    %% Solid connectors (--) are foreign keys the database enforces: there are five,
+    %% and all five point at USERS. Dashed connectors (..) are relations the
+    %% application maintains but the schema does not declare.
+
+
+    %% ---------- Identity and access ----------
+
+    USERS {
+        UUID id PK
+        TEXT username UK
+        TEXT email UK
+        BOOLEAN is_active
+        BOOLEAN is_admin
+    }
+
+    REFRESH_TOKENS {
+        TEXT token_hash PK
+        UUID user_id FK "-> users.id, on delete cascade"
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ revoked_at
+    }
+
+    PASSWORD_RESET_TOKENS {
+        TEXT token_hash PK
+        UUID user_id FK "-> users.id, on delete cascade"
+        TIMESTAMPTZ expires_at
+        TIMESTAMPTZ used_at
+    }
+
+    %% ---------- Dataset catalogue ----------
+
+    CLASSES {
+        TEXT class_uid PK
+        INTEGER class_idx
+        TEXT slug
+        TEXT label_original
+        TEXT language
+        TEXT dialect
+        TEXT recognition_profile
+        INTEGER hands_required
+        TEXT motion_type
+    }
+
+    SIGNERS {
+        TEXT signer_id PK
+        TEXT display_name
+        TEXT regional_group
+        BOOLEAN is_active
+    }
+
+    SAMPLES {
+        TEXT sample_uid PK
+        TEXT class_uid "-> classes.class_uid, no FK constraint"
+        TEXT signer_id "-> signers.signer_id, no FK constraint"
+        UUID auth_user_id FK "-> users.id, on delete set null"
+        TEXT session_id
+        INTEGER seq_len
+        REAL completeness
+        REAL both_hands_ratio
+        TEXT quality_status
+        TEXT normalization_version
+        TEXT file_path
+        TIMESTAMPTZ created_at
+    }
+
+    RAW_UPLOADS {
+        TEXT upload_uid PK
+        TEXT class_uid "-> classes.class_uid, no FK constraint"
+        UUID auth_user_id FK "-> users.id, on delete set null"
+        TEXT source_type
+        TEXT original_filename
+        TEXT storage_key
+        TIMESTAMPTZ created_at
+    }
+
+    %% ---------- Experiment lifecycle ----------
+
+    TRAINING_JOBS {
+        TEXT job_id PK
+        UUID auth_user_id FK "-> users.id, on delete set null"
+        TEXT model_type
+        TEXT status
+        INTEGER current_epoch
+        INTEGER total_epochs
+        JSONB config
+        JSONB split_provenance
+        JSONB evaluation
+        REAL test_acc
+        REAL test_f1
+        TEXT checkpoint_path
+        TIMESTAMPTZ promoted_at
+    }
+
+    TRAINING_METRICS {
+        TEXT job_id PK "-> training_jobs.job_id, no FK constraint"
+        INTEGER epoch PK
+        REAL train_loss
+        REAL val_loss
+        REAL val_acc
+        REAL val_f1
+    }
+
+    %% ---------- Supporting synchronisation ----------
+
+    GOOGLE_SHEETS_SYNC_STATUS {
+        INTEGER id PK
+        VARCHAR table_name UK "length 50"
+        VARCHAR current_spreadsheet_id "length 100"
+        INTEGER current_data_rows
+    }
+
+    %% ---------- Enforced by foreign-key constraints ----------
+
+    USERS ||--o{ REFRESH_TOKENS : "owns"
+    USERS ||--o{ PASSWORD_RESET_TOKENS : "owns"
+    USERS |o--o{ SAMPLES : "contributes"
+    USERS |o--o{ RAW_UPLOADS : "uploads"
+    USERS |o--o{ TRAINING_JOBS : "submits"
+
+    %% ---------- Logical only: no FK constraint exists ----------
+
+    CLASSES |o..o{ SAMPLES : "categorises"
+    CLASSES |o..o{ RAW_UPLOADS : "categorises"
+    SIGNERS |o..o{ SAMPLES : "performs"
+    TRAINING_JOBS ||..o{ TRAINING_METRICS : "records"

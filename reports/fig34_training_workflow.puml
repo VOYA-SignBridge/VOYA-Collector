@@ -1,0 +1,104 @@
+@startuml fig34_training_workflow
+' Training and Evaluation Workflow
+' UML 2.5 Activity Diagram with partitions (swimlanes).
+' Every step below was verified against the running source tree.
+
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 17
+skinparam shadowing false
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityBorderColor #333333
+skinparam ActivityFontSize 17
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondFontSize 17
+skinparam ArrowColor #333333
+skinparam ArrowFontSize 15
+skinparam NoteBackgroundColor #FAFAFA
+skinparam NoteBorderColor #999999
+skinparam NoteFontSize 14
+skinparam SwimlaneBorderColor #666666
+skinparam SwimlaneTitleFontStyle bold
+skinparam SwimlaneTitleFontSize 18
+
+|Researcher|
+start
+:Select a published partition
+and submit a training request;
+
+|Backend Application Service|
+:Receive request
+POST /training/jobs;
+if (Partition eligible?\n_research_splits()) then ([no])
+  :Return 4xx;
+  note left
+    **Gate 1** — enforced in the backend
+    process; no training_jobs row is created.
+  end note
+  stop
+else ([yes])
+endif
+:Insert training_jobs row (queued)
+and enqueue the Celery task;
+
+|Trainer Subprocess|
+:Receive task, load configuration;
+if (Research preconditions met?\n_enforce_research_preconditions()) then ([no])
+  :Mark the job failed;
+  note right
+    **Gate 2** — re-checked inside the trainer
+    subprocess before optimisation starts. The
+    two gates are independent and run in two
+    different execution contexts.
+  end note
+  stop
+else ([yes])
+endif
+:Load data, initialise the model;
+repeat
+  :Train one epoch and evaluate
+  on the validation set (macro-F1);
+  :Append per-epoch metrics
+  (JSONL to PostgreSQL);
+  note right
+    Written by the trainer's supervisor
+    process, not by the backend.
+  end note
+repeat while (Epochs left and patience not exhausted?\npatience = 10) is ([yes]) not ([early stop / epochs exhausted])
+:Restore the best weights by validation
+macro-F1 and evaluate on the test set;
+:Persist the checkpoint and final metrics;
+
+|Backend Application Service|
+:Mark the job completed;
+
+|Researcher|
+:Inspect the results on the dashboard;
+if (Request a validity assessment?) then ([no])
+  stop
+else ([yes])
+endif
+:Call GET /training/jobs/{id}/provenance;
+note right
+  This branch is **not** on the training path. It runs
+  only on demand, over the stored checkpoint, and its
+  outcome is never written back to training_jobs.
+end note
+
+|Backend Application Service|
+:Read the stored checkpoint and call
+evaluate_checkpoint() over criteria C1-C14;
+switch (Verdict?)
+case ([valid])
+  :Report valid;
+case ([invalid])
+  :Report invalid;
+case ([undecidable])
+  :Report undecidable;
+endswitch
+
+|Researcher|
+:Receive the C1-C14 verdict;
+stop
+
+@enduml

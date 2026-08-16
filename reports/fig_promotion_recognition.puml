@@ -1,0 +1,122 @@
+@startuml fig_promotion_recognition
+' Controlled Promotion and Real-Time Recognition Design
+' UML 2.5 Sequence Diagram.
+' Verified against backend/app/routers/training.py (promote_training_job)
+' and backend/realtime_service/app/predict.py (predict).
+
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 16
+skinparam shadowing false
+skinparam ParticipantFontSize 16
+skinparam ParticipantFontStyle bold
+skinparam ActorFontSize 16
+skinparam ActorFontStyle bold
+skinparam SequenceMessageAlignment center
+skinparam SequenceGroupFontSize 16
+skinparam SequenceGroupHeaderFontSize 16
+skinparam NoteFontSize 14
+skinparam NoteBackgroundColor #FAFAFA
+skinparam NoteBorderColor #999999
+skinparam SequenceLifeLineBorderColor #666666
+skinparam ArrowColor #333333
+skinparam ParticipantBackgroundColor #FFFFFF
+skinparam ParticipantBorderColor #333333
+skinparam ActorBackgroundColor #FFFFFF
+skinparam ActorBorderColor #333333
+skinparam DatabaseBackgroundColor #FFFFFF
+skinparam DatabaseBorderColor #333333
+skinparam SequenceBoxBackgroundColor #FFFFFF
+
+actor "Administrator" as ADMIN
+actor "Signer" as USER
+participant "Web Client\nReact SPA" as SPA
+participant "Backend API\nFastAPI" as API
+database "Checkpoint\nstore" as CKPT
+database "Model registry\nmodels.json" as REG
+participant "Recognition Service\nFastAPI, port 8010" as RT
+database "PostgreSQL" as PG
+
+autonumber "<b>[0]"
+
+group Controlled promotion — administrators only
+  ADMIN -> API : POST /training/jobs/{id}/promote
+  activate API
+  API -> API : require_admin
+
+  alt job status is not "completed"
+    API --> ADMIN : 409 Conflict
+  else checkpoint file is missing
+    API --> ADMIN : 404 Not Found
+  else job is completed and its checkpoint exists
+    API -> CKPT : read the checkpoint, take model_type
+
+  group#Gainsboro architecture admission
+    alt model_type not in the realtime registry
+      API --> ADMIN : 400 Bad Request
+    else architecture is recognised
+    end
+  end
+
+    API -> CKPT : copy checkpoint into the deployment directory
+    note right of API
+      The realtime slot is keyed by **dialect**, so promoting a
+      new model for a dialect replaces the one already serving
+      it rather than adding a duplicate choice.
+    end note
+
+    API -> REG : write the models.json entry
+    note over REG
+      Durable state is written **before** the hot swap.
+    end note
+
+    API -> RT : POST /reload
+    activate RT
+    alt reload succeeds
+      RT --> API : bundle swapped in memory
+    else reload fails
+      RT --> API : error
+      note over API, RT
+        Promotion is **not** rolled back and does not fail. The API still
+        answers 200, reporting that the model will serve only after the
+        Recognition Service restarts. Until then the durable registry and
+        the in-memory bundle disagree.
+      end note
+    end
+    deactivate RT
+
+    API -> PG : store promoted_at, repoint checkpoint_path
+    API -> API : dispatch the Drive backup task (best effort)
+    API --> ADMIN : 200 PromoteResponse\n(registry_updated, realtime_reloaded)
+  end
+  deactivate API
+end
+
+|||
+
+group Real-time recognition
+  USER -> SPA : perform a sign in front of the camera
+  SPA -> SPA : extract landmarks, buffer 60 frames x 126 values
+  SPA -> API : POST predict
+  activate API
+  API -> RT : proxy the request
+  activate RT
+
+  RT -> RT : validate the request schema\n(exactly 60 x 126, no NaN or Inf)
+  RT -> RT : check that the model_id is loaded
+  RT -> RT : normalise with the shared normalization.py
+  RT -> RT : run inference, then decode the label
+  RT -> RT : record latency
+
+  note right of RT
+    Only served predictions are recorded. A rejected request never
+    reached the model, so counting it would distort the distribution.
+  end note
+
+  RT --> API : label, confidence, label_key
+  deactivate RT
+  API --> SPA : prediction
+  deactivate API
+  SPA --> USER : display the recognised sign
+end
+
+@enduml

@@ -76,6 +76,11 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
                 "feature_version=%r needs processed/shared/features_v2.py, which "
                 "failed to import" % (self.feature_version,)
             )
+        # Geometry is appended after augmentation, so the array carried around
+        # before that point is always the 126-dim landmark block.
+        self._base_version = ("v1z" if self.feature_version == "v1g"
+                              else "v2" if self.feature_version == "v2g"
+                              else self.feature_version)
         self.expected_feature_dim = (
             _EXPECTED_FEATURE_DIM if self.feature_version == "v1"
             else _fv2.feature_dim(self.feature_version)
@@ -336,12 +341,20 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # Rebuild from raw when the run asks for a newer feature version. The
         # stored `sequence` is left alone; it is simply not the array we use.
         if self.feature_version != "v1":
-            if 'landmarks_raw' not in npz:
-                raise MissingRawLandmarks(
-                    "feature_version=%s needs 'landmarks_raw'; this .npz only has %s"
-                    % (self.feature_version, sorted(npz.keys()))
-                )
-            return _fv2.build_sequence(npz['landmarks_raw'], self.feature_version)
+            if _fv2.needs_raw(self.feature_version):
+                if 'landmarks_raw' not in npz:
+                    raise MissingRawLandmarks(
+                        "feature_version=%s needs 'landmarks_raw'; this .npz only has %s"
+                        % (self.feature_version, sorted(npz.keys()))
+                    )
+                return _fv2.build_sequence(npz['landmarks_raw'], self._base_version)
+            # v1z / v1g derive from the stored, already v1-normalised sequence, so
+            # they apply to every sample including the older captures that never
+            # kept raw landmarks.
+            for k in self.feature_key_priority:
+                if k in npz:
+                    return _fv2.build_sequence_from_normalized(npz[k], self._base_version)
+            raise KeyError('No stored sequence found in npz archive')
         # try priority keys
         for k in self.feature_key_priority:
             if k in npz:
@@ -438,9 +451,9 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # enforce expected temporal-first shape (T, D) without modifying dimensions
         if x.ndim != 2:
             raise ValueError(f"Invalid feature shape {tuple(x.shape)} in {path}; expected 2D (T,D).")
-        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, self.expected_feature_dim):
+        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, _EXPECTED_FEATURE_DIM):
             raise ValueError(
-                f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {self.expected_feature_dim})."
+                f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {_EXPECTED_FEATURE_DIM})."
             )
 
         # Cache mảng thô đã qua kiểm tra shape; augmentation/kiểm tra hữu hạn vẫn
@@ -459,12 +472,15 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
 
             if tuple(x.shape) != (
                 _EXPECTED_SEQ_LEN,
-                self.expected_feature_dim
+                _EXPECTED_FEATURE_DIM
             ):
                 raise ValueError(
                     f"Augmentation returned invalid shape {tuple(x.shape)}"
                 )
-            
+
+        if self.feature_version != "v1" and _fv2.has_geometry(self.feature_version):
+            x = _fv2.append_geometry(x)
+
         x = np.ascontiguousarray( x, dtype=np.float32 )
 
         if not np.isfinite(x).all(): 
