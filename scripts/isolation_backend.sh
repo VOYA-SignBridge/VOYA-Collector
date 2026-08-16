@@ -117,6 +117,41 @@ else
   echo "       va doi chung duong cho lop/mau se TRUOT (dung nhu no phai the)"
 fi
 
+# --------------------------------------------------------------------------
+# Mã ứng dụng ĐÃ ĐÓNG BĂNG.
+#
+# Vì sao không dựa vào tag ảnh
+# ----------------------------
+# Một tag bị dùng lại. Dựng lại `voya_backend:latest` để đo cũng có nghĩa là đổi
+# thứ mà lần khởi động lại kế tiếp của sản xuất sẽ nạp — một tác dụng phụ không
+# ai muốn ký tên vào. Và ngày 16/08/2026 đã gặp đúng ca xấu: container báo `Up`,
+# tag đúng, mã cũ.
+#
+# `freeze_measurement_code.sh` tách hai danh tính ra:
+#
+#     phụ thuộc runtime  ->  digest của ẢNH NỀN (không đổi giữa các lượt đo)
+#     mã ứng dụng        ->  tree_sha256 của SNAPSHOT (đổi theo từng lượt)
+#
+# Gắn snapshot đè lên `/app/app` READ-ONLY thì mã của lượt đo không đổi được nữa
+# kể từ thời điểm chụp — kể cả khi cây làm việc chạy tiếp bên dưới, chuyện đã xảy
+# ra bốn lần trong dự án này.
+#
+# READ-ONLY là bắt buộc: ứng dụng không được sửa chính thứ đang làm bằng chứng.
+# `PYTHONDONTWRITEBYTECODE=1` để nó khỏi cần ghi `__pycache__` vào chỗ chỉ đọc.
+# --------------------------------------------------------------------------
+ISO_SNAPSHOT="${VOYA_ISO_SNAPSHOT:-}"
+if [ -n "$ISO_SNAPSHOT" ]; then
+  [ -f "$ISO_SNAPSHOT/SNAPSHOT.json" ] \
+    || { echo "khong phai snapshot hop le: $ISO_SNAPSHOT"; exit 2; }
+  SNAP_MOUNT="$(cd "$ISO_SNAPSHOT/backend/app" && { pwd -W 2>/dev/null || pwd; })"
+  SNAPSHOT_ARGS="-v ${SNAP_MOUNT}:/app/app:ro -e PYTHONDONTWRITEBYTECODE=1"
+  echo "==> ma dong bang: $ISO_SNAPSHOT -> /app/app (ro)"
+else
+  SNAPSHOT_ARGS=""
+  echo "[warn] khong co VOYA_ISO_SNAPSHOT — dang do MA BAKED TRONG ANH '$IMAGE'."
+  echo "       Ket qua chi quy thuoc duoc cho anh do, khong cho commit nao."
+fi
+
 cmd="${1:-up}"
 
 case "$cmd" in
@@ -155,6 +190,7 @@ docker run -d --name "$NAME" \
   -e REGISTER_REQUESTS_PER_MINUTE=1000000 \
   -e REALTIME_SERVICE_URL="http://realtime_service:8010" \
   $DATASET_ARGS \
+  $SNAPSHOT_ARGS \
   "$IMAGE" \
   gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 \
   >/dev/null
