@@ -98,6 +98,13 @@ class Bo:
     sample_a: str = ""
     workspace_b: str = ""
     project_b: str = ""
+    #: Đối tượng RIÊNG cho đối chứng dương có tác dụng phụ. Không dùng chung với
+    #: `class_a`/`sample_a`: một lượt xoá thành công sẽ phá mất chính mục tiêu
+    #: mà đối chứng đọc đang dùng, và mọi lượt lặp sau đó trả 404 — trông như
+    #: đối chứng trượt, trong khi nó vừa thành công.
+    class_upd_a: str = ""
+    class_del_a: str = ""
+    sample_del_a: str = ""
     ops: list[Op] = field(default_factory=list)
 
     def dung(self, repeat: int) -> list[Op]:
@@ -229,6 +236,41 @@ class Bo:
         if self.sample_a:
             ops.append(Op("P", "GET", f"/api/v1/dataset/samples/{self.sample_a}/data",
                           A, "A đọc dữ liệu mẫu CỦA CHÍNH A"))
+        return ops
+
+    def doi_chung_duong_ghi(self) -> list[Op]:
+        """A SỬA và XOÁ tài nguyên của chính A. Phải THÀNH CÔNG. Chạy MỘT LẦN.
+
+        Vì sao tách khỏi nhóm đọc
+        -------------------------
+        Nhóm đọc lặp `--repeat` lần để có cỡ mẫu. Hai thao tác dưới đây có tác
+        dụng phụ, nên lặp chúng là tự phá:
+
+            lần 1   DELETE mẫu -> 2xx, đúng
+            lần 2+  DELETE mẫu -> 404, chấm thành TRƯỢT
+
+        Một đối chứng dương trượt làm VÔ HIỆU cả lượt đo. Nên nhóm này chạy đúng
+        một lần, và nhắm vào hai đối tượng RIÊNG mà cây fixture dựng sẵn cho nó.
+
+        Vì sao vế ghi là bắt buộc, không phải cho đủ bộ
+        -----------------------------------------------
+        Nhóm đối kháng khẳng định A **không sửa/xoá được** tài nguyên của B. Chỉ
+        có đối chứng đọc thì kết luận ấy vẫn treo: có thể A không sửa/xoá được
+        BẤT CỨ THỨ GÌ — vì thiếu quyền, vì cổng CSRF, vì token chỉ đọc. Khi đó
+        "đã chặn" không nói gì về cách ly tenant cả.
+
+        Chỉ khi A sửa/xoá được của chính mình mà KHÔNG sửa/xoá được của B thì
+        hiệu số hai kết quả mới quy được cho ranh giới tenant.
+        """
+        A = self.token_a
+        ops: list[Op] = []
+        if self.class_upd_a:
+            ops.append(Op("P", "PUT", f"/api/v1/classes/{self.class_upd_a}", A,
+                          "A sửa lớp CỦA CHÍNH A",
+                          {"label_original": "doi chung duong — sua duoc"}))
+        if self.sample_del_a:
+            ops.append(Op("P", "DELETE", f"/api/v1/dataset/samples/{self.sample_del_a}",
+                          A, "A xoá mẫu CỦA CHÍNH A"))
         return ops
 
     def ngoai_le_cong_khai(self) -> list[Op]:
@@ -409,6 +451,12 @@ def _doc_fixture_dataset(duong: str) -> dict:
             "file_path": str(goc / m["file_path"]),
             "sha256_16": m["file_sha256"][:16],
         }
+
+    # `control_a` là bí danh của `control_read_a`. Cây fixture tách ba đối tượng
+    # đối chứng cho tenant A — đọc, sửa, xoá — chính vì đối chứng xoá mà dùng
+    # chung đối tượng với đối chứng đọc thì nó tự phá mục tiêu của mình.
+    if "control_a" not in chuan and "control_read_a" in chuan:
+        chuan["control_a"] = chuan["control_read_a"]
 
     thieu = [k for k in ("control_a", "target_b") if k not in chuan]
     if thieu:
@@ -618,13 +666,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         dt = dfx["doi_tuong"]
         args.class_a, args.sample_a = dt["control_a"]["class_uid"], dt["control_a"]["sample_uid"]
         args.class_b, args.sample_b = dt["target_b"]["class_uid"], dt["target_b"]["sample_uid"]
-        print(f"đối chứng A: {args.class_a} / {args.sample_a}")
-        print(f"mục tiêu  B: {args.class_b} / {args.sample_b}\n")
+        upd = dt.get("control_update_a", {})
+        dele = dt.get("control_delete_a", {})
+        print(f"đối chứng A đọc : {args.class_a} / {args.sample_a}")
+        print(f"đối chứng A sửa : {upd.get('class_uid', '(khong co)')}")
+        print(f"đối chứng A xoá : {dele.get('sample_uid', '(khong co)')}")
+        print(f"mục tiêu  B     : {args.class_b} / {args.sample_b}\n")
 
     bo = Bo(args.tenant_a, args.tenant_b, args.token_a, args.token_b,
             args.class_b, args.sample_b, args.class_a, args.sample_a,
-            args.workspace_b, args.project_b)
+            args.workspace_b, args.project_b,
+            class_upd_a=(dfx or {}).get("doi_tuong", {})
+                        .get("control_update_a", {}).get("class_uid", ""),
+            class_del_a=(dfx or {}).get("doi_tuong", {})
+                        .get("control_delete_a", {}).get("class_uid", ""),
+            sample_del_a=(dfx or {}).get("doi_tuong", {})
+                         .get("control_delete_a", {}).get("sample_uid", ""))
+    # Đối chứng ghi chạy TRƯỚC nhóm đối kháng và ĐÚNG MỘT LẦN. Trước, vì nếu
+    # quyền ghi của chính chủ đã hỏng thì không cần bắn 500 phát nữa mới biết
+    # lượt đo vô hiệu. Một lần, vì nó có tác dụng phụ.
     ops = (bo.doi_chung_duong() * args.repeat
+           + bo.doi_chung_duong_ghi()
            + bo.dung(args.repeat)
            + bo.ngoai_le_cong_khai() * args.repeat)
 
