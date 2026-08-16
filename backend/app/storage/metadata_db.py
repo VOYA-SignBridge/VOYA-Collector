@@ -1746,6 +1746,11 @@ MIGRATION_STATEMENTS = [
     # Add sheets_synced column to samples (safe for existing data: defaults to FALSE)
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS sheets_synced BOOLEAN DEFAULT FALSE",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS gdrive_synced BOOLEAN DEFAULT TRUE",
+    # Databases created before the DDL default was corrected still carry the
+    # old FALSE default on this column (ADD COLUMN IF NOT EXISTS is a no-op
+    # once the column exists, so it never picked up the fix above). Repoint
+    # the live default explicitly; existing row values are untouched.
+    "ALTER TABLE samples ALTER COLUMN gdrive_synced SET DEFAULT TRUE",
     # Promotion timestamp for training jobs (admin promoted model to realtime)
     "ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP WITH TIME ZONE",
     # When a LATER promotion for the same dialect replaced this job's model.
