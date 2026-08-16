@@ -59,6 +59,27 @@ thứ gì — vì thiếu quyền, vì cổng chống giả mạo yêu cầu, v�
 "đã chặn" không nói gì về ranh giới tổ chức. Chỉ hiệu số giữa "làm được của
 mình" và "không làm được của bên kia" mới quy được cho ranh giới ấy.
 
+#### Đối chứng dương còn làm một việc thứ hai, và nó mới là điểm đáng giữ
+
+Lớp này thường được hiểu là phép kiểm **khả đạt**: chứng minh đường đi tồn tại và
+tài khoản chạm tới được. Nhưng ở lượt đo này nó bắt được một thứ khác hẳn và
+nghiêm trọng hơn: **tập danh tính được chọn để đo không thuộc lớp phân quyền mà
+phép đo định nói về.**
+
+Tài khoản ban đầu mang cờ quản trị nền tảng. Nó vượt mọi đối chứng dương một cách
+trơn tru — và chính vì thế nó sẽ vượt luôn mọi rào chắn xuyên tổ chức, một cách
+hợp lệ. Ma trận khi ấy vẫn chạy, vẫn cho ra một con số, và con số ấy nói về năng
+lực quản trị nền tảng chứ không nói về cách ly tổ chức.
+
+Phát biểu đúng cho phần phương pháp:
+
+> Đối chứng dương được dùng không chỉ để xác lập tính khả đạt, mà còn để **kiểm
+> chứng rằng các chủ thể được chọn thật sự đại diện cho lớp phân quyền đã định**,
+> trước khi bất kỳ kết quả đối kháng nào được diễn giải.
+
+Đây là bài học mạnh hơn nhiều so với việc kể rằng "một tài khoản quản trị đã làm
+phép thử sai".
+
 Thao tác **sửa lớp** cố ý không nằm ở lớp này. Xem mục 4.
 
 ### Lớp 2 — đối kháng xuyên tổ chức
@@ -76,7 +97,13 @@ tại** đều trả về 404. Hai câu trả lời khác nhau ở đây sẽ bi
 thành máy trả lời câu hỏi "tổ chức kia có tài nguyên này không" — một kênh phụ rò
 siêu dữ liệu mà không rò một hàng dữ liệu nào.
 
-### Lớp 3 — ngoại lệ công khai, đối chứng **hai chiều**
+### Lớp 3 — đối chứng **hai chiều** cho phạm vi công bố đã cấu hình
+
+> **Đây KHÔNG phải "đối chứng Community".** Lớp này đo phạm vi mà điểm cuối
+> **thật sự đọc** — giá trị `public_tenant_id` trong cấu hình, hiện là tổ chức
+> khởi tạo. Nó **không** đo tổ chức dự trữ mang tên cộng đồng. Chừng nào nguồn
+> dữ liệu thật của điểm cuối chưa phải tổ chức ấy thì **không được viết** "ngoại
+> lệ Community đã được kiểm chứng" từ kết quả ở đây. Xem mục 4.
 
 Điểm cuối thống kê công khai là ngoại lệ tường minh: nó trả dữ liệu tổng hợp cho
 người gọi bất kỳ, không cần chứng thực. Ngoại lệ nào cũng phải trả lời hai câu.
@@ -98,10 +125,17 @@ So sánh là so **trạng thái trước/sau quanh một can thiệp có kiểm 
 phải đọc bốn con số một lần. Điều cần chứng minh là một quan hệ nhân quả, và một
 lần đọc không nói được về nhân quả.
 
-Ghi chú về tên gọi: phạm vi mà điểm cuối thật sự đọc là **tổ chức khởi tạo**, một
-tổ chức bình thường, **không phải** tổ chức dự trữ mang tên cộng đồng. Mặt phẳng
-dữ liệu cộng đồng hiện chưa có dòng mã nào. Phép đo can thiệp vào đúng phạm vi mà
-điểm cuối đọc, chứ không vào phạm vi mang cái tên nghe hợp lý hơn.
+Phép đo can thiệp vào đúng phạm vi mà điểm cuối đọc, chứ không vào phạm vi mang
+cái tên nghe hợp lý hơn. Mặt phẳng dữ liệu cộng đồng hiện chưa có dòng mã nào.
+
+**Phát biểu được phép rút ra từ lớp này, và chỉ chừng ấy:**
+
+> Số liệu tổng hợp công khai đã được đánh giá là **cách ly khỏi thay đổi trong
+> các phạm vi tổ chức riêng**, và **chỉ phản ứng với thay đổi bên trong chính
+> phạm vi nguồn đã được cấu hình tường minh của nó.**
+
+Không được suy rộng thành một phát biểu về ngoại lệ Community. Đó là một mặt
+phẳng khác, và nó chưa được kiểm.
 
 ### Lớp 4 — hậu điều kiện trên ba kho
 
@@ -155,11 +189,21 @@ tiến trình phục vụ ở chế độ **chỉ đọc**. Từ thời điểm 
 đổi được nữa — kể cả khi cây làm việc chạy tiếp bên dưới, chuyện đã xảy ra bốn
 lần trong dự án này.
 
-| danh tính | giá trị |
-|---|---|
-| băm cây ảnh chụp | `b85d4271d7dcd174…` |
-| commit nền | `69dbce5` |
-| cơ sở dữ liệu | `signdb_test`, hỏi máy chủ chứ không đọc lại chuỗi cấu hình |
+| danh tính | giá trị | loại |
+|---|---|---|
+| **ảnh chụp mã nguồn được đo, bất biến** | `b85d4271d7dcd174…` | **danh tính chính thức của lượt đo** |
+| commit gần nhất bên dưới | `69dbce5` | tham chiếu phụ, **không phải** thứ đã được đo |
+| cơ sở dữ liệu | `signdb_test`, hỏi máy chủ chứ không đọc lại chuỗi cấu hình | |
+
+Hai dòng đầu phải đọc tách bạch. `b85d4271` là **băm cây mã nguồn đã đóng băng**,
+không phải một đối tượng nào của hệ quản lý phiên bản. Nó **không** được gọi là
+"commit đã review", vì nó không phải commit: cây làm việc còn hai tệp chưa lưu
+tại thời điểm đóng băng (xem dưới). Ép nó thành một khái niệm quản lý phiên bản
+mà nó không thuộc về sẽ tạo ra một truy nguyên nghe chặt hơn thực tế.
+
+Điều thật sự bảo chứng cho lượt đo không phải một mã commit, mà là: **mười hai
+mô-đun khớp ảnh chụp cả trước lẫn sau**, và ảnh chụp được gắn ở chế độ chỉ đọc
+nên không đổi được ở giữa.
 
 Ảnh chụp còn được **đối chiếu từng mô-đun** với mã đang chạy, cả **trước và sau**
 lượt đo: mười hai mô-đun quyết định hành vi được hỏi `__file__` của chính mô-đun
@@ -208,25 +252,57 @@ là "đã chặn" sẽ là một phát biểu về cách ly rút ra từ một �
 tham số phạm vi. Lý do thứ hai, độc lập: chính điểm cuối ấy đang trả lỗi máy chủ
 cho **mọi** người gọi trên bản mã đo — xem mục dưới.
 
-### Hai phát hiện của chính lượt đo này
+### Hai phát hiện của chính lượt đo này — **thuộc hai loại khác nhau**
 
-Cả hai được ghi thành phát hiện của bản mã đang đo, **không** vá rồi đo tiếp.
+Cả hai được ghi thành phát hiện của bản mã đang đo, **không** vá rồi đo tiếp. Và
+chúng phải đi về hai chỗ khác nhau trong quyển: gộp chung là làm sai bản chất của
+cả hai.
 
-**Bảy đường gọi chưa chuyển phạm vi.** Hàm đọc danh mục lớp từ kho tệp nay bắt
-buộc nhận phạm vi tổ chức, nhưng lượt chuyển các nơi gọi chưa xong. Hai nơi nằm
-trên đường đi thật: tạo lớp mới trả lỗi máy chủ cho mọi tài khoản, và đồng bộ dữ
-liệu lúc khởi động gãy. Chế độ hỏng là **đóng** — hàm ném lỗi chứ không rơi về
-đọc toàn kho — nên đây là cái giá của việc bịt một lỗ rò, hiện ra ở dạng dễ thấy
-nhất. Chi tiết: `docs/10-issues/FINDING_P0B_unscoped_load_labels.md`.
+#### F1 — Đường gọi thiếu phạm vi: **hồi quy tính khả dụng, hỏng theo hướng đóng**
 
-**Cờ quản trị nền tảng gộp hai thẩm quyền.** Một tài khoản mang cờ ấy đọc, liệt
-kê và **xoá** được tổ chức khác — đúng thiết kế, vì cờ nghĩa là thẩm quyền toàn
-nền tảng. Vấn đề là không có cách cấp "miễn kiểm quyền sở hữu" mà không cấp kèm
-"thẩm quyền trên mọi tổ chức". Điều này **suýt làm hỏng phép đo**: chạy ma trận
-bằng tài khoản ấy thì mọi thao tác xuyên tổ chức đo năng lực quản trị nền tảng
-chứ không đo cách ly, và tỉ lệ vi phạm công bố ra sẽ đo sai đối tượng nhưng trông
-hoàn toàn hợp lý. Bị bắt vì đối chứng dương buộc phải chạy trước. Lượt chính thức
-dùng tài khoản tổ chức thường. Chi tiết:
+| trục | phán định |
+|---|---|
+| Cách ly an ninh | **hỏng theo hướng ĐÓNG** — không tạo ra rò rỉ xuyên tổ chức |
+| Tính đúng đắn chức năng | **HỎNG** trên các đường bị ảnh hưởng |
+| Ảnh hưởng tới P0-B | là phát hiện; **không** làm phát sinh rò rỉ xuyên tổ chức |
+| Ảnh hưởng tới P1-B | **bắt buộc xuất hiện** trong báo cáo kết quả chức năng |
+
+Hàm đọc danh mục lớp từ kho tệp nay bắt buộc nhận phạm vi tổ chức, nhưng lượt
+chuyển các nơi gọi chưa xong: bảy nơi còn thiếu. Hai nơi nằm trên đường đi thật —
+tạo lớp mới trả lỗi máy chủ cho **mọi** tài khoản, và đồng bộ dữ liệu lúc khởi
+động gãy.
+
+Hàm **ném lỗi** chứ không rơi về đọc toàn kho, nên đường gọi thiếu phạm vi gãy
+thay vì lặng lẽ đọc dữ liệu của tổ chức khác. Đây là cái giá của việc bịt một lỗ
+rò, hiện ra ở dạng dễ thấy nhất.
+
+Điều này **không** được nuốt chỉ vì P0-B xanh. Lỗi tạo lớp là một hỏng hóc chức
+năng trên đường đi chính của sản phẩm, và nó phải xuất hiện ở phần kết quả chức
+năng và phần thảo luận. Chi tiết:
+`docs/10-issues/FINDING_P0B_unscoped_load_labels.md`.
+
+#### F2 — Cờ quản trị gộp hai thẩm quyền: **khuyết tật ranh giới phân quyền**
+
+| trục | phán định |
+|---|---|
+| Danh tính dùng để đo cách ly | **KHÔNG ĐƯỢC dùng** tài khoản mang cờ quản trị nền tảng |
+| Mô hình phân quyền | **khuyết tật ranh giới đặc quyền có thật** |
+| Ảnh hưởng tới P0-B | phép đo còn hiệu lực **chỉ vì** các danh tính được đánh giá là người dùng có phạm vi tổ chức, không mang thẩm quyền nền tảng |
+
+Một tài khoản mang cờ ấy đọc, liệt kê và xoá được tổ chức khác. Điều này **không
+được trình bày như một vụ vượt ranh giới xuyên tổ chức**: trong mô hình hiện
+hành, cờ ấy **mang thẩm quyền nền tảng**, nên hành vi đó đúng với ngữ nghĩa của
+nó.
+
+Khuyết tật nằm ở chỗ khác: **một cờ đang đại diện cho hai loại thẩm quyền khác
+nhau** — "miễn kiểm quyền sở hữu" và "thẩm quyền trên mọi tổ chức" — và không có
+đường cấp riêng lẻ. Hậu quả kép: ngữ nghĩa phân quyền quá rộng, và việc **chọn
+danh tính cho phép đo rất dễ sai**.
+
+Chính cái sai thứ hai suýt xảy ra ở đây. Chạy ma trận bằng tài khoản ấy thì mọi
+thao tác xuyên tổ chức đo **năng lực quản trị nền tảng** chứ không đo cách ly, và
+tỉ lệ vi phạm công bố ra sẽ đo sai đối tượng nhưng trông hoàn toàn hợp lý. Lượt
+chính thức vì thế chạy bằng tài khoản tổ chức thường. Chi tiết:
 `docs/10-issues/FINDING_P0B_platform_admin_crosses_tenants.md`.
 
 Hệ quả kèm theo: mọi thao tác sửa và xoá lớp gác sau quyền quản trị **nền tảng**,
@@ -254,14 +330,25 @@ hơn bằng chứng.
 ## 5. Phát biểu được phép dùng
 
 > Cách ly giữa các tổ chức đã được chứng minh trên **các đường giao diện lập
-> trình và kho lưu trữ có phạm vi tổ chức đã được đánh giá**, thông qua phép kiểm
-> hành vi dưới vai vận hành thật, đối chứng dương xuyên kho, yêu cầu đối kháng
-> xuyên tổ chức, và hậu điều kiện trên cả cơ sở dữ liệu, tệp bảng và kho tệp.
-> **Phân hệ theo dõi thí nghiệm và mô hình — vốn có phạm vi theo người dùng — và
-> thẩm quyền ký mật mã theo tổ chức nằm ngoài ranh giới đã được kiểm chứng này.**
+> trình và kho lưu trữ có phạm vi tổ chức đã được đánh giá**, với **không một
+> thao tác xuyên tổ chức hay trái quyền nào thành công, và không một ca nào
+> không kết luận được** trong ma trận đối kháng đã công bố. Nằm **ngoài** khẳng
+> định này: các hỏng hóc chức năng đã biết vốn hỏng theo hướng đóng, phân hệ theo
+> dõi thí nghiệm và mô hình có phạm vi theo người dùng, ngữ nghĩa thẩm quyền cấp
+> nền tảng, và thẩm quyền ký mật mã theo tổ chức.
 
 Đủ mạnh để đứng, và không để hội đồng tìm được một bảng thiếu cột phạm vi rồi bác
 cả kết luận.
+
+Riêng lớp 3, phát biểu **không** được gộp vào câu trên mà phải đứng riêng đúng
+phạm vi của nó:
+
+> Số liệu tổng hợp công khai được đánh giá đã được cách ly khỏi thay đổi trong
+> các phạm vi tổ chức riêng, và chỉ phản ứng với thay đổi bên trong chính phạm vi
+> nguồn đã được cấu hình tường minh của nó.
+
+Không viết "ngoại lệ Community đã được kiểm chứng" cho tới khi nguồn dữ liệu thật
+của điểm cuối là tổ chức dự trữ mang tên ấy.
 
 Không có trạng thái "gần đạt". Bốn lớp cùng xanh thì công bố; thiếu một lớp thì
 phát biểu hạ xuống *có bằng chứng một phần*, và chỉ số không lên bảng.

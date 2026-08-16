@@ -369,7 +369,7 @@ giống nhau, và một container chạy mã cũ cho ra kết luận về một 
 |---|---|
 | 1. Đối chứng dương | chủ sở hữu **thật sự** đọc/sửa/xoá được tài nguyên của chính mình |
 | 2. Đối kháng xuyên tenant | A không đọc/sửa/xoá được của B, và ngược lại |
-| 3. Ngoại lệ Community | đối chứng **hai chiều** — xem dưới |
+| 3. Phạm vi công bố đã cấu hình | đối chứng **hai chiều** — xem dưới |
 | 4. Hậu điều kiện ba kho | PostgreSQL + CSV + băm tệp **không** bị request bị chặn làm đổi |
 
 Bốn lớp đều xanh thì CTIVR mới có nền để công bố.

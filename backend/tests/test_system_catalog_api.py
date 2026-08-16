@@ -379,18 +379,78 @@ def test_is_system_reserved_is_never_read_by_authorisation():
 
     Quét mã nguồn thay vì tin vào trí nhớ. Cột này chỉ được phép xuất hiện ở nơi
     ĐỊNH NGHĨA nó (`storage/authz_schema.py`).
+
+    Quét MÃ, không quét văn bản
+    ---------------------------
+    Bản đầu hỏi `"is_system_reserved" in path.read_text()`. Câu hỏi đó không phải
+    câu hỏi cần hỏi: nó bắt cả những lần cái tên ấy xuất hiện trong CHÚ THÍCH —
+    kể cả một chú thích đang giải thích rằng cột này *không* được dùng làm quyền.
+
+    Xảy ra thật ngày 16/08/2026: một khối chú thích ở tầng định tuyến ghi
+    `is_system_reserved=FALSE` để phân biệt tenant khởi tạo với tenant cộng đồng,
+    và phép kiểm báo đỏ cho một tệp không hề đọc cột ấy.
+
+    Đây là đúng họ lỗi mà kho này đã gặp nhiều lần: một bộ quét theo dòng cho ra
+    một con số hợp lý về thứ nó không đo. Hậu quả không phải là bỏ sót — nó tệ
+    theo chiều ngược lại: một phép kiểm báo đỏ giả sẽ bị người ta quen tay bỏ
+    qua, và ngày nó đỏ THẬT thì cũng bị bỏ qua nốt.
+
+    Nay quét bằng cây cú pháp. Chú thích và chuỗi tài liệu không nằm trong cây,
+    nên chúng biến mất khỏi phép quét mà không cần một luật loại trừ nào. Ba dạng
+    tham chiếu THẬT vẫn bị bắt: tên biến/thuộc tính, khoá từ điển dạng chuỗi, và
+    cột trong một câu lệnh SQL viết thành chuỗi.
     """
+    import ast
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "app"
     allowed = {"storage/authz_schema.py"}
+    TEN = "is_system_reserved"
+
+    def _tham_chieu_that(src: str) -> bool:
+        try:
+            cay = ast.parse(src)
+        except SyntaxError:                                      # pragma: no cover
+            return TEN in src        # không phân tích được thì quay về quét thô
+        for node in ast.walk(cay):
+            if isinstance(node, ast.Name) and node.id == TEN:
+                return True
+            if isinstance(node, ast.Attribute) and node.attr == TEN:
+                return True
+            if isinstance(node, ast.arg) and node.arg == TEN:
+                return True
+            # Chuỗi: khoá từ điển, tên cột trong SQL. Chuỗi tài liệu bị loại ở
+            # dưới, nên chỗ này không bắt nhầm phần diễn giải.
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if TEN in node.value:
+                    return True
+        return False
+
+    def _bo_chuoi_tai_lieu(src: str) -> str:
+        """Xoá mọi chuỗi tài liệu — chúng là văn xuôi, không phải mã."""
+        cay = ast.parse(src)
+        for node in ast.walk(cay):
+            if isinstance(node, (ast.Module, ast.ClassDef,
+                                 ast.FunctionDef, ast.AsyncFunctionDef)):
+                if (node.body and isinstance(node.body[0], ast.Expr)
+                        and isinstance(node.body[0].value, ast.Constant)
+                        and isinstance(node.body[0].value.value, str)):
+                    node.body[0].value.value = ""
+        return ast.unparse(cay)
 
     offenders = []
     for path in root.rglob("*.py"):
         rel = path.relative_to(root).as_posix()
         if rel in allowed:
             continue
-        if "is_system_reserved" in path.read_text(encoding="utf-8"):
+        src = path.read_text(encoding="utf-8")
+        if TEN not in src:
+            continue                 # lối tắt: đa số tệp không nhắc tới nó
+        try:
+            src = _bo_chuoi_tai_lieu(src)
+        except SyntaxError:                                      # pragma: no cover
+            pass
+        if _tham_chieu_that(src):
             offenders.append(rel)
 
     assert not offenders, (

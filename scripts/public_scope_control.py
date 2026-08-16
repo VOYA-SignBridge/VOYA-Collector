@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-"""Đối chứng HAI CHIỀU cho ngoại lệ công khai — lớp 3 của P0-B.
+"""Đối chứng HAI CHIỀU cho PHẠM VI CÔNG BỐ ĐÃ CẤU HÌNH — lớp 3 của P0-B.
 
-    python scripts/community_exception_control.py \
+    python scripts/public_scope_control.py \
         --base http://voya_backend_iso:8000 --fixture /src/.measurement/p0b-... \
         --json ket_qua.json
+
+Tên gọi: đây KHÔNG phải "đối chứng Community"
+=============================================
+Kịch bản này đo phạm vi mà điểm cuối THẬT SỰ đọc — giá trị của `public_tenant_id`
+trong cấu hình, hiện là tenant khởi tạo. Nó KHÔNG đo tenant dự trữ mang tên
+`community`.
+
+Gọi nó là "đối chứng Community" sẽ là một khẳng định về một mặt phẳng chưa được
+kiểm: chừng nào nguồn dữ liệu thật của điểm cuối chưa phải `tenant_id='community'`
+thì không được viết "ngoại lệ Community đã được kiểm chứng" từ kết quả ở đây.
+
+Điều kịch bản này chứng minh, phát biểu đúng phạm vi: **số liệu tổng hợp công
+khai được cách ly khỏi thay đổi trong các phạm vi tổ chức riêng, và chỉ phản ứng
+với thay đổi bên trong chính phạm vi nguồn đã được cấu hình tường minh của nó.**
 
 Vì sao một chiều là chưa đủ
 ===========================
