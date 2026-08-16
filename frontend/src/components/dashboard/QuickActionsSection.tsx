@@ -1,9 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { HandIcon, TagIcon, UploadIcon, UsersIcon, DatabaseIcon } from "../ui/Icons";
-import { me } from "../../api/auth";
-import type { AuthUser } from "../../api/auth";
+import { useAuth } from "../../hooks/useAuth";
 import SyncGDriveModal from "../SyncGDriveModal";
 
 interface ActionCard {
@@ -18,14 +17,11 @@ interface ActionCard {
 
 export default function QuickActionsSection() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<AuthUser | null>(null);
+  // Lấy từ AuthProvider thay vì tự gọi /auth/me. Trước đây mỗi lần vào trang
+  // chủ có tới ba lời gọi song song (provider + component này + CaptureCamera),
+  // và thẻ dành cho admin ở đây xuất hiện trễ hơn phần còn lại một nhịp.
+  const { user } = useAuth();
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
-
-  useEffect(() => {
-    me()
-      .then((u) => setUser(u))
-      .catch(() => setUser(null));
-  }, []);
 
   const handleSyncLocal = () => {
     setIsSyncModalOpen(true);

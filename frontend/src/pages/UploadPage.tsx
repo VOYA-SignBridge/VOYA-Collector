@@ -8,6 +8,7 @@ import Button from "../components/ui/Button";
 import LoadingScreen from "../components/LoadingScreen";
 import { useAuth } from "../hooks/useAuth";
 const CaptureCamera = lazy(() => import("../components/CaptureCamera"));
+import { TagIcon } from "../components/ui/Icons";
 
 type Feedback = {
   type: 'error' | 'warning' | 'info' | 'success';
@@ -132,7 +133,7 @@ export default function UploadPage() {
       {SHOW_QUICK_LABELS && tab === "camera" && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-700">🏷️ Gợi ý nhãn nhanh</h3>
+            <h3 className="flex items-center gap-1.5 text-sm font-medium text-gray-700"><TagIcon className="h-4 w-4" /> Gợi ý nhãn nhanh</h3>
             <div className="flex items-center gap-2 text-xs text-gray-500">
               <span>Được dùng nhiều hôm nay:</span>
               <Badge variant="info" size="sm">walking (12)</Badge>
@@ -158,7 +159,7 @@ export default function UploadPage() {
             ))}
           </div>
           <div className="mt-2 text-xs text-gray-500">
-            💡 Nhấp để tự động điền nhãn giúp thu dữ liệu nhanh hơn
+            Nhấp để tự động điền nhãn giúp thu dữ liệu nhanh hơn
           </div>
         </div>
       )}

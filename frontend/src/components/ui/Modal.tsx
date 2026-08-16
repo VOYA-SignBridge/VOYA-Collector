@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { XIcon } from "./Icons";
 
 interface ModalProps {
   isOpen: boolean;
@@ -54,9 +55,9 @@ export default function Modal({ isOpen, onClose, title, children, size = "md" }:
               <button
                 onClick={onClose}
                 className="btn btn-ghost p-2 rounded-full"
-                aria-label="Close modal"
+                aria-label="Đóng hộp thoại"
               >
-                ✕
+                <XIcon className="h-4 w-4" />
               </button>
             </div>
           )}

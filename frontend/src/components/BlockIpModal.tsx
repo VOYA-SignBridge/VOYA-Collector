@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BanIcon } from "./ui/Icons";
 
 const PRESET_REASONS = [
   "Gửi quá nhiều request (nghi bot/quét)",
@@ -50,7 +51,7 @@ export default function BlockIpModal({
     <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="max-w-lg w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-lg">🚫</span>
+          <BanIcon className="h-5 w-5" />
           <h3 className="text-lg font-bold text-slate-900">Chặn IP</h3>
         </div>
         <p className="text-sm text-slate-500 mb-4">

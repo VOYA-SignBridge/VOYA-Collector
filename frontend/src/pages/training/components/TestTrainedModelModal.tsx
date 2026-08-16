@@ -12,6 +12,8 @@ import {
 import { PredictionSmoother } from '../../../utils/predictionSmoother';
 import { HAND_TRACKING_OPTIONS, MP_HANDS_VERSION } from '../../../config/handTracking';
 import type { HandAnchors } from '../../../utils/handIdentity';
+import type { MediaPipeLandmark } from '../../../types';
+import { FlaskIcon, XIcon } from '../../../components/ui/Icons';
 
 interface TestTrainedModelModalProps {
   isOpen: boolean;
@@ -154,7 +156,7 @@ export default function TestTrainedModelModal({
               const w = canvas.width;
               const h = canvas.height;
 
-              mpResults.multiHandLandmarks.forEach((landmarks: any[]) => {
+              mpResults.multiHandLandmarks.forEach((landmarks: MediaPipeLandmark[]) => {
                 // Draw connections (skeleton)
                 const connections = [
                   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -181,7 +183,7 @@ export default function TestTrainedModelModal({
 
                 // Draw joints
                 ctx.fillStyle = '#00ff00';
-                landmarks.forEach((lm: any) => {
+                landmarks.forEach((lm: MediaPipeLandmark) => {
                   const x = lm.x * w;
                   const y = lm.y * h;
                   ctx.beginPath();
@@ -347,7 +349,10 @@ export default function TestTrainedModelModal({
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">🧪 Test Model Realtime</h2>
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+            <FlaskIcon className="h-5 w-5 text-ctu-blue" />
+            Thử mô hình bằng camera
+          </h2>
           <button
             onClick={() => {
               setRunning(false);
@@ -355,7 +360,7 @@ export default function TestTrainedModelModal({
             }}
             className="text-slate-400 hover:text-slate-600 text-2xl leading-none"
           >
-            ✕
+            <XIcon className="h-5 w-5" />
           </button>
         </div>
 

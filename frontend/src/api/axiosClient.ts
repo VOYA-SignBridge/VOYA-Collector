@@ -184,9 +184,9 @@ axiosClient.interceptors.response.use(
     if (err?.message === "Network Error" && !err?.response) {
       err.userMessage = "Server đang offline hoặc không thể kết nối. Vui lòng thử lại sau.";
     } else if (err?.response?.status === 0) {
-      err.userMessage = "Connection refused. Backend may be offline.";
+      err.userMessage = "Không kết nối được tới máy chủ. Máy chủ có thể đang offline.";
     } else if (err?.code === "ECONNABORTED") {
-      err.userMessage = "Request timeout. Backend may be slow or offline.";
+      err.userMessage = "Yêu cầu quá thời gian chờ. Máy chủ đang chậm hoặc offline.";
     } else if (err?.response?.status === 401) {
       const reqUrl = err?.config?.url || "";
       const isAuthEndpoint = reqUrl.includes("/auth/login") || reqUrl.includes("/auth/register");

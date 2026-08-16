@@ -58,7 +58,7 @@ export default function SecurityNotices() {
               href={`mailto:${blocked.contact}?subject=${encodeURIComponent("Khiếu nại hạn chế truy cập")}&body=${encodeURIComponent("Xin chào, truy cập của tôi bị hạn chế với lý do: " + (blocked.reason || "") + ". Tôi mong được xem xét lại. Cảm ơn.")}`}
               className="inline-flex items-center gap-1.5 mb-5 text-ctu-blue font-medium hover:underline"
             >
-              ✉️ {blocked.contact}
+              {blocked.contact}
             </a>
           ) : (
             <p className="text-sm text-slate-400 mb-5">quản trị viên hệ thống</p>

@@ -19,9 +19,9 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
-    // nginx publishes on 8080 in this deployment (NGINX_HTTP_PORT in .env);
-    // host port 80 belongs to an unrelated Windows service, not this stack.
-    baseURL: process.env.E2E_BASE_URL || "http://localhost:8080",
+    // NGINX_HTTP_PORT in .env — 80 now that the port-80 Windows service
+    // (IIS) that used to squat it is disabled.
+    baseURL: process.env.E2E_BASE_URL || "http://localhost",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

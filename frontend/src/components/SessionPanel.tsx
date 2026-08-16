@@ -100,7 +100,7 @@ export default function SessionPanel({ sessionId, samples, onFinish, onDelete }:
                       variant={sample.uploaded ? "success" : "warning"} 
                       size="sm"
                     >
-                      {sample.uploaded ? "✓ Uploaded" : "⏳ Processing"}
+                      {sample.uploaded ? "Đã tải lên" : "Đang xử lý"}
                     </Badge>
                   </div>
                   <div className="text-sm text-gray-600">

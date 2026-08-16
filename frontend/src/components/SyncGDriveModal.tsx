@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import apiClient from "../api/axiosClient";
-import { XIcon, CheckIcon } from "./ui/Icons";
+import { CheckIcon, CloudDownloadIcon, XIcon } from "./ui/Icons";
+import { apiErrorMessage } from "../utils/apiError";
 
 interface SyncGDriveModalProps {
   isOpen: boolean;
@@ -44,8 +45,8 @@ export default function SyncGDriveModal({ isOpen, onClose }: SyncGDriveModalProp
           if (res.data.state === "SUCCESS" || res.data.state === "FAILURE") {
             clearInterval(interval);
           }
-        } catch (err: any) {
-          setError(err.response?.data?.detail || "Lỗi khi lấy trạng thái đồng bộ");
+        } catch (err) {
+          setError(apiErrorMessage(err, "Lỗi khi lấy trạng thái đồng bộ"));
           clearInterval(interval);
         }
       }, 1000);
@@ -62,8 +63,8 @@ export default function SyncGDriveModal({ isOpen, onClose }: SyncGDriveModalProp
       setError(null);
       const res = await apiClient.post("/api/v1/admin/sync-local");
       setTaskId(res.data.task_id);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Lỗi khi khởi chạy tiến trình đồng bộ");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Lỗi khi khởi chạy tiến trình đồng bộ"));
     }
   };
 
@@ -81,7 +82,8 @@ export default function SyncGDriveModal({ isOpen, onClose }: SyncGDriveModalProp
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            ☁️ Đồng bộ Google Drive
+            <CloudDownloadIcon className="h-5 w-5" />
+          Đồng bộ Google Drive
           </h3>
           {(status?.state === "SUCCESS" || status?.state === "FAILURE" || error) && (
             <button

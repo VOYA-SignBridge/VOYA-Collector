@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import Layout from "./components/Layout";
 // import DebugPanel from "./components/DebugPanel";
 import { Suspense, lazy, useEffect, useState } from "react";
@@ -20,6 +20,7 @@ const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
 const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPage"));
 const TrainingPipeline = lazy(() => import("./pages/training/TrainingPipeline"));
+const DatasetPreparationPage = lazy(() => import("./pages/training/DatasetPreparationPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const RegisterPage = lazy(() => import("./pages/RegisterPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
@@ -42,9 +43,16 @@ function ProtectedRoute({
   requireAdmin?: boolean;
 }) {
   const { loading, isAuthenticated, isAdmin } = useAuth();
+  const location = useLocation();
 
   if (loading) return <LoadingScreen />;
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Nhớ trang người dùng định vào để sau khi đăng nhập quay lại đúng chỗ, thay
+  // vì luôn đổ về /upload (bấm "Huấn luyện model" khi chưa đăng nhập trước đây
+  // sẽ lạc sang trang Đóng góp dữ liệu).
+  if (!isAuthenticated) {
+    const next = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/login?next=${next}`} replace />;
+  }
   // Signed in but lacking admin rights → show a proper 403 page instead of
   // leaking the admin shell (which would render empty and look broken).
   if (requireAdmin && !isAdmin) return <NotAuthorizedPage />;
@@ -105,6 +113,17 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <TrainingPipeline />
+                  </ProtectedRoute>
+                }
+              />
+
+              {/* Chuẩn bị dữ liệu ghi ra artefact dùng chung cho mọi lần huấn
+                  luyện sau đó, nên giới hạn ở admin — cùng mức với promote. */}
+              <Route
+                path="/training/dataset"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <DatasetPreparationPage />
                   </ProtectedRoute>
                 }
               />

@@ -7,6 +7,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { TrainingJob, TrainingMetrics } from '../../../hooks/useTrainingAPI';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 import Button from '../../../components/ui/Button';
+import {
+  ClockIcon,
+  InfoCircleIcon,
+  StopCircleIcon,
+  XCircleIcon,
+} from '../../../components/ui/Icons';
+import { jobStatusBadge } from '../jobStatus';
+import { formatDuration } from '../jobTiming';
 
 interface Props {
   job: TrainingJob;
@@ -14,33 +22,41 @@ interface Props {
   onCancel?: () => Promise<void> | void;
 }
 
+// Job đã kết thúc thì mọi thứ "đang chạy" (đồng hồ, ETA, nút Hủy) đều vô nghĩa.
+const isLive = (status: string) => status === 'running' || status === 'pending' || status === 'queued';
+
 const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
   const [cancelling, setCancelling] = useState(false);
   const [startTime] = useState<Date>(new Date(job.started_at || new Date()));
-  const [elapsedTime, setElapsedTime] = useState('0m');
+  const [elapsedTime, setElapsedTime] = useState('0m 0s');
   const [eta, setEta] = useState('Tính toán...');
 
-  // Update elapsed time and ETA
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date();
-      const elapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
-      const minutes = Math.floor(elapsed / 60);
-      const seconds = elapsed % 60;
-      setElapsedTime(`${minutes}m ${seconds}s`);
+  const live = isLive(job.status);
 
-      if (metrics.length > 0) {
+  // Đồng hồ + ETA chỉ chạy khi job còn sống. Mở lại một job đã thất bại từ Lịch
+  // sử trước đây làm đồng hồ đếm từ started_at cũ (ra hàng nghìn phút và vẫn
+  // tăng); giờ chốt ở khoảng thời gian thực tế đã chạy.
+  useEffect(() => {
+    const tick = () => {
+      const end = live ? new Date() : new Date(job.completed_at || job.started_at || Date.now());
+      const elapsed = Math.floor((end.getTime() - startTime.getTime()) / 1000);
+      setElapsedTime(formatDuration(elapsed));
+
+      if (live && metrics.length > 0) {
         const last = metrics[metrics.length - 1];
         const avgTimePerEpoch = elapsed / Math.max(1, last.epoch);
         const remainingEpochs = Math.max(0, job.total_epochs - last.epoch);
         const remainingSeconds = Math.ceil(avgTimePerEpoch * remainingEpochs);
-        const remainingMinutes = Math.floor(remainingSeconds / 60);
-        setEta(`~${remainingMinutes}m`);
+        setEta(remainingSeconds < 60 ? '< 1m' : `~${Math.round(remainingSeconds / 60)}m`);
       }
-    }, 1000);
+    };
 
+    tick();
+    if (!live) return;
+
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [startTime, metrics, job.total_epochs]);
+  }, [startTime, metrics, job.total_epochs, job.completed_at, job.started_at, live]);
 
   const trainLossSeries = useMemo(() => metrics.map((m) => m.train_loss), [metrics]);
   const trainAccSeries = useMemo(() => metrics.map((m) => m.train_acc), [metrics]);
@@ -65,21 +81,44 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
     );
   };
 
+  const badge = jobStatusBadge(job.status);
+  // Tiêu đề trước đây luôn là "Đang Huấn Luyện Mô Hình", kể cả khi mở lại một
+  // job đã thất bại/bị hủy từ Lịch sử — mâu thuẫn thẳng với dòng trạng thái ngay dưới.
+  const headerTitle =
+    job.status === 'failed'
+      ? 'Huấn luyện thất bại'
+      : job.status === 'cancelled'
+      ? 'Huấn luyện đã bị hủy'
+      : job.status === 'completed'
+      ? 'Huấn luyện hoàn tất'
+      : live && job.status === 'running'
+      ? 'Đang huấn luyện mô hình'
+      : 'Phiên huấn luyện đang chờ';
+
   return (
     <div className="space-y-6">
       {/* Header with Timer */}
       <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-base font-semibold text-slate-900">Đang Huấn Luyện Mô Hình</h3>
+            <h3 className="text-base font-semibold text-slate-900">{headerTitle}</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Trạng thái: <span className="font-medium text-ctu-blue">{job.status}</span>
+              Trạng thái:{' '}
+              <span className={`ml-1 rounded-full px-2 py-0.5 text-xs font-medium ${badge.cls}`}>
+                {badge.text}
+              </span>
             </p>
+            {job.error_message && (
+              <p className="mt-2 text-sm text-red-700">{job.error_message}</p>
+            )}
           </div>
           <div className="text-right">
             <div className="text-sm text-slate-600">
-              <div>⏱️ Thời gian: <strong>{elapsedTime}</strong></div>
-              <div className="text-xs text-slate-500 mt-1">ETA: {eta}</div>
+              <div className="flex items-center justify-end gap-1.5">
+                <ClockIcon className="h-4 w-4" />
+                Thời gian: <strong>{elapsedTime}</strong>
+              </div>
+              {live && <div className="text-xs text-slate-500 mt-1">Dự kiến còn: {eta}</div>}
             </div>
           </div>
         </div>
@@ -112,7 +151,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
           <MetricCard
             label="Training Loss"
             value={latestMetric.train_loss.toFixed(4)}
-            trend={metrics.length > 1 && metrics[metrics.length - 2].train_loss > latestMetric.train_loss ? '↘️ Giảm' : '↗️ Tăng'}
+            trend={metrics.length > 1 && metrics[metrics.length - 2].train_loss > latestMetric.train_loss ? 'Giảm' : 'Tăng'}
             sparkline={renderSparkline(trainLossSeries, '#ef4444')}
             color="red"
             description="Mức độ sai lệch trên tập huấn luyện"
@@ -120,13 +159,13 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
           <MetricCard
             label="Train Accuracy"
             value={`${(latestMetric.train_acc * 100).toFixed(1)}%`}
-            trend={metrics.length > 1 && metrics[metrics.length - 2].train_acc < latestMetric.train_acc ? '↗️ Tăng' : '↘️ Giảm'}
+            trend={metrics.length > 1 && metrics[metrics.length - 2].train_acc < latestMetric.train_acc ? 'Tăng' : 'Giảm'}
             sparkline={renderSparkline(trainAccSeries, '#10b981')}
             color="green"
             description="Độ chính xác trên tập huấn luyện"
           />
           <MetricCard
-            label="Val Accuracy ⭐"
+            label="Độ chính xác kiểm định"
             value={`${(latestMetric.val_acc * 100).toFixed(1)}%`}
             trend="KPI Chính"
             sparkline={renderSparkline(valAccSeries, '#0e7bc2')}
@@ -176,12 +215,18 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
               ? 'bg-amber-50 border-amber-300 text-amber-900'
               : 'bg-red-50 border-red-300 text-red-900'
           }`}>
-            {job.status === 'cancelled' ? '⏹️ Huấn luyện đã bị hủy' : '❌ Huấn luyện thất bại'}
+            {job.status === 'cancelled' ? (
+              <StopCircleIcon className="h-4 w-4 shrink-0" />
+            ) : (
+              <XCircleIcon className="h-4 w-4 shrink-0" />
+            )}
+            {job.status === 'cancelled' ? 'Huấn luyện đã bị hủy' : 'Huấn luyện thất bại'}
             {job.error_message ? ` — ${job.error_message}` : ''}
           </div>
         ) : (
           <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-            ℹ️ Mô hình sẽ được lưu tự động khi huấn luyện hoàn tất.
+            <InfoCircleIcon className="h-4 w-4 shrink-0" />
+            Mô hình sẽ được lưu tự động khi huấn luyện xong.
           </div>
         )}
 
@@ -202,7 +247,8 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel }) => {
               }
             }}
           >
-            {cancelling ? 'Đang hủy...' : '⏹️ Hủy Huấn Luyện'}
+            <StopCircleIcon className="h-4 w-4" />
+            {cancelling ? 'Đang hủy...' : 'Hủy huấn luyện'}
           </Button>
         )}
       </div>

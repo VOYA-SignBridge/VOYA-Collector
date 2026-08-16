@@ -25,6 +25,8 @@ export type NavSection = {
 export type AnyNavItem = FlatNavItem | NavSection;
 
 export default function Layout({ children }: { children: ReactNode }) {
+  // Sidebar luôn khởi tạo đóng, kể cả trên desktop — người dùng tự bấm
+  // hamburger khi cần. Không ghi nhớ trạng thái giữa các lần tải trang.
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -71,6 +73,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       name: "Quản trị",
       icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>,
       children: [
+        { name: "Chuẩn bị dữ liệu", href: "/training/dataset", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6M12 9v6" /></svg> },
         { name: "Quản lý dữ liệu", href: "/admin/data", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2 1.5 3 5 3s5-1 5-3V7M4 7c0 2 1.5 3 5 3s5-1 5-3M4 7c0-2 1.5-3 5-3s5 1 5 3m0 5c0 2 1.5 3 5 3s5-1 5-3V7c0-2-1.5-3-5-3s-5 1-5 3" /></svg> },
         { name: "Quản lý người dùng", href: "/admin/users", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg> },
         { name: "Giám sát tài nguyên", href: "/admin/resources", icon: <svg className={navIconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
@@ -82,8 +85,12 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const navigation = user?.is_admin ? [...baseNavigation, ...adminNavigation] : baseNavigation;
 
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  const toggleSidebar = useCallback(() => setSidebarOpen((current) => !current), []);
+
   const handleNewSession = useCallback(() => {
-    setSidebarOpen(false);
+    closeSidebar();
     // Trước đây nút này gọi window.location.reload(). Reload thật sự có cấp
     // session_id mới, nhưng mọi chỗ hiển thị phiên đều đang tắt (SessionPanel
     // nằm sau cờ SHOW_ADVANCED), nên màn hình sau reload y hệt trước đó và
@@ -91,7 +98,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     // nhận để luôn có phản hồi thấy được.
     requestNewSession();
     toast.success("Đã bắt đầu phiên thu mới");
-  }, [toast]);
+  }, [toast, closeSidebar]);
 
   const handleLogout = useCallback(async () => {
     setSidebarOpen(false);
@@ -113,7 +120,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/60"
         }`
       }
-      onClick={() => setSidebarOpen(false)}
+      onClick={closeSidebar}
     >
       <span className="mr-3 flex items-center">{item.icon}</span>
       {item.name}
@@ -147,7 +154,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/60"
               }`
             }
-            onClick={() => setSidebarOpen(false)}
+            onClick={closeSidebar}
           >
             <span className="mr-3 flex items-center">{child.icon}</span>
             {child.name}
@@ -193,11 +200,14 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
             </div>
 
+            {/* Nút đóng — hiện ở mọi kích thước màn hình, cùng hàng với avatar
+                và tên người dùng. */}
             <button
               type="button"
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              aria-label="Đóng sidebar"
+              onClick={closeSidebar}
+              className="shrink-0 rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              aria-label="Đóng thanh điều hướng"
+              title="Đóng thanh điều hướng"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -225,7 +235,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Button
                 size="sm"
                 onClick={handleNewSession}
-                title="Tải lại trang và bắt đầu một phiên làm việc mới"
+                title="Bắt đầu một phiên thu dữ liệu mới"
                 className="w-full justify-center gap-1.5 px-3 py-2 text-xs sm:text-sm"
               >
                 <RefreshIcon className="h-4 w-4" />
@@ -267,9 +277,9 @@ export default function Layout({ children }: { children: ReactNode }) {
             {hasToken && (
               <button
                 type="button"
-                onClick={() => setSidebarOpen((current) => !current)}
+                onClick={toggleSidebar}
                 className="btn btn-ghost p-2 text-slate-600 hover:text-slate-900"
-                aria-label="Toggle sidebar"
+                aria-label="Mở/đóng thanh điều hướng"
                 aria-expanded={sidebarOpen}
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -286,36 +296,47 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap overflow-x-auto">
-            <div className="hidden sm:flex items-center space-x-2">
+          {/* Cụm hành động bên phải. Trước đây cả khối là `hidden md:flex`:
+              khách trên điện thoại không có hamburger (bị chặn bởi hasToken) và
+              cũng không có nút nào ở đây, nên lối đăng nhập duy nhất là link
+              tận cuối Footer. Giờ khách luôn thấy nút Đăng nhập. */}
+          <div className="flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap">
+            <div className="hidden lg:flex items-center space-x-2">
               <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-emerald-400 animate-pulse" : "bg-slate-300"}`} />
               <span className="text-sm text-slate-600">{hasToken ? "Đã đăng nhập" : "Chế độ khách"}</span>
             </div>
 
             {hasToken ? (
-              <Button size="sm" onClick={handleLogout} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
-                Đăng xuất
-              </Button>
+              <>
+                {/* Mobile đã có Đăng xuất + Phiên mới trong sidebar. */}
+                <div className="hidden md:flex items-center gap-2 sm:gap-3">
+                  <Button size="sm" variant="secondary" onClick={handleLogout} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
+                    Đăng xuất
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleNewSession}
+                    title="Bắt đầu một phiên thu dữ liệu mới"
+                    className="whitespace-nowrap gap-1.5 px-3 py-2 text-xs sm:text-sm"
+                  >
+                    <RefreshIcon className="h-4 w-4" />
+                    Phiên mới
+                  </Button>
+                </div>
+              </>
             ) : (
               <div className="flex items-center gap-2">
                 <Button size="sm" onClick={() => navigate("/login")} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
                   Đăng nhập
                 </Button>
-                <Button size="sm" onClick={() => navigate("/register")} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
-                  Đăng ký
-                </Button>
+                {/* Thứ cấp: hai nút primary cạnh nhau thì không nút nào là chính. */}
+                <div className="hidden sm:block">
+                  <Button size="sm" variant="secondary" onClick={() => navigate("/register")} className="whitespace-nowrap px-3 py-2 text-xs sm:text-sm">
+                    Đăng ký
+                  </Button>
+                </div>
               </div>
             )}
-
-            <Button
-              size="sm"
-              onClick={handleNewSession}
-              title="Tải lại trang và bắt đầu một phiên làm việc mới"
-              className="whitespace-nowrap gap-1.5 px-3 py-2 text-xs sm:text-sm"
-            >
-              <RefreshIcon className="h-4 w-4" />
-              Phiên mới
-            </Button>
           </div>
         </header>
 

@@ -14,7 +14,7 @@
 import React from 'react';
 import type { DatasetInfo, SplitProvenance } from '../../../hooks/useTrainingAPI';
 import DIALECT_LABELS from '../../../config/dialectLabels';
-import { CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
+import { AlertTriangleIcon, CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
 
 interface Props {
   datasetInfo: DatasetInfo | null;
@@ -75,6 +75,12 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
           lẫn giữa tập huấn luyện và tập đánh giá hay không — hãy kiểm tra trước khi
           tin vào con số cuối cùng.
         </p>
+        <a
+          href="/training/dataset"
+          className="mt-3 inline-block rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white"
+        >
+          Chuẩn bị dữ liệu
+        </a>
       </div>
     );
   }
@@ -84,48 +90,42 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
 
   return (
     <div className="space-y-6">
-      {/* Điều quan trọng nhất đặt trên cùng: số cuối đo trên người mới hay người cũ */}
-      <div
-        className={`rounded-xl border p-5 ${
-          disjoint
-            ? 'border-emerald-300 bg-emerald-50'
-            : 'border-amber-400 bg-amber-50'
-        }`}
-      >
-        <div className="flex items-start gap-3">
-          <span className="text-xl leading-none">{disjoint ? '✓' : '⚠️'}</span>
-          <div>
-            <p
-              className={`font-semibold ${
-                disjoint ? 'text-emerald-900' : 'text-amber-900'
-              }`}
-            >
-              {disjoint
-                ? 'Đánh giá trên người ký chưa từng thấy'
-                : 'Đánh giá KHÔNG trên người ký mới'}
-            </p>
-            <p
-              className={`mt-1 text-sm ${
-                disjoint ? 'text-emerald-800' : 'text-amber-800'
-              }`}
-            >
-              {prov.warning ??
-                'Không người ký nào xuất hiện ở cả tập huấn luyện và tập đánh giá, nên độ chính xác báo cáo phản ánh khả năng nhận dạng một người hoàn toàn mới.'}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Cách chia này do hệ thống quyết định, không phải người dùng */}
+      {/* Cách chia này do hệ thống quyết định, không phải người dùng.
+          Hai khung cũ ở trên (lối tắt "Chuẩn bị dữ liệu" và hộp cảnh báo người
+          ký) đã bỏ: bước Chuẩn Bị Dữ Liệu giờ là bước 2 ngay trước đây nên lối
+          tắt thành thừa, còn tình trạng trùng người ký rút thành một chip ngay
+          cạnh cách chia — vẫn đọc được mà không chiếm nguyên một khung. */}
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wider text-slate-900">
               Cách chia đang áp dụng
             </p>
-            <p className="mt-1 text-lg font-bold text-ctu-navy">
-              {prov.split_mode ? MODE_LABELS[prov.split_mode] ?? prov.split_mode : 'Không xác định'}
-            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <p className="text-lg font-bold text-ctu-navy">
+                {prov.split_mode ? MODE_LABELS[prov.split_mode] ?? prov.split_mode : 'Không xác định'}
+              </p>
+              <span
+                title={
+                  prov.warning ??
+                  (disjoint
+                    ? 'Không người ký nào xuất hiện ở cả tập huấn luyện và tập đánh giá.'
+                    : 'Có người ký xuất hiện ở cả hai tập.')
+                }
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  disjoint
+                    ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
+                    : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                }`}
+              >
+                {disjoint ? (
+                  <CheckCircleIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <AlertTriangleIcon className="h-3.5 w-3.5" />
+                )}
+                {disjoint ? 'Người ký tách riêng' : 'Người ký bị trùng'}
+              </span>
+            </div>
           </div>
           <div className="text-right text-xs text-slate-500">
             <p>{total.toLocaleString()} mẫu</p>

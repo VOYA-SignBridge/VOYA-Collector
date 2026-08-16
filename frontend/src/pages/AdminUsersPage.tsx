@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
 import { useToast } from "../hooks/useToast";
 import apiClient from "../api/axiosClient";
-import { me } from "../api/auth";
-import type { AuthUser } from "../api/auth";
-import { CheckIcon, XIcon, UsersIcon } from "../components/ui/Icons";
+import { useAuth } from "../hooks/useAuth";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  LockIcon,
+  UnlockIcon,
+  UsersIcon,
+  XIcon,
+} from "../components/ui/Icons";
 import LockUserModal, { type LockPayload } from "../components/LockUserModal";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
+import { apiErrorMessage } from "../utils/apiError";
 
 interface UserData {
   id: string;
@@ -23,15 +30,12 @@ interface UserData {
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  // Người dùng hiện tại lấy từ AuthProvider (đã fetch /auth/me một lần cho cả app).
+  const { user: currentUser } = useAuth();
   const [lockTarget, setLockTarget] = useState<UserData | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    me()
-      .then((user) => setCurrentUser(user))
-      .catch(() => setCurrentUser(null));
-
     fetchUsers();
   }, []);
 
@@ -40,8 +44,8 @@ export default function AdminUsersPage() {
       setLoading(true);
       const res = await apiClient.get<UserData[]>("/api/v1/admin/users");
       setUsers(res.data);
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Không thể tải danh sách người dùng");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Không thể tải danh sách người dùng"));
     } finally {
       setLoading(false);
     }
@@ -52,8 +56,8 @@ export default function AdminUsersPage() {
       await apiClient.post(`/api/v1/admin/users/${userId}/lock`, payload);
       toast.success("Đã khóa tài khoản");
       fetchUsers();
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Khóa tài khoản thất bại");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Khóa tài khoản thất bại"));
     }
   };
 
@@ -62,8 +66,8 @@ export default function AdminUsersPage() {
       await apiClient.post(`/api/v1/admin/users/${userId}/unlock`);
       toast.success("Đã mở khóa tài khoản");
       fetchUsers();
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Mở khóa thất bại");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Mở khóa thất bại"));
     }
   };
 
@@ -74,8 +78,8 @@ export default function AdminUsersPage() {
       await apiClient.post(`/api/v1/admin/users/${userId}/warn`, { message: message.trim() });
       toast.success(`Đã gửi cảnh báo tới ${name}`);
       fetchUsers();
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Gửi cảnh báo thất bại");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Gửi cảnh báo thất bại"));
     }
   };
 
@@ -91,8 +95,8 @@ export default function AdminUsersPage() {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, is_admin: !currentIsAdmin } : u))
       );
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Lỗi cập nhật quyền");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Lỗi cập nhật quyền"));
     }
   };
 
@@ -161,7 +165,7 @@ export default function AdminUsersPage() {
                           </span>
                         )}
                         {user.has_warning && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700">⚠️ Đã cảnh báo</span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700"><AlertTriangleIcon className="h-3 w-3" /> Đã cảnh báo</span>
                         )}
                       </div>
                     </td>
@@ -185,21 +189,24 @@ export default function AdminUsersPage() {
                               onClick={() => warnUser(user.id, user.username)}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
                             >
-                              ⚠️ Cảnh báo
+                              <AlertTriangleIcon className="h-3.5 w-3.5" />
+                          Cảnh báo
                             </button>
                             {user.locked ? (
                               <button
                                 onClick={() => unlockUser(user.id)}
                                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
                               >
-                                🔓 Mở khóa
+                                <UnlockIcon className="h-3.5 w-3.5" />
+                          Mở khóa
                               </button>
                             ) : (
                               <button
                                 onClick={() => setLockTarget(user)}
                                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors"
                               >
-                                🔒 Khóa
+                                <LockIcon className="h-3.5 w-3.5" />
+                          Khóa
                               </button>
                             )}
                           </>

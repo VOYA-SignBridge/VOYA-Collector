@@ -6,6 +6,9 @@
 import React from 'react';
 import type { DatasetInfo as DatasetInfoType } from '../../../hooks/useTrainingAPI';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
+import { AlertTriangleIcon, InfoCircleIcon } from '../../../components/ui/Icons';
+import { dialectName } from '../../../config/dialectLabels';
+import { languageName } from '../../../config/languageLabels';
 
 interface Props {
   datasetInfo: DatasetInfoType | null;
@@ -27,7 +30,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
     return (
       <div className="rounded-lg bg-red-50 border border-red-200 p-6">
         <div className="flex gap-3">
-          <div className="text-2xl">⚠️</div>
+          <AlertTriangleIcon className="h-6 w-6 shrink-0 text-red-500" />
           <div>
             <h4 className="font-semibold text-red-900">Không thể tải dataset</h4>
             <p className="mt-1 text-sm text-red-800">
@@ -63,7 +66,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
           {Object.entries(datasetInfo.dialects).map(([lang, dialects]) => (
             <div key={lang}>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-slate-900">{lang.toUpperCase()}</span>
+                <span className="text-sm font-medium text-slate-900">{languageName(lang)}</span>
                 <span className="text-xs text-slate-500">{dialects.length} phương ngữ</span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -71,8 +74,9 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
                   <span
                     key={d}
                     className="inline-flex items-center px-2.5 py-1 rounded-md bg-white border border-slate-200 text-xs font-medium text-slate-700 shadow-sm"
+                    title={d}
                   >
-                    {d}
+                    {dialectName(d)}
                   </span>
                 ))}
               </div>
@@ -132,7 +136,10 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
 
       {/* Info Message */}
       <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-        <p className="font-medium">ℹ️ Dữ liệu sẵn sàng</p>
+        <p className="flex items-center gap-1.5 font-medium">
+          <InfoCircleIcon className="h-4 w-4" />
+          Dữ liệu sẵn sàng
+        </p>
         <p className="mt-1">Dataset đã được tải thành công. Hãy tiếp tục để xem chi tiết phân chia tập dữ liệu.</p>
       </div>
     </div>

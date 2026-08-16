@@ -7,7 +7,15 @@ import React, { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTrainingAPI } from '../../../hooks/useTrainingAPI';
 import type { ModelType, ResearchSplit, TrainingConfig } from '../../../hooks/useTrainingAPI';
-import { ChipIcon, GraduationCapIcon } from '../../../components/ui/Icons';
+import {
+  ChipIcon,
+  ClockIcon,
+  GraduationCapIcon,
+  InfoCircleIcon,
+  PencilIcon,
+  RefreshIcon,
+} from '../../../components/ui/Icons';
+import Collapsible from '../../../components/ui/Collapsible';
 
 interface Props {
   config: TrainingConfig;
@@ -40,9 +48,9 @@ const SETTING_META: Record<string, { label: string; min: number; max: number; st
 };
 
 const BASE_GROUP: SettingGroup = {
-  title: 'Tham số Huấn Luyện',
+  title: 'Thông số huấn luyện',
   icon: <GraduationCapIcon className="h-6 w-6" />,
-  description: 'Điều khiển quá trình học của mô hình',
+  description: 'Quyết định mô hình học nhanh hay chậm, kỹ hay sơ',
   settings: (['epochs', 'batch_size', 'learning_rate', 'dropout'] as const).map((key) => ({
     key,
     ...SETTING_META[key],
@@ -54,18 +62,18 @@ const BASE_GROUP: SettingGroup = {
 // architectures (LSTM, BiGRU+Attention, HandGCN) use fixed internal defaults.
 const ARCHITECTURE_GROUPS: Partial<Record<ModelType, SettingGroup>> = {
   tcn: {
-    title: 'Kiến Trúc TCN (Temporal Convolutional Network)',
+    title: 'Cấu trúc mạng TCN',
     icon: <ChipIcon className="h-6 w-6" />,
-    description: 'Cấu trúc mạng neural cho xử lý chuỗi thời gian',
+    description: 'Độ lớn và độ sâu của mạng',
     settings: (['channels', 'levels', 'kernel_size'] as const).map((key) => ({
       key,
       ...SETTING_META[key],
     })),
   },
   cnn: {
-    title: 'Kiến Trúc CNN (Convolutional Neural Network)',
+    title: 'Cấu trúc mạng CNN',
     icon: <ChipIcon className="h-6 w-6" />,
-    description: 'Số kênh và kích thước cửa sổ tích chập',
+    description: 'Số kênh và độ rộng cửa sổ quét',
     settings: (['channels', 'kernel_size'] as const).map((key) => ({
       key,
       ...SETTING_META[key],
@@ -74,19 +82,19 @@ const ARCHITECTURE_GROUPS: Partial<Record<ModelType, SettingGroup>> = {
 };
 
 const ARCHITECTURE_NOTES: Partial<Record<ModelType, string>> = {
-  lstm: 'LSTM dùng kiến trúc cố định (2 lớp BiLSTM, hidden size 64). Chỉ các tham số huấn luyện ở trên có thể tùy chỉnh.',
-  bigru_attention: 'BiGRU + Attention dùng kiến trúc cố định (2 lớp BiGRU, hidden size 64, attention). Chỉ các tham số huấn luyện ở trên có thể tùy chỉnh.',
-  hdgcn: 'HandGCN dùng kiến trúc cố định (2 lớp GCN, 64 kênh, temporal 128). Chỉ các tham số huấn luyện ở trên có thể tùy chỉnh.',
+  lstm: 'LSTM dùng kiến trúc cố định (2 lớp BiLSTM, hidden size 64). Chỉ chỉnh được các thông số huấn luyện ở trên.',
+  bigru_attention: 'BiGRU + Attention dùng kiến trúc cố định (2 lớp BiGRU, hidden size 64, attention). Chỉ chỉnh được các thông số huấn luyện ở trên.',
+  hdgcn: 'HandGCN dùng kiến trúc cố định (2 lớp GCN, 64 kênh, temporal 128). Chỉ chỉnh được các thông số huấn luyện ở trên.',
 };
 
 const MODEL_OPTIONS: ModelOption[] = [
-  { id: 'tcn', label: 'TCN', description: 'Temporal Convolutional Network (recommended)' },
-  { id: 'cnn', label: 'CNN', description: 'Convolutional Neural Network' },
-  { id: 'lstm', label: 'LSTM', description: 'Long Short-Term Memory' },
-  { id: 'bigru_attention', label: 'BiGRU + Attention', description: 'Bidirectional GRU with Attention' },
+  { id: 'tcn', label: 'TCN', description: 'Mặc định — hoạt động tốt nhất với dữ liệu hiện có' },
+  { id: 'cnn', label: 'CNN', description: 'Nhẹ và nhanh, hợp khi cần thử nhanh' },
+  { id: 'lstm', label: 'LSTM', description: 'Chuyên xử lý chuỗi theo thời gian' },
+  { id: 'bigru_attention', label: 'BiGRU + Attention', description: 'Đọc chuỗi hai chiều, tập trung vào đoạn quan trọng' },
   // id stays 'hdgcn': it is the wire value the API expects and what existing job
   // records store. Only the display name is normalized to HandGCN.
-  { id: 'hdgcn', label: 'HandGCN', description: 'Hand Skeleton Graph Convolutional Network' },
+  { id: 'hdgcn', label: 'HandGCN', description: 'Học theo cấu trúc khớp xương bàn tay' },
 ];
 
 const DEFAULT_CONFIG: TrainingConfig = {
@@ -144,73 +152,15 @@ const TrainingSettings: React.FC<Props> = ({ config, onChange }) => {
 
   return (
     <div className="space-y-6">
-      {/* Run purpose — exploratory by default, research when results must be citable */}
-      <div className={`rounded-xl border p-5 ${isResearch ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white'}`}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h4 className="font-semibold text-slate-900">Chế độ chạy</h4>
-            <p className="mt-1 text-xs text-slate-600 max-w-xl">
-              {isResearch
-                ? 'Huấn luyện trên split đã versioned. Checkpoint truy ngược được về đúng phiên bản dữ liệu, nên kết quả trích dẫn được trong báo cáo.'
-                : 'Thăm dò nhanh: dựng tập con tạm từ phương ngữ đã chọn. Model dùng được, nhưng không truy ngược được về một phiên bản dữ liệu cố định nên không nên trích dẫn số liệu.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={isResearch}
-            onClick={() => setResearchMode(!isResearch)}
-            disabled={!isResearch && splits.length === 0}
-            className={`shrink-0 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              isResearch
-                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed'
-            }`}
-          >
-            <GraduationCapIcon className="h-4 w-4" />
-            {isResearch ? 'Chế độ nghiên cứu: BẬT' : 'Chế độ nghiên cứu: TẮT'}
-          </button>
-        </div>
-
-        {isResearch && (
-          <div className="mt-4">
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-              Split đã versioned
-            </label>
-            <select
-              value={config.split_version || ''}
-              onChange={(e) => updateConfig('split_version', e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-ctu-blue focus:outline-none"
-            >
-              {splits.map((s) => (
-                <option key={s.split_version} value={s.split_version}>
-                  {s.split_version} — {s.num_classes} lớp · train {s.counts.train}/val {s.counts.val}/test {s.counts.test}
-                </option>
-              ))}
-            </select>
-            <p className="mt-2 text-xs text-slate-500">
-              Split đã định nghĩa sẵn tập dữ liệu, nên lựa chọn phương ngữ ở bước trước
-              không áp dụng cho lần chạy này.
-            </p>
-          </div>
-        )}
-
-        {!isResearch && splits.length === 0 && (
-          <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            Chưa có split nào đủ điều kiện nghiên cứu (cần <code className="font-mono">valid_for_research</code>{' '}
-            và checksum manifest). Tạo bằng <code className="font-mono">processed/splits/make_splits.py</code>.
-          </p>
-        )}
-      </div>
 
       {/* Model Selection */}
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="mb-4">
           <div className="flex items-center gap-2 mb-1">
             <ChipIcon className="h-6 w-6 text-ctu-blue" />
-            <h4 className="font-semibold text-slate-900">Chọn Mô Hình</h4>
+            <h4 className="font-semibold text-slate-900">Chọn mô hình</h4>
           </div>
-          <p className="text-xs text-slate-600">Lựa chọn kiến trúc mạng neural cho huấn luyện</p>
+          <p className="text-xs text-slate-600">Chưa rõ chọn gì thì cứ để mặc định TCN</p>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {MODEL_OPTIONS.map((model) => (
@@ -234,9 +184,9 @@ const TrainingSettings: React.FC<Props> = ({ config, onChange }) => {
       {/* Mode Toggle */}
       <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-ctu-blue/10 to-ctu-navy/5 border border-ctu-blue/30">
         <div>
-          <h3 className="font-semibold text-slate-900">Cấu Hình Hyperparameters</h3>
+          <h3 className="font-semibold text-slate-900">Thông số huấn luyện</h3>
           <p className="mt-1 text-sm text-slate-600">
-            Chọn cách bạn muốn cấu hình các thông số huấn luyện
+            Giữ mặc định là chạy được. Chỉ chỉnh khi bạn biết mình đang đổi gì.
           </p>
         </div>
         <label className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-ctu-blue/30 cursor-pointer hover:bg-ctu-blue/5 transition-colors">
@@ -254,8 +204,9 @@ const TrainingSettings: React.FC<Props> = ({ config, onChange }) => {
         // Default Configuration View
         <div className="space-y-4">
           {architectureNote && (
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-amber-900">
-              ℹ️ {architectureNote}
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <InfoCircleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{architectureNote}</span>
             </div>
           )}
           {settingGroups.map((group) => (
@@ -289,17 +240,19 @@ const TrainingSettings: React.FC<Props> = ({ config, onChange }) => {
 
           <button
             onClick={() => setUseDefaults(false)}
-            className="w-full py-3 px-4 rounded-lg border border-ctu-blue/40 bg-ctu-blue/5 text-ctu-blue font-medium hover:bg-ctu-blue/10 transition-colors"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-ctu-blue/40 bg-ctu-blue/5 px-4 py-3 font-medium text-ctu-blue transition-colors hover:bg-ctu-blue/10"
           >
-            ✏️ Tùy chỉnh Cấu Hình
+            <PencilIcon className="h-4 w-4" />
+            Tùy chỉnh thông số
           </button>
         </div>
       ) : (
         // Custom Configuration View
         <div className="space-y-4">
           {architectureNote && (
-            <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-amber-900">
-              ℹ️ {architectureNote}
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <InfoCircleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{architectureNote}</span>
             </div>
           )}
           {settingGroups.map((group) => (
@@ -352,21 +305,92 @@ const TrainingSettings: React.FC<Props> = ({ config, onChange }) => {
 
           <button
             onClick={resetToDefaults}
-            className="w-full py-3 px-4 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-50 transition-colors"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 font-medium text-slate-700 transition-colors hover:bg-slate-50"
           >
-            ↻ Đặt Lại Cấu Hình Mặc Định
+            <RefreshIcon className="h-4 w-4" />
+            Đặt lại mặc định
           </button>
         </div>
       )}
 
-      {/* Training Time Estimate */}
-      <div className="rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 p-4 text-sm text-ctu-navy">
-        <p className="font-medium">⏱️ Thời gian dự kiến</p>
-        <p className="mt-1">
-          Với cấu hình hiện tại, quá trình huấn luyện sẽ mất khoảng <strong>30-60 phút</strong> tùy
-          thuộc vào cấu hình phần cứng của máy.
+      {/* Thời gian dự kiến */}
+      <div className="flex items-start gap-2.5 rounded-lg border border-ctu-blue/30 bg-ctu-blue/10 p-4 text-sm text-ctu-navy">
+        <ClockIcon className="mt-0.5 h-4 w-4 shrink-0" />
+        <p>
+          Với cấu hình hiện tại, huấn luyện mất khoảng <strong>30–60 phút</strong>, tuỳ cấu hình máy.
         </p>
       </div>
+
+      {/* Chế độ chạy — trước đây là khung mở sẵn ở đầu bước, nhưng đa số lần
+          chạy dùng mặc định (thăm dò nhanh) và không cần đụng tới. Gập lại để
+          bước Cấu Hình mở ra là thấy ngay phần chọn mô hình. */}
+      <Collapsible
+        title="Tuỳ chọn nâng cao"
+        description="Chế độ chạy và bộ chia dữ liệu dùng cho lần huấn luyện này"
+        badge={
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+              isResearch ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {isResearch ? 'Nghiên cứu' : 'Thăm dò nhanh'}
+          </span>
+        }
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="font-semibold text-slate-900">Chế độ chạy</h4>
+            <p className="mt-1 max-w-xl text-xs text-slate-600">
+              {isResearch
+                ? 'Huấn luyện trên bộ chia đã đánh phiên bản. Kết quả truy ngược được về đúng bộ dữ liệu đã dùng, nên trích dẫn được trong báo cáo.'
+                : 'Thăm dò nhanh: dựng tập tạm từ phương ngữ đã chọn. Mô hình dùng được, nhưng không truy ngược được về một phiên bản dữ liệu cố định nên không nên lấy số liệu đưa vào báo cáo.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isResearch}
+            onClick={() => setResearchMode(!isResearch)}
+            disabled={!isResearch && splits.length === 0}
+            className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              isResearch
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50'
+            }`}
+          >
+            <GraduationCapIcon className="h-4 w-4" />
+            {isResearch ? 'Chế độ nghiên cứu: BẬT' : 'Chế độ nghiên cứu: TẮT'}
+          </button>
+        </div>
+
+        {isResearch && (
+          <div className="mt-4">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Bộ chia đã đánh phiên bản
+            </label>
+            <select
+              value={config.split_version || ''}
+              onChange={(e) => updateConfig('split_version', e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-ctu-blue focus:outline-none"
+            >
+              {splits.map((s) => (
+                <option key={s.split_version} value={s.split_version}>
+                  {s.split_version} — {s.num_classes} lớp · train {s.counts.train}/val {s.counts.val}/test {s.counts.test}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-slate-500">
+              Bộ chia đã cố định sẵn dữ liệu, nên phương ngữ chọn ở bước trước không áp dụng cho lần chạy này.
+            </p>
+          </div>
+        )}
+
+        {!isResearch && splits.length === 0 && (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Chưa có bộ chia nào đủ điều kiện nghiên cứu. Chạy bước <strong>Chuẩn Bị Dữ Liệu</strong> để tạo.
+          </p>
+        )}
+      </Collapsible>
     </div>
   );
 };

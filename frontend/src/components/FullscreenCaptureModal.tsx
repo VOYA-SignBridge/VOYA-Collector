@@ -14,6 +14,23 @@ import {
   clampCaptureCount,
 } from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
+import {
+  AlertTriangleIcon,
+  BanIcon,
+  ChartBarIcon,
+  CheckCircleIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ClipboardListIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FolderIcon,
+  LightbulbIcon,
+  PauseCircleIcon,
+  TargetIcon,
+  VideoIcon,
+  XIcon,
+} from "./ui/Icons";
 import AddDialectModal from "./AddDialectModal";
 import { getClassesList, getClassesStats } from "../api/dataset";
 import { fetchLabelSuggestions, fetchCollectorSuggestions, getPreference, setPreference } from "../api/preferences";
@@ -332,10 +349,12 @@ function CapturedWordsSummary({ summary }: { summary: Record<string, number> }) 
         className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-gray-200 hover:bg-gray-700/50 transition-colors"
       >
         <span className="flex items-center gap-2 text-xs sm:text-sm font-medium truncate">
-          <span>📋</span>
+          <ClipboardListIcon className="h-4 w-4 shrink-0" />
           <span className="truncate">Đã lưu phiên này: {total} mẫu · {entries.length} từ</span>
         </span>
-        <span className="text-xs text-gray-400 flex-shrink-0">{open ? "🔽" : "▶️"}</span>
+        <ChevronDownIcon
+          className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {open && (
         <div className="max-h-32 sm:max-h-40 overflow-y-auto border-t border-gray-700">
@@ -1530,11 +1549,10 @@ export default function FullscreenCaptureModal({
     const canvas = canvasRef.current;
     if (canvas) { canvas.width = CAPTURE_FRAME_WIDTH; canvas.height = CAPTURE_FRAME_HEIGHT; }
 
-    const video = videoRef.current;
-    const onLoadedMetadata = () => console.log("Video metadata loaded:", { w: video.videoWidth, h: video.videoHeight });
-    const onCanPlay = () => console.log("Video can play");
-    video.addEventListener("loadedmetadata", onLoadedMetadata);
-    video.addEventListener("canplay", onCanPlay);
+    // Đã bỏ hai listener "loadedmetadata"/"canplay": chúng chỉ console.log và
+    // không strip được khỏi bundle production (console.log là thân arrow
+    // function nên giá trị trả về bị coi là có dùng), làm console đầy log mỗi
+    // lần mở camera.
 
     // FIX (redundant getUserMedia): The previous code called getUserMedia,
     // immediately stopped the resulting stream, then started Camera() which
@@ -1559,8 +1577,6 @@ export default function FullscreenCaptureModal({
       });
 
     return () => {
-      video.removeEventListener("loadedmetadata", onLoadedMetadata);
-      video.removeEventListener("canplay", onCanPlay);
       hands.close();
       stopCameraResources();
     };
@@ -1714,14 +1730,18 @@ export default function FullscreenCaptureModal({
             aria-live="polite"
           >
             <div className="flex items-start gap-2">
-              <span>{visibleNotice.kind === "error" ? "⛔" : "⚠️"}</span>
+              {visibleNotice.kind === "error" ? (
+                <BanIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
               <span className="leading-snug">{visibleNotice.message}</span>
               <button
                 onClick={() => setVisibleNotice(null)}
                 className="ml-auto -mr-1 -mt-1 p-1 opacity-70 hover:opacity-100"
                 aria-label="Đóng thông báo"
               >
-                ✕
+                <XIcon className="h-4 w-4" />
               </button>
             </div>
           </div>
@@ -1749,7 +1769,10 @@ export default function FullscreenCaptureModal({
       <div className="absolute top-0 left-0 right-0 z-10 bg-black/80 backdrop-blur-sm border-b border-gray-700 hidden sm:block">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-xl font-semibold text-white">🎬 Ghi toàn màn hình</h2>
+            <h2 className="flex items-center gap-2 text-xl font-semibold text-white">
+              <VideoIcon className="h-5 w-5" />
+              Ghi toàn màn hình
+            </h2>
             {isReady && (
               <Badge variant="success">
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse mr-2"></span>Camera sẵn sàng
@@ -1782,7 +1805,7 @@ export default function FullscreenCaptureModal({
               <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Esc</kbd> để thoát
             </div>
             <button onClick={() => setShowGuide(!showGuide)} className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2">
-              <span>{showGuide ? "🙈" : "👁️"}</span>
+              {showGuide ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
               <span>{showGuide ? "Ẩn hướng dẫn" : "Hiển thị hướng dẫn"}</span>
             </button>
             <button onClick={handleClose} className="text-white hover:text-gray-300 p-2">
@@ -1842,7 +1865,7 @@ export default function FullscreenCaptureModal({
                     <span className="text-teal-400 text-xs">R</span>
                   </div>
                 </div>
-                <div className="absolute -top-10 sm:-top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium">🎯 Đặt vị trí vào khung</div>
+                <div className="absolute -top-10 sm:-top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium"><TargetIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" /> Đặt vị trí vào khung</div>
                 <div className="absolute -bottom-7 sm:-bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-[11px] sm:text-xs text-center">Thấy phần trên cơ thể và hai tay</div>
               </div>
             </div>
@@ -1865,7 +1888,7 @@ export default function FullscreenCaptureModal({
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20">
               <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 sm:p-8 w-full max-w-[calc(100vw-2rem)] sm:max-w-lg">
                 <div className="text-center">
-                  <div className="text-6xl mb-4">⏸️</div>
+                  <PauseCircleIcon className="mx-auto mb-4 h-16 w-16 text-yellow-400" />
                   <h3 className="text-3xl font-bold text-white mb-2">Đã tạm dừng</h3>
                   <p className="text-gray-300 mb-6">Bạn muốn làm gì với dữ liệu hiện tại?</p>
                   <div className="bg-gray-800 rounded-lg p-4 mb-6">
@@ -1901,7 +1924,7 @@ export default function FullscreenCaptureModal({
           {!recording && !countdown && completedCaptures > 0 && completedCaptures < captureCount && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="text-center text-white">
-                <div className="text-4xl mb-4">🎉</div>
+                <CheckCircleIcon className="mx-auto mb-4 h-12 w-12 text-green-400" />
                 <div className="text-2xl font-bold mb-2 text-green-400">Đã chụp {completedCaptures} mẫu!</div>
                 <div className="text-xl mb-4">Chuẩn bị chụp tiếp...</div>
                 <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {captureCount}</div>
@@ -1915,7 +1938,7 @@ export default function FullscreenCaptureModal({
           {!recording && !countdown && completedCaptures > 0 && completedCaptures >= captureCount && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm">
               <div className="text-center text-white">
-                <div className="text-6xl mb-4">✅</div>
+                <CheckCircleIcon className="mx-auto mb-4 h-16 w-16 text-green-400" />
                 <div className="text-3xl font-bold mb-2 text-green-400">Hoàn tất tất cả lần chụp!</div>
                 <div className="text-xl mb-4">Đã chụp {completedCaptures} mẫu cho "{label}"</div>
                 <div className="text-lg text-gray-300">Sẵn sàng chụp tiếp — nhập nhãn mới và nhấn nút Bắt đầu chụp</div>
@@ -1933,7 +1956,10 @@ export default function FullscreenCaptureModal({
 
           {recording && (
             <div className="absolute bottom-3 sm:bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-4 sm:px-6 py-2 max-w-[calc(100vw-2rem)]">
-              <div className="text-white text-sm">📊 {frames.length} khung đã chụp</div>
+              <div className="flex items-center gap-1.5 text-sm text-white">
+                <ChartBarIcon className="h-4 w-4" />
+                {frames.length} khung đã chụp
+              </div>
             </div>
           )}
         </div>
@@ -1944,7 +1970,7 @@ export default function FullscreenCaptureModal({
             {/* Connectivity / save warning — blocks new captures while shown */}
             {connectionIssue && (
               <div className="flex items-start gap-2 bg-red-900/40 border border-red-500/50 rounded-lg px-3 py-2 text-xs sm:text-sm text-red-100">
-                <span className="text-base leading-none">⚠️</span>
+                <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
                 <div>
                   <div className="font-semibold">Kết nối/lưu server đang gặp sự cố</div>
                   <div className="text-red-200/90 mt-0.5">{connectionIssue} Vui lòng tạm ngưng thu để tránh mất dữ liệu.</div>
@@ -1976,9 +2002,9 @@ export default function FullscreenCaptureModal({
                 {normalizedLabel && !catalogLoading && !catalogError && (
                   <div className="mt-1 text-[10px] sm:text-xs text-blue-200/80">
                     {labelExists ? (
-                      <span className="text-green-300">✓ Đã có {labelSamplesCount} mẫu</span>
+                      <span className="inline-flex items-center gap-1 text-green-300"><CheckIcon className="h-3 w-3" /> Đã có {labelSamplesCount} mẫu</span>
                     ) : (
-                      <span className="text-yellow-300">⚠ Nhãn mới ({currentCatalogLabelCount} nhãn hiện có)</span>
+                      <span className="inline-flex items-center gap-1 text-yellow-300"><AlertTriangleIcon className="h-3 w-3" /> Nhãn mới ({currentCatalogLabelCount} nhãn hiện có)</span>
                     )}
                   </div>
                 )}
@@ -2003,7 +2029,7 @@ export default function FullscreenCaptureModal({
               {/* Language / Dialect — searchable compact dropdowns */}
               <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
                 <SearchableSelect
-                  label="🌐 Ngôn ngữ"
+                  label="Ngôn ngữ"
                   value={language}
                   options={languageList}
                   displayFn={displayLanguageLabel}
@@ -2028,7 +2054,7 @@ export default function FullscreenCaptureModal({
                   disabled={recording || countdown > 0}
                 />
                 <SearchableSelect
-                  label="🧭 Phương ngữ"
+                  label="Phương ngữ"
                   value={dialect}
                   options={[...dialectList, "Khác (+)"]}
                   displayFn={(v) => v}
@@ -2048,7 +2074,7 @@ export default function FullscreenCaptureModal({
                 <div className="rounded-lg border border-blue-500/20 bg-gray-900/40 px-2.5 py-2 sm:px-3">
                   <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
                     <div className="min-w-0">
-                      <div className="text-[11px] sm:text-xs font-medium text-blue-300">🗂 Phiên thu</div>
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-blue-300 sm:text-xs"><FolderIcon className="h-3.5 w-3.5" /> Phiên thu</div>
                       <div className="mt-0.5 truncate text-[11px] text-blue-100/80" title={sessionId}>
                         Bắt đầu {formatSessionLabel(sessionId)} · {sessionSampleCount} mẫu
                       </div>
@@ -2064,7 +2090,7 @@ export default function FullscreenCaptureModal({
                   </div>
                   {signerChangedMidSession && (
                     <div className="mt-1.5 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-950/40 px-2 py-1 text-[10px] leading-relaxed text-amber-200">
-                      <span aria-hidden="true">⚠</span>
+                      <AlertTriangleIcon className="mt-px h-3 w-3 shrink-0" aria-hidden />
                       <span>
                         Người thực hiện đã đổi từ <b>{sessionSigner}</b>. Hãy bắt đầu phiên
                         mới để mẫu của hai người không bị gộp chung một nhóm.
@@ -2078,7 +2104,7 @@ export default function FullscreenCaptureModal({
               {onCaptureCountChange && (
                 <div>
                   <label htmlFor="capture-count" className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">
-                    🔁 Số lượt thu
+                    Số lượt thu
                   </label>
                   <div className="flex items-stretch gap-1.5">
                     <button
@@ -2162,7 +2188,7 @@ export default function FullscreenCaptureModal({
               </Button>
             ) : paused ? (
               <div className="text-center py-3 text-gray-400 text-sm">
-                <span className="text-yellow-500 font-medium">⏸ Đã tạm dừng</span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-yellow-500"><PauseCircleIcon className="h-4 w-4" /> Đã tạm dừng</span>
                 <p className="text-sm mt-1">Xem các tùy chọn trên màn hình</p>
               </div>
             ) : (
@@ -2183,18 +2209,23 @@ export default function FullscreenCaptureModal({
           {/* Tips */}
           <div className="hidden sm:block bg-gray-800 border-t border-gray-700 p-4">
             <button onClick={() => setShowTips(!showTips)} className="w-full flex items-center justify-between text-sm font-medium text-gray-300 hover:text-white transition-colors">
-              <span>💡 Mẹo nhanh để có kết quả tốt</span>
-              <span className="text-xs">{showTips ? "🔽" : "▶️"}</span>
+              <span className="flex items-center gap-2">
+                <LightbulbIcon className="h-4 w-4" />
+                Mẹo nhanh để có kết quả tốt
+              </span>
+              <ChevronDownIcon
+                className={`h-4 w-4 transition-transform ${showTips ? "rotate-180" : ""}`}
+              />
             </button>
             {showTips && (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-400">
-                <div>✨ Đảm bảo ánh sáng tốt và nền rõ ràng</div>
-                <div>🤲 Giữ tay hiển thị và ngón tay duỗi</div>
-                <div>👁️ Dùng nút "Hiển thị hướng dẫn" để hỗ trợ định vị</div>
-                <div>🔗 Quan sát kết nối giữa các bộ phận tay để theo dõi tốt hơn</div>
-                <div>🎯 Giữ ở giữa khung hình</div>
-                <div>⚡ Di chuyển tự nhiên để có kết quả tốt nhất</div>
-              </div>
+              <ul className="mt-3 grid list-disc grid-cols-2 gap-x-4 gap-y-1 pl-4 text-xs text-gray-400 marker:text-gray-600">
+                <li>Đủ sáng, nền đơn giản</li>
+                <li>Giữ tay trong khung, ngón tay duỗi</li>
+                <li>Bật "Hiển thị hướng dẫn" để căn vị trí</li>
+                <li>Nhìn khung xương tay để biết máy có bám đúng không</li>
+                <li>Đứng giữa khung hình</li>
+                <li>Ra dấu tự nhiên, không gấp</li>
+              </ul>
             )}
           </div>
         </div>

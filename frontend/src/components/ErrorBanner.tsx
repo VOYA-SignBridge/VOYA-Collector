@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { AlertTriangleIcon, CheckCircleIcon, InfoCircleIcon, XCircleIcon } from "./ui/Icons";
 
 type Props = {
   message: string;
@@ -34,27 +35,31 @@ export default function ErrorBanner({
   const types = {
     error: {
       bg: "bg-red-50",
-      border: "border-red-200", 
+      border: "border-red-200",
       text: "text-red-700",
-      icon: "❌"
+      icon: <XCircleIcon className="h-5 w-5" />,
+      title: "Lỗi"
     },
     warning: {
       bg: "bg-yellow-50",
       border: "border-yellow-200",
-      text: "text-yellow-700", 
-      icon: "⚠️"
+      text: "text-yellow-700",
+      icon: <AlertTriangleIcon className="h-5 w-5" />,
+      title: "Cảnh báo"
     },
     info: {
       bg: "bg-blue-50",
       border: "border-blue-200",
       text: "text-blue-700",
-      icon: "ℹ️"
+      icon: <InfoCircleIcon className="h-5 w-5" />,
+      title: "Thông tin"
     },
     success: {
       bg: "bg-emerald-50",
       border: "border-emerald-200",
       text: "text-emerald-700",
-      icon: "✅"
+      icon: <CheckCircleIcon className="h-5 w-5" />,
+      title: "Thành công"
     }
   };
 
@@ -73,10 +78,10 @@ export default function ErrorBanner({
       ${config.bg} ${config.border} ${config.text}
     `}>
       <div className="flex items-start gap-4">
-        <div className="text-xl flex-shrink-0 mt-0.5">{config.icon}</div>
+        <div className="mt-0.5 flex-shrink-0">{config.icon}</div>
         <div className="flex-1 min-w-0">
           <div className="font-medium text-slate-900 text-sm mb-1">
-            {type.charAt(0).toUpperCase() + type.slice(1)}
+            {config.title}
           </div>
           <div className="text-sm leading-relaxed">{message}</div>
         </div>
@@ -84,7 +89,7 @@ export default function ErrorBanner({
           <button
             onClick={handleClose}
             className="text-slate-500 hover:text-slate-900 transition-colors p-1 rounded-md hover:bg-white/50"
-            aria-label="Close notification"
+            aria-label="Đóng thông báo"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />

@@ -1,5 +1,6 @@
 import { type FormEvent, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { safeRedirectTarget } from "../utils/redirect";
 import { login } from "../api/auth";
 import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
@@ -13,6 +14,8 @@ type FormState = {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const destination = safeRedirectTarget(searchParams.get("next"));
   const [form, setForm] = useState<FormState>({ identifier: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [showLoading, setShowLoading] = useState(false);
@@ -39,10 +42,11 @@ export default function LoginPage() {
 
       notifyAuthChange();
 
-      // Show full-screen loading for 3 seconds before navigating
+      // Giữ màn hình chờ để không nháy lại form trong lúc điều hướng, nhưng
+      // KHÔNG chờ cứng 3 giây như trước — route đích đã có Suspense fallback
+      // riêng, nên độ trễ đó chỉ làm mọi lần đăng nhập chậm đi vô ích.
       setShowLoading(true);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      navigate("/upload", { replace: true });
+      navigate(destination, { replace: true });
     } catch (err: unknown) {
       const error = err as Record<string, unknown> | null;
       const response = error?.response as Record<string, unknown> | undefined;
@@ -70,7 +74,10 @@ export default function LoginPage() {
       footer={
         <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>Chưa có tài khoản?</span>
-          <Link to="/register" className="font-semibold text-ctu-blue hover:text-ctu-navy">
+          <Link
+            to={searchParams.get("next") ? `/register?next=${encodeURIComponent(searchParams.get("next")!)}` : "/register"}
+            className="font-semibold text-ctu-blue hover:text-ctu-navy"
+          >
             Tạo tài khoản →
           </Link>
         </div>

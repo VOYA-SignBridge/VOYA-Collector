@@ -11,6 +11,23 @@ import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import { SearchIcon, TagIcon } from "../components/ui/Icons";
 import { useAuth } from "../hooks/useAuth";
+import { dialectName, dialectBadgeClass, KNOWN_DIALECT_SLUGS } from "../config/dialectLabels";
+import { useToast } from "../hooks/useToast";
+import { languageName } from "../config/languageLabels";
+
+/** Chip phương ngữ. Trước đây mỗi view liệt kê tay từng slug bằng chuỗi
+ *  `item.dialect === '...' && (...)`, nên nhãn thuộc phương ngữ ngoài danh sách
+ *  đó (ví dụ 'bang-chu-cai') không hiện badge nào cả. */
+function DialectBadge({ dialect, className = "" }: { dialect?: string; className?: string }) {
+  if (!dialect) return null;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full font-semibold ${dialectBadgeClass(dialect)} ${className}`}
+    >
+      {dialectName(dialect)}
+    </span>
+  );
+}
 
 export default function LabelsPage() {
   const { loading: authLoading, isAdmin } = useAuth();
@@ -21,16 +38,11 @@ export default function LabelsPage() {
   const [dialect, setDialect] = useState<string>(''); // Empty = all dialects
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [operationLogs, setOperationLogs] = useState<string[] | null>(null);
   const [showOperationLogs, setShowOperationLogs] = useState(false);
-
-  // Auto-dismiss status message after 2 seconds
-  useEffect(() => {
-    if (!statusMessage) return;
-    const timer = setTimeout(() => setStatusMessage(null), 2000);
-    return () => clearTimeout(timer);
-  }, [statusMessage]);
+  // Dùng chung ToastContainer của app thay vì hộp thông báo cố định tự chế —
+  // trước đây trang này có vị trí, màu và cách tự tắt khác hẳn mọi trang khác.
+  const { toast } = useToast();
 
   const extractOperationLogs = (res: unknown): string[] | null => {
     if (!res || typeof res !== "object") return null;
@@ -46,23 +58,11 @@ export default function LabelsPage() {
     return null;
   };
   
-  const getLanguageName = (lang?: string): string => {
-    const l = (lang || language);
-    return l === 'vn' ? 'Tiếng Việt' : l === 'en' ? 'English' : l;
-  };
+  const getLanguageName = (lang?: string): string => languageName(lang || language);
   
-  const getDialectName = (dialect?: string): string => {
-    const d = (dialect || 'common');
-    const map: Record<string, string> = {
-      'common': 'Chung',
-      'bac': 'Miền Bắc',
-      'nam': 'Miền Nam',
-      'trung': 'Miền Trung',
-      'hoa-de': 'Hòa Đê',
-      'can-tho': 'Cần Thơ',
-    };
-    return map[d] || d;
-  };
+  // Tên phương ngữ lấy từ config/dialectLabels.ts — xem chú thích ở đó về việc
+  // trước kia có tới ba bảng riêng lệch nhau.
+  const getDialectName = (dialect?: string): string => dialectName(dialect);
   const [search, setSearch] = useState<string>("");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [editTarget, setEditTarget] = useState<RenderItem | null>(null);
@@ -160,6 +160,19 @@ export default function LabelsPage() {
     });
   }, [classes, labels, search, sampleCounts, dialect, language]);
 
+  // Danh sách phương ngữ để lọc: dựng từ dữ liệu thật rồi hợp với các slug đã
+  // biết. Trước đây dropdown hardcode 6 mục nên nhãn thuộc 'bang-chu-cai',
+  // 'ha-noi', 'saigon', 'spa'... không có cách nào lọc tới.
+  const dialectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of classes ?? []) {
+      const d = normalizeDialect(c.dialect);
+      if (d) seen.add(d);
+    }
+    for (const slug of KNOWN_DIALECT_SLUGS) seen.add(slug);
+    return [...seen].sort((a, b) => dialectName(a).localeCompare(dialectName(b), 'vi'));
+  }, [classes]);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -254,7 +267,6 @@ export default function LabelsPage() {
   };
 
   const openEdit = (item: RenderItem) => {
-    setStatusMessage(null);
     setError(null);
     setEditTarget(item);
     setEditValue(item.label_original || "");
@@ -263,7 +275,6 @@ export default function LabelsPage() {
   };
 
   const openDelete = (item: RenderItem) => {
-    setStatusMessage(null);
     setError(null);
     setDeleteTarget(item);
   };
@@ -327,7 +338,7 @@ export default function LabelsPage() {
         updated.language || editLanguage,
         updated.dialect || editDialect,
       );
-      setStatusMessage(
+      toast.success(
         `Đã cập nhật nhãn "${updated.label_original || nextLabel}" (${getLanguageName(updated.language || editLanguage)} / ${getDialectName(updated.dialect || editDialect)})`
       );
       setEditTarget(null);
@@ -357,7 +368,7 @@ export default function LabelsPage() {
       applyLabelDelete(classRef);
       const logs = extractOperationLogs(result);
       setOperationLogs(logs);
-      setStatusMessage(
+      toast.success(
         `Đã xóa nhãn "${deleteTarget.label_original}" (${getLanguageName(deleteTarget.language)} / ${getDialectName(deleteTarget.dialect)})`
       );
       setDeleteTarget(null);
@@ -393,16 +404,6 @@ export default function LabelsPage() {
         />
       )}
 
-      {statusMessage && !error && (
-        <div className="fixed bottom-4 left-4 right-4 z-40 sm:left-auto sm:right-6 sm:max-w-md rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1">{statusMessage}</div>
-            <button onClick={() => setStatusMessage(null)} className="mt-0.5 text-green-600 hover:text-green-700">
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
       {operationLogs && operationLogs.length > 0 && (
         <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
           <div className="flex items-center justify-between mb-2">
@@ -411,7 +412,7 @@ export default function LabelsPage() {
               onClick={() => setShowOperationLogs(!showOperationLogs)}
               className="px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded transition-colors"
             >
-              {showOperationLogs ? '▼ Ẩn' : '▶ Hiển thị'}
+              {showOperationLogs ? 'Ẩn' : 'Hiển thị'}
             </button>
           </div>
           {showOperationLogs && (
@@ -491,13 +492,12 @@ export default function LabelsPage() {
             </div>
             <div className="min-w-0">
               <select className="input text-sm py-2.5" value={dialect} onChange={(e) => setDialect(e.target.value)}>
-                <option value="">🗺️ Tất cả vùng</option>
-                <option value="common">Chung</option>
-                <option value="bac">Miền Bắc</option>
-                <option value="nam">Miền Nam</option>
-                <option value="can-tho">Cần Thơ</option>
-                <option value="trung">Miền Trung</option>
-                <option value="hoa-de">Hòa Đê</option>
+                <option value="">Tất cả vùng</option>
+                {dialectOptions.map((slug) => (
+                  <option key={slug} value={slug}>
+                    {dialectName(slug)}
+                  </option>
+                ))}
               </select>
             </div>
             
@@ -587,39 +587,10 @@ export default function LabelsPage() {
                             #{item.class_idx}
                           </span>
                         )}
-                        {item.dialect === 'common' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-800">
-                            Chung
-                          </span>
-                        )}
-                        {item.dialect === 'bac' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-800">
-                            Miền Bắc
-                          </span>
-                        )}
-                        {item.dialect === 'nam' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800">
-                            Miền Nam
-                          </span>
-                        )}
-                        {item.dialect === 'trung' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800">
-                            Miền Trung
-                          </span>
-                        )}
-                        {item.dialect === 'hoa-de' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-100 text-purple-800">
-                            Hòa Đê
-                          </span>
-                        )}
-                        {item.dialect === 'can-tho' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-100 text-cyan-800">
-                            Cần Thơ
-                          </span>
-                        )}
+                        <DialectBadge dialect={item.dialect} className="px-2 py-0.5 text-[11px]" />
                         {item.is_common_global && (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-green-100 text-green-800">
-                            ⭐ Toàn cầu
+                            Toàn cầu
                           </span>
                         )}
                       </div>
@@ -635,26 +606,9 @@ export default function LabelsPage() {
                             #{item.class_idx}
                           </span>
                         )}
-                        {item.dialect === 'common' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-800">Chung</span>
-                        )}
-                        {item.dialect === 'bac' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">Miền Bắc</span>
-                        )}
-                        {item.dialect === 'nam' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Miền Nam</span>
-                        )}
-                        {item.dialect === 'trung' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">Miền Trung</span>
-                        )}
-                        {item.dialect === 'hoa-de' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">Hòa Đê</span>
-                        )}
-                        {item.dialect === 'can-tho' && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 text-cyan-800">Cần Thơ</span>
-                        )}
+                        <DialectBadge dialect={item.dialect} className="px-3 py-1 text-xs" />
                         {item.is_common_global && (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">⭐ Toàn cầu</span>
+                          <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800">Toàn cầu</span>
                         )}
                       </div>
                     </div>

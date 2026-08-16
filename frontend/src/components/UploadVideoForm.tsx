@@ -4,6 +4,8 @@ import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
+import { AlertTriangleIcon } from "./ui/Icons";
+import { useToast } from "../hooks/useToast";
 
 // ============================================================================
 // TYPES
@@ -38,6 +40,7 @@ type Props = {
 // ============================================================================
 
 export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
+  const { toast } = useToast();
   // ========== STATE ==========
   const [files, setFiles] = useState<FileItem[]>([]);
   const [defaultLabel, setDefaultLabel] = useState("");
@@ -164,19 +167,19 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         });
       
       if (newFiles.length === 0) {
-        onError?.(`Bỏ qua ${videoFiles.length} file trùng lặp`);
+        toast.warning(`Bỏ qua ${videoFiles.length} file trùng lặp`);
       } else {
         // Xóa CSV mapping sau khi đã áp dụng
         const appliedCount = newFiles.filter(f => csvMapping[f.file.name]).length;
         if (appliedCount > 0) {
-          onError?.(`✅ Thêm ${newFiles.length} file, trong đó ${appliedCount} file đã áp dụng CSV mapping`);
+          toast.success(`Thêm ${newFiles.length} file, trong đó ${appliedCount} file đã áp dụng CSV mapping`);
           localStorage.removeItem('csvMapping');
         }
       }
       
       return [...prev, ...newFiles];
     });
-  }, [defaultLabel, defaultUser, defaultDialect, defaultClassUid, onError]);
+  }, [defaultLabel, defaultUser, defaultDialect, defaultClassUid, onError, toast]);
 
   // Listen for global selectClass events dispatched by LabelsPage
   useEffect(() => {
@@ -189,7 +192,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           if (d.label) setDefaultLabel(String(d.label));
           if (d.class_uid) setDefaultClassUid(String(d.class_uid));
           // provide quick feedback
-          onError?.(`✅ Chọn nhãn: ${d.label} (${d.class_uid ?? d.class_idx ?? ''})`);
+          toast.success(`Chọn nhãn: ${d.label} (${d.class_uid ?? d.class_idx ?? ''})`);
         }
       } catch (err) {
         // ignore
@@ -197,7 +200,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     };
     window.addEventListener('selectClass', handler);
     return () => window.removeEventListener('selectClass', handler);
-  }, [onError]);
+  }, [onError, toast]);
   
   const removeFile = useCallback((id: string) => {
     setFiles(prev => prev.filter(f => f.id !== id));
@@ -269,7 +272,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           }
         });
         localStorage.setItem('csvMapping', JSON.stringify(mapping));
-        onError?.(`✅ Đã lưu ${Object.keys(mapping).length} mapping từ CSV. Bây giờ hãy thêm video để tự động áp dụng!`);
+        toast.success(`Đã lưu ${Object.keys(mapping).length} mapping từ CSV. Thêm video vào là tự động áp dụng.`);
         console.log('💾 Saved CSV mapping:', mapping);
         return;
       }
@@ -285,7 +288,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           const csvFilename = r.filename || r.file || r.name;
           const matched = csvFilename === item.file.name;
           if (matched) {
-            matchDetails.push(`✓ ${item.file.name} → ${r.label || 'N/A'}`);
+            matchDetails.push(`${item.file.name} -> ${r.label || 'N/A'}`);
           }
           return matched;
         });
@@ -307,9 +310,9 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       if (matchedCount > 0) {
         const unmatchedCount = files.length - matchedCount;
         if (unmatchedCount > 0) {
-          onError?.(`✅ Đã ánh xạ ${matchedCount}/${files.length} file từ CSV. ${unmatchedCount} file không tìm thấy trong CSV sẽ dùng giá trị mặc định.`);
+          toast.success(`Đã ánh xạ ${matchedCount}/${files.length} file từ CSV. ${unmatchedCount} file không có trong CSV sẽ dùng giá trị mặc định.`);
         } else {
-          onError?.(`✅ Đã ánh xạ ${matchedCount}/${files.length} file từ CSV`);
+          toast.success(`Đã ánh xạ ${matchedCount}/${files.length} file từ CSV`);
         }
       } else {
         // Không có file nào match
@@ -320,13 +323,13 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         console.log('CSV filenames:', csvFilenames);
         console.log('Current filenames:', currentFilenames);
         
-        onError?.(`⚠️ Không tìm thấy file nào khớp với CSV.\n\n💡 Gợi ý: Kiểm tra tên file trong CSV có khớp với tên file đã chọn không. Mở Console (F12) để xem chi tiết danh sách.`);
+        onError?.(`Không tìm thấy file nào khớp với CSV. Kiểm tra tên file trong CSV có trùng với tên file đã chọn không.`);
       }
     } catch (err) {
       console.error('CSV parsing error:', err);
-      onError?.('❌ Không thể đọc file CSV. Đảm bảo format: filename,label,user,dialect');
+      onError?.('Không đọc được file CSV. Định dạng cần có: filename,label,user,dialect');
     }
-  }, [files, onError]);
+  }, [files, onError, toast]);
   
   // ========== UPLOAD ==========
   const uploadSingle = useCallback(async (item: FileItem): Promise<boolean> => {
@@ -693,7 +696,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               </p>
               <span className="text-gray-400 hidden sm:inline">•</span>
               <p className="text-ctu-blue font-medium">
-                💡 Có thể import CSV trước hoặc sau đều được
+                Có thể import CSV trước hoặc sau đều được
               </p>
             </div>
           </div>
@@ -804,7 +807,8 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           {stats.validationErrors.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
               <h4 className="text-sm font-semibold text-red-900 mb-2">
-                ⚠️ Có {stats.validationErrors.length} lỗi cần sửa trước khi upload:
+                <AlertTriangleIcon className="mr-1 inline-block h-4 w-4 align-text-bottom" />
+            Có {stats.validationErrors.length} lỗi cần sửa trước khi upload:
               </h4>
               <ul className="text-xs text-red-800 space-y-1">
                 {stats.validationErrors.slice(0, 5).map((err, idx) => (
@@ -971,7 +975,8 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               </div>
               {stats.validationErrors.length > 0 && (
                 <div className="text-sm text-red-600 font-medium">
-                  ⚠️ {stats.validationErrors.length} lỗi
+                  <AlertTriangleIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" />
+                {stats.validationErrors.length} lỗi
                 </div>
               )}
             </div>

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
-import { getAuthToken } from '../api/axiosClient';
+import axiosClient, { getAuthToken } from '../api/axiosClient';
 
 /** Cách tập dữ liệu ĐANG được chia — đọc từ split trên đĩa, không phải từ
  *  lựa chọn của người dùng. Bước 3 trước đây hiện thanh trượt tỉ lệ không gửi
@@ -18,6 +18,10 @@ export interface SplitProvenance {
   dataset_manifest: string | null;
   valid_for_research: boolean | null;
   warning: string | null;
+  /** true: split triển khai riêng cho đúng dialect đang chọn. false: rơi về
+   *  split gốc dùng chung — split đó luôn có counts > 0, nên KHÔNG được suy
+   *  "đã chuẩn bị cho phạm vi này" chỉ từ counts. */
+  is_deployment_split: boolean;
 }
 
 export interface DatasetInfo {
@@ -89,6 +93,9 @@ export interface TrainingJob {
   test_f1?: number;
   error_message?: string;
   promoted_at?: string;
+  /** Cách phân hoạch đã tạo ra test_acc/test_f1. Backend luôn trả về; hiển thị
+   *  cạnh chỉ số để không ai so một split đơn với trung bình LOSO trong báo cáo. */
+  split_provenance?: SplitProvenance | null;
 }
 
 // GET /training/jobs — lịch sử jobs kèm username người chạy
@@ -167,10 +174,68 @@ export interface PromoteResponse {
 // Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
 const API_URL = '/api/v1/training';
 
-// Training endpoints require authentication; attach the stored bearer token.
-function authHeaders(): Record<string, string> {
-  const token = getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+/** Một bước trong quy trình chuẩn bị dữ liệu. */
+export interface PrepareStep {
+  step: string;
+  ok?: boolean;
+  returncode?: number;
+  started_at?: string;
+  finished_at?: string;
+  stdout_tail?: string;
+  stderr_tail?: string;
+}
+
+export interface PreparedSplit {
+  split_version: string;
+  exists: boolean;
+  split_mode?: string | null;
+  num_classes?: number | null;
+  counts?: Record<string, number> | null;
+  class_coverage?: Record<string, number> | null;
+  valid_for_research?: boolean | null;
+  invalid_reasons?: string[];
+}
+
+export interface PrepareReport {
+  run_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  manifest_version: string;
+  manifest: string;
+  profiles: string[];
+  current_step: string | null;
+  error?: string;
+  /** Vấn đề được ghi nhận nhưng KHÔNG chặn quy trình (ví dụ file mồ côi). */
+  warnings?: string[];
+  started_at?: string;
+  finished_at?: string;
+  steps: PrepareStep[];
+  artifacts: Record<string, {
+    deployment: PreparedSplit;
+    research: PreparedSplit;
+    loso: { protocol: string; folds: string[] };
+  }>;
+}
+
+/** Mọi lời gọi ở đây đi qua axiosClient, KHÔNG dùng fetch() thô.
+ *
+ *  Trước đây hook này gọi fetch() trực tiếp và tự gắn Bearer token từ
+ *  localStorage. Nhưng hệ thống đã chuyển sang cookie httpOnly — login chủ động
+ *  xoá token localStorage — nên header đó luôn rỗng, và quan trọng hơn: fetch()
+ *  bỏ qua interceptor echo cookie CSRF. Backend (`csrf_protect` trong
+ *  app/main.py) chặn mọi POST/DELETE có cookie đăng nhập mà thiếu header
+ *  X-CSRF-Token, nên start/cancel/promote/delete đều trả 403.
+ *
+ *  Đi qua axiosClient thì được cả gói: CSRF tự động, tự refresh khi 401, và
+ *  thông báo lỗi tiếng Việt (`userMessage`) thay vì "Forbidden". */
+function errMessage(err: unknown, fallback: string): string {
+  if (err && typeof err === 'object') {
+    const e = err as { userMessage?: string; response?: { data?: { detail?: unknown } }; message?: string };
+    const detail = e.response?.data?.detail;
+    if (typeof detail === 'string' && detail) return detail;
+    if (e.userMessage) return e.userMessage;
+    if (e.message) return e.message;
+  }
+  return fallback;
 }
 
 export function useTrainingAPI() {
@@ -187,23 +252,8 @@ export function useTrainingAPI() {
       if (dialect) params.append('dialect', dialect);
       if (language) params.append('language', language);
 
-      const response = await fetch(`${API_URL}/dataset-info?${params}`, {
-        headers: authHeaders(),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to load dataset info: ${response.statusText}`);
-      }
-
-      // Ensure we received JSON; sometimes proxy/back-end misconfiguration returns HTML (index.html)
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(
-          `Unexpected non-JSON response from training dataset endpoint. Response begins with: ${text.slice(0, 200)}`
-        );
-      }
-
-      const data = await response.json();
+      const response = await axiosClient.get(`${API_URL}/dataset-info`, { params });
+      const data = response.data as DatasetInfo;
       // Try to enrich dataset info with class labels (if available)
       try {
         const classesRes = await getClassesList();
@@ -216,16 +266,16 @@ export function useTrainingAPI() {
             // also map numeric idx
             if (c.class_idx !== undefined && c.class_idx !== null) map[String(c.class_idx)] = label;
           }
-          setDatasetInfo({ ...(data as DatasetInfo), label_map: map });
+          setDatasetInfo({ ...data, label_map: map });
         } else {
           setDatasetInfo(data);
         }
-      } catch (err) {
+      } catch {
         // If classes fetch fails, still set dataset info
         setDatasetInfo(data);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không tải được thông tin dataset.'));
     } finally {
       setLoading(false);
     }
@@ -236,27 +286,10 @@ export function useTrainingAPI() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_URL}/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(config),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to start training: ${response.statusText}`);
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(
-          `Unexpected non-JSON response from training start endpoint. Response begins with: ${text.slice(0, 200)}`
-        );
-      }
-
-      return await response.json();
+      const response = await axiosClient.post(`${API_URL}/start`, config);
+      return response.data as TrainingJob;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không bắt đầu được phiên huấn luyện.'));
       return null;
     } finally {
       setLoading(false);
@@ -266,22 +299,10 @@ export function useTrainingAPI() {
   // Lấy job status
   const getJobStatus = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}`, { headers: authHeaders() });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch job status: ${response.statusText}`);
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(
-          `Unexpected non-JSON response from job status endpoint. Response begins with: ${text.slice(0, 200)}`
-        );
-      }
-
-      return await response.json();
+      const response = await axiosClient.get(`${API_URL}/jobs/${jobId}`);
+      return response.data as TrainingJob;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không đọc được trạng thái phiên huấn luyện.'));
       return null;
     }
   }, []);
@@ -289,22 +310,10 @@ export function useTrainingAPI() {
   // Lấy metrics
   const getJobMetrics = useCallback(async (jobId: string): Promise<TrainingMetrics[]> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/metrics`, { headers: authHeaders() });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch metrics: ${response.statusText}`);
-      }
-
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const text = await response.text();
-        throw new Error(
-          `Unexpected non-JSON response from job metrics endpoint. Response begins with: ${text.slice(0, 200)}`
-        );
-      }
-
-      return await response.json();
+      const response = await axiosClient.get(`${API_URL}/jobs/${jobId}/metrics`);
+      return (response.data ?? []) as TrainingMetrics[];
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không đọc được chỉ số huấn luyện.'));
       return [];
     }
   }, []);
@@ -312,13 +321,10 @@ export function useTrainingAPI() {
   // Lịch sử jobs (mới nhất trước), kèm username người chạy
   const listJobs = useCallback(async (limit = 100): Promise<TrainingJobListItem[]> => {
     try {
-      const response = await fetch(`${API_URL}/jobs?limit=${limit}`, { headers: authHeaders() });
-      if (!response.ok) {
-        throw new Error(`Failed to list jobs: ${response.statusText}`);
-      }
-      return await response.json();
+      const response = await axiosClient.get(`${API_URL}/jobs`, { params: { limit } });
+      return (response.data ?? []) as TrainingJobListItem[];
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không tải được lịch sử huấn luyện.'));
       return [];
     }
   }, []);
@@ -326,16 +332,10 @@ export function useTrainingAPI() {
   // Hủy training job đang chạy/đang chờ
   const cancelTraining = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/cancel`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to cancel job: ${response.statusText}`);
-      }
-      return await response.json();
+      const response = await axiosClient.post(`${API_URL}/jobs/${jobId}/cancel`);
+      return response.data as TrainingJob;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không hủy được phiên huấn luyện.'));
       return null;
     }
   }, []);
@@ -343,56 +343,72 @@ export function useTrainingAPI() {
   // Promote model của job lên realtime (admin only)
   const promoteJob = useCallback(async (jobId: string): Promise<PromoteResponse | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/promote`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to promote job: ${response.statusText}`);
-      }
-      return await response.json();
+      const response = await axiosClient.post(`${API_URL}/jobs/${jobId}/promote`);
+      return response.data as PromoteResponse;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không đưa được model vào Realtime.'));
       return null;
     }
   }, []);
 
   // Per-class breakdown + confusion matrix trên test set (Step 7)
+  /** Chạy toàn bộ quy trình chuẩn bị: manifest -> kiểm định -> các split. */
+  const startDatasetPreparation = useCallback(
+    async (dialects?: string[]): Promise<{ run_id: string; manifest_version: string; profiles?: string[] } | null> => {
+      try {
+        // Gửi phương ngữ, không gửi profile: ánh xạ nằm ở danh mục nhãn phía
+        // máy chủ, giữ một bản sao trong giao diện thì nó sẽ lệch khi từ vựng đổi.
+        const response = await axiosClient.post(`${API_URL}/dataset/prepare`, { dialects: dialects ?? null });
+        return response.data as { run_id: string; manifest_version: string };
+      } catch (err) {
+        setError(errMessage(err, 'Không bắt đầu được việc chuẩn bị bộ dữ liệu.'));
+        return null;
+      }
+    },
+    [],
+  );
+
+  const getDatasetPreparation = useCallback(async (runId: string): Promise<PrepareReport | null> => {
+    try {
+      const response = await axiosClient.get(`${API_URL}/dataset/prepare/${runId}`);
+      // Xoá lỗi cũ ngay khi poll thành công trở lại — hàm này bị gọi lặp lại mỗi
+      // 3 giây, nên một lần lỗi thoáng qua (ví dụ trùng lúc backend được tạo lại)
+      // không được phép kẹt vĩnh viễn trên banner trong khi report vẫn đang cập
+      // nhật đúng ở các lần poll sau.
+      setError(null);
+      return response.data as PrepareReport;
+    } catch (err) {
+      setError(errMessage(err, 'Không đọc được tiến độ chuẩn bị.'));
+      return null;
+    }
+  }, []);
+
   const getResearchSplits = useCallback(async (): Promise<ResearchSplit[]> => {
     try {
-      const response = await fetch(`${API_URL}/splits`, { headers: authHeaders() });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch splits: ${response.statusText}`);
-      }
-      return await response.json();
+      const response = await axiosClient.get(`${API_URL}/splits`);
+      return (response.data ?? []) as ResearchSplit[];
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không tải được danh sách split nghiên cứu.'));
       return [];
     }
   }, []);
 
   const getJobProvenance = useCallback(async (jobId: string): Promise<JobProvenance | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/provenance`, { headers: authHeaders() });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch provenance: ${response.statusText}`);
-      }
-      return await response.json();
+      const response = await axiosClient.get(`${API_URL}/jobs/${jobId}/provenance`);
+      return response.data as JobProvenance;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không đọc được thông tin nguồn gốc model.'));
       return null;
     }
   }, []);
 
   const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}/evaluation`, { headers: authHeaders() });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch evaluation: ${response.statusText}`);
-      }
-      return await response.json();
+      const response = await axiosClient.get(`${API_URL}/jobs/${jobId}/evaluation`);
+      return response.data as JobEvaluation;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không đọc được kết quả đánh giá.'));
       return null;
     }
   }, []);
@@ -400,20 +416,10 @@ export function useTrainingAPI() {
   // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc: completed/failed/cancelled)
   const deleteJob = useCallback(async (jobId: string): Promise<boolean> => {
     try {
-      const response = await fetch(`${API_URL}/jobs/${jobId}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
-      if (!response.ok) {
-        const contentType = response.headers.get('content-type') || '';
-        const detail = contentType.includes('application/json')
-          ? (await response.json())?.detail
-          : undefined;
-        throw new Error(detail || `Failed to delete job: ${response.statusText}`);
-      }
+      await axiosClient.delete(`${API_URL}/jobs/${jobId}`);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(errMessage(err, 'Không xóa được phiên huấn luyện này.'));
       return false;
     }
   }, []);
@@ -434,6 +440,8 @@ export function useTrainingAPI() {
     getJobEvaluation,
     getJobProvenance,
     getResearchSplits,
+    startDatasetPreparation,
+    getDatasetPreparation,
     deleteJob,
     useWebSocketProgress,
   };

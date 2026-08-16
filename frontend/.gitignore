@@ -26,6 +26,13 @@ pnpm-debug.log*
 # Coverage
 /coverage/
 
+# Playwright E2E — the fixture is generated from a gitignored dataset video
+# (see tests-e2e/fixtures/generate.md), and report/result output is a run
+# artifact, not source.
+/playwright-report/
+/test-results/
+tests-e2e/fixtures/*.y4m
+
 # Local overrides
 *.local
 

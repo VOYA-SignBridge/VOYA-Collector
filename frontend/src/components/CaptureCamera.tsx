@@ -9,7 +9,7 @@ import FullscreenCaptureModal from "./FullscreenCaptureModal";
 import Button from "./ui/Button";
 import { TARGET_FRAMES, CAPTURE_COUNT } from "../config/capture";
 import { createSessionId, NEW_SESSION_EVENT } from "../utils/session";
-import { me } from "../api/auth";
+import { useAuth } from "../hooks/useAuth";
 
 type Props = {
   onError?: (msg: string) => void;
@@ -17,6 +17,7 @@ type Props = {
 };
 
 export default function CaptureCamera({ onError, onSuccess }: Props) {
+  const { user: authUser } = useAuth();
   // Removed frames state - now using only fullscreen capture
   const [label, setLabel] = useState("");
   const [user, setUser] = useState("");
@@ -92,25 +93,14 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       .join(" ")
       .trim();
 
+  // Tên người thu lấy từ AuthProvider (đã fetch /auth/me một lần cho cả app)
+  // thay vì gọi lại ở đây. Nếu chưa đăng nhập thì để trống cho nhập tay.
   useEffect(() => {
-    let active = true;
-
-    me()
-      .then((currentUser) => {
-        if (!active) return;
-        const candidate = sanitizeCollectorName(currentUser.username || "");
-        if (candidate) {
-          setUser(candidate);
-        }
-      })
-      .catch(() => {
-        // Keep manual entry available when auth lookup fails.
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
+    const candidate = sanitizeCollectorName(authUser?.username || "");
+    if (candidate) {
+      setUser(candidate);
+    }
+  }, [authUser?.username]);
 
   // Toggle to temporarily hide advanced/session UI without deleting it
   const SHOW_ADVANCED = false;

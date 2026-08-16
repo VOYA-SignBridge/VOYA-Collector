@@ -44,14 +44,25 @@ export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error("useToast must be used inside <ToastProvider>");
 
+  const { addToast } = ctx;
+
+  // Giữ nguyên identity giữa các lần render. Trước đây object này được tạo mới
+  // mỗi render, nên component nào gọi toast bên trong useCallback/useEffect
+  // buộc phải bỏ nó khỏi dependency array (sai) hoặc chịu callback tái tạo liên
+  // tục. addToast đã là useCallback ổn định nên memo theo nó là đủ.
+  const toast = useMemo(
+    () => ({
+      success: (message: string) => addToast(message, "success"),
+      error: (message: string) => addToast(message, "error"),
+      warning: (message: string) => addToast(message, "warning"),
+      info: (message: string) => addToast(message, "info"),
+    }),
+    [addToast]
+  );
+
   return {
     toasts: ctx.toasts,
     removeToast: ctx.removeToast,
-    toast: {
-      success: (message: string) => ctx.addToast(message, "success"),
-      error: (message: string) => ctx.addToast(message, "error"),
-      warning: (message: string) => ctx.addToast(message, "warning"),
-      info: (message: string) => ctx.addToast(message, "info"),
-    },
+    toast,
   };
 }

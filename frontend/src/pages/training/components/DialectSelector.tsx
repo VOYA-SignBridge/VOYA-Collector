@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import DIALECT_LABELS from '../../../config/dialectLabels';
+import { AlertTriangleIcon, CheckCircleIcon, CheckIcon, LettersIcon, MapPinIcon, XIcon } from "../../../components/ui/Icons";
 
 interface Props {
   dialects: Record<string, string[]>;
@@ -54,7 +55,8 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              📍 Theo Vùng
+              <MapPinIcon className="h-4 w-4" />
+            Theo vùng
             </button>
             <button
               role="tab"
@@ -66,7 +68,8 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              🔤 Bảng Chữ Cái
+              <LettersIcon className="h-4 w-4" />
+            Bảng chữ cái
             </button>
           </div>
 
@@ -79,7 +82,8 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                 : 'bg-ctu-blue/10 text-ctu-blue hover:bg-ctu-blue/20'
             }`}
           >
-            {isAllSelected ? '✕ Bỏ chọn tất cả' : `✓ Chọn tất cả (${allDialects.length})`}
+            {isAllSelected ? <XIcon className="h-3.5 w-3.5" /> : <CheckIcon className="h-3.5 w-3.5" />}
+          {isAllSelected ? 'Bỏ chọn tất cả' : `Chọn tất cả (${allDialects.length})`}
           </button>
         </div>
       </div>
@@ -90,10 +94,10 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
           // Group by Language/Region
           Object.entries(dialects).map(([language, langDialects]) => {
             const GROUP_LABELS: Record<string, string> = {
-              'mien-bac': '🌞 Miền Bắc',
-              'mien-nam': '🌴 Miền Nam',
-              'mien-trung': '⛰️ Miền Trung',
-              vi: '🇻🇳 Tiếng Việt',
+              'mien-bac': 'Miền Bắc',
+              'mien-nam': 'Miền Nam',
+              'mien-trung': 'Miền Trung',
+              vi: 'Tiếng Việt',
               default: language,
             };
 
@@ -112,11 +116,12 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                   <div className="flex items-center gap-2">
                     {groupSelected === langDialects.length ? (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 text-xs font-medium text-emerald-700">
-                        ✓ Đã chọn hết
+                        <CheckIcon className="h-3 w-3" />
+                Đã chọn hết
                       </span>
                     ) : groupSelected > 0 ? (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-ctu-blue/10 text-xs font-medium text-ctu-blue">
-                        ◐ {groupSelected} mục
+                        {groupSelected} mục
                       </span>
                     ) : null}
                   </div>
@@ -260,7 +265,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
       {isNoneSelected ? (
         <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-4">
           <div className="flex gap-3">
-            <span className="text-xl">⚠️</span>
+            <AlertTriangleIcon className="h-5 w-5 shrink-0 text-amber-600" />
             <div>
               <p className="font-semibold text-yellow-900">Chưa chọn phương ngữ</p>
               <p className="text-sm text-yellow-800 mt-1">
@@ -272,7 +277,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
       ) : (
         <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4">
           <div className="flex gap-3">
-            <span className="text-xl">✓</span>
+            <CheckCircleIcon className="h-5 w-5 shrink-0 text-emerald-600" />
             <div>
               <p className="font-semibold text-emerald-900">Đã chọn {selected.length} phương ngữ</p>
               <p className="text-sm text-emerald-800 mt-1">

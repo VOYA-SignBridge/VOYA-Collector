@@ -6,6 +6,7 @@ import LoadingSpinner from "../components/ui/LoadingSpinner";
 import {
   TagIcon, CameraIcon, UsersIcon, GlobeIcon, DatabaseIcon, ClockIcon, CloudDownloadIcon,
 } from "../components/ui/Icons";
+import { apiErrorMessage } from "../utils/apiError";
 
 interface Contributor { user_id: string; username: string; count: number }
 interface RecentSample { label: string; dialect: string; source: string; created_at: string }
@@ -69,8 +70,8 @@ export default function AdminDataPage() {
       const res = await apiClient.get<DataReport>("/api/v1/admin/data-report");
       setData(res.data);
       setError(null);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || "Không tải được báo cáo dữ liệu");
+    } catch (e) {
+      setError(apiErrorMessage(e, "Không tải được báo cáo dữ liệu"));
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import apiClient from "../api/axiosClient";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
+import { apiErrorMessage } from "../utils/apiError";
+import { CheckCircleIcon, ChipIcon, DatabaseIcon, GearIcon, GpuIcon, MemoryIcon } from "../components/ui/Icons";
 
 // ---------------------------------------------------------------------------
 // Types — mirror backend app/monitoring.py :: collect_resources()
@@ -144,8 +146,8 @@ export default function AdminResourcesPage() {
       try {
         const res = await apiClient.get<ResourceReport>("/api/v1/admin/resources");
         if (!cancelled) { setData(res.data); setError(null); }
-      } catch (e: any) {
-        if (!cancelled) setError(e?.response?.data?.detail || "Không tải được số liệu tài nguyên");
+      } catch (e) {
+        if (!cancelled) setError(apiErrorMessage(e, "Không tải được số liệu tài nguyên"));
       }
     };
     tick();
@@ -229,7 +231,7 @@ export default function AdminResourcesPage() {
         </div>
       ) : data ? (
         <div className="rounded-lg px-4 py-3 text-sm font-medium border bg-ctu-blue/10 border-ctu-blue/20 text-ctu-blue flex items-center gap-2">
-          <span>🟢</span> Tài nguyên bình thường — không có cảnh báo
+          <CheckCircleIcon className="h-4 w-4 text-emerald-600" /> Tài nguyên bình thường — không có cảnh báo
         </div>
       ) : null}
 
@@ -260,7 +262,7 @@ export default function AdminResourcesPage() {
           label="Tải GPU"
           pct={gpu?.available ? gpu?.util_pct : undefined}
           value={gpu?.available ? `${(gpu?.util_pct ?? 0).toFixed(0)}%` : "—"}
-          meta={gpu?.available ? `🌡️ ${gpu?.temp_c ?? "—"}°C · ⚡ ${gpu?.power_w ?? "—"} W · ${gpu?.processes?.length ?? 0} tiến trình` : undefined}
+          meta={gpu?.available ? `${gpu?.temp_c ?? "—"}°C · ${gpu?.power_w ?? "—"} W · ${gpu?.processes?.length ?? 0} tiến trình` : undefined}
           muted={!gpu?.available}
         />
         <StatTile
@@ -278,7 +280,7 @@ export default function AdminResourcesPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <span className="text-lg">🧮</span>
+            <ChipIcon className="h-5 w-5 text-slate-500" />
             <h3 className="font-semibold text-slate-700">CPU theo nhân</h3>
           </div>
           <span className="text-xs text-slate-400">
@@ -344,7 +346,7 @@ export default function AdminResourcesPage() {
 
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-lg">🗄️</span>
+            <DatabaseIcon className="h-5 w-5 text-slate-500" />
             <h3 className="font-semibold text-slate-700">Redis</h3>
           </div>
           {redis?.available ? (
@@ -369,7 +371,7 @@ export default function AdminResourcesPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5">
           <div className="flex items-center gap-2">
-            <span className="text-lg">⚙️</span>
+            <GearIcon className="h-5 w-5 text-slate-500" />
             <h3 className="font-semibold text-slate-700">Cấu hình &amp; phân phối tài nguyên</h3>
           </div>
           {config?.available && (
@@ -380,14 +382,14 @@ export default function AdminResourcesPage() {
         {/* Capacity chips */}
         <div className="flex flex-wrap gap-2 mb-5">
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-600">
-            🧮 {host?.cpu_count ?? "?"} nhân CPU
+            <ChipIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" /> {host?.cpu_count ?? "?"} nhân CPU
           </span>
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-50 border border-slate-200 text-slate-600">
-            💾 {fmtMem(budgetMb)} RAM
+            <MemoryIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" /> {fmtMem(budgetMb)} RAM
           </span>
           {gpu?.available && (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-ctu-blue/5 border border-ctu-blue/20 text-ctu-blue">
-              🎮 {gpu.name} · {fmtMem(gpu.vram_total_mb)} → trainer
+              <GpuIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" /> {gpu.name} · {fmtMem(gpu.vram_total_mb)} → trainer
             </span>
           )}
         </div>

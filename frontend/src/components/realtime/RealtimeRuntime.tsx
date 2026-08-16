@@ -43,6 +43,8 @@ import {
 import { fetchTTSAudio, prewarmTTS } from "../../api/tts";
 import PageHeader from "../ui/PageHeader";
 import Button from "../ui/Button";
+import { dialectName } from "../../config/dialectLabels";
+import { languageName } from "../../config/languageLabels";
 
 type Props = {
   /** Visual-only mirror for preview. Never affects payload semantics. */
@@ -777,23 +779,31 @@ export default function RealtimeRuntime({
     }
   };
 
-  // Map errors to user-friendly Vietnamese messages (memoized to prevent recomputation)
+  // Map errors to user-friendly Vietnamese messages (memoized to prevent recomputation).
+  // Quan trọng: PHẢI luôn trả về một câu. Trước đây nhánh cuối trả null, nên mọi
+  // lỗi không khớp mẫu (500, mất mạng, lỗi model...) bị nuốt sạch — màn hình đứng
+  // ở "Đang chờ..." mà không báo gì, trông y như hệ thống treo.
   const friendlyError = useMemo(() => {
     if (!error) return null;
-    if (error.includes("Camera")) return "Vui lòng cấp quyền sử dụng camera";
-    if (error.includes("timeout") || error.includes("504")) return "Phản hồi chậm, vui lòng thử lại";
-    if (error.includes("503") || error.includes("unavailable")) return "Không thể kết nối hệ thống nhận diện";
-    if (error.includes("404") || error.includes("not found")) return "Bộ nhận diện không tồn tại";
-    return null;
+    if (error.includes("Camera")) return "Không truy cập được camera. Vui lòng cấp quyền camera cho trang này rồi bấm Bắt đầu lại.";
+    if (error.includes("timeout") || error.includes("504")) return "Máy chủ phản hồi chậm, vui lòng thử lại.";
+    if (error.includes("503") || error.includes("unavailable")) return "Không thể kết nối hệ thống nhận diện. Vui lòng thử lại sau ít phút.";
+    if (error.includes("404") || error.includes("not found")) return "Bộ nhận diện không tồn tại. Hãy chọn lại bộ nhận diện khác.";
+    if (error.includes("Failed to fetch") || error.includes("Network")) return "Mất kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.";
+    if (error.includes("401") || error.includes("403")) return "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.";
+    return "Đã xảy ra lỗi khi nhận diện. Vui lòng dừng và bắt đầu lại.";
   }, [error]);
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-2.5 sm:space-y-4 p-2.5 sm:p-4 lg:p-5">
+    // Layout đã bọc <main> bằng max-w-7xl + padding responsive. Bọc thêm
+    // max-w-6xl + p-* ở đây làm trang này hẹp hơn và thụt sâu hơn mọi trang
+    // khác — chỉ giữ khoảng cách dọc giữa các khối.
+    <div className="w-full space-y-4 sm:space-y-6">
       {/* Header */}
       <PageHeader
-        title="Nhận diện ngôn ngữ kí hiệu"
-        subtitle="Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực"
-        breadcrumb={["Dashboard", "Nhận dạng realtime"]}
+        title="Nhận dạng ngôn ngữ ký hiệu"
+        subtitle="Nhận dạng ngôn ngữ ký hiệu Việt Nam theo thời gian thực"
+        breadcrumb={["Trang chủ", "Nhận dạng realtime"]}
       />
 
       {/* Model Selection */}
@@ -870,7 +880,7 @@ export default function RealtimeRuntime({
                 <option value="">-- Chọn ngôn ngữ --</option>
                 {languages.map((lang) => (
                   <option key={lang} value={lang}>
-                    {lang}
+                    {languageName(lang)}
                   </option>
                 ))}
               </select>
@@ -902,7 +912,7 @@ export default function RealtimeRuntime({
                   {filteredModels.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name}
-                      {model.dialect && model.dialect !== model.name && ` (${model.dialect})`}
+                      {model.dialect && model.dialect !== model.name && ` (${dialectName(model.dialect)})`}
                     </option>
                   ))}
                 </select>

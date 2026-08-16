@@ -1,5 +1,6 @@
 import { type FormEvent, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { safeRedirectTarget } from "../utils/redirect";
 import { register, login } from "../api/auth";
 import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
@@ -16,6 +17,9 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const nextParam = searchParams.get("next");
+  const destination = safeRedirectTarget(nextParam);
   const [form, setForm] = useState<FormState>({
     username: "",
     email: "",
@@ -76,7 +80,7 @@ export default function RegisterPage() {
       await Promise.all([registerTask, minWait]);
 
       notifyAuthChange();
-      navigate("/upload", { replace: true });
+      navigate(destination, { replace: true });
     } catch (err: unknown) {
       const errorObj = err as {
         response?: { data?: { detail?: string } };
@@ -100,7 +104,10 @@ export default function RegisterPage() {
       footer={
         <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>Đã có tài khoản?</span>
-          <Link to="/login" className="font-semibold text-ctu-blue hover:text-ctu-navy">
+          <Link
+            to={nextParam ? `/login?next=${encodeURIComponent(nextParam)}` : "/login"}
+            className="font-semibold text-ctu-blue hover:text-ctu-navy"
+          >
             Đăng nhập →
           </Link>
         </div>
