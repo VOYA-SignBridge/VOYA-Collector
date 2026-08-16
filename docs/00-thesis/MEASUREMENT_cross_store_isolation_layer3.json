@@ -1,0 +1,58 @@
+{
+  "public_tenant_id": "default",
+  "buoc": [
+    {
+      "can_thiep": "tenant rieng iso_a",
+      "ky_vong": "khong doi",
+      "quan_sat": {
+        "labels_count": 0,
+        "total_samples": 0,
+        "contributors_count": 0,
+        "regions_count": 0
+      },
+      "dat": true
+    },
+    {
+      "can_thiep": "tenant rieng iso_b",
+      "ky_vong": "khong doi",
+      "quan_sat": {
+        "labels_count": 0,
+        "total_samples": 0,
+        "contributors_count": 0,
+        "regions_count": 0
+      },
+      "dat": true
+    },
+    {
+      "can_thiep": "tenant cong bo default",
+      "ky_vong": "phai doi",
+      "quan_sat": {
+        "labels_count": 1,
+        "total_samples": 1,
+        "contributors_count": 1,
+        "regions_count": 1
+      },
+      "dat": true
+    }
+  ],
+  "truoc": {
+    "labels_count": 0,
+    "total_samples": 0,
+    "contributors_count": 0,
+    "regions_count": 0
+  },
+  "sau": {
+    "labels_count": 1,
+    "total_samples": 1,
+    "contributors_count": 1,
+    "regions_count": 1
+  },
+  "dat": true,
+  "sau_khi_don": {
+    "labels_count": 0,
+    "total_samples": 0,
+    "contributors_count": 0,
+    "regions_count": 0
+  },
+  "don_sach": true
+}
