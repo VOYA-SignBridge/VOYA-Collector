@@ -23,7 +23,13 @@ from fastapi.testclient import TestClient
 
 from app.auth import get_current_user, require_admin
 from app.routers import training as training_module
-from app.routers.training import TrainingConfig, TrainingJob, router, training_jobs
+from app.routers.training import (
+    SplitProvenance,
+    TrainingConfig,
+    TrainingJob,
+    router,
+    training_jobs,
+)
 
 USER = {"id": "u-1", "username": "researcher", "role": "user"}
 ADMIN = {"id": "a-1", "username": "boss", "role": "admin"}
@@ -45,6 +51,14 @@ def client(monkeypatch):
     # Every dialect is trainable unless a test says otherwise.
     monkeypatch.setattr(
         training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 7}
+    )
+    # Submission also fails closed on a split with no train/test samples
+    # (training.py's exploratory-path guard); stub a split with data so that
+    # guard doesn't fire on whatever's on disk in the test environment.
+    monkeypatch.setattr(
+        training_module,
+        "_effective_split_provenance",
+        lambda dialect=None: SplitProvenance(counts={"train": 100, "val": 20, "test": 20}),
     )
 
     training_jobs.clear()
@@ -356,7 +370,25 @@ def test_promote_rejects_an_unrecognized_architecture(client, tmp_path):
     assert "Transformer" in response.json()["detail"]
 
 
+_REPRO_LABEL_KEYS = [
+    "vn/hoa_de/cat-dau-ca",
+    "vn/hoa_de/cat-ky",
+    "vn/hoa_de/danh-vay-ca",
+    "vn/hoa_de/lot-da-ca",
+    "vn/hoa_de/lot-vo-tom",
+    "vn/hoa_de/rang-muoi",
+    "vn/hoa_de/tom",
+]
+
+
 def _reproducible_ckpt(**overrides) -> dict:
+    """A checkpoint that satisfies all 14 criteria of evaluate_checkpoint().
+
+    C5/C6/C7/C12 read real files (manifest + split_metadata.json), so this
+    anchors dataset_version/split_version to hoa_de_strict_v22 — a real,
+    currently-frozen split verified intact by test_frozen_artifacts.py —
+    rather than a value evaluate_checkpoint() can't resolve on disk.
+    """
     ckpt = {
         "git_commit": "0475b78cabc9c35b3ab9345097a774f8b78818be",
         "seed": 42,
@@ -368,11 +400,26 @@ def _reproducible_ckpt(**overrides) -> dict:
             "deterministic_algorithms": True,
             "warnings": [],
         },
-        "dataset_version": "isds2026_v6",
-        "split_version": "hoa_de_loso_v5/test_S001",
-        "dataset_manifest_checksum": "a95bc6d1ed3b",
         "model_type": "TCN",
+        "recognition_profile": "hoa_de",
+        "include_common": False,
+        "dataset_version": "VSL2026_v22",
+        "split_version": "hoa_de_strict_v22",
+        "vocabulary_schema_version": "v2",
+        "normalization_version": "v2",
+        "seq_len": 60,
+        "feature_dim": 126,
         "num_classes": 7,
+        "preprocess_contract_version": "v2",
+        "storage_contract_version": "v2",
+        "motion_types_present": ["static", "dynamic"],
+        "dataset_manifest_checksum": (
+            "9f893cdc8ad8649902dfe09afa0133331f9106b967435a3cee2b1cad086ca13f"
+        ),
+        "label_to_idx": {key: i for i, key in enumerate(_REPRO_LABEL_KEYS)},
+        "idx_to_label": {i: {"label_key": key} for i, key in enumerate(_REPRO_LABEL_KEYS)},
+        "common_labels": [],
+        "profile_specific_labels": list(_REPRO_LABEL_KEYS),
         "runtime_env": {
             "python_version": "3.11.15",
             "pytorch_version": "2.0.0+cu117",
@@ -383,6 +430,15 @@ def _reproducible_ckpt(**overrides) -> dict:
             "criterion": "val_macro_f1",
             "restored_best_state": True,
             "best_epoch": 10,
+        },
+        "training_config": {
+            "augmentation": {
+                "augmentation_contract_version": "v2_wrist_centered_mirror",
+                "enabled": True,
+                "profile": "standard",
+                "mirror_prob": 0.5,
+                "p": 0.5,
+            },
         },
     }
     ckpt.update(overrides)
@@ -411,7 +467,7 @@ def test_provenance_reports_a_fully_reproducible_run(client, tmp_path):
     assert body["available"] is True
     assert body["reproducible"] is True
     assert body["code"]["seed"] == 42
-    assert body["data"]["dataset_version"] == "isds2026_v6"
+    assert body["data"]["dataset_version"] == "VSL2026_v22"
     assert all(check["ok"] for check in body["checks"])
 
 

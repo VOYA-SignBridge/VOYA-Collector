@@ -62,7 +62,15 @@ def main() -> int:
             check(f"{version}: manifest checksum still matches",
                   sha256_file(m) == meta.get("dataset_manifest_checksum"),
                   str(m))
+        # Class-pool splits (e.g. the vocabulary/motion scaling grids) are
+        # intentionally train-only: they feed make_budget_grid.py against a
+        # shared held-out fold rather than shipping their own val/test csv.
+        # Their own recorded counts say so, so only require a csv when the
+        # split's own metadata claims samples exist for it.
+        counts = meta.get("counts", {})
         for split_name in ("train", "val", "test"):
+            if counts.get(split_name, 0) <= 0:
+                continue
             check(f"{version}: {split_name}.csv present",
                   (meta_path.parent / f"{split_name}.csv").exists())
 
