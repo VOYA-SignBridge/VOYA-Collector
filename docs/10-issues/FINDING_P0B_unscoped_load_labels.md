@@ -1,4 +1,4 @@
-# Phát hiện trong lúc đo P0-B: bảy đường gọi chưa chuyển phạm vi
+# Phát hiện trong lúc đo P0-B: mười một đường gọi chưa chuyển phạm vi
 
 **Trạng thái:** ĐÃ ĐÓNG 16/08/2026 tại `47a8846` — xem "Kết cục" ở cuối
 **Số nơi gọi thật:** **11**, không phải 7 — xem "Đính chính con số"
@@ -30,8 +30,9 @@ Hàm đọc danh mục lớp từ kho tệp gần đây được siết lại: n
 phạm vi đơn vị, và ném lỗi khi không có, thay vì lặng lẽ trả về toàn bộ kho. Đây
 là một thay đổi đúng — nó biến một đường rò im lặng thành một lỗi ồn ào.
 
-Nhưng lượt chuyển đổi các nơi gọi chưa hoàn tất. Bảy nơi vẫn gọi hàm ấy mà không
-truyền phạm vi. Hai trong số đó nằm trên đường đi thật và đã được quan sát trực
+Nhưng lượt chuyển đổi các nơi gọi chưa hoàn tất. Mười một nơi vẫn gọi hàm ấy mà
+không truyền phạm vi — bản đầu của tài liệu này đếm nhầm thành bảy, xem mục
+"Đính chính con số". Hai trong số đó nằm trên đường đi thật và đã được quan sát trực
 tiếp trong lúc đo:
 
 ### 1. Tạo lớp mới trả về lỗi máy chủ
@@ -59,9 +60,9 @@ rằng lược đồ vẫn nguyên vẹn và cơ sở dữ liệu không bị đ
 tiếp. Không có hỏng hóc âm thầm. Nhưng hệ quả vẫn là: cơ chế bù hàng thiếu hiện
 không hoạt động, và không ai được báo ngoài một dòng nhật ký mức lỗi.
 
-### 3. Năm nơi còn lại
+### 3. Chín nơi còn lại
 
-Năm nơi khác cũng gọi thiếu phạm vi: bộ cân bằng dữ liệu, bộ phân loại lại
+Chín nơi khác cũng gọi thiếu phạm vi: bộ cân bằng dữ liệu, bộ phân loại lại
 phương ngữ, đường xuất dữ liệu, bộ đề bạt danh mục dùng chung, và một nhánh nội
 bộ trong chính mô-đun quản lý dữ liệu. Chưa nơi nào trong số này được quan sát
 trực tiếp trong lượt đo, nên không khẳng định chúng hỏng — chỉ khẳng định chúng
@@ -111,15 +112,14 @@ sai quyền" — nơi mà bị từ chối là kết cục **đúng**, không ph
 
 ---
 
-## Việc cần làm, sau kỳ bảo vệ
+## Kế hoạch ban đầu — đã thực hiện, xem "Kết cục"
 
-Truyền phạm vi vào bảy nơi gọi. Với hai đường bảo trì đọc toàn kho một cách hợp
-lệ (đề bạt danh mục dùng chung, phân loại lại phương ngữ), đường đúng là gọi
-biến thể đọc-toàn-kho đã có sẵn — nó được đặt tên dài và lộ liễu chính vì mục
-đích ấy.
+Kế hoạch lúc ghi nhận là hoãn tới sau kỳ bảo vệ, và nêu nguyên tắc: không gộp vào
+một bản vá duy nhất, vì các nơi gọi thuộc nhiều ngữ cảnh phạm vi khác nhau và một
+bản vá gộp sẽ phải **đoán** phạm vi cho phần lớn trong số đó.
 
-Không gộp vào một bản vá duy nhất: bảy nơi thuộc bốn ngữ cảnh phạm vi khác nhau,
-và một bản vá gộp sẽ phải đoán phạm vi cho ít nhất ba trong số đó.
+Nguyên tắc ấy được giữ khi thực hiện: mỗi nơi được phân loại riêng thành "đọc
+toàn kho hợp lệ" hay "cần phạm vi thật" trước khi sửa. Kết quả ở mục cuối.
 
 ---
 
