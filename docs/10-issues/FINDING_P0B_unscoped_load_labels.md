@@ -1,6 +1,7 @@
 # Phát hiện trong lúc đo P0-B: bảy đường gọi chưa chuyển phạm vi
 
-**Trạng thái:** ĐANG MỞ — cố ý chưa sửa
+**Trạng thái:** ĐÃ ĐÓNG 16/08/2026 tại `47a8846` — xem "Kết cục" ở cuối
+**Số nơi gọi thật:** **11**, không phải 7 — xem "Đính chính con số"
 **Phát hiện lúc:** 16/08/2026, trong lượt đo cách ly xuyên kho (P0-B)
 **Thuộc bản mã:** `19a8f75`, ảnh chụp mã `1961904ccb07ab25`
 **Mức độ:** một lỗi CHẶN ĐƯỜNG CHÍNH, một lỗi làm hỏng đồng bộ khởi động
@@ -119,3 +120,55 @@ biến thể đọc-toàn-kho đã có sẵn — nó được đặt tên dài v
 
 Không gộp vào một bản vá duy nhất: bảy nơi thuộc bốn ngữ cảnh phạm vi khác nhau,
 và một bản vá gộp sẽ phải đoán phạm vi cho ít nhất ba trong số đó.
+
+---
+
+## Đính chính con số: mười một, không phải bảy
+
+Bản đầu của tài liệu này ghi "bảy nơi gọi". Con số ấy sai, và cách nó sai đáng
+ghi lại hơn bản thân con số.
+
+Lệnh tìm kiếm dựng ra danh sách bị cắt bởi một giới hạn số dòng, và con số cắt
+cụt được chép thẳng vào đây mà không ai đếm lại. Bốn nơi bị bỏ sót — trong đó có
+**nơi nặng nhất cả nhóm**: một điểm cuối trả bảng lớp cho nhận dạng, đọc toàn kho
+trên một đường **request**, không phải đường bảo trì.
+
+Đây là lần thứ hai trong cùng một ngày một con số cắt cụt suýt vào tài liệu, và
+là cùng họ lỗi với mọi bộ đếm tự chế khác trong kho này. Bài học không phải "cẩn
+thận hơn" mà là: **một con số dùng để kết luận thì phải đến từ một lệnh không có
+giới hạn hiển thị.**
+
+## Phân loại mười một nơi
+
+Sáu nơi đọc toàn kho một cách **hợp lệ**, và nay gọi biến thể có tên dài để ý
+định lộ ra ngay tại chỗ đọc: dựng lại tệp chỉ mục nhãn, đồng bộ bù hàng thiếu lúc
+khởi động, phân loại lại phương ngữ, xuất bảng tính, đề bạt nhãn dùng chung, và
+bộ soát dữ liệu.
+
+Gọi hàm có phạm vi rồi bỏ trống tham số **không** phải lựa chọn tương đương: bỏ
+trống không phân biệt được với quên.
+
+Năm nơi cần phạm vi thật:
+
+| nơi | vì sao |
+|---|---|
+| bảng lớp cho nhận dạng | **đường request**; rò danh mục, và lệch chỉ số lớp so với mô hình |
+| kế hoạch cân bằng | đếm mẫu của mọi tổ chức rồi đề xuất bù cho lớp tổ chức khác |
+| bộ đếm mẫu theo lớp | cùng lý do |
+| bản đồ siêu dữ liệu lớp | cùng lý do |
+| công cụ sinh mẫu tăng cường | **GHI** xuống cây theo chủ sở hữu; đọc toàn kho là đổ mẫu vào cây tổ chức khởi tạo |
+
+## Kết cục
+
+Đã sửa đủ mười một nơi tại `47a8846`. Bảy ca kiểm độc lập từng bắt lỗi này nay
+xanh, cùng bốn ca khác thất bại gián tiếp qua tầng HTTP.
+
+Phát biểu đúng cho phần kết quả chức năng và phần thảo luận:
+
+> Việc siết phạm vi tổ chức cho kho tệp đã đóng đường lùi xuyên tổ chức, nhưng
+> một số đường xử lý yêu cầu chưa truyền đủ ngữ cảnh tổ chức, khiến chức năng
+> tương ứng thất bại **theo hướng đóng**.
+
+Câu **không** được viết: *cách ly tổ chức làm hỏng hệ thống.* Câu đúng: *việc
+chuyển sang phạm vi tổ chức hỏng-theo-hướng-đóng chưa hoàn tất ở một số nơi gọi,
+tạo ra hồi quy khả dụng nhưng không tạo ra phơi lộ xuyên tổ chức.*
