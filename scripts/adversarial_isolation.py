@@ -137,6 +137,14 @@ class Bo:
         # Người gọi thuộc đúng tenant mình, nhưng vai không có quyền đó.
         nhom_a = [
             Op("A", "DELETE", f"/api/v1/classes/{self.class_a}", A, "xoá lớp khi vai không có quyền xoá"),
+            # Sửa lớp CỦA CHÍNH đơn vị mình. Nằm ở nhóm này chứ không ở đối
+            # chứng dương, vì thao tác gác sau quyền quản trị NỀN TẢNG chứ không
+            # sau vai trong đơn vị: một tổ chức không sửa được lớp của chính nó.
+            # Bị từ chối ở đây là kết cục ĐÚNG, và nó đo đúng thứ nhóm A đo —
+            # đúng đơn vị, sai quyền.
+            Op("A", "PUT", f"/api/v1/classes/{self.class_upd_a or self.class_a}", A,
+               "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
+               {"label_original": "thu sua bang vai don vi"}),
             Op("A", "PATCH",  f"/api/v1/billing/tenants/{self.tenant_a}/plan", A,
                "tự nâng gói (đòi sudo nền tảng)", {"plan_code": "pro"}),
             Op("A", "GET",    "/api/v1/billing/platform-usage", A, "đọc mức dùng toàn nền tảng"),
@@ -264,10 +272,20 @@ class Bo:
         """
         A = self.token_a
         ops: list[Op] = []
-        if self.class_upd_a:
-            ops.append(Op("P", "PUT", f"/api/v1/classes/{self.class_upd_a}", A,
-                          "A sửa lớp CỦA CHÍNH A",
-                          {"label_original": "doi chung duong — sua duoc"}))
+        # `PUT /classes/{uid}` KHÔNG nằm ở đây, và đó là kết luận của phép đo
+        # ngày 16/08/2026 chứ không phải một chỗ bỏ sót.
+        #
+        # Thao tác ấy gác sau quyền quản trị NỀN TẢNG, không phải vai trong đơn
+        # vị. Một tài khoản đơn vị thường bị từ chối — đúng thiết kế. Đặt nó vào
+        # đối chứng dương thì lượt từ chối ấy bị chấm thành TRƯỢT, và cả lượt đo
+        # bị tuyên vô hiệu vì một hành vi hoàn toàn đúng.
+        #
+        # Nó thuộc nhóm "đúng đơn vị, SAI QUYỀN", nơi bị từ chối là kết cục
+        # ĐÚNG. Xem docs/10-issues/FINDING_P0B_platform_admin_crosses_tenants.md
+        #
+        # Dùng tài khoản mang cờ quản trị nền tảng để lượt này "đạt" là cách
+        # sai: cùng cờ ấy cũng cho phép xoá đơn vị khác, nên toàn bộ ma trận
+        # xuyên đơn vị sẽ đo năng lực quản trị nền tảng thay vì đo cách ly.
         if self.sample_del_a:
             ops.append(Op("P", "DELETE", f"/api/v1/dataset/samples/{self.sample_del_a}",
                           A, "A xoá mẫu CỦA CHÍNH A"))

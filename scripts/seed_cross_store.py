@@ -180,7 +180,15 @@ def _noi_dung_npz(d: dict) -> bytes:
             f"{d['vai_tro']}\n{d['class_uid']}\n{d['sample_uid']}\n").encode()
 
 
-def _dung_cay(goc: Path, dt: list[dict]) -> tuple[list[dict], list[dict]]:
+#: Cây fixture được gắn vào container đo ở đây. Xem chú thích ở cột `file_path`
+#: trong `_dung_cay` về việc vì sao CSV phải mang đường TUYỆT ĐỐI theo cách
+#: container nhìn thấy, chứ không phải đường tương đối như kho sản xuất.
+PREFIX_TEP_TRONG_CONTAINER = "/isodata"
+
+
+def _dung_cay(goc: Path, dt: list[dict],
+              prefix_tep: str = PREFIX_TEP_TRONG_CONTAINER
+              ) -> tuple[list[dict], list[dict]]:
     from app.dataset_manager import LABEL_FIELDS
     from app.dataset_samples import SAMPLE_FIELDS
 
@@ -205,7 +213,30 @@ def _dung_cay(goc: Path, dt: list[dict]) -> tuple[list[dict], list[dict]]:
             # loại bỏ. Validator không bắt vì nó chưa so cột này.
             "source_type": "camera", "session_id": d["session_id"],
             "seq_len": "16", "fps_original": "30", "fps_processed": "30",
-            "completeness": "1.0", "file_path": d["file_path"],
+            # Đường TUYỆT ĐỐI theo cách container đo nhìn thấy cây, không phải
+            # đường tương đối như `dataset/samples.csv` của sản xuất.
+            #
+            # Vì sao lệch khỏi sản xuất một cách CÓ CHỦ Ý
+            # -------------------------------------------
+            # Endpoint đọc dữ liệu mẫu phân giải theo hai nhánh, theo thứ tự:
+            #
+            #     1. `Path(file_path).exists()`  -> trả tệp cục bộ
+            #     2. materialise từ kho đám mây  -> cần liên kết tải về
+            #
+            # Sản xuất ghi đường tương đối và luôn rơi vào nhánh 2, vì tệp thật
+            # nằm trên kho đám mây. Cây fixture thì cố ý KHÔNG có liên kết ấy:
+            # một phép đo cách ly không được phụ thuộc vào một dịch vụ ngoài,
+            # và cũng không được phát yêu cầu ra Internet giữa lượt đo.
+            #
+            # Ghi đường tương đối ở đây làm nhánh 1 trượt (thư mục làm việc của
+            # ứng dụng không phải gốc cây dữ liệu) rồi nhánh 2 cũng trượt, và
+            # đối chứng dương "chủ sở hữu đọc được mẫu của chính mình" nhận 404.
+            # Đó là 404 của HẠ TẦNG FIXTURE, nhưng nó làm VÔ HIỆU cả lượt đo —
+            # đúng như bộ đo đã từ chối công bố ngày 16/08/2026.
+            #
+            # Đường tuyệt đối đưa nhánh 1 vào cuộc. Nhánh 1 là mã sản xuất thật,
+            # không phải đường vòng dựng riêng cho phép đo.
+            "file_path": f"{prefix_tep}/{d['file_path']}",
             "created_at": NOW, "tenant_id": d["tenant_id"],
             # Cùng giá trị mà `_ghi_db` ghi vào `samples.auth_user_id`. Hai kho
             # lệch nhau ở cột này thì đối chứng dương đạt ở kho này và trượt ở
