@@ -5,7 +5,7 @@ import logging
 import sys
 import time
 
-from app.config import settings
+from app.config import settings, redact_db_url
 from app.db import init_db
 from app.logging_config import configure_logging
 
@@ -18,7 +18,7 @@ def run_init_db() -> int:
     logger.info(
         "[INIT_DB] start dataset_root=%s database_url=%s",
         settings.dataset_root,
-        settings.database_url,
+        redact_db_url(settings.database_url),
     )
 
     try:

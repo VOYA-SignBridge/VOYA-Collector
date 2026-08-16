@@ -304,3 +304,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def redact_db_url(url: str) -> str:
+    """postgresql://user:PASSWORD@host/db -> postgresql://user:***@host/db.
+
+    settings.database_url embeds POSTGRES_PASSWORD verbatim; logging it
+    unredacted puts the DB password in every startup log line, which
+    typically has much broader read access than the .env file it came from.
+    """
+    if "://" not in url or "@" not in url:
+        return url
+    scheme, rest = url.split("://", 1)
+    creds, host_part = rest.split("@", 1)
+    user = creds.split(":", 1)[0] if ":" in creds else creds
+    return f"{scheme}://{user}:***@{host_part}"
