@@ -129,8 +129,25 @@ class Bo:
             Op("B", "GET",    f"/api/v1/tenants/{self.tenant_b}/members", A, "liệt kê thành viên B"),
             # Ghi với tenant_id của người khác trong THÂN yêu cầu: đây là ca mà
             # WITH CHECK phải bắt, khác hẳn ca đọc mà USING bắt.
-            Op("B", "POST",   "/api/v1/classes/register", A, "tạo lớp mang tenant_id của B",
-               {"slug": f"xuyen-{fake}", "label_original": "x", "tenant_id": self.tenant_b}),
+            # ĐÃ GỠ ngày 16/08/2026: `POST /classes/register` mang `tenant_id`
+            # của bên kia.
+            #
+            # Thao tác này thử một vector KHÔNG TỒN TẠI. Điểm cuối đọc đúng sáu
+            # trường từ thân yêu cầu, và `tenant_id` không nằm trong đó; phạm vi
+            # lấy từ ngữ cảnh request. Truyền `tenant_id` vào chỉ là truyền một
+            # trường bị bỏ qua.
+            #
+            # Giữ nó lại thì tệ theo hai hướng, và lượt đo đã đi qua cả hai:
+            #
+            #   * thân yêu cầu sai tên trường -> 422 -> ba mươi ca MỜ, và bộ đo
+            #     từ chối công bố vì một lỗi soạn thân yêu cầu;
+            #   * sửa đúng tên trường -> lượt gọi CHẠY, rồi bị chấm "đã chặn"
+            #     hoặc "vi phạm" tuỳ mã trả về — cả hai đều là một phát biểu về
+            #     cách ly, rút ra từ một đường không hề nhận tham số phạm vi.
+            #
+            # Hướng thứ hai nguy hiểm hơn hẳn: nó cho ra một con số trông hợp lý
+            # về một thứ chưa từng được thử. Nên đường này chuyển sang danh sách
+            # KHÔNG KIỂM ĐƯỢC, chỗ dành cho những chiều mà API không mở ra.
         ]
 
         # --- Nhóm A: đúng tenant, sai quyền ------------------------------
@@ -906,6 +923,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "khong_kiem_duoc": [
                     "đổi phạm vi workspace/project — API chưa có endpoint nào "
                     "cho workspaces/projects, nên chiều này KHÔNG được chứng minh",
+                    "tạo lớp mang tenant_id của bên kia — điểm cuối tạo lớp "
+                    "KHÔNG đọc trường tenant_id nào từ thân yêu cầu; phạm vi "
+                    "lấy từ ngữ cảnh request. Không có vector ghi xuyên tenant "
+                    "nào ở đường này để thử, nên nó bị loại khỏi ma trận thay "
+                    "vì được chấm là 'đã chặn'. Ngoài ra chính điểm cuối này "
+                    "đang trả lỗi máy chủ cho MỌI người gọi trên bản mã đo — "
+                    "xem docs/10-issues/FINDING_P0B_unscoped_load_labels.md — "
+                    "nên cũng không có bằng chứng lúc chạy theo chiều nào cả",
                 ],
                 "khong_phan_biet": kpb,
                 "chi_tiet": [{"nhom": r.op.nhom, "mo_ta": r.op.mo_ta,
