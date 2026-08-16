@@ -4,8 +4,15 @@ from typing import List, Dict
 from app.dataset_manager import load_labels, ClassMetadata
 from app.tenancy import tenant_id_of
 
-def load_inference_classes(language: str, dialect: str) -> List[ClassMetadata]:
-    rows = load_labels()
+def load_inference_classes(tenant_id: str, language: str,
+                           dialect: str) -> List[ClassMetadata]:
+    """Bảng lớp cho nhận dạng, TRONG phạm vi một tổ chức.
+
+    Đây là đường REQUEST, không phải đường bảo trì. Bản trước đọc toàn kho,
+    nên bảng lớp trả về cho một tổ chức chứa cả nhãn của tổ chức khác — rò dữ
+    liệu danh mục, và làm chỉ số lớp lệch so với mô hình đã huấn luyện.
+    """
+    rows = load_labels(tenant_id)
     out: List[ClassMetadata] = []
     for r in rows:
         lang = r["language"]

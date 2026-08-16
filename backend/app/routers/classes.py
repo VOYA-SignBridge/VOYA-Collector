@@ -416,7 +416,7 @@ def community_stats():
 
 @router.get("/balance")
 def balance_plan(target: int | None = None):
-    plan = build_balance_plan(target=target)
+    plan = build_balance_plan(require_tenant(), target=target)
     return plan
 
 

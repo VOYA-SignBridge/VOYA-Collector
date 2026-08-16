@@ -9,8 +9,11 @@ from app.tenancy import tenant_id_of
 from app.dataset_samples import save_sequence_npz
 from app.processing.augmenter import generate_augmented_sequences
 
-def get_class_dirs() -> dict[str, Path]:
-    rows = load_labels()
+def get_class_dirs(tenant_id: str) -> dict[str, Path]:
+    # Công cụ này SINH mẫu tăng cường rồi ghi xuống cây dữ liệu. Đường ghi
+    # bám theo chủ sở hữu của lớp, nên đọc toàn kho ở đây sẽ đổ mẫu mới vào
+    # cây của tổ chức khởi tạo — xem chú thích ở `balancer.load_class_meta_map`.
+    rows = load_labels(tenant_id)
     out = {}
     from app.dataset_manager import ClassMetadata
     for r in rows:
@@ -42,10 +45,11 @@ def load_sequences_for_class(class_uid: str, limit: int | None = None) -> List[n
             break
     return seqs
 
-def execute(target: int | None = None, per_sequence_aug: int = 2):
-    plan = build_balance_plan(target=target)
-    dirs = get_class_dirs()
-    rows = load_labels()
+def execute(tenant_id: str, target: int | None = None,
+            per_sequence_aug: int = 2):
+    plan = build_balance_plan(tenant_id, target=target)
+    dirs = get_class_dirs(tenant_id)
+    rows = load_labels(tenant_id)
     uid_to_meta = {r['class_uid']: ClassMetadata(
         class_uid=r['class_uid'], slug=r['slug'], label_original=r['label_original'],
         language=r['language'], dialect=r['dialect'],

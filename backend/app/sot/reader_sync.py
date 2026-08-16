@@ -516,8 +516,23 @@ _LEGACY_SEEDS = (
         # Hai nửa: phủ đủ (không tenant nào thiếu) VÀ không trùng (không tenant
         # nào có hai đăng ký cùng mở). Chỉ nửa đầu thì một tenant có hai dòng mở
         # vẫn được chấm là "đã đúng".
+        # `deleted_at IS NULL` — thêm 16/08/2026. Vế phủ đủ trước đây quét CẢ
+        # tenant đã xoá mềm, và một tenant đã xoá thì theo định nghĩa không cần
+        # đăng ký đang mở: lượt xoá chính là thứ đóng đăng ký lại.
+        #
+        # Hậu quả không nằm ở bộ test. Hậu điều kiện này quyết định việc bộ đọc
+        # SOT có chấp nhận câu gieo đời cũ là "đã đúng" hay không; sai một lần
+        # là câu ấy rơi vào `schema_failed`, và lượt đồng bộ SOT hỏng. Nghĩa là
+        # bất kỳ bản cài nào TỪNG xoá mềm một tenant đều không đồng bộ SOT được
+        # nữa — một quả mìn hẹn giờ, chỉ nổ sau lần xoá tenant đầu tiên.
+        #
+        # Đo được trên `signdb_test`: 8 tenant vi phạm, và cả 8 đều đã xoá mềm;
+        # tập tenant đang sống sạch hoàn toàn. Bất biến ở `test_schema_v4` vốn
+        # đã lọc `deleted_at IS NULL`, nên hai nơi nói về cùng một điều mà lệch
+        # nhau đúng ở mệnh đề này.
         "SELECT NOT EXISTS ("
         "  SELECT 1 FROM tenants t WHERE t.plan_code IS NOT NULL"
+        "    AND t.deleted_at IS NULL"
         "    AND NOT EXISTS (SELECT 1 FROM tenant_subscriptions s"
         "                    WHERE s.tenant_id = t.tenant_id AND s.ended_at IS NULL)"
         ") AND NOT EXISTS ("

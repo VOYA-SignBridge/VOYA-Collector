@@ -147,8 +147,12 @@ def test_a_real_purge_shows_up_in_the_endpoint(client, monkeypatch):
     from app.routers import classes as classes_router
 
     class_uid = f"gia-{uuid.uuid4().hex[:12]}"
+    # Chữ ký thật nhận thêm `tenant_id` (từ khoá) kể từ lượt chuyển phạm vi
+    # 16/08/2026. Một stub cứng theo chữ ký cũ không "hỏng an toàn": nó ném
+    # TypeError bên trong tầng trung gian ASGI, nổi lên thành một nhóm ngoại lệ
+    # khó đọc, và ca kiểm đỏ vì lý do chẳng liên quan gì tới điều nó khẳng định.
     monkeypatch.setattr(classes_router, "sync_purge_class",
-                        lambda uid: {"purged": True, "class_uid": uid,
+                        lambda uid, **_: {"purged": True, "class_uid": uid,
                                      "op_id": f"class_purge_{uid}"})
 
     response = client.delete(f"/api/v1/classes/{class_uid}/purge")

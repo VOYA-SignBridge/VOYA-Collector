@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 from collections import defaultdict
 
-from app.dataset_manager import load_labels, ClassMetadata
+from app.dataset_manager import _load_all_labels_unscoped, ClassMetadata
 from app.tenancy import tenant_id_of
 from app.config import settings
 
@@ -13,7 +13,9 @@ FEATURE_DIM = int(getattr(settings, 'feature_dim', 126))
 
 
 def load_class_meta(language: str | None, dialect: str | None):
-    rows = load_labels()
+    # Bộ soát dữ liệu chạy từ dòng lệnh, CHỈ ĐỌC, và mục đích của nó là soi
+    # toàn kho. Đây là một trong số ít đường đọc-tất-cả hợp lệ.
+    rows = _load_all_labels_unscoped()
     out = []
     for r in rows:
         if language and r['language'] != language:

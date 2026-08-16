@@ -6,7 +6,9 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from app.dataset_manager import load_labels, register_class, ClassMetadata, MASTER_LABELS, LABEL_FIELDS, regenerate_label_indexes
+from app.dataset_manager import (_load_all_labels_unscoped, register_class,
+                                 ClassMetadata, MASTER_LABELS, LABEL_FIELDS,
+                                 regenerate_label_indexes)
 from app.tenancy import tenant_id_of
 from app.dataset_samples import SAMPLES_CSV, SAMPLE_FIELDS
 from filelock import FileLock
@@ -68,7 +70,9 @@ def find_label(rows: List[Dict[str,str]], language: str, label_original: str, sl
     return None
 
 def reclassify(mapping_csv: str, apply: bool = False, remove_old: bool = False, default_language: str = 'vn') -> Dict:
-    label_rows = load_labels()
+    # Công cụ bảo trì chạy từ dòng lệnh, phân loại lại phương ngữ trên
+    # TOÀN kho. Đây là một trong số ít đường đọc-tất-cả hợp lệ.
+    label_rows = _load_all_labels_unscoped()
     samples = load_samples()
     mapping = read_mapping(mapping_csv)
     changes = []

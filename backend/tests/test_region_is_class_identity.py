@@ -123,7 +123,8 @@ class TestVungLaDinhDanh:
         dm = kho_tam
         _viet_labels(dm, [_hang("RG-BAC", 901, "bac"), _hang("RG-NAM", 902, "nam")])
 
-        metas = [m for m in dm.list_classes(language="vn", dialect="pho-thong")
+        metas = [m for m in dm.list_classes(language="vn", dialect="pho-thong",
+                                            tenant_id="default")
                  if m.slug == SLUG]
 
         assert len(metas) == 2, f"gộp mất một lớp: {len(metas)}"
@@ -137,7 +138,8 @@ class TestVungLaDinhDanh:
         _viet_labels(dm, [_hang("RG-BAC", 901, "bac"), _hang("RG-NAM", 902, "nam")])
 
         theo_uid = {m.class_uid: m.to_label_row()
-                    for m in dm.list_classes(language="vn", dialect="pho-thong")
+                    for m in dm.list_classes(language="vn", dialect="pho-thong",
+                                             tenant_id="default")
                     if m.slug == SLUG}
 
         assert theo_uid["RG-BAC"]["region"] == "bac"

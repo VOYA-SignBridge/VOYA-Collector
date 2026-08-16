@@ -538,8 +538,12 @@ def load_labels(tenant_id: Optional[str] = None) -> List[Dict[str, str]]:
     return [r for r in _load_all_labels_unscoped() if tenant_id_of(r) == scope]
 
 
-def find_existing(language: str, dialect: str, slug: str) -> Optional[Dict[str, str]]:
-    rows = load_labels()
+def find_existing(tenant_id: str, language: str, dialect: str,
+                  slug: str) -> Optional[Dict[str, str]]:
+    # `tenant_id` đứng ĐẦU và bắt buộc: hàm này trả lời "lớp này đã tồn
+    # tại chưa", và câu trả lời chỉ có nghĩa bên trong một phạm vi. Đọc
+    # toàn kho sẽ báo "đã tồn tại" cho một lớp thuộc tổ chức khác.
+    rows = load_labels(tenant_id)
     for r in rows:
         if r["language"] == language and r["dialect"] == dialect and r["slug"] == slug:
             return r
@@ -618,7 +622,10 @@ def sync_master_labels_to_gdrive() -> None:
 
 
 def regenerate_label_indexes():
-    rows = load_labels()
+    # Đường BẢO TRÌ, đọc toàn kho một cách hợp lệ: tệp chỉ mục nhãn là
+    # hiện vật CHUNG của cả cài đặt, không phải của một tổ chức. Gọi
+    # biến thể có tên dài để ý định lộ ra ngay tại chỗ đọc.
+    rows = _load_all_labels_unscoped()
     # language-level common summary
     lang_rows = []
     dialect_rows = []

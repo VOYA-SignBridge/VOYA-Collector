@@ -346,7 +346,7 @@ def sync_missing_data_on_startup(full: bool | None = None) -> bool:
     already exist, which is the only way to push EDITS, since neither CSV
     carries an updated_at column to diff against.
     """
-    from app.dataset_manager import load_labels
+    from app.dataset_manager import _load_all_labels_unscoped
     from app.dataset_samples import list_samples
     from app.raw_uploads import list_raw_uploads
     from app.storage.metadata_db import upsert_class, upsert_sample, upsert_raw_upload
@@ -361,7 +361,11 @@ def sync_missing_data_on_startup(full: bool | None = None) -> bool:
     try:
         # Order matters: classes is the parent of samples and raw_uploads.
         for label, table, key_column, rows, upsert in (
-            ("classes", "classes", "class_uid", load_labels(), upsert_class),
+            # Đồng bộ lúc khởi động bù hàng thiếu cho MỌI tổ chức, nên nó
+            # đọc toàn kho một cách hợp lệ — và nói ra điều đó bằng tên
+            # hàm, thay vì gọi biến thể có phạm vi rồi bỏ trống tham số.
+            ("classes", "classes", "class_uid",
+             _load_all_labels_unscoped(), upsert_class),
             ("samples", "samples", "sample_uid", list_samples(), upsert_sample),
             ("raw_uploads", "raw_uploads", "upload_uid", list_raw_uploads(), upsert_raw_upload),
         ):

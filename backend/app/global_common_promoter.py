@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse, shutil
 from collections import defaultdict
 
-from app.dataset_manager import load_labels, register_class, ClassMetadata
+from app.dataset_manager import (_load_all_labels_unscoped, register_class,
+                                 ClassMetadata)
 from app.tenancy import tenant_id_of
 
 def find_multi_language_slugs(min_languages: int = 2):
-    rows = load_labels()
+    # Đề bạt nhãn dùng chung phải so sánh XUYÊN ngôn ngữ trên toàn kho;
+    # phạm vi hoá theo tổ chức sẽ làm chính phép so ấy vô nghĩa.
+    rows = _load_all_labels_unscoped()
     slug_map = defaultdict(set)
     meta_map = defaultdict(list)
     for r in rows:

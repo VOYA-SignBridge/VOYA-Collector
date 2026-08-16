@@ -153,7 +153,7 @@ def export_labels_to_sheets(self):
             return {"status": "skipped", "reason": "not_configured"}
 
         # Labels are small enough to do full replace safely
-        from app.dataset_manager import load_labels, LABEL_FIELDS
+        from app.dataset_manager import _load_all_labels_unscoped, LABEL_FIELDS
 
         # Active labels from labels.csv PLUS soft-deleted classes from Postgres,
         # each carrying a deleted_at marker, ordered by class_idx (stable). A
@@ -161,7 +161,9 @@ def export_labels_to_sheets(self):
         # of vanishing and shifting every row below it up by one.
         from app.storage.metadata_db import list_deleted_classes
 
-        active = load_labels()
+        # Xuất sang bảng tính là ảnh chụp TOÀN kho vào một bảng duy
+        # nhất, không phải xuất theo tổ chức. Đọc-tất-cả là đúng ở đây.
+        active = _load_all_labels_unscoped()
         seen = {(r.get("class_uid") or "") for r in active}
         merged: List[Dict[str, Any]] = []
         for r in active:
