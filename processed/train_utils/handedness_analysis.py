@@ -41,6 +41,11 @@ def detect_hand_presence(x: np.ndarray) -> Tuple[bool, bool]:
     """
     x = np.asarray(x, dtype=np.float32)
 
+    # Feature versions that append derived descriptors keep the 126-dim landmark
+    # block first, so hand presence is always read from the leading columns.
+    if x.shape[-1] > 126:
+        x = x[..., :126]
+
     if x.ndim == 2:
         # (T, 126): check any timestep
         x = x.reshape(-1, 126)

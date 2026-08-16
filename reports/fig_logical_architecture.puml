@@ -1,0 +1,97 @@
+@startuml fig_logical_architecture
+' Logical Architecture of the CTU.SignBridge Training and Recognition Subsystem
+' UML 2.5 Component Diagram.
+' Every element below was verified against docker-compose.yml and the source tree.
+
+skinparam defaultFontName "Times New Roman"
+skinparam defaultFontSize 18
+skinparam shadowing false
+skinparam linetype ortho
+skinparam roundcorner 4
+skinparam nodesep 60
+skinparam ranksep 70
+skinparam ArrowFontSize 15
+skinparam ArrowColor #333333
+skinparam ComponentBackgroundColor #FFFFFF
+skinparam ComponentBorderColor #333333
+skinparam ComponentFontSize 18
+skinparam DatabaseBackgroundColor #FFFFFF
+skinparam DatabaseBorderColor #333333
+skinparam QueueBackgroundColor #FFFFFF
+skinparam QueueBorderColor #333333
+skinparam ArtifactBackgroundColor #FFFFFF
+skinparam ArtifactBorderColor #333333
+skinparam PackageBackgroundColor #FCFCFC
+skinparam PackageBorderColor #777777
+skinparam PackageFontSize 19
+skinparam PackageFontStyle bold
+skinparam LegendBackgroundColor #FAFAFA
+skinparam LegendBorderColor #999999
+skinparam LegendFontSize 15
+
+package "Client Tier" as CLIENT {
+  component "MediaPipe Hands\nin-browser extraction" as MP
+  component "Web Client\nReact SPA\nbuffers 60 x 126 sequences" as SPA
+}
+
+package "Edge" as EDGE {
+  component "Reverse Proxy\nnginx" as NGINX
+}
+
+package "Application Tier" as APP {
+  component "Backend API\nFastAPI" as API
+  component "Recognition Service\nFastAPI, port 8010" as RT
+}
+
+package "Asynchronous Execution" as ASYNC {
+  component "Scheduler\nCelery Beat" as BEAT
+  component "General Worker\nCelery, default queue" as WORKER
+  component "Trainer Worker\nCelery, queue = training" as TRAINER
+}
+
+package "Persistence" as STORE {
+  queue "Redis\nbroker, cancel flags" as REDIS
+  database "PostgreSQL\njobs, metrics, samples" as PG
+  artifact "Checkpoint store\n.pt files" as CKPT
+  artifact "Model registry\nmodels.json" as REG
+}
+
+package "Shared Model Contract" as SMC {
+  artifact "normalization.py" as NORM
+  artifact "Model architectures\nTCN, HandGCN" as ARCH
+  artifact "Label mapping\nindex_to_label.json" as LABELS
+}
+
+MP -right-> SPA
+SPA -down-> NGINX : HTTPS
+NGINX -down-> API : /api
+API -down-> RT : proxy /predict
+
+API -down-> REDIS : enqueue
+BEAT -down-> REDIS : schedule
+REDIS -up-> WORKER
+REDIS -up-> TRAINER
+
+API -down-> PG
+API -down-> REG : promote
+WORKER -down-> PG
+TRAINER -down-> PG : metrics
+TRAINER -down-> CKPT : write
+RT -down-> CKPT : read
+RT -down-> REG : reload
+
+NORM -[hidden]right-> ARCH
+ARCH -[hidden]right-> LABELS
+RT -[hidden]down-> NORM
+
+TRAINER ..> SMC
+RT ..> SMC
+
+legend bottom
+  Solid arrows are runtime dependencies; dashed arrows are UML dependencies on shared code.
+  The Shared Model Contract is mounted read-only into the Recognition Service, so inference applies
+  the same preprocessing and the same model classes that produced the checkpoint. Only the reverse
+  proxy publishes a port; every other component is reachable only inside the container network.
+endlegend
+
+@enduml

@@ -414,6 +414,7 @@ class TrainConfig:
     levels: int = 3
     kernel_size: int = 5
     seed: int = 42
+    patience: int = 10
     device: str = pick_device()
     num_workers: int = 0
     out_dir: Path = Path(__file__).resolve().parents[1] / "train_utils" / "outputs"
@@ -935,6 +936,7 @@ def build_checkpoint(
     stamp="",
     index_to_label: Optional[Dict[int, object]] = None,
     contract_extra: Optional[Dict[str, object]] = None,
+    idx_to_label_rich: Optional[Dict[int, Dict[str, object]]] = None,
 ):
     ckpt = {
         "schema_version": "1.0",
@@ -961,13 +963,27 @@ def build_checkpoint(
 
         "num_classes": num_classes,
 
-        # `index_to_label` ở đường vận hành mang cả tên hiển thị; đường
-        # legacy vẫn ra chuỗi như cũ. `normalize_idx_to_label` phía suy
-        # luận xử lý được cả hai kiểu.
-        "idx_to_label": (index_to_label if index_to_label else {
-            int(v): k
-            for k, v in label_map.items()
-        }),
+        # Ba nguồn, theo thứ tự ưu tiên — và cả ba đều cần, vì mỗi cái được
+        # đặt ở MỘT đường chạy khác nhau:
+        #
+        #   index_to_label     đường VẬN HÀNH (`i2l_for_ckpt`, chỉ đặt khi
+        #                      split tự khai `purpose="operational"`)
+        #   idx_to_label_rich  đường PROFILE/SUBSET (`rich_i2l`)
+        #   label_map          đường trần — chỉ còn khoá nhãn
+        #
+        # Vì sao không bỏ được cái thứ hai: khoá trần buộc dịch vụ thời gian
+        # thực đi tra tên hiển thị trong `processed/analysis/index_to_label.json`
+        # toàn cục, mà tệp đó chỉ phủ từ vựng hoa-de. Với một mô hình bảng chữ
+        # cái thì không khớp gì cả, và giao diện hiện "vn/alphabet/a" ở chỗ đáng
+        # lẽ phải là "A". Checkpoint vốn đã mang đủ thứ để tự gọi tên lớp của
+        # mình, nên nó phải mang theo.
+        #
+        # `normalize_idx_to_label` phía suy luận xử lý được cả hai kiểu.
+        "idx_to_label": (
+            index_to_label if index_to_label
+            else {int(k): v for k, v in idx_to_label_rich.items()} if idx_to_label_rich
+            else {int(v): k for k, v in label_map.items()}
+        ),
 
         "label_to_idx": label_map,
 
@@ -1113,6 +1129,16 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--patience", type=int, default=10,
+        help="Early-stopping patience on validation macro-F1. Default 10 keeps "
+             "every published result reproducible. Raise it when validation is "
+             "measured on signers the model never trains on: that signal is far "
+             "noisier than same-signer validation, and 10 has been observed to "
+             "stop while the model is still underfitted (train acc 0.88 at the "
+             "epoch it stopped, against 0.98 on a fold whose validation shares "
+             "signers with training).",
+    )
+    parser.add_argument(
         "--run-purpose", dest="run_purpose", type=str, default="smoke_test",
         choices=["smoke_test", "research"],
         help="Declare what this run is for. Defaults to smoke_test so an "
@@ -1154,6 +1180,9 @@ def main() -> None:
         help="Attach tracking to an existing experiment ID instead of creating a new one.",
     )
     args = parser.parse_args()
+    # Set when a profile/subset run builds its own label maps; stays None on the
+    # plain path, where build_checkpoint falls back to bare keys as before.
+    rich_i2l: Optional[Dict[int, Dict[str, object]]] = None
 
     cfg = TrainConfig(
         train_csv=args.train_csv,
@@ -1168,6 +1197,7 @@ def main() -> None:
         levels=args.levels,
         kernel_size=args.kernel_size,
         seed=args.seed,
+        patience=args.patience,
         device=args.device,
         num_workers=args.num_workers,
         out_dir=args.out_dir,
@@ -1306,6 +1336,7 @@ def main() -> None:
 
         train_rows, _ = _read_csv_rows(sub_train)
         l2i, i2l = _build_subset_label_maps(train_rows, default_language="vn")
+        rich_i2l = i2l
         if len(l2i) < 2:
             raise SystemExit(f"Profile '{profile_tag}': need at least 2 classes, got {len(l2i)}.")
         common_labels, profile_specific_labels = split_common_and_profile_labels(list(l2i.keys()))
@@ -1549,6 +1580,13 @@ def main() -> None:
     if requested_dim != EXPECTED_FEATURE_DIM:
         raise SystemExit(f"feature_dim must be {EXPECTED_FEATURE_DIM}; got {requested_dim}.")
     in_dim = EXPECTED_FEATURE_DIM
+    # A non-default feature version changes the width of the input. v1 keeps the
+    # constant, so nothing moves unless a run explicitly asks for another version.
+    _fv = os.environ.get("VOYA_FEATURE_VERSION", "v1").strip() or "v1"
+    if _fv != "v1":
+        from shared import features_v2 as _features_v2
+        in_dim = _features_v2.feature_dim(_fv)
+        print(f"[FEATURES] version={_fv} input_dim={in_dim}")
     # infer number of classes from label_to_index if present
     ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root,
                             label_to_index_json=label_to_index_json,
@@ -1668,9 +1706,9 @@ def main() -> None:
 
     X0 = sample_batch[0]
 
-    if X0.shape[-1] != EXPECTED_FEATURE_DIM:
+    if X0.shape[-1] != in_dim:
         raise RuntimeError(
-            f"Invalid feature dim: {X0.shape}"
+            f"Invalid feature dim: {X0.shape}, expected last dim {in_dim}"
         )
 
 
@@ -1679,7 +1717,7 @@ def main() -> None:
 
     best_val_f1 = -1.0
     best_state = None
-    patience = 10
+    patience = int(getattr(cfg, "patience", 10) or 10)
     since_best = 0
     _best_epoch_track = 0
     _best_val_acc_track = 0.0
@@ -1899,6 +1937,7 @@ def main() -> None:
         "dataset_manifest_checksum": manifest_checksum or _read_split_manifest_checksum(cfg.train_csv),
     }
     final_checkpoint = build_checkpoint(
+        idx_to_label_rich=rich_i2l,
         model=model,
         cfg=cfg,
         in_dim=in_dim,
