@@ -10,11 +10,12 @@ import csv
 import json
 import logging
 import os
+import re
 import uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import torch
@@ -268,6 +269,12 @@ class SplitProvenance(BaseModel):
     valid_for_research: Optional[bool] = None
     # Câu hiển thị thẳng cho người dùng; rỗng nghĩa là không có gì bất thường.
     warning: Optional[str] = None
+    # True: có split triển khai (*_deploy_*) riêng cho đúng dialect đang chọn.
+    # False: không tìm thấy, đã rơi về split gốc processed/splits/ — split đó
+    # LUÔN có counts > 0 vì nó là partition cũ chạy chung cho mọi dialect, nên
+    # counts một mình không đủ để suy ra "phạm vi này đã được chuẩn bị". FE
+    # phải đọc đúng cờ này, không được suy từ counts.
+    is_deployment_split: bool = False
 
 
 class DatasetInfo(BaseModel):
@@ -588,8 +595,8 @@ def _get_dialects_by_language() -> Dict[str, List[str]]:
     return {lang: sorted(list(dialects)) for lang, dialects in dialects_map.items()}
 
 
-def _root_split_provenance() -> SplitProvenance:
-    """How the active root split partitions the data, read from the split itself.
+def _provenance_from_dir(split_dir: Path) -> SplitProvenance:
+    """How a split partitions the data, read from the split itself.
 
     The signer lists are recomputed from the CSVs rather than trusted from
     split_metadata.json: the metadata describes how the split was *generated*,
@@ -600,7 +607,7 @@ def _root_split_provenance() -> SplitProvenance:
     import csv as _csv
 
     prov = SplitProvenance()
-    meta_path = SPLITS_DIR / "split_metadata.json"
+    meta_path = split_dir / "split_metadata.json"
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -619,7 +626,7 @@ def _root_split_provenance() -> SplitProvenance:
     identity_col: Optional[str] = None
     seen: Dict[str, set] = {}
     for part in ("train", "val", "test"):
-        path = SPLITS_DIR / f"{part}.csv"
+        path = split_dir / f"{part}.csv"
         if not path.exists():
             continue
         signers: set = set()
@@ -670,6 +677,38 @@ def _root_split_provenance() -> SplitProvenance:
     return prov
 
 
+def _root_split_provenance() -> SplitProvenance:
+    return _provenance_from_dir(SPLITS_DIR)
+
+
+def _effective_split_provenance(dialect: Optional[str]) -> SplitProvenance:
+    """Provenance of the split a run on `dialect` would actually use.
+
+    The split step used to describe the root split no matter which dialect was
+    selected, so it always reported the unified 37-class partition. Since the
+    default path now resolves a deployment split per dialect, that display was
+    describing a different partition from the one training would read — the
+    panel said one thing and the job did another. Resolve it the same way the
+    dispatcher does, from the same helper, so the two cannot disagree.
+    """
+    if dialect:
+        try:
+            from app.training_tasks import _deployment_split_for
+
+            chosen = _deployment_split_for([dialect])
+            if chosen:
+                d = WORKSPACE_ROOT / "processed" / "splits" / "versions" / chosen["split_version"]
+                if (d / "train.csv").exists():
+                    prov = _provenance_from_dir(d)
+                    prov.dataset_manifest = prov.dataset_manifest or chosen["split_version"]
+                    prov.is_deployment_split = True
+                    return prov
+        except Exception as exc:
+            logger.warning("[SPLIT_PROV] không phân giải được split cho dialect %s: %s",
+                           dialect, exc)
+    return _root_split_provenance()
+
+
 def _trainable_dialects_from_splits() -> Dict[str, int]:
     """Đọc split train.csv hiện tại, trả về {dialect: số_class}.
 
@@ -712,33 +751,29 @@ def _research_splits() -> List[Dict[str, Any]]:
     if not versions_dir.is_dir():
         return []
 
-    out: List[Dict[str, Any]] = []
-    for d in sorted(versions_dir.iterdir()):
+    def _describe(d: Path, name: str, protocol: Optional[str]) -> Optional[Dict[str, Any]]:
         meta_path = d / "split_metadata.json"
-        if not d.is_dir() or not (d / "train.csv").exists() or not meta_path.exists():
-            continue
+        if not (d / "train.csv").exists() or not meta_path.exists():
+            return None
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning("[SPLITS] bỏ qua %s: metadata không đọc được (%s)", d.name, exc)
-            continue
-
+            logger.warning("[SPLITS] bỏ qua %s: metadata không đọc được (%s)", name, exc)
+            return None
         if not meta.get("valid_for_research"):
-            continue
+            return None
         checksum = str(meta.get("dataset_manifest_checksum") or "").strip()
         if not checksum:
-            continue
+            return None
 
         # dataset_version suy ra từ tên manifest: .../dataset_manifest_isds2026_v5.csv
-        manifest = str(meta.get("dataset_manifest") or "")
-        dataset_version = ""
-        stem = Path(manifest).stem
-        if stem.startswith("dataset_manifest_"):
-            dataset_version = stem[len("dataset_manifest_"):]
+        stem = Path(str(meta.get("dataset_manifest") or "")).stem
+        dataset_version = stem[len("dataset_manifest_"):] if stem.startswith("dataset_manifest_") else ""
 
         counts = meta.get("counts") or {}
-        out.append({
-            "split_version": d.name,
+        signers = meta.get("signers") or {}
+        return {
+            "split_version": name,
             "dataset_version": dataset_version,
             "recognition_profile": str(meta.get("recognition_profile") or ""),
             "split_mode": str(meta.get("split_mode") or ""),
@@ -746,8 +781,206 @@ def _research_splits() -> List[Dict[str, Any]]:
             "counts": {k: counts.get(k) for k in ("train", "val", "test")},
             "seed": meta.get("seed"),
             "dataset_manifest_checksum": checksum,
+            "protocol": protocol,
+            "held_out": sorted(signers.get("test") or []),
+            "n_train_signers": len(signers.get("train") or []),
+        }
+
+    out: List[Dict[str, Any]] = []
+    for d in sorted(versions_dir.iterdir()):
+        if not d.is_dir():
+            continue
+
+        flat = _describe(d, d.name, None)
+        if flat is not None:
+            out.append(flat)
+            continue
+
+        # A fold of a multi-run protocol is still one train/val/test partition,
+        # so a single job can run it. Withholding them was costing more than it
+        # saved: the only flat alphabet split puts a signer in validation and so
+        # trains on four signers, while every fold here trains on five. On the
+        # identical held-out test set that difference is 0.596 against 0.956,
+        # and each fold result is a published per-performer column, so a run
+        # started from the web can now be checked against the report.
+        for sub in sorted(d.iterdir()):
+            if not sub.is_dir():
+                continue
+            fold = _describe(sub, f"{d.name}/{sub.name}", d.name)
+            if fold is not None:
+                out.append(fold)
+    return out
+
+
+def _evaluation_protocols() -> List[Dict[str, Any]]:
+    """Multi-fold evaluation protocols, e.g. leave-one-signer-out fold sets.
+
+    `_research_splits` deliberately withholds these: a fold set is not something
+    a single training job can run, so offering it there would only let a user
+    pick it and fail. But the thesis tables are means over exactly these folds,
+    so a run started from the web can never reproduce a published figure while
+    they are invisible. Listing them separately keeps both properties: one job
+    still means one split, and the protocol behind a published number is
+    discoverable instead of living only in a shell script.
+    """
+    versions_dir = WORKSPACE_ROOT / "processed" / "splits" / "versions"
+    if not versions_dir.is_dir():
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for d in sorted(versions_dir.iterdir()):
+        if not d.is_dir() or (d / "train.csv").exists():
+            continue  # flat split -> belongs to /splits, not here
+
+        folds = []
+        for sub in sorted(d.iterdir()):
+            if not sub.is_dir():
+                continue
+            if not ((sub / "train.csv").exists() and (sub / "test.csv").exists()):
+                continue
+            meta_path = sub / "split_metadata.json"
+            meta: Dict[str, Any] = {}
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+            folds.append({
+                "fold": sub.name,
+                "split_mode": meta.get("split_mode"),
+                "num_classes": meta.get("num_classes"),
+                "counts": meta.get("counts") or {},
+                "held_out": sorted((meta.get("signers") or {}).get("test") or []),
+            })
+
+        if len(folds) < 2:
+            continue
+
+        modes = {f["split_mode"] for f in folds if f["split_mode"]}
+        out.append({
+            "protocol": d.name,
+            "n_folds": len(folds),
+            "split_mode": sorted(modes)[0] if len(modes) == 1 else "mixed",
+            "num_classes": folds[0].get("num_classes"),
+            "folds": folds,
         })
     return out
+
+
+def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
+    """Map chosen dialects to the recognition profiles that can be prepared.
+
+    Read from the label catalogue rather than hard-coded, and resolved on the
+    server rather than in the browser: the pairing is data, it changes when the
+    vocabulary changes, and a copy in the UI would silently rot.
+
+    `legacy_unassigned` marks labels that were never given a profile, so a split
+    built for it would describe nothing coherent. Those dialects come back as
+    unsupported instead, and the caller reports that rather than preparing
+    something unusable.
+    """
+    _, labels = _load_samples_and_labels()
+    wanted = {str(d).strip() for d in dialects if str(d).strip()}
+
+    by_dialect: Dict[str, set] = {}
+    for label in labels:
+        dialect = str(label.get("dialect") or "").strip()
+        profile = str(label.get("recognition_profile") or "").strip()
+        if dialect in wanted and profile:
+            by_dialect.setdefault(dialect, set()).add(profile)
+
+    profiles: List[str] = []
+    unsupported: List[str] = []
+    for dialect in sorted(wanted):
+        found = {p for p in by_dialect.get(dialect, set()) if p != "legacy_unassigned"}
+        if found:
+            profiles.extend(found)
+        else:
+            unsupported.append(dialect)
+    return sorted(set(profiles)), unsupported
+
+
+class DatasetPrepareRequest(BaseModel):
+    """Người bấm chỉ chọn phương ngữ; profile suy ra từ danh mục nhãn."""
+    dialects: Optional[List[str]] = None
+    profiles: Optional[List[str]] = None
+    seed: int = 42
+
+
+@router.post("/dataset/prepare")
+async def start_dataset_preparation(
+    body: DatasetPrepareRequest,
+    current_user: Dict[str, Any] = Depends(require_admin),
+) -> Dict[str, Any]:
+    """Sinh manifest + split triển khai + split nghiên cứu + fold LOSO.
+
+    Trước đây phải chạy bốn script CLI đúng thứ tự, nên người thu dữ liệu qua
+    nền tảng không tự biến nó thành thứ huấn luyện được. Một lần bấm sinh cả
+    đường dùng hằng ngày lẫn đường nghiên cứu, từ cùng một manifest, nên hai
+    đường không thể lệch nhau về việc đang mô tả bộ dữ liệu nào.
+    """
+    from app.dataset_prep_tasks import (
+        create_pending_report,
+        next_manifest_version,
+        prepare_dataset,
+    )
+
+    profiles = body.profiles
+    if not profiles and body.dialects:
+        # Chuẩn bị đúng phương ngữ đang chọn. Chuẩn bị cả bộ dữ liệu khi người
+        # dùng chỉ quan tâm một phương ngữ vừa tốn thời gian vừa tạo ra artefact
+        # không ai dùng.
+        profiles, unsupported = await asyncio.to_thread(_profiles_for_dialects, body.dialects)
+        if not profiles:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Phương ngữ đã chọn chưa được gán nhóm nhận dạng "
+                    f"({', '.join(unsupported) or 'không rõ'}), nên chưa chuẩn bị được. "
+                    "Hãy gán recognition_profile cho các nhãn của phương ngữ này trước."
+                ),
+            )
+
+    run_id = uuid.uuid4().hex[:12]
+    version = await asyncio.to_thread(next_manifest_version)
+    # Hàng đợi mặc định, KHÔNG phải "training": worker huấn luyện chạy
+    # concurrency 1 trên GPU, đẩy việc này vào đó sẽ chặn huấn luyện vô cớ.
+    # Ghi trạng thái "đang chờ" TRƯỚC khi đẩy vào hàng đợi: giao diện bắt đầu
+    # hỏi ngay khi có run_id, nên nếu tệp chưa tồn tại nó sẽ báo không tìm thấy.
+    await asyncio.to_thread(
+        create_pending_report, run_id, version, profiles or [], body.seed
+    )
+    # Truyền thẳng version đã tính ở trên — KHÔNG để task tự gọi lại
+    # next_manifest_version(). Nếu không truyền, task tính lại độc lập lúc
+    # nó thực sự chạy (có thể trễ vài phút sau khi vào hàng đợi), và nếu một
+    # lần chuẩn bị khác đã tạo xong manifest trong lúc chờ, con số đó có thể
+    # khác với con số vừa ghi vào report "queued" — đúng nghịch với lý do
+    # duy nhất hàm này tồn tại: một manifest, không lệch giữa hai đường.
+    prepare_dataset.delay(run_id=run_id, profiles=profiles, seed=body.seed, version=version)
+    logger.info("[PREP] admin=%s bắt đầu run=%s version=%s",
+                current_user.get("username"), run_id, version)
+    return {"run_id": run_id, "manifest_version": version, "profiles": profiles, "status": "queued"}
+
+
+@router.get("/dataset/prepare/{run_id}")
+async def get_dataset_preparation(
+    run_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Tiến độ và kết quả của một lần chuẩn bị dữ liệu."""
+    from app.dataset_prep_tasks import read_report
+
+    report = await asyncio.to_thread(read_report, run_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy lần chuẩn bị {run_id}")
+    return report
+
+
+@router.get("/protocols")
+async def list_evaluation_protocols(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    """Bộ fold nhiều lần chạy (LOSO...) — cơ sở của các bảng trong báo cáo."""
+    return await asyncio.to_thread(_evaluation_protocols)
 
 
 @router.get("/splits")
@@ -967,7 +1200,7 @@ async def get_dataset_info(
             if d:
                 samples_by_dialect[d] = samples_by_dialect.get(d, 0) + 1
 
-        provenance = _root_split_provenance()
+        provenance = _effective_split_provenance(dialect)
         return DatasetInfo(
             total_samples=len(samples),
             total_classes=len(class_counts),
@@ -1036,11 +1269,15 @@ async def start_training(
 
         # Snapshot how the data is split right now. Research runs read a frozen
         # versioned split and already carry their own provenance through the
-        # checkpoint contract; the exploratory path reads the root split, which
-        # is regenerated whenever new recordings arrive.
+        # checkpoint contract; the exploratory path resolves a split from the
+        # dialect being trained, exactly as the dispatcher will.
         split_prov: Optional[SplitProvenance] = None
         if config.run_purpose != "research":
-            split_prov = _root_split_provenance()
+            # Must match what _build_cmd picks, or the results panel will label
+            # the run with a partition it never read.
+            split_prov = _effective_split_provenance(
+                (config.dialects or [None])[0] if len(config.dialects or []) == 1 else None
+            )
             # Fail closed on a split that cannot train, rather than letting the
             # subprocess exit rc=1 after the job has been queued and the user has
             # watched a progress bar for nothing.
@@ -1239,55 +1476,104 @@ def _determinism_summary(determinism: Any) -> str:
     return text
 
 
-def _provenance_checks(ckpt: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Các tiêu chí tái lập trả lời được CHỈ từ checkpoint.
+# Nhãn tiếng Việt cho từng tiêu chí của scripts/research_validity.py. Khoá phải
+# khớp đúng criteria key mà evaluate_checkpoint() trả về.
+_CRITERION_LABELS: Dict[str, str] = {
+    "C1_run_purpose": "Chạy nghiên cứu (không phải smoke test)",
+    "C2_augmentation_contract": "Hợp đồng augmentation đã sửa lỗi mirror",
+    "C3_contract_complete": "Checkpoint ghi đủ trường bắt buộc",
+    "C4_versions_present": "Có phiên bản dataset và split",
+    "C5_manifest_checksum": "Checksum manifest KHỚP file dữ liệu",
+    "C6_split_metadata": "Split có metadata mô tả cách chia",
+    "C7_split_valid_for_research": "Split hợp lệ cho nghiên cứu (không rò rỉ người ký)",
+    "C8_profile_matches_labels": "Nhãn khớp profile đã khai báo",
+    "C9_no_cross_profile": "Không lẫn nhãn của profile khác",
+    "C10_runtime_env": "Ghi đủ môi trường chạy",
+    "C11_git_commit": "Ghim được commit sinh ra model",
+    "C12_test_set_non_empty": "Tập đánh giá không rỗng",
+    "C13_best_val_restored": "Metrics lấy từ checkpoint val tốt nhất",
+    "C14_run_completed": "Lần chạy kết thúc bình thường",
+}
 
-    Dùng lại đúng mã C1/C5/C10/C11/C13 của scripts/research_validity.py để một
-    lần chạy được đánh giá giống nhau dù xem trên web hay chạy audit bằng script.
+
+def _load_research_validity():
+    """Import bộ tiêu chí dùng chung, hoặc None nếu không tới được.
+
+    scripts/ KHÔNG nằm trong image backend (Dockerfile chỉ COPY app/), nhưng repo
+    được bind-mount tại /workspace, nên module tồn tại lúc chạy. Import theo
+    đường dẫn thay vì nhân bản logic: một bản sao thứ hai sẽ trôi khỏi bản gốc,
+    và đó đúng là loại lệch giữa tuyên bố và hiện vật mà cổng này sinh ra để bắt.
     """
-    runtime_env = ckpt.get("runtime_env") or {}
-    selection = ckpt.get("model_selection") or {}
-    missing_env = [
-        k for k in ("python_version", "pytorch_version", "numpy_version", "device")
-        if not (runtime_env or {}).get(k)
-    ]
-    purpose = str(ckpt.get("run_purpose") or "")
+    import importlib.util
 
-    return [
-        {
-            "id": "C1",
-            "label": "Chạy nghiên cứu (không phải smoke test)",
-            "ok": purpose == "research",
-            "detail": f"run_purpose = '{purpose or 'không ghi'}'",
-        },
-        {
-            "id": "C5",
-            "label": "Có checksum manifest dữ liệu",
-            "ok": bool(str(ckpt.get("dataset_manifest_checksum") or "").strip()),
-            "detail": str(ckpt.get("dataset_manifest_checksum") or "") or "trống",
-        },
-        {
-            "id": "C10",
-            "label": "Ghi đủ môi trường chạy",
-            "ok": not missing_env,
-            "detail": "đầy đủ" if not missing_env else f"thiếu: {', '.join(missing_env)}",
-        },
-        {
-            "id": "C11",
-            "label": "Ghim được commit sinh ra model",
-            "ok": bool(str(ckpt.get("git_commit") or "").strip()),
-            "detail": str(ckpt.get("git_commit") or "") or "trống",
-        },
-        {
-            "id": "C13",
-            "label": "Metrics lấy từ checkpoint val tốt nhất",
-            "ok": bool(selection.get("restored_best_state")),
-            "detail": (
-                f"tiêu chí {selection.get('criterion')}, epoch {selection.get('best_epoch')}"
-                if selection else "không ghi model_selection"
-            ),
-        },
-    ]
+    for base in (Path("/workspace"), WORKSPACE_ROOT, Path(__file__).resolve().parents[3]):
+        candidate = base / "scripts" / "research_validity.py"
+        if not candidate.exists():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("research_validity", candidate)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)  # type: ignore[union-attr]
+            return module
+        except Exception as exc:
+            logger.warning("[PROVENANCE] không nạp được research_validity: %s", exc)
+            return None
+    return None
+
+
+def _provenance_checks(ckpt: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Toàn bộ tiêu chí C1–C14, đánh giá bằng CHÍNH bộ mã của bản audit.
+
+    Trước đây hàm này tự kiểm 5 tiêu chí và dùng lại tên C1/C5/C10/C11/C13 của
+    scripts/research_validity.py — nhưng nội dung kiểm KHÔNG giống. Rõ nhất là
+    C5: bản này chỉ hỏi "có ghi checksum không", còn bản audit so checksum với
+    file manifest thật. Giao diện vì thế hiện C5 màu xanh cho một lần chạy mà
+    audit sẽ loại, và bỏ sót hẳn C6/C7 — đúng hai tiêu chí nói về rò rỉ người ký.
+
+    Giờ gọi thẳng evaluate_checkpoint() nên một lần chạy được phán xét giống hệt
+    nhau dù xem trên web hay chạy audit.
+    """
+    rv = _load_research_validity()
+    if rv is None:
+        # Fail-closed: không kiểm được thì nói là không kiểm được, tuyệt đối
+        # không hiện "đạt". Một cổng báo xanh khi nó không chạy còn tệ hơn là
+        # không có cổng.
+        return [{
+            "id": "—",
+            "label": "Không chạy được bộ kiểm tính hợp lệ",
+            "ok": False,
+            "detail": ("không nạp được scripts/research_validity.py — "
+                        "không thể xác nhận lần chạy này hợp lệ cho nghiên cứu"),
+        }]
+
+    try:
+        verdict = rv.evaluate_checkpoint(ckpt)
+    except Exception as exc:
+        logger.warning("[PROVENANCE] evaluate_checkpoint lỗi: %s", exc)
+        return [{
+            "id": "—", "label": "Bộ kiểm tính hợp lệ gặp lỗi",
+            "ok": False, "detail": str(exc),
+        }]
+
+    # reasons là văn bản tự do có kèm mã "(C5)" ở cuối — gắn về đúng tiêu chí để
+    # người dùng thấy LÝ DO trượt chứ không chỉ thấy dấu đỏ.
+    detail_by_code: Dict[str, str] = {}
+    for reason in verdict.reasons:
+        m = re.search(r"\((C\d+)\)\s*$", str(reason))
+        if m:
+            detail_by_code.setdefault(m.group(1), str(reason))
+
+    out: List[Dict[str, Any]] = []
+    for key, ok in verdict.criteria.items():
+        code = key.split("_", 1)[0]
+        out.append({
+            "id": code,
+            "label": _CRITERION_LABELS.get(key, key),
+            "ok": bool(ok),
+            "detail": detail_by_code.get(code, "đạt" if ok else "không đạt"),
+        })
+    out.sort(key=lambda c: int(c["id"][1:]) if c["id"][1:].isdigit() else 99)
+    return out
 
 
 @router.get("/jobs/{job_id}/provenance")
@@ -1756,49 +2042,64 @@ async def predict_trained_model(
         pred_idx = int(np.argmax(probs))
         confidence = float(probs[pred_idx])
 
-        # Build label map from checkpoint + labels.csv for label_original
-        # Checkpoint idx_to_label: {0: "vn/dialect/slug", 1: ...}
+        # Build label map from checkpoint + labels.csv for label_original.
+        # Checkpoint idx_to_label entries come in two shapes depending on when
+        # the checkpoint was trained: a bare label_key string (older
+        # checkpoints), or a rich dict that already carries label_original
+        # (current format — see build_checkpoint() in train_tcn.py, and the
+        # matching read in realtime_service/app/predict.py). Both must be
+        # handled here, since this endpoint serves checkpoints from any past
+        # job, not only freshly trained ones.
         i2l = ckpt.get("idx_to_label")
         label_key = f"class_{pred_idx}"
         label = f"class_{pred_idx}"
 
-        # Extract label_key from checkpoint
+        v = None
         if isinstance(i2l, dict):
-            v = i2l.get(pred_idx) or i2l.get(str(pred_idx))
-            if v:
-                label_key = str(v).strip()
-                label = label_key  # default to label_key
+            v = i2l.get(pred_idx)
+            if v is None:
+                v = i2l.get(str(pred_idx))
         elif isinstance(i2l, list) and pred_idx < len(i2l):
             v = i2l[pred_idx]
-            if v:
-                label_key = str(v).strip()
-                label = label_key
 
-        # Load labels.csv to get label_original
+        if isinstance(v, dict):
+            # Rich entry: label_original is already resolved, no CSV lookup
+            # needed. Guard against str(v) leaking the whole dict if either
+            # field happens to be missing.
+            label_key = str(v.get("label_key") or label_key).strip()
+            rich_original = str(v.get("label_original") or "").strip()
+            label = rich_original or label_key
+        elif v:
+            label_key = str(v).strip()
+            label = label_key  # default to label_key; refined by the CSV lookup below
+
+        # Load labels.csv to get label_original — only the bare-string legacy
+        # path needs this; a rich idx_to_label entry already carried it.
         # label_key format: "vn/hoa-de/rang-muoi" or "vn/rang-muoi"
-        try:
-            if LABELS_CSV.exists():
-                # Parse label_key to extract slug (last part)
-                parts = label_key.replace("\\", "/").split("/")
-                slug = parts[-1] if parts else ""
+        if not isinstance(v, dict):
+            try:
+                if LABELS_CSV.exists():
+                    # Parse label_key to extract slug (last part)
+                    parts = label_key.replace("\\", "/").split("/")
+                    slug = parts[-1] if parts else ""
 
-                logger.debug("job=%s looking up slug='%s' from label_key='%s'", job_id, slug, label_key)
+                    logger.debug("job=%s looking up slug='%s' from label_key='%s'", job_id, slug, label_key)
 
-                with open(LABELS_CSV, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    found = False
-                    for row in reader:
-                        if row.get("slug", "").strip() == slug:
-                            label_original = row.get("label_original", "").strip()
-                            if label_original:
-                                label = label_original
-                                logger.debug("job=%s found label_original: %s", job_id, label)
-                            found = True
-                            break
-                    if not found:
-                        logger.warning("job=%s slug '%s' not found in labels.csv", job_id, slug)
-        except Exception as e:
-            logger.warning("job=%s error loading labels.csv: %s", job_id, e)
+                    with open(LABELS_CSV, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        found = False
+                        for row in reader:
+                            if row.get("slug", "").strip() == slug:
+                                label_original = row.get("label_original", "").strip()
+                                if label_original:
+                                    label = label_original
+                                    logger.debug("job=%s found label_original: %s", job_id, label)
+                                found = True
+                                break
+                        if not found:
+                            logger.warning("job=%s slug '%s' not found in labels.csv", job_id, slug)
+            except Exception as e:
+                logger.warning("job=%s error loading labels.csv: %s", job_id, e)
 
         return TrainedModelPredictResponse(
             label=label,
