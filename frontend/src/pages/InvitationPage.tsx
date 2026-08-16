@@ -72,7 +72,7 @@ export default function InvitationPage() {
       setError(
         friendlyError(
           err,
-          "Lời mời không còn hiệu lực. Hãy đề nghị người mời gửi lại một liên kết mới.",
+          t("Lời mời không còn hiệu lực. Hãy đề nghị người mời gửi lại một liên kết mới."),
         ),
       );
     } finally {

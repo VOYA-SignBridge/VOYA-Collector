@@ -74,7 +74,7 @@ export default function AdminDataPage() {
       setData(res.data);
       setError(null);
     } catch (e: any) {
-      setError(friendlyError(e, "Không tải được báo cáo dữ liệu"));
+      setError(friendlyError(e, t("Không tải được báo cáo dữ liệu")));
     } finally {
       setLoading(false);
     }

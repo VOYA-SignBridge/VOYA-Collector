@@ -960,6 +960,7 @@ def clone_catalog_to_tenant(tenant_id: str, created_by: Optional[str] = None) ->
     tenant has since made to its clone.
     """
     from app.storage.metadata_db import _execute, _fetch_all
+    from app.tenant_context import tenant_scope
 
     catalog_version = publish_catalog_version(created_by, note=f"clone -> {tenant_id}")
     # `regions` KHÔNG được nhân bản ở đây: nó là bảng toàn cục, cùng hình dạng
@@ -967,38 +968,58 @@ def clone_catalog_to_tenant(tenant_id: str, created_by: Optional[str] = None) ->
     # tenant bị bỏ.
     counts = {"dialects": 0, "profiles": 0}
 
-    for r in _fetch_all("SELECT * FROM community_dialects ORDER BY display_order, dialect_id"):
-        _execute(
-            "INSERT INTO dialects(tenant_id, dialect_id, display_name, language, is_alphabet, "
-            "is_active, status, note, approved_at) "
-            "VALUES(%s, %s, %s, %s, %s, %s, 'approved', %s, NOW()) "
-            "ON CONFLICT (tenant_id, dialect_id) DO NOTHING",
-            (tenant_id, r["dialect_id"], r["display_name"], r["language"],
-             r["is_alphabet"], r["is_active"], r.get("note")),
-        )
-        counts["dialects"] += 1
+    # Phạm vi của TENANT ĐÍCH, không phải phạm vi nền tảng.
+    #
+    # Mọi phép ghi dưới đây đều mang `tenant_id` của đúng tenant ấy, nên đây là
+    # thao tác "hành động NHÂN DANH tenant đích" — hẹp hơn hẳn `system_scope`,
+    # và đủ để thoả vế WITH CHECK của `dialects`, `recognition_profiles`,
+    # `vocabulary_registry_meta` lẫn `tenants`.
+    #
+    # Hai bảng NGUỒN (`community_dialects`, `community_profiles`) không mang cột
+    # `tenant_id` nên không thuộc diện RLS — chúng đọc được dưới mọi phạm vi.
+    #
+    # Trước 15/08/2026 hàm này KHÔNG có phạm vi nào. Vì `dialects` đã bật RLS từ
+    # lâu, endpoint `POST /vocabulary/catalog/clone` đã hỏng từ trước:
+    #
+    #     psycopg2.errors.InsufficientPrivilege:
+    #     new row violates row-level security policy for table "dialects"
+    #
+    # Lỗi ấy sống sót qua mọi lượt kiểm cho tới khi có một bài kiểm gọi ĐÚNG
+    # endpoint. Bài kiểm dựng lại khuôn `system_scope` rồi kiểm chính khuôn ấy
+    # thì không bao giờ chạm tới hàm này.
+    with tenant_scope(tenant_id):
+        for r in _fetch_all("SELECT * FROM community_dialects ORDER BY display_order, dialect_id"):
+            _execute(
+                "INSERT INTO dialects(tenant_id, dialect_id, display_name, language, is_alphabet, "
+                "is_active, status, note, approved_at) "
+                "VALUES(%s, %s, %s, %s, %s, %s, 'approved', %s, NOW()) "
+                "ON CONFLICT (tenant_id, dialect_id) DO NOTHING",
+                (tenant_id, r["dialect_id"], r["display_name"], r["language"],
+                 r["is_alphabet"], r["is_active"], r.get("note")),
+            )
+            counts["dialects"] += 1
 
-    for r in _fetch_all("SELECT * FROM community_profiles WHERE is_active = TRUE "
-                        "ORDER BY display_order, profile_id"):
-        _execute(
-            "INSERT INTO recognition_profiles(tenant_id, profile_id, display_name, is_trainable, display_order) "
-            "VALUES(%s, %s, %s, %s, %s) ON CONFLICT (tenant_id, profile_id) DO NOTHING",
-            (tenant_id, r["profile_id"], r["display_name"], r["is_trainable"], r["display_order"]),
-        )
-        counts["profiles"] += 1
+        for r in _fetch_all("SELECT * FROM community_profiles WHERE is_active = TRUE "
+                            "ORDER BY display_order, profile_id"):
+            _execute(
+                "INSERT INTO recognition_profiles(tenant_id, profile_id, display_name, is_trainable, display_order) "
+                "VALUES(%s, %s, %s, %s, %s) ON CONFLICT (tenant_id, profile_id) DO NOTHING",
+                (tenant_id, r["profile_id"], r["display_name"], r["is_trainable"], r["display_order"]),
+            )
+            counts["profiles"] += 1
 
-    _execute(
-        "INSERT INTO vocabulary_registry_meta(tenant_id, version) VALUES(%s, 0) "
-        "ON CONFLICT (tenant_id) DO NOTHING",
-        (tenant_id,),
-    )
-    _execute(
-        "UPDATE tenants SET cloned_from_community_version = %s, cloned_at = NOW() "
-        "WHERE tenant_id = %s AND cloned_from_community_version IS NULL",
-        (catalog_version, tenant_id),
-    )
-    _bump(tenant_id, created_by=created_by,
-          note=f"clone từ system catalog v{catalog_version}")
+        _execute(
+            "INSERT INTO vocabulary_registry_meta(tenant_id, version) VALUES(%s, 0) "
+            "ON CONFLICT (tenant_id) DO NOTHING",
+            (tenant_id,),
+        )
+        _execute(
+            "UPDATE tenants SET cloned_from_community_version = %s, cloned_at = NOW() "
+            "WHERE tenant_id = %s AND cloned_from_community_version IS NULL",
+            (catalog_version, tenant_id),
+        )
+        _bump(tenant_id, created_by=created_by,
+              note=f"clone từ system catalog v{catalog_version}")
     logger.info("[VOCAB] tenant %s cloned from system catalog v%s: %s",
                 tenant_id, catalog_version, counts)
     return counts

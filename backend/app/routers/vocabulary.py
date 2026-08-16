@@ -328,9 +328,31 @@ def clone_to_tenant(
     # cloned_from_community_version` silently matches zero rows and the
     # provenance is lost. Refuse before writing anything.
     from app.storage.metadata_db import _fetch_all
+    from app.tenant_context import tenant_scope
 
-    if not _fetch_all("SELECT 1 FROM tenants WHERE tenant_id = %s AND deleted_at IS NULL",
-                      (tenant_id,)):
+    # Phạm vi của TENANT ĐÍCH — KHÔNG phải `system_scope`.
+    #
+    # Khi `tenants` bật RLS (15/08/2026), phép kiểm này chạy dưới phạm vi của
+    # NGƯỜI GỌI sẽ thấy 0 dòng cho mọi tenant khác, và hàm kết luận "Tenant
+    # không tồn tại" — một cái 404 nghe hợp lý cho một tenant vẫn đang ở đó.
+    #
+    # Bản vá đầu dùng `system_scope`, và `test_no_router_crosses_the_boundary_
+    # except_the_documented_one` đã bắt đúng: *"một request handler hành động
+    # nhân danh mọi tenant chính là cách biên giới bị mở lại"*. Danh sách cho
+    # phép chỉ có `sot_admin.py`, và nó nên tiếp tục chỉ có một mục.
+    #
+    # Lời giải hẹp hơn nằm sẵn trong chính vị từ chính sách: dưới
+    # `tenant_scope(đích)`, dòng của CHÍNH tenant đích nhìn thấy được. Không
+    # cần quyền xuyên tenant nào cả — chỉ cần đứng đúng chỗ.
+    #
+    # Cùng phạm vi ấy được `clone_catalog_to_tenant` dùng lại cho toàn bộ phép
+    # ghi, nên cả endpoint chạy dưới đúng một phạm vi: tenant đích.
+    with tenant_scope(tenant_id):
+        co_tenant = _fetch_all(
+            "SELECT 1 FROM tenants WHERE tenant_id = %s AND deleted_at IS NULL",
+            (tenant_id,))
+
+    if not co_tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Tenant '{tenant_id}' không tồn tại.")
 

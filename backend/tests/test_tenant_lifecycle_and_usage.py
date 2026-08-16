@@ -230,18 +230,26 @@ class TestPurgeExecution:
                 assert db._fetch_all(
                     f"SELECT 1 FROM {table} WHERE tenant_id = %s", (doomed_tenant,)
                 ) == [], f"{table} còn sót dòng"
-            ledger = db._fetch_all(
+        # Sổ cái đọc bằng vai CHỦ SỞ HỮU, không phải vai ứng dụng.
+        #
+        # Từ 15/08/2026 `tenant_purges` là bảng MẶT PHẲNG ĐIỀU KHIỂN và
+        # `voya_app`/`voya_test_app` không còn quyền nào trên nó — đó chính là
+        # điều đang được bảo vệ. Một bài kiểm đọc bằng vai ứng dụng sẽ đỏ, và
+        # cách sửa SAI là cấp lại quyền để bài kiểm xanh.
+        with db._migration_cursor() as cur:
+            cur.execute(
                 "SELECT tenant_id, reason FROM tenant_purges WHERE purge_id = %s",
                 (result["purge_id"],),
             )
+            ledger = cur.fetchall()
 
         # Sổ phải SỐNG SÓT qua chính việc nó ghi lại. Đó là lý do bảng này cố ý
         # không có khoá ngoại tới `tenants`.
-        assert ledger and ledger[0]["tenant_id"] == doomed_tenant
-        assert ledger[0]["reason"] == "test đóng cửa"
+        assert ledger and ledger[0][0] == doomed_tenant
+        assert ledger[0][1] == "test đóng cửa"
 
-        with system_scope("test cleanup: remove the ledger row"):
-            db._execute(
+        with db._migration_cursor() as cur:
+            cur.execute(
                 "DELETE FROM tenant_purges WHERE purge_id = %s", (result["purge_id"],)
             )
 
@@ -292,7 +300,10 @@ class TestPurgeExecution:
                     db._execute("DELETE FROM users WHERE id = %s", (user["id"],))
                 except Exception:
                     pass
-                db._execute("DELETE FROM tenant_purges WHERE tenant_id = %s",
+            # Sổ cái dọn bằng vai CHỦ SỞ HỮU: vai ứng dụng không còn quyền nào
+            # trên bảng điều khiển. Xem `app/storage/control_plane.py`.
+            with db._migration_cursor() as cur:
+                cur.execute("DELETE FROM tenant_purges WHERE tenant_id = %s",
                             (doomed_tenant,))
             purge_tenant(survivor_tenant)
             plans._clear_caches()

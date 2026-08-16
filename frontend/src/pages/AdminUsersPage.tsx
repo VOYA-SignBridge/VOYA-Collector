@@ -45,7 +45,7 @@ export default function AdminUsersPage() {
       const res = await apiClient.get<UserData[]>("/api/v1/admin/users");
       setUsers(res.data);
     } catch (error: any) {
-      toast.error(friendlyError(error, "Không thể tải danh sách người dùng"));
+      toast.error(friendlyError(error, t("Không thể tải danh sách người dùng")));
     } finally {
       setLoading(false);
     }
@@ -54,20 +54,20 @@ export default function AdminUsersPage() {
   const doLock = async (userId: string, payload: LockPayload) => {
     try {
       await apiClient.post(`/api/v1/admin/users/${userId}/lock`, payload);
-      toast.success("Đã khóa tài khoản");
+      toast.success(t("Đã khóa tài khoản"));
       fetchUsers();
     } catch (error: any) {
-      toast.error(friendlyError(error, "Khóa tài khoản thất bại"));
+      toast.error(friendlyError(error, t("Khóa tài khoản thất bại")));
     }
   };
 
   const unlockUser = async (userId: string) => {
     try {
       await apiClient.post(`/api/v1/admin/users/${userId}/unlock`);
-      toast.success("Đã mở khóa tài khoản");
+      toast.success(t("Đã mở khóa tài khoản"));
       fetchUsers();
     } catch (error: any) {
-      toast.error(friendlyError(error, "Mở khóa thất bại"));
+      toast.error(friendlyError(error, t("Mở khóa thất bại")));
     }
   };
 
@@ -79,13 +79,13 @@ export default function AdminUsersPage() {
       toast.success(t("Đã gửi cảnh báo tới {name}", { name }));
       fetchUsers();
     } catch (error: any) {
-      toast.error(friendlyError(error, "Gửi cảnh báo thất bại"));
+      toast.error(friendlyError(error, t("Gửi cảnh báo thất bại")));
     }
   };
 
   const handleToggleAdmin = async (userId: string, currentIsAdmin: boolean) => {
     if (currentUser?.id === userId && currentIsAdmin) {
-      toast.error("Không thể tự gỡ quyền admin của chính mình!");
+      toast.error(t("Không thể tự gỡ quyền admin của chính mình!"));
       return;
     }
 
@@ -96,7 +96,7 @@ export default function AdminUsersPage() {
         prev.map((u) => (u.id === userId ? { ...u, is_admin: !currentIsAdmin } : u))
       );
     } catch (error: any) {
-      toast.error(friendlyError(error, "Lỗi cập nhật quyền"));
+      toast.error(friendlyError(error, t("Lỗi cập nhật quyền")));
     }
   };
 

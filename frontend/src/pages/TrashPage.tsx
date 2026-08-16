@@ -148,7 +148,7 @@ export default function TrashPage() {
       }),
       confirmLabel: t("Xóa {size} mục", { size: sel.size }),
       onConfirm: () =>
-        runBulk("Đã xóa vĩnh viễn", () => (tab === "classes" ? bulkPurgeClasses(ids()) : bulkPurgeSamples(ids()))),
+        runBulk(t("Đã xóa vĩnh viễn"), () => (tab === "classes" ? bulkPurgeClasses(ids()) : bulkPurgeSamples(ids()))),
     });
 
   const askEmpty = () =>
@@ -159,27 +159,27 @@ export default function TrashPage() {
         loai: tab === "classes" ? t("nhãn (kèm mẫu bên trong)") : t("mẫu"),
       }),
       confirmLabel: t("Làm trống"),
-      onConfirm: () => runBulk("Đã làm trống", () => (tab === "classes" ? emptyClassTrash() : emptySampleTrash())),
+      onConfirm: () => runBulk(t("Đã làm trống"), () => (tab === "classes" ? emptyClassTrash() : emptySampleTrash())),
     });
 
   const askPurgeClass = (c: TrashClass) =>
     setConfirm({
       title: t("Xóa vĩnh viễn nhãn"),
       message: t("Xóa VĨNH VIỄN nhãn \"{label_original}\" và {sample_count} mẫu bên trong (file + Drive). Không thể hoàn tác.", { label_original: c.label_original || c.slug, sample_count: c.sample_count ?? 0 }),
-      confirmLabel: "Xóa vĩnh viễn",
-      onConfirm: () => runSingle("Đã xóa vĩnh viễn nhãn", () => purgeClass(c.class_uid)),
+      confirmLabel: t("Xóa vĩnh viễn"),
+      onConfirm: () => runSingle(t("Đã xóa vĩnh viễn nhãn"), () => purgeClass(c.class_uid)),
     });
 
   const askPurgeSample = (s: TrashSample) =>
     setConfirm({
       title: t("Xóa vĩnh viễn mẫu"),
       message: t("Xóa VĨNH VIỄN mẫu {sample_uid}. Không thể hoàn tác.", { sample_uid: s.sample_uid }),
-      confirmLabel: "Xóa vĩnh viễn",
-      onConfirm: () => runSingle("Đã xóa vĩnh viễn mẫu", () => purgeSample(s.sample_uid)),
+      confirmLabel: t("Xóa vĩnh viễn"),
+      onConfirm: () => runSingle(t("Đã xóa vĩnh viễn mẫu"), () => purgeSample(s.sample_uid)),
     });
 
   const bulkRestore = () =>
-    runBulk("Đã khôi phục", () => (tab === "classes" ? bulkRestoreClasses(ids()) : bulkRestoreSamples(ids())));
+    runBulk(t("Đã khôi phục"), () => (tab === "classes" ? bulkRestoreClasses(ids()) : bulkRestoreSamples(ids())));
 
   /* ---- UI pieces ---- */
   const TabPill = ({ t, label, n }: { t: Tab; label: string; n: number }) => {
@@ -270,14 +270,14 @@ export default function TrashPage() {
           onClick={bulkRestore}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-sky-800 bg-sky-50 hover:bg-sky-100 ring-1 ring-sky-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <RestoreIcon /> Khôi phục{sel.size ? ` (${sel.size})` : ""}
+          <RestoreIcon /> {t("Khôi phục")}{sel.size ? ` (${sel.size})` : ""}
         </button>
         <button
           disabled={busy || sel.size === 0}
           onClick={askBulkPurge}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-ctu-red hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <TrashIcon className="h-4 w-4" /> Xóa vĩnh viễn{sel.size ? ` (${sel.size})` : ""}
+          <TrashIcon className="h-4 w-4" /> {t("Xóa vĩnh viễn")}{sel.size ? ` (${sel.size})` : ""}
         </button>
         <div className="w-px h-6 bg-slate-200 mx-1" />
         <button
@@ -356,7 +356,7 @@ export default function TrashPage() {
                             <div className="flex gap-1.5 justify-end">
                               <button
                                 disabled={busy}
-                                onClick={() => runSingle("Đã khôi phục nhãn", () => restoreClass(c.class_uid))}
+                                onClick={() => runSingle(t("Đã khôi phục nhãn"), () => restoreClass(c.class_uid))}
                                 title={t("Khôi phục")}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sky-800 hover:bg-sky-50 ring-1 ring-sky-200 disabled:opacity-50 transition-colors"
                               >
@@ -390,7 +390,7 @@ export default function TrashPage() {
                             <div className="flex gap-1.5 justify-end">
                               <button
                                 disabled={busy}
-                                onClick={() => runSingle("Đã khôi phục mẫu", () => restoreSample(s.sample_uid))}
+                                onClick={() => runSingle(t("Đã khôi phục mẫu"), () => restoreSample(s.sample_uid))}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-sky-800 hover:bg-sky-50 ring-1 ring-sky-200 disabled:opacity-50 transition-colors"
                               >
                                 <RestoreIcon className="h-3.5 w-3.5" /> {t("Khôi phục")}

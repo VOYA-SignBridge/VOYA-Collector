@@ -25,8 +25,13 @@ from app.auth import get_current_user, require_admin
 from app.routers import training as training_module
 from app.routers.training import TrainingConfig, TrainingJob, router, training_jobs
 
-USER = {"id": "u-1", "username": "researcher", "role": "user"}
-ADMIN = {"id": "a-1", "username": "boss", "role": "admin"}
+#: `tenant_id` bắt buộc từ nhóm B: `quota_deps.tenant_of` fail-closed khi bản
+#: ghi tài khoản không nói người gọi thuộc tổ chức nào. Trước đó `_row_to_user`
+#: bịa ra một tenant, nên một người dùng giả thiếu trường này vẫn đi lọt.
+USER = {"id": "u-1", "username": "researcher", "role": "user",
+        "tenant_id": "iso_a"}
+ADMIN = {"id": "a-1", "username": "boss", "role": "admin",
+         "tenant_id": "iso_a"}
 
 
 @pytest.fixture
@@ -243,6 +248,7 @@ def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
             "languages": ["vn"],
         },
         "metrics.jsonl",
+        tenant_id="iso_a",
     )
 
     assert "--run-purpose=research" in cmd
@@ -261,7 +267,8 @@ def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
 def test_exploratory_command_keeps_dialect_filters_and_stays_smoke_test():
     from app.training_tasks import _build_cmd
 
-    cmd = _build_cmd({"model_type": "tcn", "dialects": ["hoa-de"], "languages": ["vn"]}, "m.jsonl")
+    cmd = _build_cmd({"model_type": "tcn", "dialects": ["hoa-de"], "languages": ["vn"]},
+                     "m.jsonl", tenant_id="iso_a")
 
     assert "--dialect=hoa-de" in cmd
     assert not any(a.startswith("--run-purpose") for a in cmd)

@@ -321,7 +321,7 @@ export default function LabelsPage() {
   const saveCreate = async () => {
     const nextLabel = createValue.trim();
     if (!nextLabel) {
-      setError("Tên nhãn không được để trống.");
+      setError(t("Tên nhãn không được để trống."));
       return;
     }
 
@@ -368,7 +368,7 @@ export default function LabelsPage() {
     if (!editTarget) return;
     const nextLabel = editValue.trim();
     if (!nextLabel) {
-      setError("Label không được để trống.");
+      setError(t("Label không được để trống."));
       return;
     }
 
@@ -455,7 +455,7 @@ export default function LabelsPage() {
       <PageHeader 
         title={t("Thư viện nhãn")} 
         subtitle={t("Quản lý và tìm kiếm các nhãn ngôn ngữ ký hiệu.")}
-        breadcrumb={[{ label: "Dashboard", href: "/" }, "Dữ liệu", "Nhãn"]}
+        breadcrumb={[{ label: "Dashboard", href: "/" }, t("Dữ liệu"), t("Nhãn")]}
       />
 
       {error && (

@@ -133,7 +133,7 @@ export default function DraftEditor({
 
   const handleConflict = async (err: unknown) => {
     if (!(err instanceof RevisionConflict)) {
-      setError(messageOf(err, "Không lưu được."));
+      setError(messageOf(err, t("Không lưu được.")));
       return;
     }
     // Kéo về bản của người kia để người soạn ĐỌC ĐƯỢC nó cạnh bản mình —

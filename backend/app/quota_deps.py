@@ -22,6 +22,7 @@ from fastapi import HTTPException
 
 from app.plans import QuotaExceeded, TenantSuspended, enforce
 from app.tenancy import normalize_tenant_id
+from app.tenant_context import TenantScopeError
 
 
 def tenant_of(current_user: Optional[Dict[str, Any]]) -> str:
@@ -31,7 +32,15 @@ def tenant_of(current_user: Optional[Dict[str, Any]]) -> str:
     như luôn bằng nhau, nhưng khi lệch thì bản ghi tài khoản mới là thứ quyết
     định dữ liệu ghi vào đâu — nên hạn mức phải tính trên chính nó.
     """
-    return normalize_tenant_id((current_user or {}).get("tenant_id"))
+    tenant = ((current_user or {}).get("tenant_id") or "").strip()
+    if not tenant:
+        # Fail-closed. `normalize_tenant_id("")` trả `"default"` — cố ý, vì nó
+        # phục vụ các hàng CSV có trước khi tenant tồn tại. Nhưng ở đây "trống"
+        # nghĩa là không biết người gọi thuộc tenant nào, và ghi hạn mức vào
+        # tenant khởi tạo là ghi hoá đơn cho một tổ chức không liên quan.
+        raise TenantScopeError(
+            "khong xac dinh duoc tenant nha cua nguoi goi de tinh han muc")
+    return normalize_tenant_id(tenant)
 
 
 def guard_quota(

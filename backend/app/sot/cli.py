@@ -217,7 +217,33 @@ def _cmd_sync(args: argparse.Namespace) -> int:
         return 0
     print(f"[sync] {result.status} version={result.version} signed_by={result.signed_by} "
           f"upserted={result.rows_upserted} extras={result.server_extras}")
-    return 0 if result.status in ("applied", "empty") else 5
+
+    if result.schema_skipped_retired:
+        print(f"[sync] bo qua theo chinh sach (doi tuong DA RETIRE, goi nay cu hon "
+              f"migration hien hanh): {sorted(set(result.schema_skipped_retired))}")
+
+    if result.schema_failed:
+        # `applied_degraded` thoát 0 — MỘT QUYẾT ĐỊNH VẬN HÀNH, không phải sơ suất.
+        #
+        # backend/worker/trainer đều gate trên `service_completed_successfully`
+        # của container này, nên thoát khác 0 ở đây làm SẬP CẢ STACK. Hôm nay
+        # đã có sẵn một câu thất bại lành tính trong gói SOT:
+        #
+        #     CREATE INDEX … ON tenant_members(user_id)
+        #     -> cannot create index on relation "tenant_members"  (nó là VIEW)
+        #
+        # Biến nó thành lỗi chặn nghĩa là mọi lượt triển khai từ nay đều hỏng vì
+        # một chuyện đã đúng từ trước. Nên trạng thái NÓI RA sự thật và nhật ký
+        # ghi mức error, còn mã thoát giữ 0 cho tới khi câu ấy được xử lý.
+        #
+        # Đây là chỗ để siết: khi gói SOT được publish lại sạch, đổi dòng dưới
+        # thành `return 5` và một lượt phát lại hỏng sẽ chặn triển khai.
+        print(f"[sync] CANH BAO: {len(result.schema_failed)} cau luoc do THAT BAI "
+              f"ngoai du kien — luoc do co the KHONG day du:", file=sys.stderr)
+        for loi in result.schema_failed[:10]:
+            print(f"    - {loi}", file=sys.stderr)
+
+    return 0 if result.status in ("applied", "empty", "applied_degraded") else 5
 
 
 def build_parser() -> argparse.ArgumentParser:

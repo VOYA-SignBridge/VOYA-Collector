@@ -168,10 +168,30 @@ RLS_TABLES: tuple[str, ...] = (
     # schema v3
     "audit_log", "capture_sessions", "signer_aliases", "signer_consents",
     "training_job_classes", "vocabulary_groups",
+    # `tenants` — BẢNG GỐC, mỗi dòng LÀ một tenant, nên vị từ chuẩn
+    # `tenant_id = current_setting('app.tenant_id')` đọc ra thành "chỉ thấy dòng
+    # của chính mình". Thêm ngày 15/08/2026.
+    #
+    # Nó vắng mặt ở đây KHÔNG phải vì bị loại có lý do — nó chưa từng được nhắc
+    # tới. Đo được với `voya_test_app`, vai đặc quyền tối thiểu, KHÔNG cần
+    # sentinel: `SELECT` trả 28 tenant, `UPDATE` chạm 28 dòng. Cột lộ ra gồm
+    # `plan_code`, `billing_status`, `billing_exempt`, `owner_user_id`.
+    #
+    # Ba đường ĐỌC XUYÊN TENANT hợp lệ đã được kiểm kê và đều chạy trong
+    # `system_scope`: xác thực khoá API (`api_keys.py`, mặt phẳng danh tính),
+    # kiểm tenant đích tồn tại trước khi sao chép danh mục
+    # (`routers/vocabulary.py` — được bọc CÙNG lượt này, trước đó nó không có
+    # phạm vi nào), và hậu điều kiện gieo dữ liệu đời cũ của SOT.
+    "tenants",
     # schema v4 — mặt phẳng thương mại. `plans` không có ở đây vì nó là danh
-    # mục chung của nền tảng (mọi tenant đọc cùng một bảng giá), và
-    # `tenant_purges` cũng không, vì sau khi xoá thì không còn tenant nào để
-    # phạm vi hoá theo. Cả hai được canh bằng test, không phải bằng trí nhớ.
+    # mục chung của nền tảng (mọi tenant đọc cùng một bảng giá).
+    #
+    # `tenant_purges` cũng chưa có, nhưng KHÔNG còn là ngoại lệ có giải trình.
+    # Lập luận cũ — "sau khi xoá thì không còn tenant nào để phạm vi hoá theo" —
+    # chỉ đứng vững nếu vai ứng dụng không có đường ghi trực tiếp. Phép đo bác
+    # bỏ điều đó: `voya_app` có đủ bốn quyền DML trên bảng ấy. Nó là khoảng
+    # trống thật, đang chờ xử ngay sau `tenants`. Xem
+    # docs/TENANT_ISOLATION_AND_AUTHZ.md §5.
     "api_keys", "tenant_exports", "tenant_subscriptions", "tenant_usage_daily",
     "webhook_deliveries", "webhook_endpoints",
     # schema v6 — thông báo và hỗ trợ. Cả hai mang nội dung do NGƯỜI viết ra:

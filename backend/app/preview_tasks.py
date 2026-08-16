@@ -15,11 +15,24 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=15)
-def render_session_preview_task(self, class_uid: str, session_id: str):
+def render_session_preview_task(self, class_uid: str, session_id: str,
+                                tenant_id: str):
+    """`tenant_id` là tham số của TÁC VỤ, không phải thứ suy ra lúc chạy.
+
+    Worker chạy trong `system_scope` (xem `tenant_context.enter_system_scope`):
+    nó không có request, nên phạm vi phải đi cùng thông điệp. Chốt phạm vi lúc
+    ĐƯA VÀO HÀNG ĐỢI — khi còn biết ai gọi — và mang theo, thay vì để tác vụ đọc
+    một phạm vi rộng hơn phạm vi của người đã yêu cầu nó.
+
+    Không có mặc định. Một tác vụ cũ còn nằm trong hàng đợi từ trước bản vá sẽ
+    nổ vì thiếu tham số — đó là hành vi ĐÚNG: dựng lại nó dưới một tenant đoán
+    được là cách một lượt kết xuất đi lạc sang dữ liệu của người khác.
+    """
     from app.preview_render import render_preview_for_session
 
     try:
-        out_path = render_preview_for_session(class_uid, session_id)
+        out_path = render_preview_for_session(class_uid, session_id,
+                                              tenant_id=tenant_id)
         return {"status": "ok", "path": str(out_path)}
     except (ValueError, FileNotFoundError) as exc:
         # Bad reference (class/session/npz gone) — retrying cannot fix it.

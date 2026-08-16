@@ -6,13 +6,13 @@ import uuid
 import tempfile
 import logging
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from filelock import FileLock
 from datetime import datetime
 from app.config import settings
 from app.processing.utils import atomic_write_json
-from app.tenancy import TENANT_COLUMN, tenant_id_of
+from app.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
 
 
 DATASET_ROOT = settings.dataset_root
@@ -464,12 +464,90 @@ def append_sample_row(row: Dict[str, Any]):
     mirror_samples_to_gdrive_and_sheets(SAMPLES_CSV)
 
 
-def list_samples() -> List[Dict[str, str]]:
+class TenantScopeRequired(RuntimeError):
+    """Một đường đọc runtime gọi kho mẫu mà không nêu tenant.
+
+    Cố ý là lỗi chứ không phải cảnh báo: mặc-định-từ-chối chỉ có nghĩa khi
+    đường sai không chạy được.
+    """
+
+
+def _load_all_samples_unscoped() -> List[Dict[str, str]]:
+    """MỌI hàng của mọi tenant. Vượt qua ranh giới cách ly — dùng đúng chỗ.
+
+    Vì sao tên dài và khó chịu như vậy
+    ==================================
+    Ngày 15/08/2026, đo trên bộ dựng lại phép đo cách ly:
+
+        iso_user_a (tenant iso_a)  ->  GET /api/v1/classes/<lớp của iso_b>/sessions
+        HTTP 200, kèm label_original, session_id, sample_uid của iso_b
+
+    Nguyên nhân không phải RLS hỏng. RLS vẫn đúng — nhưng đường đọc lớp/mẫu
+    KHÔNG đi qua PostgreSQL:
+
+        find_class_meta -> list_classes -> load_labels  -> labels.csv
+        list_session_rows -> list_samples               -> samples.csv
+
+    Cả hai tệp CÓ cột `tenant_id`. Không đường nào đọc nó. RLS không biết gì về
+    tệp, nên mặt phẳng lưu trữ thứ hai này không được bảo vệ bởi bất cứ thứ gì.
+
+    Tên hàm là một phần của bản vá: gặp `_load_all_samples_unscoped()` trong một
+    router, người duyệt mã phải thấy sai ngay — khác hẳn `list_samples()` trông
+    vô hại và đã lọt vào 12 chỗ ở tầng request.
+
+    Ai được gọi
+    ===========
+    Chỉ các đường ĐỒNG BỘ / BẢO TRÌ có lý do nêu được: chiếu CSV sang Postgres,
+    đồng bộ danh mục, trình kiểm tra kho. Danh sách được cưỡng chế bằng phép
+    kiểm kiến trúc ở `tests/test_file_backed_tenant_isolation.py`.
+    """
     _ensure_samples_file()
     lock = FileLock(str(SAMPLES_CSV) + ".lock")
     with lock:
         with open(SAMPLES_CSV, newline="", encoding="utf-8") as f:
             return list(csv.DictReader(f))
+
+
+def list_samples(tenant_id: Optional[str] = None) -> List[Dict[str, str]]:
+    """Hàng mẫu MÀ TENANT NÀY ĐƯỢC THẤY. `tenant_id` bắt buộc.
+
+    `None` KHÔNG có nghĩa "toàn cục" — nó ném lỗi. Đó là khác biệt giữa bản này
+    và bản trước 16/08/2026: bản trước không có tham số nào, và mọi caller đều
+    nhận toàn bộ kho.
+
+    Không có đường lùi về `default`. Một tenant thiếu ngữ cảnh phải thấy KHÔNG
+    GÌ, chứ không phải thấy dữ liệu của tenant gốc — nếu không thì `default` trở
+    thành một super-tenant ngầm và bất biến sau này không giải thích nổi.
+    """
+    if not (tenant_id or "").strip():
+        raise TenantScopeRequired(
+            "list_samples() can tenant_id. Duong bao tri doc toan bo kho phai "
+            "goi _load_all_samples_unscoped() — ten do la co y.")
+    scope = normalize_tenant_id(tenant_id)
+    return [r for r in _load_all_samples_unscoped() if tenant_id_of(r) == scope]
+
+
+def find_sample(sample_uid: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, str]]:
+    """Phân giải một UID BÊN TRONG phạm vi. Không tìm toàn cục rồi mới kiểm.
+
+    Thứ tự quan trọng, không phải chi tiết cài đặt. Bản sai trông thế này:
+
+        row = tim_toan_cuc(uid)
+        if row["tenant_id"] != scope: return None
+
+    Nó vẫn từ chối đúng, nhưng đã phân giải hàng của tenant khác trước — và mọi
+    thứ xảy ra ở giữa (đọc siêu dữ liệu, dựng đường dẫn tệp, kiểm tệp tồn tại)
+    đều là một kênh phụ trả lời câu "UID này có thật không".
+
+    Đúng cái oracle đó đã lộ ra ngày 15/08/2026: `/dataset/samples/{uid}/data`
+    trả `"Sample file missing on disk"` cho mẫu của tenant khác, trong khi một
+    UID bịa ra nhận `"Sample not found"`. Hai thông điệp khác nhau là một phép
+    thử tồn tại xuyên tenant.
+    """
+    for row in list_samples(tenant_id):
+        if (row.get("sample_uid") or "") == sample_uid:
+            return row
+    return None
 
 
 def update_sample_row(sample_uid: str, updates: Dict[str, Any]):

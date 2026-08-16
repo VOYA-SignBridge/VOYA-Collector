@@ -88,12 +88,23 @@ def dataset(tmp_path, monkeypatch):
         _sample_row("ghost", "sess-del", 0, deleted_at="2026-07-02T00:00:00Z"),
     ]
 
-    monkeypatch.setattr(pr, "find_class_meta", lambda uid: meta if uid == "cls123" else None)
-    monkeypatch.setattr("app.dataset_samples.list_samples", lambda: rows)
+    # Các seam nhận `tenant_id` từ 16/08/2026. Chúng KHẲNG ĐỊNH phạm vi thay vì
+    # nuốt nó bằng `**k`: một seam dễ dãi sẽ xanh cả khi router quên truyền
+    # phạm vi, và bộ test khi đó chứng minh điều ngược với điều nó tuyên bố.
+    def _meta(uid, *, tenant_id):
+        assert tenant_id, "find_class_meta goi khong co pham vi tenant"
+        return meta if uid == "cls123" else None
+
+    def _mau(tenant_id):
+        assert tenant_id, "list_samples goi khong co pham vi tenant"
+        return rows
+
+    monkeypatch.setattr(pr, "find_class_meta", _meta)
+    monkeypatch.setattr("app.dataset_samples.list_samples", _mau)
     # The router imported these symbols by name — patch its bindings too.
     import app.routers.label_sessions as ls
 
-    monkeypatch.setattr(ls, "find_class_meta", lambda uid: meta if uid == "cls123" else None)
+    monkeypatch.setattr(ls, "find_class_meta", _meta)
     return {"meta": meta, "seq": seq, "class_dir": class_dir}
 
 
@@ -283,10 +294,10 @@ class TestSessionListEdgeCases:
         import app.preview_render as pr
 
         extra = _sample_row("stat-del", "sess-stat", 0, status="deleted")
-        rows = list(pr.list_session_rows("cls123").values())
+        rows = list(pr.list_session_rows("cls123", tenant_id="default").values())
         monkeypatch.setattr(
             "app.dataset_samples.list_samples",
-            lambda: [r for group in rows for r in group] + [extra],
+            lambda tenant_id: [r for group in rows for r in group] + [extra],
         )
         # Act
         res = client.get("/classes/cls123/sessions")

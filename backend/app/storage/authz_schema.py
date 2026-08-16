@@ -223,6 +223,85 @@ $$
 # 0. Tenant: loại và cờ dự trữ
 # ---------------------------------------------------------------------------
 
+#: Tenant cộng đồng dự trữ — MỘT ý định, hai câu.
+#:
+#: `INSERT ... WHERE NOT EXISTS` chứ không `ON CONFLICT`: xem chú thích cùng chủ
+#: đề ở `metadata_db.py` — `ON CONFLICT` vẫn dựng tuple rồi mới phát hiện trùng,
+#: nên mọi NOT NULL thêm về sau (như `plan_code` ở v4.2) sẽ bị kiểm TRƯỚC bước
+#: phát hiện đó và làm câu này thất bại lặng lẽ từ lượt chạy thứ hai.
+#:
+#: `plan_code` phải nêu tường minh vì lý do vừa nói.
+#:
+#: Vì sao `enterprise` chứ không `internal` (sửa 15/08/2026)
+#: --------------------------------------------------------
+#: Bản đầu ghi `'internal'`. Billing v6 (`_BILLING_V6_RENAME_PLANS`) đã đổi
+#: `internal -> enterprise` và **xoá** `internal` khỏi `plans`, nhưng câu seed
+#: này không được sửa theo. Máy đang chạy sống sót vì dòng `community` ra đời
+#: TRƯỚC v6 rồi được đổi tên cùng mọi tenant khác — nên không ai thấy gì.
+#:
+#: Trên một bản cài MỚI thì `plans` chỉ được gieo bằng bốn mã của v6, và câu này
+#: hỏng vì khoá ngoại. Đo trên `signdb` ngày 15/08/2026:
+#:
+#:     ERROR: insert or update on table "tenants" violates foreign key
+#:            constraint "fk_tenants_plan"
+#:     DETAIL: Key (plan_code)=(internal) is not present in table "plans".
+#:
+#: Đây là lỗi ĐỘC LẬP với RLS. Chỉ bọc phạm vi hệ thống sẽ biến một lỗi im lặng
+#: thành một lỗi khoá ngoại ồn ào, chứ không làm bản cài mới chạy được.
+_SQL_SEED_COMMUNITY_TENANT = f"""
+    INSERT INTO tenants (tenant_id, display_name, slug, tenant_type,
+                         is_system_reserved, plan_code)
+    SELECT '{COMMUNITY_TENANT_ID}', 'Cộng đồng', '{COMMUNITY_TENANT_ID}',
+           'COMMUNITY', TRUE, 'enterprise'
+     WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE tenant_id = '{COMMUNITY_TENANT_ID}')
+    """
+
+#: Nửa SỬA CHỮA, và nó phải tách khỏi câu INSERT: trên máy đã chạy bản trước,
+#: dòng `community` có thể đã tồn tại với `tenant_type` mặc định 'ORGANIZATION'.
+#:
+#: Câu này là lý do bước cộng đồng KHÔNG được bắt lỗi mà phải kiểm hậu điều
+#: kiện. Đo dưới `voya_test_owner` (NOSUPERUSER/NOBYPASSRLS), không phạm vi:
+#:
+#:     UPDATE 0            <- không ném lỗi, không dòng log nào
+#:     SELECT count(*)     <- 0: RLS làm chính nó không thấy dòng cần sửa
+#:
+#: Nên `_run_ddl` không có gì để bắt, `schema_failed` rỗng, và migration tự nhận
+#: đã hoàn tất trong khi trạng thái đích chưa bao giờ đạt.
+_SQL_REPAIR_COMMUNITY_TENANT = (
+    f"UPDATE tenants SET tenant_type = 'COMMUNITY', is_system_reserved = TRUE "
+    f"WHERE tenant_id = '{COMMUNITY_TENANT_ID}' AND tenant_type <> 'COMMUNITY'"
+)
+
+#: Hậu điều kiện: DANH TÍNH canonical, không phải "có dòng nào đó".
+#:
+#: `plan_code` CỐ Ý không nằm ở đây. Nó là trạng thái thương mại đổi được sau đó
+#: (`tenant_admin.py` đổi gói cho tenant bất kỳ), nên đưa vào bất biến danh tính
+#: sẽ làm migration đỏ vì một thay đổi hoàn toàn hợp lệ. Tính hợp lệ của nó đã
+#: do `fk_tenants_plan` + NOT NULL lo.
+#:
+#: `slug` thì CÓ, và cố ý không có câu sửa nào cho nó: nếu tồn tại một dòng
+#: `community` mang slug khác, đó là trạng thái canonical đã hỏng và phải được
+#: BÁO chứ không được lặng lẽ ghi đè. Migration chỉ sửa những gì hợp đồng miền
+#: cho phép nó sửa.
+_SQL_POSTCOND_COMMUNITY_TENANT = (
+    f"SELECT count(*) = 1 FROM tenants "
+    f"WHERE tenant_id = '{COMMUNITY_TENANT_ID}' "
+    f"  AND tenant_type = 'COMMUNITY' "
+    f"  AND is_system_reserved = TRUE "
+    f"  AND slug = '{COMMUNITY_TENANT_ID}'"
+)
+
+#: Bước định hình dữ liệu do mặt phẳng phân quyền sở hữu, khoá theo câu DẪN ĐẦU.
+#: `metadata_db._data_steps()` gộp sổ này với sổ của chính nó.
+AUTHZ_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
+    _SQL_SEED_COMMUNITY_TENANT: (
+        "migration:v5:seed-community-tenant",
+        (_SQL_SEED_COMMUNITY_TENANT, _SQL_REPAIR_COMMUNITY_TENANT),
+        _SQL_POSTCOND_COMMUNITY_TENANT,
+    ),
+}
+
+
 _TENANT_TYPE_DDL: list[str] = [
     # Mặc định `ORGANIZATION`: mọi tenant đã tồn tại là tổ chức thật, và tenant
     # cộng đồng được nâng lên tường minh bằng câu UPDATE bên dưới. Mặc định
@@ -234,25 +313,8 @@ _TENANT_TYPE_DDL: list[str] = [
     add_constraint("tenants", "ck_tenants_type",
                    "CHECK (%s)" % _in_list("tenant_type", TENANT_TYPES)),
 
-    # Tenant cộng đồng dự trữ. `INSERT ... WHERE NOT EXISTS` chứ không
-    # `ON CONFLICT`: xem chú thích cùng chủ đề ở `metadata_db.py` — `ON CONFLICT`
-    # vẫn dựng tuple rồi mới phát hiện trùng, nên mọi NOT NULL thêm về sau (như
-    # `plan_code` ở v4.2) sẽ bị kiểm TRƯỚC bước phát hiện đó và làm câu này thất
-    # bại lặng lẽ từ lượt chạy thứ hai.
-    #
-    # `plan_code` phải nêu tường minh vì lý do vừa nói; `internal` vì tenant này
-    # thuộc nền tảng, không phải khách hàng, nên không chịu hạn mức gói dùng thử.
-    f"""
-    INSERT INTO tenants (tenant_id, display_name, slug, tenant_type,
-                         is_system_reserved, plan_code)
-    SELECT '{COMMUNITY_TENANT_ID}', 'Cộng đồng', '{COMMUNITY_TENANT_ID}',
-           'COMMUNITY', TRUE, 'internal'
-     WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE tenant_id = '{COMMUNITY_TENANT_ID}')
-    """,
-    # Idempotent, và cần tách khỏi câu INSERT: trên máy đã chạy bản trước, dòng
-    # `community` có thể đã tồn tại với `tenant_type` mặc định 'ORGANIZATION'.
-    f"UPDATE tenants SET tenant_type = 'COMMUNITY', is_system_reserved = TRUE "
-    f"WHERE tenant_id = '{COMMUNITY_TENANT_ID}' AND tenant_type <> 'COMMUNITY'",
+    _SQL_SEED_COMMUNITY_TENANT,
+    _SQL_REPAIR_COMMUNITY_TENANT,
 
     # ĐÚNG MỘT tenant cộng đồng. Chỉ mục trên chính cột được lọc: mọi dòng thoả
     # vị từ đều có cùng giá trị 'COMMUNITY', nên tính duy nhất trên cột đó

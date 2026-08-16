@@ -105,7 +105,7 @@ export default function ForgotPasswordPage() {
     } catch (err) {
       // Chỉ tới đây khi mạng hỏng hoặc bị chặn tần suất. Đường "tài khoản
       // không tồn tại" trả 200 kèm câu chung, không ném ra ngoài.
-      setError(friendlyError(err, "Không gửi được yêu cầu. Vui lòng thử lại."));
+      setError(friendlyError(err, t("Không gửi được yêu cầu. Vui lòng thử lại.")));
       const wait = secondsFromRetryError(err);
       if (wait) {
         // 429 kèm số giây nghĩa là một mã VẪN CÒN SỐNG — người này đã xin cách
@@ -134,7 +134,7 @@ export default function ForgotPasswordPage() {
     } catch (err) {
       // Một mã sai và một tài khoản không tồn tại cho ra cùng lời từ chối.
       // Đừng đoán nửa nào hỏng — máy chủ cố tình không nói.
-      setError(friendlyError(err, "Mã xác minh không đúng hoặc đã hết hạn."));
+      setError(friendlyError(err, t("Mã xác minh không đúng hoặc đã hết hạn.")));
       // Giữ lại mã sai trên màn hình là mời người dùng bấm gửi lần nữa với đúng
       // chuỗi vừa hỏng — mà mỗi lần như vậy tiêu một trong năm lượt thử.
       setCode("");
@@ -157,7 +157,7 @@ export default function ForgotPasswordPage() {
       await resetPasswordWithTicket(ticket, password);
       setDone(true);
     } catch (err) {
-      setError(friendlyError(err, "Không đặt lại được mật khẩu. Vui lòng thử lại."));
+      setError(friendlyError(err, t("Không đặt lại được mật khẩu. Vui lòng thử lại.")));
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 400) {
         // Vé hết hạn. Mã đã tiêu rồi nên quay về bước 2 là ngõ cụt — phải xin

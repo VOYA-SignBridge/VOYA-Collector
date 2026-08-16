@@ -831,7 +831,7 @@ def write_legacy_snapshot(out_dir: Path, *, class_keys, floor: int, excluded,
                           mode: str, seed: int, counts: dict,
                           min_classes: int = DEFAULT_MIN_CLASSES,
                           sample_counts=None, split_id=None, extra=None,
-                          class_meta=None) -> Path:
+                          class_meta=None, tenant_id=None) -> Path:
     """Ghi HỢP ĐỒNG của tập chia cạnh train/val/test.csv.
 
     Hợp đồng chứ không phải ghi chú, và khác biệt nằm ở chỗ có ai ĐỌC nó rồi
@@ -905,9 +905,41 @@ def write_legacy_snapshot(out_dir: Path, *, class_keys, floor: int, excluded,
         payload['split_id'] = str(split_id)
         # Mã băm từng tệp, tính SAU khi ba CSV đã ghi xong. Đây là thứ biến
         # "tìm được tệp" thành "đã xác minh hiện vật".
-        from processed.train_utils.split_artifact import file_hashes
+        from processed.train_utils.split_artifact import (
+            OWNER_BINDING_KEY, OWNER_KEY, file_hashes, owner_binding)
 
+        # ★ C2b — hiện vật vận hành PHẢI có chủ, và chủ chỉ do bên tạo đặt.
+        #
+        # Điều kiện là `split_id`, tức "tôi đang ghi một hiện vật vận hành CÓ
+        # ĐỊA CHỈ" — thứ mà `resolve_operational` có thể trả về cho một lượt
+        # huấn luyện. Bản khai ở gốc `processed/splits/` và ở nhánh
+        # `--by_language` cũng mang `purpose: operational`, nhưng chúng không có
+        # `split_id` nên không hiện vật nào phân giải tới được; ở đó chữ
+        # `operational` đang làm nhiệm vụ khác — cờ báo cho `train_tcn.py` biết
+        # đi đường `class_uid → target_idx`. Hai nghĩa chồng lên một trường là
+        # nợ kỹ thuật có thật, ghi ở docs/10-issues/KNOWN_ISSUES.md.
+        chu = str(tenant_id or '').strip()
+        if not chu:
+            raise ValueError(
+                f'hiện vật vận hành {split_id!r} không có `{OWNER_KEY}`. Chủ sở '
+                f'hữu phải đến từ ngữ cảnh tạo, và không có ngữ cảnh thì DỪNG — '
+                f'không lấy tenant của lượt huấn luyện đầu tiên muốn dùng nó, '
+                f'không rơi về tenant khởi tạo. Truyền --tenant_id=<ID>.')
+        # Kiểm hợp đồng TRƯỚC khi làm việc — cùng khuôn đã dùng ở C1. Đặt sau
+        # `file_hashes` thì một hiện vật thiếu chủ sẽ nổ bằng FileNotFoundError
+        # của tệp CSV, và người đọc log sẽ đi sửa nhầm chỗ.
         payload['files'] = file_hashes(out_dir)
+        payload[OWNER_KEY] = chu
+        payload[OWNER_BINDING_KEY] = owner_binding(
+            split_id=str(split_id), tenant_id=chu, files=payload['files'])
+    elif str(tenant_id or '').strip():
+        # Bản khai không-có-địa-chỉ mà lại mang chủ sở hữu là một lời khai không
+        # ai cưỡng chế được: `resolve_operational` không bao giờ chạm tới nó.
+        # Ghi vào chỉ tạo cảm giác an toàn giả.
+        raise ValueError(
+            'tenant_id chỉ có nghĩa với hiện vật vận hành có `split_id`. '
+            'Bản khai ở gốc splits/ hoặc theo ngôn ngữ không phải hiện vật có '
+            'địa chỉ, nên không mang quyền sở hữu.')
     if extra:
         payload.update(extra)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1392,6 +1424,13 @@ def main():
                              'tệp nghiên cứu đóng băng ở gốc. Chỉ-tạo-mới: thư mục '
                              'đã tồn tại thì DỪNG. Không có khái niệm "split mới '
                              'nhất" — một lượt chạy ghim đúng một ID.')
+    parser.add_argument('--tenant_id', type=str, default='',
+                        help='Tổ chức SỞ HỮU hiện vật vận hành. BẮT BUỘC cùng '
+                             '--operational_split_id. Giá trị này đến từ ngữ '
+                             'cảnh tạo split và được ghim vào bản khai; nó '
+                             'KHÔNG suy ra được về sau từ lượt huấn luyện đầu '
+                             'tiên muốn dùng hiện vật, vì như vậy là ai hỏi '
+                             'trước thì thành chủ. Không có mặc định.')
     parser.add_argument('--min_classes', type=int, default=DEFAULT_MIN_CLASSES,
                         help=f'Số lớp tối thiểu SAU khi lọc; dưới ngưỡng thì DỪNG và '
                              f'không ghi split (mặc định {DEFAULT_MIN_CLASSES}, 0 = tắt). '
@@ -1407,6 +1446,26 @@ def main():
     parser.add_argument('--languages', type=str, default='', help='Optional comma-separated whitelist of languages when using --by_language')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
+
+    # ★ C2b — cổng này đứng TRƯỚC mọi lượt ghi, và vị trí của nó là nội dung.
+    #
+    # `write_legacy_snapshot` cũng từ chối hiện vật không chủ, nhưng nó chạy SAU
+    # khi ba tệp CSV đã nằm trên đĩa: đỏ ở đó để lại một thư mục có ba CSV và
+    # không có bản khai — một hiện vật nửa chừng, mà quy tắc chỉ-tạo-mới lại
+    # khiến không ai ghi đè lên nó được nữa. Chặn ở đây thì không byte nào được
+    # ghi. Cổng kia là lưới thứ hai, cho người gọi hàm trực tiếp.
+    if args.operational_split_id and not str(args.tenant_id or '').strip():
+        raise SystemExit(
+            'Hiện vật vận hành phải có chủ: thiếu --tenant_id.\n'
+            'Chủ sở hữu đến từ ngữ cảnh tạo split. Không tìm được ngữ cảnh thì '
+            'DỪNG — không dùng tenant khởi tạo, không dùng tenant của lượt '
+            'huấn luyện sẽ tiêu thụ nó.')
+    if str(args.tenant_id or '').strip() and not args.operational_split_id:
+        raise SystemExit(
+            '--tenant_id chỉ dùng với --operational_split_id. Bản khai ở gốc '
+            'processed/splits/ không phải hiện vật có địa chỉ nên không mang '
+            'được quyền sở hữu, và ghi một trường không ai cưỡng chế vào đó chỉ '
+            'tạo cảm giác an toàn giả.')
 
     # v2 manifest mode: fully separate path; never touches legacy split files.
     if args.dataset_manifest is not None:
@@ -1587,6 +1646,7 @@ def main():
             min_classes=args.min_classes, sample_counts=dem_mau,
             class_meta=mo_ta_lop,
             split_id=args.operational_split_id or None,
+            tenant_id=args.tenant_id or None,
             # Phạm vi phải nằm TRONG hiện vật: đọc lại sau ba tháng, "7 lớp"
             # một mình không nói được đây là 7 lớp của hoa-de hay 7 lớp còn
             # sót của toàn bộ từ vựng.

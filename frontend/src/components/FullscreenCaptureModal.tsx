@@ -1018,11 +1018,11 @@ export default function FullscreenCaptureModal({
         setPreference("dialectSelected", nextDialect);
 
         if (!classesRes.ok && !statsRes.ok) {
-          setCatalogError("Không tải được danh sách bộ ngôn ngữ từ máy chủ.");
+          setCatalogError(t("Không tải được danh sách bộ ngôn ngữ từ máy chủ."));
         }
       } catch {
         if (!active) return;
-        setCatalogError("Không tải được dữ liệu bộ ngôn ngữ.");
+        setCatalogError(t("Không tải được dữ liệu bộ ngôn ngữ."));
         // Keep whatever the registry already gave us; do not substitute a
         // hardcoded list, which would silently mask the outage.
         setDialectList((prev) => (prev.length > 0 ? prev : registryDialectIds));
@@ -2000,7 +2000,9 @@ export default function FullscreenCaptureModal({
                   {t("Đã chụp {n} mẫu!", { n: completedCaptures })}
                 </div>
                 <div className="text-xl mb-4">{t("Chuẩn bị chụp tiếp...")}</div>
-                <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {captureCount}</div>
+                <div className="text-lg text-gray-300">
+                  {t("Tiến độ: {da} / {tong}", { da: completedCaptures, tong: captureCount })}
+                </div>
                 <div className="w-64 bg-gray-700 rounded-full h-3 mt-4 mx-auto">
                   <div className="bg-sky-600 h-3 rounded-full transition-all duration-500" style={{ width: `${(completedCaptures / captureCount) * 100}%` }} />
                 </div>

@@ -40,7 +40,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel, onBack, onR
   const [cancelling, setCancelling] = useState(false);
   const [startTime] = useState<Date>(new Date(job.started_at || new Date()));
   const [elapsedTime, setElapsedTime] = useState('0m');
-  const [eta, setEta] = useState('Tính toán...');
+  const [eta, setEta] = useState(t('Tính toán...'));
 
   const isFailed = job.status === 'failed';
   const isCancelled = job.status === 'cancelled';
@@ -240,7 +240,7 @@ const TrainingProgress: React.FC<Props> = ({ job, metrics, onCancel, onBack, onR
             disabled={cancelling}
             className="w-full"
             onClick={async () => {
-              if (!window.confirm('Bạn có chắc muốn hủy huấn luyện này?')) return;
+              if (!window.confirm(t('Bạn có chắc muốn hủy huấn luyện này?'))) return;
               setCancelling(true);
               try {
                 await onCancel();

@@ -40,7 +40,10 @@ const MODEL_LABELS: Record<string, string> = {
   handgcn: 'HandGCN',
 };
 
+// Giá trị trả về là KHOÁ, không phải chữ để hiện: chỗ dựng gọi `t(dialectKey(job))`
+// (dòng ~193). Bọc `t()` ngay đây sẽ hỏng cả việc gom nhóm ở dòng ~66 lẫn dịch hai lần.
 const dialectKey = (job: TrainingJobListItem): string =>
+  // i18n-ignore-next-line
   job.config?.dialects?.length ? job.config.dialects.join(' + ') : 'Tất cả';
 
 const fmtDate = (iso?: string): string => {

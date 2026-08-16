@@ -17,11 +17,18 @@ cd "$(dirname "$0")/.."
 FILES=(-f docker-compose.yml -f docker-compose.prod.yml)
 BUILD=(--build)
 FORCE_CPU=0
+SAVE_ONLY=0
 
 for arg in "$@"; do
   case "$arg" in
     --no-build) BUILD=() ;;
     --cpu)      FORCE_CPU=1 ;;
+    # Cất đường lùi rồi dừng, không dựng, không đụng stack. Có hai công dụng:
+    # bảo đảm một bản lưu ngoài kho ảnh khi chưa định triển khai, và cho phép
+    # kiểm chính đoạn mã ấy bằng đường chạy THẬT thay vì một bản sao logic
+    # trong bài kiểm — hai nửa của một hợp đồng mà mỗi nửa tự kiểm bằng định
+    # nghĩa riêng thì cả hai cùng xanh trong khi hợp đồng đã gãy.
+    --save-rollback-only) SAVE_ONLY=1; BUILD=() ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -88,6 +95,36 @@ else
     [ -n "$(env_get "$key")" ] || fail "$key is not set in .env"
   done
 
+  # MAT PHANG DIEU KHIEN (15/08/2026).
+  #
+  # `tenant_purges` khong con nam trong tam voi cua vai ung dung; duong ghi so
+  # cai purge di qua `CONTROL_DATABASE_URL`. Va `control_dsn()` CO Y khong lui
+  # ve DATABASE_URL — thieu bien nay thi lenh purge nem loi.
+  #
+  # Bat o day chu khong de no lo ra luc co nguoi bam nut xoa mot to chuc: mot
+  # thao tac khong hoan tac duoc khong phai cho de phat hien loi cau hinh.
+  control_dsn=$(env_get CONTROL_DATABASE_URL)
+  if [ -z "$control_dsn" ]; then
+    fail "CONTROL_DATABASE_URL is not set in .env. Cap phat vai dieu khien truoc:
+    1)  echo \"VOYA_CONTROL_DB_PASSWORD=\$(openssl rand -hex 24)\" >> .env
+    2)  docker compose run --rm -e VOYA_CONTROL_DB_PASSWORD=... backend \\
+            python -m app.cli.provision_db_roles
+    3)  them CONTROL_DATABASE_URL=postgresql://voya_control:...@postgres:5432/<db>
+Xem app/storage/control_plane.py ve vi sao duong nay khong duoc lui ve voya_app."
+  fi
+
+  # Kiem RE o day; kiem THAT nam o `_assert_control_identity`, chay moi lan mo
+  # ket noi va hoi chinh co so du lieu xem no la ai. Cai nay chi bat loi dan
+  # nhat truoc khi dung anh.
+  case "$control_dsn" in
+    *//voya_control:*) : ;;
+    *//admin:*|*//voya_app:*)
+      fail "CONTROL_DATABASE_URL tro vao vai ung dung/quan tri — ranh gioi tin
+cay bien mat trong im lang. Phai la voya_control." ;;
+    *) note "[warn] CONTROL_DATABASE_URL khong dung vai voya_control — backend se
+    tu choi khi chay thao tac dieu khien" ;;
+  esac
+
   # FRONTEND_BASE_URL must match the URL people actually open, or password-reset
   # and invitation links point at the wrong host on this machine.
   base_url=$(env_get FRONTEND_BASE_URL)
@@ -150,7 +187,12 @@ if [ -n "$disk_line" ]; then
   free_int=${free_gb%%.*}
   note "Docker disk: ${drive}: has ${free_gb} GB free, vhdx is ${vhdx_gb} GB"
 
-  if [ "$free_int" -lt "$DISK_FAIL_GB" ]; then
+  if [ "$free_int" -lt "$DISK_FAIL_GB" ] && [ "$SAVE_ONLY" -eq 1 ]; then
+    # Ngưỡng này đo cho một lượt DỰNG ảnh, thứ làm vhdx phình. `--save-rollback-only`
+    # không dựng gì và ghi ra ổ khác, nên áp ngưỡng ấy ở đây là chặn nhầm —
+    # đúng lúc người ta cần cất đường lùi nhất, tức là khi đĩa đang chật.
+    note "[warn] chi con ${free_gb} GB tren ${drive}: — bo qua vi --save-rollback-only khong dung anh"
+  elif [ "$free_int" -lt "$DISK_FAIL_GB" ]; then
     fail "only ${free_gb} GB free on ${drive}: — one measured clean build grew "\
 "the vhdx by 43 GB, and a build that runs out has killed dockerd here before. "\
 "Reclaim space FIRST:  bash scripts/docker_gc.sh"
@@ -167,6 +209,17 @@ if [ "$preflight_fail" -ne 0 ]; then
   exit 3
 fi
 note "ok"
+
+# `--save-rollback-only` KHÔNG dò GPU và KHÔNG ghi lại `COMPOSE_FILE`.
+#
+# Phép dò là một `docker run` thật, và nó trượt được vì lý do nhất thời. Khi ấy
+# `upsert_env` bên dưới sẽ ghi một `COMPOSE_FILE` KHÔNG có `docker-compose.gpu.yml`
+# vào `.env` — và theo đúng chú thích ở khối đó, mọi lệnh compose sau này trong
+# thư mục này sẽ mất overlay GPU mà không có gì báo. Một thao tác chỉ-đọc-và-lưu
+# thì không được phép để lại hậu quả đó.
+if [ "$SAVE_ONLY" -eq 1 ]; then
+  echo "==> --save-rollback-only: bo qua do GPU va khong ghi .env"
+else
 
 echo "==> Probing for a usable GPU…"
 if gpu_usable; then
@@ -226,6 +279,8 @@ upsert_env COMPOSE_FILE "$compose_file_value"
 echo "==> .env: COMPOSE_FILE=$compose_file_value"
 echo "    (a bare \`docker compose up -d\` in this folder now keeps the same overlays)"
 
+fi  # kết thúc nhánh "không phải --save-rollback-only"
+
 # ---------------------------------------------------------------------------
 # Migration, as its own step, BEFORE the application comes up.
 #
@@ -251,10 +306,176 @@ echo "    (a bare \`docker compose up -d\` in this folder now keeps the same ove
 # backend` against the PREVIOUS image — which is the image whose schema
 # expectations we are trying to move away from. That is the exact skew this
 # whole step exists to prevent, so it must not be reintroduced by the step.
+# ---------------------------------------------------------------------------
+# Cất đường lùi RA NGOÀI kho ảnh của Docker, TRƯỚC khi ảnh mới đè lên tag cũ.
+#
+# Vì sao không phải một cái tag
+# ------------------------------
+# Ngày 15/08/2026 đường lùi được chuẩn bị đúng cách — `voya_backend:pre-f882414`
+# và `voya_frontend:pre-f882414` — rồi biến mất trước khi kịp dùng: một lượt
+# `docker_gc.sh` dọn sâu đã xoá chúng, vì lúc đó chúng không còn container nào
+# tham chiếu. Cả hai việc đều "đúng" theo cách nhìn của mình, và kết quả là
+# lượt triển khai rủi ro nhất trong tuần chạy mà không có đường lùi nhanh.
+#
+# Bài học không phải "đừng dọn rác", mà là: **một tag trong cùng daemon mà
+# script GC đang quét thì không phải bản lưu.** Tệp .tar nằm ngoài kho ảnh thì
+# `docker image prune -a` không với tới được.
+#
+# Ghi bằng chuyển hướng của shell chứ không truyền đường dẫn cho `docker -o`:
+# Git Bash dịch tham số trông giống đường dẫn POSIX, và chính lớp dịch đó đã
+# làm hỏng phép tự kiểm sao lưu lẫn bước nén vhdx trong `docker_gc.sh`. Shell
+# tự mở tệp thì không có gì để dịch sai.
+# ---------------------------------------------------------------------------
+ROLLBACK_DIR="${ROLLBACK_DIR:-E:/CTU_ProjectOutside/voya_backups/rollback}"
+ROLLBACK_KEEP="${ROLLBACK_KEEP:-2}"
+
+save_rollback() {
+  local img="$1" name="$2" out size_bytes free_bytes
+  docker image inspect "$img" >/dev/null 2>&1 || {
+    note "[skip] chua co $img — may nay chua tung trien khai, khong co gi de lui ve"
+    return 0
+  }
+
+  mkdir -p "$ROLLBACK_DIR" || { fail "khong tao duoc $ROLLBACK_DIR"; return 1; }
+
+  # Tên tệp mang ID CỦA CHÍNH ẢNH, không mang "phiên bản sắp triển khai".
+  #
+  # Bản đầu đặt tên `${name}_pre_${new_rev}` với nghĩa "ảnh đang sống TRƯỚC khi
+  # triển khai <rev>". Đúng khi chạy đúng luồng, nhưng sai ngay khi chạy
+  # `--save-rollback-only` sau lúc đã triển khai: tệp chứa ảnh f882414 mà tên
+  # lại ghi `pre_f882414`. Một hiện vật cứu hộ mà nội dung phụ thuộc vào việc
+  # ai đó chạy lệnh lúc nào thì không dùng được lúc đang hoảng.
+  #
+  # `image_id` thì tự nó nói ra nó là ai, bất kể chạy khi nào.
+  img_id=$(docker image inspect "$img" --format '{{.Id}}' 2>/dev/null | sed 's/^sha256://' | cut -c1-12)
+  out="$ROLLBACK_DIR/${name}_${img_id}_${stamp}.tar"
+
+  # Hệ số 3, và nó không phải cho chắc ăn — hai nguồn số trên chính máy này
+  # KHÔNG khớp nhau. Đo 15/08/2026 với `voya_backend:latest`:
+  #
+  #     docker images        -> 13.3 GB   (đã bung)
+  #     inspect .Size        ->  4.53 GB  (đã nén)
+  #
+  # Kho ảnh containerd báo hai con số khác nhau cho cùng một ảnh, và không có
+  # gì hứa `docker save` sẽ ra con số nào. Đoán trúng bên nhỏ rồi hết đĩa giữa
+  # chừng thì để lại một tệp .tar cụt — đúng loại "bản lưu có mà không dùng
+  # được" mà cả tệp này đang cố tránh. Lấy dư 3 lần là rẻ hơn nhiều.
+  size_bytes=$(docker image inspect "$img" --format '{{.Size}}' 2>/dev/null || echo 0)
+  need_bytes=$((size_bytes * 3))
+  free_bytes=$(df -P "$ROLLBACK_DIR" 2>/dev/null | awk 'NR==2 {print $4 * 1024}')
+  if [ -n "$free_bytes" ] && [ "$free_bytes" -lt "$need_bytes" ]; then
+    fail "$ROLLBACK_DIR chi con $((free_bytes / 1024 / 1024 / 1024)) GB, can "\
+"$((need_bytes / 1024 / 1024 / 1024)) GB cho $img"
+    return 1
+  fi
+
+  note "luu $img -> $(basename "$out") ($((size_bytes / 1024 / 1024 / 1024)) GB)…"
+  if ! docker save "$img" > "$out"; then
+    rm -f "$out"
+    fail "docker save $img that bai"
+    return 1
+  fi
+
+  # Đọc HẾT tệp, không chỉ liếc phần đầu. `pg_restore --list` từng cho một bản
+  # sao lưu cụt điểm "đạt" vì mục lục nằm ở đầu tệp; tệp .tar cũng vậy. Một
+  # đường lùi chưa từng được đọc trọn thì chưa phải đường lùi.
+  #
+  # `--force-local` là BẮT BUỘC, không phải cho chắc. `$out` bắt đầu bằng
+  # `E:/…`, và `tar` đọc `host:path` theo cú pháp kho lưu từ xa — nó đi phân
+  # giải tên máy `E:` rồi trả `Cannot connect to E: resolve failed` (exit 128).
+  # Đo 15/08/2026: một tệp .tar HOÀN TOÀN LÀNH bị phép kiểm này báo hỏng, và
+  # script đã xoá nó đi rồi từ chối triển khai.
+  #
+  # Đây là lần thứ BA trong một ngày cùng một hình dạng — `pg_restore` với
+  # `/b/…`, `-File` với `/tmp/…`, và giờ là `tar` với `E:/…`. Lớp dịch đường
+  # dẫn của Git Bash làm hỏng đúng những bước KIỂM CHỨNG, và cách sai để "sửa"
+  # là nới phép kiểm ra cho nó xanh.
+  if ! tar --force-local -tf "$out" >/dev/null 2>&1; then
+    rm -f "$out"
+    fail "$(basename "$out") khong doc het duoc — da xoa, KHONG giu ban luu hong"
+    return 1
+  fi
+  note "  DAT — doc tron tep"
+
+  # Tệp kèm: tên tệp nói ảnh nào, tệp này nói bối cảnh. Không có nó thì sáu
+  # tháng sau `backend_a1b2c3d4e5f6_20260815.tar` là một chuỗi hex vô nghĩa.
+  {
+    printf 'image_ref=%s\n' "$img"
+    printf 'image_id=%s\n' "$img_id"
+    printf 'saved_at=%s\n' "$(date -Iseconds)"
+    printf 'git_head_when_saved=%s\n' "$new_rev"
+    printf 'khoi_phuc=docker load -i %s\n' "$(basename "$out")"
+  } > "${out%.tar}.meta"
+
+  # Dọn bản cũ SAU khi bản mới đã được xác minh, không bao giờ trước.
+  # `|| true` ở cuối: khi chưa có bản cũ nào thì `ls` thoát khác 0, và dưới
+  # `set -e` một hàm kết thúc bằng đường ống hỏng sẽ bị coi là hỏng — tức là
+  # lượt lưu ĐÚNG lại bị báo thất bại chỉ vì không có gì để dọn.
+  ls -1t "$ROLLBACK_DIR/${name}_"*.tar 2>/dev/null | tail -n +$((ROLLBACK_KEEP + 1)) \
+    | while read -r old; do
+        note "  go ban cu: $(basename "$old")"
+        rm -f "$old"
+      done || true
+}
+
+if [ ${#BUILD[@]} -gt 0 ] || [ "$SAVE_ONLY" -eq 1 ]; then
+  new_rev=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+  stamp=$(date +%Y%m%d_%H%M%S)
+
+  echo "==> Cat duong lui (ngoai kho anh Docker)…"
+  rollback_fail=0
+  save_rollback voya_backend:latest  backend  || rollback_fail=1
+  save_rollback voya_frontend:latest frontend || rollback_fail=1
+
+  if [ "$rollback_fail" -ne 0 ]; then
+    echo >&2
+    echo "    [FAIL] khong cat duoc duong lui. NOTHING WAS BUILT." >&2
+    echo "           Trien khai khong co duong lui la dieu 15/08 da tra gia." >&2
+    echo "           Bo qua co y:  ROLLBACK_DIR=... hoac sua cho chua." >&2
+    exit 3
+  fi
+
+  if [ "$SAVE_ONLY" -eq 1 ]; then
+    echo "==> --save-rollback-only: da cat duong lui, khong dung gi, khong dung stack."
+    ls -1t "$ROLLBACK_DIR"/*.tar 2>/dev/null | head -6 || true
+    exit 0
+  fi
+fi
+
 if [ ${#BUILD[@]} -gt 0 ]; then
   echo "==> docker compose ${FILES[*]} build"
   docker compose "${FILES[@]}" build
 fi
+
+# ---------------------------------------------------------------------------
+# DỪNG ứng dụng TRƯỚC khi migration chạy. Đây là bước 15/08/2026 thêm vào, và
+# nó sửa một cuộc đua có thật chứ không phải phòng xa.
+#
+# Thứ tự cũ là `build -> migrate -> up`, nghĩa là lượt migration chạy trong khi
+# ẢNH CŨ vẫn đang phục vụ. Bản cũ vẫn giữ quyền đổi lược đồ: `ensure_tables()`
+# chạy ở mỗi lần một tiến trình ứng dụng khởi động, và `docker-compose.yml`
+# cho gunicorn `--max-requests 1000 --max-requests-jitter 100` — worker được
+# thay định kỳ, mỗi worker mới chạy lại `ensure_tables()`.
+#
+# Hệ quả đo được ngày 15/08: `migrate --to 5` gỡ
+# `uq_classes_tenant_slug_lang_dialect` lúc 04:01:21; đến 04:03 chỉ mục ĐÃ QUAY
+# LẠI. Chạy đúng lệnh đó lúc 04:07, khi chỉ còn ảnh mới, thì nó gỡ sạch và khởi
+# động lại không dựng lại nữa. Cơ chế chính xác không tái dựng được (ảnh cũ đã
+# bị xoá) nên ghi là **cơ chế nhiều khả năng, chưa tái hiện** — nhưng cuộc đua
+# thì không cần đo mới biết: hai bản mã cùng có quyền ghi lược đồ trong cùng
+# một cửa sổ thời gian.
+#
+# Vì sao `stop` TẤT CẢ chứ không liệt kê service:
+# năm service dùng chung ảnh backend (`backend`, `worker`, `trainer`,
+# `celery_beat`, `sot_init`) và danh sách đó đã từng bị quên đúng một mục —
+# `celery_beat`. Một danh sách phải nhớ là một danh sách sẽ sai; "dừng hết rồi
+# bật lại đúng hai cái cần" thì không có gì để quên.
+#
+# Cái giá: thời gian ngừng dịch vụ dài hơn, tính từ đây thay vì từ `up -d`.
+# Đó là đánh đổi có chủ ý — lượt triển khai vốn đã làm gián đoạn khi thay
+# container; điều thay đổi là bây giờ nó trung thực về việc đó.
+echo "==> Dung ung dung truoc khi migration chay…"
+docker compose "${FILES[@]}" stop >/dev/null 2>&1 || true
 
 echo "==> Starting Postgres…"
 docker compose "${FILES[@]}" up -d postgres redis
@@ -306,6 +527,31 @@ if ! docker compose "${FILES[@]}" run --rm --no-deps -T \
   exit 4
 fi
 
+# ---------------------------------------------------------------------------
+# Hợp đồng lược đồ có HAI tập, và `--status` hỏi cả hai:
+#
+#     required_objects   phải CÓ MẶT
+#     retired_objects    phải VẮNG MẶT
+#
+# Migration thoát 0 chỉ nói "các câu đã chạy xong", không nói "lược đồ đã ở
+# trạng thái đích". Ngày 15/08 hai điều đó khác nhau: migration thoát 0 và chỉ
+# mục đáng lẽ đã retire vẫn nằm đó. Nên đây là một CỔNG riêng, không phải một
+# dòng in cho vui.
+# ---------------------------------------------------------------------------
+schema_status() {
+  docker compose "${FILES[@]}" run --rm --no-deps -T \
+    -e EXPECTED_DATABASE="$expected_db" backend \
+    python -m app.cli.migrate --status 2>&1 | grep -v MIGRATION-TARGET
+}
+
+echo "==> Kiem lai luoc do TRUOC khi bat ung dung…"
+if ! schema_status; then
+  echo >&2
+  echo "    [FAIL] luoc do KHONG o trang thai dich sau migration." >&2
+  echo "           NOTHING ELSE WAS STARTED — ung dung van dang dung." >&2
+  exit 4
+fi
+
 # No `--build` here: the build already happened above, before the migration.
 # Passing it again re-exports every image layer for no benefit — measured at
 # several minutes on this machine during the 12/08 deploy, all of it after the
@@ -320,6 +566,34 @@ until [ "$(docker ps --filter health=starting --format '{{.Names}}' | wc -l)" -e
 done
 
 docker compose "${FILES[@]}" ps -a --format "{{.Name}}\t{{.Status}}"
+
+# ---------------------------------------------------------------------------
+# Kiểm lại lược đồ SAU khi ứng dụng mới đã lên. Đây là nửa còn lại của bài học
+# 15/08, và nó hỏi một câu mà lần kiểm trước không hỏi được:
+#
+#     "vòng đời khởi động của ảnh MỚI có dựng lại thứ gì migration vừa gỡ không?"
+#
+# Lần kiểm trước chạy khi chưa có tiến trình ứng dụng nào sống, nên nó không
+# thể trả lời câu đó. `ensure_tables()` chạy ở mỗi lần một tiến trình lên, và
+# gunicorn còn thay worker giữa chừng — nên "lược đồ đúng lúc migration xong"
+# và "lược đồ đúng khi hệ thống đang chạy" là hai khẳng định khác nhau.
+#
+# Đây là CẢNH BÁO chứ không phải lỗi dừng máy: tới đây stack đã lên và đang
+# phục vụ, nên tự ý dừng lại không lấy lại được gì. Nhưng nó phải ồn, vì trạng
+# thái này có nghĩa là đường khởi động đang hoàn tác việc của migration — đúng
+# thứ đã âm thầm xảy ra hai lần trước khi có phép kiểm này.
+# ---------------------------------------------------------------------------
+echo "==> Kiem lai luoc do SAU khi ung dung da len…"
+if schema_status; then
+  echo "    luoc do van o trang thai dich sau khi ung dung khoi dong."
+else
+  echo >&2
+  echo "    [WARN] LUOC DO LECH SAU KHI UNG DUNG LEN." >&2
+  echo "           Migration da dat trang thai dich, roi duong KHOI DONG doi no." >&2
+  echo "           Nghi truoc tien: mot cau CREATE cua doi tuong vua retire van" >&2
+  echo "           con trong duong khoi dong — retire thi phai GO cau tao, them" >&2
+  echo "           cau xoa la chua du. Xem metadata_db.retired_indexes()." >&2
+fi
 
 # The trainer picks the device itself (train_tcn.pick_device) and refuses a GPU
 # whose compute capability this torch build has no kernels for, so this line is

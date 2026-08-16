@@ -412,9 +412,15 @@ def bootstrap_admin_user():
         admin_id = str(uuid.uuid4())
         password_hash = get_password_hash(admin_password)
         
+        from app.tenancy import DEFAULT_TENANT_ID
+
+        # `tenant_id` TƯỜNG MINH. Tài khoản quản trị khởi tạo THẬT SỰ thuộc
+        # tenant khởi tạo, nên nó nói ra điều đó thay vì dựa vào
+        # `DEFAULT 'default'` của lược đồ — default ấy đã bị bỏ 16/08/2026 để
+        # một lượt INSERT quên tenant không còn lặng lẽ sinh ra membership.
         sql = """
-        INSERT INTO users(id, username, email, password_hash, is_active, is_admin, created_at)
-        VALUES(%s, %s, %s, %s, true, true, %s)
+        INSERT INTO users(id, username, email, password_hash, is_active, is_admin, created_at, tenant_id)
+        VALUES(%s, %s, %s, %s, true, true, %s, %s)
         ON CONFLICT (id) DO NOTHING
         """
         
@@ -426,6 +432,7 @@ def bootstrap_admin_user():
                 f"{admin_username}@admin.local",
                 password_hash,
                 datetime.now(timezone.utc),
+                DEFAULT_TENANT_ID,
             ),
         )
         

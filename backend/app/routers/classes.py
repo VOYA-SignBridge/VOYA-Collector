@@ -29,6 +29,7 @@ from app.catalog_sync import (
 )
 from app.config import settings
 from app.auth import get_current_user, require_admin, require_tenant_editor
+from app.tenant_context import require_tenant
 from app.quota_deps import guard_quota, tenant_of
 from app.webhooks import emit
 
@@ -149,7 +150,11 @@ def register_class(
 
 @router.get("/list")
 def list_endpoint(language: Optional[str] = None, dialect: Optional[str] = None):
-    metas = list_classes(language=language, dialect=dialect)
+    # `count` cũng phải theo phạm vi. Lọc `items` mà để `count` toàn cục thì
+    # giao diện không thấy lớp của tenant khác nhưng vẫn BIẾT chúng tồn tại —
+    # rò siêu dữ liệu mà không rò một hàng nào.
+    metas = list_classes(language=language, dialect=dialect,
+                         tenant_id=require_tenant())
     return {"count": len(metas), "items": [m.to_label_row() for m in metas]}
 
 
@@ -166,7 +171,8 @@ def suggest_labels(
     start with the query text (diacritics-insensitive prefix match).
     When q is empty, returns the first `limit` labels sorted A-Z.
     """
-    metas = list_classes(language=language, dialect=dialect)
+    metas = list_classes(language=language, dialect=dialect,
+                         tenant_id=require_tenant())
 
     # Deduplicate by label_original
     seen: set = set()
@@ -207,7 +213,10 @@ def search_collectors(
     Optionally filtered by language and dialect.
     Returns collector names matching the query prefix.
     """
-    samples = list_samples()
+    # Đây là chỗ rò nặng nhất trong tệp: không phải rò một hàng dữ liệu, mà rò
+    # DANH SÁCH NGƯỜI của tenant khác. Một lượt đọc toàn cục ở đây biến ô tìm
+    # kiếm thành danh bạ xuyên tổ chức.
+    samples = list_samples(require_tenant())
 
     seen: set = set()
     collectors: list = []
@@ -250,7 +259,15 @@ def _prefs_bucket(current_user: Dict[str, Any]) -> str:
     """
     from app.tenancy import normalize_tenant_id
 
-    tenant = normalize_tenant_id(current_user.get("tenant_id"))
+    tho = (current_user.get("tenant_id") or "").strip()
+    if not tho:
+        # Khoá tuỳ chọn mang tenant làm tiền tố để purge một tenant thành phép
+        # lọc tiền tố. Rơi về `default` khi thiếu sẽ nhét tuỳ chọn của người
+        # dùng vào không gian khoá của tenant khởi tạo — và lượt purge tenant
+        # đó sẽ xoá nhầm.
+        raise HTTPException(status_code=400,
+                            detail="Không xác định được tenant của tài khoản")
+    tenant = normalize_tenant_id(tho)
     return f"{tenant}::{current_user.get('id')}"
 
 
@@ -300,8 +317,9 @@ def set_preference(
 
 @router.get("/stats")
 def stats(language: Optional[str] = None, dialect: Optional[str] = None):
-    metas = list_classes(language=language, dialect=dialect)
-    samples = list_samples()
+    scope = require_tenant()
+    metas = list_classes(language=language, dialect=dialect, tenant_id=scope)
+    samples = list_samples(scope)
     counts = {m.class_uid: 0 for m in metas}
     for s in samples:
         cid = s.get("class_uid")
@@ -337,8 +355,46 @@ def community_stats():
     download the full class list (~14KB) + every session and reduce them in the
     browser. Aggregation happens server-side; response is ~120 bytes.
     """
-    metas = list_classes()
-    samples = list_samples()
+    # QUYẾT ĐỊNH CÒN MỞ — đọc hết khối này trước khi sửa. Xem
+    # docs/01-architecture/COMMUNITY_DATA_COMMONS.md §0 và §10.
+    #
+    # Endpoint này KHÔNG đọc mặt phẳng Community. Nó đọc
+    # `settings.public_tenant_id`, mặc định là `"default"` — và `default` là một
+    # tenant TỔ CHỨC bình thường (`tenant_type='ORGANIZATION'`,
+    # `is_system_reserved=FALSE`) đang giữ corpus nghiên cứu thật. Commons thật
+    # là một tenant KHÁC: `tenant_id='community'`, `tenant_type='COMMUNITY'`.
+    #
+    # Nói cách khác, cái tên `community-stats` đang lặp lại đúng sai lầm mà §0
+    # của tài liệu ấy đã sửa một lần: gọi mặt phẳng hệ thống/khởi tạo là
+    # "Community". Community Data Commons hiện là **0 dòng mã**, nên hiện chưa
+    # có số liệu cộng đồng nào để hiển thị.
+    #
+    # Và theo §10, Community KHÔNG phải một mặt phẳng ngoại lệ: nó là một tenant
+    # dự trữ, chịu ĐÚNG RLS/RBAC/cách ly như mọi tenant khác, với quy tắc "tư
+    # cách thành viên không bao giờ là điều kiện đủ — mọi phép kiểm phải hỏi một
+    # QUYỀN cụ thể". Nên đừng hợp thức hoá endpoint này bằng câu "cộng đồng thì
+    # công khai"; nó cần một lý do gắn với quyền.
+    #
+    # Hành vi hiện tại được GIỮ NGUYÊN có chủ ý (vẫn là tenant khởi tạo, giống
+    # trước khi có tenant), vì đổi nó là một quyết định chính sách chứ không
+    # phải một bản vá cách ly. Ba lựa chọn, chưa chọn:
+    #   (a) đọc tenant `community` -> hiện trả 0, trung thực với trạng thái thật
+    #   (b) đổi tên endpoint thành `/classes/public-corpus-stats` và ghi rõ nó
+    #       công bố corpus của tenant khởi tạo
+    #   (c) gắn một quyền tường minh thay vì để nó mở cho mọi người gọi
+    #
+    # Điều đã sửa được ngay: phạm vi là TƯỜNG MINH và không phải "cộng mọi
+    # tenant lại". Bản trước đọc toàn bộ kho, nên bốn con số này rò quy mô của
+    # mọi tổ chức. Nay thêm dữ liệu vào một tenant riêng KHÔNG làm chúng đổi —
+    # đó là bất biến READ-3 đã đo được.
+    cong_bo = (settings.public_tenant_id or "").strip()
+    if not cong_bo:
+        # Không cấu hình thì không công bố gì. Trả 0 chứ không rơi về phạm vi
+        # người gọi và cũng không rơi về toàn bộ kho.
+        return {"labels_count": 0, "total_samples": 0,
+                "contributors_count": 0, "regions_count": 0}
+    metas = list_classes(tenant_id=cong_bo)
+    samples = list_samples(cong_bo)
 
     contributors = {
         (s.get("user_id") or "").strip() for s in samples
@@ -371,7 +427,7 @@ def update_class(
     current_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
-        result = sync_update_class(class_ref, payload)
+        result = sync_update_class(class_ref, payload, tenant_id=require_tenant())
         return {
             "success": True,
             "message": f"Nh\u00e3n \u0111\u01b0\u1ee3c c\u1eadp nh\u1eadt th\u00e0nh c\u00f4ng: {result.get('slug', '')}",
@@ -438,7 +494,7 @@ def delete_class(
 ):
     """Soft-delete a class to Trash (restorable). Files/Drive are kept until purge."""
     try:
-        result = sync_soft_delete_class(class_ref)
+        result = sync_soft_delete_class(class_ref, tenant_id=require_tenant())
         audit.record("data.class.soft_delete", actor=current_user, request=request,
                      target_type="class", target_id=result.get("class_uid") or class_ref,
                      detail={"sample_count": result.get("sample_count")})
@@ -465,7 +521,7 @@ def restore_class_endpoint(
 ):
     """Restore a soft-deleted class from Trash."""
     try:
-        result = sync_restore_class(class_uid)
+        result = sync_restore_class(class_uid, tenant_id=require_tenant())
         return {"success": True, "message": "\u0110\u00e3 kh\u00f4i ph\u1ee5c nh\u00e3n t\u1eeb th\u00f9ng r\u00e1c.", **result}
     except CatalogSyncError as exc:
         return {"success": False, "message": f"L\u1ed7i kh\u00f4i ph\u1ee5c nh\u00e3n: {str(exc)}", "error_code": exc.error_code}
@@ -485,7 +541,7 @@ def purge_class_endpoint(
     có dòng nào trong `audit_log` để tra lại ai đã làm và lúc nào.
     """
     try:
-        result = sync_purge_class(class_uid)
+        result = sync_purge_class(class_uid, tenant_id=require_tenant())
         audit.record("data.class.purge", actor=current_user, request=request,
                      target_type="class", target_id=class_uid,
                      detail={"op_id": result.get("op_id")})

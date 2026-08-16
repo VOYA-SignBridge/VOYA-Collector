@@ -732,6 +732,74 @@ hai trong im lặng.
 - **jsdom báo `navigator.language = "en-US"`.** Test khung đa ngôn ngữ phải ghim
   giá trị đó, không thì kết quả đổi tuỳ máy chạy.
 
+## Hiện vật chia dữ liệu — nợ phát hiện trong C2b (16/08/2026)
+
+### `purpose` đang mang HAI nghĩa
+
+`write_legacy_snapshot` ghi `"purpose": "operational"` vào **mọi** bản khai nó
+tạo ra — kể cả bản ở gốc `processed/splits/` và bản theo `--by_language`. Nhưng
+trường đó đang làm hai việc khác nhau:
+
+| Nghĩa | Ai đọc | Hệ quả nếu đổi |
+|---|---|---|
+| Không gian tên hợp đồng: "đây là hiện vật vận hành, phân biệt với mốc nghiên cứu đóng băng" | `split_artifact.resolve_operational` | — |
+| Cờ tính năng: "trainer hãy đi đường `class_uid → target_idx`" | `train_tcn.py` | Đổi chữ này ở bản khai gốc sẽ **âm thầm đổi cách đánh chỉ số lớp** của các lượt legacy |
+
+Vì vậy cổng sở hữu của C2b lấy điều kiện là **có `split_id`** (tức "hiện vật vận
+hành CÓ ĐỊA CHỈ", thứ mà resolver có thể trả về cho một lượt huấn luyện), chứ
+không phải `purpose == "operational"` một mình. Đây là sai lệch có chủ ý so với
+quy tắc "phân biệt theo `purpose`", và lý do là trường `purpose` hiện chưa đủ tin
+cậy để làm điều kiện duy nhất.
+
+Không có rủi ro bỏ lọt: bản khai không có `split_id` thì `resolve_operational`
+không bao giờ trả về được nó — nó đối chiếu `split_id` trong bản khai với tên thư
+mục — nên nó không phải hiện vật mà một lượt huấn luyện tiêu thụ được.
+
+**Việc cần làm sau:** tách hai nghĩa thành hai trường, rồi mới thu điều kiện về
+đúng `purpose`. Không làm trong C2b vì nó đổi hành vi đánh chỉ số lớp của đường
+legacy — thay đổi đó cần lượt đo riêng, không phải phần phụ của một bước tenant.
+
+### Hai hiện vật vận hành KHÔNG BIẾT CHỦ — đã quyết 16/08
+
+`hoa-de-20260815-floor25` và `bang-chu-cai-20260815-floor25` được dựng trước hợp
+đồng sở hữu nên không khai `tenant_id`. Cách gọi đúng **không phải** "dữ liệu
+hỏng" mà là:
+
+```
+nội dung hợp lệ, provenance không đủ để chứng minh phạm vi tenant
+```
+
+Phân biệt này quyết định việc phải làm: một bên cần dựng lại hiện vật, một bên
+cần tra lại lịch sử tạo.
+
+| | Quyết định |
+|---|---|
+| Hai hiện vật | **GIỮ** — bằng chứng lịch sử rằng hiện vật vận hành có trước hợp đồng sở hữu |
+| Chủ sở hữu | **KHÔNG gán** — `ownership_state = unknown`, giữ nguyên |
+| Dùng lúc chạy | **KHÔNG** — từ C2c resolver từ chối, fail-closed |
+| Xoá | **Chưa** |
+
+**Vì sao không dựng lại chúng với một tenant nào đó:** làm vậy chính là điều
+C2b vừa cấm —
+
+```
+owner unknown  ->  con người đoán owner  ->  thành owned
+```
+
+Khác duy nhất là người tự cấp quyền sẽ là chúng ta thay vì job đang gọi. Về
+provenance thì vẫn không hợp lệ.
+
+**Backfill có chứng cứ vẫn để ngỏ.** Nếu sau này tìm được nguồn gốc đáng tin —
+manifest cũ, nhật ký tạo split, bản ghi job, lệnh đã chạy, hiện vật đo đạc — thì
+lúc đó mới làm một lượt chuyển quyền có ghi vết. Không chứng cứ thì không
+backfill.
+
+**`test_api_operational_contract.py` giờ tự dựng hiện vật của nó**
+(`test-owned-operational-a`, chủ tường minh, dọn sau khi chạy) thay vì mượn
+`hoa-de-…`. Chiều phụ thuộc cũ mới là vấn đề thật: bộ ca vay một hiện vật lịch
+sử, rồi khi hợp đồng bảo mật siết lại, 19 ca đỏ trở thành sức ép phải NỚI hợp
+đồng. Đầu vào của bộ ca phải do chính nó sở hữu.
+
 ### Còn treo sau đợt này
 
 - **SSO** — thiết kế đầy đủ ở `docs/01-architecture/SSO_OIDC_DESIGN.md`, **chưa hiện

@@ -88,7 +88,7 @@ export default function AdminBillingPage() {
       setLoadError("");
     } catch (err) {
       if (mine !== run.current) return;
-      setLoadError(friendlyError(err, "Không tải được bảng giá và số liệu sử dụng."));
+      setLoadError(friendlyError(err, t("Không tải được bảng giá và số liệu sử dụng.")));
     } finally {
       if (mine === run.current) setLoading(false);
     }
@@ -112,7 +112,7 @@ export default function AdminBillingPage() {
         } catch (err) {
           if (!isSudoRequired(err)) throw err;
           if (!(await ensureSudo(why))) {
-            toast.error("Đã huỷ: thao tác này cần xác thực lại mật khẩu.");
+            toast.error(t("Đã huỷ: thao tác này cần xác thực lại mật khẩu."));
             return;
           }
           await action();
@@ -120,7 +120,7 @@ export default function AdminBillingPage() {
         toast.success(ok);
         await load();
       } catch (err) {
-        toast.error(friendlyError(err, "Thao tác không thành công."));
+        toast.error(friendlyError(err, t("Thao tác không thành công.")));
       } finally {
         setBusy(null);
       }
@@ -193,7 +193,7 @@ export default function AdminBillingPage() {
                       `plan-${plan.plan_code}`,
                       t('Sửa hạn mức của gói "{ten}"', { ten: plan.display_name }),
                       () => updatePlan(plan.plan_code, changes),
-                      "Đã cập nhật gói",
+                      t("Đã cập nhật gói"),
                     ).then(() => setEditing(null))
                   }
                 />
@@ -253,7 +253,7 @@ export default function AdminBillingPage() {
                             `tenant-${row.tenant_id}`,
                             t("Đổi gói của \"{display_name}\"", { display_name: row.display_name }),
                             () => changeTenantPlan(row.tenant_id, code),
-                            "Đã đổi gói",
+                            t("Đã đổi gói"),
                           )
                         }
                         onStatus={(status, reason) =>
@@ -261,7 +261,7 @@ export default function AdminBillingPage() {
                             `tenant-${row.tenant_id}`,
                             t("Đổi trạng thái của \"{display_name}\"", { display_name: row.display_name }),
                             () => changeTenantStatus(row.tenant_id, status, reason),
-                            "Đã đổi trạng thái",
+                            t("Đã đổi trạng thái"),
                           )
                         }
                       />
@@ -371,7 +371,7 @@ function PlanCard({
                     setDraft((d) => ({ ...d, [f.key as string]: e.target.value }))
                   }
                   inputMode="numeric"
-                  placeholder={f.nullable ? "không giới hạn" : "0"}
+                  placeholder={f.nullable ? t("không giới hạn") : "0"}
                   className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-sm tabular-nums"
                 />
               </label>

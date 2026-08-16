@@ -106,7 +106,7 @@ function ConsentSection() {
       setLoadError("");
     } catch (err) {
       if (mine !== run.current) return;
-      setLoadError(friendlyError(err, "Không đọc được danh sách chấp thuận của bạn."));
+      setLoadError(friendlyError(err, t("Không đọc được danh sách chấp thuận của bạn.")));
     }
   }, []);
 
@@ -126,7 +126,7 @@ function ConsentSection() {
         setRead((prev) => ({ ...prev, [c.kind]: false }));
         await load();
       } catch (err) {
-        toast.error(friendlyError(err, "Không ghi nhận được đồng ý của bạn."));
+        toast.error(friendlyError(err, t("Không ghi nhận được đồng ý của bạn.")));
         // Văn bản đã đổi trong lúc trang đang mở. Bỏ tích và nạp lại: giữ ô
         // tích là ghi nhận sự đồng ý với thứ người dùng chưa đọc.
         setRead((prev) => ({ ...prev, [c.kind]: false }));
@@ -147,7 +147,7 @@ function ConsentSection() {
         setConfirming(null);
         await load();
       } catch (err) {
-        toast.error(friendlyError(err, "Không rút được đồng ý."));
+        toast.error(friendlyError(err, t("Không rút được đồng ý.")));
       } finally {
         setBusy(null);
       }
@@ -407,7 +407,7 @@ function UsernameSection() {
       // `changed: false` nghĩa là tên mới trùng tên cũ — không phải lỗi, nhưng
       // cũng không có gì để khoe. Nói đúng chuyện đã xảy ra.
       if (!result.changed) {
-        toast.success("Tên không thay đổi.");
+        toast.success(t("Tên không thay đổi."));
         return;
       }
       setRows(result.rows);
@@ -417,7 +417,7 @@ function UsernameSection() {
       // cho tới lần tải trang sau, và tưởng việc đổi tên thất bại.
       notifyAuthChange();
     } catch (err) {
-      setError(friendlyError(err, "Không đổi được tên tài khoản."));
+      setError(friendlyError(err, t("Không đổi được tên tài khoản.")));
     } finally {
       setBusy(false);
     }

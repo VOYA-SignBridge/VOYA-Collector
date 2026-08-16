@@ -297,10 +297,28 @@ class TestRlsDdl:
         table with no `tenant_id` cannot be created, so a name appearing only
         in `RLS_TABLES` would fail at boot and be swallowed into a log warning
         by `ensure_tables`.
+
+        Ngoại lệ DUY NHẤT: `tenants`, thêm 15/08/2026.
+        ------------------------------------------------
+        Hai danh sách gần bằng nhau nhưng KHÔNG đồng nghĩa:
+
+            TENANT_SCOPED_TABLES  bảng mang khoá ngoại `tenant_id` -> `tenants`
+            RLS_TABLES            bảng mang chính sách cách ly
+
+        `tenants` là bảng GỐC. Nó mang chính sách (vị từ chuẩn đọc ra thành
+        "chỉ thấy dòng của chính mình"), nhưng nó không thể mang khoá ngoại
+        tới chính nó — và `TENANT_SCOPED_TABLES` điều khiển `TENANT_FK_LOOP_SQL`,
+        vòng lặp gắn đúng khoá ngoại ấy cho mọi tên trong danh sách. Đưa
+        `tenants` vào đó là sinh ra một khoá ngoại tự trỏ về mình.
+
+        Nên bất biến đúng là ĐẲNG THỨC KÈM ĐÚNG MỘT PHẦN TỬ, không phải bao
+        hàm: một tên chỉ có ở `RLS_TABLES` mà không phải `tenants` vẫn phải làm
+        ca này đỏ, vì chính sách trên bảng không có `tenant_id` sẽ hỏng lúc
+        khởi động rồi bị `ensure_tables` nuốt vào một dòng cảnh báo.
         """
         from app.storage.metadata_db import TENANT_SCOPED_TABLES
 
-        assert set(rls.RLS_TABLES) == set(TENANT_SCOPED_TABLES)
+        assert set(rls.RLS_TABLES) == set(TENANT_SCOPED_TABLES) | {"tenants"}
 
     def test_covers_every_declared_table(self):
         ddl = " ".join(rls.rls_ddl())

@@ -207,7 +207,7 @@ axiosClient.interceptors.response.use(
       window.dispatchEvent(new CustomEvent("voya:blocked", { detail: data }));
     }
     // Admin force-logged-out this user → surface the reason before we redirect.
-    if (status === 401 && typeof data?.detail === "string" && data.detail.includes("quản trị viên")) {
+    if (status === 401 && typeof data?.detail === "string" && data.detail.includes(tr("quản trị viên"))) {
       window.dispatchEvent(new CustomEvent("voya:forcelogout", { detail: { message: data.detail } }));
     }
 

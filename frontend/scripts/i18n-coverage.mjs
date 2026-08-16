@@ -120,12 +120,19 @@ function unescapeLiteral(raw) {
 
 function translatedKeys(src) {
   const keys = new Set();
+  const ranges = [];
   // `t(...)` trong component và `tr(...)` ngoài React — xem i18n/index.tsx.
   const re = /\b(?:t|tr)\(\s*(["'])((?:\\.|(?!\1)[^\\])*)\1/g;
   let m;
   while ((m = re.exec(src))) keys.add(unescapeLiteral(m[2]));
+  // `<Trans k="…" vars={…}/>`. Khoá của nó cũng phải ghi KHOẢNG, không chỉ ghi
+  // chữ: luật 4 (`= "…"`) khớp đúng vào literal này, nên nếu không có khoảng
+  // che thì mọi câu dùng `<Trans>` đều bị báo là còn trần.
   const trans = /\bk=\{?\s*(["'])((?:\\.|(?!\1)[^\\])*)\1/g;
-  while ((m = trans.exec(src))) keys.add(unescapeLiteral(m[2]));
+  while ((m = trans.exec(src))) {
+    keys.add(unescapeLiteral(m[2]));
+    ranges.push([m.index, m.index + m[0].length]);
+  }
 
   // Khoá KHÔNG đứng ngay sau `t(`. Chuyện thường gặp và hoàn toàn đúng:
   //
@@ -137,6 +144,8 @@ function translatedKeys(src) {
   //
   // Nên: quét cân bằng ngoặc, mọi literal nằm TRONG một lời gọi `t(`/`tr(` đều
   // tính là đã dịch.
+  // Đồng thời ghi lại KHOẢNG ký tự của mỗi lời gọi. Chỉ có tập khoá thôi thì
+  // chưa đủ: xem chú thích của `ranges` ở chỗ dùng dưới kia.
   for (const call of src.matchAll(/\b(?:t|tr)\(/g)) {
     let i = call.index + call[0].length;
     let depth = 1;
@@ -156,8 +165,9 @@ function translatedKeys(src) {
       }
       i++;
     }
+    ranges.push([call.index, i]);
   }
-  return keys;
+  return { keys, ranges };
 }
 
 /**
@@ -212,10 +222,46 @@ function stripInterp(body) {
  *   `table` — chuỗi trong bảng/hằng, marker `@i18n-key-table` che được;
  *   `jsx`   — chữ hiển thị thẳng trong JSX, KHÔNG bao giờ được che.
  */
-function bareStrings(src, skipLines = new Set()) {
+function bareStrings(src, skipLines = new Set(), wrapped = []) {
   const table = [];
   const jsx = [];
-  const seen = new Set();
+
+  // Một literal được tha CHỈ KHI nó nằm bên trong một lời gọi `t(`/`tr(`, xét
+  // theo VỊ TRÍ. Bản trước tha theo VĂN BẢN: chuỗi nào trùng chữ với một khoá
+  // đã bọc ở đâu đó trong cùng tệp thì được bỏ qua. Nghe thì hợp lý, nhưng nó
+  // xoá đúng nhóm lỗi hay gặp nhất:
+  //
+  //     title={t("Đăng nhập")}                    ← dòng 190, đã dịch
+  //     {loading ? t("Đang đăng nhập...") : "Đăng nhập"}   ← dòng 256, CÒN TRẦN
+  //
+  // Luật 6 bắt được dòng 256, rồi bộ lọc ném nó đi vì dòng 190 có cùng chữ.
+  // Sáu nút hành động chính của hệ thống — Đăng nhập, Tạo tài khoản, Đặt lại
+  // mật khẩu, Chặn IP, Khóa tài khoản, Xóa — nấp trong khe này và vẫn hiện chữ
+  // Việt giữa màn hình tiếng Anh, trong khi bảng số báo 100,0%.
+  //
+  // Gộp khoảng chồng nhau trước khi tìm nhị phân. `t(msg, { n: t("…") })` sinh
+  // ra một khoảng nằm lọt trong khoảng khác; tìm nhị phân trên tập chồng nhau
+  // có thể rơi vào khoảng con rồi kết luận "ngoài" cho một vị trí thật ra nằm
+  // trong khoảng cha.
+  const merged = [];
+  for (const [a, b] of [...wrapped].sort((x, y) => x[0] - y[0])) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+
+  const inWrapped = (at) => {
+    if (at === undefined) return false;
+    let lo = 0, hi = merged.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const [a, b] = merged[mid];
+      if (at < a) hi = mid - 1;
+      else if (at >= b) lo = mid + 1;
+      else return true;
+    }
+    return false;
+  };
 
   // Bảng tra chỉ số → số dòng, dựng một lần. `stripComments` giữ nguyên độ dài
   // nên chỉ số ở đây trỏ đúng vào tệp gốc.
@@ -231,15 +277,37 @@ function bareStrings(src, skipLines = new Set()) {
     return lo + 1;
   };
 
-  const make = (bucket) => (text, at) => {
+  // Nhóm được chọn theo LUẬT MẠNH NHẤT đã khớp, không theo luật khớp TRƯỚC.
+  //
+  // Bản trước dùng một tập `seen` chung cho cả hai nhóm, nên luật nào chạy sớm
+  // hơn thì giành được chuỗi. Điều đó vô hiệu hoá ranh giới ghi ở chú thích của
+  // KEY_TABLE ("marker không bao giờ che chữ JSX"), theo một đường vòng:
+  //
+  //     {busy ? t("Đang khóa…") : "Khóa tài khoản"}
+  //
+  // Luật 3 tìm giá trị của object literal bằng mẫu `: "…"` — và dấu hai chấm
+  // của toán tử ba ngôi trông y hệt. Luật 3 chạy trước luật 6, nên chuỗi rơi
+  // vào nhóm `table`; tệp có `@i18n-key-table` nên cả nhóm `table` bị bỏ; chuỗi
+  // biến mất. Nút "Khóa tài khoản", "Chặn IP", "Xóa" nằm đúng trong khe này.
+  //
+  // Nay `jsx` luôn thắng `table`, bất kể luật nào khớp trước.
+  const bucketOf = new Map();
+  const make = (name) => (text, at) => {
     const s = text.trim();
-    if (s.length < 2 || !VIETNAMESE.test(s) || seen.has(s)) return;
+    if (s.length < 2 || !VIETNAMESE.test(s)) return;
     if (at !== undefined && skipLines.has(lineOf(at))) return;
-    seen.add(s);
-    bucket.push(s);
+    if (inWrapped(at)) return;
+    const prev = bucketOf.get(s);
+    if (prev === name || prev === "jsx") return;
+    if (prev === "table") {
+      const i = table.indexOf(s);
+      if (i >= 0) table.splice(i, 1);
+    }
+    bucketOf.set(s, name);
+    (name === "jsx" ? jsx : table).push(s);
   };
-  const pushJsx = make(jsx);
-  const push = make(table);
+  const pushJsx = make("jsx");
+  const push = make("table");
 
   // 1. Chữ nằm giữa hai thẻ JSX: >Xin chào<
   for (const m of src.matchAll(/>([^<>{}\n][^<>{}]*)</g)) pushJsx(m[1], m.index);
@@ -338,6 +406,57 @@ function bareStrings(src, skipLines = new Set()) {
     pushJsx(body.replace(/\s+/g, " "), m.index);
   }
 
+  // 8. Chuỗi làm ĐỐI SỐ của một lời gọi hàm:
+  //       useState("Tính toán…")
+  //       new Error("Dữ liệu máy chủ trả về không đúng định dạng.")
+  //       window.confirm("Bạn có chắc muốn hủy huấn luyện này?")
+  //       friendlyError(err, "Không đọc được thông tin tổ chức của bạn.")
+  //
+  //    Nhóm này từng vô hình HOÀN TOÀN, và nó là chỗ mù cuối cùng làm bảng số
+  //    báo 100% trong khi màn hình tiếng Anh vẫn còn chữ Việt. Không luật nào ở
+  //    trên chạm tới nó: không nằm giữa hai thẻ (luật 1, 5), không phải thuộc
+  //    tính (2), không đứng sau `:` (3) hay sau `=` (4) — vì sau `=` là tên hàm
+  //    chứ không phải dấu nháy — không đứng sau `?` (6), không phải chuỗi mẫu (7).
+  //
+  //    Phản ví dụ đã đo được ngày 15/08/2026: `api/realtime.ts` KHÔNG mang
+  //    marker nào, chứa bốn câu `throw new Error("Dữ liệu máy chủ…")`, và bộ đo
+  //    vẫn báo tệp đó sạch.
+  //
+  //    Hai nửa, vì một biểu thức chính quy không nhìn được xa hơn một dấu:
+  //      8a  neo theo TÊN HÀM  -> đối số đầu, ít nhiễu, biết được callee
+  //      8b  neo theo dấu phẩy -> đối số thứ hai trở đi, và cả phần tử mảng
+  //
+  //    8b PHẢI phân biệt đối số với phần tử mảng, và đây là chỗ bản đầu sai:
+  //    nó đẩy cả hai vào `jsx`, nên một bảng khoá viết dưới dạng MẢNG —
+  //    `PRESET_REASONS` trong `BlockIpModal`, đã khai `@i18n-key-table` và đã
+  //    dịch tử tế bằng `{t(r)}` ở chỗ dựng — bị báo là còn trần. Một công cụ
+  //    phạt đúng cách làm đúng thì người ta sẽ học cách phớt lờ bảng số của nó.
+  //
+  //    Nên dò ngược tìm dấu mở đang bao literal:
+  //        `(`  đối số lời gọi   -> `jsx`,   marker KHÔNG che được
+  //        `[`  phần tử mảng     -> `table`, marker che được
+  //        `{`  giá trị object   -> `table`, cùng nhóm với luật 3
+  const CALLEE_SKIP = /^(t|tr|console\.\w+|require|import|Symbol|BigInt)$/;
+  for (const m of src.matchAll(/([A-Za-z_$][\w$.]*)\s*\(\s*(["'])([^"'\n]{2,})\2/g)) {
+    if (CALLEE_SKIP.test(m[1])) continue;
+    pushJsx(m[3], m.index);
+  }
+  const enclosingOpener = (at) => {
+    let depth = 0;
+    for (let i = at; i >= 0; i--) {
+      const c = src[i];
+      if (c === ")" || c === "]" || c === "}") depth++;
+      else if (c === "(" || c === "[" || c === "{") {
+        if (depth === 0) return c;
+        depth--;
+      }
+    }
+    return "";
+  };
+  for (const m of src.matchAll(/,\s*(["'])([^"'\n]{2,})\1/g)) {
+    (enclosingOpener(m.index - 1) === "(" ? pushJsx : push)(m[2], m.index);
+  }
+
   return { table, jsx };
 }
 
@@ -349,23 +468,19 @@ const usedKeys = new Set();
 for (const file of files) {
   const raw = readFileSync(file, "utf-8");
   const src = stripComments(raw);
-  const done = translatedKeys(src);
+  const { keys: done, ranges } = translatedKeys(src);
   for (const k of done) usedKeys.add(k);
 
-  const { table, jsx } = bareStrings(src, ignoredLines(raw));
+  const { table, jsx } = bareStrings(src, ignoredLines(raw), ranges);
 
   // Marker chỉ áp cho nhóm `table`. Chữ JSX luôn phải tự đi qua `t()`.
   const declared = KEY_TABLE.test(raw);
   if (declared) for (const s of table) usedKeys.add(s);
 
-  // So khớp cả dạng đã cắt khoảng trắng. Khoá `" và "` (dấu cách hai đầu nằm
-  // TRONG khoá, vì bản dịch phải tự quyết khoảng trắng của mình) được bộ đo
-  // hiển thị dưới dạng đã cắt là `"và"` — nếu chỉ so nguyên văn thì một chuỗi
-  // đã dịch tử tế vẫn bị đếm là còn trần, mãi mãi.
-  const doneTrimmed = new Set([...done].map((k) => k.trim()));
-  const bare = [...(declared ? [] : table), ...jsx].filter(
-    (s) => !done.has(s) && !doneTrimmed.has(s.trim()),
-  );
+  // Việc tha cho literal nằm trong `t()` đã chuyển vào `bareStrings`, xét theo
+  // VỊ TRÍ. Ở đây không lọc theo văn bản nữa: trùng chữ với một khoá đã dịch
+  // KHÔNG phải là bằng chứng rằng chỗ này đã dịch.
+  const bare = [...(declared ? [] : table), ...jsx];
   if (bare.length) {
     perFile.push({ file: relative(ROOT, file), bare });
     bareTotal += bare.length;

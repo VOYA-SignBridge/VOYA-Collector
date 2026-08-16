@@ -108,7 +108,7 @@ export default function AdminTenantsPage() {
     try {
       setTenants(await fetchTenants(includeDeleted));
     } catch (e) {
-      toast.error(friendlyError(e, "Không tải được danh sách tổ chức"));
+      toast.error(friendlyError(e, t("Không tải được danh sách tổ chức")));
     } finally {
       setLoading(false);
     }
@@ -212,7 +212,7 @@ export default function AdminTenantsPage() {
               await createTenant(newTenant);
               setNewTenant({ tenant_id: "", display_name: "" });
               await loadTenants();
-            }, "Đã tạo tổ chức")}
+            }, t("Đã tạo tổ chức"))}
             className={`px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("success", "solid")} ${FOCUS_RING} disabled:opacity-40`}
           >
             {t("Tạo")}
@@ -293,7 +293,7 @@ export default function AdminTenantsPage() {
                       onChange={(e) => run(`role-${m.user_id}`, async () => {
                         await updateMemberRole(current.tenant_id, m.user_id, parseRole(e.target.value));
                         await loadDetail(current.tenant_id);
-                      }, "Đã đổi vai")}
+                      }, t("Đã đổi vai"))}
                       className="ml-auto px-2 py-1 rounded-md border border-slate-200 text-xs"
                     >
                       {/* Mục rỗng đứng ĐẦU, và nó là một lựa chọn thật: chọn nó
@@ -307,7 +307,7 @@ export default function AdminTenantsPage() {
                         await removeMember(current.tenant_id, m.user_id);
                         await loadDetail(current.tenant_id);
                         await loadTenants();
-                      }, "Đã gỡ thành viên")}
+                      }, t("Đã gỡ thành viên"))}
                       className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border ${toneClasses("danger", "outline")} ${FOCUS_RING} disabled:opacity-50`}
                     >
                       <TrashIcon className="w-3.5 h-3.5" aria-hidden="true" />
@@ -339,7 +339,7 @@ export default function AdminTenantsPage() {
                   setAddForm({ user_id: "", role: null });
                   await loadDetail(current.tenant_id);
                   await loadTenants();
-                }, "Đã gắn tài khoản vào tổ chức")}
+                }, t("Đã gắn tài khoản vào tổ chức"))}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("success", "solid")} ${FOCUS_RING} disabled:opacity-40`}
               >
                 {t("Gắn tài khoản")}
@@ -355,7 +355,7 @@ export default function AdminTenantsPage() {
                   setAddForm({ user_id: "", role: null });
                   await loadDetail(current.tenant_id);
                   await loadTenants();
-                }, "Đã chuyển tổ chức nhà của tài khoản")}
+                }, t("Đã chuyển tổ chức nhà của tài khoản"))}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("neutral", "outline")} ${FOCUS_RING} disabled:opacity-40`}
               >
                 {t("Chuyển tổ chức nhà về đây")}
@@ -401,12 +401,12 @@ export default function AdminTenantsPage() {
                     onClick={() => {
                       void navigator.clipboard
                         .writeText(freshInvite.acceptUrl)
-                        .then(() => toast.success("Đã sao chép đường liên kết mời"))
+                        .then(() => toast.success(t("Đã sao chép đường liên kết mời")))
                         // Chép được hay không phụ thuộc quyền của trình duyệt và
                         // ngữ cảnh bảo mật. Hỏng thì nói ra — mã vẫn nằm trên màn
                         // hình để chép tay, nhưng một nút im lặng không làm gì cả
                         // sẽ khiến người dùng tưởng mình đã có nó trong bộ nhớ tạm.
-                        .catch(() => toast.error("Trình duyệt không cho sao chép. Hãy chọn và chép thủ công."));
+                        .catch(() => toast.error(t("Trình duyệt không cho sao chép. Hãy chọn và chép thủ công.")));
                     }}
                     className={`px-2 py-1 rounded-md text-xs font-medium border ${toneClasses("success", "outline")} ${FOCUS_RING}`}
                   >
@@ -436,7 +436,7 @@ export default function AdminTenantsPage() {
                       onClick={() => run(`rv-${iv.invitation_id}`, async () => {
                         await revokeInvitation(current.tenant_id, iv.invitation_id);
                         await loadDetail(current.tenant_id);
-                      }, "Đã thu hồi lời mời")}
+                      }, t("Đã thu hồi lời mời"))}
                       className="px-2 py-1 rounded-md text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 disabled:opacity-50"
                     >
                       {t("Thu hồi")}
@@ -473,7 +473,7 @@ export default function AdminTenantsPage() {
                   });
                   setInviteForm({ email: "", role: null });
                   await loadDetail(current.tenant_id);
-                }, "Đã tạo lời mời")}
+                }, t("Đã tạo lời mời"))}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("success", "solid")} ${FOCUS_RING} disabled:opacity-40`}
               >
                 {t("Mời")}
@@ -562,7 +562,7 @@ export default function AdminTenantsPage() {
                     // tiếp diễn (xuất dữ liệu, rồi xoá vĩnh viễn).
                     setIncludeDeleted(true);
                     await loadDetail(current.tenant_id);
-                  }, "Đã xoá mềm. Dữ liệu vẫn còn nguyên.")}
+                  }, t("Đã xoá mềm. Dữ liệu vẫn còn nguyên."))}
                   className={`px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("danger", "outline")} ${FOCUS_RING} disabled:opacity-50`}
                 >
                   <TrashIcon className="w-4 h-4 inline -mt-0.5 mr-1" aria-hidden="true" />
@@ -613,7 +613,7 @@ export default function AdminTenantsPage() {
                         setSelected(null);
                         setPurgeConfirm("");
                         await loadTenants();
-                      }, "Đã xoá vĩnh viễn tổ chức")}
+                      }, t("Đã xoá vĩnh viễn tổ chức"))}
                       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("danger", "solid")} ${FOCUS_RING} disabled:opacity-40`}
                     >
                       <TrashIcon className="w-4 h-4" aria-hidden="true" />

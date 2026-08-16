@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, require_tenant_editor
 from app.storage.postgres_connection import connect_postgres
 from psycopg2.extras import RealDictCursor
 from app.sync_tasks import download_missing_files_to_local
@@ -384,15 +384,61 @@ def get_audit_log(
 
 
 @router.get("/data-report")
-def get_data_report(current_user: Dict[str, Any] = Depends(require_admin)):
+def get_data_report(current_user: Dict[str, Any] = Depends(require_tenant_editor)):
     """Dataset dashboard: totals, per-label / per-region / per-source breakdowns,
-    top contributors, and the most recent samples."""
+    top contributors, and the most recent samples.
+
+    CỔNG PHẢI KHỚP PHÂN LOẠI — sửa 16/08/2026
+    =========================================
+    Endpoint này được phân loại TENANT_ADMIN và dữ liệu của nó đã thu về phạm vi
+    tenant người gọi. Nhưng cổng vẫn là `require_admin`, mà cổng ấy kiểm cờ
+    `users.is_admin` — tức `platform_administrator`
+    (docs/03-security/AUTHORIZATION.md §247). Ghép lại thành một endpoint không
+    phục vụ đúng ai cả:
+
+        quản trị TENANT   -> 403, dù đây là bảng điều khiển của chính tổ chức họ
+        quản trị NỀN TẢNG -> qua, nhưng chỉ thấy tenant NHÀ của mình
+
+    Ba thứ phải nhất quán, và trước bản vá này chúng lệch nhau:
+
+        chủ thể   quyền   phạm vi   ngữ nghĩa endpoint
+
+    `require_tenant_editor` là bậc quyền đúng: nó cấp theo VAI TRONG TENANT NHÀ
+    (`tenant_members.role`), và vẫn cho quản trị nền tảng qua. Không endpoint
+    nào ở bậc này nhận tenant từ người gọi, nên không có gì để giả mạo.
+
+    Nếu sau này cần một bảng điều khiển TOÀN NỀN TẢNG thì đó là endpoint riêng
+    với một quyền hệ thống tường minh — không nới cổng này ra.
+    """
     from collections import Counter
     from app.dataset_manager import list_classes
     from app.dataset_samples import list_samples
+    from app.tenant_context import require_tenant
 
-    metas = list_classes()
-    samples = list_samples()
+    # PHÂN LOẠI (16/08/2026): TENANT_ADMIN + DISPLAY/AGGREGATION -> theo phạm vi.
+    #
+    # `require_admin` chỉ kiểm cờ boolean `is_admin`, không phải một quyền có
+    # phạm vi. Nghĩa là ở cổng này hệ thống KHÔNG phân biệt được:
+    #
+    #     quản trị viên CỦA MỘT TENANT   vs   người vận hành NỀN TẢNG
+    #
+    # Bản trước đọc toàn bộ kho, nên bất kỳ ai mang cờ ấy đều thấy được tổng số
+    # lớp/mẫu, phân rã theo vùng/nguồn, và DANH SÁCH NGƯỜI ĐÓNG GÓP của mọi tổ
+    # chức — cùng loại rò đã gỡ ở ô tìm kiếm người đóng góp.
+    #
+    # Hai lý do chọn phạm vi tenant thay vì giữ toàn cục:
+    #   1. `is_admin` là quyền cao TRONG tenant, không phải quyền vượt ranh giới
+    #      tenant. Quyền hành động lớn hơn không có nghĩa phạm vi rộng hơn.
+    #   2. Endpoint anh em ngay trên (`/admin/audit`) ĐÃ theo phạm vi và nói
+    #      thẳng điều đó trong phản hồi (`scope`, `excludes_platform_rows`). Để
+    #      hai endpoint cạnh nhau trả lời hai kiểu là chỗ để hiểu nhầm.
+    #
+    # Nếu về sau cần bảng điều khiển TOÀN NỀN TẢNG thì đó là một endpoint RIÊNG
+    # với một quyền hệ thống tường minh, không phải nới endpoint này ra. Không
+    # tạo ngoại lệ hệ thống chỉ vì tệp có tên `admin.py`.
+    scope = require_tenant()
+    metas = list_classes(tenant_id=scope)
+    samples = list_samples(scope)
 
     label_c: Counter = Counter()
     region_c: Counter = Counter()

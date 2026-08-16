@@ -56,7 +56,7 @@ export default function TrialGate({ children }: { children: ReactNode }) {
       setState(await fetchTrialStatus());
       setError("");
     } catch (err) {
-      setError(friendlyError(err, "Không đọc được hạn mức dùng thử."));
+      setError(friendlyError(err, t("Không đọc được hạn mức dùng thử.")));
     } finally {
       setChecking(false);
     }
@@ -98,7 +98,7 @@ export default function TrialGate({ children }: { children: ReactNode }) {
     try {
       setState(await startTrial());
     } catch (err) {
-      setError(friendlyError(err, "Không xin được lượt dùng thử. Vui lòng thử lại."));
+      setError(friendlyError(err, t("Không xin được lượt dùng thử. Vui lòng thử lại.")));
     } finally {
       setBusy(false);
     }

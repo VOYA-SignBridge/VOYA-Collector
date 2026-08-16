@@ -506,10 +506,36 @@ def _ensure_labels_file():
                 writer.writeheader()
 
 
-def load_labels() -> List[Dict[str, str]]:
+def _load_all_labels_unscoped() -> List[Dict[str, str]]:
+    """MỌI lớp của mọi tenant. Vượt qua ranh giới cách ly — dùng đúng chỗ.
+
+    Xem chú thích dài ở `dataset_samples._load_all_samples_unscoped()`: đây là
+    nửa còn lại của cùng một lỗ, đo được ngày 15/08/2026. Đường đọc lớp không đi
+    qua PostgreSQL nên RLS không bảo vệ gì; `labels.csv` có cột `tenant_id` mà
+    không đường nào hỏi tới.
+
+    Chỉ đường ĐỒNG BỘ / BẢO TRÌ được gọi. Danh sách được cưỡng chế bằng phép
+    kiểm kiến trúc, không bằng quy ước.
+    """
     _ensure_labels_file()
     with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+def load_labels(tenant_id: Optional[str] = None) -> List[Dict[str, str]]:
+    """Hàng lớp MÀ TENANT NÀY ĐƯỢC THẤY. `tenant_id` bắt buộc.
+
+    `None` ném lỗi chứ không rơi về toàn cục, và cũng không rơi về `default`.
+    Xem `dataset_samples.list_samples()` về vì sao không có đường lùi.
+    """
+    from app.dataset_samples import TenantScopeRequired
+
+    if not (tenant_id or "").strip():
+        raise TenantScopeRequired(
+            "load_labels() can tenant_id. Duong bao tri doc toan bo kho phai "
+            "goi _load_all_labels_unscoped() — ten do la co y.")
+    scope = normalize_tenant_id(tenant_id)
+    return [r for r in _load_all_labels_unscoped() if tenant_id_of(r) == scope]
 
 
 def find_existing(language: str, dialect: str, slug: str) -> Optional[Dict[str, str]]:
@@ -741,7 +767,7 @@ def register_class(
     dialect: str,
     is_common_global: bool = False,
     is_common_language: bool = False,
-    region: str = REGION_UNCLASSIFIED,
+    region: str | None = None,
 ) -> ClassMetadata:
     """Register or fetch existing class with TOCTOU-safe locking.
 
@@ -774,31 +800,98 @@ def register_class(
     with lock:
         # 1. CHECK — read fresh state from disk while holding lock
         rows = _load_labels_locked()
+
+        # `region=None` (KHÔNG nói ra) khác `region='unclassified'` (nói rõ).
+        #
+        # Phân biệt này sinh ra từ một hồi quy đã lên sản xuất ngày 15/08/2026.
+        # Khi `region` bước vào phép tìm, `unclassified` trở thành một giá trị
+        # CỤ THỂ phải khớp — nhưng mọi đường thu mẫu (`upload.py` video và
+        # camera, `processing/pipeline.py`) gọi hàm này mà không truyền vùng,
+        # nên chúng mặc nhiên đi tìm `region='unclassified'`.
+        #
+        # Sản xuất có 60/60 nhãn mang `region='nam'`. Phép tìm không khớp cái
+        # nào, và hàm đi thẳng xuống nhánh TẠO. Đo được: thu một mẫu cho nhãn
+        # `tom` đã tồn tại thì sinh ra lớp `tom` thứ hai với
+        # `region='unclassified'`, mẫu rơi vào lớp ma đó. Im lặng, API trả 200,
+        # và khoá duy nhất năm cột KHÔNG chặn vì hai vùng là hai lớp hợp lệ.
+        #
+        # Nên: không nói ra vùng nghĩa là "nhãn nào cũng được, miễn không mơ
+        # hồ" — chứ không phải "vùng phải là unclassified".
+        region_given = region is not None
         region_key = normalize_region(region)
-        for r in rows:
-            if (
-                r.get("language") == language_key
-                and r.get("dialect") == dialect_key
-                and r.get("slug") == slug
-                # `region` phải nằm TRONG phép so, không đứng ngoài.
-                #
-                # Thiếu nó thì phép tìm này dùng khoá (slug, language, dialect)
-                # trong khi cơ sở dữ liệu định danh lớp bằng (…, region) — hai
-                # định nghĩa khác nhau về "lớp nào". Hệ quả đo được: tạo
-                # `ăn|pho-thong|bac` rồi tạo `ăn|pho-thong|nam` thì lần thứ hai
-                # KHÔNG tạo gì cả, nó trả về lớp `bac` — cùng `class_uid`, cùng
-                # `region='bac'`. Người dùng tưởng đã có biến thể miền Nam, và
-                # mọi mẫu họ thu sau đó rơi vào lớp miền Bắc.
-                #
-                # Im lặng hoàn toàn: không lỗi, không cảnh báo, API trả 200 kèm
-                # một lớp trông hợp lệ. Với 483 từ có biến thể miền trong từ
-                # điển quốc gia, đây là đường nhập QIPEDC gộp sạch chúng lại.
-                and normalize_region(r.get("region")) == region_key
-            ):
-                # Class already exists — return it
-                meta = _build_meta_from_row(r)
-                # Release lock before triggering sync
-                break
+
+        cung_nhan = [
+            r for r in rows
+            if r.get("language") == language_key
+            and r.get("dialect") == dialect_key
+            and r.get("slug") == slug
+        ]
+        if region_given:
+            # Nói rõ vùng nào thì so khớp CHÍNH XÁC vùng ấy, không nới.
+            khop = [r for r in cung_nhan
+                    if normalize_region(r.get("region")) == region_key]
+        else:
+            # Không nói ra vùng: KHÔNG so khớp chính xác trước.
+            #
+            # Bản đầu vẫn lọc theo `region_key` (= `unclassified` khi bỏ trống)
+            # rồi mới xét mơ hồ nếu không khớp gì. Nghe hợp lý và SAI: khi một
+            # trong các biến thể tình cờ LÀ `unclassified`, phép lọc khớp ngay
+            # và nhánh kiểm mơ hồ không bao giờ chạy — hệ thống lặng lẽ chọn
+            # bản `unclassified` thay vì từ chối.
+            #
+            # Bộ kiểm không bắt được vì nó dựng `bac` + `nam`; smoke sau triển
+            # khai 15/08 bắt được, vì nó dựng đúng tổ hợp `nam` + `unclassified`
+            # do chính bước trước sinh ra. Bài học: hai biến thể "khác vùng"
+            # phải bao gồm cả trường hợp một trong hai là giá trị MẶC ĐỊNH.
+            khop = cung_nhan
+            if len(cung_nhan) > 1:
+                # Fail-closed, và đây đúng là chỗ phải đóng. Từ điển quốc gia có
+                # 483 từ mang biến thể miền; khi `ăn|bac` và `ăn|nam` cùng tồn
+                # tại thì một yêu cầu chỉ nói "ăn" là MƠ HỒ. Đoán một trong hai
+                # là ghi dữ liệu vào lớp sai — hỏng nặng hơn hẳn việc từ chối.
+                co_vung = ", ".join(sorted(
+                    normalize_region(r.get("region")) for r in cung_nhan))
+                raise ValueError(
+                    f"Nhãn '{slug}' ({language_key}/{dialect_key}) có nhiều biến "
+                    f"thể vùng: {co_vung}. Phải nói rõ vùng nào, hoặc gọi bằng "
+                    f"class_uid.")
+            # Đúng một biến thể: nhãn đã có, người gọi chỉ không nhắc tới vùng.
+            # Trả về lớp đang có thay vì đẻ thêm một bản sao `unclassified`.
+            #
+            # ĐÂY LÀ ĐƯỜNG TƯƠNG THÍCH CŨ, KHÔNG PHẢI CÁCH CHỌN LỚP.
+            # ---------------------------------------------------------------
+            # Nhánh này tồn tại để cứu một thế giới mà mỗi nhãn chỉ có ĐÚNG MỘT
+            # biến thể đang tồn tại — tức là sản xuất hôm nay, 60 nhãn đều
+            # `region='nam'`, và các client cũ gửi lên nhãn dạng chuỗi. Nó
+            # KHÔNG phải hợp đồng lâu dài.
+            #
+            # Cách đúng để gắn mẫu vào một lớp ĐÃ TỒN TẠI là `class_uid`. Ngay
+            # khi `ăn|bac` và `ăn|nam` cùng có mặt, `upload("ăn")` PHẢI thất
+            # bại — hệ thống không được đoán — và nhánh trên sẽ ném lỗi. Lúc đó
+            # đường đi đúng là: giao diện chọn lớp cụ thể → `class_uid` →
+            # attach vào đúng lớp ấy. Không phải label + dialect + region rồi
+            # tìm lại lớp.
+            #
+            # Viết dài dòng ở đây vì một lý do cụ thể: nhánh này TIỆN, và cái
+            # tiện thì được sao chép. Nếu không nói rõ nó là đường tạm, vài
+            # tháng nữa sẽ có API mới dựng quanh nó, và `class_uid` sẽ không
+            # bao giờ thành định danh thật ở phía GHI.
+
+        # `region` nằm TRONG phép so ở trên, không đứng ngoài.
+        #
+        # Thiếu nó thì phép tìm dùng khoá (slug, language, dialect) trong khi cơ
+        # sở dữ liệu định danh lớp bằng (…, region) — hai định nghĩa khác nhau
+        # về "lớp nào". Hệ quả đo được: tạo `ăn|pho-thong|bac` rồi tạo
+        # `ăn|pho-thong|nam` thì lần thứ hai KHÔNG tạo gì cả, nó trả về lớp
+        # `bac` — cùng `class_uid`, cùng `region='bac'`. Người dùng tưởng đã có
+        # biến thể miền Nam, và mọi mẫu thu sau đó rơi vào lớp miền Bắc.
+        #
+        # Im lặng hoàn toàn: không lỗi, không cảnh báo, API trả 200 kèm một lớp
+        # trông hợp lệ. Với 483 từ có biến thể miền trong từ điển quốc gia, đây
+        # là đường nhập QIPEDC gộp sạch chúng lại.
+        if khop:
+            # Class already exists — return it
+            meta = _build_meta_from_row(khop[0])
         else:
             # 2. ALLOCATE — compute next class_idx safely inside lock
             indices = _collect_indices(rows)
@@ -884,9 +977,16 @@ def register_class(
 
 
 def list_classes(
-    language: Optional[str] = None, dialect: Optional[str] = None
+    language: Optional[str] = None, dialect: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> List[ClassMetadata]:
-    rows = load_labels()
+    """Lớp MÀ TENANT NÀY ĐƯỢC THẤY. `tenant_id` bắt buộc — xem `load_labels()`.
+
+    `tenant_id` đứng SAU hai tham số lọc cũ để không đổi thứ tự vị trí của
+    caller hiện có; nhưng nó không có mặc định dùng được, nên caller nào quên
+    truyền sẽ hỏng ồn ào chứ không lặng lẽ đọc toàn kho.
+    """
+    rows = load_labels(tenant_id)
     out: List[ClassMetadata] = []
     for r in rows:
         if language and r["language"] != language:
@@ -951,7 +1051,7 @@ def get_or_register_class(
     dialect: str = "",
     is_common_global: bool = False,
     is_common_language: bool = False,
-    region: str = REGION_UNCLASSIFIED,
+    region: str | None = None,
 ) -> ClassMetadata:
     """Convenience wrapper used by pipelines & routes.
     If class exists returns metadata, else registers.

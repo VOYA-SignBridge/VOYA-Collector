@@ -23,24 +23,38 @@ PostgreSQL cưỡng chế, không phải do lập trình viên nhớ viết `WHE
 
 ## 2. Số liệu chốt (dùng cho Chương 4)
 
+**Đo lại toàn bộ ngày 15/08/2026.** Bảng cũ (44 bảng, 13 RLS, 47.334 dòng) đã lệch
+đáng kể, và lệch theo hướng **hạ thấp** hệ thống — riêng số bảng chịu RLS đã hơn
+gấp đôi. Mọi dòng dưới đây kèm cách đo lại.
+
 | Hạng mục | Số | Nguồn kiểm chứng |
 |---|---|---|
-| Bảng CSDL | **44** | `docs/02-data/db/schema_erd.sql` |
-| Bảng có chính sách RLS | **13** | `backend/app/storage/rls.py` |
-| Điểm cuối API | **209** | đếm decorator trong `backend/app/routers/` |
-| Router nghiệp vụ | 26 | `backend/app/routers/` |
-| Mã backend | **47.334 dòng** Python (143 tệp) | `backend/app/` |
-| Mã frontend | **41.316 dòng** TS/TSX (194 tệp) | `frontend/src/` |
-| Mã kiểm thử | **26.700 dòng** (104 tệp) | `backend/tests/` |
-| Test backend | **1.696 xanh / 0 đỏ** (bản sao sản xuất) | `docs/08-testing/TESTING.md` |
-| Test backend trên CSDL dựng-từ-số-không | **1.681 xanh / 0 đỏ / 15 skip** | CI `signdb_ci` |
-| Test frontend | **363** (45 tệp) | `docs/08-testing/TESTING.md` |
-| Dịch vụ container | **13** (đủ 13 healthy) | `docker-compose.yml` |
-| Mẫu đã thu | **3.860** | `dataset/samples.csv` |
+| Bảng CSDL | **58** | `pg_class` `relkind='r'`, schema `public` |
+| Bảng bật RLS | **32** | `pg_class.relrowsecurity` |
+| Bảng bật FORCE RLS | **32 / 32 = 100%** | `pg_class.relforcerowsecurity` |
+| Chính sách RLS | **32** | `pg_policies` |
+| Bảng mang `tenant_id` | **34** | `information_schema.columns` → coverage 32/34 = 94,1% |
+| Điểm cuối API | **210** | đếm decorator trong `backend/app/routers/` |
+| Router nghiệp vụ | **26** | `backend/app/routers/` |
+| Mã backend | **59.025 dòng** Python (161 tệp) | `backend/app/` |
+| Mã frontend | **46.544 dòng** TS/TSX (217 tệp) | `frontend/src/` |
+| Mã kiểm thử | **36.099 dòng** (130 tệp) | `backend/tests/` |
+| Hàm test backend | **1.794** trong 127 tệp | đếm TĨNH `^def test_` — xem cảnh báo dưới |
+| Ca test frontend | **453** | đếm TĨNH `it(`/`test(` |
+| Dịch vụ container | **14** (14 healthy) | `docker compose ps` |
+| Mẫu đã thu | **3.860** | `dataset/samples.csv`, 0 dòng xoá mềm |
 | Lớp từ vựng | **60** | như trên |
 | Phân bố phương ngữ | bảng chữ cái 2.487 · hoa-đề 830 · common 363 · Cần Thơ 109 · spa 71 | như trên |
-| Kích thước một mẫu `.npz` | **≈ 44 KB** (60 khung × 126 chiều) | `dataset/features/` |
+| Nguồn mẫu | **camera 3.860 / 3.860 = 100%** | như trên |
+| Tệp `.npz` trên đĩa | **3.871** (146,0 MiB) | `dataset/features/` |
+| Kích thước một mẫu `.npz` | **trung vị 42,6 KiB**; p5–p95: 14,1–82,8 KiB | `MEASUREMENT_storage_efficiency.md` |
 | Phiên bản lược đồ SOT | 8 | `backend/app/sot/__init__.py` |
+
+**Cảnh báo về hai dòng test.** 1.794 và 453 là **số hàm test đếm tĩnh**, không phải
+số test đã chạy xanh. Hai con số đó khác nhau: một hàm mang `@pytest.mark.parametrize`
+sinh nhiều ca, và một hàm bị `skip` vẫn được đếm. Trước khi đưa vào quyển phải chạy
+`sh scripts/run_tests.sh` rồi chép con số **thật sự chạy** kèm số skip — viết "1.794
+test xanh" khi chưa chạy là một con số bịa.
 
 **Cảnh báo về số liệu:** cột "phân bố phương ngữ" cho thấy dữ liệu **rất lệch** —
 64% là bảng chữ cái. Đừng viết "bộ dữ liệu cân bằng"; hãy viết đúng và đưa mất cân

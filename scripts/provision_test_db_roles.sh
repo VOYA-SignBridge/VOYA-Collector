@@ -48,18 +48,28 @@ read_env() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
 
 OWNER_PW=$(read_env VOYA_TEST_OWNER_PASSWORD)
 APP_PW=$(read_env VOYA_TEST_APP_PASSWORD)
+CONTROL_PW=$(read_env VOYA_TEST_CONTROL_PASSWORD)
 
-if [ -z "$OWNER_PW" ] || [ -z "$APP_PW" ]; then
-  echo "Thieu mat khau role test trong $ENV_FILE. Them hai dong nay roi chay lai:"
+if [ -z "$OWNER_PW" ] || [ -z "$APP_PW" ] || [ -z "$CONTROL_PW" ]; then
+  echo "Thieu mat khau role test trong $ENV_FILE. Them ba dong nay roi chay lai:"
   echo
   echo "VOYA_TEST_OWNER_PASSWORD=$(openssl rand -hex 24 2>/dev/null || date +%s%N)"
   echo "VOYA_TEST_APP_PASSWORD=$(openssl rand -hex 24 2>/dev/null || date +%s%N)"
+  echo "VOYA_TEST_CONTROL_PASSWORD=$(openssl rand -hex 24 2>/dev/null || date +%s%N)"
+  exit 2
+fi
+
+# Ba mật khẩu phải KHÁC nhau. Dùng chung một bí mật thì ranh giới tin cậy giữa
+# vai ứng dụng và vai điều khiển chỉ tồn tại trên giấy — ai đọc được một cái là
+# có cái kia, và toàn bộ bộ kiểm quyền vẫn xanh.
+if [ "$APP_PW" = "$CONTROL_PW" ] || [ "$OWNER_PW" = "$CONTROL_PW" ]; then
+  echo "TU CHOI: mat khau vai dieu khien trung voi mot vai khac."
   exit 2
 fi
 
 psql_admin() { docker exec -i "$PG" psql -U admin -v ON_ERROR_STOP=1 -P pager=off "$@"; }
 
-echo "==> 1/4  hai role test (NOSUPERUSER, NOBYPASSRLS)"
+echo "==> 1/4  ba role test (NOSUPERUSER, NOBYPASSRLS)"
 psql_admin -d postgres <<SQL
 DO \$\$
 BEGIN
@@ -68,6 +78,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'voya_test_app') THEN
         CREATE ROLE voya_test_app;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'voya_test_control') THEN
+        CREATE ROLE voya_test_control;
     END IF;
 END \$\$;
 
@@ -105,6 +118,21 @@ ALTER ROLE voya_test_owner WITH LOGIN NOSUPERUSER NOBYPASSRLS CREATEDB
     NOCREATEROLE NOREPLICATION INHERIT PASSWORD '${OWNER_PW}';
 ALTER ROLE voya_test_app   WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
     NOCREATEROLE NOREPLICATION INHERIT PASSWORD '${APP_PW}';
+
+-- Vai ĐIỀU KHIỂN: thuộc tính giống hệt vai ứng dụng. Nó KHÔNG mạnh hơn ở mức
+-- vai — chỗ khác nhau duy nhất là tập GRANT trên đúng vài bảng ở bước 3.
+--
+-- Đây là điểm dễ hiểu sai nhất của thiết kế: `voya_control` không phải "vai
+-- quản trị nhỏ". Nó là một danh tính HẸP HƠN `voya_app` trên gần như mọi bảng,
+-- và rộng hơn ở đúng những bảng điều khiển đã khai báo.
+ALTER ROLE voya_test_control WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
+    NOCREATEROLE NOREPLICATION INHERIT PASSWORD '${CONTROL_PW}';
+
+-- Không vai nào được thừa hưởng quyền của vai kia. `INHERIT` ở trên chỉ nói về
+-- các vai mà nó LÀ THÀNH VIÊN; câu này bảo đảm nó không là thành viên của ai.
+REVOKE voya_test_owner FROM voya_test_control;
+REVOKE voya_test_app   FROM voya_test_control;
+REVOKE voya_test_control FROM voya_test_app;
 SQL
 
 echo "==> 2/4  mac dinh-tu-choi tren '${PROD_DB}' (mot giao dich, co khang dinh)"
@@ -136,7 +164,7 @@ SQL
 
 echo "==> 3/4  quyen tren '${TEST_DB}'"
 psql_admin -d postgres <<SQL
-GRANT CONNECT ON DATABASE ${TEST_DB} TO voya_test_owner, voya_test_app;
+GRANT CONNECT ON DATABASE ${TEST_DB} TO voya_test_owner, voya_test_app, voya_test_control;
 SQL
 
 psql_admin -d "${TEST_DB}" <<SQL
@@ -210,6 +238,33 @@ ALTER DEFAULT PRIVILEGES FOR ROLE voya_test_owner IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO voya_test_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE voya_test_owner IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO voya_test_app;
+
+-- MẶT PHẲNG ĐIỀU KHIỂN.
+--
+-- Vai điều khiển KHÔNG được cấp hàng loạt: không `ON ALL TABLES`, không
+-- `ALTER DEFAULT PRIVILEGES`. Nó chỉ chạm đúng những bảng khai báo ở
+-- `app/storage/control_plane.py`, nên một bảng mới sinh ra sau này không tự
+-- động vào tầm với của nó.
+--
+-- Danh sách dưới đây phải KHỚP khai báo Python. `test_control_plane.py` so hai
+-- bên và đỏ nếu lệch — chép tay ở hai nơi là cách chắc chắn nhất để một ngày
+-- nào đó chúng nói khác nhau.
+GRANT USAGE ON SCHEMA public TO voya_test_control;
+REVOKE CREATE ON SCHEMA public FROM voya_test_control;
+
+REVOKE ALL    ON tenant_purges FROM voya_test_control;
+GRANT  INSERT ON tenant_purges TO   voya_test_control;
+
+-- Và vai ỨNG DỤNG mất sạch quyền trên bảng điều khiển. Phải đứng SAU câu
+-- `GRANT ... ON ALL TABLES` ở trên, vì câu đó quét cả bảng này.
+REVOKE SELECT, INSERT, UPDATE, DELETE ON tenant_purges FROM voya_test_app;
+
+-- `voya_app` (vai SẢN XUẤT) cũng còn quyền trên cơ sở dữ liệu test, do lịch sử
+-- cấp phát để lại. Bộ test không dùng nó, nhưng để nguyên thì phép kiểm cấu
+-- trúc phải nới thành "vai test không có quyền" thay vì "không vai ứng dụng
+-- nào có quyền" — và một phép kiểm nới ra để hợp với hiện trạng là phép kiểm
+-- yếu đi. Quyền trên SẢN XUẤT do `app.cli.provision_db_roles` lo.
+REVOKE SELECT, INSERT, UPDATE, DELETE ON tenant_purges FROM voya_app;
 SQL
 
 echo "==> 4/4  do lai bang has_database_privilege (khong suy luan tu lenh da go)"
@@ -219,8 +274,18 @@ SELECT r.rolname AS role,
        has_database_privilege(r.rolname, '${TEST_DB}', 'CONNECT') AS connect_test,
        r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb
   FROM pg_roles r
- WHERE r.rolname IN ('admin','voya_app','voya_test_owner','voya_test_app')
+ WHERE r.rolname IN ('admin','voya_app','voya_test_owner','voya_test_app',
+                     'voya_control','voya_test_control')
  ORDER BY r.rolname;"
+
+echo
+echo "==> quyen tren bang MAT PHANG DIEU KHIEN (rong la dung voi vai ung dung)"
+psql_admin -d "${TEST_DB}" -c "
+SELECT table_name, grantee, string_agg(privilege_type, ',' ORDER BY privilege_type) AS quyen
+  FROM information_schema.role_table_grants
+ WHERE table_name = 'tenant_purges'
+   AND grantee IN ('voya_app','voya_test_app','voya_control','voya_test_control')
+ GROUP BY table_name, grantee ORDER BY grantee;"
 
 echo
 echo "Xong. Buoc kiem chung THAT SU (thu ket noi bang chinh credential do) nam o"

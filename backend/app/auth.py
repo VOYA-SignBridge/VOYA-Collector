@@ -97,7 +97,30 @@ def _row_to_user(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         # does not need a second query to learn which tenant they belong to.
         # The request SCOPE still comes from the middleware, never from this
         # field - this is for display and authorisation checks, not scoping.
-        "tenant_id": (row.get("tenant_id") or DEFAULT_TENANT_ID),
+        #
+        # KHÔNG bịa ra tenant khi thiếu — sửa 16/08/2026
+        # ----------------------------------------------
+        # Bản trước là `or DEFAULT_TENANT_ID`, và nó làm HAI đường trả lời KHÁC
+        # NHAU cho cùng một trạng thái:
+        #
+        #     tenant_middleware._tenant_of_user()  ->  None   -> request KHÔNG
+        #                                                        phạm vi -> RLS
+        #                                                        trả 0 dòng
+        #     auth._row_to_user()                  ->  'default'
+        #
+        # Tức là phạm vi nói "không có tenant" trong khi từ điển người dùng nói
+        # "default". Và từ điển ấy KHÔNG chỉ để hiển thị: `quota_deps.tenant_of`
+        # và `routers/classes.py` đọc nó cho hạn mức và tuỳ chọn, nên một giá
+        # trị bịa sẽ ghi hạn mức vào tenant khởi tạo.
+        #
+        # `users.tenant_id` là NOT NULL DEFAULT 'default', nên phép hợp nhất này
+        # KHÔNG bao giờ cứu một hàng NULL — nó chỉ che một truy vấn quên SELECT
+        # cột đó. Che một lỗi lập trình bằng một tenant đoán được là cách tệ
+        # nhất để phát hiện nó.
+        #
+        # Nay trả về đúng giá trị đã lưu. Rỗng nghĩa là rỗng, và người đọc phải
+        # tự quyết fail-closed thay vì nhận một câu trả lời sai trông như đúng.
+        "tenant_id": (row.get("tenant_id") or "").strip(),
         # NULL until the person proves they receive mail at that address. Only
         # consulted when REQUIRE_EMAIL_VERIFICATION is on — see `login`.
         "email_verified_at": row.get("email_verified_at"),
@@ -570,7 +593,18 @@ def require_tenant_editor(
             )
         return current_user
 
-    tenant_id = normalize_tenant_id(current_user.get("tenant_id"))
+    # Fail-closed khi không xác định được tenant nhà. `normalize_tenant_id("")`
+    # trả `"default"`, nên viết `normalize_tenant_id(...)` thẳng ở đây sẽ đánh
+    # giá quyền trên TENANT KHỞI TẠO cho một người gọi mà ta không biết thuộc
+    # đâu — đúng phép rơi-về-default đã gỡ khỏi mặt phẳng danh tính 16/08/2026,
+    # còn sót lại ở cổng này.
+    tho = (current_user.get("tenant_id") or "").strip()
+    if not tho:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Không xác định được tổ chức của tài khoản.",
+        )
+    tenant_id = normalize_tenant_id(tho)
     if not can_edit_registry(
         tenant_id, current_user.get("id"), bool(current_user.get("is_admin", False))
     ):

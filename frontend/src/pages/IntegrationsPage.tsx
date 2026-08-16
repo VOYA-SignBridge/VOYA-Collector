@@ -64,9 +64,9 @@ function SecretOnce({
       if (!navigator.clipboard) throw new Error("clipboard unavailable");
       await navigator.clipboard.writeText(secret);
       setCopied(true);
-      toast.success("Đã sao chép");
+      toast.success(t("Đã sao chép"));
     } catch {
-      toast.error("Trình duyệt không cho sao chép tự động — hãy bôi đen và copy tay.");
+      toast.error(t("Trình duyệt không cho sao chép tự động — hãy bôi đen và copy tay."));
     }
   };
 
@@ -120,7 +120,7 @@ function ApiKeysSection() {
     try {
       setKeys(await fetchApiKeys());
     } catch {
-      toast.error("Không tải được danh sách khoá API.");
+      toast.error(t("Không tải được danh sách khoá API."));
     } finally {
       setLoading(false);
     }
@@ -152,10 +152,10 @@ function ApiKeysSection() {
       return;
     try {
       await revokeApiKey(key.key_id);
-      toast.success("Đã thu hồi");
+      toast.success(t("Đã thu hồi"));
       await load();
     } catch {
-      toast.error("Không thu hồi được khoá.");
+      toast.error(t("Không thu hồi được khoá."));
     }
   };
 
@@ -281,7 +281,7 @@ function WebhooksSection() {
       setHooks(hookList);
       setEventTypes(types);
     } catch {
-      toast.error("Không tải được danh sách webhook.");
+      toast.error(t("Không tải được danh sách webhook."));
     } finally {
       setLoading(false);
     }
@@ -319,19 +319,19 @@ function WebhooksSection() {
     if (!window.confirm(t("Xoá webhook tới {url}?", { url: hook.url }))) return;
     try {
       await deleteWebhook(hook.endpoint_id);
-      toast.success("Đã xoá");
+      toast.success(t("Đã xoá"));
       await load();
     } catch {
-      toast.error("Không xoá được webhook.");
+      toast.error(t("Không xoá được webhook."));
     }
   };
 
   const test = async (hook: Webhook) => {
     try {
       await sendTestEvent(hook.endpoint_id);
-      toast.success("Đã xếp một sự kiện thử vào hàng giao (tối đa một phút).");
+      toast.success(t("Đã xếp một sự kiện thử vào hàng giao (tối đa một phút)."));
     } catch {
-      toast.error("Không gửi được sự kiện thử.");
+      toast.error(t("Không gửi được sự kiện thử."));
     }
   };
 
@@ -343,7 +343,7 @@ function WebhooksSection() {
       const rows = await fetchDeliveries(hook.endpoint_id);
       setDeliveries((prev) => ({ ...prev, [hook.endpoint_id]: rows }));
     } catch {
-      toast.error("Không tải được lịch sử giao.");
+      toast.error(t("Không tải được lịch sử giao."));
     }
   };
 

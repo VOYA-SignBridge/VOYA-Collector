@@ -48,7 +48,7 @@ export default function SyncGDriveModal({ isOpen, onClose }: SyncGDriveModalProp
             clearInterval(interval);
           }
         } catch (err: any) {
-          setError(friendlyError(err, "Lỗi khi lấy trạng thái đồng bộ"));
+          setError(friendlyError(err, t("Lỗi khi lấy trạng thái đồng bộ")));
           clearInterval(interval);
         }
       }, 1000);
@@ -66,7 +66,7 @@ export default function SyncGDriveModal({ isOpen, onClose }: SyncGDriveModalProp
       const res = await apiClient.post("/api/v1/admin/sync-local");
       setTaskId(res.data.task_id);
     } catch (err: any) {
-      setError(friendlyError(err, "Lỗi khi khởi chạy tiến trình đồng bộ"));
+      setError(friendlyError(err, t("Lỗi khi khởi chạy tiến trình đồng bộ")));
     }
   };
 

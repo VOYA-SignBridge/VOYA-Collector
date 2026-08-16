@@ -382,7 +382,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                 {isAdmin && onPromote && job.status === 'completed' && !job.promoted_at && (
                   <button
                     onClick={async () => {
-                      if (!window.confirm('Đưa model này vào tab nhận diện realtime? Model sẽ hiển thị cho tất cả người dùng.')) return;
+                      if (!window.confirm(t('Đưa model này vào tab nhận diện realtime? Model sẽ hiển thị cho tất cả người dùng.'))) return;
                       setPromoting(true);
                       setPromoteMessage(null);
                       try {

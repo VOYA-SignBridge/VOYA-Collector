@@ -108,7 +108,7 @@ export default function BlockIpModal({
           </button>
           <button onClick={submit} disabled={busy}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50">
-            {busy ? t("Đang chặn…") : "Chặn IP"}
+            {busy ? t("Đang chặn…") : t("Chặn IP")}
           </button>
         </div>
       </div>

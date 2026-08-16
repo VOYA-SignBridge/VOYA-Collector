@@ -71,7 +71,7 @@ export default function SotAdminPage() {
       setLoading(true);
       setOverview(await getSotOverview());
     } catch (e: any) {
-      toast.error(friendlyError(e, "Không tải được thông tin SOT"));
+      toast.error(friendlyError(e, t("Không tải được thông tin SOT")));
     } finally {
       setLoading(false);
     }
@@ -82,7 +82,7 @@ export default function SotAdminPage() {
       setRemoteLoading(true);
       setRemote(await getSotRemote());
     } catch (e: any) {
-      setRemote({ available: false, error: friendlyError(e, "Lỗi đọc Drive") });
+      setRemote({ available: false, error: friendlyError(e, t("Lỗi đọc Drive")) });
     } finally {
       setRemoteLoading(false);
     }
@@ -100,9 +100,9 @@ export default function SotAdminPage() {
       const res = await runSotVerify();
       setVerifyResult(res);
       if (res.ok) toast.success(`Verify OK — ${res.version ?? res.status}`);
-      else toast.error("Verify thất bại");
+      else toast.error(t("Verify thất bại"));
     } catch (e: any) {
-      toast.error(friendlyError(e, "Verify lỗi"));
+      toast.error(friendlyError(e, t("Verify lỗi")));
     } finally {
       setVerifying(false);
     }
@@ -110,11 +110,11 @@ export default function SotAdminPage() {
 
   const doRegister = async () => {
     if (!name.trim()) {
-      toast.error("Nhập tên máy");
+      toast.error(t("Nhập tên máy"));
       return;
     }
     if (mode === "public_key" && !publicKey.trim()) {
-      toast.error("Dán public key của máy");
+      toast.error(t("Dán public key của máy"));
       return;
     }
     try {
@@ -134,7 +134,7 @@ export default function SotAdminPage() {
       setPublicKey("");
       loadOverview();
     } catch (e: any) {
-      toast.error(friendlyError(e, "Đăng ký thất bại"));
+      toast.error(friendlyError(e, t("Đăng ký thất bại")));
     } finally {
       setSubmitting(false);
     }
@@ -148,7 +148,7 @@ export default function SotAdminPage() {
       toast.success(t("Đã thu hồi \"{name}\"", { name: m.name }));
       loadOverview();
     } catch (e: any) {
-      toast.error(friendlyError(e, "Thu hồi thất bại"));
+      toast.error(friendlyError(e, t("Thu hồi thất bại")));
     }
   };
 
@@ -416,7 +416,7 @@ export default function SotAdminPage() {
             />
             <div className="mt-3 flex justify-end gap-2">
               <button
-                onClick={() => { navigator.clipboard?.writeText(generatedKey.private_key); toast.success("Đã copy"); }}
+                onClick={() => { navigator.clipboard?.writeText(generatedKey.private_key); toast.success(t("Đã copy")); }}
                 className="px-3 py-2 rounded-lg bg-ctu-blue text-white text-sm font-medium hover:bg-ctu-blue/90 transition-colors"
               >
                 Copy

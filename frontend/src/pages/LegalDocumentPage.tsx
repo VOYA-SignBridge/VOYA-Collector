@@ -41,7 +41,7 @@ export default function LegalDocumentPage() {
 
   useEffect(() => {
     if (!isKind(kind)) {
-      setError("Không có loại văn bản này.");
+      setError(t("Không có loại văn bản này."));
       setLoading(false);
       return;
     }

@@ -234,3 +234,17 @@ backend/dataset/
 
 # Báo cáo test do CI sinh — không commit
 junit-*.xml
+
+# Bản PDF đính kèm do Zotero xuất ra (26 MB). Danh mục `.bib` cạnh nó ĐƯỢC theo
+# dõi vì đó mới là thứ quyển luận văn trích dẫn; các tệp PDF chỉ là bản sao của
+# tài liệu đã xuất bản, tải lại được, và không nên nằm trong lịch sử git.
+docs/00-thesis/SignBridge_Reference/files/
+
+# Bản xuất Zotero đã bị chính người dùng đánh dấu KHÔNG DÙNG.
+docs/00-thesis/SignBridge_Reference/*KHONG_DUNG*
+
+# Thư mục làm việc của các lượt đo: vân tay mã nguồn, ảnh chụp mã, chứng cứ thô
+# theo từng lượt chạy. Kết quả đã CÔNG BỐ nằm ở docs/00-thesis/MEASUREMENT_*,
+# nên thư mục này là scratch chứ không phải hồ sơ.
+.measurement/
+*.bak2

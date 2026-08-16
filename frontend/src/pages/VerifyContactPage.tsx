@@ -69,7 +69,7 @@ export default function VerifyContactPage() {
       setLoadError("");
     } catch (err) {
       if (mine !== run.current) return;
-      setLoadError(friendlyError(err, "Không đọc được trạng thái xác minh của tài khoản."));
+      setLoadError(friendlyError(err, t("Không đọc được trạng thái xác minh của tài khoản.")));
     }
   }, []);
 
@@ -88,7 +88,7 @@ export default function VerifyContactPage() {
         setPending({ channel, destination: destination || status?.email || "" });
         startFrom(status?.resend_cooldown_seconds ?? 60);
       } catch (err) {
-        setError(friendlyError(err, "Không gửi được mã. Vui lòng thử lại."));
+        setError(friendlyError(err, t("Không gửi được mã. Vui lòng thử lại.")));
         const wait = secondsFromRetryError(err);
         if (wait) {
           // Máy chủ nói còn phải đợi, nghĩa là mã CŨ vẫn sống. Mở ô nhập ra
@@ -124,7 +124,7 @@ export default function VerifyContactPage() {
       clear();
       await load();
     } catch (err) {
-      setError(friendlyError(err, "Mã xác minh không đúng hoặc đã hết hạn."));
+      setError(friendlyError(err, t("Mã xác minh không đúng hoặc đã hết hạn.")));
       setCode("");
     } finally {
       setBusy(false);

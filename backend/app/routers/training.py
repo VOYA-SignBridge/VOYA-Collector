@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth import get_current_user, get_user_from_token, require_admin
 from app.checkpoint_io import load_checkpoint
-from app.quota_deps import guard_quota
+from app.quota_deps import guard_quota, tenant_of
 from app.rate_limit_deps import limit_predict, limit_training
 from app.vocabulary_registry import assert_can_use_dialect, dialect_owner
 from app.cookie_auth import ACCESS_COOKIE
@@ -1166,11 +1166,17 @@ async def start_training(
                 PURPOSE_OPERATIONAL, SplitArtifactError, resolve_split_artifact,
             )
 
+            # Phạm vi lấy từ tenant NHÀ của người gọi, đúng nguồn mà
+            # `guard_quota` đã dùng ở trên — hai quyết định về cùng một lượt
+            # chạy phải đọc cùng một danh tính, nếu không thì hạn mức ghi cho
+            # tổ chức này còn dữ liệu lại đọc của tổ chức kia.
+            pham_vi = tenant_of(current_user)
+
             try:
                 art = await run_in_threadpool(
                     lambda: resolve_split_artifact(
                         purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR,
-                        split_id=split_id),
+                        split_id=split_id, tenant_id=pham_vi),
                 )
             except SplitArtifactError as exc:
                 # Phân giải ở ĐÂY chứ không chỉ ở worker, để người gọi nhận lỗi

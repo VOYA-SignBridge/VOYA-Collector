@@ -24,25 +24,42 @@ if str(REPO_ROOT) not in sys.path:
 from processed.train_utils.split_artifact import (  # noqa: E402
     SplitArtifactError,
     file_hashes,
+    owner_binding,
     resolve_split_artifact,
 )
 
 COT = "sample_uid,class_uid,slug,dialect,region,target_idx\n"
 
+#: Tenant của lượt chạy trong mọi ca ở đây. Từ C2c, `resolve_split_artifact`
+#: đòi tenant tường minh — không có mặc định, vì một mặc định biến "quên truyền"
+#: thành "được miễn kiểm".
+TENANT = "iso_a"
+
 
 def _dung_hien_vat(goc: Path, split_id: str, *, purpose="operational",
-                   sua_id=None) -> Path:
-    """Dựng một hiện vật vận hành hợp lệ trong tmp."""
+                   sua_id=None, tenant_id=TENANT) -> Path:
+    """Dựng một hiện vật vận hành hợp lệ trong tmp.
+
+    Hiện vật phải có CHỦ, kể cả trong các ca vốn chỉ kiểm mã băm: từ C2c một
+    hiện vật không chủ bị từ chối ngay, nên nếu fixture không khai chủ thì mọi
+    ca dưới đây sẽ đỏ vì lý do KHÁC với lý do chúng được viết ra để kiểm — và
+    một ca xanh/đỏ vì lý do khác lý do nó nói là ca không còn đo gì.
+    """
     d = goc / "operational" / split_id
     d.mkdir(parents=True, exist_ok=True)
     for ten in ("train", "val", "test"):
         (d / f"{ten}.csv").write_text(
             COT + f"s-{ten},UID_A,an,pho-thong,bac,0\n", encoding="utf-8")
+    khai_id = sua_id if sua_id is not None else split_id
+    files = file_hashes(d)
     meta = {
         "purpose": purpose,
-        "split_id": sua_id if sua_id is not None else split_id,
-        "files": file_hashes(d),
+        "split_id": khai_id,
+        "files": files,
         "classes": [{"class_uid": "UID_A", "target_idx": 0}],
+        "tenant_id": tenant_id,
+        "owner_binding": owner_binding(split_id=khai_id, tenant_id=tenant_id,
+                                       files=files),
     }
     (d / "split_metadata.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -54,7 +71,8 @@ class TestBangChung1_VanHanhKhongCoIdThiTuChoi:
 
     def test_thieu_split_id_thi_DUNG_chu_khong_roi_ve_nghien_cuu(self, tmp_path):
         with pytest.raises(SplitArtifactError) as loi:
-            resolve_split_artifact(purpose="operational", splits_root=tmp_path)
+            resolve_split_artifact(purpose="operational", splits_root=tmp_path,
+                                   tenant_id=TENANT)
         msg = str(loi.value)
         assert "phải ghim một `split_id`" in msg
         assert "KHÔNG rơi về" in msg, (
@@ -64,7 +82,8 @@ class TestBangChung1_VanHanhKhongCoIdThiTuChoi:
     def test_id_khong_ton_tai_thi_DUNG(self, tmp_path):
         with pytest.raises(SplitArtifactError) as loi:
             resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                   split_id="chua-dung")
+                                   split_id="chua-dung",
+                                   tenant_id=TENANT)
         assert "không có hiện vật vận hành" in str(loi.value)
 
     def test_khong_bao_gio_tra_ve_ba_tep_goc_cho_van_hanh(self, tmp_path):
@@ -72,7 +91,8 @@ class TestBangChung1_VanHanhKhongCoIdThiTuChoi:
         for ten in ("train", "val", "test"):
             (tmp_path / f"{ten}.csv").write_text(COT, encoding="utf-8")
         with pytest.raises(SplitArtifactError):
-            resolve_split_artifact(purpose="operational", splits_root=tmp_path)
+            resolve_split_artifact(purpose="operational", splits_root=tmp_path,
+                                   tenant_id=TENANT)
 
 
 class TestBangChung2_NghienCuuVanTraVeBaTepDongBang:
@@ -84,7 +104,8 @@ class TestBangChung2_NghienCuuVanTraVeBaTepDongBang:
             json.dumps({"purpose": "research", "files": file_hashes(tmp_path)}),
             encoding="utf-8")
 
-        hv = resolve_split_artifact(purpose="research", splits_root=tmp_path)
+        hv = resolve_split_artifact(purpose="research", splits_root=tmp_path,
+                                        tenant_id=TENANT)
 
         assert hv.purpose == "research"
         assert hv.train_csv == tmp_path / "train.csv"
@@ -94,7 +115,8 @@ class TestBangChung2_NghienCuuVanTraVeBaTepDongBang:
         for ten in ("train", "val", "test"):
             (tmp_path / f"{ten}.csv").write_text(COT, encoding="utf-8")
         with pytest.raises(SplitArtifactError) as loi:
-            resolve_split_artifact(purpose="research", splits_root=tmp_path)
+            resolve_split_artifact(purpose="research", splits_root=tmp_path,
+                                        tenant_id=TENANT)
         assert "không phát hiện được nếu ba tệp đã bị dựng lại" in str(loi.value)
 
     def test_ba_tep_bi_dung_lai_thi_DUNG(self, tmp_path):
@@ -107,7 +129,8 @@ class TestBangChung2_NghienCuuVanTraVeBaTepDongBang:
                                           encoding="utf-8")
 
         with pytest.raises(SplitArtifactError) as loi:
-            resolve_split_artifact(purpose="research", splits_root=tmp_path)
+            resolve_split_artifact(purpose="research", splits_root=tmp_path,
+                                        tenant_id=TENANT)
         assert "không khớp mã băm đã khai" in str(loi.value)
 
 
@@ -115,7 +138,8 @@ class TestBangChung3_XacMinhChuKhongChiTimThay:
     def test_hien_vat_hop_le_thi_di_qua(self, tmp_path):
         _dung_hien_vat(tmp_path, "smoke-01")
         hv = resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                    split_id="smoke-01")
+                                    split_id="smoke-01",
+                                    tenant_id=TENANT)
         assert hv.split_id == "smoke-01" and hv.purpose == "operational"
         assert hv.train_csv.exists()
 
@@ -126,7 +150,8 @@ class TestBangChung3_XacMinhChuKhongChiTimThay:
 
         with pytest.raises(SplitArtifactError) as loi:
             resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                   split_id="smoke-02")
+                                   split_id="smoke-02",
+                                   tenant_id=TENANT)
         assert "không khớp mã băm đã khai" in str(loi.value)
 
     def test_chep_CSV_tu_hien_vat_khac_vao_thu_muc_nay_thi_BI_BAT(self, tmp_path):
@@ -143,14 +168,16 @@ class TestBangChung3_XacMinhChuKhongChiTimThay:
 
         with pytest.raises(SplitArtifactError) as loi:
             resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                   split_id="X")
+                                   split_id="X",
+                                   tenant_id=TENANT)
         assert "chép vào đây từ một hiện vật khác" in str(loi.value)
 
     def test_doi_ten_thu_muc_thi_BI_BAT(self, tmp_path):
         _dung_hien_vat(tmp_path, "ten-moi", sua_id="ten-cu")
         with pytest.raises(SplitArtifactError) as loi:
             resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                   split_id="ten-moi")
+                                   split_id="ten-moi",
+                                   tenant_id=TENANT)
         assert "bị đổi tên hoặc chép nhầm chỗ" in str(loi.value)
 
     def test_purpose_KHONG_suy_tu_ten_thu_muc(self, tmp_path):
@@ -158,7 +185,8 @@ class TestBangChung3_XacMinhChuKhongChiTimThay:
         _dung_hien_vat(tmp_path, "gia-dang", purpose="research")
         with pytest.raises(SplitArtifactError) as loi:
             resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                   split_id="gia-dang")
+                                   split_id="gia-dang",
+                                   tenant_id=TENANT)
         assert "Không suy purpose từ tên thư mục" in str(loi.value)
 
     def test_thieu_muc_files_thi_KHONG_coi_la_da_xac_minh(self, tmp_path):
@@ -169,12 +197,14 @@ class TestBangChung3_XacMinhChuKhongChiTimThay:
 
         with pytest.raises(SplitArtifactError) as loi:
             resolve_split_artifact(purpose="operational", splits_root=tmp_path,
-                                   split_id="khong-hash")
+                                   split_id="khong-hash",
+                                   tenant_id=TENANT)
         assert "Đó chưa phải xác minh" in str(loi.value)
 
 
 class TestPurposeLa:
     def test_purpose_khong_ro_thi_DUNG_chu_khong_doan(self, tmp_path):
         with pytest.raises(SplitArtifactError) as loi:
-            resolve_split_artifact(purpose="linh-tinh", splits_root=tmp_path)
+            resolve_split_artifact(purpose="linh-tinh", splits_root=tmp_path,
+                                   tenant_id=TENANT)
         assert "mở lại đúng chỗ mơ hồ vừa đóng" in str(loi.value)

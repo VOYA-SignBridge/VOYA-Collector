@@ -59,7 +59,13 @@ def _setup_reassign(monkeypatch, tmp_path, *, download=None, gdrive=True):
     monkeypatch.setattr(cs, "_catalog_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(cs, "ensure_tables", lambda: None)
     monkeypatch.setattr(cs, "slog", MagicMock())
-    monkeypatch.setattr(cs, "load_labels", lambda: [{"class_uid": "TARGET", "class_idx": "2"}])
+    # Các seam nhận `tenant_id` từ 16/08/2026: `sync_reassign_sample` phân giải
+    # cả lớp đích lẫn mẫu BÊN TRONG phạm vi tenant. Seam nuốt tham số bằng
+    # `*a, **k` sẽ che mất việc gọi thiếu phạm vi, nên chúng KHẲNG ĐỊNH nó.
+    def _labels(tenant_id):
+        assert tenant_id == "default", f"load_labels goi voi tenant {tenant_id!r}"
+        return [{"class_uid": "TARGET", "class_idx": "2"}]
+    monkeypatch.setattr(cs, "load_labels", _labels)
     monkeypatch.setattr(cs, "_build_class_meta_from_row", lambda row: _fake_target_meta(tmp_path))
     monkeypatch.setattr(cs, "_write_samples_csv", MagicMock())
     monkeypatch.setattr(cs, "db_upsert_sample", MagicMock())
@@ -97,9 +103,10 @@ def test_reassign_local_file_moves_uploads_new_and_deletes_old(monkeypatch, tmp_
            "storage_key": "features/vn/bang/class_src/sample_ab.npz",
            "storage_url": "https://drive.google.com/file/d/OLDID/view",
            "file_path": str(old)}
-    monkeypatch.setattr(cs, "list_samples", lambda: [row])
+    monkeypatch.setattr(cs, "list_samples", lambda tenant_id: [row])
+    monkeypatch.setattr(cs, "_load_all_samples_unscoped", lambda: [row])
 
-    res = cs.sync_reassign_sample("S1", "TARGET")
+    res = cs.sync_reassign_sample("S1", "TARGET", tenant_id="default")
 
     new = tmp_path / "features" / "vn" / "common" / "class_tgt_TARGET00" / "sample_ab.npz"
     print(f"\n[evidence] changed={res['changed']} moved_to_exists={new.exists()} "
@@ -122,9 +129,10 @@ def test_reassign_drive_only_materialises_then_moves(monkeypatch, tmp_path):
            "storage_key": "features/vn/bang/class_src/sample_cd.npz",
            "storage_url": "https://drive.google.com/file/d/OLDID2/view",
            "file_path": str(old)}
-    monkeypatch.setattr(cs, "list_samples", lambda: [row])
+    monkeypatch.setattr(cs, "list_samples", lambda tenant_id: [row])
+    monkeypatch.setattr(cs, "_load_all_samples_unscoped", lambda: [row])
 
-    res = cs.sync_reassign_sample("S2", "TARGET")
+    res = cs.sync_reassign_sample("S2", "TARGET", tenant_id="default")
 
     print(f"\n[evidence] changed={res['changed']} download={env.client.download_file.call_count} "
           f"upload={env.up_task.delay.call_count} delete={env.del_task.delay.call_count}")
@@ -145,10 +153,11 @@ def test_reassign_drive_only_unfetchable_REFUSES_and_never_deletes(monkeypatch, 
            "storage_key": "features/vn/bang/class_src/sample_ef.npz",
            "storage_url": "https://drive.google.com/file/d/OLDID3/view",
            "file_path": str(old)}
-    monkeypatch.setattr(cs, "list_samples", lambda: [row])
+    monkeypatch.setattr(cs, "list_samples", lambda tenant_id: [row])
+    monkeypatch.setattr(cs, "_load_all_samples_unscoped", lambda: [row])
 
     with pytest.raises(CatalogSyncError) as ei:
-        cs.sync_reassign_sample("S3", "TARGET")
+        cs.sync_reassign_sample("S3", "TARGET", tenant_id="default")
 
     print(f"\n[evidence] refused error_code={ei.value.error_code} "
           f"download_tried={env.client.download_file.call_count} "
@@ -168,10 +177,11 @@ def test_reassign_no_drive_ref_refuses_without_touching_drive(monkeypatch, tmp_p
            "storage_key": "features/vn/bang/class_src/sample_gh.npz",
            "storage_url": "",  # not a Drive URL -> nothing to download
            "file_path": str(old)}
-    monkeypatch.setattr(cs, "list_samples", lambda: [row])
+    monkeypatch.setattr(cs, "list_samples", lambda tenant_id: [row])
+    monkeypatch.setattr(cs, "_load_all_samples_unscoped", lambda: [row])
 
     with pytest.raises(CatalogSyncError) as ei:
-        cs.sync_reassign_sample("S4", "TARGET")
+        cs.sync_reassign_sample("S4", "TARGET", tenant_id="default")
 
     print(f"\n[evidence] refused error_code={ei.value.error_code} "
           f"download={env.client.download_file.call_count} delete={env.del_task.delay.call_count}")

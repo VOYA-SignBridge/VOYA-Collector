@@ -325,10 +325,21 @@ def render_sequence_to_mp4(sequence: np.ndarray, out_path: Path, fps: float = _D
 # Session-level helpers (shared by the API router and the Celery task)
 # ---------------------------------------------------------------------------
 
-def find_class_meta(class_uid: str):
+def find_class_meta(class_uid: str, *, tenant_id: str):
+    """Lớp `class_uid` TRONG phạm vi `tenant_id`, hoặc None.
+
+    `tenant_id` là tham số BẮT BUỘC và không nhận None. Dạng cũ — tìm toàn cục
+    rồi để người gọi tự so `tenant_id` — là dạng đã đo được rò rỉ ngày
+    15/08/2026: người gọi hoặc quên so, hoặc so SAU khi đã dùng kết quả để
+    quyết định điều khác.
+
+    Thứ tự ở đây là điều quan trọng: LỌC trước, TÌM sau. Một lớp của tenant khác
+    không lọt vào vòng lặp, nên nó không phân biệt được với một `class_uid`
+    không tồn tại — người gọi không có gì để lỡ kiểm.
+    """
     from app.dataset_manager import list_classes
 
-    for meta in list_classes():
+    for meta in list_classes(tenant_id=tenant_id):
         if meta.class_uid == class_uid:
             return meta
     return None
@@ -341,16 +352,21 @@ def _is_active_row(row: dict) -> bool:
     return status not in ("deleted", "trash", "trashed")
 
 
-def list_session_rows(class_uid: str) -> dict:
-    """Group this class's active sample rows by session_id.
+def list_session_rows(class_uid: str, *, tenant_id: str) -> dict:
+    """Group this class's active sample rows by session_id, WITHIN one tenant.
 
     Rows without a session_id (old data) become single-sample pseudo-sessions
     keyed by their sample_uid, so nothing recorded is invisible in the UI.
+
+    `tenant_id` bắt buộc, cùng lý do như `find_class_meta`. Lọc theo `class_uid`
+    một mình là không đủ: `class_uid` KHÔNG duy nhất xuyên tenant về mặt lược đồ
+    (khoá là `(tenant_id, class_uid)`), nên một vòng lặp không lọc tenant có thể
+    gom nhầm mẫu của tenant khác vào cùng một lần quay.
     """
     from app.dataset_samples import list_samples
 
     groups: dict = {}
-    for row in list_samples():
+    for row in list_samples(tenant_id=tenant_id):
         if row.get("class_uid") != class_uid or not _is_active_row(row):
             continue
         key = (row.get("session_id") or "").strip() or f"single-{row.get('sample_uid', '')}"
@@ -405,17 +421,23 @@ def sample_fps(row: dict) -> float:
     return _DEFAULT_FPS
 
 
-def render_preview_for_session(class_uid: str, session_id: str) -> Path:
+def render_preview_for_session(class_uid: str, session_id: str, *,
+                               tenant_id: str) -> Path:
     """Full pipeline: locate the session's original .npz and render its preview.
 
     Called by the Celery task (async path) and inline when no broker is
     available (dev fallback). Idempotent — re-rendering overwrites atomically.
+
+    `tenant_id` đi kèm suốt đường, kể cả khi chạy trong worker. Tác vụ nền KHÔNG
+    phải ngoại lệ của cách ly tenant: nó chỉ không có REQUEST, chứ không phải
+    không có PHẠM VI. Phạm vi ấy phải được chốt lại lúc ĐƯA VÀO HÀNG ĐỢI, khi
+    danh tính người gọi còn biết được, chứ không suy ra lúc chạy.
     """
-    meta = find_class_meta(class_uid)
+    meta = find_class_meta(class_uid, tenant_id=tenant_id)
     if meta is None:
         raise ValueError(f"class not found: {class_uid}")
 
-    rows = list_session_rows(class_uid).get(session_id)
+    rows = list_session_rows(class_uid, tenant_id=tenant_id).get(session_id)
     if not rows:
         raise ValueError(f"session not found: {class_uid}/{session_id}")
 

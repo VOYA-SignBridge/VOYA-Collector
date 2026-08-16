@@ -1,4 +1,5 @@
 import axiosClient from "./axiosClient";
+import { tr } from "../i18n";
 import type { Result } from "./validators";
 
 /**
@@ -63,20 +64,20 @@ function createRequestId(): string {
  */
 export function validateRealtimePredictResponse(data: unknown): Result<RealtimePredictResponse> {
   try {
-    if (!isObject(data)) throw new Error("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên.");
+    if (!isObject(data)) throw new Error(tr("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên."));
 
     const label = data.label;
     const confidence = data.confidence;
     const label_key = data.label_key;
 
     if (typeof label !== "string" || !label.trim()) {
-      throw new Error("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên.");
+      throw new Error(tr("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên."));
     }
     if (!isFiniteNumber(confidence)) {
-      throw new Error("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên.");
+      throw new Error(tr("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên."));
     }
     if (typeof label_key !== "string" || !label_key.trim()) {
-      throw new Error("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên.");
+      throw new Error(tr("Dữ liệu máy chủ trả về không đúng định dạng. Hãy tải lại trang; nếu vẫn vậy, báo cho quản trị viên."));
     }
 
     return { ok: true, data: { label, confidence, label_key } };
@@ -91,10 +92,10 @@ export function validateRealtimePredictResponse(data: unknown): Result<RealtimeP
  */
 function validateRealtimeModels(data: unknown): Result<RealtimeModel[]> {
   try {
-    if (!Array.isArray(data)) throw new Error("Danh sách mô hình máy chủ trả về không đúng định dạng.");
+    if (!Array.isArray(data)) throw new Error(tr("Danh sách mô hình máy chủ trả về không đúng định dạng."));
 
     const models: RealtimeModel[] = data.map((item, idx) => {
-      if (!isObject(item)) throw new Error("Danh sách mô hình máy chủ trả về không đúng định dạng.");
+      if (!isObject(item)) throw new Error(tr("Danh sách mô hình máy chủ trả về không đúng định dạng."));
       const id = item.id;
       const name = item.name;
       const language = item.language;
@@ -107,10 +108,10 @@ function validateRealtimeModels(data: unknown): Result<RealtimeModel[]> {
         throw new Error(`Model[${idx}]: missing name`);
       }
       if (typeof language !== "string") {
-        throw new Error("Danh sách mô hình máy chủ trả về thiếu thông tin ngôn ngữ.");
+        throw new Error(tr("Danh sách mô hình máy chủ trả về thiếu thông tin ngôn ngữ."));
       }
       if (typeof dialect !== "string") {
-        throw new Error("Danh sách mô hình máy chủ trả về thiếu thông tin phương ngữ.");
+        throw new Error(tr("Danh sách mô hình máy chủ trả về thiếu thông tin phương ngữ."));
       }
 
       return { id: id.trim(), name: name.trim(), language, dialect };

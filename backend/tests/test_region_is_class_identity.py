@@ -181,6 +181,102 @@ class TestDangKyKhongGopHaiVung:
         assert m.region == REGION_UNCLASSIFIED
 
 
+class TestKhongNoiVungThiKhongDuocDE_THEM_LOP:
+    """Hồi quy 15/08/2026 — bản vá vùng tự nó đẻ ra một lỗi nặng hơn.
+
+    Khi `region` bước vào phép tìm, `unclassified` thôi là "chỗ trống" và trở
+    thành một GIÁ TRỊ CỤ THỂ phải khớp. Nhưng mọi đường thu mẫu —
+    `upload.py` (video và camera) và `processing/pipeline.py` — gọi
+    `get_or_register_class(label, language, dialect)` mà không truyền vùng.
+
+    Sản xuất có 60/60 nhãn mang `region='nam'`. Phép tìm không khớp cái nào,
+    nên hàm rơi xuống nhánh TẠO và sinh ra lớp thứ hai. Mẫu vừa thu đi vào lớp
+    ma ấy. Khoá duy nhất năm cột KHÔNG chặn — hai vùng là hai lớp hợp lệ, đó
+    chính là điều nó được dựng lên để cho phép.
+
+    Ba ca dưới đây khoá ba nửa của cùng một quy tắc: không nói ra vùng nghĩa là
+    "nhãn nào cũng được, miễn không mơ hồ", còn nói ra thì là một khẳng định.
+    """
+
+    def test_nhan_da_co_MOT_vung_thi_dung_lai_no(self, kho_tam, phuong_ngu_that):
+        """Ca đắt nhất: đúng đường mà thu mẫu trực tiếp đang đi."""
+        dm = kho_tam
+        _viet_labels(dm, [_hang("RG-NAM", 902, "nam")])
+
+        meta = dm.get_or_register_class(
+            label_original=SLUG, language="vn", dialect=phuong_ngu_that)
+
+        con_lai = list(csv.DictReader(dm.MASTER_LABELS.open(encoding="utf-8")))
+        assert len(con_lai) == 1, (
+            f"da de them lop: {[r['class_uid'] + '/' + r['region'] for r in con_lai]}")
+        assert meta.class_uid == "RG-NAM"
+        assert meta.region == "nam", "tra ve lop dung nhung mat vung"
+
+    def test_nhieu_bien_the_vung_ma_khong_noi_ro_thi_TU_CHOI(self, kho_tam, phuong_ngu_that):
+        """Mơ hồ thì dừng, đừng đoán.
+
+        `ăn|bac` và `ăn|nam` cùng tồn tại thì một yêu cầu chỉ nói "ăn" không có
+        câu trả lời đúng. Đoán một trong hai là ghi dữ liệu vào lớp sai — hỏng
+        nặng hơn hẳn việc từ chối, vì nó không để lại dấu vết nào.
+        """
+        dm = kho_tam
+        _viet_labels(dm, [_hang("RG-BAC", 901, "bac"), _hang("RG-NAM", 902, "nam")])
+
+        with pytest.raises(ValueError) as loi:
+            dm.get_or_register_class(
+                label_original=SLUG, language="vn", dialect=phuong_ngu_that)
+
+        assert "bac" in str(loi.value) and "nam" in str(loi.value), (
+            f"loi phai NOI RA co nhung vung nao de con chon: {loi.value}")
+        assert len(list(csv.DictReader(dm.MASTER_LABELS.open(encoding="utf-8")))) == 2, (
+            "da tu choi ma van ghi them dong")
+
+    def test_mo_ho_ke_ca_khi_MOT_bien_the_la_unclassified(self, kho_tam, phuong_ngu_that):
+        """Ca mà bộ kiểm bỏ sót và smoke sau triển khai bắt được.
+
+        Ba ca trên dựng `bac` + `nam` — không cái nào là giá trị MẶC ĐỊNH. Bản
+        vá đầu vẫn so khớp chính xác `region_key` (= `unclassified` khi bỏ
+        trống) TRƯỚC, rồi mới xét mơ hồ nếu không khớp gì. Với `bac` + `nam`
+        thì phép so ấy không khớp gì nên nhánh mơ hồ chạy, và ba ca đều xanh.
+
+        Nhưng khi một biến thể LÀ `unclassified`, phép so khớp ngay và nhánh mơ
+        hồ không bao giờ chạy: hệ thống lặng lẽ chọn bản `unclassified` thay vì
+        từ chối. Đúng thứ mà "đừng đoán" cấm.
+
+        Bài học chung: khi kiểm một quy tắc về "nhiều giá trị khác nhau", phải
+        có ít nhất một ca mà một trong các giá trị ấy là MẶC ĐỊNH của hệ thống.
+        """
+        dm = kho_tam
+        _viet_labels(dm, [_hang("RG-NAM", 902, "nam"),
+                          _hang("RG-CHUA", 903, REGION_UNCLASSIFIED)])
+
+        with pytest.raises(ValueError) as loi:
+            dm.get_or_register_class(
+                label_original=SLUG, language="vn", dialect=phuong_ngu_that)
+
+        assert "nam" in str(loi.value) and REGION_UNCLASSIFIED in str(loi.value)
+        assert len(list(csv.DictReader(dm.MASTER_LABELS.open(encoding="utf-8")))) == 2
+
+    def test_noi_RO_unclassified_van_la_mot_khang_dinh(self, kho_tam, phuong_ngu_that):
+        """Nửa còn lại, và nó giữ cho bản vá không đi quá tay.
+
+        `region=None` (không nhắc tới) khác `region='unclassified'` (nói rõ).
+        Nếu gộp hai thứ này thì không còn cách nào tạo một lớp `unclassified`
+        bên cạnh một biến thể vùng đã có — mà đó là trạng thái hợp lệ:
+        "từ này đã có bản miền Nam, và đây là một bản chưa ai phân loại".
+        """
+        dm = kho_tam
+        _viet_labels(dm, [_hang("RG-NAM", 902, "nam")])
+
+        meta = dm.get_or_register_class(
+            label_original=SLUG, language="vn", dialect=phuong_ngu_that,
+            region=REGION_UNCLASSIFIED)
+
+        assert meta.class_uid != "RG-NAM"
+        assert meta.region == REGION_UNCLASSIFIED
+        assert len(list(csv.DictReader(dm.MASTER_LABELS.open(encoding="utf-8")))) == 2
+
+
 class TestSuaNhanKhongDuocXoaVung:
     """Lỗi phá dữ liệu ĐÃ ĐÚNG, ở một thao tác không ai ngờ liên quan."""
 

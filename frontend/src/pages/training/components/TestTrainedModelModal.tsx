@@ -111,7 +111,7 @@ export default function TestTrainedModelModal({
 
     const video = videoRef.current;
     if (!video) {
-      setError('Chưa mở được khung hình camera. Hãy thử lại.');
+      setError(t('Chưa mở được khung hình camera. Hãy thử lại.'));
       setRunning(false);
       return;
     }

@@ -1,6 +1,7 @@
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 from contextlib import contextmanager
+from functools import lru_cache
 from typing import Any, Dict, List, NamedTuple, Optional
 import logging
 import re
@@ -147,16 +148,218 @@ def _assert_expected_database(cur) -> None:
         )
 
 
+class MigrationStepFailed(RuntimeError):
+    """Một bước migration BẮT BUỘC không đạt. Migration phải dừng."""
+
+
+def _run_data_step(cur, reason: str, statements: tuple[str, ...],
+                   postcondition: str) -> None:
+    """Chạy một bước ĐỊNH HÌNH DỮ LIỆU của migration, trong phạm vi hệ thống.
+
+    Vì sao cần, và vì sao chỉ ĐÚNG những bước được đăng ký
+    ------------------------------------------------------
+    Đo ngày 15/08/2026 trên `signdb_test`, vai `voya_test_owner`
+    (NOSUPERUSER, NOBYPASSRLS) — tức đúng mô hình quyền mà hệ thống khuyến nghị:
+
+        UPDATE classes SET region='unclassified' WHERE region IS NULL
+        -> UPDATE 0        (RLS chặn, KHÔNG ném lỗi)
+        ALTER TABLE classes ALTER COLUMN region SET NOT NULL
+        -> that bai        (còn NULL) — và `_run_ddl` NUỐT lỗi
+
+    Cùng vai đó dưới `admin` (superuser, bypassrls): `UPDATE 63`. Nên migration
+    lâu nay chỉ chạy đúng vì sản xuất dùng superuser — không phải vì hợp đồng
+    migration hợp lệ.
+
+    Sau khi `tenants` bật RLS, câu bootstrap tenant gốc còn hỏng theo một đường
+    tinh hơn: RLS làm MÙ chính phép kiểm tồn tại đang bảo vệ nó.
+
+        SELECT ... FROM tenants WHERE tenant_id='default'   -> 0 dòng (RLS)
+        WHERE NOT EXISTS                                    -> hoá TRUE
+        INSERT                                              -> WITH CHECK từ chối
+
+    Trên bản cài mới với vai tối thiểu, tenant gốc sẽ không bao giờ ra đời.
+
+    Vì sao đây KHÔNG phải vá biên giới bằng sentinel
+    ------------------------------------------------
+    `app.system_scope` tự đặt được bởi vai ứng dụng, và đó vẫn là giới hạn TCB
+    **Mức II** (xem docs/TENANT_ISOLATION_AND_AUTHZ.md §4.1). Nhưng bộ thực thi
+    migration vốn đã nằm trong mặt phẳng điều khiển tin cậy của **Mức I**, và
+    thao tác ở đây thật sự là xuyên-tenant / trước-tenant. Ranh giới là:
+
+        yêu cầu thông thường   KHÔNG được dùng system_scope chỉ vì khó phạm vi
+        bootstrap / backfill   thao tác xuyên tenant thật -> hợp lệ, và phải
+                               NÓI RA mình đang mở phạm vi để làm gì
+
+    Ba tính chất bắt buộc
+    ---------------------
+    * **Theo GIAO DỊCH**, không theo phiên: `set_config(..., true)` chỉ sống
+      trong giao dịch, nên không kết nối nào mang `system_scope='on'` sang bước
+      kế tiếp. `_migration_cursor` chạy autocommit nên phải mở `BEGIN` tường
+      minh — cũng chính là thứ làm cặp "định hình dữ liệu + ràng buộc" trở nên
+      nguyên tử.
+    * **Hậu điều kiện**, không phải rowcount. `UPDATE 0` hợp lệ khi dữ liệu vốn
+      đã đúng, và sai khi RLS vừa nuốt mất phép ghi. Chỉ trạng thái CUỐI phân
+      biệt được hai trường hợp đó.
+    * **Hỏng thì DỪNG.** Đây là nơi `_run_ddl` nuốt lỗi phải chấm dứt: một bước
+      định hình dữ liệu chạy hụt để lại lược đồ nửa vời mà mọi phép kiểm khác
+      vẫn báo "khớp".
+
+    Hậu điều kiện kiểm TRONG cùng phạm vi
+    -------------------------------------
+    Câu kiểm chạy TRƯỚC `COMMIT`, tức vẫn trong `system_scope`. Nếu thoát phạm
+    vi rồi mới kiểm thì chính câu kiểm bị RLS làm mù và trả `count(*) = 0` cho
+    một dòng vừa ghi xong — đúng cái bẫy `NOT EXISTS` mà bước này sinh ra để gỡ,
+    chỉ khác là lần này nó làm migration đỏ oan thay vì xanh oan.
+    """
+    logger.warning("[MIGRATE][DATA] bat dau %s", reason)
+    cur.execute("BEGIN")
+    try:
+        cur.execute("SELECT set_config('app.system_scope', 'on', true)")
+        for stmt in statements:
+            cur.execute(stmt)
+        cur.execute(postcondition)
+        dat = cur.fetchone()[0]
+        if not dat:
+            raise MigrationStepFailed(
+                f"{reason}: hau dieu kien KHONG dat sau khi chay. "
+                f"Kiem: {postcondition}")
+        cur.execute("COMMIT")
+    except Exception:
+        try:
+            cur.execute("ROLLBACK")
+        except Exception:
+            pass
+        logger.error("[MIGRATE][DATA][THAT BAI] %s", reason)
+        raise
+    logger.warning("[MIGRATE][DATA] xong %s — hau dieu kien DAT", reason)
+
+
 def _run_ddl(cur, statements, kind: str) -> None:
-    """Execute schema statements, logging and continuing past failures."""
+    """Execute schema statements, logging and continuing past failures.
+
+    Hai ngoại lệ cho luật "ghi log rồi đi tiếp", cả hai đều thêm 15/08/2026:
+
+      * câu nằm trong `MIGRATION_DATA_STEPS` -> đi qua `_run_data_step`
+      * câu nằm trong `MIGRATION_MUST_SUCCEED` -> hỏng là DỪNG migration
+
+    Việc nuốt lỗi vẫn đúng cho phần còn lại (`IF NOT EXISTS` chạy lại, khác biệt
+    giữa các bản cài), nhưng nó KHÔNG đúng cho những câu mà trạng thái cuối phụ
+    thuộc vào chúng.
+    """
+    so_dang_ky = _data_steps()
+    theo_sau = _data_step_followers()
     for stmt in statements:
+        buoc = so_dang_ky.get(stmt)
+        if buoc is not None:
+            _run_data_step(cur, *buoc)
+            continue
+        if stmt in theo_sau:
+            continue  # đã chạy cùng câu dẫn đầu, trong phạm vi
         try:
             cur.execute(stmt)
         except Exception as exc:
+            if stmt in MIGRATION_MUST_SUCCEED:
+                logger.error("[MIGRATE][THAT BAI] cau BAT BUOC hong: %s : %s",
+                             getattr(exc, "pgerror", str(exc)), stmt[:160])
+                raise
             logger.warning(
                 "ensure_tables: %s statement failed (ignored): %s : %s",
                 kind, getattr(exc, "pgerror", str(exc)), stmt[:120],
             )
+
+
+#: Ba câu dưới đây là HẰNG SỐ DÙNG CHUNG, không phải chuỗi gõ lại.
+#:
+#: Chúng xuất hiện ở HAI nơi — trong `MIGRATION_STATEMENTS` (để giữ đúng vị trí
+#: thứ tự) và trong các sổ đăng ký bên dưới (để được xử lý đặc biệt). Sổ đăng ký
+#: khớp theo NGUYÊN VĂN chuỗi, nên chép lại lần thứ hai là dựng sẵn một lỗi:
+#: sửa một chỗ, chỗ kia lặng lẽ hết khớp, và bước ấy âm thầm quay về đường
+#: "nuốt lỗi rồi đi tiếp".
+_SQL_BACKFILL_CLASS_REGION = (
+    "UPDATE classes SET region = 'unclassified' "
+    "WHERE region IS NULL OR btrim(region) = ''"
+)
+_SQL_CLASS_REGION_NOT_NULL = "ALTER TABLE classes ALTER COLUMN region SET NOT NULL"
+_SQL_BOOTSTRAP_DEFAULT_TENANT = (
+    f"INSERT INTO tenants(tenant_id, display_name, slug) "
+    f"SELECT '{DEFAULT_TENANT_ID}', 'VOYA', '{DEFAULT_TENANT_ID}' "
+    f"WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE tenant_id = '{DEFAULT_TENANT_ID}')"
+)
+_SQL_SEED_VOCAB_REGISTRY_META = (
+    f"INSERT INTO vocabulary_registry_meta(tenant_id) VALUES('{DEFAULT_TENANT_ID}') "
+    f"ON CONFLICT DO NOTHING"
+)
+
+#: Bước ĐỊNH HÌNH DỮ LIỆU: chạy trong phạm vi hệ thống theo giao dịch, và phải
+#: chứng minh HẬU ĐIỀU KIỆN. Xem `_run_data_step` về vì sao rowcount không đủ.
+#:
+#: Khoá là câu DẪN ĐẦU; giá trị là `(lý do, các câu, hậu điều kiện)`. Một bước
+#: được phép gồm NHIỀU câu vì có ý định không diễn đạt nổi bằng một câu — bước
+#: cộng đồng là "gieo nếu chưa có, SỬA nếu có mà sai loại", và tách đôi thì mỗi
+#: nửa tự nhận là đã xong trong khi trạng thái đích chưa đạt.
+#:
+#: `reason` phải nêu đích danh phiên bản và bước — không dùng `"migration"` trơn,
+#: vì sổ kiểm toán sau này cần trả lời được "phạm vi được mở để làm gì".
+MIGRATION_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
+    _SQL_BOOTSTRAP_DEFAULT_TENANT: (
+        "migration:v5:bootstrap-default-tenant",
+        (_SQL_BOOTSTRAP_DEFAULT_TENANT,),
+        f"SELECT count(*) = 1 FROM tenants WHERE tenant_id = '{DEFAULT_TENANT_ID}'",
+    ),
+    _SQL_BACKFILL_CLASS_REGION: (
+        "migration:v5:backfill-class-region",
+        (_SQL_BACKFILL_CLASS_REGION,),
+        "SELECT count(*) = 0 FROM classes WHERE region IS NULL",
+    ),
+    # NỢ KIẾN TRÚC — bước tương thích/khởi tạo, KHÔNG phải nơi canonical.
+    #
+    # Quyền sở hữu dài hạn của dòng này thuộc về đường khởi tạo registry chạy
+    # DƯỚI phạm vi tenant (`vocabulary_registry._bump()` tự chèn khi thiếu, và
+    # `clone_catalog_to_tenant` chèn cho tenant mới) — cả hai đều đã tự lo được
+    # và tự lo ĐÚNG, vì chúng có tenant context. Migration là chỗ duy nhất không
+    # có, nên là chỗ duy nhất hỏng.
+    #
+    # Ghi ra đây để người đọc sổ đăng ký sau này đừng kết luận ngược: nhìn thấy
+    # nó ở đây KHÔNG có nghĩa migration là nơi phải gieo registry meta.
+    _SQL_SEED_VOCAB_REGISTRY_META: (
+        "migration:v5:seed-vocabulary-registry-meta",
+        (_SQL_SEED_VOCAB_REGISTRY_META,),
+        f"SELECT count(*) = 1 FROM vocabulary_registry_meta "
+        f"WHERE tenant_id = '{DEFAULT_TENANT_ID}'",
+    ),
+}
+
+
+@lru_cache(maxsize=1)
+def _data_steps() -> dict[str, tuple[str, tuple[str, ...], str]]:
+    """Sổ đăng ký GỘP, gồm cả bước do mặt phẳng phân quyền sở hữu.
+
+    Nhập trễ: `authz_schema` được nạp sau tệp này, và bước cộng đồng phải sống
+    cạnh câu SQL nó chạy chứ không phải bị chép sang đây — chép là dựng sẵn cái
+    lệch mà `_SQL_*` ở trên sinh ra để tránh.
+    """
+    from app.storage.authz_schema import AUTHZ_DATA_STEPS
+
+    return {**MIGRATION_DATA_STEPS, **AUTHZ_DATA_STEPS}
+
+
+@lru_cache(maxsize=1)
+def _data_step_followers() -> frozenset[str]:
+    """Câu THEO SAU trong một bước nhiều câu — đã chạy cùng câu dẫn đầu.
+
+    Không có tập này thì câu sửa chữa của bước cộng đồng sẽ chạy lần thứ hai,
+    lần đó NGOÀI phạm vi, và lại lặng lẽ `UPDATE 0`.
+    """
+    return frozenset(
+        stmt
+        for _, cac_cau, _ in _data_steps().values()
+        for stmt in cac_cau[1:]
+    )
+
+#: Câu mà trạng thái cuối phụ thuộc vào: hỏng là DỪNG migration, không ghi log
+#: rồi đi tiếp. `SET NOT NULL` ở đây vì nó là nửa sau của cặp backfill→ràng
+#: buộc; nếu nó hụt thì cột vẫn nhận NULL và vòng lặp tự nuôi mình quay lại.
+MIGRATION_MUST_SUCCEED: frozenset[str] = frozenset({_SQL_CLASS_REGION_NOT_NULL})
 
 
 def _bool_value(value: Any) -> bool:
@@ -211,6 +414,47 @@ _DROP_PRE_REGISTRY_DIALECTS = """
 
 
 #: Bỏ bảng `user_profiles` đã chết, chỉ khi nó RỖNG. MỘT CHIỀU.
+#: Bỏ DEFAULT của `training_jobs.tenant_id` — giữ NOT NULL. MỘT CHIỀU.
+#:
+#: Cùng khuôn với `_DROP_USERS_TENANT_DEFAULT` (xem chú thích ở đó cho lý do
+#: đầy đủ). Ở đây hậu quả nặng hơn một bậc: một job lập hồ sơ thiếu tenant
+#: không chỉ thuộc nhầm tổ chức, mà kéo theo MỌI thứ móc vào nó — hợp đồng lớp
+#: đầu ra, hiện vật, sự kiện webhook.
+#:
+#:     CreateTrainingJob(thiếu tenant)  ->  PostgreSQL gán 'default'   (trước)
+#:     CreateTrainingJob(thiếu tenant)  ->  TỪ CHỐI                    (sau)
+#:
+#: KHÔNG di chuyển job hiện hữu: job đang mang `default` vẫn thuộc `default`.
+#: Câu này chỉ chặn việc tạo THÊM một job thuộc tenant khởi tạo do sơ suất.
+_DROP_TRAINING_JOBS_TENANT_DEFAULT = """
+    ALTER TABLE training_jobs ALTER COLUMN tenant_id DROP DEFAULT
+    """
+
+#: Bỏ DEFAULT của `users.tenant_id` — giữ NOT NULL. MỘT CHIỀU.
+#:
+#: Vì sao
+#: ------
+#: Cột đang là `NOT NULL DEFAULT 'default'`. Nghĩa là một lượt `INSERT INTO
+#: users` quên `tenant_id` KHÔNG hỏng — PostgreSQL lặng lẽ gán tenant khởi tạo,
+#: và một lỗi thiếu phạm vi biến thành một tư cách thành viên CÓ THẬT.
+#:
+#:     INSERT user thiếu tenant_id  ->  PostgreSQL gán 'default'  ->  membership
+#:
+#: Sau câu này, cùng lượt INSERT ấy sẽ NỔ. Đó là điểm khác biệt cốt lõi:
+#:
+#:     bootstrap TƯỜNG MINH tới default   hợp lệ
+#:     fallback NGẦM tới default          cấm
+#:
+#: KHÔNG chuyển một hàng nào. Tài khoản đang mang `tenant_id='default'` vẫn
+#: thuộc `default`; câu này chỉ loại bỏ khả năng tạo THÊM một tư cách thành viên
+#: default một cách vô tình.
+#:
+#: Cột vẫn NOT NULL. Không biến thành nullable — "không có tenant" không phải
+#: một trạng thái hợp lệ để lưu, nó là một lỗi cần chặn lúc ghi.
+_DROP_USERS_TENANT_DEFAULT = """
+    ALTER TABLE users ALTER COLUMN tenant_id DROP DEFAULT
+    """
+
 _DROP_DEAD_USER_PROFILES = """
     DO $$
     DECLARE n bigint;
@@ -707,6 +951,7 @@ INDEX_STATEMENTS = [
 # DDL tạo ra chúng — thay vì phải nhớ cập nhật ba tệp.
 from app.storage.authz_schema import (  # noqa: E402  (sau `logger`, có chủ ý)
     TENANT_SCOPED_AUTHZ_TABLES as _AUTHZ_TENANT_TABLES,
+    add_constraint as _add_constraint,
 )
 
 TENANT_SCOPED_TABLES = (
@@ -1027,10 +1272,9 @@ MIGRATION_STATEMENTS = [
        ON CONFLICT (code) DO NOTHING""",
     # Backfill TRƯỚC khi đặt NOT NULL. Cả NULL lẫn chuỗi rỗng đều là "chưa
     # phân loại" theo nghĩa cũ, nên cả hai về `unclassified`.
-    "UPDATE classes SET region = 'unclassified' "
-    "WHERE region IS NULL OR btrim(region) = ''",
+    _SQL_BACKFILL_CLASS_REGION,
     "ALTER TABLE classes ALTER COLUMN region SET DEFAULT 'unclassified'",
-    "ALTER TABLE classes ALTER COLUMN region SET NOT NULL",
+    _SQL_CLASS_REGION_NOT_NULL,
     # Khoá ngoại đúng hình dạng `fk_classes_language`: một cột, bảng toàn cục.
     #
     # ON UPDATE RESTRICT, KHÔNG phải CASCADE — và đây là bài học từ một lỗ thật
@@ -1049,8 +1293,24 @@ MIGRATION_STATEMENTS = [
     # hiển thị: `bac` cố định, còn `name_vi`/`name_en` mới là thứ người ta đổi.
     # Đổi `bac` thành `north` phải là một migration có chủ ý, không phải hệ quả
     # phụ của một lượt ghi nghiệp vụ.
-    "ALTER TABLE classes ADD CONSTRAINT classes_region_fkey "
-    "FOREIGN KEY (region) REFERENCES regions(code) ON UPDATE RESTRICT",
+    # `add_constraint` chứ không phải `ALTER TABLE` trần: SQL không có
+    # `ADD CONSTRAINT IF NOT EXISTS`, nên bản trần hỏng ở MỌI lượt chạy thứ hai
+    # trở đi và để lại một dòng
+    #
+    #     ensure_tables: migration statement failed (ignored):
+    #     constraint "classes_region_fkey" for relation "classes" already exists
+    #
+    # trong mỗi lần khởi động của mỗi service dùng chung ảnh này. Đây là lỗi
+    # chưa-phân-loại CUỐI CÙNG còn sót sau lượt migration 15/08/2026, và tiếng
+    # ồn kiểu đó dạy người vận hành bỏ qua cảnh báo của `ensure_tables` — cảnh
+    # báo tiếp theo có thể là thật.
+    #
+    # Đánh đổi, nêu rõ: đổi ĐỊNH NGHĨA ràng buộc này về sau sẽ không tự áp
+    # dụng nữa, phải viết một câu migration riêng. Giống hệt đánh đổi mà 20 ràng
+    # buộc khác trong kho này đã chấp nhận.
+    _add_constraint("classes", "classes_region_fkey",
+                    "FOREIGN KEY (region) REFERENCES regions(code) "
+                    "ON UPDATE RESTRICT"),
     # Bỏ bản `coalesce` TRƯỚC khi bản trần được dựng phía dưới. Không có
     # khoảng trống về đảm bảo: `NOT NULL` + khoá ngoại vừa đặt ở trên đã chặn
     # đúng cái mà `coalesce` từng chặn.
@@ -1285,9 +1545,7 @@ MIGRATION_STATEMENTS = [
     # `WHERE NOT EXISTS` không sinh hàng nào khi hàng đã có, nên không có tuple
     # nào để kiểm ràng buộc. Đúng ba trường hợp: cài mới (chèn, chưa có cột),
     # chạy lại (không làm gì, không lỗi), hàng bị xoá (chèn, cột lấy mặc định).
-    f"INSERT INTO tenants(tenant_id, display_name, slug) "
-    f"SELECT '{DEFAULT_TENANT_ID}', 'VOYA', '{DEFAULT_TENANT_ID}' "
-    f"WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE tenant_id = '{DEFAULT_TENANT_ID}')",
+    _SQL_BOOTSTRAP_DEFAULT_TENANT,
     f"ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '{DEFAULT_TENANT_ID}'",
     f"ALTER TABLE classes ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '{DEFAULT_TENANT_ID}'",
     f"ALTER TABLE samples ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT '{DEFAULT_TENANT_ID}'",
@@ -1372,8 +1630,7 @@ MIGRATION_STATEMENTS = [
         updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     )
     """,
-    f"INSERT INTO vocabulary_registry_meta(tenant_id) VALUES('{DEFAULT_TENANT_ID}') "
-    f"ON CONFLICT DO NOTHING",
+    _SQL_SEED_VOCAB_REGISTRY_META,
     "CREATE INDEX IF NOT EXISTS idx_dialects_status ON dialects(tenant_id, status, is_active)",
     "CREATE INDEX IF NOT EXISTS idx_dialects_created_by ON dialects(created_by)",
     # ---------------------------------------------------------------------
@@ -2353,6 +2610,13 @@ MIGRATION_STATEMENTS = [
     # biểu thức trước khi chạy, nên vế phải vẫn bị phân tích sau khi bảng đã bị
     # xoá và đẻ ra cảnh báo mỗi lần khởi động. `EXECUTE` hoãn việc đó lại.
     _DROP_DEAD_USER_PROFILES,
+    # Bỏ DEFAULT của `users.tenant_id` (16/08/2026). Nằm ở ĐÂY thì
+    # `app.cli.migrate` mới chạy nó; chỉ đăng ký vào `one_way_statements()`
+    # thôi thì câu lệnh bị LOẠI khỏi đường khởi động mà cũng không bao giờ
+    # được thi hành ở đâu cả — một câu "đã đăng ký" nhưng chết. Đo lại thấy
+    # đúng như vậy trước khi thêm dòng này.
+    _DROP_USERS_TENANT_DEFAULT,
+    _DROP_TRAINING_JOBS_TENANT_DEFAULT,
     # =====================================================================
     # v4 — MẶT PHẲNG THƯƠNG MẠI VÀ VÒNG ĐỜI KHÁCH HÀNG
     #
@@ -3420,6 +3684,14 @@ def one_way_statements() -> frozenset[str]:
     by_hand = frozenset((
         _DROP_PRE_REGISTRY_DIALECTS,
         _DROP_DEAD_USER_PROFILES,
+        # Bỏ DEFAULT của `users.tenant_id`. Đăng ký TAY vì bộ phân loại xếp
+        # `ALTER ... DROP DEFAULT` vào nhóm an toàn theo hình dạng — đúng với
+        # phần lớn cột, sai với cột này: bỏ default ở đây làm MỌI đường ghi
+        # quên `tenant_id` chuyển từ "im lặng gán default" sang "nổ". Đó là
+        # thay đổi hành vi, và nó phải đi qua `app.cli.migrate` chứ không lên
+        # đường khởi động.
+        _DROP_USERS_TENANT_DEFAULT,
+        _DROP_TRAINING_JOBS_TENANT_DEFAULT,
         *_DROP_GLOBAL_CLASS_UNIQUES,
         *_DROP_PRE_REGION_CLASS_UNIQUE,
         *_DROP_COALESCE_REGION_UNIQUE,
@@ -3491,6 +3763,42 @@ def retired_indexes() -> frozenset[str]:
             bo.add(m.group(1).strip('"').lower())
 
     return frozenset(bo - tao)
+
+
+def creates_retired_object(stmt: str) -> str | None:
+    """Tên đối tượng ĐÃ RETIRE mà câu lệnh này định tạo lại — hoặc None.
+
+    Tồn tại để `app.sot.reader_sync` hỏi được cùng một câu hỏi mà
+    `migrate --status` đang hỏi, bằng cùng một nguồn sự thật.
+
+    Vì sao không để bên SOT tự liệt kê
+    -----------------------------------
+    Ngày 15/08/2026 phát hiện gói SOT `Ver5_06082026` — đã ký, hợp lệ, ký
+    TRƯỚC khi `region` vào định danh lớp — mang theo một bản chụp đông lạnh của
+    lược đồ cũ, trong đó có:
+
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_classes_tenant_slug_lang_dialect …
+
+    `reader_sync` phát lại toàn bộ đoạn SQL ấy ở MỖI lượt sync, nên `migrate`
+    gỡ chỉ mục rồi `sot_init` dựng lại ngay trong cùng một lượt triển khai. Đo
+    được: `--status` xanh trước `up -d`, đỏ sau `up -d`.
+
+    Một danh sách retire thứ hai nằm bên SOT sẽ trôi khỏi danh sách này đúng
+    như mọi danh sách chép tay khác đã trôi. Một đối tượng đã retire phải có
+    ĐÚNG MỘT nơi định nghĩa, và đó là `retired_indexes()` — thứ tự nó cũng suy
+    ra từ các câu DDL chứ không viết tay.
+
+    Nguyên tắc đằng sau, rộng hơn cái chỉ mục này:
+
+        Một hiện vật lịch sử được phép MÔ TẢ lược đồ của thời điểm nó ra đời,
+        nhưng không được phép vượt quyền migration để khôi phục thứ mà hệ
+        thống hiện hành đã retire.
+    """
+    m = _RE_CREATE_INDEX.match((stmt or "").strip())
+    if not m:
+        return None
+    ten = m.group(1).strip('"').lower()
+    return ten if ten in retired_indexes() else None
 
 
 def retired_still_present(cur) -> list[str]:
@@ -3819,9 +4127,13 @@ def verify_integrity_constraints() -> list[str]:
     return missing
 
 
+#: `tenant_id` TƯỜNG MINH. Trước 16/08/2026 câu này bỏ trống cột ấy và dựa vào
+#: `DEFAULT 'default'` của lược đồ; sau khi default bị bỏ
+#: (`_DROP_USERS_TENANT_DEFAULT`) nó sẽ nổ, và đó là hành vi đúng — nhưng đường
+#: bootstrap thì THẬT SỰ thuộc tenant khởi tạo, nên nó nói ra điều đó.
 SQL_UPSERT_USER = """
-INSERT INTO users(id, username, email, password_hash, is_active, is_admin, created_at)
-VALUES(%(id)s, %(username)s, %(email)s, %(password_hash)s, %(is_active)s, %(is_admin)s, %(created_at)s)
+INSERT INTO users(id, username, email, password_hash, is_active, is_admin, created_at, tenant_id)
+VALUES(%(id)s, %(username)s, %(email)s, %(password_hash)s, %(is_active)s, %(is_admin)s, %(created_at)s, %(tenant_id)s)
 ON CONFLICT (id) DO UPDATE SET
     username = EXCLUDED.username,
     email = EXCLUDED.email,
@@ -3837,7 +4149,8 @@ INSERT INTO classes(
     is_common_global, is_common_language, folder_name, created_at, migrated_at,
     hands_required,
     semantic_label, vocabulary_scope, recognition_profile, vocabulary_group, collection_campaign, is_active,
-    motion_type, tenant_id
+    motion_type, tenant_id,
+    region
 )
 VALUES(
     %(class_uid)s, %(class_idx)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
@@ -3846,7 +4159,19 @@ VALUES(
     %(semantic_label)s, %(vocabulary_scope)s, %(recognition_profile)s, %(vocabulary_group)s, %(collection_campaign)s, %(is_active)s,
     %(motion_type)s,
     -- Same rule as samples: absent means bootstrap tenant on INSERT only.
-    COALESCE(%(tenant_id)s, '{DEFAULT_TENANT_ID}')
+    COALESCE(%(tenant_id)s, '{DEFAULT_TENANT_ID}'),
+    -- VẮNG MẶT khác NULL TƯỜNG MINH, và khác biệt đó là cả điểm của dòng này.
+    --
+    -- Gói SOT `Ver5_06082026` ra đời TRƯỚC khi cột `region` tồn tại, nên
+    -- `labels.csv` của nó không có cột ấy. Hiểu "không có trường" thành "hãy
+    -- ghi NULL" là để một hiện vật lịch sử **xoá** một chiều thông tin mà nó
+    -- chưa từng biết là có. Đo được trên `signdb_test` ngày 15/08: 63/63 lớp
+    -- mang `region` NULL, và vì thế `ALTER COLUMN region SET NOT NULL` không
+    -- bao giờ chạy được — một vòng tự nuôi mình qua mỗi lượt chạy suite.
+    -- Literal, khớp với `DEFAULT 'unclassified'` trong DDL của chính cột này.
+    -- Không import `dataset_manager.REGION_UNCLASSIFIED`: module ấy import
+    -- ngược lại tệp này.
+    COALESCE(%(region)s, 'unclassified')
 )
 ON CONFLICT (class_uid) DO UPDATE SET
     class_idx = EXCLUDED.class_idx,
@@ -3868,7 +4193,24 @@ ON CONFLICT (class_uid) DO UPDATE SET
     is_active = COALESCE(EXCLUDED.is_active, classes.is_active),
     motion_type = COALESCE(EXCLUDED.motion_type, classes.motion_type),
     -- Parameter, not EXCLUDED — see the note on samples.tenant_id above.
-    tenant_id = COALESCE(%(tenant_id)s, classes.tenant_id)
+    tenant_id = COALESCE(%(tenant_id)s, classes.tenant_id),
+    -- GIỮ NGUYÊN khi hiện vật không nói gì về vùng.
+    --
+    -- `EXCLUDED.region` là NULL đúng khi gói không mang cột `region`, và khi đó
+    -- giá trị đang có trên máy này là thứ ĐÚNG duy nhất còn lại. Ghi đè bằng
+    -- rỗng sẽ biến `tom|hoa-de|nam` thành `tom|hoa-de|NULL` mỗi lượt sync — một
+    -- gói cũ lặng lẽ gỡ bỏ công phân loại vùng.
+    --
+    -- THAM SỐ, không phải `EXCLUDED` — cùng lý do đã ghi ở `tenant_id`.
+    --
+    -- `EXCLUDED.region` là giá trị đã đi qua `COALESCE(%(region)s,'unclassified')`
+    -- ở phần VALUES, nên nó KHÔNG BAO GIỜ NULL. Dùng nó ở đây thì mọi lượt
+    -- upsert của một hiện vật không biết vùng sẽ ghi đè `nam` thành
+    -- `unclassified` — vẫn là mất dữ liệu, chỉ đổi từ NULL sang một giá trị
+    -- trông hợp lệ, tức là khó thấy hơn. Bài kiểm
+    -- `test_hien_vat_cu_KHONG_co_khoa_region_thi_GIU_NGUYEN` bắt được đúng chỗ
+    -- này ở bản vá đầu.
+    region = COALESCE(%(region)s, classes.region)
 """
 
 SQL_UPSERT_SIGNER = """
@@ -3981,8 +4323,22 @@ ON CONFLICT (upload_uid) DO UPDATE SET
 
 
 def insert_user(row: Dict[str, Any]):
+    """`tenant_id` là tham số BẮT BUỘC, không có mặc định trong Python.
+
+    Đặt `tenant_id=DEFAULT_TENANT_ID` làm mặc định của hàm này chỉ chuyển phép
+    rơi-về-default từ PostgreSQL lên Python — cùng một lỗ, khác tầng, và khó
+    thấy hơn vì không còn nằm trong lược đồ. Người gọi nào thật sự muốn tenant
+    khởi tạo thì phải viết ra, và khi ấy `grep DEFAULT_TENANT_ID` sẽ liệt kê
+    đúng những chỗ cố ý dùng nguồn seed.
+    """
+    tenant = str(row.get("tenant_id") or "").strip()
+    if not tenant:
+        raise ValueError(
+            "insert_user() can tenant_id tuong minh. Duong bootstrap thuoc "
+            "tenant khoi tao thi truyen DEFAULT_TENANT_ID; dung de trong.")
     payload = {
         **row,
+        "tenant_id": tenant,
         "is_active": _bool_value(row.get("is_active", True)),
         "is_admin": _bool_value(row.get("is_admin", False)),
     }
@@ -4060,6 +4416,49 @@ def upsert_class(row: Dict[str, Any]):
     )
     # Same "absent means absent" rule as insert_sample.
     payload[TENANT_COLUMN] = optional_tenant_id(payload.get(TENANT_COLUMN))
+    # `region`: VẮNG MẶT -> NULL (SQL COALESCE giữ giá trị đang có / đặt
+    # 'unclassified' khi tạo mới); CÓ MẶT -> chuẩn hoá rồi ghi.
+    #
+    # Quy tắc tương thích ngược tổng quát, không riêng cột này:
+    #
+    #     KHÔNG CÓ TRƯỜNG  =  hiện vật không biết chiều thông tin này
+    #                      ≠  NULL tường minh
+    #                      ≠  đặt lại giá trị đang có
+    #
+    # `Ver5_06082026` publish trước khi cột `region` ra đời nên `labels.csv` của
+    # nó không có cột ấy. Đọc sự vắng mặt đó thành "ghi NULL" là để một gói cũ
+    # xoá một chiều thông tin nó chưa từng biết là có tồn tại.
+    #
+    # Chuỗi rỗng cũng tính là vắng mặt: CSV không phân biệt được "ô trống" với
+    # "không có cột", và cả hai đều nghĩa là hiện vật không nói gì.
+    # Import trong hàm: `dataset_manager` import ngược tệp này, nên import ở
+    # đầu module sẽ thành vòng. Chuẩn hoá phải dùng CHUNG một hàm — hai bảng
+    # ánh xạ vùng sẽ trôi khỏi nhau đúng như mọi danh sách chép tay khác.
+    from app.dataset_manager import normalize_region
+
+    # Ba trạng thái, không phải hai. `COALESCE` trong SQL chỉ thấy NULL, nên nếu
+    # tầng này không tách chúng ra thì "gói cũ không biết vùng" và "gói mới cố ý
+    # xoá vùng" nhập làm một — và cái sau lặng lẽ được đối xử như "giữ nguyên".
+    if "region" not in row:
+        # VẮNG MẶT: hiện vật không biết chiều này. SQL COALESCE giữ giá trị đang
+        # có, hoặc đặt 'unclassified' khi tạo mới.
+        payload["region"] = None
+    elif row["region"] is None:
+        # NULL TƯỜNG MINH: người gọi biết trường này và gửi rỗng. `csv` không bao
+        # giờ sinh ra `None` — nó cho chuỗi rỗng — nên giá trị này chỉ đến từ một
+        # payload có cấu trúc, tức là một khẳng định. Cột là NOT NULL và
+        # `unclassified` đã là cách nói "chưa phân loại", nên không có nghĩa hợp
+        # lệ nào cho NULL ở đây.
+        raise ValueError(
+            f"upsert_class({row.get('class_uid')!r}): region=None là NULL tường "
+            f"minh, không phải 'không biết'. Bỏ hẳn khoá 'region' nếu hiện vật "
+            f"không mang thông tin vùng, hoặc gửi 'unclassified'.")
+    else:
+        _vung = str(row["region"]).strip()
+        # Ô TRỐNG của CSV: cùng nghĩa với vắng mặt. Một tệp CSV không phân biệt
+        # được "cột không tồn tại" với "ô để trống", nên đọc nó thành một khẳng
+        # định là đọc quá lời.
+        payload["region"] = normalize_region(_vung) if _vung else None
     _execute(SQL_UPSERT_CLASS, payload)
 
 
@@ -4225,20 +4624,44 @@ def upsert_training_job(row: Dict[str, Any]):
     an outright failure, because WITH CHECK would refuse a row whose tenant does
     not match the scope writing it.
 
-    `ambient_tenant()` rather than a caller-supplied value for the same reason
-    `apply_scope` reads the ContextVar: a caller must not be able to file a job
-    under a tenant other than the one it is acting for. Celery tasks run in
-    system scope and therefore fall back to the row's own value if it has one.
+    Phạm vi đang hành động — chứ không phải một giá trị do người gọi đưa vào —
+    vì cùng lý do `apply_scope` đọc ContextVar: người gọi không được lập hồ sơ
+    job dưới một tenant khác tenant mình đang hành động.
+
+    KHÔNG rơi về `default` ở CẢ HAI nhánh — sửa 16/08/2026
+    -----------------------------------------------------
+    Bản trước:
+
+        system scope  ->  row.tenant  or DEFAULT_TENANT_ID
+        request scope ->  ambient_tenant()   (= current_tenant() or DEFAULT_TENANT_ID)
+
+    tức cả hai nhánh đều hạ cánh xuống tenant khởi tạo khi không biết tenant.
+    Với một tác vụ Celery mất `tenant_id`, job của tổ chức A được lập hồ sơ
+    dưới `default` — và mọi thứ móc vào job đó (hợp đồng lớp, hiện vật, sự
+    kiện) đi theo.
+
+    Ý định gốc vẫn giữ nguyên và vẫn đúng: người gọi KHÔNG được tự khai một
+    tenant khác tenant mình đang hành động. Chỉ đổi cách xử khi không biết —
+    từ "đoán là `default`" thành "từ chối".
     """
-    from app.dataset_manager import ambient_tenant
-    from app.tenant_context import in_system_scope
+    from app.tenant_context import in_system_scope, require_tenant
 
     payload = dict(row)
     payload.setdefault("evaluation", None)
     if in_system_scope():
-        payload[TENANT_COLUMN] = optional_tenant_id(payload.get(TENANT_COLUMN)) or DEFAULT_TENANT_ID
+        # Tác vụ nền không có request, nên tenant phải đi theo CHÍNH HÀNG job.
+        # Thiếu thì đó là vi phạm hợp đồng, không phải chỗ để đoán.
+        tenant = optional_tenant_id(payload.get(TENANT_COLUMN))
+        if not tenant:
+            raise ValueError(
+                "upsert_training_job: hang job khong mang tenant_id va dang "
+                "chay trong system scope. Khong suy ra 'default' — mot job "
+                "thieu pham vi phai hong, khong duoc doi chu.")
+        payload[TENANT_COLUMN] = tenant
     else:
-        payload[TENANT_COLUMN] = ambient_tenant()
+        # Đường request: lấy từ phạm vi đang hành động, và `require_tenant()`
+        # ném lỗi khi không có — khác `ambient_tenant()` vốn trả `default`.
+        payload[TENANT_COLUMN] = require_tenant()
     for jsonb_field in ("config", "evaluation"):
         value = payload.get(jsonb_field)
         if isinstance(value, (dict, list)):

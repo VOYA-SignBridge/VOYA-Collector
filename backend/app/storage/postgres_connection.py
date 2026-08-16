@@ -46,6 +46,131 @@ def migration_dsn() -> str:
     return (settings.migration_database_url or "").strip() or settings.database_url
 
 
+class ControlPlaneMisconfigured(RuntimeError):
+    """DSN điều khiển không trỏ tới một vai điều khiển hợp lệ."""
+
+
+def control_dsn() -> str:
+    """DSN cho thao tác MẶT PHẲNG ĐIỀU KHIỂN.
+
+    KHÔNG có đường lùi về `database_url`, và đây là khác biệt cố ý so với
+    `migration_dsn()`. Vai migration lùi được vì một bản cài chưa tách vai vẫn
+    phải chạy DDL; còn ở đây, lùi về vai ứng dụng nghĩa là **đúng thứ mà ranh
+    giới này sinh ra để ngăn** lại xảy ra trong im lặng, và mọi phép kiểm quyền
+    vẫn xanh vì chúng đo vai điều khiển ở nơi khác.
+
+    Chưa cấu hình thì đường gọi phải NÓI RA, không tự xoay xở.
+    """
+    import os
+
+    from app.storage.control_plane import CONTROL_DSN_ENV
+
+    dsn = (os.getenv(CONTROL_DSN_ENV) or "").strip()
+    if not dsn:
+        raise ControlPlaneMisconfigured(
+            f"{CONTROL_DSN_ENV} chua duoc dat. Thao tac mat phang dieu khien "
+            f"KHONG duoc chay bang vai ung dung — chay "
+            f"`python -m app.cli.provision_db_roles` roi dat bien nay."
+        )
+    return dsn
+
+
+#: Bốn thuộc tính vai mà một danh tính điều khiển KHÔNG được có.
+_CAM_O_VAI_DIEU_KHIEN = ("rolsuper", "rolbypassrls", "rolcreatedb", "rolcreaterole")
+
+
+def _assert_control_identity(conn) -> None:
+    """Kết nối này có thật sự là vai điều khiển không — hỏi cơ sở dữ liệu.
+
+    Vì sao phải kiểm chứ không tin cấu hình
+    ---------------------------------------
+    Toàn bộ giá trị của lượt tách vai này nằm ở chỗ `CONTROL_DATABASE_URL` mang
+    một danh tính HẸP HƠN `voya_app`. Nếu ai đó cấu hình nhầm nó thành `admin`
+    — hoặc thành chính `voya_app` — thì:
+
+      * đường ghi vẫn chạy,
+      * mọi phép kiểm hành vi vẫn xanh,
+      * và ranh giới tin cậy biến mất mà không ai được báo.
+
+    Đó là kiểu hỏng tệ nhất: thiết kế least-privilege trở thành trang trí. Nên
+    kiểm ở đây, ngay lúc mở kết nối, bằng `current_user` và `pg_roles` chứ
+    không bằng cách đọc lại chuỗi DSN đã cấu hình.
+
+    Kiểm mỗi lần mở kết nối chứ không một lần cho cả tiến trình: thao tác điều
+    khiển hiếm (một lượt purge), nên cái giá là một lượt khứ hồi không đáng kể,
+    đổi lại một thay đổi cấu hình giữa chừng cũng không lọt.
+    """
+    from app.storage.control_plane import CONTROL_ROLE, TEST_CONTROL_ROLE
+
+    duoc_phep = {CONTROL_ROLE, TEST_CONTROL_ROLE}
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT current_user, current_database(), "
+            f"{', '.join(_CAM_O_VAI_DIEU_KHIEN)} "
+            f"FROM pg_roles WHERE rolname = current_user"
+        )
+        hang = cur.fetchone()
+
+    if hang is None:
+        raise ControlPlaneMisconfigured("khong doc duoc danh tinh cua ket noi dieu khien")
+
+    vai, csdl, *co_cam = hang
+    if vai not in duoc_phep:
+        raise ControlPlaneMisconfigured(
+            f"CONTROL_DATABASE_URL noi toi vai {vai!r}, phai la mot trong "
+            f"{sorted(duoc_phep)}. Mot DSN tro vao admin hoac voya_app lam ranh "
+            f"gioi tin cay bien mat trong im lang."
+        )
+    if any(co_cam):
+        vi_pham = [ten for ten, bat in zip(_CAM_O_VAI_DIEU_KHIEN, co_cam) if bat]
+        raise ControlPlaneMisconfigured(
+            f"vai dieu khien {vai!r} dang mang thuoc tinh bi cam: {vi_pham}"
+        )
+
+    # Và ĐÚNG cơ sở dữ liệu.
+    #
+    # Vai đúng mà cơ sở dữ liệu sai thì sổ cái purge được ghi vào một nơi không
+    # ai đọc: lượt xoá vẫn báo thành công, `tenant_purges` ở cơ sở dữ liệu thật
+    # vẫn trống, và mọi phép kiểm quyền vẫn xanh vì chúng đo ở chỗ khác.
+    #
+    # KHÔNG so với hằng số `'signdb'`: bộ test chạy trên `signdb_test`, nên một
+    # hằng số cứng sẽ biến phép kiểm này thành thứ phải tắt đi khi chạy test —
+    # tức tắt đúng lúc cần nhất. Bất biến đúng là "cùng cơ sở dữ liệu với ứng
+    # dụng": sổ cái phải nằm cạnh chính dữ liệu mà nó ghi lại việc xoá.
+    mong_doi = _database_name(settings.database_url)
+    if mong_doi and csdl != mong_doi:
+        raise ControlPlaneMisconfigured(
+            f"CONTROL_DATABASE_URL noi toi co so du lieu {csdl!r} nhung ung dung "
+            f"dung {mong_doi!r}. So cai dieu khien phai nam cung noi voi du lieu "
+            f"ma no ghi lai viec xoa."
+        )
+
+
+def _database_name(dsn: str) -> str:
+    """Tên cơ sở dữ liệu trong một DSN, hoặc chuỗi rỗng nếu không đọc được."""
+    return (urlsplit(dsn).path or "").lstrip("/").split("?")[0]
+
+
+def connect_control(*, connect_timeout: int = 10):
+    """Kết nối bằng vai ĐIỀU KHIỂN, đã xác minh danh tính.
+
+    Không dùng nhóm kết nối, cùng lý do với `connect_migration`: một kết nối
+    mang năng lực điều khiển không được nằm trong nhóm dùng chung để rồi một
+    request thường mượn trúng nó.
+    """
+    conn = connect_postgres(
+        connect_timeout=connect_timeout,
+        application_name="voya_control",
+        database_url=control_dsn(),
+    )
+    try:
+        _assert_control_identity(conn)
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
 def _candidate_hosts(database_url: str | None = None) -> Iterable[str]:
     current_url = database_url or settings.database_url
     parsed = urlsplit(current_url)

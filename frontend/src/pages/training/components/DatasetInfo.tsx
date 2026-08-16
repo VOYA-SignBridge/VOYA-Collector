@@ -67,7 +67,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
             <div key={lang}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium text-slate-900">{lang.toUpperCase()}</span>
-                <span className="text-xs text-slate-500">{dialects.length} phương ngữ</span>
+                <span className="text-xs text-slate-500">{dialects.length} {t("phương ngữ")}</span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {dialects.map((d) => (

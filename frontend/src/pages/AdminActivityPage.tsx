@@ -194,7 +194,7 @@ export default function AdminActivityPage() {
       setAuditError(null);
     } catch (e: any) {
       if (run !== auditRun.current) return;
-      setAuditError(friendlyError(e, "Không tải được nhật ký kiểm toán"));
+      setAuditError(friendlyError(e, t("Không tải được nhật ký kiểm toán")));
     } finally {
       if (run === auditRun.current) setAuditBusy(false);
     }
@@ -207,7 +207,7 @@ export default function AdminActivityPage() {
       setSecLog(rep.data.security_log || []);
       setError(null);
     } catch (e: any) {
-      setError(friendlyError(e, "Không tải được dữ liệu phiên hoạt động"));
+      setError(friendlyError(e, t("Không tải được dữ liệu phiên hoạt động")));
     }
   }, []);
 
@@ -237,7 +237,7 @@ export default function AdminActivityPage() {
       toast.success(t("Đã chặn {ip}", { ip }));
       await fetchReport();
     } catch (e: any) {
-      toast.error(friendlyError(e, "Chặn IP thất bại"));
+      toast.error(friendlyError(e, t("Chặn IP thất bại")));
     } finally { setBusy(null); }
   };
 
@@ -248,12 +248,12 @@ export default function AdminActivityPage() {
       toast.success(t("Đã bỏ chặn {ip}", { ip }));
       await fetchReport();
     } catch (e: any) {
-      toast.error(friendlyError(e, "Bỏ chặn thất bại"));
+      toast.error(friendlyError(e, t("Bỏ chặn thất bại")));
     } finally { setBusy(null); }
   };
 
   const forceLogout = async (userId: string, name: string) => {
-    const reason = window.prompt(t("Lý do ngắt phiên \"{name}\" (sẽ hiển thị cho người dùng):", { name }), "Vi phạm quy định sử dụng");
+    const reason = window.prompt(t("Lý do ngắt phiên \"{name}\" (sẽ hiển thị cho người dùng):", { name }), t("Vi phạm quy định sử dụng"));
     if (reason === null) return; // cancelled
     setBusy(userId);
     try {
@@ -261,7 +261,7 @@ export default function AdminActivityPage() {
       toast.success(t("Đã đăng xuất {name}", { name }));
       await fetchReport();
     } catch (e: any) {
-      toast.error(friendlyError(e, "Đăng xuất thất bại"));
+      toast.error(friendlyError(e, t("Đăng xuất thất bại")));
     } finally { setBusy(null); }
   };
 

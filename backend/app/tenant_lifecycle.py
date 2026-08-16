@@ -432,6 +432,44 @@ def purge_preview(tenant_id: str) -> Dict[str, Any]:
     }
 
 
+def _record_purge(
+    *, purge_id: str, tenant: str, display_name: str,
+    requested_by: Optional[str], counts: Dict[str, int],
+    files_removed: int, bytes_removed: int, reason: str,
+) -> None:
+    """Ghi sổ cái nền tảng — qua vai ĐIỀU KHIỂN, không qua vai ứng dụng.
+
+    Trước 15/08/2026 câu này chạy bằng `_execute` (vai `voya_app`) bọc trong
+    `system_scope`. Hai điều sai với cách đó:
+
+      * `voya_app` có đủ bốn quyền trên `tenant_purges`, nên nó vừa **xoá được
+        lịch sử purge** vừa **ghi được "đã purge"** cho một tổ chức chưa hề bị
+        xoá. Đó là lỗ toàn vẹn sổ cái.
+      * `system_scope` ở đây chẳng bảo vệ gì: bảng không có RLS, và bản thân
+        sentinel ấy `voya_app` cũng tự đặt được.
+
+    Nay năng lực đến từ QUYỀN của một danh tính khác — `voya_control`, có đúng
+    `INSERT` trên đúng bảng này. Không sentinel, không GUC. Xem
+    `app/storage/control_plane.py`.
+
+    Phân quyền đã xảy ra TRƯỚC: `routers/tenants.py` chặn bằng `require_sudo`,
+    và `purge_tenant` tự kiểm điều kiện nghiệp vụ trước khi tới đây. Hàm này
+    KHÔNG tự quyết định ai được purge.
+    """
+    from app.storage.control_plane import control_cursor
+
+    with control_cursor() as cur:
+        cur.execute(
+            "INSERT INTO tenant_purges(purge_id, tenant_id, display_name, requested_by, "
+            "row_counts, files_removed, bytes_removed, reason) "
+            "VALUES(%s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                purge_id, tenant, display_name, requested_by,
+                json.dumps(counts), files_removed, bytes_removed, reason,
+            ),
+        )
+
+
 def purge_tenant(
     tenant_id: str,
     *,
@@ -523,17 +561,13 @@ def purge_tenant(
     files_removed, bytes_removed = _remove_tenant_files(tenant)
 
     purge_id = str(uuid.uuid4())
-    with system_scope("lifecycle: record the purge in the platform ledger"):
-        _execute(
-            "INSERT INTO tenant_purges(purge_id, tenant_id, display_name, requested_by, "
-            "row_counts, files_removed, bytes_removed, reason) "
-            "VALUES(%s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                purge_id, tenant, preview["display_name"],
-                str(requested_by) if requested_by else None,
-                json.dumps(counts), files_removed, bytes_removed, reason.strip()[:1000],
-            ),
-        )
+    _record_purge(
+        purge_id=purge_id, tenant=tenant,
+        display_name=preview["display_name"],
+        requested_by=str(requested_by) if requested_by else None,
+        counts=counts, files_removed=files_removed,
+        bytes_removed=bytes_removed, reason=reason.strip()[:1000],
+    )
 
     logger.warning(
         "[PURGE] xoá vĩnh viễn %s: %d dòng, %d tệp, %d byte (bởi %s)",

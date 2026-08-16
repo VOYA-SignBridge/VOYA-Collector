@@ -101,15 +101,15 @@ function QuotaBar({ line }: { line: QuotaLine & { key: string } }) {
 function TotalsGrid({ totals }: { totals: Record<string, number> }) {
   const { t } = useI18n();
   const cards: Array<[string, string, (v: number) => string]> = [
-    ["samples_created", "Mẫu đã thu", (v) => v.toLocaleString("vi-VN")],
-    ["training_jobs_started", "Lượt huấn luyện", (v) => v.toLocaleString("vi-VN")],
+    ["samples_created", t("Mẫu đã thu"), (v) => v.toLocaleString("vi-VN")],
+    ["training_jobs_started", t("Lượt huấn luyện"), (v) => v.toLocaleString("vi-VN")],
     [
       "training_seconds",
-      "Thời gian huấn luyện",
+      t("Thời gian huấn luyện"),
       (v) => (v < 3600 ? t("{n} phút", { n: Math.round(v / 60) }) : t("{n} giờ", { n: (v / 3600).toFixed(1) })),
     ],
-    ["storage_mb", "Dung lượng", (v) => (v < 1024 ? `${v} MB` : `${(v / 1024).toFixed(1)} GB`)],
-    ["active_users", "Người đóng góp", (v) => v.toLocaleString("vi-VN")],
+    ["storage_mb", t("Dung lượng"), (v) => (v < 1024 ? `${v} MB` : `${(v / 1024).toFixed(1)} GB`)],
+    ["active_users", t("Người đóng góp"), (v) => v.toLocaleString("vi-VN")],
   ];
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -49,26 +50,106 @@ from app.routers.training import router, training_jobs  # noqa: E402
 SPLITS = REPO_ROOT / "processed" / "splits"
 FEATURES = REPO_ROOT / "dataset" / "features"
 
-#: Hiện vật THẬT, dựng 15/08 từ dữ liệu thật. Cố ý dùng nó chứ không dựng một
-#: hiện vật giả trong tmp: mục đích của tệp này là chứng minh đường API và
-#: đường tay gặp nhau trên CÙNG MỘT hiện vật, nên hiện vật phải là cái đã được
-#: đường tay chứng minh.
-SPLIT_ID = "hoa-de-20260815-floor25"
+#: Hiện vật của CHÍNH bộ ca này, dựng bằng CLI thật từ dữ liệu thật, có chủ sở
+#: hữu tường minh.
+#:
+#: Trước 16/08 tệp này mượn `hoa-de-20260815-floor25` — một hiện vật lịch sử
+#: dựng bằng tay hôm 15/08. Lý lẽ khi đó nghe hợp lý: "đường API và đường tay
+#: phải gặp nhau trên CÙNG một hiện vật". Nhưng nó tạo ra một phụ thuộc sai
+#: chiều — hiện vật ấy không khai chủ sở hữu, nên khi hợp đồng C2b bắt hiện vật
+#: vận hành phải có chủ, 19 ca ở đây thành lý do để NỚI hợp đồng bảo mật.
+#:
+#: Đó là chiều phụ thuộc phải chặn:
+#:
+#: ```
+#: test  ->  vay hiện vật lịch sử  ->  hợp đồng siết  ->  test đỏ
+#:                                                    ->  sức ép nới hợp đồng
+#: ```
+#:
+#: Bộ ca phải sở hữu đầu vào của nó. Dựng bằng chính CLI thật nên vẫn giữ nguyên
+#: điều nó muốn chứng minh: hai đường gặp nhau trên cùng một hiện vật — chỉ khác
+#: là hiện vật ấy do bộ ca dựng, biết chắc chủ, và dọn được.
+SPLIT_ID = "test-owned-operational-a"
+TENANT = "iso_a"
 ARTIFACT = SPLITS / "operational" / SPLIT_ID
 SO_LOP = 7
 PHUONG_NGU = "hoa-de"
 
-_CO = ARTIFACT.is_dir() and (ARTIFACT / "split_metadata.json").exists()
+#: Hai hiện vật lịch sử (`hoa-de-…`, `bang-chu-cai-…`) ở nguyên trạng thái
+#: `unknown` và KHÔNG được dùng ở đây. Chọn một tenant rồi dựng lại chúng chính
+#: là điều C2b vừa cấm — chỉ khác là người tự cấp quyền sẽ là chúng ta thay vì
+#: job đang gọi. Về provenance thì vẫn không hợp lệ. Xem KNOWN_ISSUES.md.
+
+_CO_DU_LIEU = ((REPO_ROOT / "dataset" / "samples.csv").exists()
+               and (REPO_ROOT / "dataset" / "labels.csv").exists())
 
 pytestmark = pytest.mark.skipif(
-    not _CO,
-    reason=(f"cần hiện vật vận hành {SPLIT_ID} (thư mục operational/ nằm ngoài "
-            f"Git — dựng lại bằng make_splits.py --dialects=hoa-de "
-            f"--min_samples_per_class=25 --operational_split_id={SPLIT_ID})"),
+    not _CO_DU_LIEU,
+    reason="cần dataset/samples.csv + dataset/labels.csv để tự dựng hiện vật",
 )
 
-USER = {"id": "u-1", "username": "researcher", "role": "user"}
-ADMIN = {"id": "a-1", "username": "boss", "role": "admin"}
+
+def _la_cua_bo_test(d: Path) -> bool:
+    """Chỉ dọn thứ do chính bộ ca này dựng ra.
+
+    Điều kiện đọc TỪ BÊN TRONG bản khai, không từ tên thư mục: một hiện vật
+    khác vô tình trùng tên vẫn phải sống sót. Hàm này là thứ đứng giữa một lượt
+    dọn dẹp và việc xoá nhầm hiện vật của người khác.
+    """
+    p = d / "split_metadata.json"
+    if not p.exists():
+        return False
+    try:
+        meta = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return (meta.get("split_id") == SPLIT_ID
+            and meta.get("tenant_id") == TENANT)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def hien_vat_cua_bo_test():
+    """Dựng hiện vật bằng CLI thật, chủ sở hữu tường minh, dọn sau khi xong.
+
+    Chạy bằng tiến trình con chứ không gọi `ms.main()` trong tiến trình này:
+    `main()` dời biến toàn cục `OUT_DIR` sang thư mục hiện vật và để nguyên đó,
+    nên lượt gọi thứ hai trong cùng tiến trình sẽ ghi vào
+    `operational/<id>/operational/<id>`. Bài học đó đã trả giá một lần ở
+    `test_operational_artifact_pipeline`.
+    """
+    if ARTIFACT.exists():
+        if not _la_cua_bo_test(ARTIFACT):
+            pytest.fail(
+                f"{ARTIFACT} đã tồn tại và KHÔNG phải hiện vật của bộ ca này. "
+                f"Không xoá. Hãy xem nó là gì trước.")
+        shutil.rmtree(ARTIFACT)
+
+    proc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "processed" / "splits" / "make_splits.py"),
+         f"--dialects={PHUONG_NGU}", "--min_samples_per_class=25",
+         f"--operational_split_id={SPLIT_ID}", f"--tenant_id={TENANT}"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=900)
+    assert proc.returncode == 0, (
+        f"không dựng được hiện vật của bộ ca:\n{proc.stdout[-3000:]}\n"
+        f"{proc.stderr[-3000:]}")
+
+    yield ARTIFACT
+
+    if ARTIFACT.exists() and _la_cua_bo_test(ARTIFACT):
+        shutil.rmtree(ARTIFACT)
+
+#: `tenant_id` KHÔNG phải chi tiết trang trí của fixture.
+#:
+#: Hai chỗ hạ nguồn đọc nó và cả hai đều fail-closed từ nhóm B: `quota_deps.
+#: tenant_of` (hạn mức phải ghi cho đúng tổ chức) và `require_tenant()` trên
+#: đường ghi job. Trước nhóm B, `_row_to_user` bịa ra một tenant khi bản ghi
+#: thiếu, nên một người dùng giả không tenant vẫn đi lọt — đúng kiểu lỗ đã đóng.
+#: Ở đây điền một tenant thật để bộ ca này kiểm ĐÚNG thứ nó sinh ra để kiểm:
+#: cổng ghim hiện vật, chứ không phải danh tính.
+USER = {"id": "u-1", "username": "researcher", "role": "user",
+        "tenant_id": "iso_a"}
+ADMIN = {"id": "a-1", "username": "boss", "role": "admin",
+         "tenant_id": "iso_a"}
 
 
 @pytest.fixture
@@ -210,7 +291,7 @@ class TestLenhMangDungBaTepDo:
         cmd = _build_cmd(
             {"model_type": "tcn", "run_purpose": "operational",
              "operational_split_id": SPLIT_ID, "dialects": [PHUONG_NGU]},
-            Path("m.jsonl"))
+            Path("m.jsonl"), tenant_id=TENANT)
 
         assert f"--train_csv={ARTIFACT / 'train.csv'}" in cmd
         assert f"--val_csv={ARTIFACT / 'val.csv'}" in cmd
@@ -231,7 +312,7 @@ class TestLenhMangDungBaTepDo:
 
         cmd = _build_cmd(
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
-            Path("m.jsonl"))
+            Path("m.jsonl"), tenant_id=TENANT)
 
         assert _split_csvs_of(cmd) == [
             str(ARTIFACT / "train.csv"), str(ARTIFACT / "val.csv"),
@@ -248,7 +329,8 @@ class TestLenhMangDungBaTepDo:
         from app.training_tasks import _build_cmd
 
         with pytest.raises(SplitArtifactError):
-            _build_cmd({"run_purpose": "operational"}, Path("m.jsonl"))
+            _build_cmd({"run_purpose": "operational"}, Path("m.jsonl"),
+                       tenant_id=TENANT)
 
     def test_legacy_khong_con_de_cong_dong_thuan_mu(self):
         """Lỗ cũ: `_split_csvs_of` trả RỖNG cho legacy.
@@ -260,7 +342,7 @@ class TestLenhMangDungBaTepDo:
         from app.training_tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd({"model_type": "tcn", "dialects": [PHUONG_NGU]},
-                         Path("m.jsonl"))
+                         Path("m.jsonl"), tenant_id=TENANT)
 
         duong_dan = _split_csvs_of(cmd)
         assert duong_dan, "legacy vẫn không nói ra tệp nó đọc"
@@ -330,7 +412,7 @@ class TestArgvLaThamQuyenCuoiCung:
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
             {"model_type": "tcn", "dialects": [PHUONG_NGU]},          # legacy
         ):
-            cmd = _build_cmd(cau_hinh, Path("m.jsonl"))
+            cmd = _build_cmd(cau_hinh, Path("m.jsonl"), tenant_id=TENANT)
             for co in CO_QUYET_DINH_NGUON:
                 lan = [a for a in cmd if str(a).startswith(f"{co}=")]
                 assert len(lan) <= 1, f"{co} lặp {len(lan)} lần: {lan}"
@@ -346,7 +428,7 @@ class TestArgvLaThamQuyenCuoiCung:
 
         cmd = _build_cmd(
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
-            Path("m.jsonl"))
+            Path("m.jsonl"), tenant_id=TENANT)
 
         thu_muc = {Path(p).parent for p in _split_csvs_of(cmd)}
         assert thu_muc == {ARTIFACT}
@@ -365,7 +447,7 @@ class TestChayThatBangChinhLenhAPIDung:
         cmd = tt._build_cmd(
             {"model_type": "tcn", "epochs": 1, "batch_size": 32,
              "run_purpose": "operational", "operational_split_id": SPLIT_ID},
-            tmp_path / "m.jsonl")
+            tmp_path / "m.jsonl", tenant_id=TENANT)
 
         out = tmp_path / "out"
         out.mkdir()

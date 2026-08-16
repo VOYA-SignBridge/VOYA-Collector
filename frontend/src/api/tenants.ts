@@ -27,6 +27,7 @@
  */
 
 import axiosClient from "./axiosClient";
+import { tr } from "../i18n";
 
 const API_PREFIX = "/api/v1/tenants";
 
@@ -78,7 +79,7 @@ export const ROLE_LABEL: Record<MemberRole, string> = {
  * người quản trị sẽ đi cấp một vai để "sửa" nó — tức là giao diện vừa thuyết
  * phục họ nới quyền cho một người mà không ai yêu cầu.
  */
-export const NO_ROLE_LABEL = "Chưa có vai";
+export const NO_ROLE_LABEL = "Chưa có vai";  // khoá từ điển; dịch ở `roleLabel()`
 
 /**
  * Nhãn của một vai có thể vắng. Dùng ở mọi chỗ hiển thị vai đọc từ máy chủ.
@@ -88,7 +89,7 @@ export const NO_ROLE_LABEL = "Chưa có vai";
  * ra, chỉ khác nguyên nhân.
  */
 export function roleLabel(role: MemberRoleOrNone | undefined): string {
-  return role ? ROLE_LABEL[role] : NO_ROLE_LABEL;
+  return role ? tr(ROLE_LABEL[role]) : tr(NO_ROLE_LABEL);
 }
 
 /** Giá trị của mục "chưa có vai" trong `<select>`. DOM không giữ được `null`,

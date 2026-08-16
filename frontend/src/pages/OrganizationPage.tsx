@@ -155,7 +155,7 @@ export default function OrganizationPage() {
       if (status === 403) {
         setDenied(true);
       } else {
-        setError(friendlyError(err, "Không đọc được thông tin tổ chức của bạn."));
+        setError(friendlyError(err, t("Không đọc được thông tin tổ chức của bạn.")));
       }
     } finally {
       if (mine === run.current) setLoading(false);
@@ -305,7 +305,7 @@ function IdentityCard({ tenant, memberCount }: { tenant: Tenant; memberCount: nu
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-xl font-semibold text-slate-900">{tenant.display_name}</h2>
             <Badge variant={tenant.is_active ? "success" : "warning"} size="sm">
-              {tenant.is_active ? "Đang hoạt động" : "Đã tạm dừng"}
+              {tenant.is_active ? t("Đang hoạt động") : t("Đã tạm dừng")}
             </Badge>
           </div>
           <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
@@ -370,7 +370,7 @@ function SubscriptionSection({
         setConfirming(false);
         await onChanged();
       } catch (err) {
-        toast.error(friendlyError(err, "Không đổi được thiết lập gia hạn."));
+        toast.error(friendlyError(err, t("Không đổi được thiết lập gia hạn.")));
       } finally {
         setBusy(false);
       }
@@ -543,7 +543,7 @@ function MembersSection({
         }));
         await onChanged();
       } catch (err) {
-        toast.error(friendlyError(err, "Không đổi được vai của thành viên này."));
+        toast.error(friendlyError(err, t("Không đổi được vai của thành viên này.")));
       } finally {
         setBusy(null);
       }
@@ -560,7 +560,7 @@ function MembersSection({
       setRemoving(null);
       await onChanged();
     } catch (err) {
-      toast.error(friendlyError(err, "Không gỡ được thành viên này."));
+      toast.error(friendlyError(err, t("Không gỡ được thành viên này.")));
     } finally {
       setBusy(null);
     }
@@ -693,7 +693,7 @@ function InvitationsSection({
       setEmail("");
       await onChanged();
     } catch (err) {
-      toast.error(friendlyError(err, "Không tạo được lời mời."));
+      toast.error(friendlyError(err, t("Không tạo được lời mời.")));
     } finally {
       setBusy(false);
     }
@@ -706,7 +706,7 @@ function InvitationsSection({
         toast.success(t("Đã thu hồi lời mời gửi tới {email}.", { email: inv.email }));
         await onChanged();
       } catch (err) {
-        toast.error(friendlyError(err, "Không thu hồi được lời mời."));
+        toast.error(friendlyError(err, t("Không thu hồi được lời mời.")));
       }
     },
     [tenantId, onChanged, toast],
@@ -715,8 +715,8 @@ function InvitationsSection({
   const copyLink = useCallback(() => {
     if (!created?.accept_url) return;
     void navigator.clipboard.writeText(created.accept_url).then(
-      () => toast.success("Đã chép liên kết mời."),
-      () => toast.error("Trình duyệt không cho chép. Hãy bôi đen rồi chép tay."),
+      () => toast.success(t("Đã chép liên kết mời.")),
+      () => toast.error(t("Trình duyệt không cho chép. Hãy bôi đen rồi chép tay.")),
     );
   }, [created, toast]);
 
@@ -856,10 +856,10 @@ function ExportsSection({
       try {
         await requestExport(tenantId, scope);
         // Máy chủ trả 202: đã nhận việc, chưa có gì tải được. Nói đúng như vậy.
-        toast.success("Đã nhận yêu cầu. Bản xuất sẽ hiện ở danh sách khi xong.");
+        toast.success(t("Đã nhận yêu cầu. Bản xuất sẽ hiện ở danh sách khi xong."));
         await onChanged();
       } catch (err) {
-        toast.error(friendlyError(err, "Không tạo được bản xuất."));
+        toast.error(friendlyError(err, t("Không tạo được bản xuất.")));
       } finally {
         setBusy(false);
       }
@@ -922,7 +922,7 @@ function ExportsSection({
                         {t("Tải về")}
                       </a>
                     ) : ex.status === "failed" ? (
-                      <span className="text-xs text-red-600">{ex.error || "Thất bại"}</span>
+                      <span className="text-xs text-red-600">{ex.error || t("Thất bại")}</span>
                     ) : (
                       <span className="text-xs text-slate-400">{t("Đang xử lý…")}</span>
                     )}

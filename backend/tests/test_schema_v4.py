@@ -26,15 +26,29 @@ V4_PLATFORM_TABLES = ("plans", "tenant_purges")
 
 
 def _columns(table: str) -> dict:
-    return {
-        r["column_name"]: r
-        for r in db._fetch_all(
+    """Cột của một bảng, hỏi bằng vai CHỦ SỞ HỮU.
+
+    `information_schema` LỌC THEO QUYỀN: nó chỉ hiện những bảng mà vai đang kết
+    nối có ít nhất một quyền, hoặc sở hữu. Từ 15/08/2026 `tenant_purges` là bảng
+    mặt phẳng điều khiển và `voya_test_app` không còn quyền nào trên nó, nên hỏi
+    bằng vai ứng dụng cho ra `{}` — và bài kiểm báo "bảng chưa được tạo" trong
+    khi bảng vẫn ở đó nguyên vẹn.
+
+    Đó là một thông điệp lỗi nói dối, và cách sửa SAI là cấp lại quyền cho vai
+    ứng dụng để bài kiểm xanh. Câu hỏi ở đây là câu hỏi về LƯỢC ĐỒ, nên người
+    hỏi đúng là vai sở hữu lược đồ.
+    """
+    with db._migration_cursor() as cur:
+        cur.execute(
             "SELECT column_name, is_nullable, column_default "
             "FROM information_schema.columns "
             "WHERE table_schema = 'public' AND table_name = %s",
             (table,),
         )
-    }
+        return {
+            r[0]: {"column_name": r[0], "is_nullable": r[1], "column_default": r[2]}
+            for r in cur.fetchall()
+        }
 
 
 class TestTablesExistAndAreScopedCorrectly:

@@ -8,6 +8,8 @@ chung). Bối cảnh đầy đủ của đợt vá lược đồ: `docs/02-data/
 from __future__ import annotations
 
 
+from pathlib import Path
+
 import pytest
 
 from app.storage import metadata_db as db
@@ -84,6 +86,40 @@ def test_every_live_user_is_a_member_of_their_tenant():
         "AND NOT EXISTS (SELECT 1 FROM tenant_members m "
         "                WHERE m.user_id = u.id AND m.tenant_id = u.tenant_id)")
     assert rows[0]["n"] == 0
+
+
+def test_kich_ban_gieo_fixture_do_luong_luon_gan_tu_cach_thanh_vien():
+    """Lưới bắt hồi quy cho `scripts/seed_isolation_fixture.py`.
+
+    Ngày 15/08/2026 kịch bản ấy gieo ba tài khoản sống — `iso_user_a`,
+    `iso_user_b`, `perf_user` — với `users.tenant_id` nhưng KHÔNG có dòng
+    `memberships` nào, và làm bài kiểm ngay bên trên đỏ.
+
+    Vì sao cần lưới ở TẦNG NGUỒN chứ không chỉ bất biến ở tầng dữ liệu
+    ------------------------------------------------------------------
+    Bài kiểm bên trên chỉ đỏ SAU KHI có người chạy kịch bản. Giữa lúc thêm một
+    tài khoản gieo thứ tư và lúc ai đó chạy lại kịch bản có thể là hàng tuần, và
+    khi nó đỏ thì nó trỏ vào dữ liệu chứ không trỏ vào dòng mã đã gây ra.
+
+    Phép kiểm này cố tình HẸP: nó chỉ đếm, không cố hiểu luồng. Đổi lại nó không
+    cần cơ sở dữ liệu và không cần chạy kịch bản.
+    """
+    import re
+
+    nguon = (Path(__file__).resolve().parents[2]
+             / "scripts" / "seed_isolation_fixture.py").read_text(encoding="utf-8")
+    than = "\n".join(d for d in nguon.splitlines()
+                     if not d.lstrip().startswith("#"))
+
+    tao = len(re.findall(r"^\s+_tao_user\(", than, re.MULTILINE))
+    gan = len(re.findall(r"^\s+_gan_tu_cach_thanh_vien\(", than, re.MULTILINE))
+
+    assert tao > 0, "khong tim thay cho goi _tao_user — phep kiem nay da lac huong"
+    assert gan >= tao, (
+        f"kich ban gieo {tao} tai khoan nhung chi gan {gan} tu cach thanh vien. "
+        f"Mot tai khoan song thieu `memberships` bi he thong coi la 'khong phai "
+        f"thanh vien' o moi phep kiem quyen — va phep do co lap mat doi chung "
+        f"DUONG, nen ca am xanh khong con chung minh duoc gi.")
 
 
 def test_admins_were_carried_over_as_admins():

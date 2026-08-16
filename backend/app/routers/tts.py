@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query
 from fastapi.responses import Response
 
+from app.tenant_context import require_tenant
 from app.config import settings
 from app.dataset_manager import list_classes
 from app.services.tts_service import (
@@ -68,7 +69,15 @@ async def prewarm(background_tasks: BackgroundTasks, payload: dict = Body(defaul
     voices = payload.get("voices") or [settings.tts_default_voice]
     voices = [v for v in voices if v in ALLOWED_VOICE_IDS] or [settings.tts_default_voice]
 
-    metas = list_classes(language=language, dialect=dialect)
+    # Khoá bộ nhớ đệm TTS là `(voice, text)` — nội dung thuần, không mang gì
+    # của tenant, nên bản thân bộ đệm KHÔNG rò xuyên tenant: hai tenant có
+    # cùng một nhãn thì cùng nhận một bản tổng hợp của chính chuỗi ấy.
+    #
+    # Chỗ rò là bước LIỆT KÊ này. Không giới hạn phạm vi thì nó (a) đọc được
+    # nhãn nào tồn tại ở mọi tenant, và (b) làm nóng đệm cho nhãn của tenant
+    # khác — biến độ trễ lần đọc đầu thành một phép thử tồn tại.
+    metas = list_classes(language=language, dialect=dialect,
+                         tenant_id=require_tenant())
     labels = sorted({
         (m.label_original or "").strip()
         for m in metas

@@ -27,6 +27,7 @@ from app.catalog_sync import (
     empty_sample_trash,
 )
 from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.tenant_context import require_tenant
 from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
@@ -124,7 +125,15 @@ class SampleOut(BaseModel):
 # ---- Endpoints ----
 
 def _labels_rows() -> List[Dict[str, str]]:
-    return load_labels()
+    """Nhãn MÀ NGƯỜI GỌI ĐƯỢC THẤY.
+
+    Phạm vi đặt ở HELPER chứ không ở từng chỗ gọi: bốn endpoint dùng chung
+    hàm này, và một chỗ quên truyền phạm vi là một lỗ. Đặt ở đây thì không
+    có chỗ nào để quên.
+
+    `require_tenant()` ném lỗi khi không có ngữ cảnh — đóng, không mở.
+    """
+    return load_labels(require_tenant())
 
 
 def _class_uid_to_label_row_map() -> Dict[str, Dict[str, str]]:
@@ -224,7 +233,7 @@ def update_label(
     admin_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
-        result = sync_update_class(class_ref, {"label_original": label})
+        result = sync_update_class(class_ref, {"label_original": label}, tenant_id=require_tenant())
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
@@ -237,7 +246,7 @@ def delete_label(
     admin_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
-        result = sync_soft_delete_class(class_ref)
+        result = sync_soft_delete_class(class_ref, tenant_id=require_tenant())
         audit.record("data.class.soft_delete", actor=admin_user, request=request,
                      target_type="class", target_id=result.get("class_uid") or class_ref,
                      detail={"sample_count": result.get("sample_count"), "via": "labels"})
@@ -253,7 +262,15 @@ def delete_label(
 # It was reachable anonymously purely by omission.
 @router.get("/samples", response_model=List[SampleOut])
 def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
-    samples = list_samples_v2()
+    # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
+    # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
+    # `sample_id` không tồn tại. Không có phép kiểm tenant nào sau khi tra cứu,
+    # nên cũng không có kênh phụ nào giữa hai câu trả lời.
+    #
+    # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
+    # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
+    # vi. Trước 16/08/2026 đường này đọc toàn kho.
+    samples = list_samples_v2(require_tenant())
     labels_by_uid = _class_uid_to_label_row_map()
     out: List[Dict[str, Any]] = []
     for s in samples:
@@ -284,7 +301,15 @@ def get_sample_data(sample_id: str):
     """
     Trả về file npz/json của sample_id
     """
-    samples = list_samples_v2()
+    # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
+    # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
+    # `sample_id` không tồn tại. Không có phép kiểm tenant nào sau khi tra cứu,
+    # nên cũng không có kênh phụ nào giữa hai câu trả lời.
+    #
+    # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
+    # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
+    # vi. Trước 16/08/2026 đường này đọc toàn kho.
+    samples = list_samples_v2(require_tenant())
     match = next((s for s in samples if (s.get("sample_uid") == sample_id)), None)
     if not match:
         raise HTTPException(status_code=404, detail="Sample not found")
@@ -367,7 +392,7 @@ def delete_sample(
     """Soft-delete a sample to Trash (restorable)."""
     _check_sample_ownership(sample_id, current_user)
     try:
-        result = sync_soft_delete_sample(sample_id)
+        result = sync_soft_delete_sample(sample_id, tenant_id=require_tenant())
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -381,7 +406,7 @@ def restore_sample_endpoint(
     """Restore a soft-deleted sample from Trash."""
     _check_sample_ownership(sample_id, current_user)
     try:
-        result = sync_restore_sample(sample_id)
+        result = sync_restore_sample(sample_id, tenant_id=require_tenant())
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -396,7 +421,7 @@ def purge_sample_endpoint(
     """Permanently delete a sample (file + Drive + DB). Irreversible."""
     _check_sample_ownership(sample_id, current_user)
     try:
-        result = sync_purge_sample(sample_id)
+        result = sync_purge_sample(sample_id, tenant_id=require_tenant())
         audit.record("data.sample.purge", actor=current_user, request=request,
                      target_type="sample", target_id=sample_id,
                      detail={"class_uid": result.get("class_uid")})
@@ -454,7 +479,15 @@ def add_sample(
 @router.get("/dataset/sessions")
 def list_sessions(user: str = "", session_id: str = ""):
     """List capture sessions from the unified samples CSV."""
-    samples = list_samples_v2()
+    # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
+    # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
+    # `sample_id` không tồn tại. Không có phép kiểm tenant nào sau khi tra cứu,
+    # nên cũng không có kênh phụ nào giữa hai câu trả lời.
+    #
+    # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
+    # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
+    # vi. Trước 16/08/2026 đường này đọc toàn kho.
+    samples = list_samples_v2(require_tenant())
     # lightweight grouping without pandas
     sessions: Dict[str, Dict[str, Any]] = {}
     for s in samples:

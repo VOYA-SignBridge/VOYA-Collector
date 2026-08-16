@@ -52,6 +52,8 @@ import sys
 from typing import Optional
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from app.storage import control_plane as cp
+
 logger = logging.getLogger("db.roles")
 
 #: Role the application authenticates as at runtime.
@@ -61,6 +63,11 @@ APP_ROLE = "voya_app"
 #: password passed as an argument lands in the shell history and in the process
 #: list of every other user on the host.
 PASSWORD_ENV = "VOYA_APP_DB_PASSWORD"
+
+#: Mật khẩu vai ĐIỀU KHIỂN. Phải KHÁC mật khẩu vai ứng dụng: hai danh tính dùng
+#: chung một bí mật thì ranh giới tin cậy chỉ tồn tại trên giấy — ai đọc được
+#: một cái là có cái kia.
+CONTROL_PASSWORD_ENV = "VOYA_CONTROL_DB_PASSWORD"
 
 #: Object privileges the application role needs, and nothing beyond them.
 #: Note the absence of TRUNCATE and REFERENCES: both are close enough to DDL to
@@ -142,6 +149,44 @@ def _statements(role: str, password: str) -> list[tuple[str, tuple]]:
             (f"REVOKE INSERT, UPDATE, DELETE ON {t} FROM {quoted}", ())
             for t in REFERENCE_TABLES
         ],
+        # Bảng MẶT PHẲNG ĐIỀU KHIỂN: vai ứng dụng không có quyền nào, chấm hết.
+        # Cùng vị trí và cùng lý do với `REFERENCE_TABLES` ở trên — phải đứng
+        # SAU `GRANT ... ON ALL TABLES`, vì câu đó quét cả chúng.
+        #
+        # Xem `app/storage/control_plane.py` về vì sao `tenant_purges` là bảo vệ
+        # theo QUYỀN chứ không theo RLS.
+        *[(sql, ()) for sql in cp.revoke_from_app_statements(role)],
+    ]
+
+
+def _control_statements(role: str, password: str) -> list[tuple[str, tuple]]:
+    """Vai ĐIỀU KHIỂN. Khác vai ứng dụng ở chỗ nó KHÔNG được cấp gì hàng loạt.
+
+    Không `GRANT ... ON ALL TABLES`, không `ALTER DEFAULT PRIVILEGES`. Vai này
+    chỉ chạm đúng những bảng đã khai báo ở `CONTROL_PLANE_TABLES`, nên một bảng
+    mới sinh ra sau này KHÔNG tự động vào tầm với của nó — ngược hẳn với vai
+    ứng dụng, nơi mặc-định-cấp là đúng vì nó phục vụ mọi request.
+
+    Thuộc tính vai giống hệt vai ứng dụng: NOSUPERUSER, NOBYPASSRLS, NOCREATEDB,
+    NOCREATEROLE, NOREPLICATION. Đây KHÔNG phải một vai quản trị mới — nó chỉ là
+    một danh tính mang một tập năng lực điều khiển nhỏ.
+    """
+    quoted = f'"{role}"'
+    return [
+        (
+            "DO $$ BEGIN "
+            "  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s) THEN "
+            f"    CREATE ROLE {quoted} LOGIN NOSUPERUSER NOBYPASSRLS "
+            "        NOCREATEDB NOCREATEROLE NOREPLICATION; "
+            "  END IF; "
+            "END $$",
+            (role,),
+        ),
+        (f"ALTER ROLE {quoted} NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE", ()),
+        (f"ALTER ROLE {quoted} PASSWORD %s", (password,)),
+        (f"GRANT USAGE ON SCHEMA public TO {quoted}", ()),
+        (f"REVOKE CREATE ON SCHEMA public FROM {quoted}", ()),
+        *[(sql, ()) for sql in cp.grant_to_control_statements(role)],
     ]
 
 
@@ -215,9 +260,26 @@ def provision(conn, password: str) -> None:
     về False và lỗi thiếu quyền được ném lại nguyên vẹn — vẫn phải có người
     superuser vào sửa, đúng như trước.
     """
+    _apply(conn, _statements(APP_ROLE, password), APP_ROLE)
+    logger.info("[DB_ROLES] role %s provisioned", APP_ROLE)
+
+
+def provision_control(conn, password: str) -> None:
+    """Tạo/sửa vai ĐIỀU KHIỂN. Idempotent, cùng nới lỏng savepoint như trên.
+
+    Tách khỏi `provision()` chứ không thêm cờ: hai vai có hình dạng quyền khác
+    hẳn nhau (một bên cấp hàng loạt, một bên cấp đúng bảng), và gộp chúng sau
+    một tham số boolean là cách chắc chắn nhất để một ngày nào đó vai điều khiển
+    thừa hưởng nhầm `GRANT ... ON ALL TABLES`.
+    """
+    _apply(conn, _control_statements(cp.CONTROL_ROLE, password), cp.CONTROL_ROLE)
+    logger.info("[DB_ROLES] role %s provisioned", cp.CONTROL_ROLE)
+
+
+def _apply(conn, statements: list[tuple[str, tuple]], role: str) -> None:
     with conn:
         with conn.cursor() as cur:
-            for sql, params in _statements(APP_ROLE, password):
+            for sql, params in statements:
                 if not sql.startswith("ALTER ROLE"):
                     cur.execute(sql, params)
                     continue
@@ -231,7 +293,7 @@ def provision(conn, password: str) -> None:
                     if getattr(exc, "pgcode", None) != _INSUFFICIENT_PRIVILEGE:
                         raise
                     cur.execute("ROLLBACK TO SAVEPOINT provision_role_attr")
-                    if not _desired_attributes_already_hold(cur, APP_ROLE):
+                    if not _desired_attributes_already_hold(cur, role):
                         raise
                     # Mật khẩu không đọc lại được để so sánh (nó đã băm). Bỏ
                     # qua an toàn vì sai mật khẩu lộ ra ngay ở lượt kết nối kế
@@ -239,11 +301,10 @@ def provision(conn, password: str) -> None:
                     logger.info(
                         "[DB_ROLES] bo qua '%s...': thieu quyen o muc cum, nhung "
                         "thuoc tinh cua %s da dung san",
-                        sql[:32], APP_ROLE,
+                        sql[:32], role,
                     )
                 else:
                     cur.execute("RELEASE SAVEPOINT provision_role_attr")
-    logger.info("[DB_ROLES] role %s provisioned", APP_ROLE)
 
 
 def _report(posture: dict, *, label: str) -> None:

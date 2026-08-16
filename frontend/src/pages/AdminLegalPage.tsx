@@ -78,7 +78,7 @@ export default function AdminLegalPage() {
       setDrafts(d);
       setEvents(e);
     } catch (err) {
-      setError(errorMessage(err, "Không tải được danh sách văn bản."));
+      setError(errorMessage(err, t("Không tải được danh sách văn bản.")));
     }
   }, []);
 
@@ -92,8 +92,8 @@ export default function AdminLegalPage() {
    */
   const { ensureSudo: askForSudo } = useSudo();
   const ensureSudo = useCallback(async () => {
-    const ok = await askForSudo("Công bố văn bản pháp lý");
-    if (!ok) setError("Mật khẩu không đúng, hoặc bạn đã huỷ.");
+    const ok = await askForSudo(t("Công bố văn bản pháp lý"));
+    if (!ok) setError(t("Mật khẩu không đúng, hoặc bạn đã huỷ."));
     return ok;
   }, [askForSudo]);
 
@@ -121,7 +121,7 @@ export default function AdminLegalPage() {
       setDrafts((list) => [created, ...list]);
       setOpenDraft(created);
     } catch (err) {
-      setError(errorMessage(err, "Không mở được bản nháp."));
+      setError(errorMessage(err, t("Không mở được bản nháp.")));
     }
   };
 
@@ -140,7 +140,7 @@ export default function AdminLegalPage() {
       const doc = await fetchAnyVersion(row.kind, row.version);
       setPreview({ title: t("{p1} — bản {version}", { p1: t(LEGAL_KIND_LABEL[row.kind]), version: row.version }), body: doc.body });
     } catch (err) {
-      setError(errorMessage(err, "Không đọc được bản văn."));
+      setError(errorMessage(err, t("Không đọc được bản văn.")));
     }
   };
 

@@ -14,6 +14,7 @@
  */
 
 import axiosClient from "./axiosClient";
+import { tr } from "../i18n";
 
 const API_PREFIX = "/api/v1/billing";
 
@@ -109,7 +110,7 @@ export function quotaLines(summary: BillingSummary): Array<QuotaLine & { key: st
  * thay vì chia cứng.
  */
 export function formatPrice(cents: number, currency: string): string {
-  if (cents === 0) return "Miễn phí";
+  if (cents === 0) return tr("Miễn phí");
   const amount = currency === "VND" ? cents : cents / 100;
   return new Intl.NumberFormat("vi-VN", {
     style: "currency",

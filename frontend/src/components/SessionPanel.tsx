@@ -13,7 +13,7 @@ interface SessionPanelProps {
 export default function SessionPanel({ sessionId, samples, onFinish, onDelete }: SessionPanelProps) {
   const { t } = useI18n();
   const handleDelete = (id: number) => {
-    if (confirm("Bạn có chắc muốn xoá mẫu này không?")) {
+    if (confirm(t("Bạn có chắc muốn xoá mẫu này không?"))) {
       onDelete(id);
     }
   };

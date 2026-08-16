@@ -84,7 +84,7 @@ export default function LoginPage() {
       setError(
         typeof custom === "string" && custom
           ? custom
-          : friendlyError(err, "Không đăng nhập được. Hãy kiểm tra lại email và mật khẩu."),
+          : friendlyError(err, t("Không đăng nhập được. Hãy kiểm tra lại email và mật khẩu.")),
       );
     } finally {
       setLoading(false);
@@ -116,7 +116,7 @@ export default function LoginPage() {
       setError(
         typeof custom === "string" && custom
           ? custom
-          : friendlyError(err, "Mã không đúng hoặc đã hết hạn."),
+          : friendlyError(err, t("Mã không đúng hoặc đã hết hạn.")),
       );
       setLoading(false);
     }
@@ -253,7 +253,7 @@ export default function LoginPage() {
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
           )}
-          {loading ? t("Đang đăng nhập...") : "Đăng nhập"}
+          {loading ? t("Đang đăng nhập...") : t("Đăng nhập")}
         </button>
       </form>
     </AuthShell>

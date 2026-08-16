@@ -584,7 +584,7 @@ function SessionCard({
               disabled={deleting}
               className="text-[11px] text-red-600 hover:text-red-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {deleting ? t("Đang xóa…") : "Xóa"}
+              {deleting ? t("Đang xóa…") : t("Xóa")}
             </button>
           </div>
         )}

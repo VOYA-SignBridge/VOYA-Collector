@@ -30,6 +30,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.auth import get_current_user
+from app.tenant_context import require_tenant
 from app.preview_render import (
     find_class_meta,
     list_session_rows,
@@ -50,14 +51,26 @@ _CACHE_HEADER = "private, max-age=604800"
 
 
 def _get_class_or_404(class_uid: str):
-    meta = find_class_meta(class_uid)
+    """Phạm vi lấy từ NGỮ CẢNH YÊU CẦU, không phải từ tài nguyên.
+
+    `require_tenant()` đọc biến ngữ cảnh do `TenantScopeMiddleware` đặt ở đầu
+    mỗi request, cùng giá trị được nạp vào GUC mà chính sách RLS của PostgreSQL
+    so sánh. Dùng đúng nguồn ấy cho tầng CSV giữ hai mặt phẳng nói cùng một
+    câu trả lời; lấy tenant từ `current_user` là một nguồn thứ hai có thể lệch.
+
+    Không có ngữ cảnh tenant thì `require_tenant()` ném lỗi — đóng, không mở.
+    """
+    meta = find_class_meta(class_uid, tenant_id=require_tenant())
     if meta is None:
+        # Cùng một câu trả lời cho "lớp của tenant khác" và "lớp không tồn tại".
+        # Hai thông điệp khác nhau ở đây sẽ dựng lại đúng phép thử tồn tại mà
+        # việc lọc theo phạm vi vừa gỡ bỏ.
         raise HTTPException(status_code=404, detail="Không tìm thấy nhãn")
     return meta
 
 
 def _get_session_rows_or_404(class_uid: str, session_id: str) -> list:
-    rows = list_session_rows(class_uid).get(session_id)
+    rows = list_session_rows(class_uid, tenant_id=require_tenant()).get(session_id)
     if not rows:
         raise HTTPException(status_code=404, detail="Không tìm thấy lần quay (session)")
     return rows
@@ -69,7 +82,7 @@ def list_label_sessions(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     meta = _get_class_or_404(class_uid)
-    groups = list_session_rows(class_uid)
+    groups = list_session_rows(class_uid, tenant_id=require_tenant())
 
     # Ownership is decided by auth_user_id (a UUID), NOT by the display name in
     # user_id/username — two people can share a name, so a name-based check would
@@ -162,7 +175,7 @@ def delete_label_session(
         if not uid:
             continue
         try:
-            sync_soft_delete_sample(uid)
+            sync_soft_delete_sample(uid, tenant_id=require_tenant())
             deleted.append(uid)
         except Exception as exc:  # one bad row must not abort the rest
             failed.append({"sample_uid": uid, "error": str(exc)})
@@ -223,7 +236,10 @@ def reassign_label_session(
         if not uid:
             continue
         try:
-            sync_reassign_sample(uid, target_ref)
+            # Phạm vi tenant của NGƯỜI GỌI, không phải của tài nguyên. Truyền
+            # tenant của mẫu vào đây sẽ vô hiệu hoá chính phép kiểm: một mẫu của
+            # tenant khác sẽ tự mang theo phạm vi làm nó hợp lệ.
+            sync_reassign_sample(uid, target_ref, tenant_id=require_tenant())
             moved.append(uid)
         except Exception as exc:  # one bad row must not abort the rest
             failed.append({"sample_uid": uid, "error": str(exc)})
@@ -309,11 +325,15 @@ def _dispatch_or_render(class_uid: str, session_id: str) -> str:
     try:
         from app.preview_tasks import render_session_preview_task
 
-        render_session_preview_task.delay(class_uid, session_id)
+        # Phạm vi chốt lúc ĐƯA VÀO HÀNG ĐỢI, khi còn biết ai gọi. Worker
+        # chạy trong system_scope và không suy lại được điều này.
+        render_session_preview_task.delay(class_uid, session_id,
+                                          tenant_id=require_tenant())
         return "rendering"
     except Exception as exc:
         logger.warning("[PREVIEW] Celery dispatch failed (%s), rendering inline", exc)
-        render_preview_for_session(class_uid, session_id)
+        render_preview_for_session(class_uid, session_id,
+                                   tenant_id=require_tenant())
         return "ready"
 
 

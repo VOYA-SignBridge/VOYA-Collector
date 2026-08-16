@@ -26,6 +26,46 @@ dãy trần chỉ giữ được hai thứ sau. Vài câu phải tham chiếu qu
 (`_DROP_GLOBAL_CLASS_UNIQUES[0]`), và một lần đảo thứ tự trong tuple gốc sẽ
 lặng lẽ đổi payload. Nhãn làm cho lượt hỏng đó nói được nó hỏng ở đâu, thay vì
 chỉ nói "checksum khác".
+
+Kỷ luật versioning — thêm một câu MỘT CHIỀU thì phải có phiên bản MỚI
+====================================================================
+Ngày 15/08/2026 lộ ra một lỗ mà chính sự tách bạch ở trên tạo ra, và nó là cái
+giá phải trả chứ không phải lỗi thiết kế.
+
+Việc `region` vào định danh lớp thêm một câu một chiều —
+`DROP INDEX IF EXISTS uq_classes_tenant_slug_lang_dialect` — vào lược đồ,
+nhưng KHÔNG tăng `APP_SCHEMA_VERSION`. Hệ quả:
+
+    payload v5      : 11 câu, không có câu DROP ấy
+    checksum v5     : KHÔNG đổi
+    lược đồ sản xuất: đã đổi thật
+
+Tức là một thay đổi lược đồ có thật đi qua mà cổng bất biến không hề thấy. Thứ
+bắt được nó là `retired_objects` trong `migrate --status` — nhưng phép kiểm ấy
+chỉ trả lời *"trạng thái cuối có đúng không"*, không trả lời được
+*"thay đổi này thuộc phiên bản nào"*.
+
+Luật, áp dụng từ thay đổi lược đồ KẾ TIẾP trở đi:
+
+    Thêm hoặc bớt một câu DDL một chiều có ảnh hưởng tới lược đồ sản xuất
+    ⇒ BẮT BUỘC một phiên bản migration mới.
+    KHÔNG sửa payload của một phiên bản đã tồn tại.
+
+Payload v5 **không** được sửa hồi tố. Sửa nó là viết lại quá khứ — đúng thứ
+tệp này sinh ra để ngăn — và sẽ làm checksum lệch khỏi con số sản xuất đã ghi
+lúc 2026-08-12 19:57:50 UTC (xem `V5_CHECKSUM`).
+
+Cách đóng lịch sử cho sạch, khi khung migration sẵn sàng: phiên bản kế tiếp
+chứa câu tương ứng ở dạng luỹ đẳng, ví dụ
+
+    v6: DROP INDEX IF EXISTS uq_classes_tenant_slug_lang_dialect
+
+Trên sản xuất hôm nay nó là no-op (chỉ mục đã gỡ lúc 04:07 ngày 15/08). Trên
+một cơ sở dữ liệu nâng cấp từ trạng thái cũ, nó tạo ra một bước chuyển **có
+phiên bản và có checksum** thay vì một thay đổi không ai quy được về đâu.
+
+Đừng tạo v6 chỉ để cho đẹp nếu khung chưa sẵn sàng — một phiên bản rỗng nghĩa
+cũng là một loại nói dối.
 """
 
 from __future__ import annotations

@@ -103,7 +103,7 @@ export default function LockUserModal({
           <button onClick={onClose} disabled={busy} className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors">{t("Hủy")}</button>
           <button onClick={submit} disabled={busy}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50">
-            {busy ? t("Đang khóa…") : "Khóa tài khoản"}
+            {busy ? t("Đang khóa…") : t("Khóa tài khoản")}
           </button>
         </div>
       </div>

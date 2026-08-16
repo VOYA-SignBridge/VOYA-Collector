@@ -499,7 +499,7 @@ export default function RealtimeRuntime({
 
     const video = videoRef.current;
     if (!video) {
-      setError("Chưa mở được khung hình camera. Hãy thử lại.");
+      setError(t("Chưa mở được khung hình camera. Hãy thử lại."));
       setRunning(false);
       return;
     }
@@ -584,7 +584,7 @@ export default function RealtimeRuntime({
         const modelId = selectedModelIdRef.current;
 
         if (!modelId) {
-          throw new Error("Chưa chọn mô hình nhận dạng.");
+          throw new Error(t("Chưa chọn mô hình nhận dạng."));
         }
 
         // Fire request
@@ -710,7 +710,7 @@ export default function RealtimeRuntime({
   const handleModelSelect = useCallback((modelId: string) => {
     // ✅ SAFETY CHECK: Verify we can switch before proceeding
     if (!canSwitchModel()) {
-      setSelectionWarning("Không thể thay đổi bộ nhận diện khi đang xử lý. Vui lòng chờ đến khi xong.");
+      setSelectionWarning(t("Không thể thay đổi bộ nhận diện khi đang xử lý. Vui lòng chờ đến khi xong."));
       return;
     }
 
@@ -801,7 +801,7 @@ export default function RealtimeRuntime({
       <PageHeader
         title={t("Nhận diện ngôn ngữ kí hiệu")}
         subtitle={t("Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực")}
-        breadcrumb={[{ label: "Dashboard", href: "/" }, "Nhận dạng realtime"]}
+        breadcrumb={[{ label: "Dashboard", href: "/" }, t("Nhận dạng realtime")]}
       />
 
       {/* Model Selection */}

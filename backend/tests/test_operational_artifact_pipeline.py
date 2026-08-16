@@ -111,7 +111,7 @@ def kho(tmp_path, monkeypatch):
     return goc_splits
 
 
-def _chay(kho, monkeypatch, *co, split_id="op-test"):
+def _chay(kho, monkeypatch, *co, split_id="op-test", tenant_id="iso_a"):
     """Gọi CLI thật của make_splits. Trả về thư mục hiện vật.
 
     Đặt lại `OUT_DIR` về gốc trước MỖI lượt, và đó không phải chi tiết vụn:
@@ -123,8 +123,13 @@ def _chay(kho, monkeypatch, *co, split_id="op-test"):
     Dòng này là thứ làm cho ca kiểm tính bất biến kiểm đúng cái nó nói.
     """
     monkeypatch.setattr(ms, "OUT_DIR", kho)
-    monkeypatch.setattr(
-        sys, "argv", ["make_splits.py", f"--operational_split_id={split_id}", *co])
+    argv = ["make_splits.py", f"--operational_split_id={split_id}", *co]
+    # Hiện vật vận hành phải có chủ (C2b). Truyền ở đây để các ca cũ vẫn kiểm
+    # đúng thứ chúng sinh ra để kiểm; ca "thiếu chủ thì DỪNG" nằm riêng ở
+    # `test_split_owner_metadata.py` và gọi CLI KHÔNG có cờ này.
+    if tenant_id is not None:
+        argv.append(f"--tenant_id={tenant_id}")
+    monkeypatch.setattr(sys, "argv", argv)
     ms.main()
     # `main()` dời OUT_DIR sang thư mục hiện vật; đọc lại từ chính module để
     # không có bản cài đặt thứ hai của quy tắc đặt tên.
@@ -169,7 +174,8 @@ class TestHopDongSanXuatTieuThu:
         _chay(kho, monkeypatch, "--dialects=pn-a", "--min_samples_per_class=25")
 
         art = resolve_split_artifact(purpose=PURPOSE_OPERATIONAL,
-                                     splits_root=kho, split_id="op-test")
+                                     splits_root=kho, split_id="op-test",
+                                     tenant_id="iso_a")
         assert art.split_id == "op-test"
         assert art.purpose == PURPOSE_OPERATIONAL
 

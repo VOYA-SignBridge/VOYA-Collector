@@ -53,7 +53,7 @@ export function useSudo(): {
   }, []);
 
   const sudoError = useCallback(
-    (err: unknown) => friendlyError(err, "Mật khẩu không đúng hoặc phiên đã hết hạn."),
+    (err: unknown) => friendlyError(err, tr("Mật khẩu không đúng hoặc phiên đã hết hạn.")),
     [],
   );
 

@@ -41,28 +41,28 @@ function malformed(what: string, detail: string): { ok: false; error: string } {
 }
 
 export function validateLabels(data: unknown): Result<Label[]> {
-  if (!Array.isArray(data)) return malformed("danh sách nhãn", "không phải mảng");
+  if (!Array.isArray(data)) return malformed(tr("danh sách nhãn"), tr("không phải mảng"));
   for (const item of data) {
-    if (!isObject(item)) return malformed("danh sách nhãn", "một phần tử không phải đối tượng");
+    if (!isObject(item)) return malformed(tr("danh sách nhãn"), tr("một phần tử không phải đối tượng"));
   }
   return { ok: true, data: data as unknown as Label[] };
 }
 
 export function validateLabel(data: unknown): Result<Label> {
-  if (!isObject(data)) return malformed("nhãn", "không phải đối tượng");
+  if (!isObject(data)) return malformed(tr("nhãn"), tr("không phải đối tượng"));
   return { ok: true, data: data as unknown as Label };
 }
 
 export function validateSessions(data: unknown): Result<Session[]> {
-  if (!Array.isArray(data)) return malformed("danh sách phiên thu", "không phải mảng");
+  if (!Array.isArray(data)) return malformed(tr("danh sách phiên thu"), tr("không phải mảng"));
   const out: Session[] = [];
   for (const item of data) {
     if (!isObject(item)) {
-      return malformed("danh sách phiên thu", "một phần tử không phải đối tượng");
+      return malformed(tr("danh sách phiên thu"), tr("một phần tử không phải đối tượng"));
     }
     const s = item as Partial<Session>;
     if (typeof s.session_id !== "string") {
-      return malformed("danh sách phiên thu", "thiếu session_id");
+      return malformed(tr("danh sách phiên thu"), tr("thiếu session_id"));
     }
     out.push({
       session_id: s.session_id,
@@ -76,19 +76,19 @@ export function validateSessions(data: unknown): Result<Session[]> {
 }
 
 export function validateJobStatus(data: unknown): Result<JobStatus> {
-  if (!isObject(data)) return malformed("trạng thái tác vụ", "không phải đối tượng");
+  if (!isObject(data)) return malformed(tr("trạng thái tác vụ"), tr("không phải đối tượng"));
   return { ok: true, data: data as JobStatus };
 }
 
 export function validateUploadResult(data: unknown): Result<UploadResult> {
-  if (!isObject(data)) return malformed("kết quả tải lên", "không phải đối tượng");
+  if (!isObject(data)) return malformed(tr("kết quả tải lên"), tr("không phải đối tượng"));
   return { ok: true, data: data as UploadResult };
 }
 
 export function validateClass(data: unknown): Result<ClassRow> {
-  if (!isObject(data)) return malformed("lớp ký hiệu", "không phải đối tượng");
+  if (!isObject(data)) return malformed(tr("lớp ký hiệu"), tr("không phải đối tượng"));
   if (typeof data.class_uid !== "string") {
-    return malformed("lớp ký hiệu", "thiếu class_uid");
+    return malformed(tr("lớp ký hiệu"), tr("thiếu class_uid"));
   }
   return { ok: true, data: data as unknown as ClassRow };
 }

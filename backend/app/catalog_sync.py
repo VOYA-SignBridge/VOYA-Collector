@@ -18,6 +18,7 @@ from app.dataset_manager import (
     LABEL_FIELDS,
     MASTER_LABELS,
     DATASET_ROOT,
+    _load_all_labels_unscoped,
     load_labels,
     regenerate_label_indexes,
     slugify,
@@ -25,11 +26,16 @@ from app.dataset_manager import (
     normalize_region,
     parse_bool,
 )
-from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
+from app.dataset_samples import (
+    SAMPLE_FIELDS,
+    SAMPLES_CSV,
+    _load_all_samples_unscoped,
+    list_samples,
+)
 from app.logging_utils import get_logger as get_structured_logger, OperationStatus, OperationType
 from app.processing.utils import atomic_write_json
 from app.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
-from app.tenancy import TENANT_COLUMN, tenant_id_of
+from app.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
 from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
@@ -398,6 +404,25 @@ def _dispatch_gdrive_folder_move(pairs: Sequence[tuple[Path, Path]]) -> None:
         logger.warning("[CATALOG] Drive folder move dispatch failed for %s: %s", rel_pairs, exc)
 
 
+def _doi_pham_vi(tenant_id: Any) -> None:
+    """Từ chối khi người gọi không mang phạm vi tenant. Không có đường lùi.
+
+    Kiểm THAM SỐ THÔ, và phải gọi TRƯỚC `normalize_tenant_id()`. Hàm chuẩn hoá
+    có `fallback=DEFAULT_TENANT_ID`, nên `""` và `None` đều trả về `"default"` —
+    cố ý, vì nó phục vụ các hàng CSV có trước khi tenant tồn tại. Nhưng ở đường
+    ghi theo yêu cầu, "trống" mang nghĩa NGƯỢC LẠI: không xác định được người
+    gọi thuộc tenant nào.
+
+    Kiểm sau khi chuẩn hoá thì `if not scope` là mã chết và một lượt gọi thiếu
+    phạm vi chạy lặng lẽ với toàn quyền của tenant khởi tạo — tenant mặc định
+    trở thành siêu tenant ngầm. `sync_reassign_sample` mắc đúng lỗi này và chỉ
+    bị bắt bởi một ca kiểm `tenant_id=""` ngày 16/08/2026.
+    """
+    if not str(tenant_id or "").strip():
+        raise CatalogSyncError("Thieu tenant context", status_code=400,
+                               error_code="TENANT_SCOPE_REQUIRED")
+
+
 def _write_samples_csv(rows: Sequence[Dict[str, Any]]) -> None:
     """Rewrite samples.csv using its REAL on-disk header (may be wider than
     SAMPLE_FIELDS). Writing with SAMPLE_FIELDS (19 cols) into the 23-col file
@@ -578,15 +603,23 @@ def _sync_db_raw_uploads(rows: Sequence[Dict[str, Any]]) -> None:
         db_upsert_raw_upload(row)
 
 
-def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def sync_update_class(class_idx: int | str, payload: Dict[str, Any], *,
+                      tenant_id: str) -> Dict[str, Any]:
+    """Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_update_{class_idx}"
     slog.start_operation(op_id)
     op_logs: List[str] = []
 
     with _catalog_lock():
-        rows = load_labels()
-        target_row = _find_class_row_by_ref(rows, class_idx)
+        # TUẦN TỰ HOÁ: `_write_csv(MASTER_LABELS, ...)` phía dưới ghi lại TOÀN
+        # BỘ labels.csv từ `rows`. Lọc nó theo tenant sẽ xoá trắng lớp của mọi
+        # tenant khác — im lặng, trong một thao tác mang tên 'sửa một lớp'.
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: người gọi chỉ chạm được lớp trong phạm vi của mình.
+        target_row = _find_class_row_by_ref(load_labels(scope), class_idx)
 
         if target_row is None:
             slog.log_operation(
@@ -650,7 +683,7 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
         old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
         backup_raw_dir = _backup_tree(old_raw_dir, snapshot_root)
 
-        all_samples_before = list_samples()
+        all_samples_before = _load_all_samples_unscoped()
         all_raw_before = list_raw_uploads()
         sample_rows_before = [row for row in all_samples_before if row.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [row for row in all_raw_before if row.get("class_uid") == old_meta.class_uid]
@@ -866,16 +899,23 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
             shutil.rmtree(snapshot_root, ignore_errors=True)
 
 
-def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
+def sync_delete_class(class_idx: int | str, *, tenant_id: str) -> Dict[str, Any]:
+    """Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_delete_{class_idx}"
     slog.start_operation(op_id)
 
     op_logs: List[str] = []
 
     with _catalog_lock():
-        rows = load_labels()
-        target_row = _find_class_row_by_ref(rows, class_idx)
+        # TUẦN TỰ HOÁ: `_write_csv(MASTER_LABELS, ...)` phía dưới ghi lại TOÀN
+        # BỘ labels.csv từ `rows`. Lọc nó theo tenant sẽ xoá trắng lớp của mọi
+        # tenant khác — im lặng, trong một thao tác mang tên 'sửa một lớp'.
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: người gọi chỉ chạm được lớp trong phạm vi của mình.
+        target_row = _find_class_row_by_ref(load_labels(scope), class_idx)
 
         if target_row is None:
             slog.log_operation(
@@ -888,7 +928,7 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
             raise CatalogSyncError(f"Class {class_idx} not found", status_code=404, error_code="CLASS_NOT_FOUND")
 
         old_meta = _build_class_meta_from_row(target_row)
-        all_samples_before = list_samples()
+        all_samples_before = _load_all_samples_unscoped()
         all_raw_before = list_raw_uploads()
         sample_rows_before = [row for row in all_samples_before if row.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [row for row in all_raw_before if row.get("class_uid") == old_meta.class_uid]
@@ -1019,19 +1059,25 @@ def _db_sample_row_to_csv_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
-def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
+def sync_soft_delete_class(class_idx: int | str, *, tenant_id: str) -> Dict[str, Any]:
     """Move a class to Trash: hide it from the active catalog (labels/samples/
     raw CSVs) and set deleted_at in the DB. Local files + Drive content are KEPT
     so it can be restored; a later purge removes them permanently. Fast: no
     inline Google I/O (the catalog mirror is dispatched async)."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_soft_delete_{class_idx}"
     slog.start_operation(op_id)
     op_logs: List[str] = []
 
     with _catalog_lock():
-        rows = load_labels()
-        target_row = _find_class_row_by_ref(rows, class_idx)
+        # TUẦN TỰ HOÁ: `_write_csv(MASTER_LABELS, ...)` phía dưới ghi lại TOÀN
+        # BỘ labels.csv từ `rows`. Lọc nó theo tenant sẽ xoá trắng lớp của mọi
+        # tenant khác — im lặng, trong một thao tác mang tên 'sửa một lớp'.
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: người gọi chỉ chạm được lớp trong phạm vi của mình.
+        target_row = _find_class_row_by_ref(load_labels(scope), class_idx)
         if target_row is None:
             slog.log_operation(
                 OperationType.CLASS_DELETE, OperationStatus.FAILURE,
@@ -1041,7 +1087,7 @@ def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
             raise CatalogSyncError(f"Class {class_idx} not found", status_code=404, error_code="CLASS_NOT_FOUND")
 
         old_meta = _build_class_meta_from_row(target_row)
-        all_samples_before = list_samples()
+        all_samples_before = _load_all_samples_unscoped()
         all_raw_before = list_raw_uploads()
         sample_rows_before = [r for r in all_samples_before if r.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [r for r in all_raw_before if r.get("class_uid") == old_meta.class_uid]
@@ -1097,17 +1143,21 @@ def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
                                    error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED"), logs=op_logs) from exc
 
 
-def sync_restore_class(class_uid: str) -> Dict[str, Any]:
+def sync_restore_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Restore a soft-deleted class from Trash: clear deleted_at in the DB and
     rebuild its labels.csv + samples.csv rows from the DB records."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_restore_{class_uid}"
     slog.start_operation(op_id)
 
     with _catalog_lock():
         dbrow = db_get_deleted_class(class_uid)
-        rows = load_labels()
-        already = any(r.get("class_uid") == class_uid for r in rows)
+        # `rows` ghi lại cả labels.csv -> toàn cục. `already` là câu hỏi THẨM
+        # QUYỀN ("lớp này đã sống trong tenant của người gọi chưa") -> phạm vi.
+        rows = _load_all_labels_unscoped()
+        already = any(r.get("class_uid") == class_uid for r in load_labels(scope))
         if dbrow is None and not already:
             raise CatalogSyncError(f"Deleted class {class_uid} not found in trash", status_code=404, error_code="CLASS_NOT_FOUND")
 
@@ -1122,7 +1172,9 @@ def sync_restore_class(class_uid: str) -> Dict[str, Any]:
             regenerate_label_indexes()
 
             # Rebuild samples.csv rows from DB (dedupe against existing).
-            existing = list_samples()
+            # TUẦN TỰ HOÁ: `existing + restored` được ghi đè lên cả tệp, nên
+            # `existing` phải chứa hàng của MỌI tenant.
+            existing = _load_all_samples_unscoped()
             existing_uids = {r.get("sample_uid") for r in existing}
             db_samples = db_list_samples_by_class(class_uid, include_deleted=True)
             restored = [_db_sample_row_to_csv_row(s) for s in db_samples
@@ -1138,16 +1190,20 @@ def sync_restore_class(class_uid: str) -> Dict[str, Any]:
         return {"restored": True, "class_uid": class_uid, "op_id": op_id}
 
 
-def sync_purge_class(class_uid: str) -> Dict[str, Any]:
+def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Permanently delete a class (from Trash or active): remove local files,
     hard-delete DB rows, dispatch async Drive folder deletion. Irreversible."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_purge_{class_uid}"
     slog.start_operation(op_id)
 
     with _catalog_lock():
-        rows = load_labels()
-        active_row = next((r for r in rows if r.get("class_uid") == class_uid), None)
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: chỉ xoá vĩnh viễn được lớp trong phạm vi người gọi.
+        active_row = next((r for r in load_labels(scope)
+                           if r.get("class_uid") == class_uid), None)
         meta_row = active_row or db_get_deleted_class(class_uid)
         if meta_row is None:
             raise CatalogSyncError(f"Class {class_uid} not found", status_code=404, error_code="CLASS_NOT_FOUND")
@@ -1160,7 +1216,8 @@ def sync_purge_class(class_uid: str) -> Dict[str, Any]:
         if active_row is not None:
             _write_csv(MASTER_LABELS, LABEL_FIELDS, [r for r in rows if r.get("class_uid") != class_uid])
             regenerate_label_indexes()
-            _write_samples_csv([r for r in list_samples() if r.get("class_uid") != class_uid])
+            _write_samples_csv([r for r in _load_all_samples_unscoped()
+                                if r.get("class_uid") != class_uid])
             _write_csv(RAW_UPLOADS_CSV, RAW_UPLOAD_FIELDS,
                        [r for r in list_raw_uploads() if r.get("class_uid") != class_uid])
 
@@ -1192,17 +1249,38 @@ def list_trash_classes() -> List[Dict[str, Any]]:
 # Trash: soft delete / restore / purge (samples)
 # ===========================================================================
 
-def sync_soft_delete_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_soft_delete_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Move a single sample to Trash: remove it from samples.csv and set
-    deleted_at in the DB. The .npz file + Drive copy are kept for restore."""
+    deleted_at in the DB. The .npz file + Drive copy are kept for restore.
+
+    HAI LƯỢT ĐỌC, HAI VAI TRÒ KHÁC NHAU — 16/08/2026
+    ================================================
+    Bản trước dùng MỘT lượt `list_samples()` cho cả hai việc, và đó là lý do
+    không thể chỉ đổi nó thành `list_samples(scope)`:
+
+        THẨM QUYỀN      "người gọi được xoá mẫu nào"      -> PHẢI theo phạm vi
+        TUẦN TỰ HOÁ     "ghi lại toàn bộ samples.csv"     -> PHẢI là toàn cục
+
+    Lọc theo tenant rồi đưa vào `_write_samples_csv()` sẽ ghi đè cả tệp bằng
+    riêng phần của một tenant — tức là XOÁ TRẮNG hàng của mọi tenant khác, im
+    lặng, trong một thao tác mang tên "xoá mềm một mẫu". Một bản vá an ninh làm
+    mất dữ liệu thì tệ hơn lỗ hổng nó vá.
+
+    Nên: phân giải trong `_theo_pham_vi`, tuần tự hoá từ `_toan_bo`.
+    """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_soft_delete_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
-        rows = list_samples()
-        target = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
+        # THẨM QUYỀN: chỉ thấy mẫu trong phạm vi người gọi.
+        target = next((r for r in list_samples(scope)
+                       if r.get("sample_uid") == sample_uid), None)
         if target is None:
             raise CatalogSyncError(f"Sample {sample_uid} not found", status_code=404, error_code="SAMPLE_NOT_FOUND")
+        # TUẦN TỰ HOÁ: toàn bộ tệp, giữ nguyên hàng của mọi tenant khác.
+        rows = _load_all_samples_unscoped()
         try:
             _write_samples_csv([r for r in rows if r.get("sample_uid") != sample_uid])
             db_upsert_sample(target)  # ensure DB row exists before marking deleted
@@ -1223,16 +1301,23 @@ def sync_soft_delete_sample(sample_uid: str) -> Dict[str, Any]:
         return {"deleted": True, "soft": True, "sample_uid": sample_uid}
 
 
-def sync_restore_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_restore_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Restore a soft-deleted sample: clear deleted_at and re-add its samples.csv
-    row from the DB record."""
+    row from the DB record.
+
+    Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`. `already` hỏi
+    trong PHẠM VI (mẫu này đã sống trong tenant của người gọi chưa), còn `rows`
+    dùng để ghi lại toàn bộ tệp nên phải toàn cục.
+    """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_restore_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
         dbrow = db_get_deleted_sample(sample_uid)
-        rows = list_samples()
-        already = any(r.get("sample_uid") == sample_uid for r in rows)
+        already = any(r.get("sample_uid") == sample_uid for r in list_samples(scope))
+        rows = _load_all_samples_unscoped()
         if dbrow is None and not already:
             raise CatalogSyncError(f"Deleted sample {sample_uid} not found in trash", status_code=404, error_code="SAMPLE_NOT_FOUND")
         db_restore_sample(sample_uid)
@@ -1246,7 +1331,8 @@ def sync_restore_sample(sample_uid: str) -> Dict[str, Any]:
         return {"restored": True, "sample_uid": sample_uid}
 
 
-def sync_reassign_sample(sample_uid: str, target_class_ref: int | str) -> Dict[str, Any]:
+def sync_reassign_sample(sample_uid: str, target_class_ref: int | str,
+                         *, tenant_id: str) -> Dict[str, Any]:
     """Move ONE sample to a different EXISTING class (it was recorded under the
     wrong label). Moves the local .npz (+ sidecar) into the target class folder,
     relabels the samples.csv + Postgres row, and re-mirrors to Drive (upload the
@@ -1258,19 +1344,64 @@ def sync_reassign_sample(sample_uid: str, target_class_ref: int | str) -> Dict[s
     materialized (no local copy and no Drive copy to fetch), the reassign is
     REFUSED rather than committed — the previous behaviour deleted the old Drive
     file and never re-uploaded it, silently losing the sample.
+
+    HAI LỖI ĐÃ SỬA Ở ĐÂY, 16/08/2026 — độc lập với nhau
+    ===================================================
+    **P0-A — phân giải xuyên tenant.** Bản trước tìm cả mẫu lẫn lớp đích trong
+    TOÀN BỘ kho (`load_labels()`, `list_samples()` khi hai hàm ấy còn không có
+    tham số tenant). Endpoint gọi nó chỉ kiểm QUYỀN SỞ HỮU (`auth_user_id`), và
+    KHÔNG kiểm gì với `target_class_ref`. Đo được trên bộ dựng lại phép đo:
+
+        iso_user_a, mẫu CỦA CHÍNH MÌNH, target_class_ref = lớp của iso_b
+        -> lớp của iso_b được phân giải thành công
+
+    Nay cả hai phép phân giải chạy BÊN TRONG phạm vi tenant, và một lớp thuộc
+    tenant khác không phân biệt được với một lớp không tồn tại.
+
+    **P0-B — ghi hai mặt phẳng không nguyên tử.** Đây là lỗi KHÁC, không phải
+    chi tiết của lỗi trên: nó xảy ra cả khi mẫu và lớp cùng một tenant. Thứ tự
+    cũ là
+
+        di chuyển tệp -> ghi samples.csv -> ghi PostgreSQL
+
+    và khối `except` chỉ hoàn nguyên phần TỆP. Nên khi PostgreSQL từ chối —
+    trong lượt đo là `fk_samples_class_tenant` — kết quả là:
+
+        HTTP 400          người gọi thấy "thất bại"
+        PostgreSQL        không đổi
+        samples.csv       ĐÃ ĐỔI, không hoàn nguyên
+        tệp .npz          đã về chỗ cũ  -> file_path treo
+
+    Và vì đường đọc lấy từ CSV, tenant B nhìn thấy mẫu của A trong lớp của B —
+    do một request đã báo lỗi.
+
+    Nay PostgreSQL ghi TRƯỚC: nó là nơi ràng buộc được cưỡng chế, nên nó phải là
+    cửa ải. CSV chỉ được ghi sau khi ràng buộc đã qua.
+
+    Điều này CHƯA phải nguyên tử đầy đủ: một lượt ghi CSV hỏng sau khi
+    PostgreSQL đã commit vẫn để lại lệch theo chiều ngược lại. Đóng hẳn khoảng
+    đó cần staging/bù trừ hoặc một nguồn chân lý duy nhất — mở riêng, không gộp
+    vào P0 này. Xem docs/10-issues/.
     """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_reassign_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
-        target_row = _find_class_row_by_ref(load_labels(), target_class_ref)
+        # Phân giải TRONG phạm vi, trước mọi tác dụng phụ. Không tìm toàn cục
+        # rồi mới so `tenant_id`: mọi thứ xảy ra ở giữa là một kênh phụ trả lời
+        # "đối tượng này có thật không".
+        target_row = _find_class_row_by_ref(load_labels(scope), target_class_ref)
         if target_row is None:
             slog.end_operation(op_id)
+            # Cùng thông điệp với một lớp không tồn tại. Nói "lớp này thuộc
+            # tenant khác" là tự dựng lại phép thử tồn tại vừa gỡ.
             raise CatalogSyncError(f"Target class {target_class_ref} not found",
                                    status_code=404, error_code="CLASS_NOT_FOUND")
         target_meta = _build_class_meta_from_row(target_row)
 
-        rows = list_samples()
+        rows = list_samples(scope)
         sample_row = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
         if sample_row is None:
             slog.end_operation(op_id)
@@ -1348,8 +1479,25 @@ def sync_reassign_sample(sample_uid: str, target_class_ref: int | str) -> Dict[s
                 # a fresh upload before its Drive mirror completes).
                 "storage_url": str(new_file),
             })
-            _write_samples_csv([updated if r.get("sample_uid") == sample_uid else r for r in rows])
+            # PostgreSQL TRƯỚC, CSV SAU. Đây là nửa P0-B của bản vá 16/08/2026.
+            #
+            # Ràng buộc được cưỡng chế ở cơ sở dữ liệu, không ở đây — trong lượt
+            # đo, `fk_samples_class_tenant` là thứ duy nhất chặn được lượt ghi
+            # xuyên tenant. Nên nó phải là CỬA ẢI, không phải bước cuối.
+            #
+            # Thứ tự cũ ghi CSV trước, và khối `except` bên dưới chỉ hoàn nguyên
+            # phần TỆP. Một lượt PostgreSQL từ chối để lại `samples.csv` đã đổi
+            # trong khi HTTP trả lỗi — và vì đường đọc lấy từ CSV, thay đổi ấy
+            # nhìn thấy được với người dùng.
+            #
+            # Đọc lại `rows` từ đĩa: `db_upsert_sample` có thể chạy lâu, và bản
+            # chụp trước đó đã cũ. Ghi đè bằng bản cũ sẽ nuốt mất lượt ghi song
+            # song — `_catalog_lock()` che phần lớn, nhưng đọc lại thì rẻ.
             db_upsert_sample(updated)
+            _write_samples_csv([
+                updated if r.get("sample_uid") == sample_uid else r
+                for r in _load_all_samples_unscoped()
+            ])
 
             # Drive: delete the old file, upload the moved one to its new path.
             # Reuses existing tasks — no new Drive primitive — and is best-effort:
@@ -1455,16 +1603,25 @@ def empty_sample_trash() -> Dict[str, Any]:
     return bulk_purge_samples([s["sample_uid"] for s in list_trash_samples()])
 
 
-def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_purge_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Permanently delete a soft-deleted sample: remove the .npz (+ sidecar),
-    hard-delete the DB row, and delete the Drive copy. Irreversible."""
+    hard-delete the DB row, and delete the Drive copy. Irreversible.
+
+    Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`. Thao tác này
+    KHÔNG hoàn tác được, nên cổng phạm vi ở đây là chỗ ít được phép sai nhất
+    trong cả tệp.
+    """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_purge_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
         # Prefer the samples.csv row (active) else the soft-deleted DB row.
-        rows = list_samples()
-        target = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
+        # THẨM QUYỀN theo phạm vi; `rows` toàn cục chỉ để ghi lại cả tệp.
+        target = next((r for r in list_samples(scope)
+                       if r.get("sample_uid") == sample_uid), None)
+        rows = _load_all_samples_unscoped()
         dbrow = db_get_deleted_sample(sample_uid) if target is None else None
         source = target or dbrow
         if source is None:
@@ -1513,15 +1670,19 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
         return {"purged": True, "sample_uid": sample_uid}
 
 
-def sync_delete_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_delete_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
+    """Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_delete_{sample_uid}"
     slog.start_operation(op_id)
 
     with _catalog_lock():
-        rows = list_samples()
+        # THẨM QUYỀN theo phạm vi; `rows` toàn cục chỉ để ghi lại cả tệp.
+        rows = _load_all_samples_unscoped()
         target_row = None
-        for row in rows:
+        for row in list_samples(scope):
             if row.get("sample_uid") == sample_uid:
                 target_row = row
                 break

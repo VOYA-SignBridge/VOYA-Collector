@@ -57,7 +57,7 @@ export default function NotificationsPage() {
       setUnread(data.unread);
       setError("");
     } catch {
-      setError("Không tải được thông báo. Vui lòng thử lại.");
+      setError(t("Không tải được thông báo. Vui lòng thử lại."));
     } finally {
       setLoading(false);
     }
@@ -91,7 +91,7 @@ export default function NotificationsPage() {
       await markAllRead();
       await load();
     } catch {
-      setError("Không đánh dấu được. Vui lòng thử lại.");
+      setError(t("Không đánh dấu được. Vui lòng thử lại."));
     }
   };
 

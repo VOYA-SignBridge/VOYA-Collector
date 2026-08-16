@@ -70,10 +70,11 @@ app_dsn=$(grep -E '^DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2-)
 mig_dsn=$(grep -E '^MIGRATION_DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2-)
 owner_pw=$(grep -E '^VOYA_TEST_OWNER_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)
 test_pw=$(grep -E '^VOYA_TEST_APP_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)
+control_pw=$(grep -E '^VOYA_TEST_CONTROL_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)
 [ -n "$app_dsn" ] || { echo "khong doc duoc DATABASE_URL tu $ENV_FILE"; exit 2; }
 [ -n "$mig_dsn" ] || mig_dsn="$app_dsn"
-if [ -z "$owner_pw" ] || [ -z "$test_pw" ]; then
-  echo "Chua cap phat role test. Chay truoc:  sh scripts/provision_test_db_roles.sh"
+if [ -z "$owner_pw" ] || [ -z "$test_pw" ] || [ -z "$control_pw" ]; then
+  echo "Chua cap phat role test. Chay truoc:  bash scripts/provision_test_db_roles.sh"
   exit 2
 fi
 
@@ -81,6 +82,9 @@ fi
 # CHỦ SỞ HỮU cho DSN migration (ALTER TABLE đòi quyền sở hữu, không phải GRANT).
 app_dsn=$(rewrite_dsn "$app_dsn" voya_test_app "$test_pw")
 mig_dsn=$(rewrite_dsn "$mig_dsn" voya_test_owner "$owner_pw")
+# Vai ĐIỀU KHIỂN. Bộ test chạy đường điều khiển bằng vai THẬT, không giả lập
+# bằng `admin`: một phép kiểm chạy dưới superuser sẽ xanh dù mọi GRANT đều sai.
+control_dsn=$(rewrite_dsn "$app_dsn" voya_test_control "$control_pw")
 
 # Che mật khẩu khi in ra: dòng này đi vào nhật ký CI và vào ảnh chụp màn hình.
 echo "==> dich test: $(printf '%s' "$app_dsn" | sed -E 's#://([^:]+):[^@]*@#://\1:***@#')"
@@ -121,6 +125,7 @@ exec docker run --rm \
   --env-file "$ENV_FILE_MOUNT" \
   -e DATABASE_URL="$app_dsn" \
   -e MIGRATION_DATABASE_URL="$mig_dsn" \
+  -e CONTROL_DATABASE_URL="$control_dsn" \
   -e POSTGRES_DB="$TEST_DB" \
   $extra \
   -v "$REPO_MOUNT:/src" -w /src \

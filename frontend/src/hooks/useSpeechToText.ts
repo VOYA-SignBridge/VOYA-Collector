@@ -75,7 +75,7 @@ export function useSpeechToText(): UseSpeechToTextValue {
     const SR = win.SpeechRecognition || win.webkitSpeechRecognition;
     if (!SR) {
       setSupported(false);
-      setError("Trình duyệt không hỗ trợ Web Speech API");
+      setError(tr("Trình duyệt không hỗ trợ Web Speech API"));
       return;
     }
 
@@ -127,13 +127,13 @@ export function useSpeechToText(): UseSpeechToTextValue {
 
     if (mode !== "browser") {
       console.warn("Speech-to-text backend mode chưa được triển khai");
-      setError("Chế độ backend STT chưa được cấu hình");
+      setError(tr("Chế độ backend STT chưa được cấu hình"));
       return;
     }
 
     const recognition = recognitionRef.current;
     if (!recognition) {
-      setError("Trình duyệt không hỗ trợ nhận dạng giọng nói");
+      setError(tr("Trình duyệt không hỗ trợ nhận dạng giọng nói"));
       return;
     }
 
@@ -142,7 +142,7 @@ export function useSpeechToText(): UseSpeechToTextValue {
     } catch (e) {
       // start() có thể throw nếu đã đang chạy
       console.warn("Speech recognition start error", e);
-      setError("Không thể bắt đầu nhận dạng, thử lại");
+      setError(tr("Không thể bắt đầu nhận dạng, thử lại"));
     }
   }, [mode]);
 

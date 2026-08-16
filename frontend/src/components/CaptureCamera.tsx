@@ -73,7 +73,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   // Mất kết nối mạng ở cấp trình duyệt cũng được coi là sự cố — chặn thu tiếp
   // để tránh mất dữ liệu đã ghi.
   useEffect(() => {
-    const handleOffline = () => setConnectionIssue("Mất kết nối mạng.");
+    const handleOffline = () => setConnectionIssue(t("Mất kết nối mạng."));
     const handleOnline = () => setConnectionIssue(null);
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
@@ -222,7 +222,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
         }
       }).catch((error) => {
         console.error('Upload failed:', error);
-        setConnectionIssue('Không thể lưu mẫu lên máy chủ. Vui lòng kiểm tra kết nối.');
+        setConnectionIssue(t('Không thể lưu mẫu lên máy chủ. Vui lòng kiểm tra kết nối.'));
         if (onError) {
           onError('Upload failed. Please try again.');
         }
@@ -334,7 +334,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
                 <button
                   onClick={() => {
                     // Clear all samples
-                    if (confirm('Xóa tất cả mẫu trong phiên này?')) {
+                    if (confirm(t('Xóa tất cả mẫu trong phiên này?'))) {
                       setSamples([]);
                       setSampleCounter(1);
                     }

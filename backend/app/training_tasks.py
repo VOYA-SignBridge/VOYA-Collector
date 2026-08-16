@@ -125,7 +125,7 @@ def _insert_metric(job_id: str, m: Dict[str, Any]) -> None:
 SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
 
 
-def _resolve_for_run(config: Dict[str, Any]):
+def _resolve_for_run(config: Dict[str, Any], *, tenant_id: str):
     """Hiện vật mà lượt chạy này SẼ đọc. Một cửa, gọi đúng một lần.
 
     Trả `None` chỉ ở đúng một trường hợp — nhánh tương thích legacy mà hiện vật
@@ -150,8 +150,13 @@ def _resolve_for_run(config: Dict[str, Any]):
         # FAIL-CLOSED. Không rơi về ba tệp nghiên cứu, không tự chọn "split mới
         # nhất", không suy từ dialect. Một lượt vận hành học trên mốc nghiên cứu
         # đóng băng là một checkpoint khai sai nguồn gốc.
+        #
+        # `tenant_id` đến từ HÀNG job đã lưu, không từ `config`. Người gọi ghi
+        # được vào `config`; hàng job thì không — nên đó là nguồn thẩm quyền duy
+        # nhất chấp nhận được ở đây.
         return resolve_split_artifact(
-            purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR, split_id=split_id)
+            purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR,
+            split_id=split_id, tenant_id=tenant_id)
 
     if muc_dich == PURPOSE_RESEARCH:
         # Nhánh nghiên cứu ghim `split_version` riêng (thư mục versioned), đã có
@@ -163,7 +168,8 @@ def _resolve_for_run(config: Dict[str, Any]):
     # và cổng đồng thuận không soi lượt legacy nào.
     try:
         return resolve_split_artifact(
-            purpose=PURPOSE_RESEARCH, splits_root=SPLITS_DIR)
+            purpose=PURPOSE_RESEARCH, splits_root=SPLITS_DIR,
+            tenant_id=tenant_id)
     except SplitArtifactError as exc:
         # KHÔNG chặn ở đây, và đây là lựa chọn có ý thức: legacy là hợp đồng
         # tương thích, ba tệp này vốn đã là mặc định của trainer, nên chặn lại
@@ -176,7 +182,9 @@ def _resolve_for_run(config: Dict[str, Any]):
         return None
 
 
-def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
+def _build_cmd(config: Dict[str, Any], metrics_file: Path, *,
+               tenant_id: str) -> list:
+    """`tenant_id` bắt buộc, lấy từ hàng job — xem `_resolve_for_run`."""
     cmd = [
         "python", "-m", "processed.train_utils.train_tcn",
         f"--model_type={config.get('model_type', 'tcn')}",
@@ -216,7 +224,7 @@ def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
     # Từ đây trở xuống là nhánh vận hành + legacy. Cả hai đi qua CÙNG một
     # resolver, nên `_split_csvs_of(cmd)` — thứ cổng đồng thuận soi — luôn trả
     # đúng tệp trainer sẽ đọc.
-    artifact = _resolve_for_run(config)
+    artifact = _resolve_for_run(config, tenant_id=tenant_id)
     if artifact is not None:
         cmd += [
             f"--train_csv={artifact.train_csv}",
@@ -336,8 +344,21 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # ★ C2c — job không mang tenant thì DỪNG TRƯỚC resolver.
+    #
+    # Đẩy chuỗi rỗng xuống resolver cũng bị chặn, nhưng thông điệp sẽ nói về
+    # hiện vật trong khi lỗi thật nằm ở hàng job. Người đọc nhật ký sáu tháng
+    # sau sẽ đi tìm hiện vật bị xoá thay vì một job lập hồ sơ thiếu tenant.
+    tenant_job = str(row.get("tenant_id") or "").strip()
+    if not tenant_job:
+        loi = ("Job không mang `tenant_id` nên không xác định được nó được phép "
+               "đọc hiện vật nào. KHÔNG suy ra tenant từ cấu hình lượt chạy.")
+        logger.error("[TRAINER] job %s: %s", job_id, loi)
+        _update_job(row, status="failed", completed_at=_now(), error_message=loi)
+        return {"status": "failed", "reason": "tenant_missing", "detail": loi}
+
     try:
-        cmd = _build_cmd(config, metrics_file)
+        cmd = _build_cmd(config, metrics_file, tenant_id=tenant_job)
     except Exception as exc:
         # Hiện vật không phân giải được thì job DỪNG ở đây, chưa từng "running".
         # Chạy tiếp bằng mặc định của trainer là đúng thứ fail-closed sinh ra để
@@ -526,11 +547,29 @@ def _emit_training_event(row: Dict[str, Any], event: str, payload: Dict[str, Any
     chạy trong container trainer dưới `platform_wide` scope, nên ngữ cảnh là
     "toàn nền tảng" chứ không phải tenant nào cả. Dùng ngữ cảnh ở đây sẽ gửi
     sự kiện cho sai người, hoặc không gửi cho ai.
+
+    KHÔNG rơi về `default` — sửa 16/08/2026
+    ---------------------------------------
+    Bản trước là `row.get("tenant_id") or "default"`. Một job mất `tenant_id` sẽ
+    phát sự kiện của nó tới **cấu hình webhook của tenant khởi tạo** — tức gửi
+    thông tin huấn luyện của một tổ chức tới endpoint của tổ chức khác.
+
+    "Thiếu tenant" KHÔNG BAO GIỜ là cách ngầm để nói "toàn hệ thống". Nếu một
+    ngày có job thật sự thuộc hệ thống thì nó phải mang danh tính hệ thống
+    TƯỜNG MINH, đúng cách `platform_administrator` được tách khỏi
+    `tenant_administrator` — chứ không biểu diễn bằng một ô trống.
     """
+    tenant = str(row.get("tenant_id") or "").strip()
+    if not tenant:
+        # Không phát còn hơn phát nhầm người. Ghi ở mức ERROR: đây là vi phạm
+        # hợp đồng dữ liệu, không phải một trục trặc thoáng qua.
+        logger.error("[TRAINER] job thieu tenant_id — KHONG phat su kien %s. "
+                     "Khong bao gio gui vao pham vi 'default'.", event)
+        return
     try:
         from app.webhooks import emit
 
-        emit(row.get("tenant_id") or "default", event, payload)
+        emit(tenant, event, payload)
     except Exception as exc:
         logger.warning("[TRAINER] không phát được sự kiện %s: %s", event, type(exc).__name__)
 
@@ -562,6 +601,30 @@ def _record_output_contract(job_id: str, row: Dict[str, Any], checkpoint_path: s
     """
     if not checkpoint_path:
         return
+
+    # Hợp đồng tenant kiểm TRƯỚC, ngoài khối `try` rộng bên dưới.
+    #
+    # Đặt phép kiểm này bên trong `try` là sai theo hai cách. Thứ nhất, mọi
+    # ngoại lệ ở đó bị nuốt thành WARNING, nên một vi phạm hợp đồng trông y hệt
+    # một trục trặc ghi đĩa. Thứ hai — và đây là cái test bắt được — nếu
+    # `load_checkpoint` hỏng TRƯỚC khi tới phép kiểm, ta chỉ thấy cảnh báo về
+    # checkpoint và không bao giờ biết job này còn thiếu tenant.
+    #
+    # Hai loại hỏng, hai cách xử:
+    #     vi phạm hợp đồng   -> dừng sớm, ERROR, không ghi đi đâu cả
+    #     hỏng thoáng qua    -> best effort, WARNING, job vẫn thành công
+    tenant = str(row.get("tenant_id") or "").strip()
+    if not tenant:
+        # KHÔNG rơi về `default` — sửa 16/08/2026. Một job mất `tenant_id` mà
+        # vẫn ghi sẽ đặt hợp đồng lớp đầu ra của mình VÀO TENANT KHỞI TẠO, tức
+        # `Train(A)` làm biến đổi `default`. Không ghi còn hơn ghi nhầm chỗ:
+        # bỏ qua chỉ mất bảng phụ trợ của MỘT job, ghi nhầm thì làm bẩn danh
+        # mục của tenant khởi tạo và không ai biết để dọn.
+        logger.error(
+            "[TRAINER] job %s thieu tenant_id — KHONG ghi hop dong dau ra. "
+            "Khong bao gio ghi vao pham vi 'default'.", job_id)
+        return
+
     try:
         from app.checkpoint_io import load_checkpoint
         from app.storage import metadata_db as db
@@ -579,7 +642,7 @@ def _record_output_contract(job_id: str, row: Dict[str, Any], checkpoint_path: s
 
         db.replace_training_job_classes(
             job_id=job_id,
-            tenant_id=row.get("tenant_id") or "default",
+            tenant_id=tenant,
             pairs=sorted(pairs),
         )
         logger.info("[TRAINER] job %s: da ghi %d lop vao hop dong dau ra",
