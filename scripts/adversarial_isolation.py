@@ -356,6 +356,69 @@ def kiem_tra_khong_phan_biet(base: str, token: str, class_b: str, timeout: float
     }
 
 
+def _doc_fixture_dataset(duong: str) -> dict:
+    """Đọc cây fixture do bộ gieo xuyên-kho sinh ra, chuẩn hoá về một hình dạng.
+
+    Vì sao cần một lớp chuyển đổi
+    -----------------------------
+    Bộ gieo và bộ đo được viết ở hai thời điểm và mô tả CÙNG một fixture bằng hai
+    hình dạng khác nhau:
+
+        bộ gieo   `doi_tuong` là DANH SÁCH 8 mục, khoá theo (tenant, vai trò),
+                  `file_path` TƯƠNG ĐỐI so với gốc cây, băm đầy đủ 64 ký tự
+        bộ đo     `doi_tuong` là TỪ ĐIỂN khoá `control_a` / `target_b`,
+                  `file_path` TUYỆT ĐỐI, băm rút gọn 16 ký tự
+
+    Phát hiện lúc chạy thật, không phải lúc đọc mã: bộ đo dừng ngay ở lượt nạp.
+    Đó là kết cục ĐÚNG — một bộ đo nuốt được hình dạng lạ sẽ lặng lẽ đọc thiếu
+    đối tượng rồi báo "không có vi phạm nào" cho một ma trận chưa từng bắn.
+
+    Chuyển đổi đặt ở BỘ ĐO chứ không ở bộ gieo, vì cây fixture đã nằm trên đĩa và
+    đang là bằng chứng: sửa bộ gieo thì phải gieo lại, và gieo lại là vứt đi đúng
+    thứ vừa được đối chiếu ba kho thành công.
+
+    Cũng chấp nhận hình dạng cũ để một artifact cũ vẫn đọc lại được.
+    """
+    import pathlib
+
+    p = pathlib.Path(duong)
+    goc = p if p.is_dir() else p.parent
+    tep = (p / "fixture.json") if p.is_dir() else p
+    with open(tep, encoding="utf-8") as fh:
+        tho = json.load(fh)
+
+    dt = tho.get("doi_tuong")
+    if isinstance(dt, dict):
+        tho.setdefault("dataset_root", str(goc))
+        return tho
+
+    # Hình dạng danh sách -> từ điển. Khoá là `<vai_tro>_<chu cai tenant>`, tức
+    # `control_a` / `target_b` — đúng tên mà bộ đo tra cứu.
+    chuan: dict[str, dict] = {}
+    for m in dt:
+        hau_to = m["tenant_id"].rsplit("_", 1)[-1]           # iso_a -> a
+        vai = m["vai_tro"]
+        nhan = f"{'target' if vai == 'target' else vai}_{hau_to}"
+        chuan[nhan] = {
+            "vai_tro": vai,
+            "tenant_id": m["tenant_id"],
+            "class_uid": m["class_uid"],
+            "sample_uid": m["sample_uid"],
+            # TUYỆT ĐỐI: hậu điều kiện mở tệp bằng đúng chuỗi này, và nó chạy
+            # với thư mục làm việc khác thư mục fixture.
+            "file_path": str(goc / m["file_path"]),
+            "sha256_16": m["file_sha256"][:16],
+        }
+
+    thieu = [k for k in ("control_a", "target_b") if k not in chuan]
+    if thieu:
+        raise SystemExit(
+            f"cay fixture {goc} thieu doi tuong bat buoc: {thieu}. "
+            f"Co: {sorted(chuan)}")
+
+    return {**tho, "dataset_root": str(goc), "doi_tuong": chuan}
+
+
 def hau_dieu_kien_dataset(dsn: str, dfx: dict) -> dict:
     """Hậu điều kiện trên CẢ BA nơi: PostgreSQL, labels/samples.csv, và tệp mẫu.
 
@@ -551,8 +614,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # kháng sau đó trả 404 vì không còn gì để chạm.
     dfx = None
     if args.dataset_fixture:
-        with open(args.dataset_fixture, encoding="utf-8") as fh:
-            dfx = json.load(fh)
+        dfx = _doc_fixture_dataset(args.dataset_fixture)
         dt = dfx["doi_tuong"]
         args.class_a, args.sample_a = dt["control_a"]["class_uid"], dt["control_a"]["sample_uid"]
         args.class_b, args.sample_b = dt["target_b"]["class_uid"], dt["target_b"]["sample_uid"]
