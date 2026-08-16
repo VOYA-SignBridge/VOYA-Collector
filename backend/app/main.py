@@ -12,7 +12,7 @@ from asgi_correlation_id import CorrelationIdMiddleware
 
 from app import activity
 from app.access_gate import access_gate
-from app.config import settings
+from app.config import settings, redact_db_url
 from app.cookie_auth import ACCESS_COOKIE, CSRF_COOKIE
 from app.rate_limit import client_ip
 # `experiments` and `dataset_exporter` are deliberately NOT imported. Both were
@@ -207,15 +207,32 @@ async def activity_guard(request: Request, call_next):
 
 
 # init DB tables (dev). In prod, use migrations (alembic).
+_INSECURE_DEFAULT_SECRET = "change-me-in-production"
+
+
 @app.on_event("startup")
 async def startup():
     logger = logging.getLogger("startup")
     logger.setLevel(logging.INFO)
     started_at = time.time()
+
+    # Refuse to serve a real deployment signed with the fallback secret from
+    # config.py — anyone who read that source line could forge admin tokens.
+    # Only enforced for app_env=="production" so local/dev setups that never
+    # set SECRET_KEY still boot without ceremony.
+    if settings.app_env == "production" and (
+        settings.secret_key == _INSECURE_DEFAULT_SECRET
+        or settings.auth_token_secret_key == _INSECURE_DEFAULT_SECRET
+    ):
+        raise RuntimeError(
+            "SECRET_KEY/AUTH_TOKEN_SECRET_KEY is still the insecure default "
+            "with APP_ENV=production. Set a real secret before starting."
+        )
+
     logger.info(
         "[STARTUP] dataset_root=%s database_url=%s",
         settings.dataset_root,
-        settings.database_url,
+        redact_db_url(settings.database_url),
     )
     db_ready = init_db()
 

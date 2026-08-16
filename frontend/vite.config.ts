@@ -3,12 +3,24 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: '',
+  // Bỏ console.log/console.debug khỏi bundle production. Mã hiện có rải rác
+  // hàng chục lời gọi không bọc `import.meta.env.DEV` (nặng nhất là
+  // getClassesList in cả JSON.stringify của response), làm console rất ồn khi
+  // mở DevTools lúc demo. Đánh dấu "pure" để esbuild tree-shake chúng — giữ
+  // nguyên console.error/console.warn vì đó là báo lỗi thật.
+  // Chỉ áp lúc build: dev vẫn cần log để gỡ lỗi.
+  esbuild: command === 'build' ? { pure: ['console.log', 'console.debug'] } : {},
   test: {
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
-    globals: true
+    globals: true,
+    // tests-e2e/ chứa spec Playwright (test.describe/beforeAll từ
+    // @playwright/test, một runner KHÁC). Glob mặc định của vitest nhặt mọi
+    // *.spec.ts, nên thiếu dòng này nó sẽ import luôn chúng và chết với
+    // "test.beforeAll() ... not expected to be called here".
+    exclude: ['**/node_modules/**', '**/tests-e2e/**'],
   },
   plugins: [
     react({
@@ -89,4 +101,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

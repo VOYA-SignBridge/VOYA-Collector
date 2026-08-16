@@ -607,3 +607,34 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def redact_db_url(url: str) -> str:
+    """Bỏ mật khẩu khỏi một URL SQLAlchemy/libpq trước khi ghi log.
+
+    postgresql://user:secret@host:5432/db -> postgresql://user:***@host:5432/db
+
+    `settings.database_url` nhúng POSTGRES_PASSWORD nguyên văn. Ghi nó không che
+    thì mật khẩu CSDL nằm trong mọi dòng log khởi động — và log chảy vào Loki,
+    nơi thường có nhiều người đọc được hơn hẳn tệp .env mà nó đến từ đó.
+
+    Dùng `urlsplit` chứ không tách chuỗi bằng tay: một URL KHÔNG có mật khẩu
+    (`postgresql://user@host/db`) khi tách tay sẽ thành `user:***@host` — bịa ra
+    một mật khẩu không tồn tại, và người đọc log sẽ đi tìm thứ không có. Thoát
+    về "<hidden>" nếu phân giải thất bại: một URL không đọc được thì không được
+    phép rơi ra nguyên văn chỉ vì bộ phân giải bó tay.
+    """
+    try:
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(url)
+        if parts.password:
+            netloc = parts.hostname or ""
+            if parts.username:
+                netloc = f"{parts.username}:***@{netloc}"
+            if parts.port:
+                netloc = f"{netloc}:{parts.port}"
+            parts = parts._replace(netloc=netloc)
+        return urlunsplit(parts)
+    except Exception:
+        return "<hidden>"
