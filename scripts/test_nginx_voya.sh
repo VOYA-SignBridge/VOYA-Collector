@@ -48,7 +48,7 @@ docker network create "$NET" >/dev/null 2>&1
 docker run -d --name "$BE" --network "$NET" --network-alias backend  -v "$MOCK_DIR_WIN/be.conf:/etc/nginx/nginx.conf:ro" nginx:alpine >/dev/null
 docker run -d --name "$FE" --network "$NET" --network-alias frontend -v "$MOCK_DIR_WIN/fe.conf:/etc/nginx/nginx.conf:ro" nginx:alpine >/dev/null
 docker run -d --name "$GW" --network "$NET" -p "$PORT:80" -v "$NGINX_CONF:/etc/nginx/nginx.conf:ro" nginx:alpine >/dev/null
-for _ in $(seq 1 20); do curl -s -o /dev/null "http://localhost:$PORT/" && break; sleep 0.5; done
+for _ in $(seq 1 20); do curl -s "http://localhost:$PORT/" >/dev/null 2>&1 && break; sleep 0.5; done
 
 # A UNIQUE X-Forwarded-For per call gives each routing check its own rate-limit
 # bucket, so the global api_limit never interferes with routing assertions.

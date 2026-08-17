@@ -198,9 +198,33 @@ docker run -d --name "$NAME" \
 # Dùng cơ chế thử lại CỦA CURL thay cho vòng `while ... sleep 1`. Vòng lặp có
 # `sleep` bị treo/chặn trong một số môi trường chạy lệnh không tương tác, và khi
 # đó nó báo "quá hạn" cho một container thật ra đã phục vụ 200 từ giây thứ hai.
+#
+# KHÔNG dùng `-o /dev/null` ở tệp này. Dùng chuyển hướng của shell.
+# ----------------------------------------------------------------------------
+# Dòng `export MSYS_NO_PATHCONV=1` ở đầu tệp — thứ cần thiết để `-w /src` không
+# bị dịch thành `C:/Program Files/Git/src` — cũng làm `/dev/null` được trao
+# NGUYÊN VĂN cho `curl.exe` của Windows. Ở đó nó là một ĐƯỜNG DẪN TỆP không tồn
+# tại, nên curl thoát **23 (write error)** dù máy chủ đã trả 200.
+#
+# Hai bản vá trong cùng một tệp đánh nhau, và hậu quả không hề giống nguyên nhân:
+#
+#   bản trước       -> 23 là lỗi vĩnh viễn -> bỏ thử lại -> hỏng sau 2 GIÂY
+#   thêm retry-all  -> 23 thành lỗi tạm    -> thử đủ 60 lần -> hỏng sau 68 GIÂY
+#                      trong khi nhật ký container ghi 60 dòng `GET /health 200`
+#
+# Cả hai đều báo "KHONG LEN DUOC" cho một container hoàn toàn khoẻ, và đều dừng
+# cả trình tự đo. Chuyển hướng của shell do chính bash xử lý nên không đi qua
+# phép dịch đường dẫn — đó mới là chỗ sửa đúng.
+#
+# `--retry-all-errors` vẫn giữ, nhưng vì một lý do KHÁC: Docker publish cổng
+# ngay khi container start, nên vài giây trước lúc gunicorn bind, kết nối không
+# bị *từ chối* mà được proxy của Docker **chấp nhận rồi reset** — một lỗi mà
+# `--retry-connrefused` một mình không phủ.
 printf "==> doi healthy"
-if curl -sf -o /dev/null --retry 60 --retry-delay 1 --retry-connrefused \
-        --max-time 120 "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
+if curl -sf --retry 60 --retry-delay 1 \
+        --retry-connrefused --retry-all-errors \
+        --connect-timeout 5 --max-time 120 \
+        "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
   echo " — OK"
 else
   echo " — KHONG LEN DUOC"

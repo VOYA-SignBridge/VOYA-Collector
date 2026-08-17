@@ -89,9 +89,15 @@ docker run -d --name "$NAME" \
   gunicorn app.main:app -w "$WORKERS" -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 \
   >/dev/null
 
+# KHONG dung `-o /dev/null`: `MSYS_NO_PATHCONV=1` o dau tep trao no NGUYEN VAN
+# cho curl.exe, thanh mot duong dan tep khong ton tai -> thoat 23 (write error)
+# du may chu da tra 200. Chuyen huong cua shell khong di qua phep dich duong dan.
+# Cung loi da vap o `isolation_backend.sh`; chu thich day du nam o do.
 printf "==> doi healthy"
-if curl -sf -o /dev/null --retry 60 --retry-delay 1 --retry-connrefused \
-        --max-time 120 "http://127.0.0.1:${PORT}/health" 2>/dev/null; then
+if curl -sf --retry 60 --retry-delay 1 \
+        --retry-connrefused --retry-all-errors \
+        --connect-timeout 5 --max-time 120 \
+        "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
   echo " — OK"
 else
   echo " — KHONG LEN DUOC"; docker logs --tail 40 "$NAME"; exit 1
