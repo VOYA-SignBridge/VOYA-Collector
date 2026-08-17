@@ -359,7 +359,7 @@ export default function AdminResourcesPage() {
             <h3 className="font-semibold text-slate-700">{t("CPU theo nhân")}</h3>
           </div>
           <span className="text-xs text-slate-400">
-            {host?.cpu_count ?? "?"} nhân · dùng chung, không ghim cứng
+            {t("{n} nhân · dùng chung, không ghim cứng", { n: host?.cpu_count ?? "?" })}
           </span>
         </div>
         {host?.cpu_per_core && host.cpu_per_core.length > 0 ? (
@@ -530,7 +530,7 @@ export default function AdminResourcesPage() {
             {/* Budget summary */}
             <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-sm">
               <span className="text-slate-500">
-                Tổng phân bổ container:{" "}
+                {t("Tổng phân bổ container:")}{" "}
                 <span className="font-bold text-slate-800 tabular-nums">{fmtMem(allocMb)}</span>
                 {budgetMb ? (
                   <span className="text-slate-400">
@@ -541,7 +541,7 @@ export default function AdminResourcesPage() {
               </span>
               {budgetMb > 0 && (
                 <span className={`font-bold tabular-nums ${allocMb > budgetMb ? "text-orange-600" : "text-slate-600"}`}>
-                  {Math.round((100 * allocMb) / budgetMb)}% ngân sách
+                  {t("{n}% ngân sách", { n: Math.round((100 * allocMb) / budgetMb) })}
                 </span>
               )}
             </div>

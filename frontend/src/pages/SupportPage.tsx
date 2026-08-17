@@ -408,7 +408,22 @@ function NewConversation({
   onCancel: () => void;
 }) {
   const { t } = useI18n();
-  const ready = subject.trim().length >= 5 && draft.trim().length >= 10;
+  const subjectOk = subject.trim().length >= 5;
+  const draftOk = draft.trim().length >= 10;
+  const ready = subjectOk && draftOk;
+
+  /**
+   * Câu nói ra ĐÚNG thứ còn thiếu, không phải cả hai điều kiện một lượt.
+   *
+   * "Cần tiêu đề từ 5 ký tự và mô tả từ 10 ký tự" bắt người dùng tự đối chiếu
+   * hai vế với hai ô để đoán mình sai ở đâu. Người đang bực vì một sự cố không
+   * làm việc đó — họ bấm lại lần nữa rồi bỏ.
+   */
+  const blocked = !subjectOk
+    ? t("Còn thiếu tiêu đề ở ô trên (từ 5 ký tự).")
+    : !draftOk
+      ? t("Mô tả cần ít nhất 10 ký tự để người trực hiểu chuyện gì đang xảy ra.")
+      : "";
 
   return (
     <>
@@ -452,11 +467,19 @@ function NewConversation({
       </header>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mx-auto max-w-lg rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-center">
+        <div className="mx-auto max-w-lg rounded-2xl border border-dashed border-slate-300 bg-white p-4">
           <RobotIcon className="mx-auto h-8 w-8 text-slate-300" aria-hidden="true" />
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-center text-sm text-slate-600">
             {t("Chọn một chủ đề bên dưới, rồi mô tả cụ thể chuyện đang xảy ra. Trợ lý sẽ trả lời ngay, và người trực nhận được phiếu cùng lúc.")}
           </p>
+
+          {/* Danh sách SỐNG, không phải một câu điều kiện tĩnh. Người dùng thấy
+              từng vạch xanh lên ngay khi mình gõ, nên họ không phải đoán xem
+              cái nút mờ kia đang chờ gì. */}
+          <ul className="mx-auto mt-4 max-w-xs space-y-1.5 text-sm">
+            <Requirement done={subjectOk} label={t("Tiêu đề, từ 5 ký tự")} />
+            <Requirement done={draftOk} label={t("Mô tả, từ 10 ký tự")} />
+          </ul>
         </div>
       </div>
 
@@ -466,20 +489,36 @@ function NewConversation({
         onPick={(text) => onSubject(text)}
         label={t("Chủ đề thường gặp")}
       />
+      {/* `disabled` CHỈ mang `busy`. Truyền `!ready` vào đây là khoá luôn ô gõ,
+          và vì `ready` đòi chính nội dung ô đó nên người dùng không bao giờ gõ
+          được — xem chú thích của `Composer`. */}
       <Composer
         value={draft}
         onChange={onDraft}
         onSend={onSend}
-        disabled={busy || !ready}
+        disabled={busy}
+        canSend={ready}
+        blockedReason={blocked}
         minLength={10}
         autoFocus
         placeholder={t("Mô tả cụ thể: bạn đang ở màn hình nào, hệ thống hiện ra chữ gì?")}
       />
-      {!ready ? (
-        <p className="bg-white px-4 pb-3 text-xs text-slate-400">
-          {t("Cần tiêu đề từ 5 ký tự và mô tả từ 10 ký tự.")}
-        </p>
-      ) : null}
     </>
+  );
+}
+
+/** Một dòng điều kiện, có dấu tick khi đã đạt. */
+function Requirement({ done, label }: { done: boolean; label: string }) {
+  return (
+    <li
+      className={`flex items-center gap-2 ${done ? "text-emerald-700" : "text-slate-500"}`}
+    >
+      {/* Không chỉ dựa vào MÀU: ký hiệu đổi theo trạng thái, nên người mù màu
+          vẫn đọc được hàng nào đã xong. */}
+      <span aria-hidden="true" className="font-semibold">
+        {done ? "✓" : "○"}
+      </span>
+      <span>{label}</span>
+    </li>
   );
 }

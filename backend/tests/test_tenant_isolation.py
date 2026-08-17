@@ -757,6 +757,25 @@ class TestRequestTenantResolution:
             # Lệnh của người vận hành: dịch quyền cũ sang RBAC mới cho MỌI
             # tenant trong một lượt.
             "cli/backfill_authz.py",
+            # `training_tasks.py` — CHỈ hàm `_checkpoint_owners`.
+            #
+            # Lượt dọn checkpoint là tác vụ hạ tầng chạy trên MỘT thư mục dùng
+            # chung chứa hiện vật của mọi tổ chức. Nó phải thấy tất cả để biết
+            # KHÔNG được xoá cái gì — phạm vi ở đây phục vụ việc bảo vệ chứ
+            # không phải việc truy cập, và đó là điều làm nó khác mọi crossing
+            # khác trong danh sách này.
+            #
+            # Hướng hỏng nếu bỏ phạm vi đi lại chính là hướng nguy hiểm: lượt
+            # quét chỉ thấy job của một tenant, kết luận rằng checkpoint của
+            # tenant khác là tệp mồ côi, rồi XOÁ chúng theo lịch. Đo được
+            # 16/08/2026 (C3-S5) với bản cũ áp "giữ 20 bản mới nhất" trên cả
+            # thư mục: một tổ chức train nhiều đẩy hiện vật của tổ chức khác ra
+            # khỏi cửa sổ giữ.
+            #
+            # Hàm này chỉ ĐỌC, và trả về một ánh xạ đường-dẫn → tenant. Nó không
+            # ghi gì; quyết định xoá nằm ở `_checkpoints_to_prune`, nơi cửa sổ
+            # giữ được áp RIÊNG cho từng tenant.
+            "training_tasks.py",
         }
 
         app = Path(__file__).resolve().parents[1] / "app"

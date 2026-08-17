@@ -434,7 +434,7 @@ const TrainingPipeline: React.FC = () => {
                   size="sm"
                   title={t("Hoàn tất và quay về màn hình chính")}
                 >
-                  Hoàn tất{" "}
+                  {t("Hoàn tất")}{" "}
                   <CheckIcon className="inline h-4 w-4 -mt-0.5"  aria-hidden="true" />
                 </Button>
               )}

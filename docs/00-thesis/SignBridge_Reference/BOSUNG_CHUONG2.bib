@@ -1,0 +1,167 @@
+% ---------------------------------------------------------------------------
+% Mười hai mục bổ sung cho Chương 2 sau đợt viết sâu ngày 17/08/2026.
+% Viết theo đúng kiểu trình bày của SignBridge_Reference.bib.
+%
+% Khoá đặt TRÙNG với tên mà Chương 2 đang trích, nên chỉ cần chép các mục này
+% vào cuối SignBridge_Reference.bib là hết `[?]`.
+%
+% Hai cách dùng — chọn MỘT:
+%   (A) Chép thẳng vào SignBridge_Reference.bib.  Nhanh, không đụng Zotero.
+%   (B) Nhập vào Zotero:  File > Import… > chọn tệp này > "Better BibTeX".
+%       BBT sẽ đọc khoá ở đây và tự ghim, nên lần xuất sau khoá không đổi.
+%
+% ✅ ĐÃ XÁC MINH TOÀN BỘ 12 MỤC ngày 17/08/2026 bằng tra cứu nguồn gốc
+% (trang nhà xuất bản, DOI, W3C, USENIX/Google Research). Trường `annote` của
+% mỗi mục ghi kết quả xác minh.
+%
+% BA THAY ĐỔI so với bản soạn đầu:
+%   1. Zanzibar — tác giả là **Christina** D. Richards, không phải Christopher.
+%   2. Elmasri & Navathe bản 7th là **2015**, không phải 2016 → khoá đổi thành
+%      `elmasri_fundamentals_2015`.
+%   3. ISO/IEC 25010 chuyển sang **bản 2023** (bản 2011 đã bị huỷ và thay thế)
+%      → khoá đổi thành `iso_25010_2023`. Xem `annote` của mục đó về hệ quả
+%      thuật ngữ.
+%
+% Vì sao cần từng mục — ghi ở trường `annote` để khi rà soát biết mục nào còn
+% dùng, mục nào bỏ được nếu phải cắt bớt tài liệu tham khảo.
+% ---------------------------------------------------------------------------
+
+% --- Khối mô hình hoá dữ liệu (§2.1.5) -------------------------------------
+
+@article{codd_relational_1970,
+	title = {A {Relational} {Model} of {Data} for {Large} {Shared} {Data} {Banks}},
+	volume = {13},
+	number = {6},
+	doi = {10.1145/362384.362685},
+	journal = {Communications of the ACM},
+	author = {Codd, E. F.},
+	year = {1970},
+	pages = {377--387},
+	annote = {ĐÃ XÁC MINH 17/08/2026: CACM 13(6), 06/1970, tr. 377–387, DOI khớp. Dùng ở §2.1.5 cho mô hình quan hệ và tính nguyên tử của giá trị (1NF). Không dùng để trích các dạng chuẩn cao hơn — dùng Elmasri & Navathe cho phần đó.},
+}
+
+@article{chen_entity-relationship_1976,
+	title = {The {Entity}-{Relationship} {Model}—{Toward} a {Unified} {View} of {Data}},
+	volume = {1},
+	number = {1},
+	doi = {10.1145/320434.320440},
+	journal = {ACM Transactions on Database Systems},
+	author = {Chen, Peter Pin-Shan},
+	year = {1976},
+	pages = {9--36},
+	annote = {ĐÃ XÁC MINH 17/08/2026: ACM TODS 1(1), 03/1976, tr. 9–36, DOI khớp. Dùng ở §2.1.5 làm cơ sở cho mô hình mức khái niệm (thực thể – quan hệ – thuộc tính), tách khỏi mức logic và mức vật lý.},
+}
+
+@book{elmasri_fundamentals_2015,
+	title = {Fundamentals of {Database} {Systems}},
+	edition = {7th},
+	publisher = {Pearson},
+	author = {Elmasri, Ramez and Navathe, Shamkant B.},
+	year = {2015},
+	isbn = {9780133970777},
+	annote = {ĐÃ XÁC MINH 17/08/2026: bản 7th xuất bản 2015 (không phải 2016), ISBN 9780133970777. Sách nền cho §2.1.6: ba mức mô hình dữ liệu, chuẩn hoá 1NF–3NF, khoá chính/khoá ngoài/khoá tổ hợp, và bốn loại ràng buộc toàn vẹn.},
+}
+
+% --- Khối chất lượng dữ liệu (§2.1.4) --------------------------------------
+
+@article{wang_beyond_1996,
+	title = {Beyond {Accuracy}: {What} {Data} {Quality} {Means} to {Data} {Consumers}},
+	volume = {12},
+	number = {4},
+	doi = {10.1080/07421222.1996.11518099},
+	journal = {Journal of Management Information Systems},
+	author = {Wang, Richard Y. and Strong, Diane M.},
+	year = {1996},
+	pages = {5--33},
+	annote = {ĐÃ XÁC MINH 17/08/2026: JMIS 12(4), 1996, tr. 5–33, DOI khớp. Dùng ở §2.1.4 cho luận điểm: chất lượng dữ liệu là khái niệm nhiều chiều và phụ thuộc mục đích sử dụng, không quy về một thuộc tính "đúng/sai".},
+}
+
+% --- Khối giao dịch và nhất quán xuyên kho (§2.7) ---------------------------
+
+@article{harder_principles_1983,
+	title = {Principles of {Transaction}-{Oriented} {Database} {Recovery}},
+	volume = {15},
+	number = {4},
+	doi = {10.1145/289.291},
+	journal = {ACM Computing Surveys},
+	author = {Härder, Theo and Reuter, Andreas},
+	year = {1983},
+	pages = {287--317},
+	annote = {ĐÃ XÁC MINH 17/08/2026: ACM Computing Surveys 15(4), 12/1983, tr. 287–317, DOI khớp. Nguồn gốc của thuật ngữ ACID. Dùng ở §2.7.3 để định nghĩa ranh giới giao dịch trước khi lập luận rằng ghi ra kho ngoài nằm NGOÀI ranh giới đó.},
+}
+
+@book{richardson_microservices_2018,
+	title = {Microservices {Patterns}: {With} {Examples} in {Java}},
+	publisher = {Manning Publications},
+	author = {Richardson, Chris},
+	year = {2018},
+	annote = {ĐÃ XÁC MINH 17/08/2026: Manning, 11/2018. Dùng ở §2.7.4 cho mẫu Transactional Outbox. Hệ thống có bảng `event_outbox` thật, nên mẫu này là lý thuyết nền chứ không phải phương án giả định.},
+}
+
+% --- Khối nguồn gốc dữ liệu (§2.8.5) ---------------------------------------
+
+@misc{moreau_prov_dm_2013,
+	title = {{PROV}-{DM}: {The} {PROV} {Data} {Model}},
+	url = {https://www.w3.org/TR/prov-dm/},
+	howpublished = {W3C Recommendation},
+	publisher = {World Wide Web Consortium},
+	author = {Moreau, Luc and Missier, Paolo},
+	month = apr,
+	year = {2013},
+	urldate = {2026-08-17},
+	annote = {ĐÃ XÁC MINH 17/08/2026: W3C Recommendation 30/04/2013; hai chủ biên Moreau (Southampton) và Missier (Newcastle). Dùng ở §2.8.5 cho khung khái niệm Entity–Activity–Agent. Chương 2 KHÔNG tuyên bố tuân thủ PROV-O; chỉ mượn khung phân biệt đối tượng / quá trình / chủ thể.},
+}
+
+% --- Khối mô hình đe doạ (§2.4.5) ------------------------------------------
+
+@book{shostack_threat_2014,
+	title = {Threat {Modeling}: {Designing} for {Security}},
+	publisher = {Wiley},
+	author = {Shostack, Adam},
+	year = {2014},
+	annote = {ĐÃ XÁC MINH 17/08/2026: Wiley, 17/02/2014, ISBN 9781118809990. Dùng ở §2.4.5 cho nguyên tắc: một phát biểu về bảo mật chỉ có nghĩa khi kèm mô hình đe doạ và ranh giới tin cậy. Đây là nguồn chống lại lỗi overclaim "RLS làm điều đó bất khả thi".},
+}
+
+% --- Khối kiểu kiến trúc và thuộc tính chất lượng (§2.10.1, phần mở đầu) ----
+
+@book{bass_software_2021,
+	title = {Software {Architecture} in {Practice}},
+	edition = {4th},
+	publisher = {Addison-Wesley},
+	author = {Bass, Len and Clements, Paul and Kazman, Rick},
+	year = {2021},
+	annote = {ĐÃ XÁC MINH 17/08/2026: Addison-Wesley, bản 4th, 2021. Dùng ở phần mở đầu chương (thuộc tính chất lượng làm tiêu chí so sánh) và ở §2.10.1 (kiểu kiến trúc). KIỂM LẠI lần xuất bản — bản 4th (2021) là bản được trích.},
+}
+
+@book{newman_building_2021,
+	title = {Building {Microservices}: {Designing} {Fine}-{Grained} {Systems}},
+	edition = {2nd},
+	publisher = {O'Reilly Media},
+	author = {Newman, Sam},
+	year = {2021},
+	annote = {ĐÃ XÁC MINH 17/08/2026: O'Reilly, bản 2nd, 07/2021. Dùng ở §2.10.1 cho các đánh đổi của kiến trúc vi dịch vụ. Trích để GIẢI THÍCH VÌ SAO KHÔNG chọn vi dịch vụ, không phải để mô tả hệ thống.},
+}
+
+@misc{iso_25010_2023,
+	title = {{ISO}/{IEC} 25010:2023 — {Systems} and software engineering — {Systems} and software {Quality} {Requirements} and {Evaluation} ({SQuaRE}) — {Product} quality model},
+	url = {https://www.iso.org/standard/78176.html},
+	publisher = {International Organization for Standardization},
+	author = {{International Organization for Standardization}},
+	year = {2023},
+	urldate = {2026-08-17},
+	annote = {ĐÃ XÁC MINH 17/08/2026: bản 2023 huỷ và thay thế 25010:2011; tiêu đề phụ đổi thành "Product quality model"; số đặc tính chất lượng tăng từ 8 lên 9 (thêm safety), usability đổi tên thành interaction capability, portability đổi thành flexibility. Bảng 2-1 của luận văn chỉ dùng BỐN tên: security, maintainability, reliability, performance efficiency — cả bốn đều KHÔNG đổi giữa hai bản, nên trích bản 2023 là nhất quán. Nếu về sau thêm usability/portability vào bảng thì PHẢI dùng tên mới của bản 2023.},
+}
+
+% --- Khối kiểm soát truy cập theo quan hệ (§2.5.5) --------------------------
+
+@inproceedings{pang_zanzibar_2019,
+	title = {Zanzibar: {Google}'s {Consistent}, {Global} {Authorization} {System}},
+	url = {https://www.usenix.org/conference/atc19/presentation/pang},
+	booktitle = {2019 {USENIX} {Annual} {Technical} {Conference} ({USENIX} {ATC} 19)},
+	publisher = {USENIX Association},
+	author = {Pang, Ruoming and Caceres, Ramon and Burrows, Mike and Chen, Zhifeng and Dave, Pratik and Germer, Nathan and Golynski, Alexander and Graney, Kevin and Kang, Nina and Kissner, Lea and Korn, Jeffrey L. and Parmar, Abhishek and Richards, Christina D. and Wang, Mengzhi},
+	year = {2019},
+	pages = {33--46},
+	urldate = {2026-08-17},
+	annote = {ĐÃ XÁC MINH 17/08/2026: USENIX ATC 19, Renton WA, tr. 33–46. SỬA: tác giả là Christina D. Richards (không phải Christopher). Dùng ở §2.5.5 và bảng so sánh mô hình phân quyền, làm dẫn chứng rằng ReBAC đã được áp dụng ở quy mô lớn. KHÔNG dùng để khẳng định bất cứ điều gì về hiệu năng.},
+}

@@ -55,7 +55,7 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
           </div>
 
           <p className="mt-6 text-center text-xs text-white/70">
-            © {new Date().getFullYear()} Đại học Cần Thơ · CTU.SignBridge
+            {t("© {nam} Đại học Cần Thơ · CTU.SignBridge", { nam: new Date().getFullYear() })}
           </p>
         </div>
       </div>

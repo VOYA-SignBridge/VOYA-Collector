@@ -19,7 +19,7 @@ import {
   SmartphoneIcon,
 } from "../components/ui/Icons";
 import { useToast } from "../hooks/useToast";
-import { useI18n } from "../i18n";
+import { Trans, useI18n } from "../i18n";
 
 /**
  * Xác minh email và số điện thoại của chính mình.
@@ -43,7 +43,21 @@ import { useI18n } from "../i18n";
 
 type Pending = { channel: OtpChannel; destination: string } | null;
 
-export default function VerifyContactPage() {
+/**
+ * `embedded` — dựng như một KHỐI bên trong trang khác, không phải một trang.
+ *
+ * Từ 16/08/2026 việc xác minh liên hệ sống trong `/settings/security` chứ không
+ * còn là mục thứ ba của thanh Cài đặt: nó trả lời cùng câu hỏi với đổi mật khẩu
+ * và 2FA ("tôi có lấy lại được tài khoản không"), nên tách ra là bắt người dùng
+ * đoán xem nó nằm ở mục nào.
+ *
+ * Một lá cờ, KHÔNG phải một bản sao. Toàn bộ logic gửi/nhập/đếm ngược mã ở dưới
+ * là thứ đã được kiểm bởi `VerifyContactPage.test.tsx`; chép nó sang một
+ * component thứ hai là tạo ra một bản sao mà bộ test không nhìn thấy, và bản
+ * sao ấy sẽ lệch ở lần sửa sau. Cờ chỉ đổi phần vỏ: tiêu đề trang thành tiêu đề
+ * khối, và bỏ lớp đệm ngoài.
+ */
+export default function VerifyContactPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useI18n();
   const [status, setStatus] = useState<VerificationStatus | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -132,13 +146,22 @@ export default function VerifyContactPage() {
   }, [code, busy, pending, toast, clear, load]);
 
   return (
-    <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-3xl">
-        <PageHeader
-          title={t("Xác minh liên hệ")}
-          subtitle={t("Chứng minh bạn đang giữ email và số điện thoại gắn với tài khoản. Địa chỉ đã xác minh là đường khôi phục khi bạn quên mật khẩu.")}
-          breadcrumb={[{ label: t("Trang chủ"), href: "/" }, { label: t("Xác minh liên hệ") }]}
-        />
+    <div className={embedded ? "" : "px-4 py-6 sm:px-6 lg:px-8"}>
+      <div className={embedded ? "" : "mx-auto max-w-3xl"}>
+        {embedded ? (
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-slate-900">{t("Xác minh liên hệ")}</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              {t("Chứng minh bạn đang giữ email và số điện thoại gắn với tài khoản. Địa chỉ đã xác minh là đường khôi phục khi bạn quên mật khẩu.")}
+            </p>
+          </div>
+        ) : (
+          <PageHeader
+            title={t("Xác minh liên hệ")}
+            subtitle={t("Chứng minh bạn đang giữ email và số điện thoại gắn với tài khoản. Địa chỉ đã xác minh là đường khôi phục khi bạn quên mật khẩu.")}
+            breadcrumb={[{ label: t("Trang chủ"), href: "/" }, { label: t("Xác minh liên hệ") }]}
+          />
+        )}
 
         {loadError ? (
           <div
@@ -275,9 +298,10 @@ export default function VerifyContactPage() {
             </ContactCard>
 
             <p className="text-xs leading-relaxed text-slate-500">
-              {t("Số bắt đầu bằng dấu cộng và mã quốc gia, ví dụ")} <code>+84901234567</code>. Mã có
-              hiệu lực {status.code_ttl_minutes} phút và nhập sai quá năm lần thì phải xin mã
-              mới.
+              <Trans
+                k="Số bắt đầu bằng dấu cộng và mã quốc gia, ví dụ {vidu}. Mã có hiệu lực {phut} phút và nhập sai quá năm lần thì phải xin mã mới."
+                vars={{ vidu: <code>+84901234567</code>, phut: status.code_ttl_minutes }}
+              />
             </p>
           </div>
         )}

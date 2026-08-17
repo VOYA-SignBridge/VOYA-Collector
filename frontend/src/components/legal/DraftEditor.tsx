@@ -221,11 +221,11 @@ export default function DraftEditor({
           {t(DRAFT_STATUS_LABEL[draft.status])}
         </span>
         <span className="text-xs text-slate-400" data-testid="revision">
-          bản ghi #{draft.revision}
+          {t("bản ghi #{n}", { n: draft.revision })}
         </span>
         {draft.based_on_version && (
           <span className="text-xs text-slate-400">
-            dựa trên {draft.based_on_version}
+            {t("dựa trên {ban}", { ban: draft.based_on_version })}
           </span>
         )}
       </div>

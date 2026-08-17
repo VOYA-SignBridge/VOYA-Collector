@@ -156,7 +156,7 @@ một đại diện trưởng thành: thu thập dựa trên biểu mẫu, hỗ 
 điểm, kiểm soát quyền ở cấp dự án và nhật ký kiểm toán \cite{harris_research_2009,harris_redcap_2019}.
 REDCap chứng minh rằng các chức năng thu thập, phân quyền và kiểm toán có thể được tích hợp
 trong một nền tảng nghiên cứu dùng chung — đây là mô hình tham chiếu gần nhất với
-CTU-SignBridge.
+CTU.SignBridge.
 
 *Khoảng trống:* mô hình của REDCap xoay quanh biểu mẫu và dự án nghiên cứu tổng quát. Nó
 không đặt tầng danh mục chuyên biệt cho ngôn ngữ, phương ngữ và lớp ký hiệu, cũng không đặt
@@ -260,7 +260,7 @@ lý và phiên bản ngay từ thời điểm thu.**
 
 ### Mục tiêu tổng quát
 
-Thiết kế, hiện thực và đánh giá **CTU-SignBridge** — một nền tảng web đa thuê bao hỗ trợ
+Thiết kế, hiện thực và đánh giá **CTU.SignBridge** — một nền tảng web đa thuê bao hỗ trợ
 thu nhận, tổ chức và quản trị bộ dữ liệu Ngôn ngữ ký hiệu Việt Nam theo chuẩn thống nhất,
 cho phép nhiều đơn vị độc lập cùng vận hành trên một hạ tầng phần mềm dùng chung mà vẫn duy
 trì ranh giới riêng về dữ liệu, thành viên, quyền và cấu hình.
@@ -758,29 +758,29 @@ Chương 2 bản hoàn chỉnh khác bản thảo trước khá nhiều. Đã đ
 
 | # | Chương 2 nói | Phần giới thiệu từng nói | Đã sửa thành |
 |---|---|---|---|
-| 1 | §2.6.2, §2.6.3: "landmark **không đương nhiên là dữ liệu ẩn danh**"; §2.9.4 nhắc lại | "loại bỏ luôn ngoại hình của người ký", "người đóng góp giữ được **mức ẩn danh** mà lưu video không bao giờ đạt tới" | **Giảm mức phơi bày**, kèm câu giới hạn tường minh và trích \cite{article29_anonymisation_2014}. Đây là mâu thuẫn nghiêm trọng nhất |
+| 1 | §2.6.3, §2.6.5: "landmark **không đương nhiên là dữ liệu ẩn danh**"; §2.9.5 nhắc lại | "loại bỏ luôn ngoại hình của người ký", "người đóng góp giữ được **mức ẩn danh** mà lưu video không bao giờ đạt tới" | **Giảm mức phơi bày**, kèm câu giới hạn tường minh và trích \cite{article29_anonymisation_2014}. Đây là mâu thuẫn nghiêm trọng nhất |
 | 2 | §2.3 tiêu đề "**Phạm vi quản trị dữ liệu**"; mở đầu nói rõ "không nhằm đưa ra kết luận pháp lý về **quyền sở hữu**" | "ba mặt phẳng **sở hữu** dữ liệu… **chủ sở hữu** khác nhau" | "ba **phạm vi quản trị** dữ liệu"; bỏ toàn bộ ngôn ngữ sở hữu |
-| 3 | Bảng 2.6 liệt kê **năm** câu hỏi kiểm soát (có "chủ thể là ai") | "**bốn** câu hỏi kiểm soát" | Đóng góp 4 chuyển sang **năm** cơ chế, khớp Bảng 2.6 |
-| 4 | §2.1.3, Bảng 2.2: lớp công cụ gồm **REDCap, Dataverse, Zenodo** | Mục 2 không hề nhắc ba hệ thống này; thay vào đó dùng OpenML/Git-Theta không có trong Chương 2 | Mục 2 tái cấu trúc theo taxonomy của Chương 2; bỏ OpenML/Git-Theta |
+| 3 | Bảng 2-22 liệt kê **năm** câu hỏi kiểm soát (có "chủ thể là ai") | "**bốn** câu hỏi kiểm soát" | Đóng góp 4 chuyển sang **năm** cơ chế, khớp Bảng 2-22 |
+| 4 | §2.1.8, Bảng 2-10: lớp công cụ gồm **REDCap, Dataverse, Zenodo** | Mục 2 không hề nhắc ba hệ thống này; thay vào đó dùng OpenML/Git-Theta không có trong Chương 2 | Mục 2 tái cấu trúc theo taxonomy của Chương 2; bỏ OpenML/Git-Theta |
 | 5 | §2.2.1: "Tenant **không nhất thiết đồng nhất với tư cách pháp nhân**… trước hết là ranh giới kỹ thuật" | "mỗi tổ chức tham gia nền tảng **tương ứng với** một tenant" | Thêm câu giới hạn đúng theo §2.2.1 |
-| 6 | §2.2.1, §2.5.3: cây phạm vi "**không tự sinh ra quyền truy cập**", "không tự động tạo ra kế thừa quyền" | Không nói gì → dễ bị hiểu là có kế thừa | MT1 và đóng góp 4 nêu tường minh: kế thừa phải khai báo bằng policy |
-| 7 | §2.2.3: "nếu không thực hiện phép đo thì **chỉ nên khẳng định có cơ chế hạn mức**, không khẳng định đạt performance isolation" | MT6 và phạm vi ghi chung chung "đánh giá hiệu năng" | MT6 nêu rõ giới hạn; thêm dòng loại trừ số 4 |
-| 8 | §2.8.3: hợp nhất đơn điệu "**không phải giải pháp tổng quát**"; §2.8.2 phân biệt tamper-evident/tamper-proof | Đóng góp 2 trình bày cơ chế như một bảo đảm chung | Đóng góp 2 phát biểu tường minh **hai giới hạn** |
+| 6 | §2.2.1, §2.5.6: cây phạm vi "**không tự sinh ra quyền truy cập**", "không tự động tạo ra kế thừa quyền" | Không nói gì → dễ bị hiểu là có kế thừa | MT1 và đóng góp 4 nêu tường minh: kế thừa phải khai báo bằng policy |
+| 7 | §2.2.8: "nếu không thực hiện phép đo thì **chỉ nên khẳng định có cơ chế hạn mức**, không khẳng định đạt performance isolation" | MT6 và phạm vi ghi chung chung "đánh giá hiệu năng" | MT6 nêu rõ giới hạn; thêm dòng loại trừ số 4 |
+| 8 | §2.8.7: hợp nhất đơn điệu "**không phải giải pháp tổng quát**"; §2.8.6 phân biệt tamper-evident/tamper-proof | Đóng góp 2 trình bày cơ chế như một bảo đảm chung | Đóng góp 2 phát biểu tường minh **hai giới hạn** |
 | 9 | Toàn chương dùng `\cite{key}` | Phần giới thiệu dùng `[n]` | Chuyển toàn bộ sang `\cite{}` với khoá của Chương 2 |
 
 **Sáu chỗ đã kiểm và xác nhận KHÔNG mâu thuẫn** (đừng "sửa" lại):
 
 * **Số chương.** §2.11 kết bằng "cơ sở để **Chương 3** mô tả kiến trúc…" → cấu trúc năm
   chương ở mục 7 vẫn đúng.
-* **126 chiều.** §2.6.1 tính $21\times3\times2=126$; phần giới thiệu dùng đúng công thức và
-  **không** mô tả đây là tái dựng 3D tuyệt đối (§2.6.1 cảnh báo điều này).
-* **Bốn mức thu hồi** (Bảng 2.8) và **bốn lớp cho phép** (Bảng 2.7) là hai bảng khác nhau —
+* **126 chiều.** §2.6.2 tính $21\times3\times2=126$; phần giới thiệu dùng đúng công thức và
+  **không** mô tả đây là tái dựng 3D tuyệt đối (§2.6.2 cảnh báo điều này).
+* **Bốn mức thu hồi** (Bảng 2-35) và **bốn lớp cho phép** (Bảng 2-33) là hai bảng khác nhau —
   đóng góp 3 nay nhắc cả hai, không gộp.
 * **MediaPipe Hands** là "thành phần thu nhận có sẵn" — phần giới thiệu và mục loại trừ số 2
-  phát biểu đúng như §2.6.1.
-* **Không có con số "giảm trên 90%"** ở bất kỳ đâu; §2.6.2 yêu cầu đo trong chương thực
+  phát biểu đúng như §2.6.2.
+* **Không có con số "giảm trên 90%"** ở bất kỳ đâu; §2.6.3 yêu cầu đo trong chương thực
   nghiệm, phần giới thiệu tuân thủ.
-* **Container ≠ ranh giới tenant** (§2.10.1) — mục 4.1 nay nói rõ điều này.
+* **Container ≠ ranh giới tenant** (§2.10.2) — mục 4.1 nay nói rõ điều này.
 
 ## A2. Thuật ngữ đã chốt: dùng "không lộ diện", không dùng "ẩn danh"
 
@@ -788,20 +788,20 @@ Chương 2 bản hoàn chỉnh khác bản thảo trước khá nhiều. Đã đ
 hiệu và thấy chuyển động bàn tay, nhưng không thấy khuôn mặt, không thấy bối cảnh phòng ốc,
 không thấy bất kỳ chi tiết hình ảnh nào nhận ra được người ký. Đây chính là điều bạn muốn
 diễn đạt. Kèm theo là cụm kỹ thuật **"giảm mức phơi bày"**, mượn nguyên văn của Chương 2
-§2.6.2 để hai chương dùng chung một thuật ngữ.
+§2.6.3 để hai chương dùng chung một thuật ngữ.
 
 **Từ đã loại: "ẩn danh".** Không phải vì hệ thống bảo vệ kém hơn, mà vì trong ngữ cảnh bảo
 vệ dữ liệu cá nhân, "ẩn danh" có nghĩa hẹp: *dữ liệu không còn khả năng quy về một cá nhân
 bởi bất kỳ ai, bằng bất kỳ phương tiện hợp lý nào*. Hệ thống này **cố ý** không đạt nghĩa
 đó, vì mỗi mẫu phải giữ liên kết tới chủ thể để thực hiện được quyền rút đồng thuận. Dùng
-từ "ẩn danh" sẽ mâu thuẫn với Chương 2 §2.6.3 (nói thẳng ba lần) và tự phủ định MT7.
+từ "ẩn danh" sẽ mâu thuẫn với Chương 2 §2.6.5 (nói thẳng ba lần) và tự phủ định MT7.
 
 Ba cụm dùng được trong quyển, xếp theo mức trang trọng:
 
 | Cụm | Dùng ở đâu |
 |---|---|
 | **không lộ diện** | thuật ngữ chính, dùng xuyên suốt |
-| **giảm mức phơi bày** | khi cần khớp thuật ngữ Chương 2 §2.6.2 |
+| **giảm mức phơi bày** | khi cần khớp thuật ngữ Chương 2 §2.6.3 |
 | *"người xem không nhận ra người ký qua giao diện"* | khi cần diễn giải dài cho người đọc không chuyên |
 
 **Tuyệt đối tránh:** "ẩn danh", "vô danh", "phi định danh", "dữ liệu đã được ẩn danh hoá" —
@@ -862,7 +862,7 @@ trừ đúng một chỗ: câu tuyên bố tường minh rằng đề tài **kh�
    đã không "học thuộc" người ký, và AUTSL đã không cần nhóm người ký tách biệt giữa các tập
    \cite{sincan_autsl_2020}. Mục 2.1 của phần giới thiệu dùng chính lập luận này — nên không
    thể quay lại nói rằng cùng dữ liệu đó là vô danh.
-4. **Chương 2 §2.6.2, §2.6.3 và §2.9.4 phát biểu thẳng điều này ba lần.** Phần giới thiệu mà
+4. **Chương 2 §2.6.3, §2.6.5 và §2.9.5 phát biểu thẳng điều này ba lần.** Phần giới thiệu mà
    nói ngược lại thì mâu thuẫn nội bộ quyển.
 
 **Kết luận cho quyển:** phát biểu đúng là *"an toàn của người đóng góp được bảo đảm bằng ba
@@ -886,7 +886,7 @@ Kiểm ngày 14/08 trên `backend/app/dataset_samples.py:281` (`load_display_seq
   `sequence`, và giao diện báo cho người dùng biết nó đang xem loại nào thay vì lặng lẽ hiển
   thị một bàn tay đã bị làm bẹt như thể là thật.
 
-**Hệ quả cho quyển:** Chương 2 §2.6.3 khuyến nghị giữ bản ghi nguồn để tái xử lý được khi
+**Hệ quả cho quyển:** Chương 2 §2.6.6 khuyến nghị giữ bản ghi nguồn để tái xử lý được khi
 thuật toán thay đổi. Hệ thống đạt nguyên tắc này **ở mức chuẩn hoá** (đổi quy ước chuẩn hoá
 thì dữ liệu cũ vẫn dùng lại được) nhưng **không ở mức trích xuất** (không thể chạy lại bằng
 một mô hình điểm mốc khác, vì hình ảnh không còn). Mục 5.2 của phần giới thiệu đã nêu đánh
@@ -936,13 +936,13 @@ python scripts/doi_khoa_trichdan.py --ghi --c2 # 51 lượt đổi, tự tạo .
 Ba nhóm đáng chú ý trong đó:
 
 * **Ba mục PostgreSQL nay TÁCH RIÊNG**, không còn gộp một như bản `.bib` cũ:
-  `postgresql_rls_2026`, `postgresql_set_2026` và `postgresql_configfunc_2026`. Nghĩa là cách Chương 2 §2.4.1/§2.4.2 trích hai khoá riêng nay **đúng**
+  `postgresql_rls_2026`, `postgresql_set_2026` và `postgresql_configfunc_2026`. Nghĩa là cách Chương 2 §2.4.6/§2.4.7 trích hai khoá riêng nay **đúng**
   — chỉ cần đổi tên. Ghi chú "gộp làm một" ở lượt rà trước đã hết hiệu lực.
 * **Ba mục trước đây thiếu nay đã có**: `sheffer_json_2020` (RFC 8725),
   `lodderstedt_best_2025` (RFC 9700), `casbin_authors_rbac_2026` (RBAC with Domains).
 * **Xung đột NIST SP 800-63B đã tự giải quyết.** `.bib` mới có `nist_sp800_63b_2025`
   (bản 2025) và **đã gỡ** `grassi_digital_2017` (bản 2017). Vậy câu *"SP 800-63B-4"* ở
-  §2.5.2 nay khớp nguồn — không phải sửa câu chữ nữa, chỉ đổi khoá.
+  §2.5.8 nay khớp nguồn — không phải sửa câu chữ nữa, chỉ đổi khoá.
 
 ### B.3 — Bốn tài liệu từng thiếu — ĐÃ NỐI VÀO `.bib` ✓
 
@@ -950,13 +950,13 @@ Cả hai chương đều trích, và đây là chỗ duy nhất còn in ra `[?]`
 
 | Khoá | Tài liệu | Đỡ luận điểm nào |
 |---|---|---|
-| `harris_research_2009` | REDCap — Harris và cs., *J Biomed Inform* 42(2), 2009. DOI `10.1016/j.jbi.2008.08.010` | §2.1.3 lớp "nền tảng thu thập dữ liệu nghiên cứu"; GT mục 2 |
+| `harris_research_2009` | REDCap — Harris và cs., *J Biomed Inform* 42(2), 2009. DOI `10.1016/j.jbi.2008.08.010` | §2.1.8 lớp "nền tảng thu thập dữ liệu nghiên cứu"; GT mục 2 |
 | `harris_redcap_2019` | REDCap consortium — *J Biomed Inform* 95, 2019. DOI `10.1016/j.jbi.2019.103208` | như trên |
-| `crosas_dataverse_2011` | The Dataverse Network — *D-Lib Magazine* 17(1/2), 2011. DOI `10.1045/january2011-crosas` | §2.1.3 lớp "kho lưu trữ và công bố"; §2.11 định vị |
+| `crosas_dataverse_2011` | The Dataverse Network — *D-Lib Magazine* 17(1/2), 2011. DOI `10.1045/january2011-crosas` | §2.1.8 lớp "kho lưu trữ và công bố"; §2.11 định vị |
 | `cern_openaire_zenodo_2013` | Zenodo — CERN/OpenAIRE. DOI `10.25495/7GXK-RD71` | như trên |
 | `w3c_wcag22_2023` | WCAG 2.2, W3C Recommendation 05/10/2023 | §2.9 và GT mục 5.2 — khung tham chiếu giao diện |
 
-Bỏ REDCap/Dataverse/Zenodo thì §2.1.3 mất hẳn hai trong bốn lớp công cụ, và đoạn định vị ở
+Bỏ REDCap/Dataverse/Zenodo thì §2.1.8 mất hẳn hai trong bốn lớp công cụ, và đoạn định vị ở
 §2.11 (*"kho tiếp nhận đối tượng đã hình thành, nền tảng thu thập phải thiết lập quan hệ
 subject–session–sample ngay khi dữ liệu sinh ra"*) không còn đối tượng để so. Đây là lập luận
 "khoảng trống" chính của đề tài, nên **thêm bốn mục này quan trọng hơn mọi việc còn lại ở phụ
@@ -1061,7 +1061,7 @@ Dùng cho Chương 3, 4, 5. Phần giới thiệu cố ý không chứa các con
 5. **Vẽ lại ERD** — 56 bảng, không phải 44. `docs/02-data/db/schema_erd.sql` đã cũ.
 6. **Chạy lại toàn bộ kiểm thử** bằng `scripts/run_tests.sh` và ghi số mới.
 7. **Trích xuất bằng chứng cô lập** — chọn 3–5 ca kiểm thử **hành vi dưới vai runtime** (đúng
-   dạng §2.4.3 yêu cầu), đưa mã vào Chương 4 và Phụ lục.
+   dạng §2.4.8 yêu cầu), đưa mã vào Chương 4 và Phụ lục.
 8. **Viết phần phân tích của Chương 3** — 10 tác nhân, 75 use case, yêu cầu chức năng và phi
    chức năng. Nội dung không được trùng Chương 1: Chương 1 nói *vì sao cần*, Chương 3 nói
    *cần cụ thể những gì*.
@@ -1086,7 +1086,7 @@ Dùng cho Chương 3, 4, 5. Phần giới thiệu cố ý không chứa các con
 
 1. **Thuật ngữ.** *đa thuê bao* cho tính chất kiến trúc; *tenant / workspace / project* cho
    phạm vi; *ba phạm vi quản trị dữ liệu* (không phải "mặt phẳng sở hữu"); *bản ghi nguồn* vs
-   *dữ liệu dẫn xuất*; *danh mục / bộ dữ liệu / tạo tác nghiên cứu* theo §2.3.4.
+   *dữ liệu dẫn xuất*; *danh mục / bộ dữ liệu / tạo tác nghiên cứu* theo §2.3.5.
 2. **Bốn khẳng định không được vượt quá Chương 2:** landmark không phải dữ liệu ẩn danh; có
    hạn mức ≠ đạt cô lập hiệu năng; tamper-evident ≠ tamper-proof; hợp nhất đơn điệu không
    tổng quát.

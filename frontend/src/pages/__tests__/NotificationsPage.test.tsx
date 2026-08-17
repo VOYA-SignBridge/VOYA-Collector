@@ -156,7 +156,7 @@ describe("NotificationBell", () => {
     renderBell();
 
     expect(
-      await screen.findByRole("link", { name: "Thông báo, 3 chưa đọc" }),
+      await screen.findByRole("button", { name: "Thông báo, 3 chưa đọc" }),
     ).toBeInTheDocument();
   });
 
@@ -164,7 +164,7 @@ describe("NotificationBell", () => {
     mocked.fetchUnreadCount.mockResolvedValue(0);
     renderBell();
 
-    expect(await screen.findByRole("link", { name: "Thông báo" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Thông báo" })).toBeInTheDocument();
   });
 
   it("chặn trên ở 99+ để không phá bố cục thanh điều hướng", async () => {
@@ -178,6 +178,79 @@ describe("NotificationBell", () => {
     mocked.fetchUnreadCount.mockRejectedValue(new Error("401"));
     renderBell();
 
-    expect(await screen.findByRole("link", { name: "Thông báo" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Thông báo" })).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------- bảng xổ xuống
+  //
+  // Trước 16/08/2026 chuông là một `<Link>`: bấm vào là rời trang. Người dùng
+  // báo rằng "bấm lần đầu nên là dạng popup xổ xuống, có nút xem chi tiết mới
+  // vào trang đó" — và họ đúng: cái chuông trả lời một câu hỏi liếc-qua, nên
+  // nó không được đòi trả giá bằng cả trang đang làm dở.
+
+  it("chỉ hỏi SỐ khi chưa mở — danh sách tải khi bấm", async () => {
+    mocked.fetchUnreadCount.mockResolvedValue(2);
+    mocked.fetchNotifications.mockResolvedValue({ items: [], unread: 2 });
+    renderBell();
+
+    await screen.findByRole("button", { name: /Thông báo/ });
+    // Đây là lý do tồn tại của `/unread-count`: hỏi cả danh sách theo chu kỳ
+    // để hiển thị một chữ số là tải vài chục kilobyte mỗi phút cho không.
+    expect(mocked.fetchNotifications).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Thông báo/ }));
+    await waitFor(() => expect(mocked.fetchNotifications).toHaveBeenCalled());
+  });
+
+  it("bảng xổ hiện mục gần nhất và nút đi tiếp", async () => {
+    mocked.fetchUnreadCount.mockResolvedValue(1);
+    mocked.fetchNotifications.mockResolvedValue({
+      items: [makeNotification({ title: "Huấn luyện xong" })],
+      unread: 1,
+    });
+    renderBell();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Thông báo/ }));
+
+    expect(await screen.findByText("Huấn luyện xong")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Xem chi tiết" })).toBeInTheDocument();
+  });
+
+  it("nút đi tiếp có mặt cả khi KHÔNG có thông báo nào", async () => {
+    // Người vào đây tìm lịch sử thông báo cần thấy đường tới nó ngay cả lúc
+    // không có gì mới — và đó chính là lúc họ hay tìm nhất.
+    mocked.fetchUnreadCount.mockResolvedValue(0);
+    mocked.fetchNotifications.mockResolvedValue({ items: [], unread: 0 });
+    renderBell();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Thông báo" }));
+
+    expect(await screen.findByText("Bạn đã đọc hết")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Xem chi tiết" })).toBeInTheDocument();
+  });
+
+  it("mở một mục thì đánh dấu đã đọc ngay", async () => {
+    mocked.fetchUnreadCount.mockResolvedValue(1);
+    mocked.fetchNotifications.mockResolvedValue({
+      items: [makeNotification({ read_at: null })],
+      unread: 1,
+    });
+    mocked.markRead.mockResolvedValue(1);
+    renderBell();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Thông báo/ }));
+    fireEvent.click(await screen.findByText("Đăng nhập từ thiết bị lạ"));
+
+    await waitFor(() => expect(mocked.markRead).toHaveBeenCalledWith(["n1"]));
+  });
+
+  it("lỗi tải danh sách KHÔNG để bảng đứng mãi ở 'Đang tải…'", async () => {
+    mocked.fetchUnreadCount.mockResolvedValue(1);
+    mocked.fetchNotifications.mockRejectedValue(new Error("mạng hỏng"));
+    renderBell();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Thông báo/ }));
+
+    expect(await screen.findByText("Bạn đã đọc hết")).toBeInTheDocument();
   });
 });

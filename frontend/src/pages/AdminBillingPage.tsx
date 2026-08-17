@@ -221,9 +221,12 @@ export default function AdminBillingPage() {
 
             {usageRows.length === 0 ? (
               <p className="text-sm text-slate-400">
-                Chưa có số đo nào trong khoảng này. Số đo được gộp mỗi ngày bởi tác vụ nền; một
-                bản triển khai vừa dựng có thể cần chạy{" "}
-                <code className="font-mono text-xs">app.cli.backfill_usage</code>.
+                <Trans
+                  k="Chưa có số đo nào trong khoảng này. Số đo được gộp mỗi ngày bởi tác vụ nền; một bản triển khai vừa dựng có thể cần chạy {lenh}."
+                  vars={{
+                    lenh: <code className="font-mono text-xs">app.cli.backfill_usage</code>,
+                  }}
+                />
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -378,7 +381,7 @@ function PlanCard({
             ))}
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-600">
-                Giá ({plan.currency} / {plan.billing_period})
+                {t("Giá ({tien} / {ky})", { tien: plan.currency, ky: plan.billing_period })}
               </span>
               <input
                 value={price}

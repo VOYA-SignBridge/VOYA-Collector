@@ -57,10 +57,20 @@ BANG_DAU_RA = [
     ("training_jobs", "hàng job — gốc thẩm quyền của mọi đầu ra"),
     ("training_job_classes", "hợp đồng lớp đầu ra (C1)"),
     ("training_metrics", "chỉ số từng epoch"),
-    ("experiments", "lượt thí nghiệm"),
-    ("experiment_metrics", "chỉ số thí nghiệm"),
-    ("model_versions", "checkpoint đã đăng ký"),
 ]
+
+#: Hai mặt phẳng đầu tiên của C3 — "hàng model registry" và "hàng model version"
+#: — KHÔNG TỒN TẠI trong hệ thống này. Đo được, không suy ra.
+#:
+#: `experiments`, `experiment_metrics`, `model_versions` chỉ có DDL trong
+#: `backend/migrations/001_…sql` và `002_…sql`, không có trong `ensure_tables()`;
+#: `experiment_tracking_api.py` ghi vào chúng nhưng `routers/experiments.py`
+#: **không được mount** (`main.py:18` nói rõ là cố ý). Không có URL nào tới được.
+#:
+#: Vì vậy C3 không đi tìm rò rỉ tenant ở đó — không có gì để rò. Nhưng phải ghi
+#: lại, vì "chưa kiểm" và "kiểm rồi, không tồn tại" là hai trạng thái khác nhau,
+#: và trạng thái thứ hai mới đóng được ô trong ma trận cam kết.
+BANG_KHONG_TON_TAI = ("experiments", "experiment_metrics", "model_versions")
 
 
 def _cot(cur, bang: str):
@@ -137,6 +147,23 @@ def test_moi_bang_trong_so_deu_ton_tai_that(so):
     print(f"\n[evidence] bảng không tồn tại: {thieu or 'không có'}")
     assert not thieu, (
         f"sổ nhắc tới bảng không tồn tại: {thieu}. Sửa danh sách, đừng tạo bảng.")
+
+
+def test_hai_mat_phang_registry_van_KHONG_ton_tai():
+    """Chốt hiệu lực cho một kết luận PHỦ ĐỊNH.
+
+    "Không có mặt phẳng registry nên không có gì để cách ly" chỉ đúng chừng nào
+    nó còn không tồn tại. Ngày ai đó mount `routers/experiments.py` hoặc chạy
+    `002_mvp_schema.sql`, kết luận ấy hết hiệu lực — và ca này đỏ đúng lúc đó,
+    thay vì để ma trận cam kết mang một ô đã hết hạn.
+    """
+    with _migration_cursor() as cur:
+        cur.execute("SELECT set_config('app.system_scope','on',false)")
+        co = [b for b in BANG_KHONG_TON_TAI if _co_bang(cur, b)]
+    print(f"\n[evidence] bảng registry đã xuất hiện: {co or 'chưa có bảng nào'}")
+    assert not co, (
+        f"{co} nay đã tồn tại. Kết luận 'mặt phẳng registry không có gì để cách "
+        f"ly' hết hiệu lực — phải đo lại C3 cho chúng.")
 
 
 def test_liet_ke_bang_dau_ra_KHONG_co_tenant(so):

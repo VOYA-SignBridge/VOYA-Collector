@@ -39,6 +39,7 @@ const AdminTenantsPage = lazy(() => import("./pages/AdminTenantsPage"));
 const AdminBillingPage = lazy(() => import("./pages/AdminBillingPage"));
 const LegalDocumentPage = lazy(() => import("./pages/LegalDocumentPage"));
 const AccountPage = lazy(() => import("./pages/AccountPage"));
+const ConsentsPage = lazy(() => import("./pages/settings/ConsentsPage"));
 const OrganizationPage = lazy(() => import("./pages/OrganizationPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const SupportPage = lazy(() => import("./pages/SupportPage"));
@@ -264,7 +265,12 @@ function App() {
                 <Route index element={<Navigate to="/settings/account" replace />} />
                 <Route path="account" element={<AccountPage />} />
                 <Route path="security" element={<SecuritySettingsPage />} />
-                <Route path="contact" element={<VerifyContactPage />} />
+                <Route path="consents" element={<ConsentsPage />} />
+                {/* `/settings/contact` giữ lại làm CHUYỂN HƯỚNG, không xoá.
+                    Nó đã đi ra ngoài trong thư mời và trong thông báo bảo mật;
+                    một đường dẫn cũ trả 404 là cách chắc chắn khiến người nhận
+                    thư kết luận hệ thống hỏng. Nội dung giờ nằm trong Bảo mật. */}
+                <Route path="contact" element={<Navigate to="/settings/security" replace />} />
                 {/* KHÔNG dùng `requireAdmin` — cờ đó là quản trị viên NỀN TẢNG,
                     còn đây là quản trị viên TỔ CHỨC. Gác bằng cờ sai sẽ tái lập
                     đúng cái gộp khái niệm mà trang này sinh ra để gỡ. Quyền

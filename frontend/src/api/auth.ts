@@ -152,3 +152,59 @@ export async function resetPassword(token: string, newPassword: string): Promise
   });
   return res.data as MessageResponse;
 }
+
+/**
+ * Đổi mật khẩu khi ĐANG đăng nhập.
+ *
+ * `code` chỉ cần khi tài khoản đã bật xác thực hai bước, và nhận CẢ mã TOTP sáu
+ * chữ số lẫn mã khôi phục `xxxxx-xxxxx`. Máy chủ trả 400 kèm
+ * `detail.code === "2fa_required"` khi thiếu — giao diện dùng đúng mã đó để mở
+ * ô nhập, thay vì đoán trước bằng cách hỏi `/2fa/status`. Đoán trước là hai
+ * nguồn sự thật cho cùng một câu hỏi, và chúng lệch nhau ngay khi người dùng
+ * bật 2FA ở một tab khác.
+ *
+ * Thành công nghĩa là **mọi thiết bị đã bị đăng xuất**, kể cả tab đang gọi. Chỗ
+ * gọi phải nói trước điều đó rồi mới đưa người dùng về màn hình đăng nhập.
+ */
+export async function changePassword(payload: {
+  currentPassword: string;
+  newPassword: string;
+  code?: string;
+}): Promise<MessageResponse> {
+  const res = await axiosClient.post("/api/v1/auth/change-password", {
+    current_password: payload.currentPassword,
+    new_password: payload.newPassword,
+    code: payload.code || undefined,
+  });
+  return res.data as MessageResponse;
+}
+
+/**
+ * Đổi email: hai bước, mã gửi tới ĐỊA CHỈ MỚI.
+ *
+ * Thứ cần chứng minh là "bạn đọc được hộp thư mới" — "bạn đọc được hộp thư cũ"
+ * đã được chứng minh bằng việc đang đăng nhập. Mật khẩu hỏi ở cả hai bước: bước
+ * đầu chỉ gửi một lá thư, bước sau mới đổi địa chỉ nhận thư khôi phục tài
+ * khoản, tức bước có thể biến một phiên bị chiếm thành mất tài khoản vĩnh viễn.
+ */
+export async function startEmailChange(payload: {
+  currentPassword: string;
+  newEmail: string;
+}): Promise<{ challenge_id: string; sent_to: string; expires_in_minutes: number }> {
+  const res = await axiosClient.post("/api/v1/auth/change-email/start", {
+    current_password: payload.currentPassword,
+    new_email: payload.newEmail,
+  });
+  return res.data;
+}
+
+export async function confirmEmailChange(payload: {
+  currentPassword: string;
+  code: string;
+}): Promise<{ email: string; email_verified: boolean }> {
+  const res = await axiosClient.post("/api/v1/auth/change-email/confirm", {
+    current_password: payload.currentPassword,
+    code: payload.code,
+  });
+  return res.data;
+}

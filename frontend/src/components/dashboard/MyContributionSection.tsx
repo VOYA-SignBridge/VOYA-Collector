@@ -250,7 +250,7 @@ export default function MyContributionSection({ username }: MyContributionSectio
                 ))}
                 {stats.labels.length > 12 && (
                   <span className="inline-flex items-center rounded-full bg-slate-50 px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200">
-                    +{stats.labels.length - 12} nhãn khác
+                    {t("+{n} nhãn khác", { n: stats.labels.length - 12 })}
                   </span>
                 )}
               </div>

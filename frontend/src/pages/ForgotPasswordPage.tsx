@@ -12,7 +12,7 @@ import {
 import { friendlyError } from "../lib/errors";
 import { secondsFromRetryError, useResendCountdown } from "../hooks/useResendCountdown";
 import { InfoCircleIcon, MailIcon, SmartphoneIcon } from "../components/ui/Icons";
-import { useI18n } from "../i18n";
+import { Trans, useI18n } from "../i18n";
 
 /**
  * Quên mật khẩu — MỘT cửa duy nhất, ba bước.
@@ -204,7 +204,7 @@ export default function ForgotPasswordPage() {
   return (
     <AuthShell title={t(STEP_TITLE[step])} footer={footer}>
       <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-slate-400">
-        Bước {STEP_INDEX[step]} / 3
+        {t("Bước {n} / 3", { n: STEP_INDEX[step] })}
       </p>
 
       {step === "identify" ? (
@@ -308,8 +308,10 @@ export default function ForgotPasswordPage() {
       ) : (
         <form onSubmit={submitPassword} className="space-y-4">
           <p className="text-sm leading-relaxed text-slate-600">
-            Mã đã được xác nhận. Đặt mật khẩu mới cho tài khoản{" "}
-            <span className="font-semibold text-slate-800">{identifier}</span>.
+            <Trans
+              k="Mã đã được xác nhận. Đặt mật khẩu mới cho tài khoản {taikhoan}."
+              vars={{ taikhoan: <span className="font-semibold text-slate-800">{identifier}</span> }}
+            />
           </p>
 
           <AuthInput

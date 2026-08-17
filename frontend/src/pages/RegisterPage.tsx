@@ -5,7 +5,7 @@ import { BuildingIcon } from "../components/ui/Icons";
 import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
 import AuthInput, { LockIcon, MailIcon, UserIcon } from "../components/auth/AuthInput";
-import { useI18n, tr } from "../i18n";
+import { Trans, useI18n, tr } from "../i18n";
 import {
   LEGAL_KIND_LABEL,
   fetchDocumentOrNull,
@@ -197,8 +197,10 @@ export default function RegisterPage() {
           <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
             <BuildingIcon className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
             <span>
-              Bạn đang gia nhập{" "}
-              <span className="font-semibold">{handoff.invitationTenant}</span> {t("theo lời mời. Địa chỉ email đã được điền sẵn và không đổi được — lời mời nêu đích danh địa chỉ đó.")}
+              <Trans
+                k="Bạn đang gia nhập {tochuc} theo lời mời. Địa chỉ email đã được điền sẵn và không đổi được — lời mời nêu đích danh địa chỉ đó."
+                vars={{ tochuc: <span className="font-semibold">{handoff.invitationTenant}</span> }}
+              />
             </span>
           </div>
         ) : null}
@@ -272,7 +274,7 @@ export default function RegisterPage() {
                 className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-ctu-blue focus:ring-ctu-blue"
               />
               <span>
-                Tôi đã đọc và đồng ý với{" "}
+                {t("Tôi đã đọc và đồng ý với")}{" "}
                 {documents.map((doc, i) => (
                   <span key={doc.kind}>
                     {/* Từ nối của danh sách cũng phải dịch: tiếng Anh là " and ".

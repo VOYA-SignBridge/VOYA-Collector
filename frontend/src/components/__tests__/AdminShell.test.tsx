@@ -14,7 +14,15 @@
 
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Huy hiệu "việc đang chờ" tự gọi API theo chu kỳ. Không chặn nó thì mỗi lượt
+// dựng bắn một request thật, thất bại, rồi `axiosClient` ghi `console.error` —
+// và một lượt ghi console còn treo lúc worker đóng làm vitest ném
+// `EnvironmentTeardownError`. Bài test về BỐ CỤC không nên phụ thuộc vào mạng.
+vi.mock("../../hooks/useAdminAttention", () => ({
+  useAdminAttention: () => ({ counts: {}, loading: false, refresh: vi.fn() }),
+}));
 
 import AdminShell from "../AdminShell";
 import { I18nProvider } from "../../i18n";
@@ -62,6 +70,14 @@ describe("AdminShell", () => {
     renderShell("en");
     expect(screen.getByText("Overview")).toBeInTheDocument();
     expect(screen.queryByText("Tổng quan")).not.toBeInTheDocument();
+  });
+
+  it("mang theo ô đổi ngôn ngữ — console thay hẳn header của ứng dụng", () => {
+    // Thiếu ô này thì `/admin` là một ngõ cụt tiếng Việt cho người đọc tiếng
+    // Anh: mười hai mục điều hướng, và lối đổi ngôn ngữ duy nhất nằm ở cái
+    // header mà console vừa thay mất. Đó đúng là điều đã xảy ra tới 16/08/2026.
+    renderShell();
+    expect(screen.getAllByRole("combobox").length).toBeGreaterThan(0);
   });
 
   it("KHÔNG phải hàng rào quyền — quyền do máy chủ quyết ở từng endpoint", () => {

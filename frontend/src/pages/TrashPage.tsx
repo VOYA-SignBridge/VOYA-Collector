@@ -348,7 +348,7 @@ export default function TrashPage() {
                           <td className="py-3 px-3 text-slate-500">{c.language} / {c.dialect || "—"}</td>
                           <td className="py-3 px-3">
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-ctu-blue/10 text-ctu-blue">
-                              {c.sample_count ?? 0} mẫu
+                              {t("{n} mẫu", { n: c.sample_count ?? 0 })}
                             </span>
                           </td>
                           <td className="py-3 px-3 text-slate-400 whitespace-nowrap">{fmtDate(c.deleted_at)}</td>

@@ -50,10 +50,21 @@ const STATUS_TONE: Record<TicketStatus, "success" | "warning" | "neutral"> = {
 
 /** Bộ lọc. `null` = mọi trạng thái; xem `fetchSupportQueue` về vì sao không dùng undefined. */
 const FILTERS: { key: string; value: TicketStatus | null }[] = [
+  // "Tất cả" đứng ĐẦU và là mặc định — đổi 16/08/2026.
+  //
+  // Trước đó mặc định là "Đang mở", và hậu quả đo được: cơ sở dữ liệu có hai
+  // phiếu thật (một `pending`, một `closed`), hàng đợi hiện **0**, và người
+  // trực kết luận rằng kênh hỗ trợ hỏng. Nó không hỏng — bộ lọc mặc định đơn
+  // giản là không khớp phiếu nào.
+  //
+  // Một màn hình mở ra trống rỗng không nói được sự khác nhau giữa "không có
+  // việc gì" và "bạn đang nhìn nhầm chỗ". Với một hàng đợi vài chục phiếu, chi
+  // phí của việc hiện thừa là một cú cuộn; chi phí của việc giấu nhầm là mất
+  // niềm tin vào cả tính năng.
+  { key: "Tất cả", value: null },
   { key: "Đang mở", value: "open" },
   { key: "Chờ người dùng", value: "pending" },
   { key: "Đã giải quyết", value: "resolved" },
-  { key: "Tất cả", value: null },
 ];
 
 /**
@@ -87,7 +98,7 @@ function formatWhen(iso: string): string {
 export default function AdminSupportPage() {
   const { t } = useI18n();
 
-  const [filter, setFilter] = useState<TicketStatus | null>("open");
+  const [filter, setFilter] = useState<TicketStatus | null>(null);
   const [items, setItems] = useState<TicketSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

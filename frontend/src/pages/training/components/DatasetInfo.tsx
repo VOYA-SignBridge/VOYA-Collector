@@ -91,7 +91,7 @@ const DatasetInfo: React.FC<Props> = ({ datasetInfo, loading }) => {
             {t("Phân Bố Lớp (Top 10)")}
           </h3>
           <span className="text-xs text-slate-500">
-            Tổng: {datasetInfo.total_samples} mẫu
+            {t("Tổng: {n} mẫu", { n: datasetInfo.total_samples })}
           </span>
         </div>
 

@@ -534,7 +534,7 @@ export default function LabelsPage() {
         <div className="space-y-3 sm:space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center">
-              Danh sách nhãn
+              {t("Danh sách nhãn")}
               {!loading && (
                 <Badge variant="info" className="ml-3">
                   {renderItems.length}

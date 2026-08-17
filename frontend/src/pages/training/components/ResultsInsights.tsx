@@ -403,8 +403,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
               {job.promoted_at && (
                 <div className="flex items-center gap-1.5 rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-xs text-sky-800">
                   <CheckCircleIcon className="h-3.5 w-3.5 shrink-0" />
-                  Đã đưa vào Realtime lúc{' '}
-                  {new Date(job.promoted_at).toLocaleString('vi-VN')}
+                  {t("Đã đưa vào Realtime lúc {luc}", { luc: new Date(job.promoted_at).toLocaleString('vi-VN') })}
                 </div>
               )}
               {promoteMessage && !job.promoted_at && (

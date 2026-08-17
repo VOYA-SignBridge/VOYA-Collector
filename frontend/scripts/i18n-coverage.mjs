@@ -61,12 +61,131 @@ function walk(dir, out = []) {
  * `index` của mọi phép khớp vẫn trỏ đúng vào bản gốc. Nhờ vậy mới tra ngược
  * được số dòng — và số dòng là thứ cần để đọc chỉ thị `i18n-ignore-next-line`.
  * Bản cũ xoá hẳn khiến mọi dòng sau một chú thích khối bị lệch.
+ *
+ * PHẢI nhận biết chuỗi. Bản trước dùng `/\/\*[\s\S]*?\*\//g` trên văn bản thô,
+ * nên một dấu `/` + `*` nằm TRONG một chuỗi mở ra một chú thích khối ma:
+ *
+ *     <input accept="video/*" ... />      <-- mở chú thích ma ở đây
+ *     ...
+ *     <h3>Kéo thả video vào đây</h3>      <-- bị bôi trắng, vô hình với bộ đo
+ *     ...
+ *     {/* một chú thích JSX thật *\/}     <-- đóng ở tận đây
+ *
+ * Đo được ngày 16/08/2026: đúng một thuộc tính `accept="video/*"` nuốt 65 dòng
+ * của `UploadVideoForm.tsx`, và bảy câu tiếng Việt trong đó — trong đó có
+ * "Kéo thả video vào đây" đang hiện giữa màn hình tiếng Anh — biến mất khỏi mọi
+ * con số. `Markdown.tsx` và `lib/errors.ts` dính cùng kiểu, tổng 38 dòng.
+ *
+ * Đây là lần thứ BA bảng số báo 100% trong khi màn hình còn chữ Việt. Hai lần
+ * trước là marker che cả tệp và các luật thiếu; lần này là chính bước tiền xử
+ * lý — nên nó giấu được cả những luật viết đúng.
  */
+/**
+ * `/` ở vị trí này mở một BIỂU THỨC CHÍNH QUY hay là phép chia?
+ *
+ * Cần phân biệt vì regex là chỗ trú của cả hai thứ làm hỏng bước tiền xử lý:
+ * dấu backtick (`` /`[^`]+`/ `` trong `Markdown.tsx`) và cặp `/*`. Một backtick
+ * lẻ trong regex mở một "chuỗi mẫu" nuốt sang tận chú thích phía dưới, và chú
+ * thích ấy khi đó được đọc như MÃ — chữ tiếng Việt trong đó hiện lên bảng số
+ * như một chuỗi cần dịch. Báo thừa cũng nguy hiểm ngang báo thiếu: nó dạy người
+ * ta phớt lờ bảng số.
+ *
+ * Quy tắc quen dùng: một `/` đứng sau toán tử hoặc dấu mở là regex; đứng sau
+ * một giá trị (tên, số, `)`, `]`) là phép chia.
+ */
+function isRegexStart(src, at) {
+  for (let i = at - 1; i >= 0; i--) {
+    const c = src[i];
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") continue;
+    return "(,=:[!&|?{};+-*%~^<>".includes(c);
+  }
+  return true;
+}
+
+/** Có dấu nháy đóng cùng loại, trên cùng dòng, sau vị trí `at` không? */
+function hasCloserOnLine(src, at, quote) {
+  for (let i = at + 1; i < src.length; i++) {
+    const c = src[i];
+    if (c === "\n") return false;
+    if (c === "\\") { i++; continue; }
+    if (c === quote) return true;
+  }
+  return false;
+}
+
 function stripComments(src) {
-  const blank = (m) => m.replace(/[^\n]/g, " ");
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, blank)
-    .replace(/(^|[^:])(\/\/.*)$/gm, (_, pre, c) => pre + blank(c));
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    // Chuỗi: sao chép nguyên vẹn, không dòm vào bên trong. Ký tự thoát ăn hai
+    // ký tự một lượt để `"\\"` không bị đọc nhầm thành chuỗi chưa đóng.
+    //
+    // `'` và `"` chỉ được coi là mở chuỗi khi có dấu đóng TRÊN CÙNG DÒNG. Đó
+    // đúng là ngữ nghĩa của JavaScript, và nó chặn một cách hỏng đối xứng với
+    // cái đang sửa: dấu lược trong chữ JSX (`<p>Đừng bấm nút "X"</p>`, hay một
+    // câu tiếng Anh có `it's`) sẽ mở một "chuỗi" nuốt mấy chục dòng tiếp theo —
+    // lại giấu chữ thật khỏi bảng số, chỉ khác lối vào.
+    if (c === '"' || c === "'" || c === "`") {
+      const closes =
+        c === "`" ? true : hasCloserOnLine(src, i, c);
+      if (closes) {
+        out += c;
+        i++;
+        while (i < src.length) {
+          if (src[i] === "\\") {
+            out += src.slice(i, i + 2);
+            i += 2;
+            continue;
+          }
+          out += src[i];
+          const done = src[i] === c;
+          i++;
+          if (done) break;
+        }
+        continue;
+      }
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) {
+        out += src[i] === "\n" ? "\n" : " ";
+        i++;
+      }
+      out += "  ";
+      i += 2;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") {
+        out += " ";
+        i++;
+      }
+      continue;
+    }
+    // Regex literal: chép nguyên vẹn, bỏ qua mọi thứ bên trong. Bó trong MỘT
+    // dòng — regex trong JavaScript không vắt dòng được, nên nếu không thấy `/`
+    // đóng trước khi hết dòng thì đó là phép chia chứ không phải regex.
+    if (c === "/" && isRegexStart(src, i)) {
+      let j = i + 1;
+      let inClass = false;
+      let closed = false;
+      while (j < src.length && src[j] !== "\n") {
+        if (src[j] === "\\") { j += 2; continue; }
+        if (src[j] === "[") inClass = true;
+        else if (src[j] === "]") inClass = false;
+        else if (src[j] === "/" && !inClass) { closed = true; j++; break; }
+        j++;
+      }
+      if (closed) {
+        out += src.slice(i, j);
+        i = j;
+        continue;
+      }
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 /**
@@ -310,7 +429,84 @@ function bareStrings(src, skipLines = new Set(), wrapped = []) {
   const push = make("table");
 
   // 1. Chữ nằm giữa hai thẻ JSX: >Xin chào<
-  for (const m of src.matchAll(/>([^<>{}\n][^<>{}]*)</g)) pushJsx(m[1], m.index);
+  //
+  //  Dấu `>` phải là THẺ ĐÓNG, không phải toán tử. `(?<![=\-])>(?!=)` loại ba
+  //  thứ trông giống nó: `>=`, `=>`, `->`. Thiếu phép loại này thì một dòng
+  //  bình thường như
+  //
+  //      const draftOk = draft.trim().length >= 10;
+  //
+  //  mở một "nút văn bản" chạy từ dấu `>` của `>=` tới dấu `<` gần nhất — có
+  //  thể là mấy chục dòng sau — và mọi chữ tiếng Việt trong khoảng đó hiện lên
+  //  bảng số như một chuỗi chưa dịch. Báo thừa nguy hiểm ngang báo thiếu: nó
+  //  dạy người ta phớt lờ bảng số.
+  for (const m of src.matchAll(/(?<![=\-])>(?!=)([^<>{}\n][^<>{}]*)</g)) {
+    pushJsx(m[1], m.index);
+  }
+
+  // 1b. Nút văn bản JSX BẮT ĐẦU Ở DÒNG MỚI — chỗ mù của luật 1.
+  //
+  //     <h2 className="...">
+  //       Truy cập nhanh          <-- luật 1 không thấy
+  //     </h2>
+  //
+  //  Luật 1 đòi ký tự đầu ngay sau `>` không được là xuống dòng (`[^<>{}\n]`).
+  //  Nới lớp ký tự đó ra thì mọi khoảng trắng giữa hai thẻ đều khớp và bảng số
+  //  ngập rác, nên nhóm này cần một luật RIÊNG đi theo dòng.
+  //
+  //  Đo được ngày 16/08/2026: bốn tiêu đề đang hiện giữa màn hình tiếng Anh —
+  //  "Truy cập nhanh", "Danh sách nhãn" và hai cái nữa — nằm đúng ở đây, trong
+  //  khi bảng số ghi 100,0%. Và đây là dạng JSX mà mọi trình định dạng tự động
+  //  sinh ra, tức chỗ mù này rộng bằng cả kho mã.
+  //
+  //  Rất chặt để không báo thừa: dòng phải là chữ THUẦN (không thẻ, không ngoặc
+  //  nhọn, không dấu nháy, không `=`), và dòng mã liền trước phải kết thúc bằng
+  //  `>` — tức thẻ mở vừa đóng lại.
+  {
+    const lines = src.split("\n");
+    let base = 0;
+    const offsets = lines.map((l) => {
+      const at = base;
+      base += l.length + 1;
+      return at;
+    });
+    //  Bỏ các cụm `{…}` CÂN BẰNG trước khi xét: một nút văn bản hay nằm cùng
+    //  dòng với một biểu thức —
+    //
+    //      <h3 ...>
+    //        Danh sách file ({files.length})     <-- vẫn là chữ cần dịch
+    //      </h3>
+    //
+    //  Xét thô thì dòng này có `{` nên bị bỏ qua, và câu biến mất khỏi bảng số.
+    //  Sau khi bỏ cụm, phần còn lại là "Danh sách file ()" — đủ để nhận ra.
+    //  Dòng mã thật không sống sót qua phép lọc này: `onClick={() => f()}` còn
+    //  lại `onClick=`, có dấu `=` nên bị loại.
+    const dropBraces = (line) => {
+      let out = "", depth = 0;
+      for (const ch of line) {
+        if (ch === "{") { depth++; continue; }
+        if (ch === "}") { depth = Math.max(0, depth - 1); continue; }
+        if (depth === 0) out += ch;
+      }
+      return out;
+    };
+    const isTextLine = (line) => {
+      const s = dropBraces(line).trim();
+      return s.length >= 2 && !/[<>="'`]/.test(s) && VIETNAMESE.test(s);
+    };
+    lines.forEach((line, i) => {
+      if (!isTextLine(line)) return;
+      let j = i - 1;
+      while (j >= 0 && !lines[j].trim()) j--;
+      // Dòng mã liền trước phải là một thẻ mở vừa đóng lại (`…>`), hoặc chính
+      // nó cũng là một dòng chữ — câu dài vắt qua nhiều dòng.
+      if (j < 0) return;
+      const prev = lines[j].trim();
+      if (!/>$/.test(prev) && !isTextLine(lines[j])) return;
+      pushJsx(dropBraces(line).trim(),
+              offsets[i] + (line.length - line.trimStart().length));
+    });
+  }
 
   // 2. Thuộc tính JSX trong danh sách trên: placeholder="Nhập tên"
   for (const m of src.matchAll(/\b([\w-]+)\s*=\s*(["'])([^"'\n]+)\2/g)) {

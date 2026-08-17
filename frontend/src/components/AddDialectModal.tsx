@@ -133,7 +133,7 @@ export default function AddDialectModal({ isOpen, onClose, onAdd }: AddDialectMo
             />
             {slug && (
               <p className="mt-2 text-xs text-gray-500">
-                Mã sẽ tạo:{' '}
+                {t("Mã sẽ tạo:")}{' '}
                 <code className="px-1.5 py-0.5 bg-gray-100 rounded font-mono text-gray-800">
                   {slug}
                 </code>{' '}

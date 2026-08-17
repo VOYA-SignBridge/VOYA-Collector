@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -67,8 +68,9 @@ from app.tenant_context import system_scope, tenant_scope  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
-UID_A = "c3-user-a"
-UID_B = "c3-user-b"
+#: `users.id` là UUID trong lược đồ — không phải chuỗi tự do.
+UID_A = "c3aaaaaa-0000-4000-8000-00000000000a"
+UID_B = "c3bbbbbb-0000-4000-8000-00000000000b"
 
 
 @pytest.fixture(scope="module")
@@ -92,14 +94,18 @@ def hai_nguoi_dung():
             insert_user({
                 "id": uid, "username": f"c3-{tenant}",
                 "email": f"{uid}@example.invalid",
-                "password_hash": "x", "full_name": f"C3 {tenant}",
-                "role": "user", "is_active": True, "is_admin": False,
+                "password_hash": "x", "created_at": datetime.now(timezone.utc),
+                "is_active": True, "is_admin": False,
                 "tenant_id": tenant,
             })
     yield
     with _migration_cursor() as cur:
         cur.execute("SELECT set_config('app.system_scope','on',false)")
-        cur.execute("DELETE FROM users WHERE id = ANY(%s)", ([UID_A, UID_B],))
+        # `users.id` là uuid; thiếu ép kiểu thì Postgres báo `uuid = text`
+        # và lượt dọn im lặng hỏng — đúng cái bẫy đã làm thư hỗ trợ không bao
+        # giờ gửi được.
+        cur.execute("DELETE FROM users WHERE id = ANY(%s::uuid[])",
+                    ([UID_A, UID_B],))
 
 
 @pytest.fixture
@@ -234,7 +240,7 @@ class TestCacheToanTienTrinh:
         """
         app_client.get(f"/training/jobs/{job_cua_A}", headers=_nhu(UID_A))
 
-        r = app_client.get(f"/training/jobs/{job_cua_A}/progress", headers=_nhu(UID_B))
+        r = app_client.get(f"/training/jobs/{job_cua_A}/metrics", headers=_nhu(UID_B))
         print(f"\n[evidence] progress cho B: {r.status_code} {r.text[:160]}")
         assert r.status_code == 404
 

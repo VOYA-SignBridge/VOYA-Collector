@@ -290,6 +290,25 @@ _SQL_SEED_VOCAB_REGISTRY_META = (
     f"ON CONFLICT DO NOTHING"
 )
 
+#: C3 — `training_metrics` nhận chủ sở hữu TỪ HÀNG JOB CHA.
+#:
+#: Backfill này khác hẳn hai hiện vật vận hành mất chủ ở C2b, và khác đúng ở
+#: điểm quyết định: ở đây có một QUAN HỆ CHA đã lưu và đáng tin —
+#: `training_metrics.job_id → training_jobs.job_id` — nên chủ sở hữu được TRA
+#: RA, không phải phỏng đoán. Có provenance thì có quyền backfill.
+#:
+#: Chỉ số nào không tra được job cha thì để nguyên NULL, và hậu điều kiện dưới
+#: đây làm migration DỪNG. Không suy nó về `default`: một chỉ số mồ côi là dấu
+#: hiệu dữ liệu hỏng, và gán bừa một tổ chức cho nó là biến một lỗi thấy được
+#: thành một lỗi im lặng.
+_SQL_BACKFILL_METRIC_TENANT = (
+    "UPDATE training_metrics m SET tenant_id = j.tenant_id "
+    "FROM training_jobs j WHERE m.job_id = j.job_id AND m.tenant_id IS NULL"
+)
+_SQL_METRIC_TENANT_NOT_NULL = (
+    "ALTER TABLE training_metrics ALTER COLUMN tenant_id SET NOT NULL"
+)
+
 #: Bước ĐỊNH HÌNH DỮ LIỆU: chạy trong phạm vi hệ thống theo giao dịch, và phải
 #: chứng minh HẬU ĐIỀU KIỆN. Xem `_run_data_step` về vì sao rowcount không đủ.
 #:
@@ -327,6 +346,21 @@ MIGRATION_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
         f"SELECT count(*) = 1 FROM vocabulary_registry_meta "
         f"WHERE tenant_id = '{DEFAULT_TENANT_ID}'",
     ),
+    # Hậu điều kiện có HAI vế, và vế thứ hai mới là vế bảo mật:
+    #
+    #   1. không còn chỉ số nào thiếu tenant  -> backfill đã phủ hết
+    #   2. không chỉ số nào LỆCH tenant cha   -> backfill lấy đúng nguồn
+    #
+    # Chỉ kiểm vế một thì một bản vá sai — ví dụ gán tất cả về `default` — vẫn
+    # đạt hậu điều kiện. Vế hai là thứ phân biệt "đã điền" với "điền ĐÚNG".
+    _SQL_BACKFILL_METRIC_TENANT: (
+        "migration:v5:backfill-training-metric-tenant-from-parent-job",
+        (_SQL_BACKFILL_METRIC_TENANT,),
+        "SELECT count(*) = 0 FROM training_metrics m "
+        "LEFT JOIN training_jobs j ON j.job_id = m.job_id "
+        "WHERE m.tenant_id IS NULL OR j.job_id IS NULL "
+        "   OR m.tenant_id IS DISTINCT FROM j.tenant_id",
+    ),
 }
 
 
@@ -359,7 +393,14 @@ def _data_step_followers() -> frozenset[str]:
 #: Câu mà trạng thái cuối phụ thuộc vào: hỏng là DỪNG migration, không ghi log
 #: rồi đi tiếp. `SET NOT NULL` ở đây vì nó là nửa sau của cặp backfill→ràng
 #: buộc; nếu nó hụt thì cột vẫn nhận NULL và vòng lặp tự nuôi mình quay lại.
-MIGRATION_MUST_SUCCEED: frozenset[str] = frozenset({_SQL_CLASS_REGION_NOT_NULL})
+MIGRATION_MUST_SUCCEED: frozenset[str] = frozenset({
+    _SQL_CLASS_REGION_NOT_NULL,
+    # C3 — nuốt lỗi ở đây là để lại một cột `tenant_id` NULLABLE trên bảng vừa
+    # được bật RLS. Vị từ policy so `tenant_id = current_setting(...)`, và
+    # `NULL = 'iso_a'` cho ra NULL chứ không phải FALSE — hàng đó vô hình với
+    # mọi tenant, kể cả chủ của nó. Một lỗi im lặng biến thành mất dữ liệu.
+    _SQL_METRIC_TENANT_NOT_NULL,
+})
 
 
 def _bool_value(value: Any) -> bool:
@@ -974,7 +1015,13 @@ TENANT_SCOPED_TABLES = (
     # mở toang view này — xem chú thích ở `_TENANT_MEMBERS_VIEW`.
     "tenant_exports", "tenant_invitations",
     "tenant_subscriptions", "tenant_usage_daily", "training_job_classes",
-    "training_jobs", "users", "vocabulary_groups", "vocabulary_registry_meta",
+    # `training_metrics` thêm ở C3 (16/08/2026). Vòng lặp khoá ngoại chạy SAU
+    # các câu C3 nên cột đã tồn tại lúc nó đi qua; `CONTINUE WHEN NOT EXISTS`
+    # sẽ bỏ qua nếu ngược lại, nên thứ tự sai chỉ mất khoá ngoại chứ không hỏng
+    # migration. Có mặt ở đây còn khiến `verify_deployment` và
+    # `missing_tenant_foreign_keys()` soi luôn bảng này.
+    "training_jobs", "training_metrics", "users",
+    "vocabulary_groups", "vocabulary_registry_meta",
     "webhook_deliveries", "webhook_endpoints",
     # PDM v1.0 — mặt phẳng phân quyền. Cùng danh sách mà `storage/rls.py` dùng
     # để cài chính sách; nối vào đây để `TENANT_FK_LOOP_SQL` cũng gắn khoá
@@ -2617,6 +2664,52 @@ MIGRATION_STATEMENTS = [
     # đúng như vậy trước khi thêm dòng này.
     _DROP_USERS_TENANT_DEFAULT,
     _DROP_TRAINING_JOBS_TENANT_DEFAULT,
+    # ---------------------------------------------------------------------
+    # C3 (16/08/2026) — `training_metrics` nhận quyền sở hữu.
+    #
+    # Trước lượt này bảng con không có `tenant_id` và không có RLS, trong khi
+    # bảng cha có cả hai. Quyền sở hữu của đầu ra đứt đúng ở đó: cổng duy nhất
+    # bảo vệ chỉ số là hàng job cha, nên bất kỳ đường đọc nào bỏ qua hàng cha
+    # là đọc được chỉ số của mọi tổ chức.
+    #
+    # THỨ TỰ dưới đây là hợp đồng, không phải sở thích:
+    #
+    #   1  thêm cột NULLABLE          — chưa ràng buộc gì, chưa hỏng được gì
+    #   2  backfill từ job cha        — bước dữ liệu, có hậu điều kiện HAI vế
+    #   3  SET NOT NULL               — chỉ hợp lệ sau khi (2) đã chứng minh
+    #   4  UNIQUE(tenant_id, job_id)  — đích cho khoá ngoại ghép
+    #   5  khoá ngoại GHÉP            — CSDL tự chặn metric.tenant ≠ job.tenant
+    #
+    # Đi thẳng tới `NOT NULL` sẽ hỏng trên mọi máy đã có dữ liệu, và đi thẳng
+    # tới khoá ngoại ghép sẽ hỏng vì chưa có đích UNIQUE.
+    "ALTER TABLE training_metrics ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+    _SQL_BACKFILL_METRIC_TENANT,
+    _SQL_METRIC_TENANT_NOT_NULL,
+    # Đích của khoá ngoại ghép. `job_id` vốn đã là khoá chính nên ràng buộc này
+    # không thu hẹp gì — nó chỉ tạo ra thứ mà `REFERENCES (tenant_id, job_id)`
+    # cần để tồn tại.
+    """
+    DO $$ BEGIN
+        ALTER TABLE training_jobs
+            ADD CONSTRAINT uq_training_jobs_tenant_job UNIQUE (tenant_id, job_id);
+    EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
+    END $$
+    """,
+    # ★ Lưới thứ hai, và là lưới KHÔNG phụ thuộc mã ứng dụng.
+    #
+    # Khoá ngoại ghép làm PostgreSQL tự từ chối trạng thái
+    # `metric.tenant_id = A` trong khi `job.tenant_id = B`. Nếu chỉ trông vào
+    # việc worker truyền đúng tenant thì một lượt gọi sai sẽ tạo ra một hàng
+    # trông hợp lệ với mọi phép kiểm phía trên nó.
+    """
+    DO $$ BEGIN
+        ALTER TABLE training_metrics
+            ADD CONSTRAINT fk_training_metrics_job_tenant
+            FOREIGN KEY (tenant_id, job_id)
+            REFERENCES training_jobs(tenant_id, job_id) ON DELETE CASCADE;
+    EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
+    END $$
+    """,
     # =====================================================================
     # v4 — MẶT PHẲNG THƯƠNG MẠI VÀ VÒNG ĐỜI KHÁCH HÀNG
     #
@@ -4670,10 +4763,35 @@ def upsert_training_job(row: Dict[str, Any]):
 
 
 def insert_training_metric(row: Dict[str, Any]):
+    """Tenant của chỉ số được SUY RA từ hàng job cha, ngay tại chỗ ghi.
+
+    Chữ ký cố ý KHÔNG nhận `tenant_id`. Người gọi tự khai tenant thì giá trị ấy
+    trở thành thẩm quyền, và thẩm quyền của đầu ra phải là hàng job đã lưu —
+    không phải điều mà lượt gọi đang chạy tuyên bố. Đây là cùng một luật đã áp
+    cho `upsert_training_job` ở C2a và cho hiện vật chia dữ liệu ở C2b:
+
+    ```
+    output.tenant_id  <-  PersistedTrainingJob.tenant_id
+    ```
+
+    `INSERT ... SELECT ... FROM training_jobs` làm việc suy ra đó xảy ra bên
+    trong CSDL, nên không có khoảng nào để một giá trị khác chen vào giữa lúc
+    đọc job và lúc ghi chỉ số.
+
+    Hệ quả phụ mà ta MUỐN: job không tồn tại thì `SELECT` không ra dòng nào và
+    lượt ghi lặng lẽ không làm gì — thay vì tạo một chỉ số mồ côi không tra
+    được chủ. Và vì `training_jobs` nằm dưới RLS, câu `SELECT` này chỉ nhìn
+    thấy job trong phạm vi đang chạy: một tiến trình thuộc tổ chức khác không
+    ghi được chỉ số vào job của A.
+    """
     _execute(
         """
-        INSERT INTO training_metrics(job_id, epoch, train_loss, train_acc, val_loss, val_acc, val_f1)
-        VALUES(%(job_id)s, %(epoch)s, %(train_loss)s, %(train_acc)s, %(val_loss)s, %(val_acc)s, %(val_f1)s)
+        INSERT INTO training_metrics(
+            job_id, epoch, train_loss, train_acc, val_loss, val_acc, val_f1,
+            tenant_id)
+        SELECT %(job_id)s, %(epoch)s, %(train_loss)s, %(train_acc)s,
+               %(val_loss)s, %(val_acc)s, %(val_f1)s, j.tenant_id
+        FROM training_jobs j WHERE j.job_id = %(job_id)s
         ON CONFLICT (job_id, epoch) DO NOTHING
         """,
         row,

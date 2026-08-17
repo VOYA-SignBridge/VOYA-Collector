@@ -999,7 +999,7 @@ export default function RealtimeRuntime({
                     </div>
                     {import.meta.env.DEV && (
                       <div className="text-xs text-slate-500">
-                        {prediction.samples} mẫu
+                        {t("{n} mẫu", { n: prediction.samples })}
                       </div>
                     )}
                   </div>

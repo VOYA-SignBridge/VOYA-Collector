@@ -408,6 +408,61 @@ def list_blocked() -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Security audit log (admin actions) — capped Redis list
 # ---------------------------------------------------------------------------
+#: Sự kiện an ninh mà NGƯỜI BỊ TÁC ĐỘNG phải được biết, và câu nói với họ.
+#:
+#: Danh sách tường minh chứ không phải "báo tất cả": `target` của
+#: `block_ip`/`unblock_ip` là một địa chỉ IP, không phải một người — gửi thông
+#: báo cho nó là gửi vào hư không, và một vòng lặp tra cứu thất bại mỗi lần
+#: chặn IP là tiếng ồn trong nhật ký chứ không phải tính năng.
+#:
+#: Cũng KHÔNG báo `unlock_user`: mở khoá là tin tốt và người dùng sẽ tự thấy
+#: ngay khi đăng nhập được. Cái chuông đắt giá vì nó hiếm khi kêu.
+_NOTIFY_TARGET: Dict[str, tuple] = {
+    "lock_user": ("critical", "Tài khoản của bạn đã bị khoá"),
+    "force_logout": ("warning", "Mọi phiên đăng nhập đã bị thu hồi"),
+    "warn_user": ("warning", "Quản trị viên gửi một cảnh báo"),
+    "password.changed": ("success", "Mật khẩu đã được đổi"),
+    "password.change_rejected": ("warning", "Có người nhập sai mật khẩu hiện tại"),
+    "2fa.disabled": ("critical", "Xác thực hai bước đã bị tắt"),
+    "2fa.recovery_codes_regenerated": ("warning", "Mã khôi phục đã được cấp lại"),
+}
+
+
+def _notify_affected_user(action: str, target: str, actor: str,
+                          reason: str) -> None:
+    """Báo cho chính người bị tác động, trong ứng dụng.
+
+    Vì sao đặt ở đây chứ không ở từng chỗ gọi: `log_security_event` đã là phễu
+    duy nhất cho "một chuyện an ninh vừa xảy ra với ai đó". Bảy chỗ gọi hôm nay,
+    và chỗ thứ tám viết sau sẽ quên — cái quên đó im lặng, vì không có gì hỏng,
+    chỉ là nạn nhân không bao giờ được báo.
+
+    Đây là lớp bảo vệ mà nhật ký kiểm toán KHÔNG thay được. `audit_log` phục vụ
+    việc điều tra sau khi đã có người tố cáo; người duy nhất tố cáo được lại
+    chính là người không được báo. Một sổ ghi đầy đủ mà nạn nhân không đọc được
+    thì chỉ chứng minh chuyện đã xảy ra, không ngăn được nó.
+
+    **Không bao giờ ném.** Thao tác quản trị đã hoàn tất trước khi tới đây.
+    """
+    entry = _NOTIFY_TARGET.get(action)
+    if not entry or not (target or "").strip():
+        return
+    severity, title = entry
+
+    body = f"Do {actor} thực hiện." if actor else ""
+    if reason:
+        body = (body + f" Lý do: {reason}").strip()
+
+    try:
+        from app import notifications
+
+        notifications.notify(target, "security", title, body=body[:500],
+                             link="/settings/security", severity=severity)
+    except Exception as exc:
+        logger.warning("[ACTIVITY] khong ghi duoc thong bao an ninh %s: %s",
+                       action, type(exc).__name__)
+
+
 def log_security_event(action: str, actor: str = "", target: str = "",
                        reason: str = "", extra: Optional[Dict[str, Any]] = None,
                        actor_user: Optional[Dict[str, Any]] = None,
@@ -462,6 +517,8 @@ def log_security_event(action: str, actor: str = "", target: str = "",
         # `audit.record` đã tự nuốt lỗi; cái `try` này chỉ che trường hợp import
         # hỏng ở môi trường cắt gọn.
         pass
+
+    _notify_affected_user(action, target, actor, reason)
 
     c = _client()
     if c is not None:
@@ -894,12 +951,22 @@ def _resolve_usernames(user_ids: Set[str]) -> Dict[str, str]:
         return {}
     try:
         from app.storage.postgres_connection import connect_postgres
+        from app.storage.rls import apply_scope
         from psycopg2.extras import RealDictCursor
 
         conn = connect_postgres(connect_timeout=5)
         try:
             with conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # `apply_scope` bắt buộc: `users` có row-level security. Thiếu
+                    # nó thì GUC `app.tenant_id` rỗng, câu này khớp 0 dòng, hàm trả
+                    # về {} — và bảng "Phiên đang hoạt động" hiện MỌI dòng là
+                    # "Khách", kể cả phiên của chính quản trị viên đang xem. Không
+                    # có lỗi nào được ném ra để lần theo.
+                    #
+                    # Dùng phạm vi hiện hành chứ không phải system scope: tên người
+                    # dùng của tenant khác không phải thứ bảng này được phép hiện.
+                    apply_scope(cur)
                     # id is a UUID column; compare as text so a Python list of
                     # string ids matches without an explicit uuid[] cast.
                     cur.execute("SELECT id, username, is_admin FROM users WHERE id::text = ANY(%s)", (ids,))

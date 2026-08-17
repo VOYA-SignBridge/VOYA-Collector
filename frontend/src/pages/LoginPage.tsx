@@ -6,7 +6,7 @@ import AuthShell from "../components/auth/AuthShell";
 import AuthInput, { LockIcon, UserIcon } from "../components/auth/AuthInput";
 import LoadingScreen from "../components/LoadingScreen";
 import { friendlyError } from "../lib/errors";
-import { useI18n } from "../i18n";
+import { Trans, useI18n } from "../i18n";
 
 type FormState = {
   identifier: string;
@@ -142,9 +142,10 @@ export default function LoginPage() {
       >
         <form onSubmit={submitCode} className="space-y-4">
           <p className="text-sm text-slate-600">
-            Mở ứng dụng xác thực trên điện thoại và nhập mã 6 chữ số. Nếu mất
-            điện thoại, hãy nhập một mã khôi phục dạng{" "}
-            <span className="font-mono">xxxxx-xxxxx</span>.
+            <Trans
+              k="Mở ứng dụng xác thực trên điện thoại và nhập mã 6 chữ số. Nếu mất điện thoại, hãy nhập một mã khôi phục dạng {mau}."
+              vars={{ mau: <span className="font-mono">xxxxx-xxxxx</span> }}
+            />
           </p>
 
           <div>

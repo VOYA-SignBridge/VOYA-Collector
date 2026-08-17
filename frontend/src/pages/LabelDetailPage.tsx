@@ -527,7 +527,7 @@ function SessionCard({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="font-semibold text-slate-800 text-sm flex items-center gap-1.5">
-          Lần quay {index}
+          {t("Lần quay {n}", { n: index })}
           {session.is_owner && (
             <span className="text-[10px] font-medium text-ctu-blue bg-ctu-blue/10 px-1.5 py-0.5 rounded">
               {t("của bạn")}
@@ -536,7 +536,7 @@ function SessionCard({
         </span>
         <div className="flex items-center gap-1">
           <Badge size="sm" variant="info">
-            {session.sample_count} mẫu
+            {t("{n} mẫu", { n: session.sample_count })}
           </Badge>
           {session.has_preview && (
             <Badge size="sm" variant="success">
@@ -550,7 +550,7 @@ function SessionCard({
       </p>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-slate-400">
-          {session.seq_len} khung hình · {session.source_type || "camera"}
+          {t("{n} khung hình", { n: session.seq_len })} · {session.source_type || "camera"}
         </span>
         {session.can_manage && (
           <div className="flex items-center gap-2 whitespace-nowrap">

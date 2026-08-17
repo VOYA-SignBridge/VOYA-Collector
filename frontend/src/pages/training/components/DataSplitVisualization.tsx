@@ -90,7 +90,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
               className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-ctu-blue"
             />
             <p className="mt-1 text-xs text-slate-500">
-              {trainCount.toLocaleString()} mẫu — dùng để dạy mô hình
+              {t("{n} mẫu — dùng để dạy mô hình", { n: trainCount.toLocaleString() })}
             </p>
           </div>
 
@@ -112,7 +112,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
               className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
             />
             <p className="mt-1 text-xs text-slate-500">
-              {valCount.toLocaleString()} mẫu — dùng để điều chỉnh mô hình
+              {t("{n} mẫu — dùng để điều chỉnh mô hình", { n: valCount.toLocaleString() })}
             </p>
           </div>
 
@@ -131,7 +131,7 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
               />
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              {testCount.toLocaleString()} mẫu — đo hiệu suất cuối cùng (tính tự động)
+              {t("{n} mẫu — đo hiệu suất cuối cùng (tính tự động)", { n: testCount.toLocaleString() })}
             </p>
           </div>
         </div>

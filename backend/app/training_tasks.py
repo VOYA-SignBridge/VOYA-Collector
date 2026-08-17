@@ -68,8 +68,13 @@ def _get_redis() -> Optional["redis.Redis"]:
         return None
 
 
+#: Trạng thái mà người bấm nút "Huấn luyện" cần biết là đã tới.
+_TERMINAL = {"completed", "failed", "cancelled"}
+
+
 def _update_job(row: Dict[str, Any], **fields: Any) -> None:
     """Best-effort DB update — a DB hiccup must not kill a training run."""
+    was = str(row.get("status") or "")
     row.update(fields)
     try:
         from app.storage.metadata_db import upsert_training_job
@@ -77,6 +82,71 @@ def _update_job(row: Dict[str, Any], **fields: Any) -> None:
         upsert_training_job(row)
     except Exception as e:
         logger.warning("[TRAINER] job %s DB update failed: %s", row.get("job_id"), e)
+
+    now = str(fields.get("status") or "")
+    if now in _TERMINAL and now != was:
+        _notify_owner(row, now)
+
+
+def _notify_owner(row: Dict[str, Any], status: str) -> None:
+    """Báo cho người đã bấm nút, trong ứng dụng.
+
+    Đặt ở `_update_job` chứ không ở tám chỗ gọi, cùng lý do đã ghi ở
+    `_escalate_system_failure`: cả tám đường tới trạng thái cuối đều đi qua đây,
+    nên một đường hỏng thứ chín được phủ sẵn. Đặt ở từng chỗ gọi là tám bản sao
+    sẽ lệch nhau, và cái lệch đó im lặng.
+
+    Vì sao cần, khi đã có webhook và thư
+    -------------------------------------
+    Webhook đi tới HỆ THỐNG của khách, không tới màn hình người dùng. Thư rời
+    khỏi hệ thống rồi không quay lại: không ai biết đã đọc chưa, và một địa chỉ
+    sai là mất hẳn. Trước lần sửa này, `app/support.py` là chỗ DUY NHẤT trong cả
+    backend gọi `notifications.notify()` — nghĩa là cái chuông trên thanh điều
+    hướng chỉ sáng khi có người trực trả lời phiếu hỗ trợ, và với đa số người
+    dùng nó không bao giờ sáng. Một cái chuông không bao giờ sáng dạy người ta
+    đừng nhìn nó.
+
+    Một lượt huấn luyện chạy hàng chục phút. Người dùng đóng tab đi làm việc
+    khác — đó chính là lúc một bản ghi bền có ích, và là lúc webhook không giúp
+    được gì cho họ.
+
+    **Không bao giờ ném.** Job đã kết thúc rồi; làm hỏng nó vì cái chuông ghi
+    hụt là đánh đổi sai — cùng nguyên tắc với `notifications.notify()`.
+    """
+    user_id = str(row.get("auth_user_id") or "").strip()
+    tenant = str(row.get("tenant_id") or "").strip()
+    job_id = str(row.get("job_id") or "")
+    if not user_id or not tenant:
+        # Không đoán. Một thông báo gửi nhầm phạm vi là một thông báo mà RLS sẽ
+        # giấu khỏi chính người cần đọc — hoặc tệ hơn, hiện cho người khác.
+        logger.warning("[TRAINER] job %s thieu auth_user_id/tenant_id — "
+                       "khong ghi thong bao trong ung dung", job_id)
+        return
+
+    kind = {
+        "completed": ("success", "Huấn luyện xong"),
+        "failed": ("critical", "Huấn luyện lỗi"),
+        "cancelled": ("info", "Huấn luyện đã huỷ"),
+    }[status]
+
+    detail = str(row.get("error_message") or "")
+    acc = row.get("test_acc")
+    if status == "completed" and acc is not None:
+        detail = f"Độ chính xác trên tập kiểm tra: {float(acc) * 100:.1f}%"
+
+    try:
+        from app import notifications
+
+        notifications.notify(
+            user_id, "training", kind[1],
+            body=detail[:500],
+            link=f"/training?job={job_id}",
+            severity=kind[0],
+            tenant_id=tenant,
+        )
+    except Exception as exc:
+        logger.warning("[TRAINER] job %s khong ghi duoc thong bao: %s",
+                       job_id, type(exc).__name__)
 
 
 def _escalate_system_failure(row: Dict[str, Any], job_id: str, error: str, source: str) -> None:
@@ -120,6 +190,43 @@ def _insert_metric(job_id: str, m: Dict[str, Any]) -> None:
         })
     except Exception as e:
         logger.warning("[TRAINER] job %s metric epoch=%s DB write failed: %s", job_id, m.get("epoch"), e)
+
+
+def _fallback_checkpoint() -> str:
+    """KHÔNG đoán checkpoint. Luôn trả rỗng — và đó là toàn bộ nội dung.
+
+    Bản trước chọn tệp `.pt` MỚI NHẤT trong `OUTPUTS_DIR`:
+
+    ```python
+    candidates = sorted(OUTPUTS_DIR.glob("*.pt"), key=mtime, reverse=True)
+    return str(candidates[0])
+    ```
+
+    `OUTPUTS_DIR` là thư mục PHẲNG mà mọi tổ chức cùng ghi vào, và tên tệp là
+    `{model_type}_{stamp}.pt` — không mang `job_id`, không mang `tenant_id`. Nên
+    câu "tệp mới nhất" không có cách nào biết nó thuộc về ai.
+
+    Kịch bản đo được ngày 16/08/2026, và nó KHÔNG cần ai cố ý tấn công:
+
+    ```
+    job của A xong, bản ghi `final` thiếu checkpoint_path
+        (trainer bị giết, tệp chỉ số cụt, ghi hụt dòng cuối)
+    -> đường dự phòng chọn tệp .pt mới nhất
+    -> tệp đó của B, vì B vừa train xong sau A
+    -> hàng job của A ghi checkpoint của B
+    ```
+
+    Từ đó mọi phép kiểm phạm vi đều ĐẠT — hàng job thuộc A thật, RLS cho A đọc
+    thật — nên A tải về, đánh giá và đưa vào sản xuất trọng số của B qua một
+    đường hoàn toàn hợp lệ. Không tầng nào phía trên phát hiện được, vì không
+    tầng nào sai.
+
+    Vì sao trả rỗng chứ không lọc theo tenant: lọc cần biết tệp thuộc về ai, và
+    tên tệp không nói. Suy từ `mtime` là đoán. Một job kết thúc mà không biết
+    checkpoint của mình là một job HỎNG, và nó phải nói ra như vậy — đúng cách
+    C2c xử hiện vật không rõ chủ.
+    """
+    return ""
 
 
 SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
@@ -506,11 +613,25 @@ def run_training_job(self, job_id: str) -> Dict[str, Any]:
     # (exact file, no mtime guessing). Fallback: newest .pt in outputs/.
     checkpoint_path = str(final_info.get("checkpoint_path") or "")
     if not checkpoint_path or not Path(checkpoint_path).exists():
-        try:
-            candidates = sorted(OUTPUTS_DIR.glob("*.pt"), key=lambda x: x.stat().st_mtime, reverse=True)
-            checkpoint_path = str(candidates[0]) if candidates else ""
-        except Exception:
-            checkpoint_path = ""
+        checkpoint_path = _fallback_checkpoint()
+
+    if not checkpoint_path:
+        # Tiến trình con thoát 0 nhưng không nói được nó đã ghi checkpoint nào.
+        # Trước 16/08/2026 chỗ này đoán tệp mới nhất trong thư mục dùng chung —
+        # xem `_fallback_checkpoint`. Giờ nó DỪNG.
+        #
+        # `failed` chứ không phải `completed` không-checkpoint: một job hoàn
+        # thành mà không có trọng số là một trạng thái không ai đọc đúng được,
+        # và bước kế tiếp (`_record_output_contract`) sẽ đi tìm một tệp không
+        # tồn tại.
+        loi = ("Lượt huấn luyện kết thúc nhưng không xác định được checkpoint "
+               "của chính nó. KHÔNG chọn tệp .pt mới nhất trong thư mục dùng "
+               "chung — thư mục đó chứa hiện vật của mọi tổ chức và tên tệp "
+               "không mang định danh job.")
+        logger.error("[TRAINER] job %s: %s", job_id, loi)
+        _update_job(row, status="failed", completed_at=_now(), error_message=loi)
+        _escalate_system_failure(row, job_id, loi, source="checkpoint_missing")
+        return {"status": "failed", "reason": "checkpoint_missing"}
 
     test_acc = final_info.get("test_acc")
     test_f1 = final_info.get("test_f1")
@@ -839,6 +960,84 @@ def backup_promoted_checkpoint_task(
         raise self.retry(exc=exc)
 
 
+def _checkpoint_owners() -> Dict[str, str]:
+    """`{đường dẫn checkpoint: tenant sở hữu}`, tra từ hàng job đã lưu.
+
+    Đây là nguồn gốc ĐÁNG TIN duy nhất cho câu hỏi "tệp này thuộc về ai": tên
+    tệp là `{model_type}_{stamp}.pt`, không mang định danh nào. Không có bảng
+    này thì "giữ N bản mới nhất" là một câu chỉ trả lời được ở mức toàn thư mục.
+
+    Đọc dưới phạm vi hệ thống — có chủ ý và bắt buộc: lượt dọn là tác vụ hạ tầng
+    chạy trên hiện vật của mọi tổ chức, nên nó cần thấy tất cả để biết KHÔNG
+    được xoá cái gì. Phạm vi hệ thống ở đây phục vụ việc bảo vệ, không phải việc
+    truy cập.
+    """
+    from app.storage.metadata_db import _fetch_all
+    from app.tenant_context import system_scope
+
+    with system_scope("retention: tra chu so huu checkpoint de KHONG xoa nham"):
+        rows = _fetch_all(
+            "SELECT checkpoint_path, tenant_id FROM training_jobs "
+            "WHERE checkpoint_path IS NOT NULL AND btrim(checkpoint_path) <> ''")
+    return {
+        str(r["checkpoint_path"]): str(r["tenant_id"] or "").strip()
+        for r in rows
+    }
+
+
+def _checkpoints_to_prune(keep_n: int) -> list:
+    """Checkpoint được phép xoá, tính RIÊNG cho từng tổ chức.
+
+    ★ C3-S5 — bản trước là một dòng:
+
+    ```python
+    checkpoints = sorted(OUTPUTS_DIR.glob("*.pt"), key=mtime, reverse=True)
+    for stale in checkpoints[keep_n:]: stale.unlink()
+    ```
+
+    "Giữ 20 bản mới nhất" áp trên một thư mục DÙNG CHUNG. Đo được ngày
+    16/08/2026: một tổ chức train nhiều hơn sẽ đẩy checkpoint của tổ chức khác
+    ra khỏi cửa sổ giữ, và lượt dọn xoá chúng — theo lịch, không cần ai tấn
+    công. Tổ chức B không đọc được hiện vật của A, nhưng XOÁ được: đó là rủi ro
+    TOÀN VẸN, không phải rò rỉ, và nó không kém nghiêm trọng hơn.
+
+    "Giữ N bản mới nhất" chỉ là một câu có nghĩa khi hỏi TRONG phạm vi một tổ
+    chức. Nên nhóm theo chủ sở hữu rồi mới áp N.
+
+    Tệp KHÔNG tra được chủ (không hàng job nào trỏ tới) được để NGUYÊN. Xoá
+    chúng có thể đúng, nhưng "không biết của ai" không phải căn cứ để xoá — cùng
+    một luật đã áp cho hiện vật chia dữ liệu ở C2c, chỉ đổi chiều: ở đó không
+    biết chủ thì không cho đọc, ở đây không biết chủ thì không được xoá.
+    """
+    try:
+        chu = _checkpoint_owners()
+    except Exception as e:
+        # Không tra được chủ thì KHÔNG xoá gì. Một lượt dọn mù trên thư mục
+        # dùng chung là đúng thứ vừa vá.
+        logger.error("[RETENTION] khong tra duoc chu so huu checkpoint (%s) — "
+                     "BO QUA luot don de khong xoa nham hien vat cua to chuc "
+                     "khac", type(e).__name__)
+        return []
+
+    theo_chu: Dict[str, list] = {}
+    khong_ro = 0
+    for p in OUTPUTS_DIR.glob("*.pt"):
+        owner = chu.get(str(p))
+        if not owner:
+            khong_ro += 1
+            continue
+        theo_chu.setdefault(owner, []).append(p)
+
+    xoa = []
+    for owner, files in theo_chu.items():
+        files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        xoa.extend(files[keep_n:])
+
+    logger.info("[RETENTION] %d to chuc, %d tep khong ro chu (giu nguyen), "
+                "%d tep se xoa", len(theo_chu), khong_ro, len(xoa))
+    return xoa
+
+
 @celery_app.task(bind=True, platform_wide=True)  # retention sweep across all tenants
 def cleanup_training_artifacts(self):
     """Daily retention sweep (Celery beat).
@@ -856,8 +1055,8 @@ def cleanup_training_artifacts(self):
     removed_artifacts = 0
 
     try:
-        checkpoints = sorted(OUTPUTS_DIR.glob("*.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for stale in checkpoints[keep_n:]:
+        checkpoints = _checkpoints_to_prune(keep_n)
+        for stale in checkpoints:
             try:
                 sidecar = stale.with_suffix(".json")
                 stale.unlink()

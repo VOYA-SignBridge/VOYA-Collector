@@ -483,8 +483,8 @@ function SubscriptionSection({
             và sẽ bật lại ngay — hoặc tệ hơn, không dám bấm gì cả. */}
         <p className="text-sm text-slate-700">
           {t("Kỳ hiện tại")} <b>{t("vẫn chạy hết")}</b>
-          {info.current_period_end && t(" (tới {p1})", { p1: fmtDate(info.current_period_end) })}. Bạn
-          không mất gì ngay bây giờ.
+          {info.current_period_end && t(" (tới {p1})", { p1: fmtDate(info.current_period_end) })}
+          {t(". Bạn không mất gì ngay bây giờ.")}
         </p>
         <p className="mt-2 text-sm text-slate-600">
           <Trans
@@ -764,7 +764,7 @@ function InvitationsSection({
               <div className="min-w-0 flex-1">
                 <div className="truncate font-medium text-slate-900">{inv.email}</div>
                 <div className="text-xs text-slate-500">
-                  {t(roleLabel(inv.role))} · hết hạn {fmtDate(inv.expires_at)}
+                  {t(roleLabel(inv.role))}{t(" · hết hạn {p1}", { p1: fmtDate(inv.expires_at) })}
                 </div>
               </div>
               <Button size="sm" variant="ghost" onClick={() => void revoke(inv)}>

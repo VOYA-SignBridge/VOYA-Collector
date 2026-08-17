@@ -5,6 +5,7 @@ import {
   InboxIcon, ScrollTextIcon, ServerIcon, TrashIcon, UsersIcon,
 } from "./ui/Icons";
 import { useI18n } from "../i18n";
+import LanguageSwitcher from "./LanguageSwitcher";
 import { useAdminAttention } from "../hooks/useAdminAttention";
 
 /**
@@ -83,6 +84,13 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           </span>
         </div>
 
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        {/* Console thay hẳn header của ứng dụng, nên nó phải mang theo MỌI thứ
+            của header mà người dùng còn cần — kể cả ô đổi ngôn ngữ. Bỏ sót nó
+            biến `/admin` thành một ngõ cụt tiếng Việt cho người đọc tiếng Anh:
+            mười hai mục, không có lối đổi nào trong tầm mắt. */}
+        <LanguageSwitcher tone="dark" className="hidden sm:inline-flex" />
+
         {/* Lối ra. MỘT nút, luôn ở cùng chỗ — vào được một chế độ mà không thấy
             đường ra là cách nhanh nhất khiến người ta ngại bấm vào. */}
         <button
@@ -93,6 +101,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           <ArrowRightIcon className="h-4 w-4 rotate-180" aria-hidden="true" />
           {t("Thoát về ứng dụng")}
         </button>
+        </div>
       </header>
 
       <div className="flex pt-14">
@@ -133,6 +142,14 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                 ) : null}
               </NavLink>
             ))}
+
+            {/* Bản sao cho màn hình hẹp, nơi ô ở thanh đầu bị giấu để nhường
+                chỗ cho nút thoát. Giấu ở CẢ HAI chỗ là bỏ hẳn tính năng trên
+                điện thoại — đúng thiết bị mà một quản trị viên hay dùng để xử
+                lý việc gấp. */}
+            <div className="mt-auto border-t border-slate-800 pt-3 sm:hidden">
+              <LanguageSwitcher tone="dark" className="w-full" />
+            </div>
           </nav>
         </aside>
 

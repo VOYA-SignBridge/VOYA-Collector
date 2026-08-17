@@ -1850,7 +1850,7 @@ export default function FullscreenCaptureModal({
               </div>
               {suggestedHands !== null && (
                 <span className="text-xs text-ctu-yellow" title={t("Nhãn này có số tay gợi ý từ catalog, nhưng vẫn cho phép thu linh hoạt 1 hoặc 2 tay.")}>
-                  Gợi ý catalog: {suggestedHands} tay
+                  {t("Gợi ý catalog: {n} tay", { n: suggestedHands })}
                 </span>
               )}
             </div>
@@ -2038,7 +2038,7 @@ export default function FullscreenCaptureModal({
             <div className="absolute bottom-3 sm:bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-4 sm:px-6 py-2 max-w-[calc(100vw-2rem)]">
               <div className="flex items-center gap-1.5 text-white text-sm">
                     <ChartBarIcon className="h-4 w-4" aria-hidden="true" />
-                    {frames.length} khung đã chụp
+                    {t("{n} khung đã chụp", { n: frames.length })}
                   </div>
             </div>
           )}
@@ -2090,12 +2090,12 @@ export default function FullscreenCaptureModal({
                     {labelExists ? (
                       <span className="inline-flex items-center gap-1 text-sky-300">
                     <CheckCircleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                    Đã có {labelSamplesCount} mẫu
+                    {t("Đã có {n} mẫu", { n: labelSamplesCount })}
                   </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-yellow-300">
                     <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                    Nhãn mới ({currentCatalogLabelCount} nhãn hiện có)
+                    {t("Nhãn mới ({n} nhãn hiện có)", { n: currentCatalogLabelCount })}
                   </span>
                     )}
                   </div>
@@ -2174,7 +2174,7 @@ export default function FullscreenCaptureModal({
                   {t("Phiên thu")}
                 </div>
                       <div className="mt-0.5 truncate text-[11px] text-blue-100/80" title={sessionId}>
-                        Bắt đầu {formatSessionLabel(sessionId)} · {sessionSampleCount} mẫu
+                        {t("Bắt đầu {luc} · {n} mẫu", { luc: formatSessionLabel(sessionId), n: sessionSampleCount })}
                       </div>
                     </div>
                     <button

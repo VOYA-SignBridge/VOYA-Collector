@@ -1,10 +1,11 @@
 from typing import Any, Dict, List
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status,
+)
 from pydantic import BaseModel
 
 from app.auth import get_current_user, require_admin, require_tenant_editor
-from app.storage.postgres_connection import connect_postgres
-from psycopg2.extras import RealDictCursor
+from app.sudo_mode import require_sudo
 from app.sync_tasks import download_missing_files_to_local
 from app.monitoring import collect_resources
 from app import activity
@@ -149,34 +150,38 @@ class WarnUser(BaseModel):
 
 @router.get("/users")
 def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Lấy danh sách tất cả người dùng (Chỉ Admin)"""
-    conn = connect_postgres()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT id, username, email, is_active, is_admin, created_at
-                    FROM users
-                    ORDER BY created_at DESC
-                    """
-                )
-                users = cur.fetchall()
-                locked = activity.list_locked_users()
-                warned = activity.list_warned_users()
-                # Chuyển đổi UUID/datetime sang string để FastAPI tự serialize
-                for u in users:
-                    u["id"] = str(u["id"])
-                    if u["created_at"]:
-                        u["created_at"] = u["created_at"].isoformat()
-                    lk = locked.get(u["id"])
-                    u["locked"] = bool(lk)
-                    u["lock_reason"] = (lk or {}).get("reason", "")
-                    u["lock_until"] = (lk or {}).get("until", 0)
-                    u["has_warning"] = u["id"] in warned
-                return users
-    finally:
-        conn.close()
+    """Người dùng CỦA TENANT hiện tại (Chỉ Admin).
+
+    Đi qua `_fetch_all` chứ không mở kết nối trần. `users` mang chính sách
+    row-level security (`storage/rls.py`), và chính sách đó đọc GUC
+    `app.tenant_id`. Một kết nối trần chưa từng gọi `apply_scope()` thì GUC rỗng,
+    `tenant_id = ''` không khớp dòng nào, và câu lệnh trả về **danh sách rỗng —
+    không phải lỗi**. Đó chính là kiểu hỏng mà `docs/` gọi là RLS fail-open ở mặt
+    phẳng danh tính: màn hình ghi "Không có người dùng." trong khi cơ sở dữ liệu
+    có mười tài khoản, và không có gì trong nhật ký để lần ra.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    users = _fetch_all(
+        """
+        SELECT id, username, email, is_active, is_admin, created_at
+        FROM users
+        ORDER BY created_at DESC
+        """
+    )
+    locked = activity.list_locked_users()
+    warned = activity.list_warned_users()
+    # Chuyển đổi UUID/datetime sang string để FastAPI tự serialize
+    for u in users:
+        u["id"] = str(u["id"])
+        if u["created_at"]:
+            u["created_at"] = u["created_at"].isoformat()
+        lk = locked.get(u["id"])
+        u["locked"] = bool(lk)
+        u["lock_reason"] = (lk or {}).get("reason", "")
+        u["lock_until"] = (lk or {}).get("until", 0)
+        u["has_warning"] = u["id"] in warned
+    return users
 
 @router.put("/users/{user_id}/role")
 def update_user_role(
@@ -192,23 +197,26 @@ def update_user_role(
             detail="Không thể tự gỡ quyền Admin của chính mình."
         )
 
-    conn = connect_postgres()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "UPDATE users SET is_admin = %s WHERE id = %s RETURNING id, username, is_admin",
-                    (payload.is_admin, user_id)
-                )
-                updated = cur.fetchone()
-                if not updated:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Không tìm thấy người dùng"
-                    )
-                return {"status": "success", "user": {"id": str(updated["id"]), "username": updated["username"], "is_admin": updated["is_admin"]}}
-    finally:
-        conn.close()
+    # Cùng lý do với `get_all_users`: kết nối trần không đặt `app.tenant_id`, nên
+    # `WHERE id = %s` khớp 0 dòng và endpoint này trả 404 "Không tìm thấy người
+    # dùng" cho một tài khoản đang tồn tại — một lỗi 404 nói dối về nguyên nhân.
+    from app.storage.metadata_db import _fetch_all
+
+    rows = _fetch_all(
+        "UPDATE users SET is_admin = %s WHERE id = %s "
+        "RETURNING id, username, is_admin",
+        (payload.is_admin, user_id),
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy người dùng"
+        )
+    updated = rows[0]
+    return {"status": "success",
+            "user": {"id": str(updated["id"]),
+                     "username": updated["username"],
+                     "is_admin": updated["is_admin"]}}
 
 @router.get("/resources")
 def get_resources(current_user: Dict[str, Any] = Depends(require_admin)):
@@ -319,6 +327,106 @@ def unlock_user_account(user_id: str, request: Request,
         activity.log_security_event("unlock_user", actor=current_user.get("username", ""),
                                     target=user_id, actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": user_id, "locked": False}
+
+
+class RecoveryAssist(BaseModel):
+    #: `reset_link` gửi lại thư đặt lại mật khẩu; `clear_2fa` gỡ yếu tố thứ hai
+    #: cho người đã mất thiết bị VÀ hết mã khôi phục.
+    action: str
+    reason: str = ""
+
+
+@router.post("/users/{user_id}/recovery")
+def assist_recovery(user_id: str, payload: RecoveryAssist,
+                    background_tasks: BackgroundTasks, request: Request,
+                    operator: Dict[str, Any] = Depends(require_sudo)):
+    """Quản trị viên giúp một người lấy lại tài khoản.
+
+    Vì sao đường này tồn tại
+    -------------------------
+    Người dùng của hệ thống này phần lớn là người khiếm thính/khiếm ngôn, và
+    luồng tự phục vụ giả định một chuỗi thao tác mà không phải ai cũng đi hết
+    được: mở hộp thư, tìm thư trong mục quảng cáo, bấm liên kết trước khi nó hết
+    hạn, hiểu vì sao ứng dụng xác thực báo "mã sai" khi đồng hồ điện thoại lệch.
+    Không có đường này thì "mất điện thoại" nghĩa là mất tài khoản vĩnh viễn,
+    kèm toàn bộ dữ liệu đã đóng góp.
+
+    Vì sao nó KHÔNG phải "admin đặt mật khẩu hộ"
+    --------------------------------------------
+    Quản trị viên không bao giờ được biết mật khẩu của người khác — biết là có
+    thể mạo danh, và mọi dòng kiểm toán từ đó trở đi mất giá trị vì không phân
+    biệt được ai đã thao tác. Nên hai hành động ở đây đều chỉ **mở lại cánh
+    cửa**, còn bước cuối vẫn do chính chủ tài khoản đi:
+
+        reset_link  ->  gửi lại thư đặt lại mật khẩu, chính chủ tự đặt
+        clear_2fa   ->  gỡ yếu tố thứ hai, chính chủ đăng nhập bằng mật khẩu
+
+    Ba lớp chặn lạm dụng
+    ---------------------
+    1. `require_sudo` — nhập lại mật khẩu của chính quản trị viên, không phải
+       một mã PIN dùng chung.
+    2. `audit.record` — dòng bền, kèm lý do bắt buộc.
+    3. **Thông báo cho chính người bị tác động.** Đây là lớp quan trọng nhất và
+       cũng là lớp hay bị bỏ: nếu chủ tài khoản không bao giờ biết ai đó đã gỡ
+       2FA của mình, thì hai lớp trên chỉ phục vụ việc điều tra SAU KHI đã có
+       người tố cáo — và người duy nhất có thể tố cáo lại chính là người không
+       được báo.
+    """
+    from app import audit, notifications, two_factor
+    from app.auth import request_password_reset
+    from app.email_service import send_password_reset_email
+    from app.public_url import resolve_frontend_base_url
+    from app.storage.metadata_db import _fetch_all
+
+    action = (payload.action or "").strip()
+    if action not in {"reset_link", "clear_2fa"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="action phải là 'reset_link' hoặc 'clear_2fa'.")
+    reason = (payload.reason or "").strip()
+    if len(reason) < 5:
+        # Bắt buộc, không phải cho đẹp: một dòng kiểm toán ghi "clear_2fa" mà
+        # không nói vì sao thì sáu tháng sau không ai dựng lại được câu chuyện.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Cần ghi lý do (ít nhất 5 ký tự).")
+
+    # Đi qua `_fetch_all` để RLS áp: một quản trị viên chỉ hỗ trợ được người
+    # trong tenant của mình. Xem `get_all_users` về vì sao kết nối trần là bẫy.
+    rows = _fetch_all("SELECT id, username, email FROM users WHERE id = %s",
+                      (user_id,))
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Không tìm thấy người dùng")
+    target = rows[0]
+
+    if action == "clear_2fa":
+        two_factor.disable(str(target["id"]))
+        title = "Quản trị viên đã gỡ xác thực hai bước"
+        body = (f"Do {operator.get('username', 'quản trị viên')} thực hiện. "
+                f"Lý do: {reason}. Nếu không phải bạn yêu cầu, hãy đổi mật khẩu "
+                f"và báo ngay.")
+    else:
+        result = request_password_reset(str(target["email"] or ""))
+        if result:
+            user, token = result
+            link = f"{resolve_frontend_base_url(request)}/reset-password?token={token}"
+            background_tasks.add_task(
+                send_password_reset_email, user["email"], user["username"], link)
+        title = "Quản trị viên đã gửi lại liên kết đặt lại mật khẩu"
+        body = (f"Do {operator.get('username', 'quản trị viên')} thực hiện. "
+                f"Lý do: {reason}. Kiểm tra hộp thư của bạn.")
+
+    notifications.notify(str(target["id"]), "security", title, body=body,
+                         link="/settings/security", severity="warning")
+    audit.record("account.recovery.assisted", actor=operator,
+                 target_type="user", target_id=str(target["id"]),
+                 detail={"action": action, "reason": reason}, request=request)
+    activity.log_security_event(
+        f"recovery.{action}", actor=operator.get("username", ""),
+        target=str(target["id"]), reason=reason,
+        actor_user=operator, request=request)
+
+    return {"status": "success", "action": action,
+            "user_id": str(target["id"])}
 
 
 @router.post("/users/{user_id}/warn")

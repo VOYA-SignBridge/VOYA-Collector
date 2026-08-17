@@ -168,6 +168,12 @@ RLS_TABLES: tuple[str, ...] = (
     # schema v3
     "audit_log", "capture_sessions", "signer_aliases", "signer_consents",
     "training_job_classes", "vocabulary_groups",
+    # C3 (16/08/2026). Bảng cha `training_jobs` có RLS từ lâu, bảng con thì
+    # không — nên quyền sở hữu của đầu ra huấn luyện đứt đúng ở đó. Cổng duy
+    # nhất bảo vệ chỉ số là hàng job cha, và mọi đường đọc bỏ qua hàng cha đọc
+    # được chỉ số của mọi tổ chức. Đo được: một lượt đọc KHÔNG có phạm vi trả
+    # về đủ dòng chỉ số, trong khi cùng lượt đọc trên `training_jobs` trả rỗng.
+    "training_metrics",
     # `tenants` — BẢNG GỐC, mỗi dòng LÀ một tenant, nên vị từ chuẩn
     # `tenant_id = current_setting('app.tenant_id')` đọc ra thành "chỉ thấy dòng
     # của chính mình". Thêm ngày 15/08/2026.

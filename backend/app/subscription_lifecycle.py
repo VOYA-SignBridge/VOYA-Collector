@@ -231,17 +231,27 @@ def _tenant_admin_emails(tenant_id: str) -> List[str]:
     hạn, nên thư tới họ chỉ là nhiễu — và nhiễu là thứ làm người ta ngừng đọc
     những thư thật sự cần đọc.
     """
+    return [r["email"] for r in _tenant_admins(tenant_id) if r.get("email")]
+
+
+def _tenant_admins(tenant_id: str) -> list:
+    """Quản trị viên của tenant, kèm `id` — cần cả id để ghi thông báo.
+
+    Tách ra khỏi `_tenant_admin_emails` khi thêm thông báo trong ứng dụng: hai
+    kênh cùng hỏi một câu ("ai quyết định được việc gia hạn"), và hỏi hai lần
+    bằng hai câu SQL là hai câu sẽ lệch nhau vào ngày định nghĩa "quản trị viên
+    tenant" đổi.
+    """
     from app.storage.metadata_db import _fetch_all
     from app.tenant_context import system_scope
 
     with system_scope("subscription: tim quan tri vien cua tenant"):
-        rows = _fetch_all(
-            "SELECT u.email FROM tenant_members m JOIN users u ON u.id = m.user_id "
-            "WHERE m.tenant_id = %s AND m.role = 'admin' AND u.is_active "
-            "AND u.email IS NOT NULL",
+        return _fetch_all(
+            "SELECT u.id, u.email FROM tenant_members m "
+            "JOIN users u ON u.id = m.user_id "
+            "WHERE m.tenant_id = %s AND m.role = 'admin' AND u.is_active",
             (str(tenant_id),),
         )
-    return [r["email"] for r in rows if r.get("email")]
 
 
 def _send_reminder(tenant_id: str, days_left: int, ends_at: datetime,
@@ -253,18 +263,41 @@ def _send_reminder(tenant_id: str, days_left: int, ends_at: datetime,
     trong danh sách không bao giờ được xét — một sự cố thư biến thành một sự cố
     vòng đời.
     """
-    from app import email_service
+    from app import email_service, notifications
 
     sent = 0
-    for addr in _tenant_admin_emails(tenant_id):
-        try:
-            email_service.send_subscription_reminder_email(
-                addr, tenant_id=tenant_id, plan_name=plan_name,
-                days_left=days_left, ends_at=ends_at)
-            sent += 1
-        except Exception as exc:
-            logger.warning("[SUB] khong gui duoc thu nhac cho %s (%s: %s)",
-                           addr, type(exc).__name__, exc)
+    for row in _tenant_admins(tenant_id):
+        addr = row.get("email")
+        if addr:
+            try:
+                email_service.send_subscription_reminder_email(
+                    addr, tenant_id=tenant_id, plan_name=plan_name,
+                    days_left=days_left, ends_at=ends_at)
+                sent += 1
+            except Exception as exc:
+                logger.warning("[SUB] khong gui duoc thu nhac cho %s (%s: %s)",
+                               addr, type(exc).__name__, exc)
+
+        # Bản ghi bền trong ứng dụng, song song với thư.
+        #
+        # Thư rời khỏi hệ thống rồi không quay lại: không ai biết đã đọc chưa,
+        # một địa chỉ sai là mất hẳn, và thư nhắc gia hạn là đúng loại thư mà bộ
+        # lọc quảng cáo hay nuốt. Một tenant bị khoá mềm vì "không ai thấy thư"
+        # là sự cố có thật và tránh được.
+        #
+        # `tenant_id` truyền TƯỜNG MINH: hàm này chạy trong tác vụ định kỳ dưới
+        # `system_scope`, nên `current_tenant()` là rỗng và `notify()` sẽ từ
+        # chối ghi. Đó là fail-closed đúng — và chỗ sửa là nói ra phạm vi, không
+        # phải nới lỏng nó.
+        notifications.notify(
+            str(row["id"]), "subscription",
+            "Gói dịch vụ sắp hết hạn",
+            body=(f"Gói {plan_name} của tổ chức {tenant_id} còn {days_left} "
+                  f"ngày, hết hạn {ends_at:%d/%m/%Y}."),
+            link="/settings/billing",
+            severity="warning" if days_left > 3 else "critical",
+            tenant_id=str(tenant_id),
+        )
     return sent
 
 

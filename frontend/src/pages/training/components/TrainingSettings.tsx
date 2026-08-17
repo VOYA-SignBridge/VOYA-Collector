@@ -196,7 +196,7 @@ const TrainingSettings: React.FC<Props> = ({ config, onChange }) => {
             >
               {splits.map((s) => (
                 <option key={s.split_version} value={s.split_version}>
-                  {s.split_version} — {s.num_classes} lớp · train {s.counts.train}/val {s.counts.val}/test {s.counts.test}
+                  {t("{ban} — {lop} lớp · train {tr}/val {va}/test {te}", { ban: s.split_version, lop: s.num_classes, tr: s.counts.train, va: s.counts.val, te: s.counts.test })}
                 </option>
               ))}
             </select>

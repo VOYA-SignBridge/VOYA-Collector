@@ -38,8 +38,15 @@ const ICON = "h-4 w-4 shrink-0";
 
 const ITEMS: Item[] = [
   { key: "Tài khoản", href: "/settings/account", icon: <UserIcon className={ICON} /> },
+  // Bảo mật giờ gồm CẢ xác minh liên hệ. Ba việc — đổi mật khẩu, xác minh địa
+  // chỉ, bật 2FA — trả lời cùng một câu hỏi: "tôi có lấy lại được tài khoản
+  // không". Tách "Xác minh liên hệ" thành mục thứ ba, ngang hàng với Tổ chức và
+  // Gói dịch vụ, là bắt người dùng đoán xem nó thuộc nhóm nào.
   { key: "Bảo mật", href: "/settings/security", icon: <ShieldIcon className={ICON} /> },
-  { key: "Xác minh liên hệ", href: "/settings/contact", icon: <ShieldCheckIcon className={ICON} /> },
+  // Đồng thuận tách RA khỏi Tài khoản: ký hay rút một văn bản pháp lý là quyết
+  // định có hệ quả pháp lý và mỗi lần rút là một chiều — không cùng nhịp với
+  // việc sửa một chữ trong tên đăng nhập.
+  { key: "Đồng thuận", href: "/settings/consents", icon: <ShieldCheckIcon className={ICON} /> },
   { key: "Tổ chức", href: "/settings/organization", icon: <BuildingIcon className={ICON} /> },
   { key: "Gói dịch vụ", href: "/settings/billing", icon: <ChartBarIcon className={ICON} /> },
   // Tích hợp đòi vai trò biên tập ở máy chủ. Hiện nó cho người không có quyền

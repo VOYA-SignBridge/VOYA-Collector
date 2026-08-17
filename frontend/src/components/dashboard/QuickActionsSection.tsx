@@ -124,7 +124,7 @@ export default function QuickActionsSection() {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 flex items-center gap-2">
-        Truy cập nhanh
+        {t("Truy cập nhanh")}
         {user?.is_admin && (
           <span className="text-xs bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full font-semibold uppercase tracking-wider ml-2">
             Admin Mode

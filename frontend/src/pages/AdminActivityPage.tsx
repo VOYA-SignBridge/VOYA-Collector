@@ -389,7 +389,7 @@ export default function AdminActivityPage() {
                           className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 hover:underline"
                           title={`GPS ${s.precise.lat.toFixed(5)}, ${s.precise.lon.toFixed(5)} (±${Math.round(s.precise.accuracy)}m)`}
                         >
-                          GPS ±{Math.round(s.precise.accuracy)}m · bản đồ
+                          {t("GPS ±{n}m · bản đồ", { n: Math.round(s.precise.accuracy) })}
                         </a>
                       )}
                     </td>

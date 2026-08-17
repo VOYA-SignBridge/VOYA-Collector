@@ -374,7 +374,7 @@ export default function SotAdminPage() {
           DDL cannot leak through a screenshot or a shared screen. */}
       <Card title={t("Lược đồ cơ sở dữ liệu (SOT)")}>
         <button onClick={() => setShowSchema((s) => !s)} className="text-sm text-ctu-blue font-medium hover:underline">
-          {showSchema ? t("Ẩn") : t("Hiện")} danh sách bảng &amp; cột
+          {showSchema ? t("Ẩn danh sách bảng & cột") : t("Hiện danh sách bảng & cột")}
         </button>
         {showSchema && (
           <div className="mt-3 max-h-96 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">

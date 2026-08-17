@@ -231,9 +231,7 @@ export default function BillingPage() {
 
         {summary.tenant.trial_ends_at ? (
           <p className="mt-4 rounded-lg bg-sky-50 px-4 py-2.5 text-sm text-sky-900">
-            Bản dùng thử kết thúc vào{" "}
-            {new Date(summary.tenant.trial_ends_at).toLocaleDateString("vi-VN")}. Liên
-            hệ quản trị viên nền tảng để chuyển sang gói chính thức.
+            {t("Bản dùng thử kết thúc vào {ngay}. Liên hệ quản trị viên nền tảng để chuyển sang gói chính thức.", { ngay: new Date(summary.tenant.trial_ends_at).toLocaleDateString("vi-VN") })}
           </p>
         ) : null}
 

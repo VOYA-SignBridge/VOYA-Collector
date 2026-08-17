@@ -154,7 +154,7 @@ export default function AdminLegalPage() {
       {overview && overview.missing_required.length > 0 && (
         <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">
-            Chưa công bố: {overview.missing_required.map((k) => t(LEGAL_KIND_LABEL[k])).join(", ")}
+            {t("Chưa công bố: {ds}", { ds: overview.missing_required.map((k) => t(LEGAL_KIND_LABEL[k])).join(", ") })}
           </p>
           <p className="mt-1">
             {t("Khi chưa công bố, đăng ký vẫn chạy nhưng")} <strong>{t("không thu chấp thuận nào")}</strong>.

@@ -70,7 +70,7 @@ function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void 
         <AlertTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
         <div>
           <p className="font-semibold text-amber-900">
-            Lưu {codes.length} mã này ở nơi an toàn ngay bây giờ
+            {t("Lưu {n} mã này ở nơi an toàn ngay bây giờ", { n: codes.length })}
           </p>
           <p className="mt-1 text-sm text-amber-800">
             {t("Đây là lần duy nhất chúng hiển thị. Mỗi mã dùng được một lần, và chúng là đường vào duy nhất nếu bạn mất điện thoại.")}
@@ -273,8 +273,7 @@ export default function TwoFactorSection() {
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
             <p className="text-sm font-medium text-slate-800">{t("Mã khôi phục")}</p>
             <p className="mt-1 text-sm text-slate-600">
-              Còn {status.recovery_codes_left} mã chưa dùng. Cấp lại sẽ huỷ toàn
-              bộ mã cũ ngay lập tức.
+              {t("Còn {n} mã chưa dùng. Cấp lại sẽ huỷ toàn bộ mã cũ ngay lập tức.", { n: status.recovery_codes_left })}
             </p>
           </div>
 

@@ -41,9 +41,20 @@ describe("SettingsLayout", () => {
     renderSettings(true);
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(hrefs).toContain("/settings/security");
-    expect(hrefs).toContain("/settings/contact");
+    expect(hrefs).toContain("/settings/consents");
     expect(hrefs).toContain("/settings/support");
     expect(hrefs).toContain("/settings/language");
+  });
+
+  it("KHÔNG còn mục 'Xác minh liên hệ' riêng — nó nằm trong Bảo mật", () => {
+    // Đổi 16/08/2026. Ba việc — đổi mật khẩu, xác minh địa chỉ, bật 2FA — trả
+    // lời cùng một câu hỏi ("tôi có lấy lại được tài khoản không"), nên tách
+    // việc thứ hai ra thành mục ngang hàng với Tổ chức và Gói dịch vụ là bắt
+    // người dùng đoán xem nó thuộc nhóm nào. `/settings/contact` vẫn sống, dưới
+    // dạng chuyển hướng — xem `App.tsx`.
+    renderSettings(true);
+    const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
+    expect(hrefs).not.toContain("/settings/contact");
   });
 
   it("gom đủ 8 mục cho quản trị viên", () => {

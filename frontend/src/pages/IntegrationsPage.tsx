@@ -435,11 +435,11 @@ function WebhooksSection() {
                   </div>
                   {!hook.is_active ? (
                     <div className="mt-2 rounded bg-red-50 px-2 py-1 text-xs text-red-800">
-                      Đã tự tắt: {hook.disabled_reason}
+                      {t("Đã tự tắt: {ly_do}", { ly_do: hook.disabled_reason })}
                     </div>
                   ) : hook.failure_streak > 0 ? (
                     <div className="mt-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                      {hook.failure_streak} lần giao hỏng liên tiếp
+                      {t("{n} lần giao hỏng liên tiếp", { n: hook.failure_streak })}
                     </div>
                   ) : null}
                 </div>
@@ -494,7 +494,7 @@ function WebhooksSection() {
                               </span>
                             </td>
                             <td className="py-1.5 pr-3 tabular-nums text-slate-500">
-                              {d.attempts} lần
+                              {t("{n} lần", { n: d.attempts })}
                             </td>
                             <td className="py-1.5 pr-3 text-slate-500">
                               {d.last_status_code ?? d.last_error ?? "—"}

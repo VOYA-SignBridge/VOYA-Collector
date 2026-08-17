@@ -126,7 +126,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                   <div>
                     <h4 className="font-semibold text-slate-900">{t(groupLabel)}</h4>
                     <p className="text-xs text-slate-500 mt-1">
-                      {langDialects.length} phương ngữ • {groupSelected} được chọn
+                      {t("{tong} phương ngữ • {chon} được chọn", { tong: langDialects.length, chon: groupSelected })}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -136,7 +136,7 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                       </span>
                     ) : groupSelected > 0 ? (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-ctu-blue/10 text-xs font-medium text-ctu-blue">
-                        ◐ {groupSelected} mục
+                        {t("◐ {n} mục", { n: groupSelected })}
                       </span>
                     ) : null}
                   </div>

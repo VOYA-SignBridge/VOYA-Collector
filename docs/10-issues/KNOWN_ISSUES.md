@@ -800,6 +800,178 @@ backfill.
 sử, rồi khi hợp đồng bảo mật siết lại, 19 ca đỏ trở thành sức ép phải NỚI hợp
 đồng. Đầu vào của bộ ca phải do chính nó sở hữu.
 
+## Mặt phẳng đầu ra huấn luyện — C3 (16/08/2026)
+
+### Đã vá: `training_jobs` là cache TOÀN TIẾN TRÌNH, RLS không với tới
+
+`routers/training.py:235` giữ `training_jobs: Dict[str, Dict]` khoá theo
+`job_id`, và `_ensure_job_loaded` trả thẳng bản sao khi job ở trạng thái cuối —
+**không hỏi Postgres**, nên không gặp RLS. Một tiến trình backend phục vụ mọi tổ
+chức, nên tổ chức B chỉ cần biết `job_id` của A là đọc được cấu hình, chỉ số, và
+`checkpoint_path` của A.
+
+Hai đường vào, đường thứ hai nặng hơn:
+
+```
+A xem job của mình  ->  nạp cache  ->  B hỏi cùng job_id  ->  ĐỌC ĐƯỢC
+backend KHỞI ĐỘNG   ->  `_restore_jobs_from_db` nạp job của MỌI tenant
+                    ->  B đọc được ngay, không cần A làm gì
+```
+
+Đo được ở `test_c3_job_read_confinement.py`: B nhận **200 + toàn bộ thân job**,
+gồm `checkpoint_path`. Vá bằng cách gắn chủ sở hữu vào từng mục cache và đối
+chiếu trước khi phục vụ; cả ba nơi ghi cache đều đã stamp.
+
+### Đã vá: WebSocket chạy NGOÀI mọi phạm vi tenant
+
+`TenantScopeMiddleware` thoát sớm ở `scope["type"] != "http"` — có chủ ý, và
+đúng với `lifespan`. Nhưng endpoint WS phát tiến độ huấn luyện dùng chung
+`_ensure_job_loaded` và `list_training_metrics` với đường HTTP, nên mọi truy vấn
+trong đó chạy không phạm vi. Nay endpoint tự bind phạm vi từ tài khoản đã xác
+thực.
+
+Đo được: `training_jobs` **fail-CLOSED** khi không phạm vi (tốt);
+`training_metrics` thì không.
+
+### ĐÃ vá: `training_metrics` nhận quyền sở hữu
+
+Trước 16/08/2026 bảng con không có `tenant_id` và không có RLS, trong khi bảng
+cha có cả hai — quyền sở hữu của đầu ra đứt đúng ở đó.
+
+| bảng | tenant_id | RLS | FORCE | policy |
+|---|---|---|---|---|
+| `training_jobs` | có | có | có | 1 |
+| `training_job_classes` | có | có | có | 1 |
+| `training_metrics` | **có (mới)** | **có** | **có** | **1** |
+
+**Thứ tự migration là hợp đồng, không phải sở thích:**
+
+```
+1  ADD COLUMN nullable          chưa ràng buộc gì, chưa hỏng được gì
+2  BACKFILL từ job cha          bước dữ liệu, hậu điều kiện HAI vế
+3  SET NOT NULL                 chỉ hợp lệ sau khi (2) đã chứng minh
+4  UNIQUE(tenant_id, job_id)    đích cho khoá ngoại ghép
+5  khoá ngoại GHÉP              CSDL tự chặn metric.tenant ≠ job.tenant
+```
+
+Hậu điều kiện có **hai vế**, và vế thứ hai mới là vế bảo mật: (1) không còn chỉ
+số thiếu tenant, (2) không chỉ số nào LỆCH tenant cha. Chỉ kiểm vế một thì một
+bản vá gán tất cả về `default` vẫn "đạt". Chỉ số mồ côi làm migration **DỪNG**,
+không suy về `default`.
+
+`SET NOT NULL` nằm trong `MIGRATION_MUST_SUCCEED`: nuốt lỗi ở đây để lại cột
+NULLABLE trên bảng vừa bật RLS, và vị từ policy so `NULL = 'iso_a'` cho ra NULL
+chứ không phải FALSE — hàng đó **vô hình với mọi tenant, kể cả chủ của nó**. Một
+lỗi im lặng biến thành mất dữ liệu.
+
+**Backfill này hợp lệ**, khác hẳn hai hiện vật vận hành mất chủ: khoá ngoại
+`training_metrics.job_id → training_jobs.job_id` cho ra chủ sở hữu THẬT chứ
+không phải phỏng đoán. Có provenance thì có quyền backfill.
+
+**Hai lưới, không phải một:**
+
+```
+lưới 1  `insert_training_metric` suy tenant từ job cha NGAY trong câu INSERT
+lưới 2  khoá ngoại GHÉP — không phụ thuộc mã ứng dụng
+```
+
+Chữ ký hàm cố ý **không** nhận `tenant_id`: người gọi tự khai thì giá trị ấy
+thành thẩm quyền, mà thẩm quyền phải là hàng job đã lưu. Hệ quả phụ ta MUỐN:
+job không tồn tại thì `SELECT` không ra dòng nào và lượt ghi lặng lẽ không làm
+gì, thay vì tạo chỉ số mồ côi. Và vì `training_jobs` dưới RLS, một tiến trình
+thuộc tổ chức khác **không ghi được** chỉ số vào job của A — cách ly cả chiều
+ghi.
+
+Đột biến: đổi `j.tenant_id` thành `%(tenant_id)s` → **8/13 ca đỏ**.
+
+Bằng chứng: `test_c3_metric_ownership.py` (13 ca, C3-M1..M6).
+
+### Hai mặt phẳng registry KHÔNG TỒN TẠI trong hệ thống này
+
+`experiments`, `experiment_metrics`, `model_versions` chỉ có DDL trong
+`backend/migrations/001_…sql` và `002_…sql`, **không** có trong `ensure_tables()`.
+`experiment_tracking_api.py` ghi vào chúng (0 lần nhắc `tenant`), nhưng
+`routers/experiments.py` **không được mount** — `main.py:18` nói rõ là cố ý.
+Không URL nào tới được.
+
+Nên C3 không đi tìm rò rỉ tenant ở đó: không có gì để rò. "Chưa kiểm" và "kiểm
+rồi, không tồn tại" là hai trạng thái khác nhau, và chỉ trạng thái thứ hai đóng
+được ô trong ma trận cam kết. `test_c3_output_ledger.py` canh kết luận phủ định
+này: ngày các bảng xuất hiện, ca đỏ.
+
+### Mặt phẳng LƯU TRỮ VẬT LÝ — đo xong 16/08, hai lỗi thật
+
+Layout **không đổi**, và kết luận không đến từ hình dạng thư mục mà từ NĂNG LỰC
+đo được.
+
+```
+processed/train_utils/outputs/
+    <model_type>_<stamp>.pt        <- phẳng; tên KHÔNG mang job_id/tenant_id
+    job_artifacts/<job_id>.log     <- tên CÓ mang job_id
+```
+
+**Đường ĐỌC: PASS.** Không endpoint nào nhận đường dẫn từ người gọi;
+`TrainingJob` (mang `checkpoint_path`) không bao giờ là thân yêu cầu; đường dẫn
+chỉ tới tay người gọi qua hàng job của chính họ, vốn đã dưới RLS + cổng cache đã
+vá. **C3-S3 = NOT APPLICABLE**, và nay có guard: ngày ai thêm một tham số
+đường dẫn vào endpoint, ca đó đỏ.
+
+**Lỗi 1 — đường dự phòng chọn checkpoint của tổ chức khác** (Trường hợp B).
+
+```python
+candidates = sorted(OUTPUTS_DIR.glob("*.pt"), key=mtime, reverse=True)
+checkpoint_path = str(candidates[0])
+```
+
+Job của A kết thúc mà bản ghi `final` thiếu `checkpoint_path` (trainer bị giết,
+tệp chỉ số cụt) → chọn tệp `.pt` mới nhất → tệp đó của B → **hàng job của A ghi
+checkpoint của B**. Từ đó mọi phép kiểm phạm vi đều ĐẠT, vì hàng job thuộc A
+thật. A tải về và đưa vào sản xuất trọng số của B qua một đường hoàn toàn hợp
+lệ. Không cần ai tấn công.
+
+Vá: **không đoán nữa**. Lọc theo tenant là bất khả — tên tệp không mang định
+danh — nên lựa chọn duy nhất đúng là DỪNG. Job thành `failed` với lý do
+`checkpoint_missing`, không phải `completed` không-checkpoint.
+
+**Lỗi 2 — lượt dọn định kỳ xoá hiện vật xuyên tổ chức** (Trường hợp C).
+
+"Giữ 20 bản mới nhất" áp trên thư mục DÙNG CHUNG. Tổ chức train nhiều hơn đẩy
+checkpoint của tổ chức khác ra khỏi cửa sổ giữ, và lượt dọn xoá chúng — theo
+lịch. B không đọc được hiện vật của A nhưng **xoá được**: rủi ro TOÀN VẸN,
+không kém nghiêm trọng hơn rò rỉ.
+
+Vá: nhóm theo chủ sở hữu (tra từ `training_jobs.checkpoint_path → tenant_id`)
+rồi mới áp N. Tệp không tra được chủ **để nguyên** — cùng luật C2c, đổi chiều:
+ở đó không biết chủ thì không cho đọc, ở đây không biết chủ thì không được xoá.
+Tra chủ thất bại → bỏ qua cả lượt dọn, không quay về quét mù.
+
+**Còn lại là nợ gia cố, không phải lỗ hổng:** tên checkpoint không mang định
+danh, và thư mục vẫn phẳng. Đề xuất `OUTPUTS_DIR/<tenant_id>/<job_id>/` **chỉ
+cho hiện vật mới**, không di chuyển tệp cũ. Và đường dẫn không bao giờ là thẩm
+quyền: `/outputs/iso_a/...` không chứng minh tệp thuộc `iso_a` — thẩm quyền vẫn
+là `training_jobs.tenant_id`.
+
+Bằng chứng: `test_c3_storage_confinement.py` (12 ca).
+
+### Một lỗi teardown xuất hiện MỘT lần, không tái hiện
+
+Trong một lượt chạy 26 tệp, `test_c3_ws_unscoped_read.py::test_pham_vi_khac…`
+báo ERROR ở teardown và sổ dấu vết ghi `training_jobs +1`. Chạy lại tệp đó ba
+lượt riêng và hai lượt đầy đủ 26 tệp: **không tái hiện** (349 xanh).
+
+Ghi ở đây thay vì bỏ qua: chưa tìm ra nguyên nhân thì chưa được gọi là đã sửa.
+Nghi ngờ đầu tiên là đua giữa teardown của fixture và lượt dọn của conftest.
+Nếu thấy lại, bắt đầu từ đó.
+
+### Bộ ca đứng ngoài nhóm B vẫn đỏ âm thầm
+
+Hai tệp — `test_api_operational_contract.py` và `test_training_lifecycle.py` —
+dùng người dùng giả thiếu `tenant_id`, nên `quota_deps.tenant_of` fail-closed từ
+nhóm B làm chúng đỏ, và không ai biết vì chúng không nằm trong bộ ca của nhóm B.
+**Bài học cho nhóm H:** mỗi nhóm đóng bằng bộ ca của riêng nó chỉ chứng minh
+được đúng những tệp nó mở ra. Chạy một lượt gom các tệp liên quan sau mỗi nhóm
+lớn, đừng dồn tới cuối.
+
 ### Còn treo sau đợt này
 
 - **SSO** — thiết kế đầy đủ ở `docs/01-architecture/SSO_OIDC_DESIGN.md`, **chưa hiện
@@ -818,3 +990,177 @@ sử, rồi khi hợp đồng bảo mật siết lại, 19 ca đỏ trở thành
 - **Thanh toán và hoá đơn** — vẫn cần cổng thanh toán và một pháp nhân.
 - **2FA chưa bắt buộc được theo tổ chức**; chưa có SMS/email làm bước hai (cố ý:
   cả hai yếu hơn TOTP và tạo cảm giác an toàn sai).
+
+## Đợt 2026-08-16 — RLS fail-open ở console, chuông rỗng, bộ đo i18n mù
+
+Xuất phát từ một danh sách phàn nàn của người dùng, không phải từ một lượt rà mã.
+Điều đáng ghi lại nhất: **ba trong bốn lỗi dưới đây đều có cách hỏng trông y hệt
+"chưa có dữ liệu"**, nên không có gì trong nhật ký hay bảng số bắt được chúng.
+
+### Đã sửa
+
+| # | Triệu chứng người dùng thấy | Nguyên nhân gốc | Neo lại bằng |
+|---|---|---|---|
+| A1 | "Quản lý người dùng" ghi *Không có người dùng* trong khi `users` có 10 dòng | `routers/admin.py` mở kết nối bằng `connect_postgres()` rồi truy vấn thẳng. `users` có RLS đọc GUC `app.tenant_id`; kết nối chưa gọi `apply_scope()` có GUC rỗng → **khớp 0 dòng, không phải lỗi** | `test_admin_console_reads_under_rls.py`, chạy ở phạm vi **tenant** chứ không system |
+| A2 | Đổi quyền admin trả 404 cho tài khoản có thật | Cùng A1 — câu `UPDATE ... RETURNING` khớp 0 dòng | cùng trên |
+| A3 | Bảng "Phiên đang hoạt động" hiện **Khách** cho mọi dòng, kể cả phiên của chính quản trị viên | `activity._resolve_usernames` cũng mở kết nối trần → trả `{}` | cùng trên |
+| B1 | Chuông thông báo không bao giờ sáng | Cả backend chỉ có **một** chỗ gọi `notifications.notify()`: `app/support.py`. 7 loại được khai, 6 loại không ai phát. Sản xuất: 2 dòng, cả hai `kind='support'` | `test_training_notifies_owner.py` |
+| C1 | Chọn tiếng Anh vẫn thấy chữ Việt, trong khi `i18n-coverage.mjs` báo **100,0%** | Hai chỗ mù ở bước tiền xử lý: (1) `accept="video/*"` mở một **chú thích khối ma** nuốt 65 dòng; (2) luật 1 đòi chữ nằm ngay sau `>` **cùng dòng**, nên mọi nút văn bản JSX xuống dòng đều lọt | `stripComments` viết lại có nhận biết chuỗi + regex; thêm luật 1b |
+| D1 | *"tôi còn gửi tin nhắn không được nữa"* ở cửa sổ hỗ trợ | `SupportPage` truyền `disabled={busy \|\| !ready}` vào `Composer`, và `disabled` khoá **cả ô nhập**. `ready` đòi chính nội dung ô đó → vòng luẩn quẩn, textarea không nhận phím | `SupportPage.composer.test.tsx` |
+| D2 | Bàn trực hỗ trợ hiện hàng đợi rỗng | Bộ lọc mặc định `open`, còn hai phiếu thật ở `pending`/`closed` | mặc định đổi thành "Tất cả" |
+
+### Con số thật sau khi sửa bộ đo
+
+`i18n-coverage.mjs` từ **100,0% (sai)** về **96,6% (thật)**: còn **63 chuỗi trần ở
+32 tệp**. Đây là lần thứ **ba** bảng số này báo 100% trong khi màn hình còn chữ
+Việt — hai lần trước là marker che cả tệp và các luật thiếu.
+
+### Còn treo
+
+- **63 chuỗi i18n còn trần.** Phần lớn là mảnh câu quanh `{biến}`, phải gom
+  thành câu trọn bằng `<Trans>`. Cơ học nhưng nhiều việc tay.
+- **Chuỗi do BACKEND sinh chưa qua i18n** — ví dụ `activity.py:181` trả
+  `"Nội bộ / LAN"` thẳng cho bảng phiên. Không có cơ chế nào cho nhóm này.
+- **Ba loại thông báo còn lại chưa có nguồn phát**: `data`, `system`, và phần
+  còn lại của `security` (đăng nhập từ thiết bị lạ).
+- **`change_email` dùng lại `purpose='verify_email'`** thay vì có mục đích
+  riêng, vì `verification_codes.purpose` có ràng buộc CHECK và một mục đích mới
+  là bước migration một chiều trên sản xuất. An toàn vì `otp.mark_verified` chỉ
+  đánh dấu khi địa chỉ trùng email hiện tại — nhưng đây là chỗ cần đọc kỹ trước
+  khi ai đó nới `mark_verified`.
+
+## Đợt C3 chưa đóng: `training_metrics` có `tenant_id` nhưng purge bỏ sót (17/08/2026)
+
+Tìm được khi chạy lại bộ test để lấy số liệu cho quyển luận văn. **Hai test đỏ,
+một nguyên nhân gốc** — tái hiện chắc chắn khi chạy riêng (2 failed, 26 passed):
+
+```
+test_schema_shape.py::test_tenant_purge_order_covers_every_tenant_table
+  AssertionError: những bảng này có tenant_id nhưng purge_tenant không xoá:
+  ['training_metrics']
+
+test_schema_constraints.py::test_training_metrics_cannot_orphan_itself
+  psycopg2.errors.NotNullViolation: null value in column "tenant_id" of
+  relation "training_metrics" violates not-null constraint
+```
+
+Đợt C3 gắn `tenant_id NOT NULL` cho `training_metrics` nhưng **chưa** làm hai
+việc đi kèm:
+
+1. Thêm bảng vào `_TENANT_PURGE_ORDER` — **đúng vị trí phụ thuộc**, không nối vào
+   cuối (con phải đi trước cha, đúng như thông báo của test nói).
+2. Cập nhật `test_training_metrics_cannot_orphan_itself`: nó còn chèn theo lược
+   đồ cũ, không truyền `tenant_id`.
+
+**Hệ quả nghiệp vụ, đây mới là phần nặng:** `purge_tenant` (UC508 "Dọn sạch dữ
+liệu tổ chức") hiện **để sót** chỉ số huấn luyện. Một tổ chức yêu cầu xoá dữ liệu
+được báo là đã xoá xong trong khi `training_metrics` của họ còn nguyên. Không có
+triệu chứng nào khi dùng bình thường — thao tác dọn vẫn chạy xong và vẫn báo
+thành công.
+
+Chưa sửa: phát hiện trong lúc đo thì ghi, không sửa ngay.
+
+## Bộ test bị chặn bởi thời hạn Drive, không phải treo (17/08/2026)
+
+Lượt chạy hồi quy dừng tiến ở 62 %, CPU container 0,4–1,2 %, bên trong có kết nối
+HTTPS mở tới Google. Không phải treo — đang chờ **đúng như cấu hình**:
+
+```
+GOOGLE_DRIVE_TIMEOUT_SECONDS  mặc định 180
+GOOGLE_DRIVE_NUM_RETRIES      mặc định   5
+                              ─────────────
+  một lượt gọi hụt đích        tối đa 900 giây = 15 phút
+```
+
+`docs/08-testing/TESTING.md` chỉ cảnh báo `test_sot_integration.py`. Loại trừ
+đúng tệp đó rồi chạy lại thì lượt chạy dừng ở **cùng mốc 62 %** — có ít nhất một
+tệp khác cũng gọi ra ngoài (`test_optimizations.py` gọi Drive trực tiếp; còn có
+đường gọi gián tiếp qua module ứng dụng nên `grep` theo tên thư viện KHÔNG phủ
+hết).
+
+Cách sửa đúng là **hạ thời hạn và số lần thử cho lượt chạy test**, không phải loại
+dần từng tệp — loại tệp là chữa triệu chứng và triệu chứng mọc lại ở tệp sau.
+
+Cách chẩn đoán tái dùng được (pytest ở chế độ `-q` chỉ in dấu chấm cho ca **đã
+xong**, nên ca đang chờ không bao giờ hiện ra trong log):
+
+```bash
+docker stats <container> --no-stream --format "{{.CPUPerc}}"      # ~0% => đang chờ
+docker exec <container> sh -c "cat /proc/1/net/tcp | awk 'NR>1 && \$4==\"01\"'"
+```
+
+## ĐÃ VÁ 17/08/2026 — đợt đưa bộ test về xanh
+
+Tám bản vá, bảy trong tám thuộc **cùng một lớp lỗi**: đợt chuyển sang đọc
+fail-closed theo phạm vi tenant đổi tên hàm ở nhiều seam, và các test còn vá tên
+cũ. Bản vá trượt trong im lặng → hàm thật chạy → trả rỗng → test đỏ ở một khẳng
+định cách xa nguyên nhân (`assert [] == [7]`, `assert 0 == 1`,
+`['B'] != ['A','B','C']`).
+
+### Lỗi ở MÃ SẢN XUẤT (2)
+
+1. **`app/db.py` — `sync_missing_data_on_startup` gọi `list_samples()` bỏ trống
+   tham số.** Dòng ngay trên đã chuyển sang `_load_all_labels_unscoped()`; dòng
+   samples thì chưa. `list_samples()` **ném `TenantScopeRequired`** khi không có
+   phạm vi, mà đồng bộ đầu vòng đời chạy trước khi có phạm vi nào → đường này
+   chết. Ba test của nó KHÔNG bắt được vì cả ba đều mock chính hàm ấy.
+   → vá: gọi `_load_all_samples_unscoped()`.
+
+2. **`app/export_tasks.py` — `export_samples_to_sheets` cùng lỗi**, bản đối xứng
+   của `export_labels_to_sheets` vốn đã chuyển đúng. Tìm ra bởi bất biến tĩnh mới
+   (dưới), không phải bởi người.
+   → vá: gọi `_load_all_samples_unscoped()`.
+
+3. **`app/tenant_lifecycle.py` — `PURGE_ORDER` thiếu `training_metrics`**
+   (xem mục trước). → vá: chèn TRƯỚC `training_jobs`.
+
+### Bất biến chặn tái diễn
+
+`test_read_scope_fail_closed.py::test_khong_noi_nao_goi_helper_co_pham_vi_ma_bo_trong_tham_so`
+quét AST toàn bộ `backend/app/`: **không nơi nào được gọi `list_samples()` hay
+`load_labels()` với danh sách tham số RỖNG**. Luật không có ngoại lệ hợp lệ —
+hoặc thiếu phạm vi, hoặc là đường bảo trì và phải gọi `_load_all_*_unscoped()` —
+nên nó không cần danh sách miễn trừ. Nó tìm ra lỗi số 2 ngay lượt chạy đầu.
+
+Vì sao phải là phép kiểm TĨNH: thứ cần canh là *hàm nào được gọi*, và mock xoá
+đúng thông tin ấy đi.
+
+### Test lạc hậu đã cập nhật (5 tệp)
+
+| Tệp | Vá sai chỗ | Phải vá |
+|---|---|---|
+| `test_startup_sync.py` (3 ca) | `app.dataset_manager.load_labels` | `_load_all_labels_unscoped` |
+| `test_reassign_sheets_owner.py` (4 ca) | `ds.list_samples`, `dm.load_labels` | `_load_all_*_unscoped` |
+| `test_tenant_sot_column.py` (2 ca) | `ds.list_samples`, `dm.load_labels` | `_load_all_*_unscoped` |
+| `test_subscription_lifecycle.py` (2 ca) | `sub._tenant_admin_emails` | `sub._tenant_admins` (seam mới, cần cả `id` cho notification) |
+| `test_upload_camera_training.py` (2 ca) | gieo job thiếu `tenant_id` | thêm `"tenant_id": u["tenant_id"]` |
+
+**Sửa một lỗi làm lộ hai lỗi:** hai ca ở `test_tenant_sot_column.py` vốn xanh vì
+chúng mock đúng cái tên cũ mà `db.py` còn gọi nhầm. Vá `db.py` cho đúng thì mock
+của chúng thành trượt. Chúng đang xanh **nhờ một lỗi**.
+
+### Hạ trần chờ Drive cho lượt chạy test
+
+`scripts/run_tests.sh` nay đặt `GOOGLE_DRIVE_TIMEOUT_SECONDS=5` và
+`GOOGLE_DRIVE_NUM_RETRIES=1` (đổi qua `VOYA_TEST_GDRIVE_TIMEOUT` /
+`VOYA_TEST_GDRIVE_RETRIES`). Trước đó 180×5 = tối đa 15 phút mỗi lượt gọi hụt
+đích, và suite không bao giờ chạy hết.
+
+**Kết quả:** `2.528 ca · 2.522 xanh · 6 đỏ · 1 skip` (26 phút) → sau tám bản vá:
+**0 đỏ**.
+
+## ĐÃ VÁ 17/08/2026 — dụng cụ đo không tự khai phiên bản mã
+
+`adversarial_isolation.py` đọc `VOYA_GIT_COMMIT`, rồi thử `git rev-parse`. Trong
+container đo không có `.git` và **không ai đặt biến đó** — cả hai đường cùng hụt,
+artefact mang `git_commit: null`, và phiên bản chỉ còn truy được nhờ THẺ ẢNH
+container (`voya_backend_iso:e5d804c`), một chỗ nằm ngoài artefact.
+
+Ghi null rồi chạy tiếp là fail-open đúng vào thứ làm con số có nghĩa.
+
+→ vá: `cong_bo_duoc` nay có **hai vế**. Ngoài "không còn ca mờ", artefact phải
+xác định được phiên bản mã và cây làm việc phải sạch; thiếu vế nào thì hạ cờ và
+in `ly_do_khong_cong_bo`. Áp lên artefact 16/08 (mo=0, commit=None) → `False`.
+
+`measure_api_latency.py` cùng khiếm khuyết, chưa có cờ công bố để hạ → thêm cảnh
+báo ra stderr.

@@ -51,11 +51,32 @@ def client(monkeypatch):
     monkeypatch.setattr(
         training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 7}
     )
+    # Cổng sàn số mẫu đếm lớp trong phạm vi tenant ĐANG chạy. Trước khi fixture
+    # này đặt phạm vi, nó chạy ngoài mọi phạm vi và đếm ra một con số — bộ ca
+    # vẫn xanh mà không ai chọn tenant nào. Giờ phạm vi là `iso_a`, một tổ chức
+    # trống, nên phải nói rõ ý định thay vì dựa vào một lượt đếm không phạm vi.
+    monkeypatch.setattr(
+        training_module, "_eligible_class_counts",
+        lambda dialects, nguong: {d: 7 for d in dialects}
+    )
+
+    # Đứng thay `TenantScopeMiddleware`, bằng CHÍNH hàm mà middleware gọi.
+    #
+    # Không phải mô phỏng: `bind_request_scope` là cơ chế thật, chỉ khác nguồn
+    # danh tính — ở đây là người dùng giả của bộ ca thay vì một token thật. Bộ
+    # ca này kiểm vòng đời job, không kiểm phân giải danh tính; chỗ kiểm điều
+    # đó là `test_c3_job_read_confinement.py`, và nó dùng tài khoản + token
+    # thật.
+    from app.tenant_context import bind_request_scope, unbind_request_scope
 
     training_jobs.clear()
-    with TestClient(app) as c:
-        yield c
-    training_jobs.clear()
+    tokens = bind_request_scope(USER["tenant_id"])
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        unbind_request_scope(tokens)
+        training_jobs.clear()
 
 
 def _config(**overrides) -> dict:
@@ -80,7 +101,14 @@ def _seed_job(job_id: str, status: str, **fields) -> TrainingJob:
         total_epochs=5,
         **fields,
     )
-    training_jobs[job_id] = {"job": job, "progress": []}
+    # ★ C3 — mục cache phải mang CHỦ SỞ HỮU.
+    #
+    # `_ensure_job_loaded` từ chối phục vụ một mục không thuộc phạm vi đang
+    # chạy, vì `training_jobs` là bộ nhớ chung của tiến trình và RLS không với
+    # tới nó. Một mục thiếu `tenant_id` bị coi như không có — cố ý: bản cũ để
+    # lại mục không chủ, và tin chúng là mở lại đúng lỗ vừa vá.
+    training_jobs[job_id] = {"job": job, "progress": [],
+                             "tenant_id": USER["tenant_id"]}
     return job
 
 
@@ -92,7 +120,7 @@ def test_submit_queues_job_and_dispatches_to_the_training_queue(client):
     with patch("app.training_tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config())
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "queued"
     assert body["id"]

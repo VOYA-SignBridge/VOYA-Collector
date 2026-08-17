@@ -22,6 +22,7 @@ from app.auth import (
     reset_password_with_token,
     revoke_refresh_token,
     rotate_refresh_token,
+    verify_password,
 )
 from app.cookie_auth import (
     REFRESH_COOKIE,
@@ -741,3 +742,282 @@ def reset_password(payload: ResetPasswordRequest, request: Request):
     enforce_ip_limit(request, "reset", max_calls=10, window=3600)
     reset_password_with_token(payload.token, payload.new_password)
     return {"message": "Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại."}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+    #: Mã yếu tố thứ hai. Chỉ bắt buộc khi tài khoản ĐÃ bật 2FA. Nhận cả mã
+    #: TOTP 6 chữ số lẫn mã khôi phục `xxxxx-xxxxx`, nên độ dài phải nới ra.
+    code: Optional[str] = Field(None, max_length=32)
+
+
+@router.post("/change-password", response_model=MessageResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    """Đổi mật khẩu khi ĐANG đăng nhập.
+
+    Vì sao đường này phải tồn tại
+    ------------------------------
+    Trước 16/08/2026 chỉ có luồng quên-mật-khẩu qua email. Trang
+    `/settings/security` có một khối chữ tên "Quên mật khẩu?" nhưng **không có
+    nút nào** — người muốn đổi mật khẩu định kỳ phải giả vờ quên nó, chờ thư,
+    rồi bấm liên kết. Với người dùng khiếm thính/khiếm ngôn mà dự án này phục
+    vụ, mỗi bước thừa là một chỗ bỏ cuộc.
+
+    Ba lớp, và vì sao đúng ba
+    --------------------------
+    1. **Mật khẩu hiện tại.** Không có nó thì một máy đang mở màn hình là đủ để
+       chiếm vĩnh viễn tài khoản — lớp bảo vệ chỉ chặn kẻ ở xa, không chặn kẻ
+       ngồi cạnh. Cùng lập luận với `two_factor._require_password`.
+    2. **Yếu tố thứ hai, CHỈ KHI đã bật.** Bắt buộc bật 2FA mới cho đổi mật khẩu
+       sẽ tạo một đường khoá cửa: người không có điện thoại thông minh sẽ không
+       bao giờ đổi được mật khẩu. Đó là hướng hỏng tệ hơn thứ nó định chặn.
+    3. **Mã khôi phục thay được mã TOTP.** Mất điện thoại không được đồng nghĩa
+       với mất tài khoản. `consume_recovery_code` tiêu mã một lần — nên một mã
+       bị nhìn trộm qua vai chỉ dùng được đúng một lần, và lần đó để lại dấu.
+
+    Thu hồi MỌI phiên, kể cả phiên đang gọi
+    ----------------------------------------
+    `_apply_password_reset` đặt `sessions_invalid_before = NOW()`, nên người
+    dùng phải đăng nhập lại. Nghe phiền, nhưng lý do phổ biến nhất để đổi mật
+    khẩu là "tôi nghi có người vào được tài khoản" — giữ lại các phiên cũ là bỏ
+    sót đúng cái mình định đuổi. Giao diện phải nói trước điều này.
+    """
+    from app import activity, audit, two_factor
+    from app.auth import _apply_password_reset, _identity_cursor
+
+    # Chặn dò mật khẩu bằng cách gọi thẳng endpoint này với một access token đã
+    # chiếm được. Cùng ngưỡng với `/reset-password`.
+    enforce_ip_limit(request, "change-password", max_calls=10, window=3600)
+
+    if not verify_password(payload.current_password,
+                           current_user.get("password_hash") or ""):
+        activity.log_security_event(
+            "password.change_rejected", actor=current_user.get("username", ""),
+            target=str(current_user["id"]), actor_user=current_user, request=request)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Mật khẩu hiện tại không đúng.")
+
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Mật khẩu mới phải khác mật khẩu hiện tại.")
+
+    used_recovery = False
+    if two_factor.is_enabled(current_user["id"]):
+        code = (payload.code or "").strip()
+        if not code:
+            # 400 kèm mã máy đọc được, để giao diện hiện ô nhập mã thay vì hiện
+            # một câu lỗi đỏ mà người dùng không biết phải làm gì với nó.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "2fa_required",
+                        "message": "Tài khoản đang bật xác thực hai bước. "
+                                   "Nhập mã 6 chữ số hoặc một mã khôi phục."})
+        if not two_factor.verify_code(current_user["id"], code):
+            used_recovery = two_factor.consume_recovery_code(current_user["id"], code)
+            if not used_recovery:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail="Mã xác thực không đúng.")
+
+    with _identity_cursor() as cur:
+        _apply_password_reset(cur, str(current_user["id"]), payload.new_password)
+
+    audit.record(
+        "account.password.change", actor=current_user, target_type="user",
+        target_id=str(current_user["id"]),
+        detail={"used_recovery_code": used_recovery}, request=request)
+    activity.log_security_event(
+        "password.changed", actor=current_user.get("username", ""),
+        target=str(current_user["id"]), actor_user=current_user, request=request)
+
+    return {"message": "Đã đổi mật khẩu. Mọi thiết bị đã bị đăng xuất, "
+                       "vui lòng đăng nhập lại."}
+
+
+# --------------------------------------------------------------- đổi email
+#
+# Hai bước, và cả hai đều bắt buộc:
+#
+#   start    -> mật khẩu + địa chỉ mới  ->  gửi mã 6 chữ số TỚI ĐỊA CHỈ MỚI
+#   confirm  -> mật khẩu + mã           ->  đổi `users.email`
+#
+# **Mã đi tới địa chỉ MỚI, không phải địa chỉ cũ.** Đó là toàn bộ điểm: thứ cần
+# chứng minh là "bạn đọc được hộp thư mới", chứ không phải "bạn đọc được hộp thư
+# cũ" — cái sau đã được chứng minh bằng việc đang đăng nhập.
+#
+# **Mật khẩu hỏi ở CẢ HAI bước.** Nghe thừa, nhưng bước `start` một mình chỉ gửi
+# một lá thư; bước `confirm` mới là bước đổi địa chỉ nhận thư khôi phục tài
+# khoản — tức là bước có thể biến một phiên bị chiếm thành mất tài khoản vĩnh
+# viễn. Một cửa sổ trình duyệt bỏ quên giữa hai bước không được phép là đủ.
+#
+# Vì sao dùng lại `purpose='verify_email'` thay vì thêm `change_email`
+# --------------------------------------------------------------------
+# `verification_codes.purpose` có ràng buộc CHECK ở lược đồ, nên một mục đích
+# mới là một bước migration MỘT CHIỀU trên cơ sở dữ liệu sản xuất. Không đáng,
+# vì mục đích ở đây trùng khớp: cả hai đều là "chứng minh bạn kiểm soát địa chỉ
+# này". Khác biệt duy nhất là hệ quả, và hệ quả do endpoint quyết chứ không do
+# hàng dữ liệu quyết.
+#
+# Điều đó an toàn vì `otp.mark_verified` chỉ đánh dấu khi địa chỉ TRÙNG email
+# hiện tại (`AND lower(email) = %s`). Nên nếu ai đó xác nhận mã này qua endpoint
+# chung `/verify/confirm`, câu UPDATE khớp 0 dòng và **không có gì xảy ra** —
+# không đổi email, không đánh dấu nhầm.
+
+
+class ChangeEmailStartRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    # `str` + `regex`, KHÔNG phải `EmailStr`: `EmailStr` kéo theo gói
+    # `email_validator` chưa có trong ảnh, và cả `RegisterRequest` cũng dùng
+    # `str`. Thêm một phụ thuộc cho đúng một trường là đổi hình dạng bản dựng để
+    # lấy một phép kiểm mà `otp.normalize_destination` đằng nào cũng làm lại.
+    #
+    # **`regex=`, không phải `pattern=`.** Dự án chạy Pydantic 1.10, và ở v1 một
+    # tham số `Field` không nhận ra được **bỏ qua trong im lặng** — không cảnh
+    # báo, không lỗi, chỉ là phép kiểm không bao giờ chạy. Bản đầu viết
+    # `pattern=` (tên của v2) và mọi chuỗi rác đều đi lọt. Bài
+    # `test_dia_chi_khong_hop_le_bi_chan_o_lop_kieu` tồn tại đúng để bắt cái
+    # im lặng ấy — nếu một ngày nâng lên Pydantic v2, nó sẽ đỏ và nhắc đổi lại
+    # thành `pattern=`.
+    new_email: str = Field(..., min_length=3, max_length=255,
+                           regex=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class ChangeEmailConfirmRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=128)
+    code: str = Field(..., min_length=4, max_length=10)
+
+
+#: Hai lớp phản hồi dưới đây KHÔNG phải thủ tục thừa.
+#:
+#: `test_login_response_shape.py` canh mọi đường trong router này: thiếu
+#: `response_model` là đỏ, trừ khi có lý do ghi trong danh sách miễn trừ. Lý do
+#: của cổng ấy rất cụ thể — bỏ `response_model=UserOut` khỏi `/auth/login` để
+#: trả được hai hình dạng đã vô tình gỡ luôn bộ lọc duy nhất ngăn
+#: `password_hash` đi ra ngoài.
+#:
+#: Hai đường đổi email không chạm hồ sơ người dùng, nhưng "không chạm" là điều
+#: đúng HÔM NAY. Khai kiểu tường minh làm nó đúng cả ngày mai, và rẻ hơn nhiều
+#: so với một dòng miễn trừ mà người sửa sau phải tin.
+class ChangeEmailStartResponse(BaseModel):
+    challenge_id: str
+    sent_to: str
+    expires_in_minutes: int
+
+
+class ChangeEmailConfirmResponse(BaseModel):
+    email: str
+    email_verified: bool
+
+
+def _guard_email_change(current_user, password: str, request: Request) -> None:
+    from app import activity
+
+    enforce_ip_limit(request, "change-email", max_calls=10, window=3600)
+    if not verify_password(password, current_user.get("password_hash") or ""):
+        activity.log_security_event(
+            "email.change_rejected", actor=current_user.get("username", ""),
+            target=str(current_user["id"]), actor_user=current_user, request=request)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Mật khẩu hiện tại không đúng.")
+
+
+@router.post("/change-email/start", response_model=ChangeEmailStartResponse)
+def change_email_start(
+    payload: ChangeEmailStartRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    from app import otp
+    from app.auth import _identity_cursor
+    from app.email_service import EmailNotConfigured, send_verification_code_email
+
+    _guard_email_change(current_user, payload.current_password, request)
+
+    new_email = str(payload.new_email).strip().lower()
+    if new_email == str(current_user.get("email") or "").strip().lower():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Địa chỉ mới trùng địa chỉ đang dùng.")
+
+    # Kiểm trùng ở mặt phẳng DANH TÍNH, không phải trong tenant: `users.email` là
+    # khoá đăng nhập của cả nền tảng, nên "chưa ai dùng" phải đúng trên toàn hệ
+    # thống. Hỏi trong phạm vi tenant sẽ báo "chưa ai dùng" cho một địa chỉ đang
+    # thuộc tổ chức khác, rồi câu INSERT vỡ vì ràng buộc UNIQUE — một lỗi 500 ở
+    # bước cuối thay vì một câu trả lời rõ ràng ở bước đầu.
+    with _identity_cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE lower(email) = %s AND id <> %s",
+                    (new_email, str(current_user["id"])))
+        if cur.fetchone():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Địa chỉ này đã có tài khoản khác dùng.")
+
+    try:
+        challenge_id, code = otp.issue(
+            user_id=current_user["id"], purpose="verify_email",
+            channel="email", destination=new_email)
+    except otp.OtpError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    try:
+        send_verification_code_email(new_email, code, "verify_email")
+    except EmailNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return {"challenge_id": challenge_id, "sent_to": new_email,
+            "expires_in_minutes": settings.otp_ttl_minutes}
+
+
+@router.post("/change-email/confirm", response_model=ChangeEmailConfirmResponse)
+def change_email_confirm(
+    payload: ChangeEmailConfirmRequest,
+    request: Request,
+    current_user=Depends(get_current_user),
+):
+    from app import activity, audit, notifications, otp
+    from app.auth import _identity_cursor
+
+    _guard_email_change(current_user, payload.current_password, request)
+
+    try:
+        result = otp.verify(user_id=current_user["id"], purpose="verify_email",
+                            code=payload.code)
+    except otp.OtpError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    new_email = str(result["destination"]).strip().lower()
+    old_email = str(current_user.get("email") or "")
+
+    # Chỉ MỘT câu UPDATE, và đó là câu đúng — khác hẳn đổi tên đăng nhập.
+    #
+    # `rename_user` phải chạm vào năm bảng cộng `samples.csv` vì cái TÊN được
+    # chép vào dữ liệu ngay lúc ghi. Địa chỉ email thì không: cả lược đồ chỉ có
+    # hai cột mang email, `users.email` và `tenant_invitations.email`.
+    #
+    # Và cột thứ hai **cố ý không đổi theo**. Nó ghi lại địa chỉ mà lời mời đã
+    # được gửi TỚI — một sự kiện đã xảy ra, không phải một thuộc tính hiện tại
+    # của tài khoản. Viết lại nó theo địa chỉ mới là sửa lịch sử, cùng lý do
+    # `audit_log.actor_label` giữ nguyên tên cũ sau khi đổi tên đăng nhập.
+    with _identity_cursor() as cur:
+        cur.execute(
+            "UPDATE users SET email = %s, email_verified_at = NOW() WHERE id = %s",
+            (new_email, str(current_user["id"])))
+
+    # Báo cho chính chủ, và ghi cả hai nhật ký. Đổi địa chỉ nhận thư khôi phục
+    # là thao tác biến một phiên bị chiếm thành mất tài khoản vĩnh viễn — nếu
+    # chủ tài khoản không bao giờ biết, họ không có gì để tố cáo.
+    notifications.notify(
+        str(current_user["id"]), "security", "Địa chỉ email đã được đổi",
+        body=f"Từ {old_email} sang {new_email}.",
+        link="/settings/security", severity="critical")
+    audit.record("account.email.change", actor=current_user, target_type="user",
+                 target_id=str(current_user["id"]),
+                 detail={"old_email": old_email, "new_email": new_email},
+                 request=request)
+    activity.log_security_event(
+        "email.changed", actor=current_user.get("username", ""),
+        target=str(current_user["id"]), actor_user=current_user, request=request)
+
+    return {"email": new_email, "email_verified": True}

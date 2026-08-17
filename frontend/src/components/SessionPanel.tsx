@@ -37,10 +37,10 @@ export default function SessionPanel({ sessionId, samples, onFinish, onDelete }:
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="info" size="sm">
-            {samples.length} mẫu
+            {t("{n} mẫu", { n: samples.length })}
           </Badge>
           <Badge variant="default" size="sm">
-            {totalFrames} khung hình
+            {t("{n} khung hình", { n: totalFrames })}
           </Badge>
         </div>
       </div>
@@ -108,7 +108,7 @@ export default function SessionPanel({ sessionId, samples, onFinish, onDelete }:
                     </Badge>
                   </div>
                   <div className="text-sm text-gray-600">
-                    {sample.frames || 0} khung hình • {sample.label || t('Chưa gán nhãn')}
+                    {t("{n} khung hình", { n: sample.frames || 0 })} • {sample.label || t('Chưa gán nhãn')}
                   </div>
                 </div>
               </div>

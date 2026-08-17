@@ -198,8 +198,7 @@ export default function AdminVocabularyPage() {
                   )}
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Đề xuất bởi {d.created_by_username || d.created_by || "—"} ·{" "}
-                  {fmtDate(d.created_at)}
+                  {t("Đề xuất bởi {ai} · {luc}", { ai: d.created_by_username || d.created_by || "—", luc: fmtDate(d.created_at) })}
                 </p>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">

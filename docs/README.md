@@ -28,8 +28,9 @@ giữ trật tự hiển thị, không hàm ý thứ tự đọc. Cấu trúc tr
 | Tệp | Nội dung |
 |---|---|
 | [PHANGIOITHIEU_BAN_SACH.md](00-thesis/PHANGIOITHIEU_BAN_SACH.md) | **Bản chép vào Word** — chỉ mục 1–7, không phụ chú |
-| [LUANVAN_PHANGIOITHIEU.md](00-thesis/LUANVAN_PHANGIOITHIEU.md) | Bản làm việc: mục 1–7 + phụ chú A–F cho tác giả |
-| [LUANVAN_CHUONG2.md](00-thesis/LUANVAN_CHUONG2.md) | Chương 2 — Cơ sở lý thuyết, 11 mục |
+| [quyen/](00-thesis/quyen/) | **Bản thảo quyển theo cấu trúc mẫu CT553H** — mỗi phần/chương một tệp, đánh số theo thứ tự đóng quyển; bắt đầu ở [00_MUCLUC_VA_QUY_UOC.md](00-thesis/quyen/00_MUCLUC_VA_QUY_UOC.md) |
+| [quyen/01_PHAN_GIOI_THIEU.md](00-thesis/quyen/01_PHAN_GIOI_THIEU.md) | Phần giới thiệu: mục 1–7 + phụ chú A–F cho tác giả *(trước ở `LUANVAN_PHANGIOITHIEU.md`)* |
+| [quyen/03_CHUONG2_CO_SO_LY_THUYET.md](00-thesis/quyen/03_CHUONG2_CO_SO_LY_THUYET.md) | Chương 2 — Cơ sở lý thuyết, 11 mục *(trước ở `LUANVAN_CHUONG2.md`)* |
 | [LUANVAN_TONGHOP.md](00-thesis/LUANVAN_TONGHOP.md) | Hệ thống thật sự là gì, đề cương nói khác ở đâu |
 | [PAPER_PIPELINE_RELEASE.md](00-thesis/PAPER_PIPELINE_RELEASE.md) | Bài ISDS 2026 — phạm vi đóng băng, mọi claim phải có artifact |
 | [BANG_TRA_TRICH_DAN.md](00-thesis/BANG_TRA_TRICH_DAN.md) | Khoá `\cite{}` → tiêu đề tài liệu, để chèn trích dẫn trong Word |

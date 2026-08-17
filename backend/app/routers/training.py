@@ -482,6 +482,11 @@ async def restore_jobs_from_db(limit: int = 50) -> None:
         training_jobs[job.id] = {
             "job": job,
             "progress": [],  # per-epoch metrics load lazily from DB on demand
+            # ★ C3 — vòng lặp này chạy lúc khởi động và nạp job của MỌI tổ chức
+            # vào một `dict` dùng chung. Thiếu chủ sở hữu ở đây thì ngay sau mỗi
+            # lần khởi động lại, bất kỳ tenant nào biết `job_id` cũng đọc được
+            # job của tenant khác — không cần chủ thật vào xem trước.
+            "tenant_id": str(row.get("tenant_id") or "").strip(),
         }
         restored += 1
 
@@ -494,8 +499,41 @@ async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
     Postgres is the source of truth: the trainer container updates job rows
     while the backend only reads them. Terminal jobs are immutable (except
     promotion, which the backend itself writes), so the cache is safe there.
+
+    ★ C3 — `training_jobs` là bộ nhớ CHUNG của tiến trình, RLS không với tới
+    ==================================================================
+    Trước 16/08/2026 hàm này mở đầu bằng `training_jobs.get(job_id)` rồi trả
+    thẳng bản sao nếu job đã ở trạng thái cuối — **không hỏi Postgres**, nên
+    không gặp RLS. Một tiến trình backend phục vụ mọi tổ chức, nên tổ chức B chỉ
+    cần biết `job_id` của A là đọc được toàn bộ hàng job của A: cấu hình, chỉ số
+    thử nghiệm, và `checkpoint_path` — vị trí hiện vật mô hình đã huấn luyện.
+
+    Hai đường vào cache, và đường thứ hai nặng hơn:
+
+    ```
+    A xem job của mình  ->  nạp vào cache  ->  B hỏi cùng job_id  ->  đọc được
+    backend KHỞI ĐỘNG   ->  `_restore_jobs_from_db` nạp job của MỌI tenant
+                        ->  B đọc được ngay, không cần A làm gì
+    ```
+
+    Đường thứ hai nghĩa là ngay sau mỗi lần khởi động lại, cache đã chứa sẵn job
+    của tất cả các tổ chức.
+
+    Bản vá giữ nguyên cache — nó có lý do tồn tại — nhưng gắn CHỦ SỞ HỮU vào mỗi
+    mục và đối chiếu trước khi phục vụ. Một mục không thuộc phạm vi đang chạy
+    được coi như không có, đúng cách hàng bị RLS lọc trông như không tồn tại.
     """
+    from app.tenant_context import current_tenant
+
+    pham_vi = (current_tenant() or "").strip()
     cached = training_jobs.get(job_id)
+
+    # Fail-closed hai chiều: không có phạm vi thì không phục vụ từ cache, và
+    # một mục không mang chủ sở hữu (do bản cũ để lại) cũng không được tin.
+    if cached is not None and (
+            not pham_vi or cached.get("tenant_id") != pham_vi):
+        cached = None
+
     if cached and cached["job"].status in TERMINAL_STATUSES:
         return cached
 
@@ -510,11 +548,16 @@ async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
         return cached
 
     job = _job_from_db_row(row)
+    # `get_training_job` chạy dưới RLS, nên tới được đây nghĩa là hàng thuộc
+    # phạm vi hiện tại. Ghi chủ sở hữu từ CHÍNH hàng đó, không từ phạm vi: nếu
+    # hai giá trị lệch nhau thì hàng mới là sự thật.
+    chu = str(row.get("tenant_id") or "").strip() or pham_vi
     if cached:
         cached["job"] = job
+        cached["tenant_id"] = chu
         return cached
 
-    job_info = {"job": job, "progress": []}
+    job_info = {"job": job, "progress": [], "tenant_id": chu}
     training_jobs[job_id] = job_info
     return job_info
 
@@ -1123,6 +1166,12 @@ async def start_training(
     guard_quota(current_user, "training_jobs_running")
     guard_quota(current_user, "training_jobs_queued")
 
+    # MỘT nguồn danh tính cho cả lượt gọi này: hạn mức, cổng hiện vật và chủ sở
+    # hữu của mục cache đều đọc đúng giá trị này. Ba nguồn khác nhau cho cùng
+    # một lượt chạy là cách một hệ thống tự mâu thuẫn mà không tầng nào sai.
+    # `tenant_of` fail-closed, nên tới được dòng sau là đã biết chắc tổ chức.
+    pham_vi_nguoi_goi = tenant_of(current_user)
+
     try:
         # ------------------------------------------------------------------
         # Hợp đồng nguồn dữ liệu, chốt TRƯỚC mọi cổng khác.
@@ -1166,17 +1215,11 @@ async def start_training(
                 PURPOSE_OPERATIONAL, SplitArtifactError, resolve_split_artifact,
             )
 
-            # Phạm vi lấy từ tenant NHÀ của người gọi, đúng nguồn mà
-            # `guard_quota` đã dùng ở trên — hai quyết định về cùng một lượt
-            # chạy phải đọc cùng một danh tính, nếu không thì hạn mức ghi cho
-            # tổ chức này còn dữ liệu lại đọc của tổ chức kia.
-            pham_vi = tenant_of(current_user)
-
             try:
                 art = await run_in_threadpool(
                     lambda: resolve_split_artifact(
                         purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR,
-                        split_id=split_id, tenant_id=pham_vi),
+                        split_id=split_id, tenant_id=pham_vi_nguoi_goi),
                 )
             except SplitArtifactError as exc:
                 # Phân giải ở ĐÂY chứ không chỉ ở worker, để người gọi nhận lỗi
@@ -1350,6 +1393,10 @@ async def start_training(
         training_jobs[job_id] = {
             "job": job,
             "progress": [],
+            # Chủ sở hữu lấy từ tenant NHÀ của người gọi — cùng nguồn mà
+            # `guard_quota` và cổng hiện vật ở trên đã dùng. Ba quyết định về
+            # một lượt chạy phải đọc cùng một danh tính.
+            "tenant_id": pham_vi_nguoi_goi,
         }
 
         # Persist BEFORE enqueue: if the backend dies right after, the job
@@ -1960,6 +2007,38 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
+    # ★ C3 — `TenantScopeMiddleware` KHÔNG chạy cho WebSocket.
+    #
+    # Nó thoát sớm ở `scope["type"] != "http"`, có chủ ý và đúng với `lifespan`.
+    # Hệ quả là mọi truy vấn trong endpoint này chạy NGOÀI phạm vi tenant, và
+    # từ đó có hai chuyện:
+    #
+    #   `training_jobs`     RLS fail-CLOSED khi không phạm vi  ->  đọc ra rỗng
+    #   `training_metrics`  không có tenant_id, không có RLS   ->  đọc ra ĐỦ
+    #
+    # Nghĩa là cổng duy nhất bảo vệ chỉ số huấn luyện là hàng job cha; chạy
+    # ngoài phạm vi thì cổng ấy vừa chặn nhầm người đúng, vừa không chặn được
+    # gì ở bảng chỉ số. Đặt phạm vi ở đây làm cả hai chuyện đó biến mất.
+    #
+    # Phạm vi lấy từ tài khoản ĐÃ xác thực ngay phía trên, cùng nguồn mà
+    # middleware dùng cho đường HTTP — không phải từ `job_id` người gọi đưa.
+    from app.tenant_context import tenant_scope
+
+    pham_vi = str((user or {}).get("tenant_id") or "").strip()
+    if not pham_vi:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
+    with tenant_scope(pham_vi):
+        await _phat_tien_do(websocket, job_id)
+
+
+async def _phat_tien_do(websocket: WebSocket, job_id: str) -> None:
+    """Thân của endpoint WS, tách ra để phạm vi tenant bọc trọn vòng đời.
+
+    `asyncio.to_thread` chép ngữ cảnh hiện tại sang luồng phụ, nên các lượt đọc
+    CSDL bên trong vẫn thấy phạm vi đã đặt.
+    """
     job_info = await _ensure_job_loaded(job_id)
     if not job_info:
         await websocket.close(code=4004, reason="Job not found")

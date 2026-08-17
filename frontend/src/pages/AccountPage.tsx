@@ -1,72 +1,46 @@
 /**
- * Tài khoản của tôi: chấp thuận và tên đăng nhập.
+ * Tài khoản của tôi — `/settings/account`.
  *
- * Vì sao trang này tồn tại
- * -------------------------
- * Cả hai đường phía máy chủ đã sống từ trước — `POST /legal/{kind}/accept`,
- * `POST /legal/{kind}/withdraw`, `PATCH /auth/me` — và **không có màn hình nào
- * gọi tới chúng**. Hệ quả đo được ngày 2026-08-09: 10 tài khoản đã ký `terms`
- * và `privacy` lúc đăng ký, `signer_consents` có 0 dòng, và vì cổng đồng thuận
- * chỉ đọc bảng thứ hai nên **mọi bản phát hành nghiên cứu đều rỗng**. Không
- * phải vì cơ chế sai, mà vì không ai ký được `data_contribution`.
+ * Trang này để SỬA THÔNG TIN, không phải để đọc lại điều khoản
+ * ------------------------------------------------------------
+ * Bản trước gộp ba thứ: danh sách đồng thuận pháp lý, xác thực hai bước, và ô
+ * đổi tên đăng nhập — dưới một tiêu đề nói rằng đây là nơi "xem lại những gì
+ * bạn đã đồng ý ... và đổi tên đăng nhập". Ba việc, ba nhịp, ba lý do tìm đến
+ * hoàn toàn khác nhau.
  *
- * `data_contribution` cố ý KHÔNG nằm trong `REQUIRED_AT_REGISTRATION`: chính
- * bản văn hứa rằng từ chối không ảnh hưởng tới quyền dùng phần còn lại của hệ
- * thống. Nên nó phải hỏi được ở một chỗ khác, và đây là chỗ đó.
+ * Hậu quả cụ thể chứ không chỉ là lộn xộn: người vào để sửa một chữ trong tên
+ * mình phải cuộn qua bốn thẻ văn bản pháp lý; người đi tìm "tôi đã ký cái gì"
+ * không đoán được rằng nó nằm dưới chữ "Tài khoản"; và người nghi tài khoản có
+ * vấn đề đi tìm chữ "Bảo mật" chứ không phải "Tài khoản".
  *
- * Ba điều trang này từ chối làm
- * ------------------------------
- * 1. **Không tự suy ra rút được hay không.** `withdrawable` đến từ máy chủ.
- *    Giao diện tự suy sẽ có ngày hiện một cái nút chắc chắn trả 409.
- * 2. **Không gộp "chưa ký bao giờ" với "đã ký bản cũ".** Nói với người từng
- *    đồng ý rằng họ chưa từng đồng ý là một câu sai, không phải một cách rút
- *    gọn.
- * 3. **Không hứa quá mức đã cấp.** Ký `data_contribution` cấp
- *    `internal_training`, KHÔNG cấp quyền công bố. Ranh giới ấy nằm trong chính
- *    bản văn (mục 4), nên màn hình phải nói ra thay vì để người ta suy đoán.
+ * Nên từ 16/08/2026:
  *
- * @i18n-key-table — nhãn trả về từ `statusOf` là KHOÁ từ điển, dịch lúc dựng.
+ *     /settings/account    hồ sơ — tên đăng nhập, email
+ *     /settings/consents   đồng thuận pháp lý
+ *     /settings/security   2FA, đổi mật khẩu, xác minh liên hệ
+ *
+ * Vì sao lời nhắc "chưa xác minh" nằm ở ĐÂY mà việc xác minh thì ở kia
+ * --------------------------------------------------------------------
+ * Trang hồ sơ là nơi người dùng nhìn thấy địa chỉ email của mình. Đó cũng là
+ * nơi họ nhận ra nó sai — một địa chỉ sai chỉ lộ ra khi có ai đó đọc nó. Nhưng
+ * việc xác minh là thao tác bảo mật, nên nó sống ở trang Bảo mật. Lời nhắc ở
+ * đây là cây cầu: nói ra vấn đề tại nơi nó được phát hiện, và chỉ đường tới nơi
+ * giải quyết được.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import PageHeader from "../components/ui/PageHeader";
-import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
-import { AlertTriangleIcon, InfoCircleIcon } from "../components/ui/Icons";
+import { AlertTriangleIcon, ShieldCheckIcon } from "../components/ui/Icons";
 import { useAuth } from "../contexts/AuthContext";
 import { notifyAuthChange } from "../api/axiosClient";
 import { useToast } from "../hooks/useToast";
 import { friendlyError } from "../lib/errors";
-import { updateUsername } from "../api/auth";
-import TwoFactorSection from "../components/account/TwoFactorSection";
-import { Trans, useI18n } from "../i18n";
-import {
-  CONSENT_SCOPE_LABEL,
-  LEGAL_KIND_LABEL,
-  acceptDocument,
-  fetchMyConsents,
-  withdrawDocument,
-  type LegalKind,
-  type MyConsent,
-} from "../api/legal";
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("vi-VN");
-}
-
-/** Bốn trạng thái, bốn câu khác nhau. Xem chú thích đầu tệp, điểm 2. */
-function statusOf(c: MyConsent): { tone: "success" | "warning" | "neutral"; label: string } {
-  if (c.accepted) return { tone: "success", label: "Đã đồng ý" };
-  if (c.needs_reconsent) return { tone: "warning", label: "Cần đồng ý lại" };
-  // "Chưa đồng ý" trên một văn bản hỏi theo từng buổi đọc như một việc còn nợ,
-  // trong khi thực ra không có gì để làm ở trang này.
-  if (!c.self_signable) return { tone: "neutral", label: "Hỏi theo từng buổi" };
-  return { tone: "neutral", label: "Chưa đồng ý" };
-}
+import { confirmEmailChange, startEmailChange, updateUsername } from "../api/auth";
+import { fetchVerificationStatus, type VerificationStatus } from "../api/verification";
+import { useI18n } from "../i18n";
 
 export default function AccountPage() {
   const { t } = useI18n();
@@ -74,307 +48,59 @@ export default function AccountPage() {
     <div className="space-y-8">
       <PageHeader
         title={t("Tài khoản của tôi")}
-        subtitle={t("Xem lại những gì bạn đã đồng ý, thay đổi quyết định, và đổi tên đăng nhập.")}
+        subtitle={t("Sửa tên đăng nhập và địa chỉ liên hệ của bạn.")}
         breadcrumb={[{ label: t("Trang chủ"), href: "/" }, { label: t("Tài khoản") }]}
       />
-      <ConsentSection />
-      <TwoFactorSection />
+      <VerificationHint />
       <UsernameSection />
+      <EmailSection />
     </div>
   );
 }
 
-// ---------------------------------------------------------------- chấp thuận
+// ---------------------------------------------------------- nhắc xác minh
 
-function ConsentSection() {
+/**
+ * Lời nhắc "còn thứ chưa xác minh", và KHÔNG hiện gì khi mọi thứ đã xong.
+ *
+ * Một tấm thẻ xanh ghi "tất cả đã xác minh" nghe thì tử tế, nhưng nó chiếm chỗ
+ * vĩnh viễn ở đầu trang để nói một điều không đòi hỏi hành động nào. Thứ đáng
+ * chiếm chỗ là việc còn phải làm.
+ */
+function VerificationHint() {
   const { t } = useI18n();
-  const [consents, setConsents] = useState<MyConsent[] | null>(null); const [loadError, setLoadError] = useState(""); /** Ô "tôi đã đọc", theo từng loại văn bản. Nút ký mở khoá theo nó. */ const [read, setRead] = useState<Record<string, boolean>>({});
-  /** Loại đang chờ xác nhận rút. Rút là thao tác một chiều, không bấm nhầm được. */
-  const [confirming, setConfirming] = useState<LegalKind | null>(null);
-  const [busy, setBusy] = useState<LegalKind | null>(null);
-  const { toast } = useToast();
-
-  // Bộ đếm lượt tải: một lượt nạp chậm không được ghi đè lên kết quả mới hơn.
-  const run = useRef(0);
-
-  const load = useCallback(async () => {
-    const mine = ++run.current;
-    try {
-      const data = await fetchMyConsents();
-      if (mine !== run.current) return;
-      setConsents(data);
-      setLoadError("");
-    } catch (err) {
-      if (mine !== run.current) return;
-      setLoadError(friendlyError(err, t("Không đọc được danh sách chấp thuận của bạn.")));
-    }
-  }, []);
+  const [status, setStatus] = useState<VerificationStatus | null>(null);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    // Hỏng thì im lặng: đây là lời nhắc phụ, và một biểu ngữ lỗi đỏ vì không
+    // đọc được trạng thái xác minh sẽ che mất việc người dùng đang làm.
+    fetchVerificationStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, []);
 
-  const accept = useCallback(
-    async (c: MyConsent) => {
-      setBusy(c.kind);
-      try {
-        // Gửi `current_version`, KHÔNG BAO GIỜ `accepted_version`: máy chủ đối
-        // chiếu với bản đang hiệu lực và trả 409 nếu lệch. Gửi bản cũ nghĩa là
-        // xin ghi chữ ký cho một bản văn đã bị thay thế.
-        await acceptDocument(c.kind, c.current_version);
-        toast.success(t("Đã ghi nhận đồng ý với {p1}.", { p1: t(LEGAL_KIND_LABEL[c.kind]) }));
-        setRead((prev) => ({ ...prev, [c.kind]: false }));
-        await load();
-      } catch (err) {
-        toast.error(friendlyError(err, t("Không ghi nhận được đồng ý của bạn.")));
-        // Văn bản đã đổi trong lúc trang đang mở. Bỏ tích và nạp lại: giữ ô
-        // tích là ghi nhận sự đồng ý với thứ người dùng chưa đọc.
-        setRead((prev) => ({ ...prev, [c.kind]: false }));
-        await load();
-      } finally {
-        setBusy(null);
-      }
-    },
-    [load, toast],
-  );
-
-  const withdraw = useCallback(
-    async (c: MyConsent) => {
-      setBusy(c.kind);
-      try {
-        await withdrawDocument(c.kind);
-        toast.success(t("Đã rút đồng ý với {p1}.", { p1: t(LEGAL_KIND_LABEL[c.kind]) }));
-        setConfirming(null);
-        await load();
-      } catch (err) {
-        toast.error(friendlyError(err, t("Không rút được đồng ý.")));
-      } finally {
-        setBusy(null);
-      }
-    },
-    [load, toast],
-  );
+  if (!status) return null;
+  const missing: string[] = [];
+  if (!status.email_verified) missing.push(t("địa chỉ email"));
+  if (status.phone_number && !status.phone_verified) missing.push(t("số điện thoại"));
+  if (missing.length === 0) return null;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-      <h2 className="text-lg font-semibold text-slate-900">{t("Chấp thuận của tôi")}</h2>
-      <p className="mt-1 text-sm text-slate-600">
-        <Trans
-          k="Mỗi dòng ghi lại bạn đã đồng ý với {ban}, không phải một ô đánh dấu. Bấm vào số hiệu bản để đọc lại đúng bản mình đã ký."
-          vars={{ ban: <strong>{t("bản nào")}</strong> }}
-        />
-      </p>
-
-      {loadError && (
-        <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{loadError}</span>
-        </div>
-      )}
-
-      {!consents && !loadError && (
-        <p className="mt-4 text-sm text-slate-500">{t("Đang tải…")}</p>
-      )}
-
-      {/* Không có văn bản nào ĐANG hiệu lực là trạng thái bình thường của một
-          bản triển khai mới — công bố chính là hành động bật cưỡng chế. */}
-      {consents?.length === 0 && (
-        <p className="mt-4 text-sm text-slate-500">
-          {t("Hệ thống chưa công bố văn bản nào, nên chưa có gì để bạn đồng ý.")}
-        </p>
-      )}
-
-      <div className="mt-4 space-y-4">
-        {consents?.map((c) => {
-          const status = statusOf(c);
-          const isBusy = busy === c.kind;
-          return (
-            <article
-              key={c.kind}
-              className="rounded-xl border border-slate-200 bg-slate-50/60 p-4"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-slate-900">
-                    {t(LEGAL_KIND_LABEL[c.kind])}
-                  </h3>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Bản đang hiệu lực:{" "}
-                    <Link
-                      to={`/legal/${c.kind}`}
-                      className="font-medium text-ctu-blue underline underline-offset-2"
-                    >
-                      {c.current_version}
-                    </Link>
-                    {c.required_at_registration && " · bắt buộc để dùng hệ thống"}
-                  </p>
-                </div>
-                <Badge variant={status.tone} size="sm">
-                  {t(status.label)}
-                </Badge>
-              </div>
-
-              {c.accepted_version && (
-                <p className="mt-2 text-sm text-slate-700">
-                  Bạn đã ký bản{" "}
-                  {/* Đường DUY NHẤT từ giao diện tới đúng bản mình đã ký. Không
-                      có nó, "bạn đã đồng ý" là câu không kiểm chứng được. */}
-                  <Link
-                    to={`/legal/${c.kind}?version=${encodeURIComponent(c.accepted_version)}`}
-                    className="font-semibold text-ctu-blue underline underline-offset-2"
-                  >
-                    {c.accepted_version}
-                  </Link>
-                  {c.accepted_at && t(" lúc {p1}", { p1: formatDate(c.accepted_at) })}.
-                </p>
-              )}
-
-              {c.needs_reconsent && (
-                <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>
-                    {t("Bản mới đã thay đổi phạm vi so với bản bạn ký, nên nó cần bạn đồng ý lại. Chấp thuận cũ vẫn được giữ nguyên trong hồ sơ.")}
-                  </span>
-                </div>
-              )}
-
-              {c.grants_scope && (
-                <div className="mt-2 flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                  <InfoCircleIcon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-                  <span>
-                    Ký văn bản này cho phép dùng dữ liệu bạn đóng góp ở mức:{" "}
-                    <strong>{t(CONSENT_SCOPE_LABEL[c.grants_scope])}</strong>. Các mức
-                    cao hơn — công bố cùng bài báo, chia sẻ ra ngoài tổ chức — cần
-                    một thoả thuận riêng bằng văn bản, và việc ký ở đây{" "}
-                    <strong>{t("không")}</strong> {t("thay cho thoả thuận đó.")}
-                  </span>
-                </div>
-              )}
-
-              {/* --- hành động --- */}
-              {/* Văn bản hỏi theo từng buổi ghi hình thì không có nút ký ở đây.
-                  Một chữ ký vĩnh viễn cho một bản văn vừa nói "mỗi buổi thu là
-                  một lần bạn biết cụ thể hôm nay con em mình làm gì" sẽ thu
-                  được đúng thứ mà bản văn ấy từ chối. */}
-              {!c.self_signable && (
-                <p className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                  <Trans
-                    k="Văn bản này được hỏi trong {khi}, không ký một lần ở đây. Bạn đọc trước được bằng liên kết bên trên."
-                    vars={{ khi: <strong>{t("từng buổi ghi hình")}</strong> }}
-                  />
-                </p>
-              )}
-
-              {!c.accepted && c.self_signable && (
-                <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-3">
-                  <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={!!read[c.kind]}
-                      onChange={(e) =>
-                        setRead((prev) => ({ ...prev, [c.kind]: e.target.checked }))
-                      }
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-ctu-blue focus:ring-ctu-blue"
-                    />
-                    <span>
-                      Tôi đã đọc và đồng ý với{" "}
-                      <Link
-                        to={`/legal/${c.kind}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-semibold text-ctu-blue underline underline-offset-2"
-                      >
-                        {t(LEGAL_KIND_LABEL[c.kind])}
-                      </Link>{" "}
-                      <span className="text-slate-400">
-                        {t("(bản {v})", { v: c.current_version })}
-                      </span>
-                      .
-                    </span>
-                  </label>
-                  <Button
-                    size="sm"
-                    className="mt-3"
-                    disabled={!read[c.kind]}
-                    loading={isBusy}
-                    onClick={() => void accept(c)}
-                  >
-                    {t("Ghi nhận đồng ý")}
-                  </Button>
-                </div>
-              )}
-
-              {c.accepted && c.withdrawable && confirming !== c.kind && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="mt-3"
-                  onClick={() => setConfirming(c.kind)}
-                >
-                  {t("Rút đồng ý")}
-                </Button>
-              )}
-
-              {c.accepted && !c.withdrawable && (
-                <p className="mt-3 text-xs text-slate-500">
-                  {t("Văn bản này bắt buộc để dùng hệ thống nên không rút riêng được. Nếu bạn muốn dừng hẳn, hãy yêu cầu xoá tài khoản.")}
-                </p>
-              )}
-
-              {confirming === c.kind && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800">
-                  <p className="font-semibold">
-                    {t("Rút đồng ý với {loai}?", {
-                      loai: t(LEGAL_KIND_LABEL[c.kind]),
-                    })}
-                  </p>
-                  {/* Nói đúng những gì cơ chế thật sự làm. Xem
-                      docs/04-legal/CONSENT_ENFORCEMENT.md §5 — rút chặn ở MỌI mức, kể cả
-                      nội bộ, nhưng KHÔNG xoá tệp đã có. Hứa xoá ở đây là hứa
-                      một việc hệ thống không làm. */}
-                  <ul className="mt-2 list-disc space-y-1 pl-5">
-                    <li>
-                      <Trans
-                        k="Từ lượt chọn dữ liệu tiếp theo, mẫu của bạn bị loại ở {muc}, kể cả huấn luyện nội bộ."
-                        vars={{ muc: <strong>{t("mọi mức")}</strong> }}
-                      />
-                    </li>
-                    <li>
-                      <Trans
-                        k="Những tệp bạn đã đóng góp {trangthai}. Muốn xoá, hãy dùng Thùng rác hoặc yêu cầu xoá tài khoản."
-                        vars={{ trangthai: <strong>{t("không bị xoá")}</strong> }}
-                      />
-                    </li>
-                    <li>{t("Bạn có thể đồng ý lại bất cứ lúc nào ở chính trang này.")}</li>
-                  </ul>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {/* "Xác nhận rút", không lặp lại "Rút đồng ý": hai nút cùng
-                        chữ ở hai bước khác nhau làm người dùng không chắc mình
-                        đang ở bước nào, và bước thứ hai là bước không lùi được. */}
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      loading={isBusy}
-                      onClick={() => void withdraw(c)}
-                    >
-                      {t("Xác nhận rút")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={isBusy}
-                      onClick={() => setConfirming(null)}
-                    >
-                      {t("Giữ nguyên")}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </article>
-          );
-        })}
-      </div>
-    </section>
+    <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      <ShieldCheckIcon className="h-5 w-5 shrink-0 text-amber-600" aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        {t(
+          "Bạn còn {what} chưa xác minh. Chưa xác minh thì không lấy lại được tài khoản khi quên mật khẩu.",
+          { what: missing.join(t(" và ")) },
+        )}
+      </span>
+      <Link
+        to="/settings/security"
+        className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+      >
+        {t("Xác minh ngay")}
+      </Link>
+    </div>
   );
 }
 
@@ -421,7 +147,7 @@ function UsernameSection() {
     } finally {
       setBusy(false);
     }
-  }, [canSave, trimmed, toast]);
+  }, [canSave, trimmed, toast, t]);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -476,6 +202,168 @@ function UsernameSection() {
           <p className="mt-2 text-xs text-sky-800">
             {t("Nhật ký kiểm toán giữ nguyên tên cũ — đó là bằng chứng lịch sử về việc ai đã làm gì, và sửa nó theo tên mới là viết lại lịch sử.")}
           </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------- email
+
+/**
+ * Đổi email — hai bước, và mã đi tới ĐỊA CHỈ MỚI.
+ *
+ * Không phải một ô `<input>` bấm Lưu là xong. Email là khoá khôi phục tài
+ * khoản: nếu đổi được nó chỉ bằng một phiên đang mở, thì một máy bỏ quên ở quán
+ * cà phê đủ để mất tài khoản vĩnh viễn — kẻ chiếm được chỉ cần trỏ địa chỉ sang
+ * hộp thư của mình rồi bấm "quên mật khẩu".
+ *
+ * Nên mật khẩu hỏi ở cả hai bước, và mã sáu chữ số phải tới được hộp thư MỚI.
+ * Một địa chỉ gõ nhầm sẽ đơn giản là không nhận được mã, và việc đổi không xảy
+ * ra — hướng hỏng đúng chiều.
+ */
+function EmailSection() {
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [step, setStep] = useState<"idle" | "code">("idle");
+  const [newEmail, setNewEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const reset = () => {
+    setStep("idle");
+    setNewEmail("");
+    setPassword("");
+    setCode("");
+    setError("");
+  };
+
+  const start = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const out = await startEmailChange({
+        currentPassword: password,
+        newEmail: newEmail.trim(),
+      });
+      setStep("code");
+      toast.success(t("Đã gửi mã tới {email}.", { email: out.sent_to }));
+    } catch (err) {
+      setError(friendlyError(err, t("Không gửi được mã tới địa chỉ mới.")));
+    } finally {
+      setBusy(false);
+    }
+  }, [password, newEmail, toast, t]);
+
+  const confirm = useCallback(async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const out = await confirmEmailChange({ currentPassword: password, code: code.trim() });
+      toast.success(t("Đã đổi email thành {email}.", { email: out.email }));
+      reset();
+      // Header và trang hồ sơ đang giữ địa chỉ cũ. Không phát sự kiện thì người
+      // dùng thấy địa chỉ cũ cho tới lần tải trang sau và tưởng việc đổi hỏng.
+      notifyAuthChange();
+    } catch (err) {
+      setError(friendlyError(err, t("Mã không đúng hoặc đã hết hạn.")));
+    } finally {
+      setBusy(false);
+    }
+  }, [password, code, toast, t]);
+
+  const emailLooksValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail.trim());
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <h2 className="text-lg font-semibold text-slate-900">{t("Địa chỉ email")}</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        {t("Đây là địa chỉ nhận mã khôi phục khi bạn quên mật khẩu. Mã xác nhận sẽ được gửi tới địa chỉ MỚI, nên hãy chắc bạn đọc được hộp thư đó.")}
+      </p>
+
+      <p className="mt-3 text-sm">
+        <span className="text-slate-500">{t("Đang dùng")}: </span>
+        <span className="font-medium text-slate-900">{user?.email ?? ""}</span>
+      </p>
+
+      {step === "idle" ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="min-w-0">
+            <span className="mb-1 block text-xs font-medium text-slate-500">
+              {t("Địa chỉ email mới")}
+            </span>
+            <input
+              type="email"
+              value={newEmail}
+              autoComplete="email"
+              onChange={(e) => setNewEmail(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-ctu-blue focus:outline-none focus:ring-1 focus:ring-ctu-blue"
+            />
+          </label>
+          <label className="min-w-0">
+            <span className="mb-1 block text-xs font-medium text-slate-500">
+              {t("Mật khẩu hiện tại")}
+            </span>
+            <input
+              type="password"
+              value={password}
+              autoComplete="current-password"
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-ctu-blue focus:outline-none focus:ring-1 focus:ring-ctu-blue"
+            />
+          </label>
+          <div className="sm:col-span-2">
+            <Button
+              loading={busy}
+              disabled={busy || !emailLooksValid || password.length < 1}
+              onClick={() => void start()}
+            >
+              {t("Gửi mã tới địa chỉ mới")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="min-w-0">
+            <span className="mb-1 block text-xs font-medium text-slate-500">
+              {t("Mã 6 chữ số vừa gửi")}
+            </span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              maxLength={10}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm tracking-widest focus:border-ctu-blue focus:outline-none focus:ring-1 focus:ring-ctu-blue"
+            />
+          </label>
+          <div className="flex items-end gap-2 sm:col-span-2">
+            <Button
+              loading={busy}
+              disabled={busy || code.trim().length < 4}
+              onClick={() => void confirm()}
+            >
+              {t("Xác nhận đổi email")}
+            </Button>
+            <button
+              type="button"
+              onClick={reset}
+              className="text-sm font-medium text-slate-500 hover:text-slate-700"
+            >
+              {t("Huỷ")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{error}</span>
         </div>
       )}
     </section>

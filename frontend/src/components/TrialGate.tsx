@@ -234,7 +234,7 @@ function Invitation({
         </div>
 
         <p className="mt-4 text-xs text-slate-500">
-          Có tài khoản rồi?{" "}
+          {t("Có tài khoản rồi?")}{" "}
           <Link to="/login" className="font-semibold text-ctu-blue hover:text-ctu-navy">
             {t("Đăng nhập")}
           </Link>{" "}

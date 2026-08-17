@@ -227,11 +227,16 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
             </div>
 
+            {/* Không `lg:hidden`. Trên màn hình rộng, thứ duy nhất đóng được
+                thanh bên là cái nút ba gạch ở header — và người dùng không đọc
+                nó là "đóng", họ đọc nó là "mở". Một ngăn kéo mở ra mà không có
+                dấu X nào trong tầm mắt thì đọc như một ngăn kéo không đóng
+                được, bất kể có phím tắt nào khác hay không. */}
             <button
               type="button"
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              aria-label={t("Đóng sidebar")}
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              aria-label={t("Đóng thanh bên")}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

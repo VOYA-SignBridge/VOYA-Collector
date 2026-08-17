@@ -30,7 +30,7 @@ import Badge from "../components/ui/Badge";
 import { BuildingIcon, DownloadIcon, RefreshIcon, TrashIcon } from "../components/ui/Icons";
 import { friendlyError } from "../lib/errors";
 import { FOCUS_RING, toneClasses, toneForStatus, type StatusTone } from "../theme/status";
-import { useI18n } from "../i18n";
+import { Trans, useI18n } from "../i18n";
 import {
   addMember,
   createInvitation,
@@ -578,9 +578,10 @@ export default function AdminTenantsPage() {
             ) : (
               <>
                 <p className="text-sm text-slate-600 mb-2">
-                  Xoá vĩnh viễn sẽ lấy đi{" "}
-                  <strong className="tabular-nums">{preview.total_rows.toLocaleString("vi-VN")}</strong>{" "}
-                  dòng dữ liệu:
+                  <Trans
+                    k="Xoá vĩnh viễn sẽ lấy đi {n} dòng dữ liệu:"
+                    vars={{ n: <strong className="tabular-nums">{preview.total_rows.toLocaleString("vi-VN")}</strong> }}
+                  />
                 </p>
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {Object.entries(preview.row_counts)

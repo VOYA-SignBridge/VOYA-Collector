@@ -72,7 +72,7 @@ export const EN: Record<string, string> = {
     "Actions here affect other people and their data.",
   "Mở hoặc đóng thanh điều hướng": "Open or close navigation",
   "Đóng thanh điều hướng": "Close navigation",
-  "Đóng sidebar": "Close sidebar",
+  "Đóng thanh bên": "Close sidebar",
   "Người dùng": "Users",
   "Đại học Cần Thơ": "Can Tho University",
   "Khu II, Đ. 3/2, Xuân Khánh, Ninh Kiều, Cần Thơ":
@@ -95,12 +95,52 @@ export const EN: Record<string, string> = {
     "Vietnamese is the source language. English covers the shell, settings, support, sign-in and legal documents. Some specialised screens are still Vietnamese only.",
   "Nội dung do người dùng nhập — tên nhãn, mô tả, nội dung phiếu hỗ trợ — luôn giữ nguyên như lúc nhập, không dịch máy.":
     "Content people type, such as label names, descriptions and support messages, is always shown exactly as entered and never machine-translated.",
-  "Lớp bảo vệ thứ hai cho tài khoản, và cách lấy lại quyền truy cập nếu mất thiết bị.":
-    "A second layer of protection for your account, and how to get back in if you lose your device.",
-  "Đổi mật khẩu qua luồng khôi phục sẽ thu hồi mọi phiên đăng nhập trên mọi thiết bị — kể cả phiên của người có thể đã chiếm được tài khoản.":
-    "Changing your password through account recovery revokes every session on every device, including any session belonging to someone who may have taken over the account.",
-  "Xem lại những gì bạn đã đồng ý, thay đổi quyết định, và đổi tên đăng nhập.":
-    "Review what you have agreed to, change your mind, and update your username.",
+  // --- Cài đặt: Tài khoản / Bảo mật / Đồng thuận (tách 16/08/2026) ---
+  "Sửa tên đăng nhập và địa chỉ liên hệ của bạn.":
+    "Update your username and contact details.",
+  "Đồng thuận": "Consents",
+  "Đồng thuận của tôi": "My consents",
+  "Xem lại từng văn bản bạn đã ký, đọc lại đúng bản đã ký, và thay đổi quyết định.":
+    "Review each document you signed, read back the exact version you signed, and change your mind.",
+  "Đổi mật khẩu, xác minh địa chỉ liên hệ, và bật lớp bảo vệ thứ hai.":
+    "Change your password, verify your contact details, and turn on a second layer of protection.",
+
+  // --- Đổi mật khẩu khi đang đăng nhập ---
+  "Đổi mật khẩu": "Change password",
+  "Cần mật khẩu hiện tại. Sau khi đổi, mọi thiết bị sẽ bị đăng xuất — kể cả thiết bị bạn đang dùng — nên bạn sẽ phải đăng nhập lại.":
+    "Your current password is required. After the change, every device is signed out — including this one — so you will need to sign in again.",
+  // "Nhập lại mật khẩu mới" và "Địa chỉ email" đã có ở nhóm "Xác thực & khôi
+  // phục" phía trên — khai lại ở đây là khoá TRÙNG, và TypeScript bắt lỗi
+  // TS1117 chứ không âm thầm lấy bản cuối.
+  "Mã xác thực hai bước, hoặc mã khôi phục":
+    "Two-factor code, or a recovery code",
+  "Tài khoản đang bật xác thực hai bước. Nhập mã 6 chữ số, hoặc một mã khôi phục.":
+    "This account has two-factor authentication on. Enter the 6-digit code, or a recovery code.",
+  "Nhập mật khẩu hiện tại.": "Enter your current password.",
+  "Mật khẩu mới cần ít nhất 8 ký tự.": "The new password needs at least 8 characters.",
+  "Hai ô mật khẩu mới phải giống nhau.": "Both new-password fields must match.",
+  "Không đổi được mật khẩu.": "Could not change the password.",
+  "Quên mật khẩu hiện tại? Hãy đăng xuất rồi dùng \"Quên mật khẩu\" ở màn hình đăng nhập. Nếu bạn cũng không mở được hộp thư, hãy liên hệ quản trị viên — họ mở lại được cửa mà không cần biết mật khẩu của bạn.":
+    "Forgot your current password? Sign out and use \"Forgot password\" on the sign-in screen. If you cannot open your mailbox either, contact an administrator — they can reopen the door without ever knowing your password.",
+
+  // --- Đổi email ---
+  "Địa chỉ email mới": "New email address",
+  "Đang dùng": "Currently",
+  "Gửi mã tới địa chỉ mới": "Send a code to the new address",
+  "Mã 6 chữ số vừa gửi": "The 6-digit code we just sent",
+  "Xác nhận đổi email": "Confirm the new email",
+  "Đây là địa chỉ nhận mã khôi phục khi bạn quên mật khẩu. Mã xác nhận sẽ được gửi tới địa chỉ MỚI, nên hãy chắc bạn đọc được hộp thư đó.":
+    "This is where recovery codes go when you forget your password. The confirmation code is sent to the NEW address, so make sure you can read that mailbox.",
+  "Đã gửi mã tới {email}.": "Code sent to {email}.",
+  "Đã đổi email thành {email}.": "Email changed to {email}.",
+  "Không gửi được mã tới địa chỉ mới.": "Could not send a code to the new address.",
+
+  // --- Nhắc xác minh ---
+  "Xác minh ngay": "Verify now",
+  "địa chỉ email": "email address",
+  "số điện thoại": "phone number",
+  "Bạn còn {what} chưa xác minh. Chưa xác minh thì không lấy lại được tài khoản khi quên mật khẩu.":
+    "You still have an unverified {what}. Without verification you cannot get your account back if you forget your password.",
   "Chứng minh bạn đang giữ email và số điện thoại gắn với tài khoản. Địa chỉ đã xác minh là đường khôi phục khi bạn quên mật khẩu.":
     "Prove you control the email address and phone number on this account. A verified address is your way back in if you forget your password.",
   "Chấp thuận của tôi": "My consents",
@@ -251,6 +291,7 @@ export const EN: Record<string, string> = {
   "mọi mức": "all levels",
   "không bị xoá": "is not deleted",
   "từng buổi ghi hình": "each recording session",
+  "vừa xong": "just now",
   "vẫn chạy hết": "still runs to completion",
   "vẫn còn nguyên": "is left untouched",
   "vẫn ghi được": "can still be written",
@@ -746,7 +787,6 @@ export const EN: Record<string, string> = {
   "Sắp xếp từ yếu nhất — các lớp F1 thấp cần thu thêm dữ liệu hoặc kiểm tra chất lượng mẫu.": "Sorted weakest first — classes with low F1 need more data or a check on sample quality.",
   "Sẵn sàng chụp tiếp — nhập nhãn mới và nhấn nút Bắt đầu chụp": "Ready for the next capture — enter a new label and press Start capture",
   "Sẵn sàng đóng góp cho": "Ready to contribute to",
-  "Số bắt đầu bằng dấu cộng và mã quốc gia, ví dụ": "The number starts with a plus and the country code, for example",
   "Số dòng": "Rows",
   "Số epoch đã chạy": "Epochs run",
   "Số hiệu phiên bản": "Version number",
@@ -935,6 +975,7 @@ export const EN: Record<string, string> = {
   "Xem Kết Quả →": "View results →",
   "Xem bản đang có trên máy chủ": "View the version currently on the server",
   "Xem các tùy chọn trên màn hình": "See the options on screen",
+  "Xem chi tiết": "See details",
   "Xem dạng danh sách": "List view",
   "Xem dạng lưới": "Grid view",
   "Xem hướng dẫn": "View the guide",
@@ -996,8 +1037,6 @@ export const EN: Record<string, string> = {
   "nhãn phổ biến": "common labels",
   "phiên ghi": "capture sessions",
   "sẽ mất quyền truy cập dữ liệu của tổ chức.": "will lose access to the organization's data.",
-  "thay cho thoả thuận đó.": "in place of that agreement.",
-  "theo lời mời. Địa chỉ email đã được điền sẵn và không đổi được — lời mời nêu đích danh địa chỉ đó.": "by invitation. The email address is filled in and cannot be changed — the invitation names that exact address.",
   "toạ độ trong không gian thật": "coordinates in real space",
   "tùy thuộc vào cấu hình phần cứng của máy.": "depending on the machine's hardware.",
   "vd: xin chào, cảm ơn": "e.g. hello, thank you",
@@ -1575,7 +1614,15 @@ export const EN: Record<string, string> = {
   "Câu trả lời mẫu": "Canned replies",
   "Còn trống {p1} GB": "{p1} GB free",
   "Có {length} lỗi cần sửa trước khi upload": "{length} problems must be fixed before uploading",
-  "Cần tiêu đề từ 5 ký tự và mô tả từ 10 ký tự.": "The subject needs at least 5 characters and the description at least 10.",
+  // Thay cho "Cần tiêu đề từ 5 ký tự và mô tả từ 10 ký tự." — một câu bắt người
+  // dùng tự đối chiếu hai vế với hai ô để đoán mình sai ở đâu. Giờ nói đúng một
+  // thứ đang thiếu, ngay cạnh nút Gửi.
+  "Còn thiếu tiêu đề ở ô trên (từ 5 ký tự).":
+    "The subject field above is still empty (5 characters minimum).",
+  "Mô tả cần ít nhất 10 ký tự để người trực hiểu chuyện gì đang xảy ra.":
+    "The description needs at least 10 characters so the agent can tell what is happening.",
+  "Tiêu đề, từ 5 ký tự": "Subject, 5 characters or more",
+  "Mô tả, từ 10 ký tự": "Description, 10 characters or more",
   "Cần {FIXED_TARGET_FRAMES} khung trước khi dừng": "{FIXED_TARGET_FRAMES} frames are needed before stopping",
   "Dừng": "Stop",
   "Dừng nhận diện": "Stop recognition",
@@ -1688,8 +1735,10 @@ export const EN: Record<string, string> = {
   "{label} thất bại": "{label} failed",
   "{label} {ok_count} mục": "{label} {ok_count} items",
   "{label}: {ok_count} thành công, {failed_count} lỗi": "{label}: {ok_count} succeeded, {failed_count} failed",
+  "{n} chưa đọc": "{n} unread",
   "{n} giờ": "{n} h",
   "{n} giờ trước": "{n} h ago",
+  "{n} ngày trước": "{n} d ago",
   "{n} nhân logic": "{n} logical cores",
   "{n} phút trước": "{n} min ago",
   "{n}s trước": "{n}s ago",
@@ -1948,4 +1997,97 @@ export const EN: Record<string, string> = {
   "Tính toán...": "Calculating…",
   "Đưa model này vào tab nhận diện realtime? Model sẽ hiển thị cho tất cả người dùng.": "Publish this model to the real-time recognition tab? It will be visible to every user.",
   "Bạn có chắc muốn hủy huấn luyện này?": "Cancel this training run?",
+
+  // --- Chuỗi bộ đo i18n từng KHÔNG nhìn thấy (16/08/2026) ---
+  //
+  // Cả nhóm này đã hiện chữ Việt giữa màn hình tiếng Anh trong khi
+  // `i18n-coverage.mjs` báo 100,0%. Hai chỗ mù: một `accept="video/*"` mở chú
+  // thích khối ma nuốt 65 dòng, và luật 1 không nhìn thấy nút văn bản JSX bắt
+  // đầu ở dòng mới — tức đa số JSX đã được định dạng tự động. Xem chú thích
+  // trong `scripts/i18n-coverage.mjs`.
+  "Danh sách nhãn": "Label list",
+  "Danh sách file ({n})": "File list ({n})",
+  "Kéo thả video vào đây": "Drag and drop videos here",
+  "hoặc chọn từ máy tính": "or pick them from your computer",
+  "Chọn file": "Choose files",
+  "Chọn thư mục": "Choose a folder",
+  "Hỗ trợ: MP4, MOV, AVI, WMV, MKV, WebM • Tối đa 100MB/file":
+    "Supported: MP4, MOV, AVI, WMV, MKV, WebM • Up to 100MB per file",
+  "Có thể import CSV trước hoặc sau đều được":
+    "You can import the CSV before or after adding the videos",
+  "Import CSV để ánh xạ label hàng loạt. Format: filename,label,user,dialect":
+    "Import a CSV to map labels in bulk. Format: filename,label,user,dialect",
+  "Mở ứng dụng xác thực trên điện thoại và nhập mã 6 chữ số. Nếu mất điện thoại, hãy nhập một mã khôi phục dạng {mau}.":
+    "Open the authenticator app on your phone and enter the 6-digit code. If you lost the phone, enter a recovery code in the form {mau}.",
+  "Chưa có số đo nào trong khoảng này. Số đo được gộp mỗi ngày bởi tác vụ nền; một bản triển khai vừa dựng có thể cần chạy {lenh}.":
+    "No measurements in this range yet. Figures are rolled up daily by a background task; a freshly built deployment may need to run {lenh}.",
+
+  // --- Chuỗi gom lại thành câu TRỌN (16/08/2026) ---
+  //
+  // Cả nhóm này từng nằm trần trong JSX và vô hình với bộ đo. Nhiều câu trước
+  // đây bị cắt thành mảnh quanh một `{biến}`; gộp lại thành một khoá là điều
+  // kiện để bản tiếng Anh sắp lại được trật tự câu — tiếng Anh đặt số đếm và
+  // mệnh đề phụ khác chỗ với tiếng Việt, nên dịch từng mảnh cho ra câu đúng
+  // ngữ pháp mà sai trật tự.
+  " · bắt buộc để dùng hệ thống": " · required to use the system",
+  ". Bạn không mất gì ngay bây giờ.": ". You lose nothing right now.",
+  "+{n} nhãn khác": "+{n} more labels",
+  "... và {n} lỗi khác": "... and {n} more errors",
+  "Bước {n} / 3": "Step {n} of 3",
+  "Bạn đang gia nhập {tochuc} theo lời mời. Địa chỉ email đã được điền sẵn và không đổi được — lời mời nêu đích danh địa chỉ đó.":
+    "You are joining {tochuc} by invitation. The email address is filled in and cannot be changed — the invitation names that exact address.",
+  "Bạn đã ký bản {ban}": "You signed version {ban}",
+  "Bản dùng thử kết thúc vào {ngay}. Liên hệ quản trị viên nền tảng để chuyển sang gói chính thức.":
+    "The trial ends on {ngay}. Contact a platform administrator to move to a paid plan.",
+  "Bản đang hiệu lực: {ban}": "Version in effect: {ban}",
+  "Bắt đầu {luc} · {n} mẫu": "Started {luc} · {n} samples",
+  "Chưa công bố: {ds}": "Not published yet: {ds}",
+  "Còn {n} mã chưa dùng. Cấp lại sẽ huỷ toàn bộ mã cũ ngay lập tức.":
+    "{n} unused codes left. Reissuing revokes every old code immediately.",
+  "Có tài khoản rồi?": "Already have an account?",
+  "Có {n} lỗi cần sửa trước khi upload:": "{n} errors to fix before uploading:",
+  "GPS ±{n}m · bản đồ": "GPS ±{n}m · map",
+  "Giá ({tien} / {ky})": "Price ({tien} / {ky})",
+  "Gợi ý catalog: {n} tay": "Catalog suggests: {n} hands",
+  "Hiện danh sách bảng & cột": "Show the table and column list",
+  "Ẩn danh sách bảng & cột": "Hide the table and column list",
+  "Hoàn tất": "Finish",
+  "Ký văn bản này cho phép dùng dữ liệu bạn đóng góp ở mức: {muc}. Các mức cao hơn — công bố cùng bài báo, chia sẻ ra ngoài tổ chức — cần một thoả thuận riêng bằng văn bản, và việc ký ở đây {khong} thay cho thoả thuận đó.":
+    "Signing this document allows your contributed data to be used at this level: {muc}. Higher levels — publishing alongside a paper, sharing outside the organisation — need a separate written agreement, and signing here does {khong} replace that agreement.",
+  "Lưu {n} mã này ở nơi an toàn ngay bây giờ": "Save these {n} codes somewhere safe right now",
+  "Lần quay {n}": "Recording {n}",
+  "Mã sẽ tạo:": "Code to be created:",
+  "Mã đã được xác nhận. Đặt mật khẩu mới cho tài khoản {taikhoan}.":
+    "The code is confirmed. Set a new password for {taikhoan}.",
+  "Nhãn mới ({n} nhãn hiện có)": "New label ({n} existing labels)",
+  "Số bắt đầu bằng dấu cộng và mã quốc gia, ví dụ {vidu}. Mã có hiệu lực {phut} phút và nhập sai quá năm lần thì phải xin mã mới.":
+    "The number starts with a plus and the country code, for example {vidu}. A code lasts {phut} minutes, and after five wrong attempts you must request a new one.",
+  "Tôi đã đọc và đồng ý với": "I have read and agree to",
+  "Tôi đã đọc và đồng ý với {vanban} {ban}.": "I have read and agree to {vanban} {ban}.",
+  "Tổng phân bổ container:": "Total allocated to containers:",
+  "Tổng: {n} mẫu": "Total: {n} samples",
+  "Xoá vĩnh viễn sẽ lấy đi {n} dòng dữ liệu:": "Permanent deletion will take away {n} rows of data:",
+  "bản ghi #{n}": "revision #{n}",
+  "dựa trên {ban}": "based on {ban}",
+  "{ban} — {lop} lớp · train {tr}/val {va}/test {te}":
+    "{ban} — {lop} classes · train {tr}/val {va}/test {te}",
+  "{n} khung hình": "{n} frames",
+  "{n} khung đã chụp": "{n} frames captured",
+  "{n} lần": "{n} attempts",
+  "{n} lần giao hỏng liên tiếp": "{n} consecutive delivery failures",
+  "{n} mẫu": "{n} samples",
+  "{n} mẫu — dùng để dạy mô hình": "{n} samples — used to teach the model",
+  "{n} mẫu — dùng để điều chỉnh mô hình": "{n} samples — used to tune the model",
+  "{n} mẫu — đo hiệu suất cuối cùng (tính tự động)":
+    "{n} samples — the final performance measurement (computed automatically)",
+  "{n} nhân · dùng chung, không ghim cứng": "{n} cores · shared, not pinned",
+  "{n}% ngân sách": "{n}% of the budget",
+  "{tong} phương ngữ • {chon} được chọn": "{tong} varieties • {chon} selected",
+  "© {nam} Đại học Cần Thơ · CTU.SignBridge": "© {nam} Can Tho University · CTU.SignBridge",
+  "Đang upload ({dang}/{tong})": "Uploading ({dang}/{tong})",
+  "Đã có {n} mẫu": "{n} samples already",
+  "Đã tự tắt: {ly_do}": "Auto-disabled: {ly_do}",
+  "Đã đưa vào Realtime lúc {luc}": "Published to real-time at {luc}",
+  "Đề xuất bởi {ai} · {luc}": "Proposed by {ai} · {luc}",
+  "◐ {n} mục": "◐ {n} selected",
 };
