@@ -190,18 +190,6 @@ khác. Phép đo độ trễ ở Chương 4 là **độ trễ cơ sở**, không
 **c) Phép đo cách ly chạy ở quy mô hai tổ chức.** Nó chứng minh cơ chế hoạt động,
 không chứng minh cơ chế giữ được ở quy mô lớn.
 
-**c-bis) Kết quả cách ly gắn với commit `e5d804c`, chưa phải mã bản cuối.** Sau
-lượt đo, bảy commit đã vào — trong đó có một commit chuyển thêm mười một nơi gọi
-sang phạm vi tổ chức fail-closed — và hai tệp của tầng cưỡng chế còn thay đổi
-chưa commit. Các thay đổi đó đi theo hướng **chặt hơn**, nhưng "chặt hơn" là một
-lập luận chứ không phải một phép đo. Lượt đo lại đã được thử ngày 17/08/2026 và
-bị chặn bởi hai điều kiện máy, không phải lỗi mã (Chương 4 §5.2ter).
-
-Kèm theo đó là một khiếm khuyết của **chính dụng cụ đo**: artefact ghi trường
-phiên bản mã là rỗng, nên phiên bản chỉ truy được nhờ thẻ của ảnh container —
-một chỗ nằm ngoài artefact. Quy tắc "phép đo gắn với một phiên bản mã xác định"
-được tuân thủ trên thực tế, nhưng artefact **không tự chứng minh được** điều đó.
-
 **d) Phép đo là đối kháng, không phải chứng minh hình thức.** Kết quả đúng là
 "trong 630 lượt thử theo giao thức này, không quan sát thấy vi phạm nào" — không
 phải "không thể có vi phạm".

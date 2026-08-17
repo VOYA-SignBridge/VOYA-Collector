@@ -1,9 +1,11 @@
 {
   "moi_truong": {
     "base": "http://voya_backend_iso:8000",
-    "thoi_diem": "2026-08-16T07:55:56+00:00",
-    "git_commit": null,
-    "git_ban": null,
+    "thoi_diem": "2026-08-17T01:29:56+00:00",
+    "git_commit": "11a80c21ea2de0a68fe35385b558b3d73f9c398c",
+    "git_ban": true,
+    "snapshot_tree_sha256": "4e961192f079835b491b05091e251d36d1ceb3b41dd11de28f34b7e8b6cca3f2",
+    "snapshot_id": "P0B-20260817T011910-4e9611",
     "database": "signdb_test",
     "runtime_role": "voya_test_app",
     "postgres": "PostgreSQL 17.10 (Debian 17.10-1.pgdg13+1) on x86_64-pc-linux-gnu",
@@ -19,6 +21,7 @@
   "svsr": 0.0,
   "so_ca_mo": 0,
   "cong_bo_duoc": true,
+  "ly_do_khong_cong_bo": [],
   "ctivr_mau_so": 450,
   "ctivr_nhom": [
     "B",
@@ -35,7 +38,21 @@
     "401": 120
   },
   "positive_control_passed": true,
-  "hau_dieu_kien": null,
+  "hau_dieu_kien": {
+    "iso_a": {
+      "tenant_con": true,
+      "class_con": true,
+      "sample_con": true,
+      "class_van_tay": "a78706883c6853bd"
+    },
+    "iso_b": {
+      "tenant_con": true,
+      "class_con": true,
+      "sample_con": true,
+      "class_van_tay": "3b96b5f1c97dcb6a"
+    }
+  },
+  "hau_dieu_kien_loi": null,
   "hau_dieu_kien_dataset": {
     "control_delete_a": {
       "vai_tro": "control_delete",
@@ -44,8 +61,8 @@
       "csv_class": true,
       "csv_sample": false,
       "tep_con": true,
-      "bam_truoc": "050f612e776eff79",
-      "bam_sau": "050f612e776eff79",
+      "bam_truoc": "a45203df6c2f1b6a",
+      "bam_sau": "a45203df6c2f1b6a",
       "bam_khop": true,
       "nguyen_ven": false
     },
@@ -56,8 +73,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "2e929fab4bc8067d",
-      "bam_sau": "2e929fab4bc8067d",
+      "bam_truoc": "f9d5460a7026a0ec",
+      "bam_sau": "f9d5460a7026a0ec",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -68,8 +85,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "cf7a8f38984aa312",
-      "bam_sau": "cf7a8f38984aa312",
+      "bam_truoc": "550bb739af185ebf",
+      "bam_sau": "550bb739af185ebf",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -80,8 +97,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "2fd639a918392458",
-      "bam_sau": "2fd639a918392458",
+      "bam_truoc": "5f8340878301e091",
+      "bam_sau": "5f8340878301e091",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -92,8 +109,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "7880aa955d1089e7",
-      "bam_sau": "7880aa955d1089e7",
+      "bam_truoc": "07c1c5d19c5b2ce5",
+      "bam_sau": "07c1c5d19c5b2ce5",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -104,8 +121,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "50646720626f241c",
-      "bam_sau": "50646720626f241c",
+      "bam_truoc": "de891367a9d5dc82",
+      "bam_sau": "de891367a9d5dc82",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -116,8 +133,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "90563d7ff5189d7e",
-      "bam_sau": "90563d7ff5189d7e",
+      "bam_truoc": "665de4bb409bec59",
+      "bam_sau": "665de4bb409bec59",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -128,8 +145,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "2e512d1dca7a2b04",
-      "bam_sau": "2e512d1dca7a2b04",
+      "bam_truoc": "4b627bc21243309a",
+      "bam_sau": "4b627bc21243309a",
       "bam_khop": true,
       "nguyen_ven": true
     },
@@ -140,8 +157,8 @@
       "csv_class": true,
       "csv_sample": true,
       "tep_con": true,
-      "bam_truoc": "2e929fab4bc8067d",
-      "bam_sau": "2e929fab4bc8067d",
+      "bam_truoc": "f9d5460a7026a0ec",
+      "bam_sau": "f9d5460a7026a0ec",
       "bam_khop": true,
       "nguyen_ven": true
     }
@@ -160,7 +177,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -168,7 +185,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -176,7 +193,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -184,7 +201,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -192,7 +209,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -200,7 +217,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -208,7 +225,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -216,7 +233,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -224,7 +241,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -232,7 +249,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -240,7 +257,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -248,7 +265,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -256,7 +273,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -264,7 +281,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -272,7 +289,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -280,7 +297,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -288,7 +305,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -296,7 +313,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -304,7 +321,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -312,7 +329,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -320,7 +337,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -328,7 +345,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -336,7 +353,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -344,7 +361,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -352,7 +369,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -360,7 +377,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -368,7 +385,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -376,7 +393,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -384,7 +401,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -392,7 +409,7 @@
       "nhom": "B",
       "mo_ta": "đọc phiên thu của lớp B",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -400,7 +417,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -408,7 +425,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -416,7 +433,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -424,7 +441,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -432,7 +449,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -440,7 +457,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -448,7 +465,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -456,7 +473,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -464,7 +481,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -472,7 +489,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -480,7 +497,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -488,7 +505,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -496,7 +513,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -504,7 +521,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -512,7 +529,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -520,7 +537,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -528,7 +545,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -536,7 +553,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -544,7 +561,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -552,7 +569,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -560,7 +577,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -568,7 +585,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -576,7 +593,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -584,7 +601,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -592,7 +609,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -600,7 +617,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -608,7 +625,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -616,7 +633,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -624,7 +641,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -632,7 +649,7 @@
       "nhom": "B",
       "mo_ta": "đọc dữ liệu mẫu của B",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -640,7 +657,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -648,7 +665,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -656,7 +673,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -664,7 +681,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -672,7 +689,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -680,7 +697,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -688,7 +705,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -696,7 +713,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -704,7 +721,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -712,7 +729,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -720,7 +737,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -728,7 +745,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -736,7 +753,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -744,7 +761,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -752,7 +769,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -760,7 +777,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -768,7 +785,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -776,7 +793,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -784,7 +801,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -792,7 +809,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -800,7 +817,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -808,7 +825,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -816,7 +833,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -824,7 +841,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -832,7 +849,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -840,7 +857,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -848,7 +865,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -856,7 +873,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -864,7 +881,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -872,7 +889,7 @@
       "nhom": "B",
       "mo_ta": "sửa lớp của B",
       "method": "PUT",
-      "path": "/api/v1/classes/isobtargde49a1",
+      "path": "/api/v1/classes/isobtarg9927b3",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -880,7 +897,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -888,7 +905,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -896,7 +913,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -904,7 +921,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -912,7 +929,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -920,7 +937,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -928,7 +945,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -936,7 +953,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -944,7 +961,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -952,7 +969,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -960,7 +977,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -968,7 +985,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -976,7 +993,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -984,7 +1001,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -992,7 +1009,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1000,7 +1017,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1008,7 +1025,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1016,7 +1033,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1024,7 +1041,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1032,7 +1049,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1040,7 +1057,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1048,7 +1065,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1056,7 +1073,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1064,7 +1081,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1072,7 +1089,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1080,7 +1097,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1088,7 +1105,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1096,7 +1113,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1104,7 +1121,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1112,7 +1129,7 @@
       "nhom": "B",
       "mo_ta": "xoá mẫu của B",
       "method": "DELETE",
-      "path": "/api/v1/dataset/samples/bf31fb6c85",
+      "path": "/api/v1/dataset/samples/bfa39aa236",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1600,7 +1617,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1608,7 +1625,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1616,7 +1633,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1624,7 +1641,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1632,7 +1649,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1640,7 +1657,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1648,7 +1665,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1656,7 +1673,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1664,7 +1681,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1672,7 +1689,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1680,7 +1697,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1688,7 +1705,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1696,7 +1713,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1704,7 +1721,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1712,7 +1729,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1720,7 +1737,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1728,7 +1745,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1736,7 +1753,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1744,7 +1761,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1752,7 +1769,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1760,7 +1777,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1768,7 +1785,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1776,7 +1793,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1784,7 +1801,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1792,7 +1809,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1800,7 +1817,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1808,7 +1825,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1816,7 +1833,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1824,7 +1841,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1832,7 +1849,7 @@
       "nhom": "A",
       "mo_ta": "xoá lớp khi vai không có quyền xoá",
       "method": "DELETE",
-      "path": "/api/v1/classes/isoareada44f22",
+      "path": "/api/v1/classes/isoareadf5a178",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1840,7 +1857,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1848,7 +1865,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1856,7 +1873,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1864,7 +1881,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1872,7 +1889,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1880,7 +1897,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1888,7 +1905,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1896,7 +1913,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1904,7 +1921,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1912,7 +1929,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1920,7 +1937,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1928,7 +1945,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1936,7 +1953,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1944,7 +1961,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1952,7 +1969,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1960,7 +1977,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1968,7 +1985,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1976,7 +1993,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1984,7 +2001,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -1992,7 +2009,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2000,7 +2017,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2008,7 +2025,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2016,7 +2033,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2024,7 +2041,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2032,7 +2049,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2040,7 +2057,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2048,7 +2065,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2056,7 +2073,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2064,7 +2081,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -2072,7 +2089,7 @@
       "nhom": "A",
       "mo_ta": "sửa lớp của chính đơn vị mình (đòi quản trị nền tảng)",
       "method": "PUT",
-      "path": "/api/v1/classes/isoaupd2555a2",
+      "path": "/api/v1/classes/isoaupd3d9f48",
       "status": 403,
       "ket_cuc": "CHAN"
     },
@@ -3760,7 +3777,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3768,7 +3785,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3776,7 +3793,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3784,7 +3801,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3792,7 +3809,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3800,7 +3817,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3808,7 +3825,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3816,7 +3833,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3824,7 +3841,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3832,7 +3849,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3840,7 +3857,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3848,7 +3865,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3856,7 +3873,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3864,7 +3881,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3872,7 +3889,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3880,7 +3897,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3888,7 +3905,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3896,7 +3913,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3904,7 +3921,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3912,7 +3929,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3920,7 +3937,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3928,7 +3945,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3936,7 +3953,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3944,7 +3961,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3952,7 +3969,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3960,7 +3977,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3968,7 +3985,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3976,7 +3993,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3984,7 +4001,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -3992,7 +4009,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã lớp không tồn tại",
       "method": "GET",
-      "path": "/api/v1/classes/4fb04114797c48c9/sessions",
+      "path": "/api/v1/classes/58a8758dda6b4120/sessions",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4000,7 +4017,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4008,7 +4025,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4016,7 +4033,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4024,7 +4041,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4032,7 +4049,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4040,7 +4057,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4048,7 +4065,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4056,7 +4073,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4064,7 +4081,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4072,7 +4089,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4080,7 +4097,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4088,7 +4105,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4096,7 +4113,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4104,7 +4121,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4112,7 +4129,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4120,7 +4137,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4128,7 +4145,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4136,7 +4153,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4144,7 +4161,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4152,7 +4169,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4160,7 +4177,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4168,7 +4185,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4176,7 +4193,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4184,7 +4201,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4192,7 +4209,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4200,7 +4217,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4208,7 +4225,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4216,7 +4233,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4224,7 +4241,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4232,7 +4249,7 @@
       "nhom": "B",
       "mo_ta": "đoán mã mẫu không tồn tại",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/5ae8ace8f3/data",
+      "path": "/api/v1/dataset/samples/bf441dc081/data",
       "status": 404,
       "ket_cuc": "CHAN"
     },
@@ -4240,7 +4257,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4248,7 +4265,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4256,7 +4273,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4264,7 +4281,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4272,7 +4289,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4280,7 +4297,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4288,7 +4305,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4296,7 +4313,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4304,7 +4321,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4312,7 +4329,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4320,7 +4337,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4328,7 +4345,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4336,7 +4353,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4344,7 +4361,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4352,7 +4369,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4360,7 +4377,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4368,7 +4385,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4376,7 +4393,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4384,7 +4401,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4392,7 +4409,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4400,7 +4417,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4408,7 +4425,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4416,7 +4433,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4424,7 +4441,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4432,7 +4449,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4440,7 +4457,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4448,7 +4465,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4456,7 +4473,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4464,7 +4481,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4472,7 +4489,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4480,7 +4497,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4488,7 +4505,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4496,7 +4513,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4504,7 +4521,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4512,7 +4529,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4520,7 +4537,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4528,7 +4545,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4536,7 +4553,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4544,7 +4561,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4552,7 +4569,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4560,7 +4577,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4568,7 +4585,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4576,7 +4593,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4584,7 +4601,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4592,7 +4609,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4600,7 +4617,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4608,7 +4625,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4616,7 +4633,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4624,7 +4641,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4632,7 +4649,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4640,7 +4657,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4648,7 +4665,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4656,7 +4673,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4664,7 +4681,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4672,7 +4689,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4680,7 +4697,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4688,7 +4705,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4696,7 +4713,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4704,7 +4721,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4712,7 +4729,7 @@
       "nhom": "B",
       "mo_ta": "đọc mẫu khi chưa đăng nhập",
       "method": "GET",
-      "path": "/api/v1/dataset/samples/bf31fb6c85/data",
+      "path": "/api/v1/dataset/samples/bfa39aa236/data",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4720,7 +4737,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4728,7 +4745,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4736,7 +4753,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4744,7 +4761,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4752,7 +4769,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4760,7 +4777,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4768,7 +4785,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4776,7 +4793,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4784,7 +4801,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4792,7 +4809,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4800,7 +4817,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4808,7 +4825,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4816,7 +4833,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4824,7 +4841,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4832,7 +4849,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4840,7 +4857,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4848,7 +4865,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4856,7 +4873,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4864,7 +4881,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4872,7 +4889,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4880,7 +4897,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4888,7 +4905,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4896,7 +4913,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4904,7 +4921,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4912,7 +4929,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4920,7 +4937,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4928,7 +4945,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4936,7 +4953,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4944,7 +4961,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },
@@ -4952,7 +4969,7 @@
       "nhom": "B",
       "mo_ta": "đọc lớp bằng token rác",
       "method": "GET",
-      "path": "/api/v1/classes/isobtargde49a1/sessions",
+      "path": "/api/v1/classes/isobtarg9927b3/sessions",
       "status": 401,
       "ket_cuc": "CHAN"
     },

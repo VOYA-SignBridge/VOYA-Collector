@@ -24,11 +24,18 @@ vốn không ghi được gì, thì "không ghi được của bên kia" không 
 trước khi đo. Mọi thay đổi mã trong lúc đo làm lượt đo đó mất hiệu lực.
 
 > **Quy tắc 3 có một vế thứ hai, và nó đã bị bỏ sót một lần.** Không đủ để phiên
-> bản mã *tồn tại*; **artefact phải tự ghi lại phiên bản đó**. Artefact của phép
-> đo cách ly ghi `git_commit: null` — phiên bản chỉ còn truy được nhờ thẻ của ảnh
-> container, một chỗ nằm ngoài artefact và có thể bị ghi đè bất cứ lúc nào. Một
-> phép đo mà người đọc không tự xác định được nó đo cái gì thì chưa gắn với phiên
-> bản nào cả. Xem Chương 4 §5.2bis; sửa kịch bản đo là việc đầu tiên trong §12.
+> bản mã *tồn tại*; **artefact phải tự ghi lại phiên bản đó**. Artefact ngày
+> 16/08 ghi `git_commit: null` — phiên bản chỉ còn truy được nhờ thẻ của ảnh
+> container, một chỗ nằm ngoài artefact và có thể bị ghi đè bất cứ lúc nào.
+>
+> **Đã vá 17/08/2026.** Danh tính chuẩn nay là **`tree_sha256` của ảnh chụp mã**,
+> không phải trạng thái git: ảnh chụp được gắn chỉ-đọc đè lên mã của container
+> nên bất biến theo cấu trúc, và nó phủ đúng những tệp tham gia hành vi. Cờ công
+> bố nhận một trong hai bằng chứng — ảnh chụp, hoặc một commit sạch cho trường
+> hợp đo mã nung sẵn trong ảnh.
+>
+> Bản đầu của cổng ấy khoá theo `git status` và **chặn nhầm** một lượt đo hợp lệ
+> vì một tệp markdown chưa theo dõi. Một cổng chặn nhầm là một cổng sẽ bị tắt.
 
 **Quy tắc 4 — Phát hiện trong lúc đo thì ghi lại, không sửa ngay.** Nếu phép đo
 lộ ra một lỗi, đó là **phát hiện của phép đo**. Sửa rồi đo lại trong cùng một
@@ -400,12 +407,12 @@ là **tinh chỉnh có lý do**, không phải cam kết bị bỏ:
 | # | Việc | Trạng thái | Vì sao |
 |---|---|---|---|
 | 1 | **Sửa kịch bản đo để ghi phiên bản mã vào artefact** | **xong 17/08/2026** | Cờ `cong_bo_duoc` nay có hai vế: hết ca mờ **và** xác định được phiên bản mã trên cây sạch |
-| 2 | **Đóng phép đo cách ly theo cách A hoặc cách B** (Chương 4 §5.2bis) | **chưa — bị chặn bởi điều kiện máy** | Kết quả hiện gắn với commit `e5d804c`, không phải mã bản cuối |
+| 2 | **Đóng phép đo cách ly trên mã bản cuối** (Chương 4 §5.2bis) | **xong 17/08/2026** | Đo lại trên ảnh chụp `4e961192`: 0/450, 0/180, 0 ca mờ, hậu điều kiện đạt |
 | 3 | Chụp lại số hàng của các bảng dữ liệu (Phụ lục A §4) | **chưa** | Ảnh chụp hiện tại là ngày 10/08/2026; ba bảng đã thay đổi đáng kể |
 | 4 | Chạy lại toàn bộ bộ kiểm thử và chép **số thật** kèm số bỏ qua | **xong 17/08/2026** | 2.528 xanh / 0 đỏ / 1 bỏ qua — số đếm tĩnh **không phải** số đã chạy xanh |
 | 5 | Đếm lại quy mô mã nguồn và lược đồ | **xong 17/08/2026** | Số cũ lệch tới 15 % ở phần mã kiểm thử |
 | 6 | Rà ba phát biểu đã hạ mức trên **cả bốn** vị trí: Tóm tắt, Chương 3, Chương 4, Kết luận | **chưa** | Lệch một chỗ là một câu hỏi phản biện không trả lời được |
 
-**Việc 1 và việc 2 nối nhau:** nếu đóng phép đo theo cách A (đo lại trên mã bản
-cuối) thì phải sửa kịch bản đo **trước**, nếu không lượt đo mới lại sinh ra một
-artefact không tự khai được phiên bản — và toàn bộ vấn đề lặp lại nguyên vẹn.
+**Việc 1 phải xong trước việc 2, và đã làm đúng thứ tự đó:** sửa kịch bản đo
+trước, rồi mới đo lại. Làm ngược thì lượt đo mới lại sinh ra một artefact không tự
+khai được phiên bản, và toàn bộ vấn đề lặp lại nguyên vẹn.

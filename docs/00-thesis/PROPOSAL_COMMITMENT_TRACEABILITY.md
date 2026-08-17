@@ -17,7 +17,7 @@ còn được đáp ứng không, bằng chứng nằm ở đâu.
 | # | Cam kết | Trạng thái cuối | Bằng chứng chính | Giới hạn |
 |---|---|---|---|---|
 | O1 | Kiến trúc đa tenant | **Đạt / tinh chỉnh** | `Tenant → Workspace → Project`; 59 bảng, 34 mang `tenant_id` | workspace/project chưa có bề mặt vận hành đầy đủ |
-| O2 | Cách ly tenant | **Chờ kiểm chứng cuối** | RLS + vai runtime; `test_file_backed_tenant_isolation.py` 12 pass | P0-B chưa chạy lại |
+| O2 | Cách ly tenant | **Đạt** | P0-B 17/08/2026 trên ảnh chụp `4e961192`: CTIVR 0/450, UASR 0/180, 0 ca mờ, hậu điều kiện đạt; `test_file_backed_tenant_isolation.py` 12 pass | hai tổ chức, đối kháng chứ không phải chứng minh hình thức |
 | O3 | RBAC nhiều phạm vi | **Đạt một phần** | gán vai system + tenant | `ws=0 prj=0`; Casbin shadow |
 | O4 | Phân loại VSL | **Đạt** | language/dialect/region + registry có phiên bản | — |
 | O5 | Hiệu quả lưu trữ | **Đạt** | 92,2% trên 54 cặp hợp lệ | QIPEDC ≠ luồng webcam |
@@ -568,7 +568,7 @@ Sai một điều kiện thì chỉ số là `NOT_PUBLISHABLE`. Xem
 | ưu tiên | việc | ghi chú |
 |---|---|---|
 | ~~P0-A~~ | ~~đo hiệu quả lưu trữ~~ | **xong** — 92,2%, xem §11 |
-| **P0-B** | **cách ly xuyên kho** | **chặn bởi: review + commit cây làm việc** — precheck 474 pass |
+| **P0-B** | **cách ly xuyên kho** | **ĐÓNG 17/08/2026** — cây đã commit, đo trên ảnh chụp mã, `cong_bo_duoc=true` |
 | ~~P0-C~~ | ~~đối chiếu cam kết~~ | **xong** — tài liệu này |
 | ~~P1-A~~ | ~~ma trận giả mạo SOT~~ | **xong** — 9 ca, 8 thoả + S7, xem §6 |
 | P1-B | báo cáo test chức năng | full-suite cuối, **sau** P0-B |

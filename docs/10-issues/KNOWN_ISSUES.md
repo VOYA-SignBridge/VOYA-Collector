@@ -1164,3 +1164,71 @@ in `ly_do_khong_cong_bo`. Áp lên artefact 16/08 (mo=0, commit=None) → `False
 
 `measure_api_latency.py` cùng khiếm khuyết, chưa có cờ công bố để hạ → thêm cảnh
 báo ra stderr.
+
+## P0-B ĐÓNG 17/08/2026 — và ba lỗi tìm được trên đường tới đó
+
+```
+CTIVR 0/450 · UASR 0/180 · SVSR 0/630 · 0 ca mờ · đối chứng dương 4/4
+ảnh chụp mã  P0B-20260817T011910-4e9611  (tree 4e961192f079835b…)
+hậu điều kiện CSDL + CSV + tệp: đạt
+cong_bo_duoc = true
+```
+
+### 1. `-o /dev/null` + `MSYS_NO_PATHCONV=1` — health probe báo hỏng cho container khoẻ
+
+`isolation_backend.sh` và `perf_backend.sh` đặt `MSYS_NO_PATHCONV=1` (cần cho
+`-w /src`), và chính dòng đó trao `/dev/null` NGUYÊN VĂN cho `curl.exe` — thành
+một đường dẫn tệp không tồn tại, **thoát 23 (write error)** dù máy chủ trả 200.
+
+Hai bản vá trong cùng một tệp đánh nhau, và triệu chứng không giống nguyên nhân:
+
+```
+ban dau           -> 23 la loi vinh vien -> bo thu lai  -> hong sau 2 GIAY
+them --retry-all  -> 23 thanh loi tam    -> thu du 60   -> hong sau 68 GIAY
+                     (nhat ky container: 60 dong GET /health 200)
+```
+
+→ vá: dùng chuyển hướng của shell. `--retry-all-errors` vẫn giữ, cho ca Docker
+publish cổng trước khi gunicorn bind (kết nối bị **reset**, không phải refused).
+`test_nginx_voya.sh`: vòng chờ `curl ... && break` không bao giờ break, luôn chạy
+đủ 20 lượt và không gác gì.
+
+### 2. `hau_dieu_kien` sập vì hình dạng fixture, SAU khi đã bắn 811 lượt
+
+Nhánh `--fixture` đọc `ben[<tenant>]["class_uid"]` — hình dạng của bộ gieo CŨ. Bộ
+gieo xuyên-kho hiện hành để đối tượng ở `doi_tuong` (danh sách, khoá theo tenant
+× vai trò). Kết quả: `KeyError: 'class_uid'` ném ra **sau** pha đối kháng và
+**trước** khi ghi artefact — mất trắng 15 phút đo. Artefact 16/08 mang
+`hau_dieu_kien: null` chính vì nhánh này chưa từng chạy được.
+
+→ vá: lớp chuyển đổi (như `_doc_fixture_dataset` đã có cho `--dataset-fixture`),
+**và** bọc bước hậu điều kiện trong try/except ghi lỗi vào artefact + hạ cờ công
+bố. Một bước phụ hỏng không được phá bằng chứng vừa thu.
+
+### 3. Cổng công bố khoá nhầm biến
+
+Bản đầu chặn theo `git status --porcelain`, và chặn một lượt đo hợp lệ vì **một
+tệp markdown chưa theo dõi**. Mã được đo nằm trong ảnh chụp chỉ-đọc, nên trạng
+thái cây làm việc không chạm tới nó được.
+
+→ vá: ghim theo `tree_sha256` của ảnh chụp; git sạch chỉ là đường dự phòng khi đo
+mã nung trong ảnh. Một cổng chặn nhầm là một cổng sẽ bị tắt.
+
+### Ghi chú vận hành: một lượt chạy sai token đã xoá thật tenant `iso_b`
+
+Lượt thử đầu trao `--token-a` cho `iso_admin_a` — tài khoản **quản trị nền tảng**
+mà bộ gieo tạo riêng cho phép đo cổng reassign. Với token đó, `GET /tenants`,
+`POST /tenants`, `DELETE /tenants/iso_b` đều 200/201 **một cách hợp lệ**, và bộ đo
+chấm chúng là vi phạm: CTIVR 0.2689, UASR 0.8013 — toàn bộ là hiện vật của việc
+trao nhầm vai, không phải phát hiện về hệ thống.
+
+Hệ quả thật: tenant `iso_b` bị xoá mềm và một tenant rác được tạo. Sửa xong bằng
+`UPDATE tenants SET deleted_at = NULL` và một lượt purge theo `PURGE_ORDER`.
+
+Đây đúng là lý do phép đo **không bao giờ** chạy trên `signdb`: bộ thử cố tình
+phát lệnh xoá, và hôm nay một trong số đó đã thực thi.
+
+Hai bài học nhỏ đi kèm: `--token-a` phải là **thành viên tổ chức**, không phải
+quản trị nền tảng; và `psql -c "a; b; c"` chạy cả chuỗi trong MỘT giao dịch ngầm
+— lỗi ở `c` cuốn ngược cả `a`, nên bản sửa `deleted_at` đầu tiên đã âm thầm bị
+huỷ.

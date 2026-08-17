@@ -583,11 +583,30 @@ def hau_dieu_kien(dsn: str, fx: dict) -> dict:
     import hashlib
     import psycopg2
 
+    # Chuẩn hoá hình dạng fixture — hai bộ gieo mô tả cùng một thứ khác nhau.
+    #
+    # Bản cũ (`seed_isolation_fixture.py`) để `class_uid`/`sample_uid` ngay trong
+    # `ben[<tenant>]`. Bộ gieo xuyên-kho hiện hành tách chúng ra `doi_tuong`, một
+    # DANH SÁCH khoá theo (tenant, vai trò), vì mỗi bên nay có bốn đối tượng chứ
+    # không còn một. `ben` chỉ còn giữ tài khoản.
+    #
+    # Không có lớp chuyển đổi này thì nhánh hậu điều kiện ném `KeyError:
+    # 'class_uid'` — và ném SAU khi đã bắn xong toàn bộ 811 lượt, tức là phá huỷ
+    # đúng cái bằng chứng vừa mất mười lăm phút để thu. `_doc_fixture_dataset`
+    # đã có lớp tương tự cho `--dataset-fixture`; nhánh này bị bỏ quên.
+    ben = fx.get("ben") or {}
+    if ben and "class_uid" not in next(iter(ben.values()), {}):
+        muc_tieu = {o["tenant_id"]: o for o in fx.get("doi_tuong", [])
+                    if o.get("vai_tro") == "target"}
+        ben = {t: {**v, "class_uid": muc_tieu[t]["class_uid"],
+                   "sample_uid": muc_tieu[t]["sample_uid"]}
+               for t, v in ben.items() if t in muc_tieu}
+
     ket = {}
     with psycopg2.connect(dsn) as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL app.system_scope = 'on'")
-            for ten, v in fx["ben"].items():
+            for ten, v in ben.items():
                 cur.execute("SELECT count(*) FROM tenants WHERE tenant_id = %s", (ten,))
                 con_tenant = cur.fetchone()[0]
                 cur.execute("SELECT count(*) FROM classes WHERE class_uid = %s",
@@ -865,7 +884,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # --- Hậu điều kiện: đọc lại CSDL, không tin vào mã HTTP -----------------
     hdk = None
+    hdk_loi = None
     if args.dsn and args.fixture:
+      try:
         with open(args.fixture, encoding="utf-8") as fh:
             fx = json.load(fh)
         hdk = hau_dieu_kien(args.dsn, fx)
@@ -878,6 +899,19 @@ def main(argv: Optional[list[str]] = None) -> int:
                   f"sample={v['sample_con']}  vân_tay={v['class_van_tay']}")
         if not moi_thu_con:
             print("  !! CÓ TÀI NGUYÊN BIẾN MẤT — một lượt xoá đã đi lọt dù HTTP nói khác")
+      except Exception as exc:
+        # Một bước hậu điều kiện hỏng KHÔNG được phá bằng chứng vừa thu.
+        #
+        # Bản trước để ngoại lệ bay lên và giết cả tiến trình — sau khi 811 lượt
+        # đã bắn xong nhưng TRƯỚC khi artefact được ghi. Mười lăm phút đo và
+        # toàn bộ dữ liệu thô mất sạch vì một `KeyError` ở khâu phụ.
+        #
+        # Nuốt lỗi thì cũng sai, nên nó được GHI VÀO artefact và làm hạ cờ công
+        # bố: một lượt đo thiếu vế hậu điều kiện vẫn là bằng chứng, chỉ là bằng
+        # chứng yếu hơn, và người đọc phải thấy được điều đó.
+        hdk_loi = f"{type(exc).__name__}: {exc}"
+        print(f"\nhậu điều kiện: HONG — {hdk_loi}")
+        print("  Con so doi khang o tren VAN CON GIA TRI; chi thieu ve thu ba.")
     else:
         print("\nhậu điều kiện: BỎ QUA (thiếu --dsn/--fixture) — kết quả chỉ dựa "
               "trên mã HTTP, chưa chứng minh được là không có tác dụng phụ")
@@ -919,6 +953,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ly_do_khong_cong_bo: list[str] = []
     if mo:
         ly_do_khong_cong_bo.append(f"{mo} ca khong ket luan duoc")
+    if hdk_loi:
+        ly_do_khong_cong_bo.append(f"hau dieu kien CSDL khong chay duoc: {hdk_loi}")
 
     # Hai đường ghim mã, nhận MỘT là đủ:
     #   snapshot  — bất biến theo cấu trúc, phủ đúng tệp tham gia hành vi
@@ -975,6 +1011,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "phan_bo_status": phan_bo,
                 "positive_control_passed": True,
                 "hau_dieu_kien": hdk,
+                "hau_dieu_kien_loi": hdk_loi,
                 "hau_dieu_kien_dataset": hdk_ds,
                 "khong_kiem_duoc": [
                     "đổi phạm vi workspace/project — API chưa có endpoint nào "

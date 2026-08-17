@@ -451,7 +451,7 @@ Bộ thử cố ý phát các lệnh **xoá** tổ chức, **xoá** mẫu và **
 bị chặn — và phép đo tồn tại chính vì điều đó chưa được chứng minh. Nếu cách ly
 thủng, phép đo sẽ chứng minh bằng cách xoá thật.
 
-*Bảng 4-15: Kết quả đo cách ly xuyên kho* — 16/08/2026
+*Bảng 4-15: Kết quả đo cách ly xuyên kho* — **17/08/2026**, ảnh chụp mã `P0B-…-4e9611`
 
 | Chỉ số | Giá trị | Mẫu số | Nghĩa |
 |---|---|---|---|
@@ -486,7 +486,7 @@ hỏng**:
 |---|---|---|
 | 1 — Đối chứng dương | Chủ sở hữu đọc được danh tính, phiên thu, dữ liệu mẫu của mình, **và xoá được mẫu của mình** | Đạt cả bốn |
 | 2 — Đối kháng | Ba nhóm A, B, C như bảng trên | Đạt |
-| 3 — Hậu điều kiện | Sau lượt đo, dữ liệu của bên bị nhắm **vẫn còn nguyên** trên cả cơ sở dữ liệu lẫn hệ tệp | Đạt |
+| 3 — Hậu điều kiện | Sau lượt đo, dữ liệu của bên bị nhắm **vẫn còn nguyên** trên cả cơ sở dữ liệu lẫn hệ tệp | Đạt — cả hai tổ chức còn đủ tenant, lớp và mẫu, kèm vân tay nội dung |
 | 4 — Không có ca mờ | Mọi lượt gọi đều quy được về "chặn" hoặc "vi phạm" | Đạt — 0 ca |
 
 **Lớp 1 là lớp quan trọng nhất, và vế ghi là bắt buộc chứ không phải cho đủ bộ.**
@@ -496,16 +496,13 @@ giả mạo yêu cầu, vì phiên chỉ đọc — thì "đã chặn" không n�
 chức. Chỉ **hiệu số** giữa "làm được của mình" và "không làm được của bên kia"
 mới quy được cho ranh giới ấy.
 
-**Bốn giới hạn phải nêu kèm kết quả:**
+**Ba giới hạn phải nêu kèm kết quả:**
 
-1. **Kết quả gắn với một phiên bản mã xác định, và phiên bản đó không phải bản
-   cuối.** Xem §5.2bis ngay dưới — đây là giới hạn quan trọng nhất và cũng là
-   giới hạn duy nhất còn xử lý được trước khi nộp.
-2. Phép đo chạy trên **hai tổ chức**, không phải trên số tổ chức lớn. Nó chứng
+1. Phép đo chạy trên **hai tổ chức**, không phải trên số tổ chức lớn. Nó chứng
    minh cơ chế hoạt động, không chứng minh cơ chế giữ được ở quy mô lớn.
-3. Phép đo phủ **các tài nguyên có bề mặt API**. Hai cấp phạm vi dưới (không gian
+2. Phép đo phủ **các tài nguyên có bề mặt API**. Hai cấp phạm vi dưới (không gian
    làm việc, dự án) không có bề mặt API nên **không có gì để đo** ở đó.
-4. Phép đo là **đối kháng**, không phải chứng minh hình thức. Kết quả đúng là
+3. Phép đo là **đối kháng**, không phải chứng minh hình thức. Kết quả đúng là
    "trong 630 lượt thử theo giao thức này, không quan sát thấy vi phạm nào" —
    không phải "không thể có vi phạm". Phân biệt giữa *chưa quan sát thấy vi phạm*
    và *có cơ chế ngăn vi phạm* phải giữ rõ: lập luận cho vế thứ hai nằm ở thiết
@@ -522,82 +519,52 @@ mới quy được cho ranh giới ấy.
 ### 5.2bis Phép đo này gắn với phiên bản mã nào
 
 Quy tắc 3 của phương pháp (Phụ lục E §1) đòi mọi phép đo phải gắn với **một phiên
-bản mã xác định**. Mục này trả lời câu đó cho phép đo cách ly, và trả lời cả phần
-không thuận lợi.
+bản mã xác định**. Mục này trả lời câu đó, và ghi lại cả chặng đường tới câu trả
+lời — vì chặng đường ấy chứa hai bài học.
 
-**Phiên bản đã đo.** Lượt đo chạy trong container dựng từ ảnh mang thẻ
-`voya_backend_iso:e5d804c`, tức mã ở commit **`e5d804c`** — *"Close the
-tenant-isolation gaps the measurements exposed, and record the evidence"*, ngày
-16/08/2026. Môi trường ghi trong artefact: cơ sở dữ liệu kiểm thử, vai chạy
-`voya_test_app`, **không** siêu người dùng, **không** quyền vượt chính sách.
+**Phiên bản đã đo.** Lượt đo ngày **17/08/2026** chạy trên một **ảnh chụp mã bất
+biến**, không phải trên cây làm việc:
 
-**Một khiếm khuyết của chính dụng cụ đo, phát hiện khi rà lại.** Artefact ghi
-`git_commit: null` và `git_ban: null` — kịch bản đo **không nắm được** phiên bản
-mã và bỏ trống hai trường ấy. Phiên bản chỉ còn truy được nhờ **thẻ của ảnh
-container**, một chỗ nằm ngoài artefact và có thể bị ghi đè bất cứ lúc nào. Nói
-đúng ra: quy tắc 3 được tuân thủ trên thực tế, nhưng **artefact không tự chứng
-minh được điều đó**. Đây là lỗi phải sửa ở kịch bản đo, và nó thuộc đúng loại lỗi
-mà Chương 4 §6.3 gọi là "không sinh triệu chứng khi dùng bình thường".
+```
+snapshot     P0B-20260817T011910-4e9611
+tree_sha256  4e961192f079835b…
+git HEAD     11a80c21ea2d
+môi trường   signdb_test · vai voya_test_app · không siêu người dùng · không vượt chính sách
+```
 
-**Mã đã thay đổi sau lượt đo, và thay đổi ngay trong đường cưỡng chế.** Đối chiếu
-cây mã hiện tại với `e5d804c`:
+Ảnh chụp được gắn **chỉ đọc** đè lên thư mục mã của container đo, nên mã của lượt
+đo **không đổi được kể từ thời điểm chụp** — kể cả khi cây làm việc bên dưới chạy
+tiếp. Vân tay mã hiệu dụng được kiểm lại **lần thứ hai** ngay trước khi gieo dữ
+liệu, đúng như giao thức đòi, và khớp.
 
-| Thay đổi | Nội dung |
-|---|---|
-| **7 commit** đã vào sau lượt đo | Trong đó `47a8846` *"Finish the fail-closed tenant-scope migration: eleven callers, not seven"* chuyển thêm **11 nơi gọi** sang phạm vi tổ chức fail-closed, và `8278f37` đổi tên tầng 3 theo đúng phạm vi mà nó đọc |
-| **Cây làm việc chưa commit** | `storage/rls.py` (+6 dòng) và `storage/metadata_db.py` (+126 dòng) — **chính hai tệp của tầng 2 và tầng 3** |
+Vì sao phải kiểm hai lần: vân tay lúc chụp chứng minh ảnh được dựng từ cây nào,
+nhưng **không** chứng minh cây còn nguyên khi phép đo bắt đầu. Trong dự án này cây
+đã đổi **ba lần giữa lúc đang đo** chỉ trong hai ngày.
 
-**Hệ quả, phát biểu đúng mức:**
+**Lượt đo trước (16/08, commit `e5d804c`) đã bị thay thế.** Nó vẫn là một phép đo
+hợp lệ của commit ấy, nhưng đường cưỡng chế đã được sửa tiếp sau đó — mười một
+nơi gọi chuyển sang phạm vi tổ chức fail-closed, cộng hai tệp của tầng cưỡng chế
+— nên con số của nó không mô tả mã sẽ nộp kèm quyển. Lượt 17/08 thay thế nó, và
+là lượt được trích dẫn.
 
-> Con số 0/450 và 0/180 là kết quả **hợp lệ của commit `e5d804c`**. Nó **không**
-> tự động là kết quả của mã sẽ nộp kèm quyển. Đường cưỡng chế đã được sửa tiếp
-> sau lượt đo — theo hướng **chặt hơn**, không phải lỏng hơn — nhưng "theo hướng
-> chặt hơn" là một lập luận, không phải một phép đo.
+**Bài học 1 — artefact phải tự khai được phiên bản.** Artefact 16/08 ghi
+`git_commit: null`: kịch bản đo cố lấy phiên bản từ biến môi trường rồi từ `git`,
+cả hai đường cùng hụt trong container không có `.git`, và nó **ghi rỗng rồi chạy
+tiếp**. Phiên bản chỉ còn truy được nhờ **thẻ của ảnh container** — một chỗ nằm
+ngoài artefact và bị ghi đè bất cứ lúc nào. Quy tắc 3 khi ấy được tuân thủ trên
+thực tế nhưng không ai đọc artefact mà kiểm lại được, tức trên thực tế nó không
+còn là một quy tắc.
 
-Một ranh giới thứ hai, thuộc về **phạm vi của phép đo** chứ không phải phiên bản mã.
-Bộ thăm dò đối kháng chạy qua đường API công khai với tài khoản hợp lệ của một tổ
-chức: nó mô phỏng **mô hình đe doạ thứ nhất** ở Chương 2 §2.4.5 — kẻ tấn công sửa
-được yêu cầu và đoán được định danh, nhưng không có thông tin xác thực cơ sở dữ
-liệu. Con số 0/450 vì vậy là bằng chứng cho mô hình đó, và chỉ cho mô hình đó.
-Phép đo này **không** và không thể nói gì về tình huống kẻ tấn công thực thi SQL
-tuỳ ý dưới vai chạy của ứng dụng, vì khi đó chính đầu vào của chính sách bị kiểm
-soát bởi kẻ tấn công. Đây là giới hạn của thiết kế thí nghiệm, không phải của lần
-chạy — thêm lượt đo cũng không mở rộng được kết luận sang mô hình thứ hai.
+Nay cờ công bố có **hai vế**: hết ca không kết luận được, **và** xác định được
+phiên bản mã. Áp ngược lên artefact 16/08 thì cờ trả về `False` — đó là câu trả
+lời mà lượt ấy lẽ ra phải đưa ra.
 
-**Hai cách đóng, phải chọn một trước khi nộp:**
-
-| Cách | Việc phải làm | Phát biểu được phép viết |
-|---|---|---|
-| **A — đo lại** (khuyến nghị) | Commit cây làm việc, dựng lại ảnh, chạy lại toàn bộ giao thức §5.2 trên commit cuối | "Đo trên phiên bản mã nộp kèm quyển" |
-| **B — ghim mốc** | Giữ nguyên số, ghi rõ commit `e5d804c` ở mọi chỗ trích dẫn, và liệt kê các thay đổi sau đó | "Đo trên commit `e5d804c`; các thay đổi sau đó nằm ngoài phạm vi phép đo" |
-
-Cách B là trung thực và dùng được, nhưng nó buộc phải trả lời một câu hỏi phản
-biện hiển nhiên: *vì sao không đo lại?* Cách A tránh được câu đó.
-
-*Trạng thái tại thời điểm viết: chưa đóng. Trở ngại là điều kiện máy chứ không
-phải điều kiện phương pháp — xem §5.2ter.*
-
-### 5.2ter Vì sao lượt đo lại chưa chạy được
-
-Ghi lại vì nó thuộc về tính trung thực của báo cáo: lượt đo lại **đã được thử**
-ngày 17/08/2026 và bị chặn ở khâu tiền kiểm của kịch bản triển khai, bởi **hai
-điều kiện máy**, không phải bởi lỗi mã:
-
-| # | Chặn ở đâu | Nội dung | Vì sao chặn là đúng |
-|---|---|---|---|
-| 1 | Dung lượng đĩa | Còn **36,4 GB** trống, ngưỡng của kịch bản là **55 GB** | Một lượt dựng ảnh sạch đo được làm tệp đĩa ảo phình thêm **43 GB**, và một lượt dựng hết chỗ đã từng giết tiến trình nền Docker trên chính máy này |
-| 2 | Cấu hình vai điều khiển | `CONTROL_DATABASE_URL` chưa có trong tệp cấu hình | Vai điều khiển là một vai cơ sở dữ liệu **riêng**, và mã **từ chối lùi về** vai ứng dụng cho các thao tác điều khiển — đúng nguyên lý "ngoại lệ phải là một phạm vi, không phải một lối đi vòng" (Chương 3 §2.3.6) |
-
-Điểm đáng nói: **cả hai lần chặn đều là cơ chế fail-closed của chính hệ thống
-đang làm đúng việc của nó.** Kịch bản triển khai từ chối dựng khi biết trước lượt
-dựng sẽ hết chỗ; ứng dụng từ chối chạy thao tác điều khiển bằng một vai không đủ
-thẩm quyền. Chúng chặn cả một việc hợp lệ — và đó chính là cái giá của fail-closed
-mà Chương 3 §2.1 đã nêu khi nói về container khởi tạo.
-
-Ba việc phải làm để mở khoá, theo thứ tự: thu hồi dung lượng đĩa (giai đoạn nén
-tệp đĩa ảo, vì bước dọn thông thường trả về **0 byte** cho ổ đĩa trên nền này);
-cấp vai điều khiển và ghi chuỗi kết nối vào cấu hình; rồi chạy lại giao thức
-§5.2 theo cách A ở trên.
+**Bài học 2 — một cổng chặn nhầm là một cổng sẽ bị tắt.** Bản đầu của cổng ấy khoá
+theo "cây làm việc có sạch không", và nó lập tức chặn một lượt đo hoàn toàn hợp
+lệ chỉ vì trong kho có **một tệp markdown chưa theo dõi** — thứ không thể chạm
+tới một byte nào của mã đang chạy. Cổng được sửa để ghim theo **ảnh chụp**, thứ
+bất biến theo cấu trúc và phủ đúng những tệp tham gia hành vi; trạng thái sạch của
+git chỉ còn là đường dự phòng cho trường hợp đo mã nung sẵn trong ảnh.
 
 ### 5.3 Trục T3a — Đo độ trễ dịch vụ
 
@@ -755,7 +722,7 @@ phải chạy riêng.
 | # | Mục tiêu | Trạng thái | Bằng chứng chính | Giới hạn |
 |---|---|---|---|---|
 | O1 | Kiến trúc đa tổ chức | **Đạt, có tinh chỉnh** | 57 bảng, 34 mang định danh tổ chức; mô hình phạm vi bốn cấp | Hai cấp dưới chưa có bề mặt vận hành |
-| O2 | Cách ly dữ liệu giữa các tổ chức | **Đạt trên commit `e5d804c`** | 0/450 vi phạm xuyên tổ chức, 0/180 thao tác trái quyền lọt, 0 ca không kết luận được, đối chứng dương đủ bốn thao tác | **Chưa đo lại trên mã bản cuối** (§5.2bis); hai tổ chức, không phải quy mô lớn; đối kháng chứ không phải chứng minh hình thức |
+| O2 | Cách ly dữ liệu giữa các tổ chức | **Đạt** | 0/450 vi phạm xuyên tổ chức, 0/180 thao tác trái quyền lọt, 0 ca không kết luận được, đối chứng dương đủ bốn thao tác, hậu điều kiện xác nhận dữ liệu nguyên vẹn — đo trên ảnh chụp mã `4e961192` (§5.2bis) | Hai tổ chức, không phải quy mô lớn; đối kháng chứ không phải chứng minh hình thức |
 | O3 | Phân quyền nhiều cấp phạm vi | **Đạt một phần** | Gán vai ở cấp hệ thống và cấp tổ chức, cưỡng chế được | Cấp không gian làm việc và dự án: **0 gán vai**, không có bề mặt API |
 | O4 | Phân loại từ vựng và phương ngữ | **Đạt** | Ngôn ngữ / phương ngữ / vùng miền + danh mục có phiên bản, ghim được | — |
 | O5 | Hiệu quả lưu trữ | **Đạt** | 92,2 % trên 54 cặp khớp thời lượng | Nguồn video ngoài, đã nén để phân phối web |
@@ -915,12 +882,11 @@ chạy hồi quy chứ không từ một phép đo đang mở, nên chúng đư�
 
 ### 6.5 Kết luận chương
 
-Ba trong bốn trục đánh giá đã đóng hoàn toàn. Trục trung tâm — cách ly dữ liệu
-giữa các tổ chức — cho tỉ lệ vi phạm bằng không trên 630 lượt thử đối kháng kết
-luận được, với đối chứng dương phủ cả đọc lẫn ghi và hậu điều kiện xác nhận dữ
-liệu bên bị nhắm vẫn nguyên vẹn; nhưng kết quả ấy **gắn với commit `e5d804c`**,
-và đường cưỡng chế đã được sửa tiếp sau đó, nên trục này chỉ đóng **có điều kiện**
-cho tới khi lượt đo lại chạy được (§5.2bis, §5.2ter).
+Bốn trục đánh giá đều đã đóng. Trục trung tâm — cách ly dữ liệu giữa các tổ chức
+— cho tỉ lệ vi phạm bằng không trên 630 lượt thử đối kháng kết luận được, với đối
+chứng dương phủ cả đọc lẫn ghi, hậu điều kiện xác nhận dữ liệu bên bị nhắm vẫn
+nguyên vẹn trên cả hai mặt phẳng lưu trữ, và kết quả gắn với một **ảnh chụp mã bất
+biến** chứ không phải với trạng thái nhất thời của cây làm việc (§5.2bis).
 
 Hai kết quả **không đạt hoàn toàn** đã được báo cáo đúng mức thay vì làm tròn:
 phân quyền mới cưỡng chế được ở hai trong bốn cấp phạm vi, và cơ chế nguồn sự

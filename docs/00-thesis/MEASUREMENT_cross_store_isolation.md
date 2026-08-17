@@ -1,8 +1,23 @@
 # P0-B — Cách ly xuyên kho, đo đối kháng
 
 **Kết luận:** ĐẠT — đủ điều kiện công bố
-**Thời điểm:** 16/08/2026, 07:55 UTC
+**Thời điểm:** 17/08/2026, 01:29 UTC
+**Ảnh chụp mã:** `P0B-20260817T011910-4e9611` · `tree_sha256 = 4e961192f079835b…`
 **Trạng thái công bố:** bốn lớp bằng chứng đều đạt, không còn ca nào không kết luận được
+
+> **Lượt này thay thế lượt 16/08/2026 (commit `e5d804c`).** Lượt cũ vẫn là phép đo
+> hợp lệ của commit ấy, nhưng sau nó đường cưỡng chế còn được sửa tiếp — mười một
+> nơi gọi chuyển sang phạm vi tổ chức fail-closed, cộng hai tệp của tầng cưỡng
+> chế — nên con số của nó không mô tả mã sẽ nộp kèm quyển.
+>
+> Lượt cũ còn một khiếm khuyết của chính dụng cụ đo: artefact ghi `git_commit:
+> null`, tức **không tự khai được nó đo phiên bản nào**. Đã vá; danh tính chuẩn
+> nay là `tree_sha256` của ảnh chụp mã, và cờ công bố từ chối một artefact không
+> xác định được phiên bản.
+>
+> Hai vế lần đầu tiên có mặt ở lượt này: **hậu điều kiện cơ sở dữ liệu** (lượt cũ
+> để `null` vì nhánh đó không đọc được hình dạng fixture hiện hành) và **đối
+> chứng dương có vế ghi** chạy trên fixture xuyên kho gieo nhất quán.
 
 ---
 
