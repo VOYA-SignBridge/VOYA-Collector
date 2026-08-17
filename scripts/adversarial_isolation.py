@@ -626,6 +626,22 @@ def moi_truong(dsn: str, base: str) -> dict:
     import os
     md["git_commit"] = os.environ.get("VOYA_GIT_COMMIT") or None
     md["git_ban"] = (os.environ.get("VOYA_GIT_DIRTY") == "1") if "VOYA_GIT_DIRTY" in os.environ else None
+
+    # Danh tính ĐÚNG của mã được đo là SNAPSHOT, không phải trạng thái git.
+    #
+    # `isolation_backend.sh` gắn một snapshot chỉ-đọc đè lên `/app/app`, nên mã
+    # chạy trong container không đổi được kể từ lúc chụp — bất kể cây làm việc
+    # bên dưới có sạch hay không. `tree_sha256` của snapshot vì thế ghim chặt
+    # hơn `git rev-parse HEAD`: nó phủ đúng những tệp tham gia hành vi, và không
+    # có cách nào sửa mà hash giữ nguyên.
+    #
+    # Phân biệt này không phải chi tiết vụn. Bản đầu của cổng công bố (viết cùng
+    # ngày) chặn theo `git status --porcelain`, và nó chặn một lượt đo hoàn toàn
+    # hợp lệ chỉ vì trong kho có **một tệp markdown chưa theo dõi** — một thứ
+    # không thể ảnh hưởng tới bất kỳ byte nào của mã đang chạy. Một cổng chặn
+    # nhầm là một cổng sẽ bị người ta tắt đi.
+    md["snapshot_tree_sha256"] = os.environ.get("VOYA_SNAPSHOT_TREE") or None
+    md["snapshot_id"] = os.environ.get("VOYA_SNAPSHOT_ID") or None
     if md["git_commit"] is None:
         try:
             md["git_commit"] = subprocess.run(
@@ -903,14 +919,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     ly_do_khong_cong_bo: list[str] = []
     if mo:
         ly_do_khong_cong_bo.append(f"{mo} ca khong ket luan duoc")
-    if not md.get("git_commit"):
+
+    # Hai đường ghim mã, nhận MỘT là đủ:
+    #   snapshot  — bất biến theo cấu trúc, phủ đúng tệp tham gia hành vi
+    #   git sạch  — dùng khi đo mã baked trong ảnh, không có snapshot
+    if md.get("snapshot_tree_sha256"):
+        pass
+    elif md.get("git_commit") and not md.get("git_ban"):
+        pass
+    elif not md.get("git_commit"):
         ly_do_khong_cong_bo.append(
-            "khong xac dinh duoc phien ban ma — dat VOYA_GIT_COMMIT (va "
-            "VOYA_GIT_DIRTY=0|1) khi chay trong container khong co .git")
-    elif md.get("git_ban"):
+            "khong xac dinh duoc phien ban ma — dat VOYA_SNAPSHOT_TREE (khi do "
+            "qua snapshot) hoac VOYA_GIT_COMMIT + VOYA_GIT_DIRTY=0")
+    else:
         ly_do_khong_cong_bo.append(
-            "cay lam viec CO thay doi chua commit — con so khong quy duoc ve "
-            f"commit {str(md['git_commit'])[:12]}")
+            "khong co snapshot VA cay lam viec CO thay doi chua commit — con so "
+            f"khong quy duoc ve commit {str(md['git_commit'])[:12]}")
 
     if ly_do_khong_cong_bo:
         print("\n[KHONG CONG BO DUOC]", file=sys.stderr)
