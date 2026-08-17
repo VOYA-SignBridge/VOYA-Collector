@@ -324,6 +324,17 @@ def moi_truong(base: str, extra: dict) -> dict:
         except Exception:
             pass
     md["git_ban"] = os.environ.get("VOYA_GIT_DIRTY") == "1"
+
+    # Cùng khiếm khuyết đã vá ở `adversarial_isolation.py`: chạy trong container
+    # thì không có `.git`, cả hai đường lấy phiên bản cùng hụt, và artefact mang
+    # `git_commit: null` mà không ai để ý. Ở đây chưa có cờ công bố để hạ, nên
+    # ít nhất phải kêu — một dòng cảnh báo còn đọc được, `null` trong tệp JSON
+    # thì không.
+    if md["git_commit"] is None:
+        print("[CANH BAO] khong xac dinh duoc phien ban ma: artefact se mang "
+              "git_commit=null va KHONG truy lai duoc luot do nay ung voi ma "
+              "nao. Dat VOYA_GIT_COMMIT truoc khi chay.", file=sys.stderr)
+
     md.update(extra)
     return md
 

@@ -58,7 +58,8 @@ def export_samples_to_sheets(self):
     an exact mirror of samples.csv, so deletes and renames propagate. A content
     hash guards against needlessly rewriting the sheet when nothing changed.
     """
-    from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
+    from app.dataset_samples import (
+        SAMPLE_FIELDS, SAMPLES_CSV, _load_all_samples_unscoped)
 
     try:
         spreadsheet_id = str(getattr(settings, "google_sheets_samples_spreadsheet_id", "")).strip()
@@ -76,7 +77,9 @@ def export_samples_to_sheets(self):
         # sheet row appear to change its label ("đổi tên").
         from app.storage.metadata_db import list_all_deleted_samples
 
-        active = list_samples()
+        # Cùng lý do với `export_labels_to_sheets`: bảng tính là ảnh chụp TOÀN
+        # kho vào một bảng duy nhất, không phải bản xuất theo tổ chức.
+        active = _load_all_samples_unscoped()
         seen = {(r.get("sample_uid") or "") for r in active}
         merged: List[Dict[str, Any]] = []
         for r in active:

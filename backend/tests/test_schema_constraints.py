@@ -60,9 +60,22 @@ def test_a_class_cannot_name_a_vocabulary_group_that_does_not_exist(rollback_cur
 
 
 def test_training_metrics_cannot_orphan_itself(rollback_cursor):
+    """Phải truyền `tenant_id`, nếu không khoá ngoại KHÔNG hề được hỏi tới.
+
+    Đợt C3 gắn `tenant_id NOT NULL` cho bảng này. Bản cũ chèn thiếu cột đó, nên
+    câu lệnh ngã ở `NotNullViolation` — trước khi khoá ngoại kịp chạy. Test đỏ,
+    nhưng đỏ vì một ràng buộc KHÁC với ràng buộc đang thử nghiệm, và thông báo
+    lỗi không hề nói ra điều đó. Đây là mặt còn lại của cái bẫy mà docstring của
+    `rollback_cursor` cảnh báo: ở đó một test xanh vì sai lý do, ở đây một test
+    đỏ vì sai lý do — cùng một hậu quả là ràng buộc dưới thử nghiệm không chạy.
+    """
+    from app.tenancy import DEFAULT_TENANT_ID
+
     with pytest.raises(psycopg2.errors.ForeignKeyViolation):
         rollback_cursor.execute(
-            "INSERT INTO training_metrics(job_id, epoch) VALUES('khong_co_job', 1)")
+            "INSERT INTO training_metrics(tenant_id, job_id, epoch) "
+            "VALUES(%s, 'khong_co_job', 1)",
+            (DEFAULT_TENANT_ID,))
 
 
 def test_a_signer_cannot_point_at_a_deleted_account(rollback_cursor):

@@ -886,6 +886,37 @@ def main(argv: Optional[list[str]] = None) -> int:
               f"superuser={md['superuser']} bypass_rls={md['bypass_rls']} / "
               f"schema v{md['schema_version']}")
 
+    # Điều kiện công bố có HAI vế, không phải một.
+    #
+    # Vế "không còn ca mờ" đã có từ đầu. Vế thứ hai được thêm 17/08/2026 sau khi
+    # rà lại artefact của lượt đo 16/08: nó mang `git_commit: null`, và phiên bản
+    # mã chỉ còn truy được nhờ THẺ CỦA ẢNH container — một chỗ nằm ngoài artefact
+    # và bị ghi đè bất cứ lúc nào.
+    #
+    # Đó là một phép đo không tự khai được nó đo cái gì. Quy tắc "phép đo gắn
+    # với một phiên bản mã xác định" khi ấy vẫn được tuân thủ trên thực tế,
+    # nhưng không ai đọc artefact mà kiểm lại được — nên trên thực tế nó không
+    # còn là một quy tắc, chỉ là một thói quen.
+    #
+    # Ghi null rồi chạy tiếp là fail-open, và ở đây nó fail-open đúng vào thứ
+    # làm cho con số có nghĩa. Nay artefact tự hạ cờ công bố.
+    ly_do_khong_cong_bo: list[str] = []
+    if mo:
+        ly_do_khong_cong_bo.append(f"{mo} ca khong ket luan duoc")
+    if not md.get("git_commit"):
+        ly_do_khong_cong_bo.append(
+            "khong xac dinh duoc phien ban ma — dat VOYA_GIT_COMMIT (va "
+            "VOYA_GIT_DIRTY=0|1) khi chay trong container khong co .git")
+    elif md.get("git_ban"):
+        ly_do_khong_cong_bo.append(
+            "cay lam viec CO thay doi chua commit — con so khong quy duoc ve "
+            f"commit {str(md['git_commit'])[:12]}")
+
+    if ly_do_khong_cong_bo:
+        print("\n[KHONG CONG BO DUOC]", file=sys.stderr)
+        for ly_do in ly_do_khong_cong_bo:
+            print(f"  - {ly_do}", file=sys.stderr)
+
     if args.json:
         phan_bo = {}
         for r in tat_ca:
@@ -897,7 +928,8 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "so_luot_doi_khang": len(ket),
                 "so_luot_ngoai_le": len(ket_x),
                 "ctivr": ctivr, "uasr": uasr, "svsr": svsr, "so_ca_mo": mo,
-                "cong_bo_duoc": mo == 0,
+                "cong_bo_duoc": not ly_do_khong_cong_bo,
+                "ly_do_khong_cong_bo": ly_do_khong_cong_bo,
 
                 # Vì sao mẫu số của CTIVR (480) NHỎ HƠN số lần thử đối kháng
                 # (630). Không ghi ra thì người đọc phải tự suy, và "630 lần

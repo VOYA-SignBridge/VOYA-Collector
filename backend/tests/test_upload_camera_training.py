@@ -361,11 +361,18 @@ def test_promote_requires_admin(user_client):
 
 
 def test_promote_rejects_uncompleted_job(admin_client):
-    c, _ = admin_client
+    c, u = admin_client
     job_id = uuid.uuid4().hex[:8]
     # seed a queued (not completed) job straight in the DB
+    #
+    # `tenant_id` là BẮT BUỘC: gieo thẳng vào CSDL nghĩa là không có request,
+    # tức đang ở system scope, và ở đó `upsert_training_job` từ chối một hàng
+    # job không mang phạm vi thay vì đoán `default`. Phải là tenant của CHÍNH
+    # tài khoản gọi promote — gieo vào tenant khác thì route trả 404 (không
+    # thấy job) chứ không phải 409, và test sẽ đỏ vì một lý do khác hẳn.
     from app.storage.metadata_db import upsert_training_job
     upsert_training_job({
+        "tenant_id": u["tenant_id"],
         "job_id": job_id, "status": "queued", "model_type": "tcn", "config": {},
         "auth_user_id": None, "created_at": "2026-07-20T00:00:00", "started_at": None,
         "completed_at": None, "current_epoch": 0, "total_epochs": 1, "checkpoint_path": None,
@@ -396,9 +403,10 @@ def test_promote_completed_tcn_job_deploys_model(admin_client, tmp_path, monkeyp
     torch.save({"model_type": "TCN", "model_state_dict": {}, "num_classes": 3,
                 "idx_to_label": {0: "a", 1: "b", 2: "c"}, "metrics": {"test_acc": 0.9}}, ckpt)
 
-    c, _ = admin_client
+    c, u = admin_client
     job_id = uuid.uuid4().hex[:8]
     upsert_training_job({
+        "tenant_id": u["tenant_id"],   # xem chú thích ở test_promote_rejects_uncompleted_job
         "job_id": job_id, "status": "completed", "model_type": "tcn", "config": {},
         "auth_user_id": None, "created_at": "2026-07-20T00:00:00", "started_at": None,
         "completed_at": "2026-07-20T00:05:00", "current_epoch": 1, "total_epochs": 1,

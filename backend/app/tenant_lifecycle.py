@@ -54,6 +54,19 @@ PURGE_ORDER: tuple[str, ...] = (
     "notifications", "support_messages", "support_tickets",
     # corpus
     "samples",                                   # -> classes, signers, capture_sessions
+    # `training_metrics` PHẢI đi trước `training_jobs`: nó trỏ tới job.
+    #
+    # Có thể nghĩ nó thừa, vì `fk_training_metrics_job` là ON DELETE CASCADE nên
+    # xoá job sẽ kéo theo chỉ số. Nhưng nó KHÔNG thừa, và lý do nằm ở một khoá
+    # ngoại khác: `fk_training_metrics_tenant` là ON DELETE **RESTRICT**. Bất kỳ
+    # dòng chỉ số nào còn sót lại mà cascade không với tới đều làm bước xoá
+    # `tenants` ở cuối lượt purge bị từ chối, và cả lượt dừng giữa chừng.
+    #
+    # Danh sách này còn là nguồn dọn dẹp của fixture test (`conftest.purge_tenant`),
+    # nơi dữ liệu được dựng tay và không phải lúc nào cũng có job cha để cascade.
+    # Liệt kê tường minh thì đúng trong cả hai đường; dựa vào cascade thì chỉ
+    # đúng ở một.
+    "training_metrics",                          # -> training_jobs, tenants(RESTRICT)
     "training_job_classes", "training_jobs",     # -> classes, users
     "raw_uploads",                               # -> classes, dialects
     "capture_sessions",                          # -> classes, signers

@@ -135,6 +135,18 @@ class TestKyKhongTroi:
         assert (row["current_period_end"] - row["current_period_start"]).days == 30
 
 
+#: Một quản trị viên giả cho các test nhắc hạn.
+#
+#: Vá `_tenant_admins`, KHÔNG phải `_tenant_admin_emails`. Từ khi có thêm kênh
+#: thông báo trong ứng dụng, `_send_reminder` cần cả `id` lẫn `email` nên nó hỏi
+#: `_tenant_admins`; `_tenant_admin_emails` giờ chỉ là một lớp mỏng bọc ngoài và
+#: đường gửi thư không còn đi qua nó. Vá seam cũ thì bản vá trượt trong im lặng:
+#: truy vấn thật chạy, tenant tạm không có quản trị viên nào, không thư nào được
+#: gửi, và test đỏ ở `assert [] == [7]` — một thông báo trông như lỗi mốc nhắc
+#: chứ không như một bản vá đặt sai chỗ.
+_ADMIN_GIA = {"id": "00000000-0000-0000-0000-000000000001", "email": "a@b.test"}
+
+
 class TestNhacTruocHan:
     def test_nhac_dung_moc_va_khong_gui_lai(self, tenant, monkeypatch):
         """Tác vụ quét chạy MỖI GIỜ. Không có cột chống trùng thì một người
@@ -143,7 +155,7 @@ class TestNhacTruocHan:
         monkeypatch.setattr(
             "app.email_service.send_subscription_reminder_email",
             lambda to, **kw: sent.append((to, kw["days_left"])))
-        monkeypatch.setattr(sub, "_tenant_admin_emails", lambda _t: ["a@b.test"])
+        monkeypatch.setattr(sub, "_tenant_admins", lambda _t: [_ADMIN_GIA])
 
         end = datetime.now(timezone.utc) + timedelta(days=6, hours=1)
         _set(tenant, current_period_start=end - timedelta(days=30),
@@ -160,7 +172,7 @@ class TestNhacTruocHan:
         monkeypatch.setattr(
             "app.email_service.send_subscription_reminder_email",
             lambda to, **kw: sent.append(kw["days_left"]))
-        monkeypatch.setattr(sub, "_tenant_admin_emails", lambda _t: ["a@b.test"])
+        monkeypatch.setattr(sub, "_tenant_admins", lambda _t: [_ADMIN_GIA])
 
         _set(tenant, current_period_end=datetime.now(timezone.utc) + timedelta(days=6, hours=1))
         sub.sweep()
@@ -175,7 +187,7 @@ class TestNhacTruocHan:
             raise RuntimeError("SMTP chết")
 
         monkeypatch.setattr("app.email_service.send_subscription_reminder_email", _explode)
-        monkeypatch.setattr(sub, "_tenant_admin_emails", lambda _t: ["a@b.test"])
+        monkeypatch.setattr(sub, "_tenant_admins", lambda _t: [_ADMIN_GIA])
         _set(tenant, current_period_end=datetime.now(timezone.utc) + timedelta(days=6, hours=1))
 
         out = sub.sweep()

@@ -242,7 +242,7 @@ def test_samples_sheet_has_deleted_at_column_and_marks_deleted_rows(monkeypatch,
     monkeypatch.setattr(ds, "SAMPLES_CSV", tmp_path / "samples.csv", raising=False)
     writes = _sheet_client(monkeypatch)
 
-    monkeypatch.setattr(ds, "list_samples", lambda: [_srow("A", "2026-01-01"), _srow("C", "2026-01-03")])
+    monkeypatch.setattr(ds, "_load_all_samples_unscoped", lambda: [_srow("A", "2026-01-01"), _srow("C", "2026-01-03")])
     monkeypatch.setattr("app.storage.metadata_db.list_all_deleted_samples",
                         lambda: [_drow("B", "2026-01-02", "2026-06-01T00:00:00Z")])
 
@@ -268,14 +268,14 @@ def test_soft_deleting_a_row_does_not_shift_the_others(monkeypatch, tmp_path):
     writes = _sheet_client(monkeypatch)
 
     # Run 1: A,B,C all active.
-    monkeypatch.setattr(ds, "list_samples",
+    monkeypatch.setattr(ds, "_load_all_samples_unscoped",
                         lambda: [_srow("A", "2026-01-01"), _srow("B", "2026-01-02"), _srow("C", "2026-01-03")])
     monkeypatch.setattr("app.storage.metadata_db.list_all_deleted_samples", lambda: [])
     et.export_samples_to_sheets.run()
     before = writes[-1]
 
     # Run 2: B is now soft-deleted (removed from the active csv, present in DB).
-    monkeypatch.setattr(ds, "list_samples",
+    monkeypatch.setattr(ds, "_load_all_samples_unscoped",
                         lambda: [_srow("A", "2026-01-01"), _srow("C", "2026-01-03")])
     monkeypatch.setattr("app.storage.metadata_db.list_all_deleted_samples",
                         lambda: [_drow("B", "2026-01-02", "2026-06-01T00:00:00Z")])
@@ -300,7 +300,7 @@ def test_samples_sheet_dedupes_active_over_deleted(monkeypatch, tmp_path):
     monkeypatch.setattr(ds, "SAMPLES_CSV", tmp_path / "samples.csv", raising=False)
     writes = _sheet_client(monkeypatch)
 
-    monkeypatch.setattr(ds, "list_samples", lambda: [_srow("A", "2026-01-01")])
+    monkeypatch.setattr(ds, "_load_all_samples_unscoped", lambda: [_srow("A", "2026-01-01")])
     monkeypatch.setattr("app.storage.metadata_db.list_all_deleted_samples",
                         lambda: [_drow("A", "2026-01-01", "2026-06-01T00:00:00Z")])
 
@@ -326,7 +326,18 @@ def test_labels_sheet_keeps_deleted_class_marked_and_ordered(monkeypatch):
         r["is_common_language"] = "0"
         return r
 
-    monkeypatch.setattr("app.dataset_manager.load_labels", lambda: [_lrow("A", 1), _lrow("C", 3)])
+    # Vá `_load_all_labels_unscoped`, KHÔNG phải `load_labels`.
+    #
+    # Đợt chuyển sang đọc fail-closed theo phạm vi tổ chức đã đổi đường xuất
+    # bảng tính sang hàm đọc-toàn-kho — có chủ ý, vì bảng tính là ảnh chụp toàn
+    # bộ kho vào một bảng duy nhất chứ không phải bản xuất theo tổ chức. Bản cũ
+    # của test còn vá `load_labels`, một hàm đường này không còn gọi nữa: bản vá
+    # trượt trong im lặng, hàm thật trả về rỗng, và test đỏ với thông báo
+    # `['B'] != ['A','B','C']` — trông như lỗi thứ tự sắp xếp, trong khi nguyên
+    # nhân là hai dòng đang hoạt động chưa bao giờ được nạp.
+    monkeypatch.setattr(
+        "app.dataset_manager._load_all_labels_unscoped",
+        lambda: [_lrow("A", 1), _lrow("C", 3)])
     monkeypatch.setattr("app.storage.metadata_db.list_deleted_classes", lambda: [{
         "class_uid": "B", "class_idx": 2, "slug": "b", "label_original": "lbl_B",
         "language": "vn", "dialect": "common",

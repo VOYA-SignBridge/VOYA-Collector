@@ -7,6 +7,14 @@ from app.storage.metadata_db import (
 )
 from app.db import sync_missing_data_on_startup
 
+# Các test dưới đây vá `_load_all_labels_unscoped`, KHÔNG phải `load_labels`.
+#
+# Đồng bộ lúc khởi động chạy TRƯỚC khi có bất kỳ ngữ cảnh tổ chức nào, nên nó
+# phải đọc toàn kho — đó là lý do `db.sync_missing_data_on_startup` gọi hàm
+# không-phạm-vi, và là chủ ý chứ không phải bỏ sót. Vá nhầm sang tên cũ thì bản
+# vá trượt trong im lặng: hàm thật vẫn chạy, trả về rỗng, và test đỏ ở khẳng
+# định cuối với `assert 0 == 1` — một thông báo không hề trỏ về nguyên nhân.
+
 
 def _postgres_available() -> bool:
     """Đây là các integration test cần Postgres thật (ensure_tables, ALTER TABLE…).
@@ -83,7 +91,7 @@ def fake_fetch_all(query, params=None):
     return original_fetch_all(query, params)
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.dataset_manager.load_labels")
+@patch("app.dataset_manager._load_all_labels_unscoped")
 @patch("app.dataset_samples.list_samples")
 @patch("app.raw_uploads.list_raw_uploads")
 def test_sync_on_empty_db(mock_raw, mock_samples, mock_labels, mock_fetch):
@@ -101,7 +109,7 @@ def test_sync_on_empty_db(mock_raw, mock_samples, mock_labels, mock_fetch):
     assert rows[0]["slug"] == "test-slug"
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.dataset_manager.load_labels")
+@patch("app.dataset_manager._load_all_labels_unscoped")
 @patch("app.dataset_samples.list_samples")
 @patch("app.raw_uploads.list_raw_uploads")
 def test_sync_idempotency(mock_raw, mock_samples, mock_labels, mock_fetch):
@@ -120,7 +128,7 @@ def test_sync_idempotency(mock_raw, mock_samples, mock_labels, mock_fetch):
     assert len(rows) == 1
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.dataset_manager.load_labels")
+@patch("app.dataset_manager._load_all_labels_unscoped")
 @patch("app.dataset_samples.list_samples")
 @patch("app.raw_uploads.list_raw_uploads")
 def test_sync_soft_delete_safety(mock_raw, mock_samples, mock_labels, mock_fetch):

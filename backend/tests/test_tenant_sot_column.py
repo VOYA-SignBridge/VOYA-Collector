@@ -902,8 +902,16 @@ class TestRebuildFromCsv:
             import app.raw_uploads as ru
             from app.db import sync_missing_data_on_startup
 
-            monkeypatch.setattr(ds, "list_samples", lambda: [sample_row])
-            monkeypatch.setattr(dm, "load_labels", lambda: [])
+            # Vá các hàm ĐỌC TOÀN KHO, không phải bản có phạm vi.
+            #
+            # `sync_missing_data_on_startup` chạy trước khi có bất kỳ phạm vi
+            # tenant nào, nên nó gọi `_load_all_*_unscoped()`. Vá nhầm sang tên
+            # có phạm vi thì bản vá trượt trong im lặng: hàm thật đọc CSV thật,
+            # `sample_row` dựng ở đây không có trong đó, và test đỏ ở
+            # `_tenant_of` với thông báo "samples row vanished — the fixture,
+            # not the assertion, is broken". Thông báo ấy nói đúng.
+            monkeypatch.setattr(ds, "_load_all_samples_unscoped", lambda: [sample_row])
+            monkeypatch.setattr(dm, "_load_all_labels_unscoped", lambda: [])
             monkeypatch.setattr(ru, "list_raw_uploads", lambda: [])
 
             assert sync_missing_data_on_startup(full=False) is True

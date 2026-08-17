@@ -120,6 +120,25 @@ else
   echo "==> khong thay $VIDEO_DIR/$VIDEO_NAME — ca trich xuat that se skip"
 fi
 
+# 3) Hạ trần chờ Google Drive CHO LƯỢT CHẠY TEST.
+#
+# Mặc định trong `config.py` là 180 giây × 5 lần thử = tối đa 900 giây cho MỘT
+# lượt gọi không tới đích. Hợp lý cho tác vụ nền tải tệp lớn; vô lý ở đây — đo
+# ngày 17/08/2026, một lượt chạy suite đứng yên ở 62% suốt hơn mười phút với
+# CPU container ~0%, và nhìn nhật ký thì không thấy gì vì pytest ở chế độ `-q`
+# chỉ in dấu chấm cho ca ĐÃ XONG: ca đang chờ không bao giờ hiện ra.
+#
+# Loại trừ từng tệp là chữa triệu chứng — thử rồi: bỏ `test_sot_integration.py`
+# (tệp duy nhất TESTING.md cảnh báo) thì lượt chạy dừng ở ĐÚNG cùng mốc 62%, vì
+# tệp khác cũng gọi ra ngoài, có tệp gọi gián tiếp qua module ứng dụng nên
+# `grep` theo tên thư viện không phủ hết. Hạ trần thì phủ mọi đường gọi, kể cả
+# đường viết sau này.
+#
+# 5 giây × 1 lần: đủ cho một lượt gọi thật khi mạng bình thường, và biến một
+# lượt hụt đích thành một ca đỏ nhanh thay vì mười lăm phút im lặng.
+extra="$extra -e GOOGLE_DRIVE_TIMEOUT_SECONDS=${VOYA_TEST_GDRIVE_TIMEOUT:-5}"
+extra="$extra -e GOOGLE_DRIVE_NUM_RETRIES=${VOYA_TEST_GDRIVE_RETRIES:-1}"
+
 exec docker run --rm \
   --network "$NETWORK" \
   --env-file "$ENV_FILE_MOUNT" \

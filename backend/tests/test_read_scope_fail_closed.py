@@ -107,3 +107,62 @@ def test_thong_diep_loi_chi_duong_toi_helper_dung():
     with pytest.raises(TenantScopeRequired) as ei:
         load_labels("")
     assert "_load_all_labels_unscoped" in str(ei.value)
+
+
+# --------------------------------------------------- caller: quét cây cú pháp
+
+def _goi_khong_tham_so(ten_ham: set[str]):
+    """Mọi lời gọi `ten_ham()` KHÔNG tham số trong `backend/app/`.
+
+    Trả về [(đường dẫn tương đối, số dòng, tên hàm)].
+    """
+    import ast
+    from pathlib import Path
+
+    goc = Path(__file__).resolve().parents[1] / "app"
+    ket_qua = []
+    for tep in sorted(goc.rglob("*.py")):
+        try:
+            cay = ast.parse(tep.read_text(encoding="utf-8"), filename=str(tep))
+        except SyntaxError:  # pragma: no cover - tệp hỏng thì để lỗi khác bắt
+            continue
+        for nut in ast.walk(cay):
+            if not isinstance(nut, ast.Call):
+                continue
+            f = nut.func
+            ten = f.id if isinstance(f, ast.Name) else (
+                f.attr if isinstance(f, ast.Attribute) else None)
+            if ten in ten_ham and not nut.args and not nut.keywords:
+                ket_qua.append((tep.relative_to(goc.parent).as_posix(),
+                                nut.lineno, ten))
+    return ket_qua
+
+
+def test_khong_noi_nao_goi_helper_co_pham_vi_ma_bo_trong_tham_so():
+    """Hai ca đỏ ở trên canh HELPER; ca này canh NGƯỜI GỌI.
+
+    `list_samples()` và `load_labels()` đều bắt buộc `tenant_id`, nên gọi chúng
+    KHÔNG tham số là sai trong mọi hoàn cảnh — hoặc thiếu phạm vi, hoặc đây là
+    đường bảo trì và phải gọi biến thể `_load_all_*_unscoped()`. Không có
+    trường hợp thứ ba, nên luật này không có ngoại lệ hợp lệ nào để phải liệt kê.
+
+    Vì sao cần một phép kiểm TĨNH khi đã có phép kiểm hành vi
+    ---------------------------------------------------------
+    Lỗi thật ngày 17/08/2026: `db.sync_missing_data_on_startup` đọc nhãn bằng
+    `_load_all_labels_unscoped()` nhưng dòng NGAY DƯỚI vẫn gọi `list_samples()`
+    — một nơi gọi bị bỏ sót giữa đợt chuyển sang đọc fail-closed. Đường đó chạy
+    lúc khởi động, trước khi có bất kỳ phạm vi nào, nên nó ném `TenantScopeRequired`
+    và đồng bộ đầu vòng đời chết.
+
+    Ba ca kiểm thử của `test_startup_sync.py` KHÔNG bắt được, vì cả ba đều vá
+    `list_samples` bằng mock — hàm thật không bao giờ chạy, chốt chặn không bao
+    giờ nổ. Đó là giới hạn cố hữu của phép kiểm hành vi ở đây: thứ cần canh là
+    *hàm nào được gọi*, và mock xoá đúng thông tin ấy đi.
+    """
+    vi_pham = _goi_khong_tham_so({"list_samples", "load_labels"})
+    assert not vi_pham, (
+        "gọi helper có phạm vi mà bỏ trống tham số:\n  "
+        + "\n  ".join(f"{t}:{d} -> {n}()" for t, d, n in vi_pham)
+        + "\nĐường bảo trì đọc toàn kho phải gọi _load_all_*_unscoped(); "
+          "đường theo tổ chức phải truyền tenant_id."
+    )
