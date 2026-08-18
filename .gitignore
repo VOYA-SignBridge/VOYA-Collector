@@ -193,6 +193,15 @@ reports/determinism/
 # Research records -> committed (negate the blanket rules above)
 !docs/
 !docs/**/*.md
+
+# Lược đồ AS-BUILT. Luật `*.json` ở trên nuốt tệp này, nên nó CHƯA BAO GIỜ vào
+# lịch sử — trong khi quyển luận văn trích dẫn nó kèm tên revision ("ảnh chụp
+# 05bd8ea"). Một tạo tác được trích dẫn mà không tra lại được ở đúng revision ấy
+# thì câu trích dẫn không có gì chống lưng, và đó đúng là điều mà chính tệp
+# `ASBUILT_INVENTORY.md` cạnh nó cảnh báo. Bản kê đi kèm là `.md` nên vẫn được
+# theo dõi — hai nửa của cùng một phép chụp mà chỉ một nửa vào git là trạng thái
+# tệ nhất, vì nó trông như đã được lưu.
+!docs/00-thesis/asbuilt/asbuilt_schema.json
 !reports/checkpoint_validity.md
 !reports/augmentation_contract.md
 !reports/augmentation_contract.json

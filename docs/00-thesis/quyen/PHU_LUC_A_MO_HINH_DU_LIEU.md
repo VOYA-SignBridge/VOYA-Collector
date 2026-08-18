@@ -8,12 +8,34 @@ mô-đun; ai cần tra một bảng hay một cột cụ thể thì đọc ở �
 
 ## 1. Giới thiệu
 
-Lược đồ có **57 bảng nghiệp vụ** và **1 khung nhìn**, với **117 khoá ngoại —
-trong đó 22 là khoá ghép mang định danh tổ chức**. Số liệu truy vấn trực tiếp cơ
-sở dữ liệu đang chạy ngày **17/08/2026**.
+Lược đồ có **58 bảng nghiệp vụ** và **1 khung nhìn**, với **123 khoá ngoại —
+trong đó 24 là khoá ghép mang định danh tổ chức**. Số liệu truy vấn trực tiếp cơ
+sở dữ liệu `signdb` đang chạy ngày **18/08/2026**, phiên bản lược đồ 5, mã ở ảnh
+chụp `05bd8ea`.
 
-*Cơ sở dữ liệu báo 58 bảng; bảng thứ 58 là `schema_migrations`, sổ ghi phiên bản
-lược đồ, không thuộc mô hình nghiệp vụ nên không tính vào 57.*
+*Cơ sở dữ liệu báo 59 bảng; bảng thứ 59 là `schema_migrations`, sổ ghi phiên bản
+lược đồ, không thuộc mô hình nghiệp vụ nên không tính vào 58.*
+
+**Dựng lại từ đầu ra 121 khoá ngoại, không phải 123 — và chênh lệch ấy phải nêu
+ra chứ không được làm tròn.** Cơ sở dữ liệu dựng mới từ mã hiện tại thiếu đúng
+hai khoá mà cơ sở dữ liệu đang chạy có:
+
+| Khoá chỉ có ở bản đang chạy | Bản chất | Hệ quả |
+|---|---|---|
+| `samples_class_uid_fkey` — `(class_uid)` → `classes(class_uid)` | Tồn dư từ một phiên bản DDL cũ. Mã hiện tại chỉ tạo khoá ghép `fk_samples_class_tenant (tenant_id, class_uid)` | Vô hại về ngữ nghĩa: `class_uid` là khoá chính của `classes` nên khoá ghép đã bao hàm ràng buộc này |
+| `project_allocations_tenant_id_fkey` — `(tenant_id)` **ON DELETE CASCADE** | Trùng cột với `fk_project_allocations_tenant`, vốn là **ON DELETE RESTRICT** | Hai ràng buộc ngược nhau trên cùng một cột. RESTRICT thắng, nên hành vi hiện tại đúng như thiết kế — nhưng vế CASCADE là một quả mìn: ai đọc nó sẽ tin rằng xoá tổ chức sẽ dọn theo bản cấp phát |
+
+Cả hai đều **không** do mã tạo ra, nên một lần dựng lại từ đầu sẽ không tái lập
+được chúng. Đây là giới hạn của phát biểu *"tái dựng hệ thống từ lược đồ của
+revision đã đóng băng"*: nó tái dựng được **thiết kế**, không tái dựng được lịch
+sử vận hành. Muốn hai bên trùng khít thì phải gỡ hai khoá dư trên bản đang chạy —
+việc này chưa làm, và nằm ở phần hướng phát triển.
+
+*Ghi chú về phép đo:* công cụ trích as-built chỉ chạy được trên cơ sở dữ liệu
+kiểm thử — đó là chốt chặn cố ý, để một lượt trích không bao giờ nhắm nhầm vào
+sản xuất. Hệ quả là ma trận sai khác của nó báo `legacy: 0`, vì tồn dư nằm ở phía
+nó không nhìn tới. Hai khoá trên tìm ra bằng cách đối chiếu tay giữa hai cơ sở dữ
+liệu, và bảng trên là kết quả của lượt đối chiếu ấy.
 
 Trình bày toàn bộ trong một sơ
 đồ duy nhất là trình bày một thứ không đọc được, nên phụ lục này chia theo đúng
@@ -127,15 +149,16 @@ Mọi token và mã một lần đều lưu ở **dạng băm**, không lưu gi�
 
 | Bảng | Khoá chính | Cột chính | RLS | Hàng |
 |---|---|---|:--:|---:|
-| `tenants` | `id` | mã định danh, tên, `billing_status`, `deleted_at` | — | 1 |
-| `workspaces` | `id` | `tenant_id`, tên — **chưa có bề mặt API** | ✔ | — |
-| `projects` | `id` | `workspace_id`, tên — **chưa có bề mặt API** | ✔ | — |
-| `roles` | `id` | mã vai, cấp phạm vi áp dụng | — | 3 |
-| `permissions` | `id` | mã quyền, mô tả | — | — |
-| `role_permissions` | (`role_id`,`permission_id`) | — | — | — |
-| `role_assignments` | `id` | chủ thể, `role_id`, **`scope_level`**, `scope_id` | ✔ | — |
-| `memberships` | `id` | bảng nền của quan hệ thành viên | ✔ | — |
-| `tenant_members` ⟨khung nhìn⟩ | — | lát cắt `scope_level = 'tenant'` của `role_assignments` | ✔ | 10 |
+| `tenants` | `tenant_id` | mã định danh, tên, `billing_status`, `deleted_at` | ✔ | 3 |
+| `workspaces` | `workspace_id` | `tenant_id`, tên | ✔ | — |
+| `projects` | `project_id` | `workspace_id`, tên | ✔ | — |
+| `project_allocations` | (`tenant_id`,`project_id`,`metric`) | hạn mức cấp cho một dự án theo từng chỉ số | ✔ | — |
+| `roles` | `role_id` | mã vai, cấp phạm vi áp dụng | ✔ | 3 |
+| `permissions` | `permission_code` | mã quyền, mô tả | — | — |
+| `role_permissions` | (`role_id`,`permission_code`) | — | — | — |
+| `role_assignments` | `assignment_id` | chủ thể, `role_id`, **`scope_level`**, `scope_id` | — | — |
+| `memberships` | `membership_id` | bảng nền của quan hệ thành viên | ✔ | — |
+| `tenant_members` ⟨khung nhìn⟩ | — | lát cắt `scope_level = 'TENANT'` của `memberships` | ✔ | 10 |
 | `tenant_invitations` | `id` | `tenant_id`, địa chỉ nhận, vai dự kiến, mã băm token, `expires_at`, trạng thái | ✔ | 0 |
 
 **Ghi chú thiết kế.** `tenant_members` là **khung nhìn**, không phải bảng, từ bản
@@ -144,8 +167,19 @@ dùng được mệnh đề xử lý xung đột khi ghi — mọi đường ghi
 Khung nhìn dùng chế độ gọi theo quyền của người gọi, để chính sách bảo mật mức
 hàng vẫn áp đúng.
 
-`scope_level` nhận bốn giá trị: hệ thống, tổ chức, không gian làm việc, dự án.
-Hai giá trị sau hiện có **0 bản ghi gán vai**.
+`scope_level` nhận bốn giá trị: hệ thống, tổ chức, không gian làm việc, dự án —
+và cột này nằm trên `memberships`, không nằm trên `role_assignments`; gán vai
+tham chiếu tới phạm vi **gián tiếp** qua `membership_id`.
+
+Đo trên cơ sở dữ liệu đang chạy ngày 18/08/2026, ba cấp dưới đều đã có tư cách
+thành viên thật: **10 bản ghi cấp tổ chức, 10 cấp không gian làm việc, 10 cấp dự
+án**. Nhưng gán vai chưa thu hồi thì phân bố hoàn toàn khác: **10 gắn với tư cách
+thành viên cấp tổ chức, 4 ở cấp hệ thống (không gắn tư cách thành viên nào), và
+0 ở hai cấp dưới**.
+
+Chênh lệch này là số liệu đáng giữ chứ không phải chỗ để làm tròn. Nó nói rằng
+**cấu trúc phạm vi đã có người ở, còn thẩm quyền thì chưa** — hai việc khác nhau,
+và chỉ việc thứ hai mới cưỡng chế được điều gì.
 
 ### 4.3 Nhóm M3 — Kho dữ liệu mẫu
 
@@ -280,24 +314,40 @@ sẽ chặn toàn bộ hoạt động của các gói không giới hạn.
 
 | Chỉ số | Giá trị | Cách kiểm chứng |
 |---|---|---|
-| Bảng mang cột định danh tổ chức | 34 | Truy vấn danh mục cột |
-| Bảng bật chính sách bảo mật mức hàng | 32 | Truy vấn cờ `relrowsecurity` |
-| Bảng bật cờ cưỡng chế với chủ sở hữu bảng | **32 / 32 = 100 %** | Truy vấn cờ `relforcerowsecurity` |
-| Số chính sách | 32 | Truy vấn danh mục chính sách |
-| **Độ phủ** | **32 / 34 ≈ 94,1 %** | — |
+| Bảng mang cột định danh tổ chức | 36 | Truy vấn danh mục cột |
+| Bảng bật chính sách bảo mật mức hàng | 35 | Truy vấn cờ `relrowsecurity` |
+| Bảng bật cờ cưỡng chế với chủ sở hữu bảng | **35 / 35 = 100 %** | Truy vấn cờ `relforcerowsecurity` |
+| Số chính sách | 35 | Truy vấn danh mục chính sách |
+| **Độ phủ** | **35 / 36 ≈ 97,2 %** | — |
 
-**Hai bảng mang định danh tổ chức nhưng không bật chính sách** — nêu đích danh và
-đánh giá rủi ro, thay vì để chúng thành một con số trừ đi:
+**Một bảng mang định danh tổ chức nhưng không bật chính sách** — nêu đích danh và
+đánh giá rủi ro, thay vì để nó thành một con số trừ đi:
 
 | Bảng | Vì sao không bật | Rủi ro |
 |---|---|---|
-| `tenants` | Đây là **danh mục các tổ chức**. Truy vấn phân giải ngữ cảnh phải đọc bảng này **trước khi** ngữ cảnh tổ chức tồn tại — bật chính sách lên chính nó thì bước phân giải khớp 0 hàng và không tổ chức nào vào được. Cùng một lý do với bảng tài khoản ở §4.1 | Thấp: bảng chỉ chứa siêu dữ liệu tổ chức, không chứa dữ liệu người dùng. Nhưng nó **liệt kê được tên mọi tổ chức**, nên mọi điểm cuối đọc nó phải tự lọc — và đó là kiểm tra ở tầng ứng dụng, tức mức bảo đảm thấp hơn |
 | `tenant_purges` | Bảng ghi nhận **yêu cầu dọn sạch dữ liệu tổ chức**, chỉ ghi và đọc qua đường quản trị nền tảng | Thấp, nhưng là một khoảng trống thật: một quản trị viên nền tảng đọc được toàn bộ lịch sử yêu cầu dọn của mọi tổ chức — điều này đúng với vai đó, song không có tầng cưỡng chế nào đứng sau |
 
-Cả hai đều được ghi vào phần hạn chế của quyển (Kết luận §2.1). Trường hợp
-`tenants` đáng chú ý về mặt lập luận: nó cho thấy **cơ chế cách ly không thể tự
-bảo vệ chính cái bảng định nghĩa ra các đơn vị cách ly** — một giới hạn có tính
-cấu trúc, không phải một sơ suất bỏ quên.
+Ngoại lệ này được ghi vào phần hạn chế của quyển (Kết luận §2.1).
+
+**Bảng `tenants` từng là ngoại lệ thứ hai, và cách nó thôi là ngoại lệ mới là
+phần đáng đọc.** Lập luận cũ nghe rất xuôi: truy vấn phân giải ngữ cảnh phải đọc
+`tenants` **trước khi** ngữ cảnh tổ chức tồn tại, nên bật chính sách lên chính nó
+thì bước phân giải khớp 0 hàng và không tổ chức nào vào được — từ đó kết luận
+rằng cơ chế cách ly *không thể* tự bảo vệ cái bảng định nghĩa ra các đơn vị cách
+ly. Kết luận ấy sai, và chỗ sai nằm ở một giả định ngầm: rằng lối ra duy nhất cho
+bước phân giải là **tắt** chính sách.
+
+Lối ra thứ hai là cấp cho bước ấy một **phạm vi tường minh**. Chính sách trên
+`tenants` nhận hai vế — `app.system_scope = 'on'` **hoặc** `tenant_id` khớp ngữ
+cảnh — nên đường phân giải chạy dưới phạm vi hệ thống vẫn đọc được, còn mọi
+đường nghiệp vụ thì không. Bảng tự bảo vệ được chính nó.
+
+Cái giá phải trả không biến mất mà **đổi chỗ**: nó chuyển từ "một bảng không có
+tầng cưỡng chế" thành "một biến ngữ cảnh mà ai đặt được thì đọc được tất cả".
+Đây là lý do phạm vi hệ thống phải là **một phạm vi có tên, được ghi kiểm toán**,
+chứ không phải một lối đi vòng sinh ra từ việc gõ nhầm tên tổ chức — xem Kết
+luận §1.1. Đổi một giới hạn cấu trúc lấy một ranh giới kiểm toán được là một
+đánh đổi tốt; giả vờ rằng không còn đánh đổi nào thì không.
 
 **Vì sao cờ cưỡng chế với chủ sở hữu bảng vẫn chưa đủ:** cơ sở dữ liệu miễn trừ
 chính sách **vô điều kiện** cho vai siêu người dùng. Đó là lý do tầng thứ tư —

@@ -80,15 +80,15 @@ Hệ thống đã được xây dựng, triển khai và đang vận hành với
 | Hạng mục | Số liệu | Cách kiểm chứng |
 |---|---|---|
 | Dịch vụ container | 15 khai báo, 14 chạy thường trực | Tệp khai báo triển khai |
-| Bảng cơ sở dữ liệu | 57 bảng nghiệp vụ + 1 khung nhìn | Truy vấn siêu dữ liệu, 17/08/2026 |
-| Khoá ngoại | 117, trong đó **22 khoá ghép mang định danh tổ chức** | Truy vấn siêu dữ liệu, 17/08/2026 |
-| Bảng bật chính sách mức hàng | 32, **32/32 = 100 % bật cờ cưỡng chế với chủ sở hữu bảng** | Truy vấn siêu dữ liệu, 17/08/2026 |
-| Độ phủ cách ly | 32/34 bảng mang định danh tổ chức ≈ 94,1 % | Truy vấn siêu dữ liệu, 17/08/2026 |
-| Điểm cuối API | 213 trên 26 bộ định tuyến | Đếm bộ trang trí phương thức |
-| Mã nguồn dịch vụ | 61.097 dòng, 162 tệp | Đếm dòng, 17/08/2026 |
-| Mã nguồn giao diện | 48.074 dòng, 221 tệp | Đếm dòng, 17/08/2026 |
-| Mã kiểm thử | 41.760 dòng, 151 tệp | Đếm dòng, 17/08/2026 |
-| Kiểm thử chạy xanh | **2.528 xanh / 0 đỏ / 1 bỏ qua** trên 2.529 ca thu thập | Lượt chạy đầy đủ 17/08/2026, 22 ph 14 s |
+| Bảng cơ sở dữ liệu | 58 bảng nghiệp vụ + 1 khung nhìn (59 bảng kể cả sổ ghi phiên bản lược đồ) | Truy vấn siêu dữ liệu, ảnh chụp `05bd8ea` 18/08/2026 |
+| Khoá ngoại | 123, trong đó **24 khoá ghép mang định danh tổ chức**; dựng lại từ đầu ra 121 — hai khoá chênh là tồn dư vận hành, xem Phụ lục A §1 | Truy vấn siêu dữ liệu, ảnh chụp `05bd8ea` |
+| Bảng bật chính sách mức hàng | 35, **35/35 = 100 % bật cờ cưỡng chế với chủ sở hữu bảng** | Truy vấn siêu dữ liệu, ảnh chụp `05bd8ea` |
+| Độ phủ cách ly | 35/36 bảng mang định danh tổ chức ≈ 97,2 %; ngoại lệ duy nhất là `tenant_purges` | Truy vấn siêu dữ liệu, ảnh chụp `05bd8ea` |
+| Điểm cuối API | **224 điểm cuối trên 199 đường dẫn** dưới tiền tố `/api/`, từ 27 bộ định tuyến | Đọc **bảng định tuyến của ứng dụng** đã dựng, không đếm bộ trang trí trong mã |
+| Mã nguồn dịch vụ | 62.817 dòng, 164 tệp | Đếm dòng, 18/08/2026 — Bảng 3-50 |
+| Mã nguồn giao diện | 49.716 dòng, 227 tệp | Đếm dòng, 18/08/2026 — Bảng 3-50 |
+| Mã kiểm thử | 42.544 dòng, 153 tệp | Đếm dòng, 18/08/2026 — Bảng 3-50 |
+| Kiểm thử chạy xanh | **2.550 xanh / 0 đỏ / 1 bỏ qua** trên 2.551 ca thu thập | Lượt chạy đầy đủ 18/08/2026, 20 ph 49 s |
 | Mẫu dữ liệu đã thu | 3.860 mẫu, 60 lớp từ vựng | Nguồn sự thật của kho mẫu |
 
 Bảy khối chức năng đã hoàn thiện và chạy được đầu-cuối: thu nhận dữ liệu hai
@@ -130,14 +130,30 @@ phát hiện **bởi chính các phép đo của luận văn**, không phải b�
 ### 2.1 Hạn chế về phạm vi cưỡng chế
 
 **a) Phân quyền mới cưỡng chế được ở hai trong bốn cấp phạm vi.** Mô hình dữ liệu
-và kiến trúc phân quyền hỗ trợ một hệ phân cấp bốn cấp, nhưng cấp không gian làm
-việc và cấp dự án hiện có **0 gán vai** và **không có điểm cuối API nào**. Chúng
-là cấu trúc dữ liệu, chưa phải bề mặt vận hành. Vì thế không có gì để kiểm chứng
-cách ly ở hai cấp đó từ bên ngoài.
+và kiến trúc phân quyền hỗ trợ một hệ phân cấp bốn cấp. Hai cấp dưới đã thôi là
+lược đồ chết: đo ngày 18/08/2026 có **4 không gian làm việc, 6 dự án, 4 bản cấp
+phát hạn mức**, tư cách thành viên đủ ba cấp (**10 tổ chức · 10 không gian làm
+việc · 10 dự án**), và **14 điểm cuối** quản trị không gian làm việc, dự án, hạn
+mức và thành viên.
+
+Nhưng ba khoảng trống vẫn còn, và chúng mới là thứ quyết định phát biểu:
+
+* **0 gán vai** ở cấp không gian làm việc và cấp dự án. Gán vai chưa thu hồi phân
+  bố hết vào cấp hệ thống (4) và cấp tổ chức (10). Có tư cách thành viên không
+  phải là có thẩm quyền.
+* **Không tài nguyên nghiệp vụ nào mang định danh không gian làm việc hay dự
+  án.** Cột `workspace_id` xuất hiện ở đúng ba bảng và `project_id` ở đúng ba
+  bảng, tất cả đều thuộc chính bộ khung phạm vi. Không một mẫu, lớp từ vựng hay
+  phiên thu nào bị hai cấp này giới hạn. Chúng hiện là phạm vi **quản trị và hạn
+  mức**, chưa phải ranh giới **dữ liệu**.
+* **Phép đo cách ly không phủ bề mặt mới.** Trục T2 chạy trên ảnh chụp mã
+  `4e9611`, trước khi 14 điểm cuối này tồn tại. Con số 0/630 nói về bề mặt API
+  tại thời điểm đó, không nói gì về những điểm cuối thêm sau.
 
 Quyết định có ý thức: **không dựng vội hai tầng phân quyền chỉ để khớp đề cương.**
 Ghi nhận sai lệch trung thực tốt hơn nhiều so với một bề mặt chưa có nghiệp vụ
-thật đứng sau.
+thật đứng sau — và cũng tốt hơn việc để một bề mặt vừa mọc ra thừa hưởng uy tín
+của một phép đo chạy trước nó.
 
 **b) Cách ly phủ nửa đầu vòng đời dữ liệu.** Ranh giới tổ chức được cưỡng chế
 chặt trên đường thu nhận và quản lý mẫu. Nửa sau — huấn luyện và quản lý mô hình
@@ -164,6 +180,19 @@ nhưng giá trị dùng chung bị ghi đè lùi.
 **c) Nguồn sự thật của kho mẫu vẫn là tệp CSV.** Đây là di sản kiến trúc từ hệ
 thống tiền thân, không phải thiết kế được chọn. Hệ quả: phải duy trì một cơ chế
 đối soát định kỳ, và đường ghi tệp không chịu chính sách bảo mật mức hàng.
+
+**d) Chưa có vòng đời bộ dữ liệu bất biến.** Danh mục ghim được phiên bản — đó là
+**điều kiện cần** để tái lập một bộ dữ liệu, không phải điều kiện đủ. Điều kiện
+còn thiếu là cố định **tập mẫu**: bảng `samples` không có cột số hiệu bản sửa, và
+chín bảng phục vụ vòng đời này (`datasets`, `dataset_versions`, `dataset_splits`,
+`dataset_samples_mapping`, `dataset_lineage`, `experiments`, `experiment_metrics`,
+`model_versions`, `model_deployments`) mới tồn tại dưới dạng DDL thiết kế, chưa
+được thi hành lên cơ sở dữ liệu đang chạy.
+
+Vì vậy **không được mô tả hệ thống như một kho lưu trữ nghiên cứu bất biến.** Nó
+ghim được không gian nhãn, và ghim được nội dung của từng tạo tác đã ký qua mã
+băm; nó chưa ghim được câu "bản phát hành X gồm đúng những mẫu này ở đúng trạng
+thái này".
 
 ### 2.3 Hạn chế về dữ liệu
 
@@ -231,10 +260,24 @@ Xếp theo tỉ lệ giá trị trên công sức:
 | 2 | **Chuẩn hoá tính lũy đẳng** cho đường tạo tài nguyên và tải đối tượng: khoá lũy đẳng theo nội dung | §2.2a | Vừa |
 | 3 | **Chuyển nguồn sự thật của kho mẫu** từ tệp CSV sang cơ sở dữ liệu, giữ CSV làm bản xuất | §2.2c, §2.1c | Lớn |
 | 4 | **Ghi bù định danh người ký** cho dữ liệu lịch sử, ở mức làm được | §2.3b | Vừa, phụ thuộc dữ liệu |
-| 5 | **Dựng bề mặt vận hành** cho hai cấp phạm vi dưới, rồi mở rộng phép đo cách ly sang bốn cấp | §2.1a | Lớn |
+| 5 | **Chạy lại giao thức T2** trên ảnh chụp `05bd8ea` để phủ 14 điểm cuối quản trị không gian làm việc xuất hiện sau lượt đo | §2.1a, gạch đầu dòng thứ ba | Nhỏ |
+| 6 | **Bật chính sách mức hàng cho `tenant_purges`** — bảng cuối cùng mang định danh tổ chức mà chưa có tầng cưỡng chế, đưa độ phủ 35/36 lên 36/36 | §2.1 | Nhỏ |
+| 7 | **Gán vai thật ở cấp không gian làm việc và dự án**, rồi gắn tài nguyên nghiệp vụ vào hai phạm vi ấy | §2.1a, hai gạch đầu dòng đầu | Lớn |
+| 8 | **Thi hành vòng đời bộ dữ liệu bất biến**: chín bảng `datasets`, `dataset_versions`, `dataset_splits`, `dataset_samples_mapping`, `dataset_lineage`, `experiments`, `experiment_metrics`, `model_versions`, `model_deployments` hiện mới có DDL thiết kế, chưa materialize | §2.2d | Lớn |
+| 9 | **Gỡ hai khoá ngoại tồn dư** trên bản đang chạy (`samples_class_uid_fkey` và `project_allocations_tenant_id_fkey`) để dựng-lại-từ-đầu trùng khít với đang-chạy | Phụ lục A §1 | Nhỏ |
+| 10 | **Mở chốt đối chiếu hai chiều cho công cụ as-built**: cho phép nó đọc **chỉ đọc** cả cơ sở dữ liệu đang chạy để phân loại `legacy` có nghĩa, thay vì luôn báo 0 vì chỉ nhìn bản dựng mới | Phụ lục A §1, ghi chú về phép đo | Nhỏ |
 
 Việc số 1 đáng làm trước vì chi phí nhỏ và nó biến một giới hạn đã công bố thành
-một thuộc tính đạt.
+một thuộc tính đạt. Việc số 5 đáng làm ngay sau, và vì một lý do khác: nó không
+thêm năng lực nào cho hệ thống, nó chỉ làm cho **phát biểu về hệ thống khớp lại
+với mã đang chạy**. Bề mặt API mọc thêm sau một phép đo thì phép đo cũ không tự
+động phủ nó, và khoảng trống ấy lớn dần theo mỗi điểm cuối viết thêm.
+
+**Về thứ tự giữa việc 7 và việc 8.** Cả hai đều lớn, nhưng việc 7 phải đi trước:
+một bộ dữ liệu bất biến ghim vào tập mẫu, mà tập mẫu hiện chưa bị không gian làm
+việc hay dự án giới hạn, thì bản phát hành sẽ ghim đúng thứ nó ghim hôm nay và
+sai ngay khi hai cấp phạm vi kia bắt đầu chia dữ liệu. Làm ngược thứ tự thì phải
+làm lại việc 8 một lần nữa.
 
 ### 3.2 Mở rộng phạm vi đánh giá
 

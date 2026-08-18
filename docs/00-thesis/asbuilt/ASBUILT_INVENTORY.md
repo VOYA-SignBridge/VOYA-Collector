@@ -2,7 +2,7 @@
 
 Nguồn: `signdb_test`. Sinh bởi `scripts/reverse_asbuilt_schema.py`.
 
-**Revision:** `a8e93d98657c952cf48596db8fa836dc67a81383` — ⚠ **cây làm việc CÓ THAY ĐỔI CHƯA COMMIT** (19 tệp)
+**Revision:** `05bd8ea38746b35795f14078656e20ceda03f231` — cây làm việc **sạch**; phép chụp này đủ tư cách làm as-built.
 
 Revision phải nằm trong tệp này, không nằm trong trí nhớ người chạy. Một mô
 hình as-built không tự khai nó chụp lúc nào thì không đối chiếu lại được, và
@@ -16,21 +16,21 @@ muốn tạo gì* — và khi chúng lệch, không bên nào được tự đ�
 
 ## Tổng lượng
 
-- bảng: **58**
+- bảng: **59**
 - view: 1
-- khoá ngoại: 118 (trong đó **hợp nhiều cột: 23**)
-- ràng buộc CHECK: 62
+- khoá ngoại: 121 (trong đó **hợp nhiều cột: 24**)
+- ràng buộc CHECK: 63
 - UNIQUE: 16
-- chỉ mục: 175 (partial: 33)
+- chỉ mục: 177 (partial: 33)
 - trigger: 6
-- bảng bật RLS: 34 — trong đó FORCE: 34
-- policy: 34
+- bảng bật RLS: 35 — trong đó FORCE: 35
+- policy: 35
 
 ## Ma trận sai khác As-built ↔ mã ↔ thiết kế
 
 | Phân loại | Nghĩa | Số |
 |---|---|---|
-| `runtime` | có trong CSDL **và** trong mã → vào As-built PDM | 58 |
+| `runtime` | có trong CSDL **và** trong mã → vào As-built PDM | 59 |
 | `view` | materialize dưới dạng **VIEW**, không phải bảng nền → vào As-built PDM, vẽ khác bảng | 1 |
 | `legacy` | có trong CSDL, **không** còn trong mã → tồn dư, phải điều tra | 0 |
 | `declared` | có trong mã, **chưa** materialize dưới bất kỳ dạng nào | 0 |
@@ -160,3 +160,9 @@ _(không có)_
 | `tenant_usage_daily` | 5 | ✓ | ✓ | 1 |
 | `webhook_deliveries` | 12 | ✓ | ✓ | 1 |
 | `webhook_endpoints` | 14 | ✓ | ✓ | 1 |
+
+### PDM-Z_chua_phan_loai  (1 bảng)
+
+| Bảng | Cột | RLS | FORCE | Policy |
+|---|---|---|---|---|
+| `project_allocations` | 7 | ✓ | ✓ | 1 |

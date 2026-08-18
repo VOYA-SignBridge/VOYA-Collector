@@ -17,7 +17,7 @@ trong bảng đều truy được về mã đang chạy.*
 | **Tệp kiểm thử** | Nơi ca này sống trong mã nguồn |
 
 **Trạng thái tổng.** Ở **lượt chạy đầy đủ ngày 17/08/2026**, mọi ca dưới đây đều
-**Đạt**: 2.528 xanh / 0 đỏ / 1 bỏ qua trên 2.529 ca thu thập, 22 ph 14 s, trên
+**Đạt**: 2.550 xanh / 0 đỏ / 1 bỏ qua trên 2.551 ca thu thập, 20 ph 49 s, trên
 bản sao cơ sở dữ liệu sản xuất. Cột kết quả vì thế được lược bỏ để bảng đọc được.
 
 Lượt chạy ấy **không xanh ngay từ đầu**: nó bắt đầu với 6 ca đỏ và một lượt chạy

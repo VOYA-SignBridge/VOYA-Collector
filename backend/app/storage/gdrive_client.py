@@ -86,7 +86,13 @@ class GoogleDriveClient:
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.root_folder_id = root_folder_id
-        self.timeout_seconds = max(30, int(timeout_seconds or 120))
+        # Sàn 1 giây, KHÔNG phải 30. Sàn 30 giây cũ nuốt im lặng mọi cấu hình
+        # thấp hơn nó — kể cả trần chờ 5 giây mà môi trường kiểm thử đặt riêng
+        # để bộ kiểm thử không treo khi gọi ra ngoài không tới đích. Biện pháp
+        # giảm thiểu đã ghi trong tài liệu, đặt đúng biến môi trường, mà vẫn
+        # không có tác dụng nào: đó là kiểu hỏng tệ nhất, vì nó trông như đã
+        # được xử lý. Ai cần trần cao thì cấu hình trần cao.
+        self.timeout_seconds = max(1, int(timeout_seconds or 120))
         self.num_retries = max(0, int(num_retries or 0))
         self.chunk_size_bytes = max(1, int(chunk_mb or 1)) * 1024 * 1024
         self.download_chunk_size_bytes = max(1, int(download_chunk_mb or 1)) * 1024 * 1024

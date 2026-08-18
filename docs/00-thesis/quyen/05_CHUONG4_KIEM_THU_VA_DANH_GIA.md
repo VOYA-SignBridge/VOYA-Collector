@@ -176,7 +176,7 @@ phiên bản mã nào cả.
 
 | Sản phẩm | Nội dung | Nơi lưu |
 |---|---|---|
-| Bộ kiểm thử tự động | 151 tệp, 41.760 dòng mã kiểm thử | `backend/tests/`, `frontend/src/**/__tests__/` |
+| Bộ kiểm thử tự động | 153 tệp, 42.544 dòng mã kiểm thử | `backend/tests/`, `frontend/src/**/__tests__/` |
 | Sổ dấu vết lượt chạy | Ảnh chụp trạng thái đầu lượt, số kiểm thử, số bỏ qua, nguyên nhân | Tạo tự động mỗi lượt chạy |
 | Tài liệu quy trình kiểm thử | Cách chạy, chuẩn viết, danh mục kiểm thử, các dạng "đỏ giả" | `docs/08-testing/TESTING.md` |
 | Artefact phép đo cách ly | Dữ liệu thô từng lượt gọi, kèm mã trả về và ngữ cảnh | `MEASUREMENT_cross_store_isolation_raw.json` |
@@ -210,12 +210,12 @@ gộp hai nền lại sẽ mất một trong hai câu trả lời.
 |---|---|---|
 | Trả lời câu | Thay đổi có phá **dữ liệu thật** không? | Mã có chạy trên một **máy mới** không? |
 | Cơ sở dữ liệu | Bản sao của cơ sở dữ liệu sản xuất | Cơ sở dữ liệu trống, dựng bằng lệnh di trú |
-| Lượt chạy sạch gần nhất | **2.528 xanh / 0 đỏ / 1 bỏ qua** (17/08/2026, 22 ph 14 s) | **1.681 xanh / 0 đỏ / 15 bỏ qua** (14/08/2026) |
+| Lượt chạy sạch gần nhất | **2.550 xanh / 0 đỏ / 1 bỏ qua** (18/08/2026, 20 ph 49 s) | **1.681 xanh / 0 đỏ / 15 bỏ qua** (14/08/2026) |
 | Chênh lệch 15 kiểm thử | — | Là **bỏ qua**, không phải đỏ: chủ yếu là kiểm thử trích đặc trưng từ video, cần kho clip 2,7 GB không có trên nền này |
-| **Quy mô thu thập, 17/08/2026** | **2.528 ca** | — |
+| **Quy mô thu thập, 18/08/2026** | **2.551 ca** | — |
 
-**Về con số 2.529.** Đây là số ca pytest **thu thập được**, khác hẳn con số hay
-bị nhầm với nó: **1.987** là số *hàm* kiểm thử đếm tĩnh trong 151 tệp. Chênh lệch
+**Về con số 2.551.** Đây là số ca pytest **thu thập được**, khác hẳn con số hay
+bị nhầm với nó: **2.010** là số *hàm* kiểm thử đếm tĩnh trong 150 tệp. Chênh lệch
 là do tham số hoá — một hàm sinh nhiều ca. Chỉ con số của **lượt chạy thật** mới
 được viết vào quyển, và phải kèm ngày.
 
@@ -314,8 +314,8 @@ có tới **ba** con số dễ bị dùng lẫn cho nhau. Đo lại toàn bộ n
 
 | Con số | Giá trị | Nó là gì |
 |---|---|---|
-| Hàm kiểm thử, đếm tĩnh | **1.987** trong 151 tệp (dịch vụ) · **429** trong 58 tệp (giao diện) | Số **hàm** trong mã nguồn |
-| Ca thu thập được | **2.528** | Số **ca** pytest dựng ra — tham số hoá làm một hàm sinh nhiều ca |
+| Hàm kiểm thử, đếm tĩnh | **2.010** trong 150 tệp (dịch vụ) · **429** trong 58 tệp (giao diện) | Số **hàm** trong mã nguồn |
+| Ca thu thập được | **2.551** | Số **ca** pytest dựng ra — tham số hoá làm một hàm sinh nhiều ca |
 | Ca chạy xanh | **1.696** (14/08/2026) | Số ca của một **lượt chạy thật** |
 
 Chỉ dòng thứ ba được phép viết là "kiểm thử xanh", và phải kèm ngày cùng số bỏ
@@ -500,8 +500,12 @@ mới quy được cho ranh giới ấy.
 
 1. Phép đo chạy trên **hai tổ chức**, không phải trên số tổ chức lớn. Nó chứng
    minh cơ chế hoạt động, không chứng minh cơ chế giữ được ở quy mô lớn.
-2. Phép đo phủ **các tài nguyên có bề mặt API**. Hai cấp phạm vi dưới (không gian
-   làm việc, dự án) không có bề mặt API nên **không có gì để đo** ở đó.
+2. Phép đo phủ **các tài nguyên có bề mặt API tại thời điểm chụp mã `4e9611`**.
+   Khi đó hai cấp phạm vi dưới (không gian làm việc, dự án) chưa có bề mặt API
+   nên không có gì để đo ở đó. Bề mặt ấy **đã xuất hiện sau lượt đo** — 14 điểm
+   cuối, ảnh chụp `05bd8ea` — và vì vậy nằm **ngoài** phạm vi của kết quả 0/630.
+   Muốn phát biểu về chúng thì phải chạy lại giao thức T2 trên ảnh chụp mới, chứ
+   không được mở rộng kết luận cũ ra cho mã viết sau nó.
 3. Phép đo là **đối kháng**, không phải chứng minh hình thức. Kết quả đúng là
    "trong 630 lượt thử theo giao thức này, không quan sát thấy vi phạm nào" —
    không phải "không thể có vi phạm". Phân biệt giữa *chưa quan sát thấy vi phạm*
@@ -721,9 +725,9 @@ phải chạy riêng.
 
 | # | Mục tiêu | Trạng thái | Bằng chứng chính | Giới hạn |
 |---|---|---|---|---|
-| O1 | Kiến trúc đa tổ chức | **Đạt, có tinh chỉnh** | 57 bảng, 34 mang định danh tổ chức; mô hình phạm vi bốn cấp | Hai cấp dưới chưa có bề mặt vận hành |
+| O1 | Kiến trúc đa tổ chức | **Đạt, có tinh chỉnh** | 59 bảng, 36 mang định danh tổ chức; mô hình phạm vi bốn cấp — ảnh chụp `05bd8ea`, 18/08/2026 | Không tài nguyên nghiệp vụ nào mang định danh không gian làm việc hay dự án |
 | O2 | Cách ly dữ liệu giữa các tổ chức | **Đạt** | 0/450 vi phạm xuyên tổ chức, 0/180 thao tác trái quyền lọt, 0 ca không kết luận được, đối chứng dương đủ bốn thao tác, hậu điều kiện xác nhận dữ liệu nguyên vẹn — đo trên ảnh chụp mã `4e961192` (§5.2bis) | Hai tổ chức, không phải quy mô lớn; đối kháng chứ không phải chứng minh hình thức |
-| O3 | Phân quyền nhiều cấp phạm vi | **Đạt một phần** | Gán vai ở cấp hệ thống và cấp tổ chức, cưỡng chế được | Cấp không gian làm việc và dự án: **0 gán vai**, không có bề mặt API |
+| O3 | Phân quyền nhiều cấp phạm vi | **Đạt một phần** | Gán vai cưỡng chế được ở cấp hệ thống (4) và cấp tổ chức (10); tư cách thành viên đã có ở cả ba cấp: 10 tổ chức · 10 không gian làm việc · 10 dự án; 14 điểm cuối quản trị không gian làm việc | Hai cấp dưới vẫn **0 gán vai**; phép đo cách ly T2 chạy trên ảnh chụp `4e9611`, **trước** khi 14 điểm cuối này tồn tại, nên chúng nằm ngoài phạm vi đã đo |
 | O4 | Phân loại từ vựng và phương ngữ | **Đạt** | Ngôn ngữ / phương ngữ / vùng miền + danh mục có phiên bản, ghim được | — |
 | O5 | Hiệu quả lưu trữ | **Đạt** | 92,2 % trên 54 cặp khớp thời lượng | Nguồn video ngoài, đã nén để phân phối web |
 | O6 | Xử lý bất đồng bộ | **Đạt, có hạn chế độ tin cậy** | Bốn nhóm công việc đều vận hành trên tiến trình nền | Thử lại và tính lũy đẳng **không đồng đều** |
@@ -874,6 +878,43 @@ tiến trình con, bỏ qua có điều kiện đúng như thiết kế.
 đợt thay đổi chưa hoàn tất. Phần lớn các ca đỏ là **hệ quả của đợt thay đổi đang
 làm dở**, không phải hồi quy của mã đã ổn định. Nhưng hai lỗi ở mục d là lỗi
 thật, và cả hai đều đã được vá cùng với bất biến chặn tái diễn.
+
+#### g) Lượt chạy 18/08/2026 — con số được công bố trong quyển
+
+Sau khi đóng băng cây mã ở ảnh chụp `05bd8ea`, bộ kiểm thử được chạy lại đầy đủ:
+
+```
+lượt đầu      2.551 ca · 2.543 xanh · 7 đỏ · 1 bỏ qua  (20 ph 16 s)
+              → 4 bản vá: 3 ở fixture, 1 ở mã sản xuất
+lượt xác nhận 2.551 ca · 2.550 xanh · 0 đỏ · 1 bỏ qua  (20 ph 49 s)
+```
+
+**Bảy ca đỏ, không ca nào là hồi quy của sản phẩm** — và cách phân định từng ca
+đáng ghi lại, vì cả bảy đều thuộc những dạng đỏ giả đã liệt kê ở Bảng 4-5, chỉ
+với biến thể mới:
+
+| Ca | Vì sao đỏ | Bằng chứng phân định |
+|---|---|---|
+| 3 ca đổi tên tài khoản | Fixture lấy lớp bằng `LIMIT 1` **không kèm `ORDER BY`**, nên nhận về lớp của một tổ chức khác và dựng hàng mẫu **xuyên tổ chức**. Đường đổi tên lọc theo tổ chức — cố ý, để không sửa hàng vô chủ của tổ chức khác — nên nó bỏ qua hàng ấy | Truy vấn trực tiếp cho thấy lớp được mượn thuộc `iso_b`, còn tài khoản thuộc `default` |
+| 2 ca đối chiếu backfill | Bất biến khẳng định trên **toàn bảng**, trong khi 8 hàng vi phạm đều là dữ liệu tổng hợp của chính bộ đo cách ly, tạo **sau** đợt backfill | Cả 8 hàng mang `session_id` dạng `sess-iso_a-target`; tài khoản "bị hạ vai" là `iso_admin_a`, vốn được gieo như vậy có chủ ý |
+| 1 ca tài khoản thiếu tư cách thành viên | Một tài khoản rò lại từ lượt chạy, nằm ngoài cơ chế dọn | Chạy riêng ca tình nghi **không** tái hiện; phép kiểm được giữ nguyên độ chặt và chỉ sửa để nêu đích danh hàng vi phạm |
+| 1 ca đồng bộ nguồn sự thật | Hệ quả trực tiếp của một bản vá trong chính lượt này — xem dưới | Lỗi là `TimeoutError`, xuất hiện đúng sau khi trần chờ trở nên có hiệu lực |
+
+**Bản vá mã sản xuất, và bài học đắt nhất của lượt chạy này.** Mục (a) ở trên ghi
+rằng cách xử lý đúng là hạ trần chờ cho môi trường kiểm thử xuống **5 giây × 1
+lần**. Biến môi trường đã được đặt đúng, kịch bản đã truyền đúng — và giá trị ấy
+**chưa bao giờ có hiệu lực**: hàm khởi tạo của khách hàng dịch vụ ngoài kẹp
+`max(30, trần_chờ)`, nên mọi cấu hình dưới 30 bị nuốt im lặng.
+
+Đây là dạng hỏng nguy hiểm hơn cả một lỗi lộ liễu, vì **nó trông như đã được xử
+lý**: tài liệu ghi có, cấu hình có, và hành vi thì không. Sàn được hạ xuống 1 để
+cấu hình có hiệu lực thật; ngay lượt chạy sau đó một phép kiểm đỏ vì đọc dịch vụ
+ngoài cần hơn 5 giây — tức là con số đã chạy tốt suốt thời gian qua vốn là **30**,
+còn 5 chỉ tồn tại trên giấy. Mặc định của môi trường kiểm thử vì vậy được ghi
+đúng thành 30, thay vì giữ một con số đẹp hơn mà sai.
+
+Hệ quả cho phương pháp, áp cho mọi biện pháp giảm thiểu về sau: **một biện pháp
+chưa được quan sát thấy có tác dụng thì chưa phải là một biện pháp đã áp dụng.**
 
 *Quy tắc "phát hiện trong lúc đo thì ghi, không sửa ngay" (Phụ lục E §1, quy tắc
 4) áp cho **phép đo**, không áp cho bộ kiểm thử. Các phát hiện trên đến từ lượt

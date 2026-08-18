@@ -245,9 +245,23 @@ sự thật lệch khỏi bản sao. Người chịu trách nhiệm và cách ph
 
 #### b. Ánh xạ từ nghiệp vụ xuống bề mặt API
 
-Tám nhóm nghiệp vụ được cài đặt thành **27 bộ định tuyến API** với **228 điểm cuối**,
-một giao diện đơn trang **71 tệp màn hình**, và một bộ công cụ vận hành chạy trên
-dòng lệnh.
+Tám nhóm nghiệp vụ được cài đặt thành **27 bộ định tuyến API** với **224 điểm cuối
+trên 199 đường dẫn** dưới tiền tố `/api/`, một giao diện đơn trang **71 tệp màn
+hình**, và một bộ công cụ vận hành chạy trên dòng lệnh.
+
+**Con số này đọc từ bảng định tuyến của ứng dụng đã dựng, không đếm bộ trang trí
+trong mã** — và hai cách cho hai kết quả khác nhau, nên phải nói rõ dùng cách nào.
+Đếm bộ trang trí `@router.<phương thức>` trong `backend/app/routers/` ra 227: nó
+gộp cả những khai báo không được đăng ký dưới tiền tố `/api/`, và bỏ sót những
+điểm cuối khai báo ngoài thư mục ấy. Bảng định tuyến trả lời đúng câu người đọc
+hỏi — *hệ thống thực sự phục vụ bao nhiêu điểm cuối* — nên nó là nguồn được chọn.
+
+Một cái bẫy khi đếm lại: mỗi bộ định tuyến được gắn **hai lần**, một lần dưới
+`/api/v1/...` và một lần dưới đường không tiền tố (`/workspaces/...`) để giữ
+tương thích với các bản giao diện cũ. Đếm toàn bộ bảng định tuyến mà không lọc
+tiền tố sẽ ra **419**, tức đếm mỗi điểm cuối hai lần cộng thêm các đường phục vụ
+tài liệu và kiểm tra sức khoẻ. Con số ấy không sai về mặt số học và sai hoàn toàn
+về mặt ý nghĩa.
 
 *Bảng 3-6: Bộ định tuyến và số điểm cuối theo nghiệp vụ*
 
@@ -1575,7 +1589,7 @@ chuẩn để dùng nhất quán ở mọi nơi trong quyển.
 | Cấp | Có bảng | Có bề mặt API | Dữ liệu phân vùng theo cấp này | Quyết định quyền lúc chạy | Chứng minh được từ ngoài |
 |---|:--:|:--:|:--:|:--:|---|
 | Hệ thống | ✔ | ✔ | — (không áp dụng) | ✔ | **Có** |
-| Tổ chức | ✔ | ✔ | ✔ (36/36 bảng mang `tenant_id`) | ✔ | **Có** — Ch.4 §5.2 |
+| Tổ chức | ✔ | ✔ | ✔ (35/36 bảng mang `tenant_id` bật chính sách; ngoại lệ `tenant_purges`) | ✔ | **Có** — Ch.4 §5.2 |
 | Không gian làm việc | ✔ | ✔ *(14 điểm cuối)* | ✘ | ✘ *(chế độ `shadow`)* | **Chưa** |
 | Dự án | ✔ | ✔ | ✘ | ✘ *(chế độ `shadow`)* | **Chưa** |
 
@@ -2970,7 +2984,7 @@ mất chỗ đứng.
 
 ```
 backend/app/
-  routers/        27 bộ định tuyến, 228 điểm cuối
+  routers/        27 bộ định tuyến, 224 điểm cuối
   storage/        tầng truy cập dữ liệu — NƠI DUY NHẤT đặt ngữ cảnh tổ chức
   processing/     trích đặc trưng, cắt cửa sổ, tăng cường, chấm chất lượng
   sot/            công bố và xác minh nguồn sự thật
@@ -2993,9 +3007,9 @@ docs/             tài liệu thiết kế, đặc tả, và quyển luận văn
 
 | Phần | Số tệp | Số dòng |
 |---|---:|---:|
-| Dịch vụ (Python, `backend/app`) | 164 | **62.752** |
-| Giao diện (TypeScript, `frontend/src`) | 227 | **49.674** |
-| Kiểm thử (Python, `backend/tests`) | 153 | **42.496** |
+| Dịch vụ (Python, `backend/app`) | 164 | **62.817** |
+| Giao diện (TypeScript, `frontend/src`) | 227 | **49.716** |
+| Kiểm thử (Python, `backend/tests`) | 153 | **42.544** |
 
 Tỉ lệ mã kiểm thử trên mã dịch vụ là **0,68 : 1**. Con số này là **hệ quả trực tiếp**
 của một nguyên tắc phương pháp (RB-D9) chứ không phải một mục tiêu tự đặt: mỗi khẳng
@@ -3302,7 +3316,7 @@ Chương này đã đi từ **phân tích yêu cầu** tới **hệ thống đan
 1. **Phân tích và mô hình hoá** (§3.1): bài toán phát biểu lại từ góc nhìn thiết kế
    quanh một nguyên tắc duy nhất — *ranh giới cách ly phải nằm ở tầng thấp hơn tầng
    mà lập trình viên có thể quên*; mười tác nhân người và sáu tác nhân hệ thống; tám
-   nhóm nghiệp vụ cài đặt thành 27 bộ định tuyến với 228 điểm cuối; và một **mô hình
+   nhóm nghiệp vụ cài đặt thành 27 bộ định tuyến với 224 điểm cuối; và một **mô hình
    use case thu gọn theo phạm vi luận văn gồm 24 use case**, rút ra từ danh mục 75 use
    case của sản phẩm theo năm nguyên tắc dựng mô hình.
 2. **Kiến trúc** (§3.2, §3.3): sáu phân hệ chức năng; 15 dịch vụ container với ba lý

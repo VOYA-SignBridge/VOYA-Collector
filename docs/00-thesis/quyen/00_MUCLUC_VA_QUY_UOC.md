@@ -36,13 +36,13 @@ chỗ mà không phải lật qua ba mươi trang không liên quan.
 
 ### Nguyên tắc phân bổ nội dung chính ↔ phụ lục
 
-Hệ thống có 57 bảng dữ liệu, 75 use case, 213 điểm cuối API và 2.528 ca kiểm thử.
+Hệ thống có 59 bảng dữ liệu, 75 use case, 224 điểm cuối API và 2.551 ca kiểm thử.
 Đưa hết vào thân bài thì thân bài không còn đọc được. Luật cắt như sau:
 
 | Loại nội dung | Vào thân bài | Vào phụ lục |
 |---|---|---|
-| Mô hình dữ liệu | **sơ đồ theo nhóm mô-đun** (7 nhóm) + bảng tóm tắt nhóm | CDM đầy đủ, PDM đầy đủ, danh mục 57 bảng kèm từng cột |
-| Use case | danh sách 79 UC + đặc tả chi tiết **8 UC trục chính** | đặc tả chi tiết toàn bộ 79 UC |
+| Mô hình dữ liệu | **sơ đồ theo nhóm mô-đun** (7 nhóm) + bảng tóm tắt nhóm | CDM đầy đủ, PDM đầy đủ, danh mục 59 bảng kèm từng cột |
+| Use case | danh sách 75 UC + đặc tả chi tiết **8 UC trục chính** | đặc tả chi tiết toàn bộ 75 UC |
 | Kiểm thử | kịch bản + ca kiểm thử **đại diện mỗi nghiệp vụ** | bảng ca kiểm thử đầy đủ |
 | Điểm cuối API | bảng đếm theo bộ định tuyến | danh mục đầy đủ (`/openapi.json`) |
 | Quyết định thiết kế | lập luận + bảng so sánh **các tiêu chí quyết định** | ma trận **đầy đủ mọi tiêu chí** (Phụ lục F), biên bản ADR, giao thức đo chi tiết |

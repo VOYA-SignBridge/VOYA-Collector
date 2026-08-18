@@ -6,7 +6,7 @@ nhân và quan hệ giữa chúng, toàn bộ quan hệ giữa các use case, b�
 75 use case, và đặc tả chi tiết các use case mà thân bài chỉ nhắc tên.*
 
 **Nguồn đặc tả:** `docs/09-specs/USE_CASE_SPECIFICATION.md` — bản dựng lại từ mã
-nguồn đang chạy: 26 bộ định tuyến, hơn 30 màn hình và bộ công cụ vận hành. Mỗi use
+nguồn đang chạy: 27 bộ định tuyến, hơn 30 màn hình và bộ công cụ vận hành. Mỗi use
 case có ít nhất một điểm cuối, một màn hình hoặc một kịch bản thật đứng sau.
 
 **Sơ đồ:** đặc tả để vẽ các hình use case và hoạt động nằm ở

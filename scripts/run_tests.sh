@@ -134,9 +134,17 @@ fi
 # `grep` theo tên thư viện không phủ hết. Hạ trần thì phủ mọi đường gọi, kể cả
 # đường viết sau này.
 #
-# 5 giây × 1 lần: đủ cho một lượt gọi thật khi mạng bình thường, và biến một
+# 30 giây × 1 lần: đủ cho một lượt gọi thật khi mạng bình thường, và biến một
 # lượt hụt đích thành một ca đỏ nhanh thay vì mười lăm phút im lặng.
-extra="$extra -e GOOGLE_DRIVE_TIMEOUT_SECONDS=${VOYA_TEST_GDRIVE_TIMEOUT:-5}"
+#
+# Vì sao 30 chứ không phải 5 như bản trước ghi: con số 5 CHƯA BAO GIỜ có hiệu
+# lực. `GoogleDriveClient.__init__` kẹp `max(30, timeout_seconds)`, nên mọi giá
+# trị dưới 30 bị nuốt im lặng và trần thực tế luôn là 30. Ngày 18/08/2026 cái
+# sàn ấy được hạ xuống 1 để cấu hình có hiệu lực thật — và ngay lượt chạy đó
+# `test_double_sync_is_idempotent` đỏ vì đọc Drive cần hơn 5 giây. Nói cách
+# khác: giá trị đã chạy tốt suốt thời gian qua là 30, còn 5 chỉ là con số ghi
+# trên giấy. Ghi đúng con số đang chạy, thay vì giữ một con số đẹp hơn mà sai.
+extra="$extra -e GOOGLE_DRIVE_TIMEOUT_SECONDS=${VOYA_TEST_GDRIVE_TIMEOUT:-30}"
 extra="$extra -e GOOGLE_DRIVE_NUM_RETRIES=${VOYA_TEST_GDRIVE_RETRIES:-1}"
 
 # 4) Danh tính revision. Ảnh test KHÔNG có `git`, nên công cụ nào cần biết nó

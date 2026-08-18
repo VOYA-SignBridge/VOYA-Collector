@@ -21,13 +21,30 @@ def _ensure_schema():
 
 # --------------------------------------------------------------- backfill
 
+#: Các tenant tổng hợp do bộ đo cách ly dựng ra. Hàng của chúng được tạo SAU đợt
+#: backfill và cố ý không đi qua nó — mẫu của chúng chỉ cần tồn tại để bị thử
+#: đọc/ghi xuyên tổ chức, nên không ai gán phiên thu cho chúng.
+#:
+#: Không loại chúng ra thì các phép kiểm dưới đây đổi ý nghĩa: từ *"đợt backfill
+#: có bỏ sót hàng nào không"* thành *"có bộ đo nào vừa chạy trước không"*, và
+#: chúng đỏ theo thứ tự chạy chứ không theo mã.
+#: Dấu `%` phải viết ĐÔI. `_fetch_all` khai `params: tuple = ()` rồi vẫn truyền
+#: tuple rỗng ấy vào `cur.execute(sql, params)`, nên psycopg luôn chạy bước nội
+#: suy và một `%` đơn thành ô giữ chỗ không có đối số — báo `IndexError: tuple
+#: index out of range`, một thông điệp không nhắc gì tới LIKE và dễ bị đọc nhầm
+#: thành lỗi dữ liệu. `\_` là gạch dưới theo nghĩa đen, vì không có nó thì `_`
+#: là ký tự đại diện một ký tự bất kỳ và mệnh đề sẽ loại nhầm cả tenant khác.
+TENANT_TONG_HOP = "tenant_id NOT LIKE 'iso\\_%%'"
+
+
 def test_every_sample_with_a_real_session_id_got_linked():
     """2.863 mẫu có `session_id` thật, và không một mẫu nào trong số đó được
     phép còn treo sau backfill."""
     rows = db._fetch_all(
         "SELECT count(*) AS n FROM samples "
         "WHERE session_id IS NOT NULL AND session_id <> '' "
-        "  AND capture_session_id IS NULL")
+        "  AND capture_session_id IS NULL "
+        f"  AND {TENANT_TONG_HOP}")
     assert rows[0]["n"] == 0
 
 
@@ -81,11 +98,22 @@ def test_every_live_user_is_a_member_of_their_tenant():
     """`tenant_members` rỗng trong khi `users` có 10 dòng nghĩa là mọi phép
     kiểm tra quyền theo tư cách thành viên trả về "không phải thành viên" —
     kể cả với chủ tenant."""
+    # Giữ nguyên độ chặt — KHÔNG loại tenant tổng hợp ở đây. Một tài khoản sống
+    # thiếu tư cách thành viên là lỗi thật dù nó nằm ở tenant nào, và phép đo
+    # cách ly mất đối chứng dương nếu tài khoản gieo bị coi là "không phải thành
+    # viên". Chỉ đổi phần BÁO CÁO: liệt kê đích danh, vì bản cũ chỉ trả về một
+    # con số và người đọc phải tự đi truy xem hàng nào — lượt chạy 18/08/2026
+    # đỏ đúng một hàng và mất thêm một vòng chẩn đoán chỉ để biết đó là ai.
     rows = db._fetch_all(
-        "SELECT count(*) AS n FROM users u WHERE u.deleted_at IS NULL "
+        "SELECT u.username, u.tenant_id, u.created_at FROM users u "
+        "WHERE u.deleted_at IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM tenant_members m "
-        "                WHERE m.user_id = u.id AND m.tenant_id = u.tenant_id)")
-    assert rows[0]["n"] == 0
+        "                WHERE m.user_id = u.id AND m.tenant_id = u.tenant_id) "
+        "ORDER BY u.created_at DESC")
+    assert not rows, (
+        "tai khoan song thieu tu cach thanh vien trong chinh tenant cua no: "
+        + "; ".join(f"{r['username']}@{r['tenant_id']} (tao {r['created_at']})"
+                    for r in rows))
 
 
 def test_kich_ban_gieo_fixture_do_luong_luon_gan_tu_cach_thanh_vien():
@@ -123,11 +151,19 @@ def test_kich_ban_gieo_fixture_do_luong_luon_gan_tu_cach_thanh_vien():
 
 
 def test_admins_were_carried_over_as_admins():
+    # Loại tenant tổng hợp: `iso_admin_a` mang cờ `is_admin` nhưng được gieo với
+    # vai `editor` một cách CỐ Ý — bộ đo cách ly cần một tài khoản có cờ quản trị
+    # nền tảng mà vai trong tenant lại không đủ quyền, để tách bạch hai câu hỏi
+    # "có phải quản trị nền tảng không" và "có quyền trong tenant này không".
+    # Đó là đối tượng đo, không phải một lần hạ vai do backfill làm sai.
     rows = db._fetch_all(
-        "SELECT count(*) AS n FROM users u JOIN tenant_members m "
+        "SELECT u.username, u.tenant_id, m.role FROM users u JOIN tenant_members m "
         "ON m.user_id = u.id AND m.tenant_id = u.tenant_id "
-        "WHERE u.is_admin AND m.role <> 'admin'")
-    assert rows[0]["n"] == 0, "một quản trị viên bị hạ vai trò khi chuyển sang tenant_members"
+        "WHERE u.is_admin AND m.role <> 'admin' "
+        f"  AND u.{TENANT_TONG_HOP}")
+    assert not rows, (
+        "mot quan tri vien bi ha vai tro khi chuyen sang tenant_members: "
+        + "; ".join(f"{r['username']}@{r['tenant_id']} -> {r['role']}" for r in rows))
 
 
 def test_the_migration_is_idempotent():

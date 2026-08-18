@@ -38,12 +38,24 @@ def sample_row(account):
     """Một hàng `samples` mang tên hiển thị của tài khoản trên."""
     # `samples_uid_is_hex10` bắt đúng 10 ký tự hex, và `fk_samples_class_tenant`
     # đòi lớp phải có thật — nên mượn một lớp đang tồn tại thay vì bịa một cái.
+    #
+    # Lớp phải nằm ĐÚNG trong tenant của tài khoản. Bản trước viết
+    # `FROM classes LIMIT 1` không kèm `ORDER BY`, nên nó nhận về bất kỳ lớp nào
+    # Postgres trả ra trước — và khi bộ đo cách ly để lại dữ liệu ở `iso_a`,
+    # `iso_b` thì hàng mẫu được dựng ở một tenant khác hẳn tenant của tài khoản.
+    # Đường đổi tên lọc theo `tenant_id` (cố ý, để không đổi tên hàng vô chủ của
+    # tenant khác), nên nó bỏ qua hàng ấy và đúng ba phép kiểm đỏ — trong khi
+    # sản phẩm hành xử chính xác. Fixture dựng dữ liệu xuyên tenant thì phép
+    # kiểm không còn đo cái nó tưởng mình đang đo.
     uid = uuid.uuid4().hex[:10]
     with system_scope("test setup: dung mot hang mau"):
         classes = _fetch_all(
-            "SELECT class_uid, tenant_id FROM classes LIMIT 1")
+            "SELECT c.class_uid, c.tenant_id FROM classes c "
+            "JOIN users u ON u.tenant_id = c.tenant_id "
+            "WHERE u.id = %s ORDER BY c.class_uid LIMIT 1",
+            (account["id"],))
         if not classes:
-            pytest.skip("khong co lop nao de gan mau thu")
+            pytest.skip("tenant cua tai khoan khong co lop nao de gan mau thu")
         _execute(
             "INSERT INTO samples (sample_uid, class_uid, user_id, username, "
             "auth_user_id, tenant_id, created_at) "

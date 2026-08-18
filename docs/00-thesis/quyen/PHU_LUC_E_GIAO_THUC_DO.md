@@ -409,7 +409,7 @@ là **tinh chỉnh có lý do**, không phải cam kết bị bỏ:
 | 1 | **Sửa kịch bản đo để ghi phiên bản mã vào artefact** | **xong 17/08/2026** | Cờ `cong_bo_duoc` nay có hai vế: hết ca mờ **và** xác định được phiên bản mã trên cây sạch |
 | 2 | **Đóng phép đo cách ly trên mã bản cuối** (Chương 4 §5.2bis) | **xong 17/08/2026** | Đo lại trên ảnh chụp `4e961192`: 0/450, 0/180, 0 ca mờ, hậu điều kiện đạt |
 | 3 | Chụp lại số hàng của các bảng dữ liệu (Phụ lục A §4) | **chưa** | Ảnh chụp hiện tại là ngày 10/08/2026; ba bảng đã thay đổi đáng kể |
-| 4 | Chạy lại toàn bộ bộ kiểm thử và chép **số thật** kèm số bỏ qua | **xong 17/08/2026** | 2.528 xanh / 0 đỏ / 1 bỏ qua — số đếm tĩnh **không phải** số đã chạy xanh |
+| 4 | Chạy lại toàn bộ bộ kiểm thử và chép **số thật** kèm số bỏ qua | **xong 18/08/2026** | 2.550 xanh / 0 đỏ / 1 bỏ qua trên 2.551 ca, 20 ph 49 s, ảnh chụp `05bd8ea` — số đếm tĩnh **không phải** số đã chạy xanh. Lượt trước: 2.528 xanh (17/08/2026) |
 | 5 | Đếm lại quy mô mã nguồn và lược đồ | **xong 17/08/2026** | Số cũ lệch tới 15 % ở phần mã kiểm thử |
 | 6 | Rà ba phát biểu đã hạ mức trên **cả bốn** vị trí: Tóm tắt, Chương 3, Chương 4, Kết luận | **chưa** | Lệch một chỗ là một câu hỏi phản biện không trả lời được |
 
