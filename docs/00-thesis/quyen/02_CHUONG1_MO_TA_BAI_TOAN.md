@@ -286,7 +286,7 @@ dịch vụ vành ngoài.
 | 6 | Quản trị người dùng và chính sách | Ai đặt luật, và lấy gì làm bằng chứng? | UC601–UC609 | 9 |
 | 7 | Vận hành hệ thống và nguồn sự thật | Hệ thống có đang chạy đúng thứ ta nghĩ không? | UC701–UC706 | 6 |
 | 8 | Hỗ trợ và tích hợp | Hỏng thì kêu ai, và máy khác nối vào thế nào? | UC801–UC806 | 6 |
-| | | | **Tổng** | **79** |
+| | | | **Tổng** | **75** |
 
 **Cách các nghiệp vụ nối nhau.** NV1 → NV2 → NV3 là vòng đời của một mẫu: có danh
 tính và đồng thuận trước, rồi mới thu được mẫu, và mẫu chỉ có nghĩa khi thuộc về
@@ -303,7 +303,7 @@ lệch khỏi bản sao. Người chịu trách nhiệm cũng khác.
 
 **Quy ước mã số:** chữ số đầu là số hiệu nghiệp vụ, hai chữ số sau là thứ tự
 trong nghiệp vụ đó, xếp theo **dòng chảy nghiệp vụ** chứ không theo bảng chữ cái.
-Đặc tả chi tiết đủ 79 use case ở **Phụ lục C**; thân bài chỉ trình bày chi tiết
+Đặc tả chi tiết đủ 75 use case ở **Phụ lục C**; thân bài chỉ trình bày chi tiết
 tám use case trục chính, mỗi nghiệp vụ một.
 
 ---
@@ -329,63 +329,73 @@ Ba điểm nghiệp vụ đáng chú ý:
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC101 | Đăng ký tài khoản | Khách vãng lai | Essential |
-| UC102 | Đăng ký theo lời mời | Khách vãng lai | Essential |
-| UC103 | Gửi mã xác thực | Người dùng đã đăng nhập | Essential |
-| UC104 | Xác thực địa chỉ liên hệ | Người dùng đã đăng nhập | Essential |
-| UC105 | Đăng nhập | Khách vãng lai | Essential |
-| UC106 | Xác thực yếu tố thứ hai | Người dùng đã đăng nhập | Important |
-| UC107 | Đăng xuất | Người dùng đã đăng nhập | Essential |
-| UC108 | Khôi phục tài khoản | Khách vãng lai | Essential |
-| UC109 | Quản lý xác thực hai yếu tố | Người dùng đã đăng nhập | Important |
-| UC110 | Quản lý hồ sơ cá nhân | Người dùng đã đăng nhập | Important |
-| UC111 | Xem văn bản pháp lý | Khách vãng lai | Essential |
-| UC112 | Chấp thuận văn bản pháp lý | Người dùng đã đăng nhập | Essential |
-| UC113 | Rút đồng thuận | Người khiếm thính – khiếm ngôn | Essential |
-| UC114 | Dùng thử nhận dạng | Khách vãng lai | Optional |
+| UC101 | Đăng ký tài khoản | Khách vãng lai | Cốt lõi |
+| UC102 | Đăng ký theo lời mời | Khách vãng lai | Cốt lõi |
+| UC103 | Gửi mã xác thực | Người dùng đã đăng nhập | Cốt lõi |
+| UC104 | Xác thực địa chỉ liên hệ | Người dùng đã đăng nhập | Cốt lõi |
+| UC105 | Đăng nhập | Khách vãng lai | Cốt lõi |
+| UC106 | Xác thực yếu tố thứ hai | Người dùng đã đăng nhập | Quan trọng |
+| UC107 | Đăng xuất | Người dùng đã đăng nhập | Cốt lõi |
+| UC108 | Khôi phục tài khoản | Khách vãng lai | Cốt lõi |
+| UC109 | Quản lý xác thực hai yếu tố | Người dùng đã đăng nhập | Quan trọng |
+| UC110 | Quản lý hồ sơ cá nhân | Người dùng đã đăng nhập | Quan trọng |
+| UC111 | Xem văn bản pháp lý | Khách vãng lai | Cốt lõi |
+| UC112 | Chấp thuận văn bản pháp lý | Người dùng đã đăng nhập | Cốt lõi |
+| UC113 | Rút đồng thuận | Người khiếm thính – khiếm ngôn | Cốt lõi |
+| UC114 | Dùng thử nhận dạng | Khách vãng lai | Tuỳ chọn |
 
 *Bảng 1-14: Mô tả chức năng Đăng nhập*
 
-| **Use Case** | Đăng nhập | **ID** | UC105 |
+| **Tên use case** | Đăng nhập | **ID** | UC105 |
 |---|---|---|---|
-| **Tác nhân chính** | Khách vãng lai | **Mức ưu tiên** | Essential |
-| **Kích hoạt bởi** | Khách vãng lai | **Loại** | external |
+| **Actor chính** | Khách vãng lai | **Mức độ cần thiết** | Cốt lõi |
+| **Kích hoạt bởi** | Khách vãng lai | **Phân loại** | Trung bình |
+| **Loại** | external | **Nghiệp vụ** | 1 — Danh tính và quyền truy cập |
 
-**Mô tả ngắn:** *Khách vãng lai đăng nhập bằng tên đăng nhập (hoặc email) và mật
-khẩu để nhận một phiên làm việc. Nếu tài khoản đã bật xác thực hai yếu tố, phiên
-chỉ được cấp sau khi qua yếu tố thứ hai.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Khách vãng lai – Đăng nhập
-- **Include:** không
-- **Extend:** không *(UC106 mở rộng use case này)*
-- **Generalization:** không
+- **Chủ tài khoản** — vào được tài khoản của mình, và mật khẩu bị lộ vẫn chưa đủ để người khác vào thay.
+- **Nền tảng** — chặn được hành vi dò mật khẩu mà không khoá oan người dùng thật đang gõ nhầm.
+- **Tổ chức** — chỉ thành viên hợp lệ chạm được vào dữ liệu của tổ chức.
+- **Bộ phận kiểm toán** — mỗi phiên làm việc để lại vết kèm thiết bị và địa chỉ.
 
-**Luồng chính:**
-1. Hệ thống hiển thị biểu mẫu đăng nhập.
-2. Khách nhập tên đăng nhập (hoặc email) và mật khẩu, bấm "Đăng nhập".
-3. Hệ thống kiểm giới hạn số lần thử theo địa chỉ IP và theo tài khoản.
-4. Hệ thống xác minh mã băm mật khẩu — hợp lệ.
-5. Hệ thống kiểm trạng thái tài khoản: đang hoạt động, không bị khoá, đã chấp
-   thuận các văn bản đang có hiệu lực, gói dịch vụ không ở trạng thái khoá cứng.
-6. Hệ thống cấp một token truy cập và một token làm mới, ghi nhận phiên kèm thiết
-   bị và địa chỉ IP, ghi một mục vào nhật ký kiểm toán.
-7. Hệ thống đưa người dùng tới bảng điều khiển và hiển thị thông báo quản trị nếu
-   có.
+**Mô tả tóm tắt:** *Khách vãng lai đăng nhập bằng tên đăng nhập hoặc địa chỉ thư điện tử cùng mật khẩu để nhận một phiên làm việc. Nếu tài khoản đã bật xác thực hai yếu tố, phiên chỉ được cấp sau khi qua yếu tố thứ hai.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Khách vãng lai – Đăng nhập
+- **Include (bao gồm):** không
+- **Extend (mở rộng):** không *(UC106 mở rộng use case này)*
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
+1. Hệ thống hiển thị biểu mẫu đăng nhập gồm hai trường: tên đăng nhập hoặc địa chỉ thư điện tử, và mật khẩu.
+2. Khách nhập hai trường và bấm "Đăng nhập".
+3. Hệ thống xác định địa chỉ IP của yêu cầu theo chuỗi máy chủ trung gian tin cậy, rồi kiểm hai lớp hạn mức **trước khi** làm bất cứ việc gì tốn kém: hạn mức theo cặp định danh – địa chỉ IP, và hạn mức theo riêng địa chỉ IP.
+4. Hệ thống tra tài khoản theo tên đăng nhập hoặc địa chỉ thư và so mật khẩu với mã băm đã lưu. Phép băm mật khẩu cố ý chậm, nên nó chỉ được chạy sau khi hai hạn mức ở bước 3 đã cho qua.
+5. Hệ thống kiểm trạng thái tài khoản theo bốn điều kiện: đang hoạt động, không bị khoá hành chính, đã chấp thuận đủ các văn bản đang hiệu lực, và tổ chức của tài khoản không ở trạng thái khoá cứng.
+6. Hệ thống đặt lại bộ đếm lần thử thất bại của cặp định danh – địa chỉ IP, cấp một token truy cập và một token làm mới, ghi nhận phiên kèm thiết bị và địa chỉ, rồi ghi một mục vào nhật ký kiểm toán.
+7. Hệ thống đặt hai token vào cookie mà mã trong trình duyệt không đọc được, đúng đường dẫn gốc của bản triển khai, và đưa người dùng tới bảng điều khiển kèm các thông báo hành chính nếu có.
+
+**Luồng luân phiên:**
+
+1. **Tài khoản có bật xác thực hai yếu tố:** ở bước 6, hệ thống **chưa** cấp phiên đầy đủ mà cấp một vé trung gian ngắn hạn và chuyển sang màn hình nhập mã (UC106). Phiên chỉ tồn tại sau khi yếu tố thứ hai được chấp nhận.
+2. **Phiên hết hạn và được làm mới:** sau bước 7, token làm mới được xoay ở mỗi lần dùng và có một cửa sổ ân hạn rất ngắn cho lần xoay trước đó, để hai tab của cùng một người không đá nhau ra khỏi hệ thống.
 
 **Luồng ngoại lệ:**
-1. **Sai thông tin đăng nhập:** ở bước 4, hệ thống trả **một** thông báo lỗi
-   chung cho cả trường hợp không có tài khoản lẫn sai mật khẩu, để biểu mẫu không
-   dùng được vào việc dò tên tài khoản.
-2. **Cần yếu tố thứ hai:** ở bước 6, nếu tài khoản bật hai yếu tố, hệ thống **chưa**
-   cấp phiên và yêu cầu yếu tố thứ hai (UC106).
-3. **Tài khoản bị khoá hoặc đình chỉ:** ở bước 5, hệ thống từ chối và hiển thị lý
-   do quản trị viên đã ghi, kèm kênh liên hệ hỗ trợ.
-4. **Còn văn bản chưa chấp thuận:** ở bước 5, hệ thống vẫn cho đăng nhập nhưng
-   điều hướng tới màn hình chấp thuận và **chặn mọi thao tác ghi** cho tới khi
-   chấp thuận xong (UC112).
-5. **Chạm trần số lần thử:** ở bước 3, hệ thống từ chối mọi lần thử tiếp theo từ
-   địa chỉ IP hoặc tài khoản đó trong khoảng thời gian khoá.
+
+1. **Sai thông tin đăng nhập.** Ở bước 4, hệ thống trả về **một** thông báo lỗi chung cho cả trường hợp không tồn tại tài khoản lẫn trường hợp sai mật khẩu, nên biểu mẫu này không dùng để dò xem tên nào đã có người đăng ký. Mỗi lần thất bại làm tăng bộ đếm của cặp định danh – địa chỉ IP. Trong mười lần thất bại đầu, người dùng thử lại được ngay; từ lần kế tiếp, hệ thống áp thời gian chờ tăng dần theo từng bậc — nửa phút, hai phút, năm phút, rồi mười lăm phút — và giữ ở bậc cuối cho tới hết cửa sổ tính một giờ. Cách chặn tăng dần này là chủ ý: người dùng thật gõ nhầm vài lần gần như không bị ảnh hưởng, còn một kịch bản dò tự động thì mất hàng giờ cho vài chục lần thử.
+
+2. **Chạm trần theo địa chỉ IP.** Ở bước 3, nếu một địa chỉ IP vượt trần số lần thử trong cửa sổ mười phút, hệ thống chặn cứng địa chỉ đó trong mười phút và từ chối mọi lượt đăng nhập từ đó, kể cả của người dùng hợp lệ. Trước khi chạm trần cứng, hai ngưỡng trung gian ghi cảnh báo vào nhật ký an ninh, cùng với số lượng định danh khác nhau đã được thử từ địa chỉ đó — số liệu phân biệt một văn phòng đông người với một đợt dò tài khoản. Người dùng bị vạ lây chờ hết cửa sổ hoặc đổi đường mạng; quản trị nền tảng xử lý các trường hợp kéo dài (UC603).
+
+3. **Tài khoản bị khoá hoặc tổ chức bị đình chỉ.** Ở bước 5, hệ thống từ chối và hiển thị **lý do quản trị viên đã ghi** kèm kênh liên hệ hỗ trợ, thay vì một thông báo sai mật khẩu chung chung. Ở bước này người dùng đã chứng minh biết mật khẩu, nên việc giấu lý do không mang lại lợi ích an ninh mà chỉ khiến họ thử lại vô ích. Đường xử lý là gửi phiếu hỗ trợ (UC801) hoặc liên hệ quản trị tổ chức, tuỳ lý do là hành chính hay thương mại.
+
+4. **Còn văn bản pháp lý chưa chấp thuận.** Ở bước 5, hệ thống **vẫn cấp phiên** nhưng điều hướng người dùng tới màn hình chấp thuận và chặn mọi thao tác ghi cho tới khi họ chấp thuận xong (UC112). Cho đăng nhập rồi chặn ghi là lựa chọn có cân nhắc: chặn ngay từ cửa đăng nhập sẽ khiến người dùng không đọc được chính văn bản mà họ được yêu cầu chấp thuận, và cũng không lấy được dữ liệu của mình ra.
+
+5. **Không xác định được thiết lập bảo mật của tài khoản.** Ở bước 5, nếu hệ thống không đọc được trạng thái xác thực hai yếu tố — thường do cấu hình khoá mã hoá bị thiếu sau một lần triển khai — lượt đăng nhập bị từ chối bằng một lỗi máy chủ thay vì bỏ qua lớp bảo vệ thứ hai. Nguyên tắc là khi không đọc được trạng thái bảo mật, hệ thống đóng chứ không mở. Người dùng không có thao tác nào tự xử lý; kỹ sư vận hành khôi phục cấu hình.
+
+**Kết quả mong đợi:** Người dùng hợp lệ có một phiên làm việc gắn với thiết bị và địa chỉ của mình, một mục kiểm toán được ghi, và bộ đếm chống dò của họ được đặt lại. Với tài khoản bật hai yếu tố, chưa có phiên nào tồn tại cho tới khi UC106 hoàn tất. Mọi lượt thất bại đều tiêu một lượt trong ngân sách chống dò, và không lượt nào tiết lộ được tài khoản có tồn tại hay không.
 
 > ### ▣ HÌNH 1-3 — Use case Nghiệp vụ 1: Danh tính và quyền truy cập
 > **Phải thể hiện:** A1, A2, A3 bên trái; S1 bên phải; 14 use case UC101–UC114;
@@ -424,67 +434,79 @@ tiến trình nền (S4) khởi phát, mang loại `internal`.
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC201 | Thu mẫu từ camera | Người khiếm thính – khiếm ngôn | Essential |
-| UC202 | Tải lên tệp video | Thành viên tổ chức | Essential |
-| UC203 | Xử lý bản ghi | Tiến trình nền (S4) | Essential |
-| UC204 | Theo dõi trạng thái tác vụ | Thành viên tổ chức | Important |
-| UC205 | Đặt tuỳ chọn thu | Thành viên tổ chức | Optional |
-| UC206 | Duyệt danh mục lớp | Thành viên tổ chức | Essential |
-| UC207 | Xem chi tiết lớp | Thành viên tổ chức | Essential |
-| UC208 | Xem lại video phiên thu | Thành viên tổ chức | Important |
-| UC209 | Xoá phiên thu | Thành viên tổ chức | Important |
-| UC210 | Gán lại người ký cho phiên thu | Biên tập viên / Nghiên cứu sinh | Optional |
-| UC211 | Xoá mẫu | Thành viên tổ chức | Essential |
-| UC212 | Quản lý thùng rác | Thành viên tổ chức | Important |
-| UC213 | Xuất ảnh chụp bộ dữ liệu | Biên tập viên / Nghiên cứu sinh | Important |
+| UC201 | Thu mẫu từ camera | Người khiếm thính – khiếm ngôn | Cốt lõi |
+| UC202 | Tải lên tệp video | Thành viên tổ chức | Cốt lõi |
+| UC203 | Xử lý bản ghi | Tiến trình nền (S4) | Cốt lõi |
+| UC204 | Theo dõi trạng thái tác vụ | Thành viên tổ chức | Quan trọng |
+| UC205 | Đặt tuỳ chọn thu | Thành viên tổ chức | Tuỳ chọn |
+| UC206 | Duyệt danh mục lớp | Thành viên tổ chức | Cốt lõi |
+| UC207 | Xem chi tiết lớp | Thành viên tổ chức | Cốt lõi |
+| UC208 | Xem lại video phiên thu | Thành viên tổ chức | Quan trọng |
+| UC209 | Xoá phiên thu | Thành viên tổ chức | Quan trọng |
+| UC210 | Gán lại người ký cho phiên thu | Biên tập viên / Nghiên cứu sinh | Tuỳ chọn |
+| UC211 | Xoá mẫu | Thành viên tổ chức | Cốt lõi |
+| UC212 | Quản lý thùng rác | Thành viên tổ chức | Quan trọng |
+| UC213 | Xuất ảnh chụp bộ dữ liệu | Biên tập viên / Nghiên cứu sinh | Quan trọng |
 
 *Bảng 1-15: Mô tả chức năng Thu mẫu từ camera*
 
-| **Use Case** | Thu mẫu từ camera | **ID** | UC201 |
+| **Tên use case** | Thu mẫu từ camera | **ID** | UC201 |
 |---|---|---|---|
-| **Tác nhân chính** | Người khiếm thính – khiếm ngôn | **Mức ưu tiên** | Essential |
-| **Kích hoạt bởi** | Người ký | **Loại** | external |
+| **Actor chính** | Người khiếm thính – khiếm ngôn | **Mức độ cần thiết** | Cốt lõi |
+| **Kích hoạt bởi** | Người ký | **Phân loại** | Phức tạp |
+| **Loại** | external | **Nghiệp vụ** | 2 — Thu thập và quản lý dữ liệu mẫu |
 
-**Mô tả ngắn:** *Người ký thực hiện một ký hiệu trước camera. Điểm mốc bàn tay
-được trích ngay trong trình duyệt và gửi lên nền tảng; một lượt thu trở thành đúng
-một mẫu của lớp đã chọn.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Người ký – Thu mẫu từ camera; Thành viên tổ chức (vận hành buổi
-  thu); Kho lưu trữ ngoài (S2)
-- **Include:** UC203 Xử lý bản ghi
-- **Extend:** không
-- **Generalization:** *Thu nhận mẫu* «abstract»
+- **Người ký khiếm thính – khiếm ngôn** — đóng góp ký hiệu bản ngữ, và mức đồng thuận của mình đi theo mẫu.
+- **Thành viên tổ chức** — vận hành buổi thu và chịu trách nhiệm về chất lượng bản ghi.
+- **Nghiên cứu sinh** — mẫu sinh ra có chỉ số chất lượng để lọc trước khi huấn luyện.
+- **Kho lưu trữ ngoài (S2)** — nhận tệp đặc trưng của mẫu.
 
-**Luồng chính:**
-1. Người ký mở trang thu và chọn lớp cần thu, ngôn ngữ và phương ngữ.
-2. Hệ thống xin quyền camera và khởi động bộ theo dõi bàn tay tại máy khách, vẽ
-   các điểm mốc phát hiện được chồng lên khung hình.
-3. Hệ thống hiển thị hướng dẫn thu: khung hình, số bàn tay lớp này yêu cầu, và
-   thời lượng mục tiêu.
-4. Người ký bấm "Thu"; hệ thống gom các khung điểm mốc kèm dấu thời gian cho tới
-   khi người ký dừng.
-5. Hệ thống hiển thị cửa sổ vừa thu để xem lại và hỏi giữ hay bỏ.
+**Mô tả tóm tắt:** *Người ký thực hiện một ký hiệu trước máy quay. Điểm mốc bàn tay được trích ngay trong trình duyệt và gửi lên nền tảng; một lượt thu trở thành đúng một mẫu của lớp đã chọn.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Người ký – Thu mẫu từ camera; Thành viên tổ chức (vận hành buổi thu); Kho lưu trữ ngoài (S2)
+- **Include (bao gồm):** UC203 Xử lý bản ghi
+- **Extend (mở rộng):** không
+- **Generalization (tổng quát hoá):** *Thu nhận mẫu* «abstract»
+
+**Xử lý sự kiện:**
+
+1. Người ký mở trang thu mẫu và chọn lớp cần thu, ngôn ngữ và phương ngữ; hai giá trị sau được điền sẵn theo tuỳ chọn đã lưu của tài khoản (UC205).
+2. Hệ thống xin quyền dùng máy quay và khởi động bộ theo vết bàn tay **chạy trên máy khách**, vẽ các điểm mốc phát hiện được chồng lên khung hình để người ký tự căn được tư thế.
+3. Hệ thống hiển thị hướng dẫn thu lấy từ siêu dữ liệu của lớp: khung hình mong muốn, số bàn tay lớp này yêu cầu, và thời lượng mục tiêu.
+4. Người ký bấm "Thu". Hệ thống gom các khung điểm mốc kèm dấu thời gian cho tới khi người ký dừng, và hiển thị số khung đã thu được cùng tỷ lệ khung thấy đủ số bàn tay.
+5. Hệ thống phát lại cửa sổ vừa thu dưới dạng khung xương để người ký xem lại, và hỏi giữ hay bỏ.
 6. Người ký bấm "Lưu".
-7. Hệ thống kiểm hạn mức số mẫu của tổ chức, tính lượt thu này là đúng một mẫu.
-8. Hệ thống gửi các khung và siêu dữ liệu (lớp, phiên thu, phương ngữ, người ký)
-   lên máy chủ; máy chủ lưu mẫu và chuyển cho tiến trình xử lý nền (UC203).
-9. Hệ thống hiển thị mẫu mới trong danh sách phiên thu kèm các chỉ số chất lượng.
+7. Hệ thống kiểm hai điều kiện ghi: tài khoản đã có đồng thuận còn hiệu lực, và tổ chức còn hạn mức số mẫu — một lượt thu tính là đúng một mẫu.
+8. Hệ thống gửi chuỗi điểm mốc cùng siêu dữ liệu — lớp, phiên thu, phương ngữ, người ký — lên máy chủ. Máy chủ ghi mẫu và chuyển cho tiến trình xử lý nền (UC203).
+9. Hệ thống hiển thị mẫu mới trong danh sách của phiên thu kèm các chỉ số chất lượng khi tiến trình nền hoàn tất.
+
+**Luồng luân phiên:**
+
+1. **Thu liên tiếp nhiều mẫu cho một lớp:** sau bước 9, người ký bấm "Thu tiếp" và quay lại bước 4 mà không phải khai lại lớp; các mẫu cùng vào một phiên thu, nên chúng chia sẻ ngữ cảnh buổi thu và cùng người ký.
+2. **Đổi người ký giữa buổi:** thành viên vận hành chọn người ký khác trước bước 4; hệ thống mở một phiên thu mới, vì phiên thu là đơn vị gắn với đúng một người ký.
+3. **Không dùng được máy quay:** người ký chuyển sang đường tải video đã quay sẵn (UC202), vốn đi cùng một tiến trình xử lý ở bước 8.
 
 **Luồng ngoại lệ:**
-1. **Không có camera hoặc bị từ chối quyền:** ở bước 2, hệ thống hướng dẫn cách
-   cấp quyền và đề nghị đường thay thế là tải tệp video (UC202).
-2. **Không phát hiện được bàn tay:** ở bước 4, nếu suốt cửa sổ thu không thấy bàn
-   tay nào, hệ thống từ chối lưu và gợi ý chỉnh khung hình.
-3. **Lớp yêu cầu hai tay:** ở bước 4, nếu lớp yêu cầu hai tay mà chỉ theo dõi được
-   một, hệ thống cảnh báo trước khi lưu. Yêu cầu này **đọc từ siêu dữ liệu của
-   lớp**, không suy đoán từ khung hình.
-4. **Vượt hạn mức:** ở bước 7, hệ thống từ chối lưu và hiển thị hạn mức của gói
-   dịch vụ kèm đường dẫn đổi gói (UC506).
-5. **Chưa có đồng thuận hiệu lực:** ở bước 6, hệ thống chặn thao tác ghi và điều
-   hướng tới màn hình chấp thuận (UC112).
-6. **Lỗi mạng:** ở bước 8, hệ thống **giữ lại** cửa sổ đã thu trong trình duyệt và
-   cho thử lại, thay vì huỷ bản thu.
+
+1. **Không có máy quay hoặc quyền bị từ chối.** Ở bước 2, hệ thống hiển thị hướng dẫn cấp quyền theo từng trình duyệt và đề nghị đường thay thế là tải tệp video (UC202). Không có dữ liệu nào được ghi và không lượt thu nào được tính. Đây là lỗi phổ biến nhất ở các buổi thu ngoài hiện trường, thường vì thiết bị dùng chung đã từ chối quyền từ một lần trước và trình duyệt nhớ lựa chọn đó.
+
+2. **Không phát hiện được bàn tay trong suốt cửa sổ thu.** Ở bước 4, nếu không khung hình nào cho ra điểm mốc, hệ thống từ chối lưu ở bước 6 và gợi ý chỉnh khung hình hoặc ánh sáng, thay vì gửi lên một chuỗi rỗng để tiến trình nền phát hiện muộn hơn. Chặn sớm ở máy khách tiết kiệm một vòng xử lý và cho người ký phản hồi ngay khi họ còn đứng trước máy quay.
+
+3. **Lớp yêu cầu hai tay nhưng chỉ theo vết được một.** Ở bước 4, hệ thống cảnh báo trước khi lưu và nêu tỷ lệ khung hình thấy đủ hai tay. Yêu cầu số bàn tay được **đọc từ siêu dữ liệu của lớp**, không suy đoán từ khung hình — suy đoán sẽ khiến một lớp hai tay được chấp nhận với dữ liệu một tay khi người ký để tay kia ra ngoài khung. Người ký vẫn lưu được nếu chủ ý, và chỉ số chất lượng sẽ phản ánh điều đó.
+
+4. **Chưa có đồng thuận còn hiệu lực.** Ở bước 7, hệ thống chặn thao tác ghi và điều hướng tới màn hình chấp thuận (UC112). Cửa sổ đã thu được giữ lại trong trình duyệt, nên sau khi chấp thuận xong người ký lưu tiếp mà không phải ký lại. Đây là hệ quả trực tiếp của nguyên tắc mọi mẫu phải truy được về một đồng thuận cụ thể.
+
+5. **Vượt hạn mức số mẫu của gói dịch vụ.** Ở bước 7, hệ thống từ chối lưu, hiển thị hạn mức cùng mức đã dùng, và nêu đường đổi gói (UC506). Cửa sổ đã thu cũng được giữ lại để không mất công của người ký nếu quản trị viên nâng hạn mức ngay tại chỗ.
+
+6. **Mất kết nối khi đang gửi.** Ở bước 8, hệ thống **giữ lại** cửa sổ đã thu trong trình duyệt và cho thử gửi lại, thay vì huỷ bản thu. Số lần thử lại tự động có trần; hết trần thì hệ thống dừng và để người ký quyết định gửi lại hay bỏ, chứ không lặp vô hạn làm nóng thiết bị. Nếu người ký đóng trang trước khi gửi được, dữ liệu trong bộ nhớ trình duyệt mất — điều này được nói rõ trên thông báo lỗi.
+
+7. **Tiến trình xử lý nền thất bại sau khi mẫu đã được nhận.** Ở bước 9, mẫu tồn tại nhưng không có tệp đặc trưng và không dùng được cho huấn luyện; trạng thái này hiện ra ở màn hình theo dõi tác vụ (UC204) kèm lý do, và chạy lại được mà không cần thu lại.
+
+**Kết quả mong đợi:** Một mẫu mới thuộc đúng lớp, đúng phiên thu và đúng người ký được ghi vào danh bạ nguồn sự thật, có tệp đặc trưng cùng chỉ số chất lượng sau khi tiến trình nền hoàn tất, và tính đúng một suất trong hạn mức của tổ chức. Nếu bất kỳ cổng nào ở bước 7 chặn lại, không mẫu nào được tạo và dữ liệu vừa thu vẫn còn trong trình duyệt để người ký quyết định.
 
 > ### ▣ HÌNH 1-4 — Use case Nghiệp vụ 2: Thu thập và quản lý dữ liệu mẫu
 > **Phải thể hiện:** A3, A5, A6 bên trái; S2, S4 bên phải; 13 use case; quan hệ
@@ -518,53 +540,69 @@ Ba nguyên tắc nghiệp vụ:
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC301 | Đăng ký lớp từ vựng | Biên tập viên / Nghiên cứu sinh | Essential |
-| UC302 | Cập nhật lớp | Biên tập viên / Nghiên cứu sinh | Important |
-| UC303 | Gộp hai lớp trùng | Biên tập viên / Nghiên cứu sinh | Important |
-| UC304 | Gỡ lớp | Biên tập viên / Nghiên cứu sinh | Important |
-| UC305 | Xem thống kê thu thập | Thành viên tổ chức | Important |
-| UC306 | Đề xuất phương ngữ | Biên tập viên / Nghiên cứu sinh | Optional |
-| UC307 | Kiểm duyệt đề xuất phương ngữ | Quản trị nền tảng | Optional |
-| UC308 | Bảo trì danh mục mẫu của cộng đồng | Quản trị nền tảng | Important |
-| UC309 | Công bố phiên bản danh mục cộng đồng | Quản trị nền tảng | Important |
-| UC310 | Sao chép danh mục vào một tổ chức | Quản trị nền tảng | Important |
+| UC301 | Đăng ký lớp từ vựng | Biên tập viên / Nghiên cứu sinh | Cốt lõi |
+| UC302 | Cập nhật lớp | Biên tập viên / Nghiên cứu sinh | Quan trọng |
+| UC303 | Gộp hai lớp trùng | Biên tập viên / Nghiên cứu sinh | Quan trọng |
+| UC304 | Gỡ lớp | Biên tập viên / Nghiên cứu sinh | Quan trọng |
+| UC305 | Xem thống kê thu thập | Thành viên tổ chức | Quan trọng |
+| UC306 | Đề xuất phương ngữ | Biên tập viên / Nghiên cứu sinh | Tuỳ chọn |
+| UC307 | Kiểm duyệt đề xuất phương ngữ | Quản trị nền tảng | Tuỳ chọn |
+| UC308 | Bảo trì danh mục mẫu của cộng đồng | Quản trị nền tảng | Quan trọng |
+| UC309 | Công bố phiên bản danh mục cộng đồng | Quản trị nền tảng | Quan trọng |
+| UC310 | Sao chép danh mục vào một tổ chức | Quản trị nền tảng | Quan trọng |
 
 *Bảng 1-16: Mô tả chức năng Đăng ký lớp từ vựng*
 
-| **Use Case** | Đăng ký lớp từ vựng | **ID** | UC301 |
+| **Tên use case** | Đăng ký lớp từ vựng | **ID** | UC301 |
 |---|---|---|---|
-| **Tác nhân chính** | Biên tập viên / Nghiên cứu sinh | **Mức ưu tiên** | Essential |
-| **Kích hoạt bởi** | Biên tập viên | **Loại** | external |
+| **Actor chính** | Biên tập viên / Nghiên cứu sinh | **Mức độ cần thiết** | Cốt lõi |
+| **Kích hoạt bởi** | Biên tập viên | **Phân loại** | Phức tạp |
+| **Loại** | external | **Nghiệp vụ** | 3 — Danh mục từ vựng và phương ngữ |
 
-**Mô tả ngắn:** *Biên tập viên đưa một đơn vị từ vựng mới vào danh mục của tổ
-chức, kèm ngôn ngữ, phương ngữ, vùng miền, nhóm từ vựng và số bàn tay yêu cầu.
-Lớp chỉ tồn tại sau bước này mới thu mẫu được.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Biên tập viên – Đăng ký lớp
-- **Include:** không
-- **Extend:** không *(UC302, UC303 tác động lên lớp đã đăng ký)*
-- **Generalization:** không
+- **Biên tập viên** — giữ danh mục lớp của tổ chức sạch và không trùng lặp.
+- **Thành viên thu mẫu** — biết chính xác phải thu ký hiệu nào, mấy bàn tay, bao nhiêu mẫu.
+- **Nghiên cứu sinh** — chỉ số lớp ổn định thì nhãn của mô hình đã huấn luyện mới còn tra được.
+- **Tổ chức** — số lớp nằm trong hạn mức của gói dịch vụ.
 
-**Luồng chính:**
+**Mô tả tóm tắt:** *Biên tập viên đưa một đơn vị từ vựng mới vào danh mục của tổ chức, kèm ngôn ngữ, phương ngữ, vùng miền, nhóm từ vựng và số bàn tay yêu cầu. Lớp chỉ tồn tại sau bước này mới thu mẫu được.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Biên tập viên – Đăng ký lớp từ vựng
+- **Include (bao gồm):** không
+- **Extend (mở rộng):** không *(UC302 và UC303 tác động lên lớp đã đăng ký)*
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
 1. Biên tập viên mở danh mục lớp của tổ chức và bấm "Thêm lớp".
-2. Hệ thống hiển thị biểu mẫu, nạp sẵn danh sách ngôn ngữ, phương ngữ, vùng miền
-   và nhóm từ vựng **của tổ chức đó**.
-3. Biên tập viên nhập nhãn hiển thị, chọn ngôn ngữ – phương ngữ – vùng miền, chọn
-   nhóm từ vựng và hồ sơ nhận dạng, khai số bàn tay yêu cầu.
-4. Hệ thống kiểm trùng theo khoá định danh lớp — **gồm cả phương ngữ và vùng
-   miền**, chứ không chỉ nhãn.
-5. Hệ thống sinh mã định danh lớp, ghi vào danh mục của tổ chức và tăng phiên bản
-   danh mục.
-6. Hệ thống hiển thị lớp mới trong danh mục, sẵn sàng nhận mẫu.
+2. Hệ thống hiển thị biểu mẫu, nạp sẵn danh sách ngôn ngữ, phương ngữ, vùng miền và nhóm từ vựng **của chính tổ chức đó** — không phải danh sách toàn nền tảng.
+3. Biên tập viên nhập nhãn hiển thị, chọn ngôn ngữ, phương ngữ và vùng miền, chọn nhóm từ vựng cùng hồ sơ nhận dạng, và khai số bàn tay mà ký hiệu này yêu cầu.
+4. Hệ thống kiểm trùng theo **khoá định danh đầy đủ của lớp** — gồm cả phương ngữ và vùng miền, chứ không chỉ nhãn hiển thị.
+5. Hệ thống kiểm hạn mức số lớp của gói dịch vụ.
+6. Hệ thống sinh mã định danh lớp, ghi lớp vào danh mục của tổ chức, tăng phiên bản danh mục và ghi một mục vào nhật ký kiểm toán.
+7. Hệ thống hiển thị lớp mới trong danh mục ở trạng thái sẵn sàng nhận mẫu, kèm mục tiêu số mẫu nếu đã đặt.
+
+**Luồng luân phiên:**
+
+1. **Tạo lớp bằng cách nhân bản một lớp đã có:** biên tập viên mở một lớp và chọn "Tạo bản cho vùng khác"; biểu mẫu ở bước 3 được điền sẵn mọi trường trừ vùng miền. Đây là đường thường dùng khi thu cùng một từ ở nhiều vùng, và nó giữ cho các trường mô tả thống nhất giữa các bản.
+2. **Lấy lớp từ danh mục dùng chung:** thay vì tạo mới, tổ chức nhân bản một mục có sẵn từ bản mẫu dùng chung (UC310). Cách này giữ cho tên lớp thống nhất giữa các tổ chức và nên được ưu tiên khi mục cần thu đã tồn tại ở danh mục chung.
 
 **Luồng ngoại lệ:**
-1. **Trùng lớp:** ở bước 4, hệ thống từ chối và chỉ ra lớp đang tồn tại; nếu đúng
-   là hai lớp cần hợp nhất, biên tập viên chuyển sang UC303.
-2. **Phương ngữ chưa có trong danh mục:** ở bước 3, hệ thống đề nghị đường đề
-   xuất phương ngữ mới (UC306) thay vì cho nhập tự do.
-3. **Thiếu quyền:** thành viên không có vai biên tập bị từ chối ở bước 1.
-4. **Vượt hạn mức số lớp:** ở bước 5, hệ thống từ chối và hiển thị hạn mức gói.
+
+1. **Trùng với một lớp đang hoạt động.** Ở bước 4, hệ thống từ chối và chỉ đích danh lớp đang tồn tại kèm số mẫu của nó. Điều cần nhấn mạnh là phạm vi kiểm trùng: hai lớp cùng nhãn nhưng khác vùng miền **không** phải trùng lặp, vì vùng là một phần định danh của lớp — cùng một từ có thể được ký khác nhau ở hai vùng, và trộn chúng lại sẽ phá đúng thứ mà bộ dữ liệu này được dựng để nghiên cứu. Nếu đúng là hai lớp cần hợp nhất, biên tập viên chuyển sang thao tác gộp (UC303).
+
+2. **Phương ngữ chưa có trong danh mục.** Ở bước 3, hệ thống **không** cho nhập tự do một mã phương ngữ mới mà đề nghị đường đề xuất phương ngữ (UC306). Nếu cho nhập tự do, mỗi tổ chức sẽ tự đặt một mã cho cùng một phương ngữ và danh mục toàn nền tảng phân mảnh tới mức không so sánh được giữa các nghiên cứu. Biên tập viên gửi đề xuất, dùng phương ngữ ở trạng thái chờ duyệt để thu nội bộ, và chờ kết quả kiểm duyệt (UC307).
+
+3. **Người gọi không có vai biên tập.** Ở bước 1, nút thêm lớp không hiển thị, và một yêu cầu gửi thẳng lên máy chủ bị từ chối. Danh mục quyết định toàn bộ dữ liệu của tổ chức được gán nhãn thế nào, nên quyền ghi vào nó hẹp hơn quyền thu mẫu.
+
+4. **Vượt hạn mức số lớp của gói dịch vụ.** Ở bước 5, hệ thống từ chối kèm hạn mức và mức đã dùng, và nêu đường đổi gói (UC506). Không lớp nào được tạo, và các giá trị biên tập viên đã nhập được giữ lại trong biểu mẫu để không phải gõ lại sau khi nâng gói.
+
+5. **Sinh mã định danh hoặc tăng phiên bản danh mục thất bại.** Ở bước 6, cả thao tác được huỷ và không lớp nào được ghi. Hệ thống không ghi lớp trước rồi cập nhật phiên bản sau, vì một lớp tồn tại ngoài phiên bản danh mục sẽ khiến các lượt huấn luyện ghim phiên bản không nhìn thấy nó — một sai lệch chỉ lộ ra ở kết quả huấn luyện chứ không có thông báo lỗi nào.
+
+**Kết quả mong đợi:** Danh mục của tổ chức có thêm một lớp với mã định danh riêng, đủ năm thuộc tính định danh và số bàn tay yêu cầu, sẵn sàng nhận mẫu ngay; phiên bản danh mục tăng và một mục kiểm toán được ghi. Nếu bất kỳ phép kiểm nào không đạt, danh mục giữ nguyên như trước.
 
 > ### ▣ HÌNH 1-5 — Use case Nghiệp vụ 3: Danh mục từ vựng và phương ngữ
 > **Phải thể hiện:** A6 và A8 ở hai phía; ranh giới giữa danh mục **của tổ chức**
@@ -599,58 +637,71 @@ nghiên cứu, nó là một lớp **rỗng**.
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC401 | Khởi động tác vụ huấn luyện | Biên tập viên / Nghiên cứu sinh | Essential |
-| UC402 | Theo dõi tiến trình huấn luyện | Biên tập viên / Nghiên cứu sinh | Essential |
-| UC403 | Huỷ tác vụ huấn luyện | Biên tập viên / Nghiên cứu sinh | Important |
-| UC404 | Xem kết quả đánh giá và nguồn gốc | Biên tập viên / Nghiên cứu sinh | Important |
-| UC405 | Thử mô hình đã huấn luyện | Biên tập viên / Nghiên cứu sinh | Important |
-| UC406 | Thăng hạng phiên bản mô hình | Quản trị nền tảng | Important |
-| UC407 | Nhận dạng ký hiệu thời gian thực | Người khiếm thính – khiếm ngôn | Essential |
-| UC408 | Đọc thành tiếng văn bản nhận dạng | Người dùng bình thường | Optional |
-| UC409 | Chuẩn bị bản phát hành nghiên cứu | Biên tập viên / Nghiên cứu sinh | Important |
+| UC401 | Khởi động tác vụ huấn luyện | Biên tập viên / Nghiên cứu sinh | Cốt lõi |
+| UC402 | Theo dõi tiến trình huấn luyện | Biên tập viên / Nghiên cứu sinh | Cốt lõi |
+| UC403 | Huỷ tác vụ huấn luyện | Biên tập viên / Nghiên cứu sinh | Quan trọng |
+| UC404 | Xem kết quả đánh giá và nguồn gốc | Biên tập viên / Nghiên cứu sinh | Quan trọng |
+| UC405 | Thử mô hình đã huấn luyện | Biên tập viên / Nghiên cứu sinh | Quan trọng |
+| UC406 | Thăng hạng phiên bản mô hình | Quản trị nền tảng | Quan trọng |
+| UC407 | Nhận dạng ký hiệu thời gian thực | Người khiếm thính – khiếm ngôn | Cốt lõi |
+| UC408 | Đọc thành tiếng văn bản nhận dạng | Người dùng bình thường | Tuỳ chọn |
+| UC409 | Chuẩn bị bản phát hành nghiên cứu | Biên tập viên / Nghiên cứu sinh | Quan trọng |
 
 *Bảng 1-17: Mô tả chức năng Khởi động tác vụ huấn luyện*
 
-| **Use Case** | Khởi động tác vụ huấn luyện | **ID** | UC401 |
+| **Tên use case** | Khởi động tác vụ huấn luyện | **ID** | UC401 |
 |---|---|---|---|
-| **Tác nhân chính** | Biên tập viên / Nghiên cứu sinh | **Mức ưu tiên** | Essential |
-| **Kích hoạt bởi** | Biên tập viên | **Loại** | external |
+| **Actor chính** | Biên tập viên / Nghiên cứu sinh | **Mức độ cần thiết** | Cốt lõi |
+| **Kích hoạt bởi** | Biên tập viên | **Phân loại** | Phức tạp |
+| **Loại** | external | **Nghiệp vụ** | 4 — Huấn luyện, đánh giá và suy luận |
 
-**Mô tả ngắn:** *Biên tập viên chọn phạm vi dữ liệu và cấu hình huấn luyện, hệ
-thống kiểm ba cổng chặn rồi đưa tác vụ vào hàng đợi GPU.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Biên tập viên – Khởi động huấn luyện; Tiến trình nền (S4)
-- **Include:** không
-- **Extend:** không *(UC402, UC403 thao tác trên tác vụ đã khởi động)*
-- **Generalization:** không
+- **Nghiên cứu sinh** — có một lượt chạy tái lập được, gắn với bản kê khai dữ liệu cụ thể.
+- **Các tổ chức khác trong hàng đợi** — hàng đợi chỉ có một chỗ chạy nên hạn mức là thứ giữ công bằng.
+- **Người ký** — mẫu không đủ điều kiện đồng thuận bị loại khỏi tập huấn luyện.
+- **Tiến trình nền (S4)** — nhận lượt chạy và báo tiến độ.
 
-**Luồng chính:**
-1. Biên tập viên mở trang huấn luyện và chọn phạm vi: nhóm từ vựng, hồ sơ nhận
-   dạng, phương ngữ, đường phát hành (nội bộ hay nghiên cứu).
-2. Hệ thống hiển thị số lớp và số mẫu **thực sự đủ điều kiện** sau khi áp cổng
-   đồng thuận, kèm số mẫu bị loại và lý do.
-3. Biên tập viên đặt tham số huấn luyện và bấm "Bắt đầu".
-4. Hệ thống áp cổng sàn số mẫu mỗi lớp, loại các lớp không đủ, rồi **mới** đánh
-   chỉ số lớp trên tập lớp còn lại.
-5. Hệ thống kiểm hạn mức tính toán của tổ chức.
-6. Hệ thống ghim phiên bản danh mục vào bản ghi tác vụ, tạo tác vụ ở trạng thái
-   `queued` và trả về mã tác vụ.
-7. Tiến trình huấn luyện nhận tác vụ, chuyển trạng thái `running` và bắt đầu phát
-   chỉ số theo từng chu kỳ.
-8. Hệ thống hiển thị tác vụ trong danh sách kèm trạng thái theo thời gian thực.
+**Mô tả tóm tắt:** *Biên tập viên chọn phạm vi dữ liệu và cấu hình huấn luyện; hệ thống kiểm ba cổng chặn độc lập rồi đưa tác vụ vào hàng đợi tính toán.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Biên tập viên – Khởi động tác vụ huấn luyện; Tiến trình nền (S4)
+- **Include (bao gồm):** không
+- **Extend (mở rộng):** không *(UC402 và UC403 thao tác trên tác vụ đã khởi động)*
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
+1. Biên tập viên mở trang huấn luyện và chọn phạm vi dữ liệu: nhóm từ vựng, hồ sơ nhận dạng, phương ngữ, và đường phát hành — dùng nội bộ hay dùng cho nghiên cứu.
+2. Hệ thống hiển thị số lớp và số mẫu **thực sự đủ điều kiện** sau khi áp cổng đồng thuận cho đường phát hành đã chọn, kèm số mẫu bị loại và lý do loại của từng nhóm.
+3. Biên tập viên đặt tham số huấn luyện — kiến trúc, số chu kỳ, kích thước lô, cách chia tập — và bấm "Bắt đầu".
+4. Hệ thống áp cổng sàn số mẫu mỗi lớp, loại các lớp không đủ mẫu để chia tập, rồi **mới** đánh chỉ số lớp trên tập lớp còn lại. Thứ tự này là bắt buộc và được nêu ở phần phân tích nghiệp vụ.
+5. Hệ thống kiểm hạn mức tính toán của tổ chức theo gói dịch vụ.
+6. Hệ thống ghim phiên bản danh mục vào bản ghi tác vụ, ghi lại bản kê khai bộ dữ liệu và toàn bộ cấu hình, tạo tác vụ ở trạng thái chờ và trả về mã tác vụ.
+7. Tiến trình huấn luyện nhận tác vụ khi tới lượt, chuyển sang trạng thái đang chạy và bắt đầu phát số đo theo từng chu kỳ.
+8. Hệ thống hiển thị tác vụ trong danh sách kèm trạng thái cập nhật theo thời gian thực (UC402).
+
+**Luồng luân phiên:**
+
+1. **Chạy lại một cấu hình đã dùng:** biên tập viên mở một lượt chạy cũ và chọn "Chạy lại"; các bước 1–3 được điền sẵn theo cấu hình đã ghi. Vì bản kê khai bộ dữ liệu được ghi lại ở bước 6, hai lượt chạy so sánh được với nhau ở mức điều kiện đầu vào.
+2. **Đường nghiên cứu thay vì đường nội bộ:** khi chọn đường nghiên cứu ở bước 1, cổng đồng thuận ở bước 2 siết chặt hơn và số mẫu đủ điều kiện thường giảm mạnh; đây là hành vi đúng, không phải lỗi lọc.
 
 **Luồng ngoại lệ:**
-1. **Không đủ lớp sau khi lọc:** ở bước 4, nếu số lớp còn lại dưới ngưỡng tối
-   thiểu, hệ thống từ chối khởi động và liệt kê từng lớp bị loại kèm lý do —
-   **không** âm thầm huấn luyện trên tập nhỏ hơn.
-2. **Chưa có đồng thuận đủ mức cho đường nghiên cứu:** ở bước 2, hệ thống hiển
-   thị số mẫu bị loại; nếu sau khi loại còn 0 mẫu thì lớp đó báo rỗng.
-3. **Vượt hạn mức tính toán:** ở bước 5, tác vụ bị từ chối kèm hạn mức của gói.
-4. **Không có GPU khả dụng:** ở bước 7, tác vụ nằm lại `queued`; hệ thống hiển
-   thị vị trí trong hàng đợi thay vì báo lỗi.
-5. **Tác vụ hỏng giữa chừng:** hệ thống chuyển trạng thái `failed`, giữ lại nhật
-   ký, và **thông báo cho chủ sở hữu tác vụ** chứ không chỉ ghi log.
+
+1. **Không đủ lớp sau khi lọc.** Ở bước 4, nếu số lớp còn lại dưới ngưỡng tối thiểu để chia tập, hệ thống **từ chối khởi động** và liệt kê từng lớp bị loại kèm lý do — thiếu bao nhiêu mẫu, hoặc bị loại vì đồng thuận. Hệ thống **không** âm thầm huấn luyện trên tập nhỏ hơn: một mô hình huấn luyện trên năm lớp trong khi người dùng tưởng là hai mươi lớp sẽ cho ra số đo đẹp và hoàn toàn vô nghĩa. Biên tập viên hoặc thu thêm mẫu cho các lớp thiếu, hoặc thu hẹp phạm vi cho khớp với dữ liệu thật có.
+
+2. **Không còn mẫu nào sau cổng đồng thuận.** Ở bước 2, các lớp mất toàn bộ mẫu vì lý do đồng thuận được báo là **rỗng** kèm số mẫu đã bị loại, chứ không bị ẩn khỏi danh sách. Phân biệt "lớp không có mẫu" với "lớp có mẫu nhưng không được phép dùng" là điều kiện để biên tập viên biết phải xử lý bằng cách thu thêm hay bằng cách xin đồng thuận (UC112).
+
+3. **Vượt hạn mức tính toán của tổ chức.** Ở bước 5, tác vụ bị từ chối kèm hạn mức của gói và số lượt đã dùng trong kỳ. Không tác vụ nào vào hàng đợi. Quản trị tổ chức nâng gói (UC506) hoặc chờ kỳ hạn mức mới.
+
+4. **Không có thiết bị tính toán khả dụng.** Ở bước 7, tác vụ **nằm lại ở trạng thái chờ** và hệ thống hiển thị vị trí trong hàng đợi thay vì báo lỗi — chờ là trạng thái bình thường của một hệ thống có đúng một chỗ chạy. Nếu thiết bị tính toán tồn tại nhưng môi trường chạy không nhìn thấy, biểu hiện lại khác hẳn: lượt chạy bắt đầu nhưng chậm hàng chục lần, và nguyên nhân thường là một tệp cấu hình triển khai bị thiếu (UC704).
+
+5. **Tác vụ hỏng giữa chừng.** Sau bước 7, hệ thống chuyển tác vụ sang trạng thái thất bại, **giữ lại nhật ký và các số đo đã ghi**, và **thông báo cho chủ sở hữu tác vụ** chứ không chỉ ghi vào nhật ký kỹ thuật. Một lượt chạy dài hỏng lúc nửa đêm mà không ai được báo là một đêm tài nguyên bị lãng phí.
+
+6. **Danh mục thay đổi sau khi tác vụ đã vào hàng đợi.** Vì phiên bản danh mục được ghim ở bước 6, lượt chạy dùng đúng tập lớp tại thời điểm khởi động dù danh mục có bị sửa sau đó. Đây là điều làm cho kết quả tái lập được, và cũng là lý do một mô hình cũ có thể tham chiếu tới lớp không còn trong danh mục hiện tại (UC405).
+
+**Kết quả mong đợi:** Một tác vụ huấn luyện tồn tại trong hàng đợi với phiên bản danh mục đã ghim, bản kê khai bộ dữ liệu và toàn bộ cấu hình được lưu, nên kết quả về sau truy được về đúng điều kiện đã sinh ra nó. Nếu một trong ba cổng chặn không cho qua, không tác vụ nào được tạo và người dùng nhận được danh sách cụ thể những gì còn thiếu.
 
 > ### ▣ HÌNH 1-6 — Use case Nghiệp vụ 4: Huấn luyện, đánh giá và suy luận
 > **Phải thể hiện:** A6, A8, A3, A4 và S3; ba cổng chặn vẽ thành ba nút quyết
@@ -679,53 +730,69 @@ hạn mức nào*. Hai phân biệt phải giữ rõ:
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC501 | Quản lý tổ chức | Quản trị nền tảng | Essential |
-| UC502 | Mời thành viên | Quản trị tổ chức | Essential |
-| UC503 | Chấp nhận lời mời | Khách vãng lai | Essential |
-| UC504 | Đổi vai thành viên | Quản trị tổ chức | Important |
-| UC505 | Gỡ thành viên | Quản trị tổ chức | Important |
-| UC506 | Quản lý gói dịch vụ | Quản trị tổ chức | Important |
-| UC507 | Yêu cầu xuất dữ liệu tổ chức | Quản trị tổ chức | Important |
-| UC508 | Dọn sạch dữ liệu tổ chức | Quản trị nền tảng | Optional |
+| UC501 | Quản lý tổ chức | Quản trị nền tảng | Cốt lõi |
+| UC502 | Mời thành viên | Quản trị tổ chức | Cốt lõi |
+| UC503 | Chấp nhận lời mời | Khách vãng lai | Cốt lõi |
+| UC504 | Đổi vai thành viên | Quản trị tổ chức | Quan trọng |
+| UC505 | Gỡ thành viên | Quản trị tổ chức | Quan trọng |
+| UC506 | Quản lý gói dịch vụ | Quản trị tổ chức | Quan trọng |
+| UC507 | Yêu cầu xuất dữ liệu tổ chức | Quản trị tổ chức | Quan trọng |
+| UC508 | Dọn sạch dữ liệu tổ chức | Quản trị nền tảng | Tuỳ chọn |
 
 *Bảng 1-18: Mô tả chức năng Mời thành viên*
 
-| **Use Case** | Mời thành viên | **ID** | UC502 |
+| **Tên use case** | Mời thành viên | **ID** | UC502 |
 |---|---|---|---|
-| **Tác nhân chính** | Quản trị tổ chức | **Mức ưu tiên** | Essential |
-| **Kích hoạt bởi** | Quản trị tổ chức | **Loại** | external |
+| **Actor chính** | Quản trị tổ chức | **Mức độ cần thiết** | Cốt lõi |
+| **Kích hoạt bởi** | Quản trị tổ chức | **Phân loại** | Phức tạp |
+| **Loại** | external | **Nghiệp vụ** | 5 — Tổ chức và đăng ký dịch vụ |
 
-**Mô tả ngắn:** *Quản trị tổ chức gửi lời mời tới một địa chỉ liên hệ kèm vai dự
-kiến. Lời mời chỉ trở thành tư cách thành viên khi chính người được mời hành
-động.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Quản trị tổ chức – Mời thành viên; Dịch vụ gửi tin (S1)
-- **Include:** không
-- **Extend:** không *(UC503 tiêu thụ lời mời này)*
-- **Generalization:** không
+- **Quản trị tổ chức** — bổ sung người vào tổ chức mà không cần quyền nền tảng.
+- **Người được mời** — chỉ gia nhập khi chính mình hành động, không bị kéo vào.
+- **Nền tảng** — lời mời là đường **duy nhất** để một tổ chức có thêm thành viên.
+- **Dịch vụ gửi tin (S1)** — chuyển thư mời tới địa chỉ được mời.
 
-**Luồng chính:**
-1. Quản trị tổ chức mở trang tổ chức, tab Thành viên, bấm "Mời".
-2. Nhập địa chỉ liên hệ và chọn vai dự kiến (`viewer`, `editor`, `admin`).
-3. Hệ thống kiểm hạn mức số thành viên của gói dịch vụ.
-4. Hệ thống sinh một lời mời có hạn dùng, mã dùng một lần, gắn với **đúng địa chỉ
-   đó** và đúng tổ chức đó.
-5. Hệ thống nhờ S1 gửi lời mời và hiển thị lời mời ở trạng thái `pending`.
-6. Người được mời mở liên kết và hoàn tất theo UC503.
-7. Hệ thống ghi tư cách thành viên, chuyển lời mời sang `accepted`, và ghi nhật
-   ký kiểm toán.
+**Mô tả tóm tắt:** *Quản trị tổ chức gửi lời mời tới một địa chỉ liên hệ kèm vai dự kiến. Lời mời chỉ trở thành tư cách thành viên khi chính người được mời hành động.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Quản trị tổ chức – Mời thành viên; Dịch vụ gửi tin (S1)
+- **Include (bao gồm):** không
+- **Extend (mở rộng):** không *(UC503 tiêu thụ lời mời này)*
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
+1. Quản trị tổ chức mở trang tổ chức, tab Thành viên, và bấm "Mời".
+2. Quản trị viên nhập địa chỉ liên hệ và chọn vai dự kiến trong tập vai hợp lệ của tổ chức.
+3. Hệ thống kiểm địa chỉ chưa thuộc về một thành viên hiện có và kiểm hạn mức số thành viên của gói dịch vụ.
+4. Hệ thống sinh một lời mời có hạn dùng, mang một mã ngẫu nhiên dùng một lần, gắn với **đúng địa chỉ đó** và **đúng tổ chức đó**, kèm vai đã chọn.
+5. Hệ thống nhờ dịch vụ gửi tin chuyển thư mời và hiển thị lời mời trong danh sách ở trạng thái đang chờ, kèm thời điểm hết hạn.
+6. Người được mời mở liên kết và hoàn tất việc gia nhập theo UC503.
+7. Hệ thống ghi tư cách thành viên, chuyển lời mời sang trạng thái đã chấp nhận, ghi một mục vào nhật ký kiểm toán và báo cho quản trị viên đã mời.
+
+**Luồng luân phiên:**
+
+1. **Gửi lại lời mời:** quản trị viên bấm gửi lại trên một lời mời đang chờ; hệ thống gửi lại thư với **cùng mã mời** nếu còn hạn, hoặc sinh mã mới và huỷ mã cũ nếu đã hết hạn. Cách này tránh việc một địa chỉ nhận hai mã còn sống cùng lúc.
+2. **Thu hồi lời mời:** quản trị viên thu hồi một lời mời đang chờ; mã bị vô hiệu ngay và người nhận mở liên kết sẽ nhận được thông báo từ chối (UC503).
 
 **Luồng ngoại lệ:**
-1. **Đã là thành viên:** ở bước 3, hệ thống từ chối và chỉ ra bản ghi thành viên
-   hiện có.
-2. **Vượt hạn mức thành viên:** ở bước 3, từ chối kèm hạn mức gói.
-3. **Lời mời hết hạn:** ở bước 6, hệ thống từ chối và cho quản trị viên gửi lại.
-4. **Địa chỉ nhận không khớp:** nếu người mở liên kết đăng nhập bằng một tài khoản
-   có địa chỉ khác, hệ thống **từ chối** — lời mời gắn với địa chỉ, không gắn với
-   liên kết.
-5. **Gửi tin thất bại:** ở bước 5, lời mời vẫn được tạo và quản trị viên gửi lại
-   được; hệ thống không im lặng bỏ qua.
+
+1. **Địa chỉ đã thuộc về một thành viên của tổ chức.** Ở bước 3, hệ thống từ chối và chỉ ra bản ghi thành viên hiện có kèm vai của họ. Nếu ý định thật là đổi vai, đường đúng là UC504 chứ không phải mời lại. Không lời mời nào được tạo và không thư nào được gửi.
+
+2. **Vượt hạn mức số thành viên của gói dịch vụ.** Ở bước 3, hệ thống từ chối kèm hạn mức và số thành viên hiện tại. Cần lưu ý hạn mức đếm **thành viên đã gia nhập cộng với lời mời đang chờ**, để một loạt lời mời chưa ai nhận không vượt qua được hàng rào hạn mức rồi làm tổ chức vượt trần khi tất cả cùng chấp nhận.
+
+3. **Lời mời hết hạn trước khi được dùng.** Ở bước 6, hệ thống từ chối và người được mời không tạo được tài khoản nào; quản trị viên gửi lại theo luồng luân phiên 1. Thời hạn của lời mời tồn tại vì một liên kết gia nhập tổ chức sống mãi trong hộp thư là một đường vào tổ chức không ai kiểm soát.
+
+4. **Người mở liên kết dùng một địa chỉ khác.** Ở bước 6, hệ thống **từ chối**: lời mời gắn với địa chỉ, không gắn với người cầm liên kết. Nếu không ràng buộc như vậy, một thư mời bị chuyển tiếp sẽ đưa người khác vào tổ chức với đúng vai đã hứa cho người được mời.
+
+5. **Gửi thư mời thất bại.** Ở bước 5, lời mời **vẫn được tạo** và hiển thị trong danh sách; quản trị viên gửi lại được, hoặc sao chép liên kết mời và chuyển cho người được mời qua kênh khác. Hệ thống không im lặng bỏ qua lỗi gửi — nếu không, quản trị viên sẽ chờ một người không bao giờ nhận được thư.
+
+6. **Người được mời đã có tài khoản trên nền tảng.** Ở bước 6, đây là khoảng trống đã nêu ở UC503: hiện không có đường tự phục vụ để một tài khoản đang tồn tại chấp nhận lời mời. Quản trị tổ chức cần liên hệ quản trị nền tảng để gắn tài khoản thủ công (UC501).
+
+**Kết quả mong đợi:** Tồn tại một lời mời đang chờ, gắn chặt với một địa chỉ, một tổ chức và một vai, có thời hạn và chỉ dùng được một lần; khi được chấp nhận, tổ chức có thêm đúng một thành viên với đúng vai đã hứa và nhật ký kiểm toán ghi lại toàn bộ chuỗi sự kiện. Không có đường nào để một tổ chức thêm thành viên mà người đó không tự hành động.
 
 ---
 
@@ -748,50 +815,68 @@ chứng*. Hai cơ chế nghiệp vụ đáng chú ý:
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC601 | Nâng quyền tạm thời | Quản trị nền tảng | Important |
-| UC602 | Quản lý tài khoản người dùng | Quản trị nền tảng | Essential |
-| UC603 | Áp dụng biện pháp bảo mật | Quản trị nền tảng | Important |
-| UC604 | Xem nhật ký kiểm toán | Quản trị nền tảng | Important |
-| UC605 | Cấu hình tham số nền tảng | Quản trị nền tảng | Important |
-| UC606 | Soạn và duyệt văn bản pháp lý | Quản trị nền tảng | Important |
-| UC607 | Công bố văn bản pháp lý | Quản trị nền tảng | Essential |
-| UC608 | Rà soát hồ sơ đồng thuận | Quản trị nền tảng | Important |
-| UC609 | Quản lý gói cước | Quản trị nền tảng | Optional |
+| UC601 | Nâng quyền tạm thời | Quản trị nền tảng | Quan trọng |
+| UC602 | Quản lý tài khoản người dùng | Quản trị nền tảng | Cốt lõi |
+| UC603 | Áp dụng biện pháp bảo mật | Quản trị nền tảng | Quan trọng |
+| UC604 | Xem nhật ký kiểm toán | Quản trị nền tảng | Quan trọng |
+| UC605 | Cấu hình tham số nền tảng | Quản trị nền tảng | Quan trọng |
+| UC606 | Soạn và duyệt văn bản pháp lý | Quản trị nền tảng | Quan trọng |
+| UC607 | Công bố văn bản pháp lý | Quản trị nền tảng | Cốt lõi |
+| UC608 | Rà soát hồ sơ đồng thuận | Quản trị nền tảng | Quan trọng |
+| UC609 | Quản lý gói cước | Quản trị nền tảng | Tuỳ chọn |
 
 *Bảng 1-19: Mô tả chức năng Công bố văn bản pháp lý*
 
-| **Use Case** | Công bố văn bản pháp lý | **ID** | UC607 |
+| **Tên use case** | Công bố văn bản pháp lý | **ID** | UC607 |
 |---|---|---|---|
-| **Tác nhân chính** | Quản trị nền tảng | **Mức ưu tiên** | Essential |
-| **Kích hoạt bởi** | Quản trị nền tảng | **Loại** | external |
+| **Actor chính** | Quản trị nền tảng | **Mức độ cần thiết** | Cốt lõi |
+| **Kích hoạt bởi** | Quản trị nền tảng | **Phân loại** | Trung bình |
+| **Loại** | external | **Nghiệp vụ** | 6 — Quản trị người dùng và chính sách |
 
-**Mô tả ngắn:** *Quản trị nền tảng đưa một bản thảo văn bản pháp lý thành phiên
-bản có hiệu lực. Bản đã công bố là bất biến; hệ thống lưu mã băm nội dung làm
-bằng chứng.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Quản trị nền tảng – Công bố văn bản pháp lý
-- **Include:** UC601 Nâng quyền tạm thời
-- **Extend:** không
-- **Generalization:** không
+- **Quản trị nền tảng** — đưa một phiên bản văn bản vào hiệu lực.
+- **Bộ phận pháp chế** — bản đã công bố là bất biến, nên chứng minh được nội dung tại thời điểm người dùng chấp thuận.
+- **Người dùng và người ký** — được hỏi lại khi có phiên bản mới, thay vì bị áp một văn bản chưa từng đọc.
+- **Bộ phận kiểm toán** — mỗi lần công bố là một sự kiện có người chịu trách nhiệm.
 
-**Luồng chính:**
-1. Quản trị viên mở bản thảo đã duyệt (UC606) và bấm "Công bố".
-2. Hệ thống yêu cầu xác thực lại (UC601).
-3. Quản trị viên khai số hiệu phiên bản, ngày hiệu lực, và **có buộc chấp thuận
-   lại hay không**.
-4. Hệ thống tính mã băm nội dung, ghi bản công bố kèm mã băm đó và khoá bản ghi
-   lại bằng ràng buộc ở tầng cơ sở dữ liệu.
-5. Nếu buộc chấp thuận lại, hệ thống đánh dấu mọi tài khoản là "còn văn bản chưa
-   chấp thuận" và chặn thao tác ghi của họ cho tới khi chấp thuận (UC112).
-6. Hệ thống ghi một sự kiện vào lịch sử văn bản và vào nhật ký kiểm toán.
+**Mô tả tóm tắt:** *Quản trị nền tảng đưa một bản nháp văn bản pháp lý thành phiên bản có hiệu lực. Bản đã công bố là bất biến; hệ thống lưu mã băm nội dung làm bằng chứng.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Quản trị nền tảng – Công bố văn bản pháp lý
+- **Include (bao gồm):** UC601 Nâng quyền tạm thời
+- **Extend (mở rộng):** không
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
+1. Quản trị viên mở một bản nháp đã qua vòng duyệt (UC606) và bấm "Công bố".
+2. Hệ thống yêu cầu xác thực lại danh tính (UC601).
+3. Quản trị viên khai số hiệu phiên bản, ngày hiệu lực, và **có buộc mọi tài khoản chấp thuận lại hay không**.
+4. Hệ thống tính mã băm nội dung của bản sắp công bố, ghi bản công bố kèm mã băm đó, và khoá bản ghi lại bằng một ràng buộc ở tầng cơ sở dữ liệu.
+5. Nếu chọn buộc chấp thuận lại, hệ thống đánh dấu mọi tài khoản là còn văn bản chưa chấp thuận và chặn thao tác ghi của họ cho tới khi họ chấp thuận (UC112).
+6. Hệ thống ghi một sự kiện vào lịch sử văn bản và một mục vào nhật ký kiểm toán, nêu người công bố, phiên bản, mã băm và thời điểm.
+7. Từ thời điểm hiệu lực, mọi người đọc công khai nhận được đúng phiên bản này (UC111).
+
+**Luồng luân phiên:**
+
+1. **Công bố không buộc chấp thuận lại:** với các sửa đổi thuần hình thức — sửa lỗi chính tả, đổi cách trình bày — quản trị viên bỏ chọn ở bước 3. Phiên bản mới có hiệu lực nhưng các đồng thuận cũ vẫn được coi là còn giá trị. Đây là một quyết định pháp lý chứ không phải kỹ thuật, và hệ thống ghi rõ lựa chọn đó trong lịch sử văn bản.
+2. **Công bố bản dịch của một văn bản:** mỗi bản ngôn ngữ được công bố riêng và có mã băm riêng, nên đồng thuận của người dùng gắn với đúng bản ngôn ngữ họ đã đọc.
 
 **Luồng ngoại lệ:**
-1. **Trùng số hiệu phiên bản:** ở bước 4, hệ thống từ chối; số hiệu phiên bản là
-   duy nhất theo loại văn bản.
-2. **Cố sửa bản đã công bố:** ràng buộc ở tầng cơ sở dữ liệu từ chối thao tác,
-   **kể cả** khi lệnh phát ra từ chính ứng dụng.
-3. **Xác thực lại thất bại:** ở bước 2, thao tác dừng và không có gì được ghi.
+
+1. **Trùng số hiệu phiên bản.** Ở bước 4, hệ thống từ chối; số hiệu phiên bản là duy nhất theo từng loại văn bản. Nếu cho phép trùng, các bản ghi đồng thuận trỏ tới một số hiệu sẽ không xác định được chúng nói về nội dung nào — và đó chính là thứ duy nhất mà bản ghi đồng thuận cần chứng minh.
+
+2. **Cố sửa nội dung một bản đã công bố.** Ràng buộc ở tầng cơ sở dữ liệu từ chối thao tác, **kể cả** khi lệnh phát ra từ chính ứng dụng và kể cả khi người thực hiện có quyền quản trị. Đặt cơ chế bảo vệ ở tầng dữ liệu chứ không ở tầng ứng dụng là chủ ý: một đoạn mã mới viết sau này, hay một lượt cập nhật thủ công trên máy chủ, đều không vượt qua được. Muốn thay đổi nội dung thì công bố một phiên bản mới.
+
+3. **Xác thực lại thất bại.** Ở bước 2, thao tác dừng và không có gì được ghi — không phiên bản, không sự kiện, không thay đổi trạng thái đồng thuận của bất kỳ ai. Công bố là thao tác đặt ra nghĩa vụ pháp lý cho toàn bộ người dùng, nên nó nằm trong nhóm bắt buộc chứng minh lại danh tính.
+
+4. **Buộc chấp thuận lại giữa giờ làm việc.** Ở bước 5, mọi tài khoản đang thao tác sẽ bị chuyển sang màn hình chấp thuận ở hành động ghi kế tiếp, kể cả khi đang giữa một buổi thu mẫu. Hệ thống giữ lại dữ liệu đang thu trong trình duyệt (UC201), nhưng gián đoạn vẫn xảy ra. Vì vậy màn hình xác nhận ở bước 3 nêu rõ số tài khoản sẽ bị ảnh hưởng và khuyến nghị chọn thời điểm công bố ngoài giờ cao điểm.
+
+5. **Bản nháp thiếu siêu dữ liệu bắt buộc.** Ở bước 3, hệ thống từ chối công bố và liệt kê các trường còn thiếu. Bản nháp được phép dở dang, phiên bản công bố thì không — phép kiểm vì vậy nằm ở đây chứ không ở lúc lưu nháp.
+
+**Kết quả mong đợi:** Tồn tại một phiên bản văn bản bất biến, có số hiệu duy nhất theo loại, có mã băm nội dung và ngày hiệu lực, là bản duy nhất mà công chúng đọc được từ thời điểm đó. Nếu chọn buộc chấp thuận lại, mọi tài khoản đều phải chấp thuận trước khi ghi tiếp, và mỗi lần chấp thuận sinh ra một bản ghi gắn với đúng mã băm này.
 
 ---
 
@@ -817,52 +902,64 @@ này tồn tại vì ba sự cố có thật:
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC701 | Quản lý máy ghi nguồn sự thật | Kỹ sư vận hành | Important |
-| UC702 | Xác minh toàn vẹn nguồn sự thật | Kỹ sư vận hành | Important |
-| UC703 | Đồng bộ kho lưu trữ và cơ sở dữ liệu | Kỹ sư vận hành | Important |
-| UC704 | Giám sát sức khoẻ hệ thống | Kỹ sư vận hành | Important |
-| UC705 | Sao lưu và khôi phục dữ liệu | Kỹ sư vận hành | Essential |
-| UC706 | Kiểm chứng độ tươi của triển khai | Kỹ sư vận hành | Important |
+| UC701 | Quản lý máy ghi nguồn sự thật | Kỹ sư vận hành | Quan trọng |
+| UC702 | Xác minh toàn vẹn nguồn sự thật | Kỹ sư vận hành | Quan trọng |
+| UC703 | Đồng bộ kho lưu trữ và cơ sở dữ liệu | Kỹ sư vận hành | Quan trọng |
+| UC704 | Giám sát sức khoẻ hệ thống | Kỹ sư vận hành | Quan trọng |
+| UC705 | Sao lưu và khôi phục dữ liệu | Kỹ sư vận hành | Cốt lõi |
+| UC706 | Kiểm chứng độ tươi của triển khai | Kỹ sư vận hành | Quan trọng |
 
 *Bảng 1-20: Mô tả chức năng Xác minh toàn vẹn nguồn sự thật*
 
-| **Use Case** | Xác minh toàn vẹn nguồn sự thật | **ID** | UC702 |
+| **Tên use case** | Xác minh toàn vẹn nguồn sự thật | **ID** | UC702 |
 |---|---|---|---|
-| **Tác nhân chính** | Kỹ sư vận hành | **Mức ưu tiên** | Important |
-| **Kích hoạt bởi** | Kỹ sư vận hành, hoặc tiến trình khởi động | **Loại** | external / internal |
+| **Actor chính** | Kỹ sư vận hành | **Mức độ cần thiết** | Quan trọng |
+| **Kích hoạt bởi** | Kỹ sư vận hành, hoặc tiến trình khởi động | **Phân loại** | Trung bình |
+| **Loại** | external / internal | **Nghiệp vụ** | 7 — Vận hành hệ thống và nguồn sự thật |
 
-**Mô tả ngắn:** *Trước khi bất kỳ dịch vụ nào chạy, hệ thống kéo bản công bố mới
-nhất của danh mục, kiểm mã băm từng tệp theo bản kê, kiểm chữ ký phủ bản kê, và
-kiểm người ký có nằm trong danh sách khoá được tin cậy hay không.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Kỹ sư vận hành – Xác minh toàn vẹn; Máy ghi nguồn sự thật (S5)
-- **Include:** không
-- **Extend:** không *(UC703 include use case này)*
-- **Generalization:** không
+- **Kỹ sư vận hành** — biết ba nơi lưu có còn khớp nhau không.
+- **Nghiên cứu sinh** — dữ liệu dùng để công bố đúng là dữ liệu đã thu.
+- **Máy ghi nguồn sự thật (S5)** — chữ ký của nó là thứ được kiểm.
+- **Bộ phận kiểm toán** — có bằng chứng về tính toàn vẹn tại một thời điểm.
 
-**Luồng chính:**
-1. Tiến trình khởi tạo kéo bản công bố mới nhất từ kho lưu trữ ngoài.
-2. Hệ thống tính lại mã băm SHA-256 của từng tệp và đối chiếu với bản kê.
-3. Hệ thống kiểm chữ ký Ed25519 phủ bản kê.
-4. Hệ thống tra khoá công khai đã ký trong danh sách khoá được tin cậy; kết quả
-   xác minh trả về **tên khoá đã đăng ký**, không phải một giá trị đúng/sai.
-5. Hệ thống hợp nhất bản công bố vào cơ sở dữ liệu theo nguyên tắc **chỉ điền,
-   không xoá**: thêm phần thiếu, không bao giờ gỡ phần đang có.
+**Mô tả tóm tắt:** *Trước khi bất kỳ dịch vụ nào chạy, hệ thống kéo bản công bố mới nhất của danh mục, kiểm mã băm từng tệp theo bản kê, kiểm chữ ký phủ bản kê, và kiểm người ký có nằm trong danh sách khoá được tin cậy hay không.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Kỹ sư vận hành – Xác minh toàn vẹn nguồn sự thật; Máy ghi nguồn sự thật (S5)
+- **Include (bao gồm):** không
+- **Extend (mở rộng):** không *(UC703 dùng lại use case này qua quan hệ «include»)*
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
+1. Tiến trình khởi tạo kéo bản công bố mới nhất của danh mục từ kho lưu trữ ngoài.
+2. Hệ thống tính lại mã băm của từng tệp trong bản công bố và đối chiếu với giá trị ghi trong bản kê.
+3. Hệ thống kiểm chữ ký số phủ toàn bộ bản kê.
+4. Hệ thống tra khoá công khai đã ký trong danh sách khoá được tin cậy. Kết quả xác minh trả về **tên khoá đã đăng ký**, không phải một giá trị đúng hay sai — vì câu hỏi cần trả lời là "ai ký", không phải "có chữ ký không".
+5. Hệ thống hợp nhất bản công bố vào cơ sở dữ liệu theo nguyên tắc **chỉ điền, không xoá**: thêm phần còn thiếu, không bao giờ gỡ phần đang có.
 6. Các dịch vụ còn lại được phép khởi động.
 
+**Luồng luân phiên:**
+
+1. **Chạy thủ công để kiểm chứng:** kỹ sư gọi trực tiếp công cụ xác minh mà không khởi động lại hệ thống, để kiểm tra tình trạng bản công bố hiện tại. Các bước 1–4 giữ nguyên, bước 5 được bỏ qua.
+2. **Được gọi từ lượt đồng bộ:** UC703 dùng lại chính use case này như bước đầu tiên, để việc đối soát ba nơi lưu không bao giờ chạy trên một bản công bố chưa được xác minh.
+
 **Luồng ngoại lệ:**
-1. **Mã băm không khớp:** dừng ở bước 2 với mã thoát chuyên biệt; **cả hệ thống
-   không khởi động**.
-2. **Chữ ký hỏng hoặc thiếu:** dừng ở bước 3, cùng hành vi.
-3. **Chữ ký hợp lệ nhưng người ký không được tin cậy:** dừng ở bước 4. Đây là ca
-   quan trọng nhất — một kẻ tấn công dựng được dữ liệu khác, tính mã băm đúng,
-   viết bản kê đúng, rồi tự ký bằng khoá của hắn. Chữ ký ấy **hợp lệ về mật mã**.
-   Nếu hệ thống chỉ hỏi "chữ ký có hợp lệ không" mà không hỏi "hợp lệ theo khoá
-   nào" thì toàn vẹn đúng nhưng thẩm quyền sai.
-4. **Bản công bố lùi phiên bản:** hệ thống **chấp nhận** — đây là một **giới hạn
-   đã biết**, ghi rõ ở Chương 4. Tài nguyên mới hơn không bị xoá, nhưng giá trị
-   dùng chung bị ghi đè lùi.
+
+1. **Mã băm của một tệp không khớp bản kê.** Ở bước 2, tiến trình dừng ngay với một mã thoát chuyên biệt và **cả hệ thống không khởi động**. Đây là hành vi có chủ đích: một tệp dữ liệu đã đổi so với lúc được ký nghĩa là hoặc dữ liệu hỏng trong lúc truyền, hoặc có người đã sửa nó, và cả hai trường hợp đều không được phép đi tiếp. Kỹ sư đối chiếu bản công bố với bản gốc trên máy ghi và công bố lại nếu cần.
+
+2. **Chữ ký hỏng hoặc thiếu.** Ở bước 3, tiến trình dừng với cùng hành vi như ngoại lệ 1. Một bản kê không có chữ ký hợp lệ không cho biết được nó do ai tạo ra, nên nó không có giá trị nào hơn một tệp bất kỳ tìm thấy trong kho.
+
+3. **Chữ ký hợp lệ nhưng người ký không được tin cậy.** Ở bước 4, tiến trình dừng. Đây là ca quan trọng nhất và cũng dễ bị bỏ sót nhất khi thiết kế: một kẻ tấn công hoàn toàn có thể dựng một tập dữ liệu khác, tính mã băm đúng cho chính tập đó, viết một bản kê hoàn chỉnh, rồi ký bằng khoá của mình. Chữ ký ấy **hợp lệ về mặt mật mã**. Nếu hệ thống chỉ hỏi "chữ ký có hợp lệ không" mà không hỏi "hợp lệ theo khoá nào", thì tính toàn vẹn được bảo đảm trong khi thẩm quyền thì không — dữ liệu nguyên vẹn, nhưng là dữ liệu của người khác. Kỹ sư xử lý bằng cách kiểm danh sách khoá được tin cậy (UC701).
+
+4. **Bản công bố lùi phiên bản.** Ở bước 5, hệ thống **chấp nhận** một bản công bố cũ hơn bản đang có. Đây là một **giới hạn đã biết** và được ghi rõ ở Chương 4: vì nguyên tắc hợp nhất là chỉ điền chứ không xoá, các mục mới hơn không bị mất, nhưng các giá trị dùng chung có thể bị ghi đè lùi về nội dung cũ. Cách phòng tránh trong vận hành là chỉ có đúng một máy giữ vai trò công bố, và điều đó được cưỡng chế qua danh sách khoá chứ không qua quy trình.
+
+5. **Không kéo được bản công bố từ kho lưu trữ.** Ở bước 1, nếu kho lưu trữ không phản hồi, tiến trình khởi tạo dừng và hệ thống không lên. Đây là hệ quả trực tiếp của việc đặt phép xác minh ở đường khởi động: hệ thống chấp nhận không khởi động được khi không xác minh được, thay vì khởi động với một nguồn sự thật chưa kiểm.
+
+**Kết quả mong đợi:** Hệ thống chỉ khởi động khi bản công bố của danh mục đã được chứng minh là nguyên vẹn **và** do một máy có thẩm quyền ký; cơ sở dữ liệu được bổ sung phần còn thiếu mà không mất mục nào đang có. Mọi trường hợp không xác minh được đều dẫn tới việc hệ thống dừng lại với một mã thoát nói rõ lý do, chứ không bao giờ dẫn tới việc chạy tiếp trong trạng thái không rõ nguồn gốc dữ liệu.
 
 ---
 
@@ -878,42 +975,64 @@ loại này thì hoặc là gửi thư trùng lặp, hoặc là không bao giờ
 
 | Mã | Chức năng | Tác nhân chính | Mức ưu tiên |
 |---|---|---|---|
-| UC801 | Tạo phiếu hỗ trợ | Người dùng đã đăng nhập | Important |
-| UC802 | Trả lời phiếu hỗ trợ | Người dùng đã đăng nhập | Important |
-| UC803 | Trực hàng đợi hỗ trợ | Nhân viên hỗ trợ | Important |
-| UC804 | Xem thông báo | Người dùng đã đăng nhập | Important |
-| UC805 | Quản lý khoá API | Quản trị tổ chức | Optional |
-| UC806 | Quản lý điểm nhận webhook | Quản trị tổ chức | Optional |
+| UC801 | Tạo phiếu hỗ trợ | Người dùng đã đăng nhập | Quan trọng |
+| UC802 | Trả lời phiếu hỗ trợ | Người dùng đã đăng nhập | Quan trọng |
+| UC803 | Trực hàng đợi hỗ trợ | Nhân viên hỗ trợ | Quan trọng |
+| UC804 | Xem thông báo | Người dùng đã đăng nhập | Quan trọng |
+| UC805 | Quản lý khoá API | Quản trị tổ chức | Tuỳ chọn |
+| UC806 | Quản lý điểm nhận webhook | Quản trị tổ chức | Tuỳ chọn |
 
 *Bảng 1-21: Mô tả chức năng Quản lý khoá API*
 
-| **Use Case** | Quản lý khoá API | **ID** | UC805 |
+| **Tên use case** | Quản lý khoá API | **ID** | UC805 |
 |---|---|---|---|
-| **Tác nhân chính** | Quản trị tổ chức | **Mức ưu tiên** | Optional |
-| **Kích hoạt bởi** | Quản trị tổ chức | **Loại** | external |
+| **Actor chính** | Quản trị tổ chức | **Mức độ cần thiết** | Tuỳ chọn |
+| **Kích hoạt bởi** | Quản trị tổ chức | **Phân loại** | Trung bình |
+| **Loại** | external | **Nghiệp vụ** | 8 — Hỗ trợ và tích hợp |
 
-**Mô tả ngắn:** *Quản trị tổ chức tạo, thu hồi và xem lịch sử sử dụng khoá API để
-hệ thống bên thứ ba gọi vào trong phạm vi tổ chức mình.*
+**Các thành phần tham gia và mối quan tâm:**
 
-**Quan hệ:**
-- **Association:** Quản trị tổ chức – Quản lý khoá API; Ứng dụng bên thứ ba (S6)
-- **Include:** không · **Extend:** không · **Generalization:** không
+- **Quản trị tổ chức** — cấp và thu quyền truy cập cho hệ thống ngoài.
+- **Ứng dụng bên thứ ba (S6)** — có một danh tính riêng, tách khỏi tài khoản người.
+- **Nền tảng** — khoá chỉ có đúng quyền ghi trong phạm vi của chính nó, không thừa hưởng quyền của người tạo.
 
-**Luồng chính:**
+**Mô tả tóm tắt:** *Quản trị tổ chức tạo, thu hồi và xem lịch sử sử dụng khoá truy cập chương trình, để hệ thống bên thứ ba gọi vào nền tảng trong phạm vi tổ chức mình.*
+
+**Các mối quan hệ:**
+
+- **Association (kết hợp):** Quản trị tổ chức – Quản lý khoá API; Ứng dụng bên thứ ba (S6)
+- **Include (bao gồm):** không
+- **Extend (mở rộng):** không
+- **Generalization (tổng quát hoá):** không
+
+**Xử lý sự kiện:**
+
 1. Quản trị tổ chức mở trang Tích hợp và bấm "Tạo khoá".
-2. Nhập tên gợi nhớ và chọn phạm vi quyền của khoá.
-3. Hệ thống sinh khoá, lưu **mã băm** của khoá chứ không lưu khoá, và hiển thị
-   giá trị khoá **đúng một lần**.
-4. Ứng dụng bên thứ ba gọi API kèm khoá; hệ thống phân giải khoá về đúng tổ chức
-   và áp cùng cơ chế cách ly như với một phiên người dùng.
-5. Quản trị viên xem thời điểm dùng gần nhất của từng khoá.
-6. Khi cần, quản trị viên thu hồi khoá; hiệu lực tức thì.
+2. Quản trị viên nhập tên gợi nhớ và chọn phạm vi quyền của khoá — tập thao tác mà khoá này được phép thực hiện.
+3. Hệ thống sinh khoá bằng bộ sinh ngẫu nhiên dùng cho mật mã, lưu **mã băm** của khoá chứ không lưu khoá, và hiển thị giá trị khoá cho quản trị viên **đúng một lần**.
+4. Quản trị viên sao chép khoá và cấu hình vào hệ thống bên thứ ba.
+5. Ứng dụng bên thứ ba gọi vào nền tảng kèm khoá; hệ thống phân giải khoá về đúng tổ chức và áp **cùng cơ chế cách ly dữ liệu** như với một phiên người dùng, đồng thời giới hạn theo phạm vi quyền đã chọn ở bước 2.
+6. Quản trị viên xem danh sách khoá kèm thời điểm dùng gần nhất của từng khoá.
+7. Khi cần, quản trị viên thu hồi một khoá; hiệu lực tức thì cho các lời gọi kế tiếp.
+
+**Luồng luân phiên:**
+
+1. **Xoay khoá theo định kỳ:** quản trị viên tạo khoá mới, cấu hình vào hệ thống bên thứ ba, xác nhận khoá mới hoạt động qua thời điểm dùng gần nhất ở bước 6, rồi mới thu hồi khoá cũ. Thứ tự này tránh khoảng gián đoạn dịch vụ.
+2. **Một khoá cho mỗi hệ thống tích hợp:** quản trị viên tạo nhiều khoá, mỗi khoá cho một hệ thống bên ngoài, để thu hồi được từng phần thay vì cắt toàn bộ tích hợp khi một hệ thống gặp sự cố.
 
 **Luồng ngoại lệ:**
-1. **Mất khoá:** không khôi phục được, chỉ tạo khoá mới — hệ quả trực tiếp của
-   việc chỉ lưu mã băm.
-2. **Khoá bị dùng ngoài phạm vi:** hệ thống từ chối và ghi nhật ký kiểm toán.
-3. **Vượt hạn mức số khoá:** từ chối kèm hạn mức gói.
+
+1. **Mất giá trị khoá sau khi đóng màn hình.** Ở bước 3, giá trị khoá **không khôi phục được** vì hệ thống chỉ lưu mã băm; quản trị viên phải tạo khoá mới và thu hồi khoá cũ. Đây là hệ quả trực tiếp và có chủ ý của việc chỉ lưu mã băm: nếu khoá đọc lại được từ giao diện, thì bất kỳ ai chiếm được một phiên quản trị cũng đọc được toàn bộ khoá tích hợp của tổ chức.
+
+2. **Khoá bị dùng ngoài phạm vi quyền.** Ở bước 5, hệ thống từ chối lời gọi và ghi một mục vào nhật ký kiểm toán. Điểm cần nhấn mạnh: khoá **không thừa hưởng** quyền của người đã tạo ra nó. Một quản trị viên tạo khoá với phạm vi chỉ đọc thì khoá đó chỉ đọc được, kể cả khi người tạo có toàn quyền trên tổ chức. Nếu khoá thừa hưởng quyền người tạo, mọi khoá tích hợp sẽ mặc nhiên là khoá quản trị.
+
+3. **Khoá bị dùng để truy cập tổ chức khác.** Ở bước 5, cơ chế cách ly dữ liệu trả về kết quả rỗng hoặc từ chối, giống hệt như với một phiên người dùng. Khoá là một danh tính trong phạm vi tổ chức, không phải một đường vòng qua tầng cách ly.
+
+4. **Vượt hạn mức số khoá của gói dịch vụ.** Ở bước 3, hệ thống từ chối tạo thêm kèm hạn mức và số khoá hiện có. Quản trị viên thu hồi các khoá không còn dùng — danh sách ở bước 6 kèm thời điểm dùng gần nhất chính là dữ liệu để quyết định khoá nào bỏ được.
+
+5. **Khoá bị lộ ra ngoài.** Không có cơ chế nào phát hiện việc này thay cho con người; dấu hiệu duy nhất hệ thống cung cấp là thời điểm dùng gần nhất và nhật ký kiểm toán các lời gọi. Khi nghi ngờ, thao tác đúng là thu hồi ngay ở bước 7 rồi mới điều tra, vì thu hồi có hiệu lực tức thì và tạo khoá mới là thao tác rẻ.
+
+**Kết quả mong đợi:** Hệ thống bên thứ ba gọi được vào nền tảng bằng một danh tính riêng, chịu đúng phạm vi quyền đã cấp và đúng ranh giới dữ liệu của tổ chức; giá trị khoá chỉ tồn tại ở phía người nhận, còn nền tảng chỉ giữ mã băm. Một khoá bị thu hồi mất hiệu lực ngay ở lời gọi kế tiếp, và mọi lời gọi vượt phạm vi đều để lại vết kiểm toán.
 
 > ### ▣ HÌNH 1-7 — Use case Nghiệp vụ 5–8: Quản trị, vận hành và tích hợp
 > **Phải thể hiện:** gộp bốn nghiệp vụ quản trị trong một hình, chia bốn vùng có

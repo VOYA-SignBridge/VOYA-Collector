@@ -119,7 +119,7 @@ def tenant_storage_mb() -> Dict[str, int]:
     Lỗi đọc một thư mục không làm hỏng cả phép đo: tenant đó bị bỏ qua và được
     ghi lại, các tenant khác vẫn có số.
     """
-    from app.dataset_manager import tenant_features_root
+    from app.dataset_manager import iter_tenant_feature_files
     from app.storage.metadata_db import _fetch_all
     from app.tenant_context import system_scope
 
@@ -129,27 +129,25 @@ def tenant_storage_mb() -> Dict[str, int]:
     out: Dict[str, int] = {}
     for row in rows:
         tenant = row["tenant_id"]
-        try:
-            root = tenant_features_root(tenant)
-        except Exception as exc:
-            logger.warning("[USAGE] %s: không giải được thư mục (%s)", tenant, type(exc).__name__)
-            continue
-        if not root.exists():
-            out[tenant] = 0
-            continue
         total = 0
         try:
-            for path in root.rglob("*"):
-                if path.is_file():
-                    try:
-                        total += path.stat().st_size
-                    except OSError:
-                        # Tệp biến mất giữa lúc liệt kê và lúc đo — bình thường
-                        # khi có tiến trình khác đang dọn. Bỏ qua một tệp,
-                        # không bỏ cả tenant.
-                        continue
+            # KHÔNG `tenant_features_root(tenant).rglob('*')`. Thư mục của tenant
+            # gốc là cha của thư mục mọi tenant khác, nên `rglob` tính dung lượng
+            # của cả nền tảng vào hoá đơn của một tổ chức. Đo được 17\\08\\2026:
+            # 7 MB thay vì 1 MB.
+            for path in iter_tenant_feature_files(tenant):
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    # Tệp biến mất giữa lúc liệt kê và lúc đo — bình thường
+                    # khi có tiến trình khác đang dọn. Bỏ qua một tệp,
+                    # không bỏ cả tenant.
+                    continue
         except OSError as exc:
-            logger.warning("[USAGE] %s: không quét được %s (%s)", tenant, root, exc)
+            logger.warning("[USAGE] %s: không quét được thư mục (%s)", tenant, exc)
+            continue
+        except Exception as exc:
+            logger.warning("[USAGE] %s: không giải được thư mục (%s)", tenant, type(exc).__name__)
             continue
         out[tenant] = total // (1024 * 1024)
     return out

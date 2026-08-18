@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 
 DATASET_ROOT = settings.dataset_root
 FEATURES_ROOT = DATASET_ROOT / "features"
+# Directory under FEATURES_ROOT holding one subtree per non-bootstrap tenant.
+# Named once because two places must agree on it: `tenant_features_root` builds
+# paths with it, `iter_tenant_feature_files` prunes it. If those two ever drift,
+# the bootstrap tenant silently reads its neighbours' files again.
+TENANT_PARTITION_DIRNAME = "_tenants"
 LABELS_DIR = DATASET_ROOT / "labels"
 MASTER_LABELS = DATASET_ROOT / "labels.csv"
 LANGUAGE_LABELS = LABELS_DIR / "labels_language.csv"
@@ -222,12 +227,60 @@ def tenant_features_root(tenant_id: str) -> Path:
     tenant = normalize_tenant_id(tenant_id)
     if tenant == DEFAULT_TENANT_ID:
         return FEATURES_ROOT
-    return FEATURES_ROOT / "_tenants" / tenant
+    return FEATURES_ROOT / TENANT_PARTITION_DIRNAME / tenant
 
 
 def ambient_tenant_features_root() -> Path:
     """Storage root for the calling tenant."""
     return tenant_features_root(ambient_tenant())
+
+
+def iter_tenant_feature_files(tenant_id: str):
+    """Every feature file BELONGING TO one tenant. Use this, not `root.rglob('*')`.
+
+    Why this exists
+    ---------------
+    `tenant_features_root` is deliberately asymmetric, and the asymmetry has a
+    consequence every tree-walking caller inherits:
+
+        tenant_features_root('iso_a').is_relative_to(tenant_features_root('default'))
+
+    is TRUE, because `_tenants/` lives INSIDE the bootstrap tenant's root. So a
+    walk rooted at the bootstrap tenant's directory descends into every other
+    tenant's data. The scope was passed correctly and the caller received the
+    right tenant — one tenant's scope simply contains all the others'.
+
+    That is not a hypothetical. Measured 17\\08\\2026 on three callers:
+
+    ```
+    _remove_tenant_files  (delete)     guarded, and its docstring names this exact trap
+    _add_feature_files    (export)     UNGUARDED -> `default-export.zip` carried
+                                       every other tenant's .npz files
+    tenant_storage_mb     (accounting) UNGUARDED -> bootstrap tenant billed 7 MB
+                                       where it owned 1 MB
+    ```
+
+    The asymmetry was understood once, on the destructive path, and not carried
+    to the two read paths. Hence one shared helper rather than a third copy of
+    the same `if` — a guard written per caller is a guard the fourth caller will
+    not know exists. `backend/tests/test_c5_export_confinement.py` fails if a new
+    caller walks the root directly.
+
+    Pruning happens during the walk, at the top level only. `_tenants` is
+    underscore-prefixed precisely so it cannot collide with a language code, so
+    excluding it at the root costs the bootstrap tenant nothing; a non-bootstrap
+    tenant is never pruned, because a `_tenants` directory inside its own subtree
+    would be its own data.
+    """
+    root = tenant_features_root(tenant_id)
+    if not root.exists():
+        return
+    la_goc = normalize_tenant_id(tenant_id) == DEFAULT_TENANT_ID
+    for thu_muc, con, tep in os.walk(root):
+        if la_goc and Path(thu_muc) == root:
+            con[:] = [d for d in con if d != TENANT_PARTITION_DIRNAME]
+        for ten in tep:
+            yield Path(thu_muc) / ten
 
 
 def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:

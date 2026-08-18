@@ -100,6 +100,19 @@ class UserOut(BaseModel):
     # see they landed in the right place, and the failure mode this catches
     # (silently registered into the public tenant) is otherwise invisible.
     tenant_id: Optional[str] = None
+    # Vai của tài khoản này TRONG tổ chức của nó — `tenant_admin`, `tenant_editor`,
+    # … hoặc `None` khi không có vai nào ở tầng tenant.
+    #
+    # Vì sao `is_admin` không thay được nó: `is_admin` là quản trị **nền tảng**,
+    # một thẩm quyền khác hẳn. Không có trường này thì giao diện chỉ đọc được
+    # đúng một câu hỏi — "có phải người vận hành hệ thống không" — và quản trị
+    # viên của một tổ chức sẽ KHÔNG thấy console của chính mình trên thanh điều
+    # hướng, dù máy chủ cho họ vào.
+    #
+    # Đây là dữ liệu để VẼ giao diện, không phải để quyết định quyền. Quyền vẫn
+    # do `require_tenant_admin` cưỡng chế ở từng điểm cuối; một client sửa
+    # trường này chỉ tự vẽ thêm một cái link dẫn tới 403.
+    tenant_role: Optional[str] = None
 
 
 class MessageResponse(BaseModel):
@@ -652,7 +665,26 @@ def logout(request: Request, response: Response):
 
 @router.get("/me", response_model=UserOut)
 def me(current_user=Depends(get_current_user)):
-    return current_user
+    """Hồ sơ tài khoản, kèm vai trong tổ chức.
+
+    Vai được tra ở ĐÂY chứ không nhét vào `get_current_user`: mọi điểm cuối đều
+    đi qua phụ thuộc đó, nên thêm một truy vấn thành viên vào nó là trả giá một
+    lượt đọc bảng trên từng request để phục vụ đúng một màn hình.
+    """
+    from app.vocabulary_registry import tenant_role
+
+    user = dict(current_user)
+    try:
+        user["tenant_role"] = tenant_role(
+            str(user.get("tenant_id") or ""), str(user.get("id") or "")
+        )
+    except Exception:  # noqa: BLE001
+        # Không tra được vai thì trả `None` chứ đừng làm hỏng `/auth/me` — đây
+        # là điểm cuối mà SPA gọi trước mọi thứ khác, và để nó ngã vì một chi
+        # tiết trang trí là đổi một cái link thiếu lấy một màn hình trắng.
+        logger.warning("[AUTH][ME] không tra được vai tổ chức cho %s", user.get("id"))
+        user["tenant_role"] = None
+    return user
 
 
 class UpdateProfileRequest(BaseModel):

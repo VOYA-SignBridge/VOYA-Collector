@@ -36,7 +36,7 @@ chỗ mà không phải lật qua ba mươi trang không liên quan.
 
 ### Nguyên tắc phân bổ nội dung chính ↔ phụ lục
 
-Hệ thống có 57 bảng dữ liệu, 79 use case, 213 điểm cuối API và 2.528 ca kiểm thử.
+Hệ thống có 57 bảng dữ liệu, 75 use case, 213 điểm cuối API và 2.528 ca kiểm thử.
 Đưa hết vào thân bài thì thân bài không còn đọc được. Luật cắt như sau:
 
 | Loại nội dung | Vào thân bài | Vào phụ lục |
@@ -246,6 +246,16 @@ sửa tiếp:
   **không được đưa ngược vào §2.8.5**. Chương 2 chỉ trình bày mô hình nguồn gốc và
   yêu cầu về tính đầy đủ của quan hệ, không nêu mức độ đạt được trên dữ liệu thật.
   Đây đúng là loại số dễ bị chép ngược lên phần lý thuyết nhất.
+* **Đã kiểm truy vết Chương 2 → Chương 3/4 (17/08/2026): 26/27 khối lý thuyết có
+  đường nối xuống.** Khối duy nhất không nối xuống là **§2.11 Hệ thống liên quan**,
+  và đó là **chủ ý**: nó phục vụ việc định vị và phát biểu khoảng trống nghiên cứu,
+  không sinh ra một quyết định thiết kế nào. Mọi khối còn lại — kể cả các khối mới
+  của §2.6 (phiên thu, phương thức thu, chiến lược thu, độ bao phủ, giao thức thu,
+  kiểm tra lúc thu) và §2.8.5 (nguồn gốc) — đều được dùng lại ở Chương 3, Chương 4
+  hoặc phụ lục.
+  **Dùng lại phép kiểm này** mỗi khi thêm một khối lý thuyết mới: nếu một mục của
+  Chương 2 không nối được sang Chương 3/4 và cũng không phục vụ khoảng trống nghiên
+  cứu, thì nó là ứng viên để rút — lý thuyết không có nơi dùng là lý thuyết thừa.
 * **Tên hệ thống đã chốt: `CTU.SignBridge` (dấu chấm).** Dạng gạch nối
   `CTU-SignBridge` đã bị thay toàn bộ ngày 17/08/2026 (11 chỗ, bốn tệp) cho khớp
   tên chính thức của đề tài. **Chỉ đổi tên hệ thống trong văn bản** — định danh
@@ -280,7 +290,7 @@ sửa tiếp:
 | 15 | **`.npz`** | Định dạng lưu trữ mảng số nhiều chiều có nén của NumPy; mỗi mẫu ký hiệu là một tệp `.npz` |
 | 16 | **Class / lớp từ vựng** | Một đơn vị từ vựng cần nhận dạng (một từ, một chữ cái); là nhãn của mẫu |
 | 17 | **Dialect** (phương ngữ) | Biến thể vùng miền của một ký hiệu; là **một phần của định danh lớp**, không phải thuộc tính phụ |
-| 18 | **Registry** (danh mục có phiên bản) | Tập hợp lớp – phương ngữ – nhóm từ vựng của một tenant, được ghim phiên bản để tái lập được |
+| 18 | **Registry** (danh mục có phiên bản) | Tập hợp lớp – phương ngữ – nhóm từ vựng của một tenant, được ghim phiên bản để **bảo toàn không gian nhãn** ứng với một trạng thái danh mục xác định. Ghim danh mục là **điều kiện cần**, không đủ, để tái lập một bộ dữ liệu: còn phải cố định tập mẫu, mà hệ thống hiện chưa có cơ chế đó |
 | 19 | **Consent** (đồng thuận) | Chấp thuận **có phiên bản** của chủ thể dữ liệu đối với một văn bản và một **phạm vi sử dụng** xác định. Ba phạm vi hiện dùng: huấn luyện nội bộ, phát hành nghiên cứu, thư viện công khai. Khác với giấy phép tái sử dụng và thoả thuận truy cập — xem §2.9.2 |
 | 20 | **Signer** (người ký) | **Chủ thể dữ liệu** — người có bàn tay trong mẫu. Khác với tài khoản thu mẫu |
 | 21 | **Celery / Broker** | Khung xử lý tác vụ bất đồng bộ; Redis đóng vai trung gian truyền tác vụ |
@@ -510,27 +520,32 @@ thời điểm thu.
 Luận văn thiết kế, hiện thực và đánh giá **phân hệ SaaS đa thuê bao phục vụ thu
 thập và quản lý dữ liệu Ngôn ngữ Ký hiệu Việt Nam trong CTU.SignBridge** — tức
 phần thu nhận, tổ chức, quản lý và quản trị vòng đời dữ liệu, chứ không phải toàn
-bộ nền tảng. Đóng góp trọng tâm là **cách ly dữ liệu giữa các tổ chức được
-cưỡng chế ở tầng cơ sở dữ liệu**, theo một mệnh đề kiểm chứng được: *một truy vấn
-không khai báo tổ chức trả về không hàng nào, và ứng dụng không tự vô hiệu hoá
-được cơ chế đó*. Cơ chế gồm bốn tầng — cột phân biệt, chính sách bảo mật mức
-hàng, phạm vi giao dịch, và tách vai cơ sở dữ liệu — mỗi tầng bịt một lối vòng mà
-ba tầng còn lại để hở.
+bộ nền tảng. Đóng góp trọng tâm là **cưỡng chế ranh giới dữ liệu giữa các tổ chức
+trên những đường ứng dụng và lưu trữ có phạm vi tổ chức**. Trong ranh giới tin
+cậy đã tuyên bố, ứng dụng thiết lập một ngữ cảnh tổ chức đã xác thực và cơ chế
+bảo mật mức hàng của PostgreSQL ràng buộc quyền đọc hàng theo ngữ cảnh đó; khi
+không có ngữ cảnh hợp lệ, hệ thống **hỏng theo hướng đóng**. Thiết kế này giảm sự
+phụ thuộc vào việc từng truy vấn nghiệp vụ phải lặp lại đúng điều kiện lọc tổ
+chức, đồng thời **không** tuyên bố bảo vệ được trước khả năng thực thi SQL tuỳ ý
+khi thông tin xác thực cơ sở dữ liệu của môi trường chạy đã bị chiếm hoàn toàn.
 
-Hệ thống còn giải quyết bốn bài toán mà một công cụ thu dữ liệu thông thường
-không đặt ra: với các luồng thu chỉ yêu cầu điểm mốc, việc trích xuất ngay tại
-trình duyệt cho phép video thô không phải rời khỏi máy người đóng góp; danh mục từ vựng ba mặt
-phẳng có ghim phiên bản để một bộ dữ liệu tái lập được; nguồn sự thật ký số bằng
-Ed25519 với xác minh **fail-closed**; và cơ chế đồng thuận có phiên bản gắn với
-**chủ thể dữ liệu** chứ không gắn với tài khoản thu.
+Phân hệ còn giải quyết bốn vấn đề đặt ra khi thu dữ liệu ngôn ngữ ký hiệu có cấu
+trúc: với các luồng thu chỉ yêu cầu điểm mốc, việc trích xuất ngay tại trình
+duyệt cho phép video thô không phải rời khỏi máy người đóng góp; danh mục từ vựng
+ba mặt phẳng có ghim phiên bản **bảo toàn không gian nhãn ứng với một trạng thái
+danh mục xác định**; nguồn sự thật ký số bằng Ed25519 hỗ trợ xác minh
+**fail-closed** cho các hiện vật có phiên bản; và mô hình đồng thuận pháp lý
+**phân biệt việc chấp thuận ở mức tài khoản với đồng thuận có phiên bản, giới hạn
+theo phạm vi, gắn với chủ thể dữ liệu**.
 
 Kết quả được đánh giá trên bốn trục, bằng các phép đo có khả năng thất bại và có
 đối chứng dương. Phép đo cách ly đối kháng qua đường API, thực hiện trên một
 phiên bản mã đã ghim, cho tỉ lệ vi phạm xuyên tổ chức **0/450** và tỉ lệ thao tác
 trái quyền lọt **0/180**, không còn ca nào không kết luận được. Biểu diễn điểm mốc giảm **92,2 %** dung lượng so với video
 gốc trên 54 cặp khớp thời lượng. Ma trận chín kịch bản giả mạo nguồn sự thật đạt
-tám thuộc tính và phát hiện một giới hạn thật về thứ tự phiên bản. Luận văn nêu
-thẳng các giới hạn đó thay vì làm tròn chúng thành kết quả.
+tám thuộc tính và phát hiện một giới hạn thật về thứ tự phiên bản. Kết luận vì
+vậy chỉ giới hạn trong những đường, hiện vật và mô hình đe doạ đã được đánh giá,
+không suy rộng ra ngoài ranh giới đã chứng minh.
 
 **Từ khoá:** ngôn ngữ ký hiệu Việt Nam, SaaS đa thuê bao, cách ly dữ liệu,
 row-level security, thu thập dữ liệu, nguồn sự thật ký số, đồng thuận dữ liệu.
@@ -547,21 +562,25 @@ management from the point of collection.
 
 This thesis designs, implements and evaluates the **multi-tenant SaaS subsystem
 for Vietnamese Sign Language data collection and management within
-CTU.SignBridge** — the acquisition, organisation, management and lifecycle
-governance of the data, rather than the platform as a whole.
-Its central contribution is **cross-organisation data isolation enforced at the
-database layer**, stated as a testable proposition: *a query that does not
-declare its organisation returns zero rows, and the application cannot switch
-that mechanism off*. The mechanism has four layers — discriminator column,
-row-level security policy, transaction-scoped context, and database role
-separation — each closing a bypass the other three leave open.
+CTU.SignBridge** — covering the acquisition, organisation, management and
+lifecycle governance of the data rather than the platform as a whole. A central
+contribution is **the enforcement of organisational data boundaries on
+tenant-scoped application and storage paths**. Within the stated
+trusted-computing boundary, the application establishes an authenticated tenant
+context and PostgreSQL Row-Level Security constrains row access accordingly; the
+absence of a valid tenant context **fails closed**. This design reduces reliance
+on tenant filters being repeated correctly in individual business queries, while
+not claiming protection against arbitrary SQL execution under a fully compromised
+runtime database credential.
 
-The system further addresses four problems an ordinary collection tool does not
-raise: for landmark-only acquisition flows, browser-side extraction allows the raw
-video to remain on the contributor's device; a three-plane, version-pinned vocabulary
-registry that makes a dataset reproducible; an Ed25519-signed source of truth
-with **fail-closed** verification; and versioned consent bound to the **data
-subject** rather than to the capturing account.
+The subsystem further addresses four concerns that arise in structured VSL data
+collection: for landmark-only acquisition flows, browser-side extraction allows
+raw video to remain on the contributor's device; a three-plane, version-pinned
+vocabulary registry **preserves the label space associated with a defined
+registry state**; an Ed25519-signed source of truth supports **fail-closed**
+verification of versioned artifacts; and the legal-consent model **distinguishes
+account-level acceptance from versioned, scope-bound consent associated with the
+data subject**.
 
 Results are evaluated along four axes using measurements designed to be capable
 of failing and equipped with positive controls. Adversarial isolation probing
@@ -571,8 +590,9 @@ with no inconclusive cases. The
 landmark representation reduces storage by **92.2 %** against source video over
 54 duration-matched pairs. A nine-scenario source-of-truth tampering matrix
 satisfies eight properties and surfaces one genuine limitation in version
-ordering. These limitations are reported as found rather than rounded into
-results.
+ordering. The conclusions are therefore restricted to the evaluated paths,
+artifacts and threat model rather than generalized beyond the demonstrated
+boundary.
 
 **Keywords:** Vietnamese Sign Language, multi-tenant SaaS, data isolation,
 row-level security, data collection, signed source of truth, data consent.
@@ -625,8 +645,12 @@ và điều kiện đo, còn độ trễ thì cần thêm phân vị. Con số t
 kiểm chứng được.
 
 **Về quy tắc cách ly tổ chức.** Mệnh đề trung tâm của quyển — *"một truy vấn không
-khai báo tổ chức trả về 0 hàng, và ứng dụng không tự vô hiệu hoá được cơ chế đó"* —
-vẫn đúng và vẫn giữ nguyên. Điều phải kèm theo là **ranh giới của nó**: mệnh đề đó
+khai báo tổ chức trả về 0 hàng, và đường truy vấn nghiệp vụ của ứng dụng không tự
+vô hiệu hoá được cơ chế đó"* — vẫn đúng và vẫn giữ nguyên. Mệnh đề phụ *"đường
+truy vấn nghiệp vụ"* là bắt buộc, không phải văn phong: bỏ nó đi thì câu khẳng
+định luôn cả trường hợp một vai cơ sở dữ liệu chạy được SQL tuỳ ý — và vai đó đặt
+lại được chính biến ngữ cảnh mà chính sách đọc. Điều phải kèm theo là **ranh giới
+của nó**: mệnh đề đó
 nói về đường truy vấn của ứng dụng, không phải về một kẻ tấn công đã chiếm được
 thông tin xác thực cơ sở dữ liệu. Chương 2 §2.4.5 và Bảng 2-17 định nghĩa hai mô
 hình đe doạ; Chương 4 báo cáo kết quả đo **trong mô hình thứ nhất**. Không mở rộng

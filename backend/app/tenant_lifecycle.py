@@ -107,6 +107,18 @@ PURGE_ORDER: tuple[str, ...] = (
     # khối cho dễ đọc.
     "event_outbox",
     "memberships",
+    # `project_allocations` PHẢI đi trước `projects`, và có mặt ở đây là bắt
+    # buộc chứ không phải cho gọn. Nó mang HAI khoá ngoại tới `tenants`: một cái
+    # ON DELETE CASCADE (từ câu `REFERENCES` viết thẳng trong `CREATE TABLE`) và
+    # một cái ON DELETE **RESTRICT** (do lượt cấp khoá ngoại chung cho mọi bảng
+    # có `tenant_id` thêm vào). Khi hai ràng buộc cùng áp, cái chặt hơn thắng —
+    # nên CASCADE ở đây KHÔNG dọn gì cả, và một dòng cấp phát còn sót sẽ làm
+    # bước `DELETE FROM tenants` ở cuối lượt purge bị từ chối, y hệt vết đã ghi
+    # cho `training_metrics` phía trên.
+    #
+    # Danh sách này cũng là đường dọn của `conftest.purge_tenant`, nên thiếu nó
+    # thì mọi fixture chạm tới cấp phát sẽ rò dữ liệu sang lượt test sau.
+    "project_allocations",
     "projects", "workspaces",
     "roles",
     "tenant_invitations",
@@ -139,13 +151,53 @@ def _export_root() -> Path:
 # --------------------------------------------------------------------------- export
 
 
+#: Hoàn trả dữ liệu cho chính đơn vị quản trị: sao lưu, hoặc rời nền tảng.
+EXPORT_PURPOSE_PORTABILITY = "tenant_portability"
+
+#: Phát hành dữ liệu cho một mục đích sử dụng tiếp theo. Tên trùng với thang của
+#: `consent_gate.SCOPE_LADDER` vì mỗi mục đích phát hành yêu cầu đúng mức đó.
+RELEASE_PURPOSES: tuple = ("internal_training", "research_release", "public_library")
+
+EXPORT_PURPOSES: tuple = (EXPORT_PURPOSE_PORTABILITY,) + RELEASE_PURPOSES
+
+
 def request_export(
     tenant_id: str,
     *,
     requested_by: Optional[str] = None,
     scope: str = "metadata",
+    export_purpose: str,
 ) -> Dict[str, Any]:
-    """Ghi nhận yêu cầu xuất và trả về ngay. Việc nặng do tác vụ nền làm."""
+    """Ghi nhận yêu cầu xuất và trả về ngay. Việc nặng do tác vụ nền làm.
+
+    `scope` và `export_purpose` hỏi hai câu khác nhau, và gộp chúng là gốc của
+    lỗ hổng đã đo ngày 17\\08\\2026:
+
+        scope           CÁI GÌ nằm trong gói   (metadata | full)
+        export_purpose  gói này DỰNG ĐỂ LÀM GÌ (hoàn trả | phát hành)
+
+    Bản trước chỉ có `scope`, nên cùng một endpoint vừa là đường hoàn trả dữ liệu
+    cho tổ chức, vừa có thể là đường phát hành cho một bên sử dụng tiếp theo —
+    và ranh giới đồng thuận phụ thuộc vào việc người gọi *hiểu đúng mục đích*.
+    Đó là khoảng trống thẩm quyền ở tầng ngữ nghĩa, không phải ở tầng mã.
+
+    Vì sao KHÔNG chặn đường hoàn trả bằng thang đồng thuận phát hành
+    ----------------------------------------------------------------
+    Vì nó tạo ra bế tắc: rút đồng thuận → không xuất được → `purge_tenant` từ
+    chối vì chưa có bản xuất → muốn rời nền tảng phải dùng `skip_export_check`,
+    tức là dữ liệu bị xoá mà chưa từng được mang đi. Một cơ chế an toàn mà đường
+    vận hành bình thường phải thường xuyên đi vòng qua là cơ chế đặt sai chỗ.
+
+    Hoàn trả cho đơn vị quản trị và phát hành cho mục đích sử dụng tiếp theo là
+    hai hoạt động khác nhau, và phải được xét theo hai điều kiện khác nhau. Gói
+    hoàn trả vì thế được phép chứa mẫu đã rút đồng thuận, nhưng KHÔNG được phép
+    giao chúng đi trần: nó mang theo trạng thái đồng thuận và một bản kê hạn chế
+    sử dụng, để dữ liệu đã rút không lặng lẽ trở thành dữ liệu dùng tự do.
+
+    `export_purpose` là tham số bắt buộc và không có giá trị mặc định. Quên nó là
+    `TypeError` ngay tại chỗ gọi, chứ không phải một lượt xuất im lặng rơi vào
+    nhánh dễ dãi nhất — cùng lý do với `resolve_operational(..., *, tenant_id)`.
+    """
     from app.config import settings
     from app.storage.metadata_db import _execute
     from app.tenancy import normalize_tenant_id
@@ -153,6 +205,10 @@ def request_export(
 
     if scope not in ("metadata", "full"):
         raise LifecycleError("scope phải là 'metadata' hoặc 'full'", status_code=422)
+    if export_purpose not in EXPORT_PURPOSES:
+        raise LifecycleError(
+            f"export_purpose phải là một trong {', '.join(EXPORT_PURPOSES)}",
+            status_code=422)
 
     tenant = normalize_tenant_id(tenant_id)
     export_id = str(uuid.uuid4())
@@ -161,11 +217,15 @@ def request_export(
     with system_scope("lifecycle: record an export request"):
         _execute(
             "INSERT INTO tenant_exports(export_id, tenant_id, requested_by, scope, "
-            "status, expires_at) VALUES(%s, %s, %s, %s, 'pending', %s)",
-            (export_id, tenant, str(requested_by) if requested_by else None, scope, expires),
+            "export_purpose, status, expires_at) "
+            "VALUES(%s, %s, %s, %s, %s, 'pending', %s)",
+            (export_id, tenant, str(requested_by) if requested_by else None, scope,
+             export_purpose, expires),
         )
-    logger.info("[EXPORT] %s yêu cầu xuất %s (%s)", requested_by, tenant, scope)
-    return {"export_id": export_id, "tenant_id": tenant, "status": "pending", "scope": scope}
+    logger.info("[EXPORT] %s yêu cầu xuất %s (scope=%s, muc dich=%s)",
+                requested_by, tenant, scope, export_purpose)
+    return {"export_id": export_id, "tenant_id": tenant, "status": "pending",
+            "scope": scope, "export_purpose": export_purpose}
 
 
 def run_export(export_id: str) -> Dict[str, Any]:
@@ -222,7 +282,16 @@ def run_export(export_id: str) -> Dict[str, Any]:
             )
 
             if (job.get("scope") or "metadata") == "full":
-                counts["_files"] = _add_feature_files(bundle, tenant)
+                counts["_files"], ban_ke = _add_feature_files(
+                    bundle, tenant,
+                    export_purpose=job.get("export_purpose") or EXPORT_PURPOSE_PORTABILITY)
+                # Bản kê đi CÙNG gói, không chỉ nằm trong nhật ký máy chủ. Người
+                # mở gói ra sáu tháng sau phải đọc được gói này gồm gì, thiếu gì
+                # và vì sao — nếu không, một gói đã lọc và một gói đầy đủ trông
+                # giống hệt nhau.
+                bundle.writestr(
+                    "MANIFEST_CONSENT.json",
+                    json.dumps(ban_ke, ensure_ascii=False, indent=2, default=str))
 
         partial.replace(target)
         size = target.stat().st_size
@@ -249,16 +318,87 @@ def run_export(export_id: str) -> Dict[str, Any]:
         raise
 
 
-def _add_feature_files(bundle: zipfile.ZipFile, tenant: str) -> int:
-    from app.dataset_manager import tenant_features_root
+def _ten_tep_duoc_phep(tenant: str, scope_yeu_cau: str) -> tuple:
+    """(tên tệp đủ điều kiện, bản kê) cho một mức phạm vi đồng thuận.
+
+    Trả về TÊN TỆP chứ không phải đường dẫn: hàng mẫu ghi `file_path` theo bố cục
+    lúc nó được tạo, còn tệp trên đĩa có thể đã đi qua một lượt đổi tên lớp hoặc
+    một lượt chuyển phương ngữ. Tên `sample_<uid>.npz` có mang `sample_uid` nên
+    nó là thứ duy nhất bền qua những lượt ấy.
+    """
+    from app import consent_gate
+    from app.dataset_samples import list_samples
+
+    rows = list_samples(tenant)
+    ket_qua = consent_gate.filter_rows(rows, scope=scope_yeu_cau, tenant_id=tenant)
+
+    def _ten(row: Dict[str, Any]) -> str:
+        for khoa in ("file_path", "storage_key", "storage_url"):
+            gia_tri = str(row.get(khoa) or "").strip()
+            if gia_tri:
+                return Path(gia_tri.replace("\\", "/")).name
+        return ""
+
+    duoc_phep = {_ten(r) for r in ket_qua.kept}
+    duoc_phep.discard("")
+    giu_lai = {_ten(r) for r in ket_qua.withheld}
+    giu_lai.discard("")
+    return duoc_phep, ket_qua, giu_lai
+
+
+def _add_feature_files(bundle: zipfile.ZipFile, tenant: str, *,
+                       export_purpose: str) -> tuple:
+    """Tệp đặc trưng CỦA tenant này vào gói zip. Trả về (số tệp, bản kê).
+
+    Hai chuyện tách bạch xảy ra ở đây.
+
+    Một — phạm vi tổ chức. Đi qua `iter_tenant_feature_files`, không phải
+    `root.rglob('*')`. Với tenant gốc, `root` chính là `FEATURES_ROOT`, mà
+    `_tenants/` nằm bên trong đó, nên `rglob` đóng gói dữ liệu của mọi tổ chức
+    vào một tệp tên `default-export.zip`. Đo được 17\\08\\2026.
+
+    Hai — phạm vi đồng thuận, và nó phụ thuộc mục đích của gói:
+
+    ```
+    tenant_portability   ĐƯA ĐỦ, kèm bản kê đánh dấu phần bị hạn chế sử dụng
+    <mục đích phát hành> LỌC fail-closed theo thang đồng thuận tương ứng
+    ```
+
+    Ở nhánh phát hành, một tệp trên đĩa KHÔNG khớp hàng mẫu nào cũng bị loại.
+    Nó không có người ký xác định được, nên không có đồng thuận nào để dựa vào —
+    và "không biết" ở một cổng phát hành phải nghĩa là không, giống hệt lý do
+    `consent_gate._signer_of` từ chối lùi về `user_id`.
+    """
+    from app.dataset_manager import iter_tenant_feature_files, tenant_features_root
 
     root = tenant_features_root(tenant)
-    if not root.exists():
-        return 0
+    la_phat_hanh = export_purpose in RELEASE_PURPOSES
+
+    duoc_phep: set = set()
+    giu_lai: set = set()
+    ket_qua = None
+    if la_phat_hanh or export_purpose == EXPORT_PURPOSE_PORTABILITY:
+        # Cả hai nhánh đều cần biết ai bị hạn chế: nhánh phát hành để LOẠI,
+        # nhánh hoàn trả để ĐÁNH DẤU.
+        muc = export_purpose if la_phat_hanh else "research_release"
+        duoc_phep, ket_qua, giu_lai = _ten_tep_duoc_phep(tenant, muc)
+
     added = 0
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
+    loai_vi_dong_thuan = 0
+    loai_vi_khong_ro = 0
+    danh_dau: List[str] = []
+
+    for path in iter_tenant_feature_files(tenant):
+        ten = path.name
+        if la_phat_hanh:
+            if ten not in duoc_phep:
+                if ten in giu_lai:
+                    loai_vi_dong_thuan += 1
+                else:
+                    loai_vi_khong_ro += 1
+                continue
+        elif ten in giu_lai:
+            danh_dau.append(path.relative_to(root).as_posix())
         try:
             bundle.write(path, f"files/{path.relative_to(root).as_posix()}")
             added += 1
@@ -266,7 +406,33 @@ def _add_feature_files(bundle: zipfile.ZipFile, tenant: str) -> int:
             # Một tệp không đọc được không được làm hỏng cả bản xuất; nó được
             # ghi vào nhật ký và bản xuất đi tiếp thiếu đúng tệp đó.
             logger.warning("[EXPORT] bỏ qua %s: %s", path, exc)
-    return added
+
+    ban_ke: Dict[str, Any] = {
+        "export_purpose": export_purpose,
+        "thoi_diem": datetime.now(timezone.utc).isoformat(),
+        "tong_mau_xet": ket_qua.total if ket_qua is not None else 0,
+        "so_tep_dua_vao": added,
+    }
+    if la_phat_hanh:
+        ban_ke.update({
+            "muc_dong_thuan_yeu_cau": export_purpose,
+            "loai_vi_dong_thuan": loai_vi_dong_thuan,
+            "loai_vi_khong_xac_dinh_nguoi_ky": loai_vi_khong_ro,
+            "ly_do": dict(ket_qua.reasons) if ket_qua is not None else {},
+            "tom_tat": ket_qua.summary() if ket_qua is not None else "",
+        })
+    else:
+        ban_ke.update({
+            "han_che_su_dung": (
+                "Gói này được dựng để HOÀN TRẢ dữ liệu cho đơn vị quản trị. Các "
+                "tệp liệt kê dưới đây thuộc về người ký đã rút hoặc chưa cấp đủ "
+                "phạm vi đồng thuận; chúng có mặt để đơn vị quản trị giữ được bản "
+                "sao đầy đủ, KHÔNG phải để dùng cho huấn luyện, nghiên cứu hay "
+                "phát hành. Xem data/signer_consents.json để đối chiếu."),
+            "so_tep_bi_han_che": len(danh_dau),
+            "tep_bi_han_che": sorted(danh_dau),
+        })
+    return added, ban_ke
 
 
 def _export_readme(tenant: str, scope: str, counts: Dict[str, int]) -> str:
@@ -298,8 +464,8 @@ def list_exports(tenant_id: str) -> List[Dict[str, Any]]:
     tenant = normalize_tenant_id(tenant_id)
     with system_scope("lifecycle: list the exports of a tenant"):
         rows = _fetch_all(
-            "SELECT export_id, tenant_id, status, scope, size_bytes, row_counts, error, "
-            "created_at, completed_at, expires_at FROM tenant_exports "
+            "SELECT export_id, tenant_id, status, scope, export_purpose, size_bytes, "
+            "row_counts, error, created_at, completed_at, expires_at FROM tenant_exports "
             "WHERE tenant_id = %s ORDER BY created_at DESC LIMIT 50",
             (tenant,),
         )
@@ -414,10 +580,16 @@ def purge_preview(tenant_id: str) -> Dict[str, Any]:
         )
         counts["users"] = int(users[0]["n"]) if users else 0
 
+        # CHỈ gói hoàn trả mới đủ tư cách làm điều kiện trước khi xoá.
+        #
+        # Một gói phát hành đã bị lọc theo đồng thuận, nên nó KHÔNG phải bản sao
+        # dữ liệu của tổ chức — nhận nó rồi cho xoá vĩnh viễn nghĩa là phần bị
+        # lọc biến mất mà chưa từng được hoàn trả cho ai. Đúng những mẫu của
+        # người đã rút đồng thuận là phần dễ mất nhất theo đường này.
         ready = _fetch_all(
             "SELECT count(*) AS n FROM tenant_exports "
-            "WHERE tenant_id = %s AND status = 'ready'",
-            (tenant,),
+            "WHERE tenant_id = %s AND status = 'ready' AND export_purpose = %s",
+            (tenant, EXPORT_PURPOSE_PORTABILITY),
         )
         has_export = bool(ready and int(ready[0]["n"]) > 0)
 

@@ -497,18 +497,28 @@ def request_export(
     # which is why nothing broke; the schema was simply claiming a guarantee it
     # was not providing. See `routers/verification.py`.
     scope: Literal["metadata", "full"] = Query("metadata"),
+    export_purpose: Literal[
+        "tenant_portability", "internal_training", "research_release", "public_library"
+    ] = Query("tenant_portability"),
     requester: Dict[str, Any] = Depends(require_tenant_admin),
 ) -> Dict[str, Any]:
     """Đặt hàng một bản xuất. Trả về ngay; việc dựng gói do tác vụ nền làm.
 
     202 chứ không phải 201: chưa có gì tải được. Trả 201 sẽ khiến giao diện
     tưởng bản xuất đã sẵn sàng và hiện nút tải về một tệp chưa tồn tại.
+
+    `export_purpose` mặc định là `tenant_portability` — mức KHÔNG có thẩm quyền
+    phát hành. Một người gọi cũ không truyền tham số này nhận đúng hành vi cũ
+    (gói hoàn trả đầy đủ, kèm bản kê hạn chế), chứ không vô tình dựng được một
+    gói phát hành. Mặc định phải nghiêng về phía không cấp quyền; ở tầng dưới,
+    `tenant_lifecycle.request_export` bắt buộc tham số và không có mặc định nào.
     """
     from app import tenant_lifecycle
 
     try:
         job = tenant_lifecycle.request_export(
-            tenant_id, requested_by=str(requester.get("id") or ""), scope=scope
+            tenant_id, requested_by=str(requester.get("id") or ""), scope=scope,
+            export_purpose=export_purpose,
         )
     except tenant_lifecycle.LifecycleError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

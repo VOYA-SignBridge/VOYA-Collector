@@ -55,7 +55,7 @@ bảy nhóm mô-đun của Chương 3.
 | **Lớp từ vựng** | Mẫu này là ký hiệu của từ nào, theo phương ngữ nào |
 | **Phiên thu** | Nhiều mẫu cùng một lượt ngồi trước camera |
 | **Phương ngữ / Vùng miền** | Biến thể vùng miền — **một phần định danh lớp** |
-| **Phiên bản danh mục** | Ảnh chụp bất biến của danh mục, để tái lập được |
+| **Phiên bản danh mục** | Ảnh chụp bất biến của danh mục — bảo toàn **không gian nhãn**, không cố định tập mẫu |
 | **Tác vụ huấn luyện** | Dữ liệu thành mô hình như thế nào |
 | **Gói cước / Đăng ký dịch vụ** | Tổ chức được dùng tới hạn mức nào |
 | **Văn bản pháp lý** | Điều khoản nào đang có hiệu lực |
@@ -151,12 +151,12 @@ Hai giá trị sau hiện có **0 bản ghi gán vai**.
 
 | Bảng | Khoá chính | Cột chính | RLS | Hàng |
 |---|---|---|:--:|---:|
-| `samples` | `id` | `tenant_id`, `class_uid`, `signer_id`, `auth_user_id`, `session_id`, `dialect`, đường dẫn tệp đặc trưng, `storage_url`, chỉ số chất lượng, `deleted_at` | ✔ | 3.860 |
-| `classes` | `id` | `tenant_id`, `class_uid`, nhãn, ngôn ngữ, `dialect`, vùng miền, nhóm từ vựng, hồ sơ nhận dạng, số bàn tay yêu cầu | ✔ | 63 |
-| `capture_sessions` | `id` | `tenant_id`, `class_uid`, `signer_id`, thời điểm bắt đầu/kết thúc, thiết bị | ✔ | 250 |
-| `raw_uploads` | `id` | `tenant_id`, `class_uid`, `dialect`, tên tệp gốc, kích thước, trạng thái xử lý | ✔ | 0 |
-| `signers` | `id` | `tenant_id`, `signer_id`, nhãn hiển thị, siêu dữ liệu | ✔ | 4 |
-| `signer_aliases` | `id` | `tenant_id`, bí danh, `new_signer_id` | ✔ | 0 |
+| `samples` | `sample_uid` | `tenant_id`, `class_uid`, `signer_id`, `auth_user_id`, `session_id`, `dialect`, đường dẫn tệp đặc trưng, `storage_url`, chỉ số chất lượng, `deleted_at` | ✔ | 3.860 |
+| `classes` | `class_uid` | `tenant_id`, `class_uid`, nhãn, ngôn ngữ, `dialect`, vùng miền, nhóm từ vựng, hồ sơ nhận dạng, số bàn tay yêu cầu | ✔ | 63 |
+| `capture_sessions` | `capture_session_id` | `tenant_id`, `class_uid`, `signer_id`, thời điểm bắt đầu/kết thúc, thiết bị | ✔ | 250 |
+| `raw_uploads` | `upload_uid` | `tenant_id`, `class_uid`, `dialect`, tên tệp gốc, kích thước, trạng thái xử lý | ✔ | 0 |
+| `signers` | `signer_id` | `tenant_id`, `signer_id`, nhãn hiển thị, siêu dữ liệu | ✔ | 4 |
+| `signer_aliases` | (`tenant_id`,`old_signer_id`) | `tenant_id`, bí danh, `new_signer_id` | ✔ | 0 |
 
 **Khoá ngoại ghép trong nhóm này** — đây là cơ chế làm việc trỏ chéo tổ chức trở
 nên **bất khả thi ở tầng ràng buộc**:

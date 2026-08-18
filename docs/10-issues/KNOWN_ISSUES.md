@@ -1232,3 +1232,213 @@ Hai bài học nhỏ đi kèm: `--token-a` phải là **thành viên tổ chức
 quản trị nền tảng; và `psql -c "a; b; c"` chạy cả chuỗi trong MỘT giao dịch ngầm
 — lỗi ở `c` cuốn ngược cả `a`, nên bản sửa `deleted_at` đầu tiên đã âm thầm bị
 huỷ.
+
+---
+
+## Đợt 2026-08-17 — `region` nằm trong khoá nhưng bị một chỉ mục cũ vô hiệu hoá
+
+### Triệu chứng
+
+`classes` mang **hai** chỉ mục duy nhất cùng lúc trên `signdb`:
+
+```
+uq_classes_tenant_slug_lang_dialect_region   (5 cột — bản hiện hành)
+uq_classes_tenant_slug_lang_dialect          (4 cột — đáng lẽ đã retire)
+```
+
+Bản 4 cột **chặt hơn**, nên nó thắng: hai lớp chỉ khác `region` vẫn bị từ chối.
+`region` có mặt trong định danh lớp trên giấy tờ và trong mã, nhưng **vô hiệu
+trong thực tế**. Đây là thứ chặn cam kết QIPEDC về biến thể phương ngữ theo vùng
+— với 483 từ có biến thể miền trong từ điển quốc gia.
+
+### Vì sao không ai thấy trong 2 ngày
+
+Nó **có** được báo, bằng đúng cơ chế dựng ra cho nó:
+
+```
+$ python -m app.cli.migrate --status
+doi tuong con sot: 1
+    - CHI MUC DA RETIRE VAN CON: uq_classes_tenant_slug_lang_dialect
+KET LUAN: KHONG KHOP
+```
+
+Vấn đề là **không có gì bắt buộc chạy câu này**. `--status` là một câu hỏi tự
+nguyện, còn backend vẫn khởi động bình thường vì `doi_tuong_thieu = 0` — vế
+"thiếu" xanh, chỉ vế "còn sót" đỏ. Một lược đồ **thừa** đối tượng không chặn
+được ai.
+
+### Nguyên nhân gốc, và vì sao lần này gỡ mới dính
+
+Gói SOT `Ver5_06082026` — chữ ký hợp lệ, không hề bị sửa — được ký **trước** khi
+`region` vào định danh lớp, nên bản chụp lược đồ đông lạnh trong gói vẫn chứa câu
+`CREATE UNIQUE INDEX ... uq_classes_tenant_slug_lang_dialect`. `reader_sync` phát
+lại nguyên văn ở **mỗi** lượt sync. Đo được hôm 15/08: `--status` xanh trước
+`up -d`, đỏ sau `up -d` — `migrate` gỡ, `sot_init` dựng lại, cùng một lượt triển khai.
+
+> Chữ ký hợp lệ chứng minh gói **không bị sửa**. Nó không chứng minh nội dung còn
+> **đúng** với hệ thống hôm nay. Trước 15/08 chỉ câu hỏi thứ nhất được hỏi.
+
+Hàng rào đã được thêm ngày 15/08 (`creates_retired_object()` dùng chung nguồn với
+`--status`), nhưng **chưa ai chạy lại `migrate`** sau đó, nên chỉ mục cũ vẫn nằm
+đó. Nhật ký `voya_sot_init` xác nhận hàng rào có bắn:
+
+```
+[SOT] BO QUA theo chinh sach: goi nay dung lai doi tuong DA RETIRE
+      'uq_classes_tenant_slug_lang_dialect'.
+[sync] applied_degraded version=Ver5_06082026 signed_by=desktop-admin
+```
+
+### Đã xử lý — 17/08/2026
+
+`EXPECTED_DATABASE=signdb python -m app.cli.migrate --to 5`, sau khi sao lưu
+(`signdb_PRE_dropidx4col_20260817_091844.dump`, đối chiếu khớp byte).
+
+Chứng cứ **hai chiều**, chạy trong giao dịch rồi `ROLLBACK` để không đụng dữ liệu:
+
+| Phép thử | Trước | Sau |
+|---|---|---|
+| Hai lớp khác nhau **chỉ ở `region`** | `ERROR: duplicate key ... uq_classes_tenant_slug_lang_dialect` | **vào được cả hai** |
+| Hai lớp **trùng cả `region`** | (bị chặn) | `ERROR: ... uq_classes_tenant_slug_lang_dialect_region` — **vẫn chặn** |
+
+Vế thứ hai là vế quan trọng: nó chứng minh lượt gỡ **không** làm mất sự bảo vệ,
+chỉ làm hẹp nó lại đúng bằng định nghĩa hiện hành. Một phép đo chỉ có vế thuận
+không phân biệt được "đã sửa đúng" với "đã gỡ sạch ràng buộc".
+
+Số dòng của 10 bảng trọng yếu **không đổi** trước/sau (samples 3.860, classes 63,
+capture_sessions 250, users 10, memberships 30, …), và `--status` sau khi khởi
+động lại backend vẫn `doi tuong con sot: 0` — tức chỉ mục **không quay lại**.
+
+### Còn treo, không sửa trong đợt này
+
+`sot_init` vẫn báo `applied_degraded` vì một câu khác trong cùng gói đông lạnh:
+
+```
+CREATE INDEX IF NOT EXISTS idx_tenant_members_user ON tenant_members(user_id)
+→ cannot create index on relation "tenant_members" (This operation is not supported for views)
+```
+
+Cùng loại nguyên nhân — gói cũ hơn lược đồ — nhưng **khác loại đối tượng**:
+`tenant_members` đã chuyển từ BẢNG thành KHUNG NHÌN trên `memberships` (phân
+quyền v5). Ý định của câu này *đã được thoả mãn*: `memberships` có `ix_memberships_user`.
+Hàng rào hiện hành chỉ biết "chỉ mục đã retire", không biết "bảng đã thành khung
+nhìn", nên nó rơi vào nhánh *thất bại ngoài dự kiến*.
+
+Hệ quả cần xử lý sớm: mọi lượt sync từ nay **luôn** báo degraded. Một kênh đỏ
+thường trực sẽ dạy người vận hành phớt lờ nó — đúng thứ mà việc tách bạch
+"bỏ theo chính sách" / "thất bại ngoài dự kiến" được dựng ra để tránh. Cách sửa
+đúng là **publish lại gói SOT** từ máy `SignBridge_SE` để bản chụp khớp lược đồ
+hiện hành, chứ không phải nới hàng rào.
+
+## Mặt phẳng tệp của export — C5 (17/08/2026)
+
+Nhóm này bắt đầu từ một câu trong bản rà soát: *"endpoint export quét `.npz`
+toàn filesystem"*. Kết luận đúng, lý do sai — và lý do sai dẫn tới bản vá sai,
+nên nó đáng ghi lại đầy đủ.
+
+### Điều KHÔNG đúng: "export không có phạm vi"
+
+`routers/dataset_exporter.py` đúng là có `rglob("*.npz")` và không có `Depends`
+nào. Nhưng nó **không được mount**: `main.py` cố ý không nhập nó, kèm chú thích
+giải thích vì sao. Cùng hình dạng với `routers/experiments.py` ở C3 — 681 dòng
+đọc như endpoint sống, không URL nào chạm tới.
+
+Đường export **đang sống** là `routers/tenants.py`, và nó có phạm vi ở mọi câu:
+`WHERE tenant_id = %s` cho từng bảng, `export_file` lọc theo cả `export_id` lẫn
+`tenant_id`, tệp đặc trưng lấy từ `tenant_features_root(tenant)`.
+
+### Điều đúng: một phạm vi lại chứa các phạm vi còn lại
+
+```
+tenant_features_root("default")  ->  FEATURES_ROOT
+tenant_features_root("iso_a")    ->  FEATURES_ROOT / "_tenants" / "iso_a"
+```
+
+`_tenants/` nằm **bên trong** gốc của tenant bootstrap. Nên
+`tenant_features_root("iso_a").is_relative_to(tenant_features_root("default"))`
+là ĐÚNG, và mọi hàm đi bộ trên cây thừa hưởng điều đó. Không caller nào thiếu
+tham số tenant; thêm tham số tenant vào chúng cũng không sửa được gì.
+
+Ba caller đi bộ, guard chỉ có ở một:
+
+| caller | guard | hậu quả đo được |
+|---|---|---|
+| `_remove_tenant_files` (xoá) | **có**, kèm docstring nêu đúng bẫy này | an toàn |
+| `_add_feature_files` (export) | không | `default-export.zip` chứa `.npz` của mọi tổ chức |
+| `usage.tenant_storage_mb` | không | tenant gốc báo 7 MB nơi nó sở hữu 1 MB |
+
+Sự bất đối xứng **đã được hiểu**, ở đường phá huỷ, và không được mang sang hai
+đường đọc. Vì vậy bản vá là **một** helper dùng chung —
+`dataset_manager.iter_tenant_feature_files` — chứ không phải câu `if` thứ ba chép
+sang chỗ mới: một guard viết theo từng caller là một guard mà caller thứ tư
+không biết là có.
+
+`test_c5_export_confinement.py::test_c5_6` chốt điều đó ở mức văn bản mã nguồn.
+Lượt chạy đầu tiên nó bắt đúng dòng chú thích *cấm* việc ấy trong chính bản vá —
+một công cụ đối chiếu văn bản không phân biệt được lệnh với lời cảnh báo về
+lệnh, nên nó bỏ qua dòng chú thích, và giới hạn đó được ghi thẳng trong docstring
+của ca.
+
+### `scope` không trả lời được câu hỏi của cổng đồng thuận
+
+Đường huấn luyện có cổng đồng thuận thật: thang ba mức, kiểm ở
+`_consent_preflight` **trước** khi job chuyển sang `running`, soi lại tệp split
+ngay trước lúc chạy. Đường export không hỏi một câu nào.
+
+Nhưng "thêm cổng vào export" là sai, vì `purge_tenant` **yêu cầu phải có một bản
+xuất sẵn sàng**:
+
+```
+rút đồng thuận -> export bị chặn -> purge bị chặn -> phải dùng skip_export_check
+              -> dữ liệu bị xoá mà chưa từng được mang đi
+```
+
+Một cơ chế an toàn mà đường vận hành bình thường phải thường xuyên đi vòng qua là
+cơ chế đặt sai chỗ. Gốc rễ: `scope` (metadata|full) nói **cái gì** nằm trong gói,
+không nói gói dựng **để làm gì** — nên cùng một endpoint vừa là đường hoàn trả dữ
+liệu cho tổ chức, vừa có thể là đường phát hành, và ranh giới đồng thuận phụ
+thuộc vào việc người gọi *hiểu đúng mục đích*. Đó là khoảng trống thẩm quyền ở
+tầng ngữ nghĩa, không ở tầng mã.
+
+Bản vá tách `export_purpose` khỏi `scope`:
+
+| `export_purpose` | chứa mẫu đã rút? | cổng | làm điều kiện purge? |
+|---|---|---|---|
+| `tenant_portability` | có, **kèm bản kê hạn chế sử dụng** | không dùng thang phát hành | **có** |
+| `internal_training` | không | `internal_training` | không |
+| `research_release` | không | `research_release` | không |
+| `public_library` | không | `public_library` | không |
+
+Ba điểm dễ làm sai:
+
+- **Nhánh phát hành fail-closed cả với tệp mồ côi.** Một `.npz` trên đĩa không
+  khớp hàng mẫu nào thì không có người ký xác định được, nên không có đồng thuận
+  nào để dựa vào. "Không biết" ở cổng phát hành phải nghĩa là không — cùng lập
+  luận với `consent_gate._signer_of` khi nó từ chối lùi về `user_id`.
+- **Gói hoàn trả không lọc, nhưng cũng không giao dữ liệu đã rút đi trần.** Nó
+  mang `MANIFEST_CONSENT.json` liệt kê phần bị hạn chế, và `signer_consents` vẫn
+  nằm trong gói để đối chiếu. Rút đồng thuận là dừng việc **sử dụng**, không phải
+  đồng ý bị xoá.
+- **Gói phát hành KHÔNG đủ tư cách làm điều kiện trước khi xoá.** Nó đã bị lọc,
+  nên nó không phải bản sao dữ liệu của tổ chức; nhận nó rồi cho xoá vĩnh viễn
+  nghĩa là phần bị lọc biến mất mà chưa từng được hoàn trả.
+
+### Hàng cũ nhận `tenant_portability`, và vì sao đó KHÔNG mâu thuẫn với C2b
+
+C2b đặt luật: hiện vật không khai chủ sở hữu thì để `unknown`, không đoán. Luật
+đó không áp vào đây, và khác biệt nằm ở **hướng của đặc quyền**.
+
+Ở C2b, đoán một chủ sở hữu là TRAO quyền: split vô chủ bỗng thuộc về ai đó và
+dùng được. Ở đây, `tenant_portability` là mức KHÔNG có thẩm quyền phát hành — nó
+mô tả đúng quá khứ (những gói ấy được dựng không qua lọc) và không thêm quyền
+nào. Chọn `unknown` sẽ làm hỏng đường rời nền tảng của các tổ chức hiện có mà
+không đổi lại chút an toàn nào.
+
+### Nợ để lại
+
+- `export_purpose` là nghĩa **thứ ba** của chữ `purpose` trong kho mã, sau
+  `purpose` của split artifact và `run_purpose` của huấn luyện. Tên đầy đủ được
+  dùng xuyên suốt để không nhân món nợ cũ lên, nhưng nợ tách nghĩa vẫn còn.
+- Giao diện chưa có chỗ chọn mục đích xuất; mặc định của router là
+  `tenant_portability`, tức là hành vi cũ và là mức không cấp quyền.
+- Chưa đo: đường Drive (`storage_url` trỏ `gdrive://`) không đi qua
+  `iter_tenant_feature_files`. `scope=full` chỉ đóng gói tệp cục bộ.

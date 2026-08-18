@@ -3116,6 +3116,39 @@ MIGRATION_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_tenant_exports_tenant "
     "ON tenant_exports(tenant_id, created_at DESC)",
+    # --- C5 (17/08/2026): gói xuất phải khai nó được dựng ĐỂ LÀM GÌ.
+    #
+    # `scope` nói cái gì nằm trong gói; `export_purpose` nói gói dùng vào việc
+    # gì. Thiếu vế thứ hai thì cùng một endpoint vừa là đường hoàn trả dữ liệu
+    # cho tổ chức, vừa có thể là đường phát hành — và cổng đồng thuận không có
+    # cách nào biết mình đang gác cái nào.
+    #
+    # Vì sao hàng CŨ mặc định là `tenant_portability`, chứ không phải `unknown`
+    # ------------------------------------------------------------------------
+    # Nhóm C2b đặt luật: hiện vật không khai chủ sở hữu thì để `unknown`, không
+    # đoán. Luật đó KHÔNG áp vào đây, và khác biệt nằm ở hướng của đặc quyền.
+    #
+    # Ở C2b, đoán một chủ sở hữu là TRAO quyền: một split vô chủ bỗng thuộc về
+    # ai đó và bắt đầu dùng được. Ở đây, `tenant_portability` là mức KHÔNG có
+    # thẩm quyền phát hành — nó không cho phép gói cũ đi vào bất kỳ đường
+    # nghiên cứu hay công bố nào. Nó chỉ giữ nguyên đúng công dụng mà những gói
+    # ấy vốn đã có: làm điều kiện trước `purge_tenant`.
+    #
+    # Nói cách khác, nhãn này mô tả đúng quá khứ (chúng được dựng không qua lọc)
+    # và không thêm một quyền nào. Chọn `unknown` sẽ làm hỏng đường rời nền tảng
+    # của các tổ chức hiện có mà không đổi lại được chút an toàn nào.
+    "ALTER TABLE tenant_exports ADD COLUMN IF NOT EXISTS export_purpose TEXT "
+    "NOT NULL DEFAULT 'tenant_portability'",
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_tenant_exports_purpose') THEN
+            ALTER TABLE tenant_exports ADD CONSTRAINT ck_tenant_exports_purpose
+                CHECK (export_purpose IN ('tenant_portability', 'internal_training',
+                                          'research_release', 'public_library'));
+        END IF;
+    END $$
+    """,
     """
     DO $$
     BEGIN

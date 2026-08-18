@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthToken } from "../api/axiosClient";
-import { logout as apiLogout } from "../api/auth";
+import { logout as apiLogout, isTenantAdmin } from "../api/auth";
 import NotificationBell from "./NotificationBell";
 import LanguageSwitcher from "./LanguageSwitcher";
 import { useAuth, hasSessionHint } from "../contexts/AuthContext";
@@ -10,7 +10,7 @@ import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
-import { ChipIcon, GearIcon, HandIcon, HomeIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
+import { BuildingIcon, ChipIcon, GearIcon, HandIcon, HomeIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
 import { prefetchProps } from "../routes/prefetch";
 import { useI18n } from "../i18n";
@@ -115,8 +115,25 @@ export default function Layout({ children }: { children: ReactNode }) {
     icon: <TrashIcon className={navIconClass} />,
   };
 
+  // Console của quản trị TỔ CHỨC — khác hẳn console nền tảng ở `AdminShell`.
+  //
+  // Điều kiện hiện là `isTenantAdmin`, KHÔNG phải `is_admin`. Bản đầu dùng
+  // `is_admin` và vì thế giấu console khỏi đúng những người nó được làm ra để
+  // phục vụ: quản trị viên của một tổ chức không phải người vận hành nền tảng,
+  // nên cờ đó luôn sai với họ.
+  //
+  // Đây vẫn chỉ là việc không mời người dùng bấm vào một trang chắc chắn 403;
+  // quyền thật do `require_tenant_admin` ở máy chủ cưỡng chế.
+  const consoleItem: FlatNavItem = {
+    name: "Console tổ chức",
+    href: "/console",
+    icon: <BuildingIcon className={navIconClass} />,
+  };
+
   const navigation: AnyNavItem[] = user
-    ? [...baseNavigation, userTrashItem, settingsItem]
+    ? isTenantAdmin(user)
+      ? [...baseNavigation, consoleItem, userTrashItem, settingsItem]
+      : [...baseNavigation, userTrashItem, settingsItem]
     : baseNavigation;
 
   const handleLogout = useCallback(async () => {

@@ -207,6 +207,23 @@ def app_database_url(password: str, template: Optional[str] = None) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
 
 
+def control_database_url(password: str, template: Optional[str] = None) -> str:
+    """`CONTROL_DATABASE_URL` tương ứng, dựng từ DSN hiện có.
+
+    Cùng lý do với `app_database_url`: giữ nguyên host/port/tên cơ sở dữ liệu,
+    chỉ đổi danh tính. Tự gõ lại URL này là cách một lượt cấp phát trỏ nhầm sang
+    cơ sở dữ liệu khác mà không ai thấy.
+    """
+    from app.config import settings
+
+    parts = urlsplit(template or settings.database_url)
+    host = parts.hostname or "postgres"
+    netloc = f"{cp.CONTROL_ROLE}:{quote(password, safe='')}@{host}"
+    if parts.port:
+        netloc += f":{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
 def check(conn) -> dict:
     """Report the isolation posture of `conn` without changing anything."""
     from app.storage.postgres_connection import current_role_privileges
@@ -216,6 +233,8 @@ def check(conn) -> dict:
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (APP_ROLE,))
         posture["app_role_exists"] = cur.fetchone() is not None
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (cp.CONTROL_ROLE,))
+        posture["control_role_exists"] = cur.fetchone() is not None
     posture["connected_as"] = current_role_privileges(conn).rolname
     return posture
 
@@ -348,6 +367,7 @@ def check_command() -> int:
     print()
     _report(migration_posture, label="migration")
     print(f"\n{APP_ROLE} exists   : {runtime_posture['app_role_exists']}")
+    print(f"{cp.CONTROL_ROLE} exists : {runtime_posture['control_role_exists']}")
 
     if runtime_posture["policies_are_theatre"]:
         print(
@@ -415,9 +435,47 @@ def main(argv: Optional[list[str]] = None) -> int:
             return 3
 
         provision(conn, password)
+
+        # Vai ĐIỀU KHIỂN. Trước bản sửa này `provision_control()` không có ai
+        # gọi: `deploy.sh` bảo người vận hành chạy đúng câu lệnh này với
+        # `VOYA_CONTROL_DB_PASSWORD`, câu lệnh chạy xong báo thành công, và
+        # `voya_control` KHÔNG hề được tạo. Cổng chặn ở deploy vẫn đỏ mà thông
+        # báo lỗi lại chỉ về chính đường vừa chạy — một vòng lặp kín.
+        control_password = os.getenv(CONTROL_PASSWORD_ENV, "").strip()
+        if control_password:
+            if len(control_password) < 16:
+                print(
+                    f"error: {CONTROL_PASSWORD_ENV} must be at least 16 characters",
+                    file=sys.stderr,
+                )
+                return 2
+            if control_password == password:
+                # Hai danh tính dùng chung một bí mật thì ranh giới tin cậy chỉ
+                # tồn tại trên giấy: đọc được một cái là có cái kia, và toàn bộ
+                # lý do tách vai điều khiển biến mất.
+                print(
+                    f"error: {CONTROL_PASSWORD_ENV} phải KHÁC {PASSWORD_ENV} — "
+                    "hai vai dùng chung mật khẩu thì ranh giới tin cậy chỉ còn trên giấy",
+                    file=sys.stderr,
+                )
+                return 2
+            provision_control(conn, control_password)
+        else:
+            # Cảnh báo chứ không lỗi: một máy chưa dùng thao tác điều khiển nào
+            # vẫn chạy được. Nhưng phải nói ra, vì im lặng ở đây chính là cái
+            # bẫy vừa sửa ở trên.
+            print(
+                f"\n[warn] {CONTROL_PASSWORD_ENV} khong duoc dat — vai "
+                f"{cp.CONTROL_ROLE} KHONG duoc cap phat, va CONTROL_DATABASE_URL "
+                "se khong ket noi duoc.",
+                file=sys.stderr,
+            )
+
         _report(check(conn), label="migration")
         if args.print_url:
             print(f"\nDATABASE_URL={app_database_url(password)}")
+            if control_password:
+                print(f"CONTROL_DATABASE_URL={control_database_url(control_password)}")
         return 0
     finally:
         conn.close()

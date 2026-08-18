@@ -1,12 +1,12 @@
 # CHƯƠNG 2. CƠ SỞ LÝ THUYẾT
 
-Chương này trình bày cơ sở lý thuyết của giải pháp theo một khuôn lập luận thống nhất cho mọi quyết định kiến trúc lớn: **khái niệm tổng quan → các phương án đã có → so sánh theo tiêu chí → yêu cầu của bài toán → định hướng được chọn → đánh đổi mà lựa chọn đó mang theo**. Khuôn này được giữ nguyên ở tất cả các mục nhằm bảo đảm một tính chất: mỗi lựa chọn kiến trúc trong luận văn phát sinh từ một yêu cầu đã được phát biểu trước đó, chứ không phải từ sự có sẵn của một công nghệ.
+Chương này trình bày cơ sở lý thuyết của giải pháp theo một khuôn lập luận thống nhất: **khái niệm tổng quan → các phương án đã có → so sánh theo tiêu chí → yêu cầu của bài toán → định hướng được chọn → đánh đổi**. Khuôn này bảo đảm mỗi lựa chọn kiến trúc phát sinh từ một yêu cầu đã phát biểu trước đó, chứ không từ sự có sẵn của một công nghệ.
 
-Cần phân biệt rõ phạm vi của chương này với Chương 3. Chương 2 trả lời câu hỏi **vì sao đi theo những định hướng kiến trúc này**; nó dừng ở mức các phương án phổ quát và tiêu chí lựa chọn. Chương 3 trả lời câu hỏi **CTU.SignBridge hiện thực các định hướng đó bằng cách nào**, với lược đồ, chính sách và cấu hình cụ thể. Vì vậy chương này không phát biểu mức độ hoàn thành của bất kỳ cơ chế nào; các phát biểu về hiện trạng triển khai thuộc Chương 3 và Chương 4.
+Phạm vi của chương dừng ở các phương án phổ quát và tiêu chí lựa chọn: chương trả lời **vì sao đi theo những định hướng này**, còn **CTU.SignBridge hiện thực chúng bằng cách nào** thuộc Chương 3, và kết quả đo thuộc Chương 4. Chương 2 do đó không phát biểu mức độ hoàn thành của bất kỳ cơ chế nào.
 
-**Về ký hiệu và công thức.** Chương này dùng công thức ở hai vai trò khác nhau, và người đọc cần phân biệt. Phần lớn là **ký hiệu quy ước của luận văn** để phát biểu gọn một phân biệt khái niệm — chẳng hạn \(\text{Dùng chung} \neq \text{Không có phạm vi}\) hay \(Tenant \supset Workspace \supset Project\); chúng là định nghĩa nội bộ, không phải kết quả trích từ tài liệu, nên không kèm trích dẫn. Số còn lại **phát biểu lại một kết quả hoặc một cơ chế đã có nguồn** — ngữ nghĩa giao nhận, tính lũy đẳng, cấu trúc chữ ký số, số chiều đầu ra của mô hình điểm mốc — và những công thức này luôn đi kèm trích dẫn ở câu dẫn ngay trước. Chương không chứa mã nguồn: mọi cơ chế đều được mô tả bằng lời hoặc bằng ký hiệu, còn cú pháp hiện thực thuộc Chương 3 và các phụ lục kỹ thuật.
+Công thức trong chương có hai vai trò. Phần lớn là **ký hiệu quy ước của luận văn** dùng để phát biểu gọn một phân biệt khái niệm — chẳng hạn \(\text{Dùng chung} \neq \text{Không có phạm vi}\) — và là định nghĩa nội bộ nên không kèm trích dẫn. Số còn lại **phát biểu lại một kết quả đã có nguồn**, chẳng hạn ngữ nghĩa giao nhận hay cấu trúc chữ ký số, và luôn có trích dẫn ở câu dẫn ngay trước. Chương không chứa mã nguồn; cú pháp hiện thực thuộc Chương 3 và các phụ lục kỹ thuật.
 
-Nội dung chương đi theo tám lớp, từ miền ứng dụng tới tổng hợp kiến trúc: đặc trưng dữ liệu và cơ sở mô hình hóa dữ liệu (2.1) → các phương án kiến trúc đa thuê bao (2.2) → phạm vi quản trị và chia sẻ (2.3) → mô hình an ninh và cô lập (2.4, 2.5) → mô hình thu nhận và xử lý dữ liệu (2.6, 2.7) → phiên bản, nguồn gốc và toàn vẹn (2.8) → quản trị người tham gia (2.9) → triển khai, tiến hóa và tổng hợp (2.10, 2.11).
+Nội dung đi theo tám lớp: đặc trưng dữ liệu và cơ sở mô hình hóa (2.1) → kiến trúc đa thuê bao (2.2) → phạm vi quản trị và chia sẻ (2.3) → an ninh và cô lập (2.4, 2.5) → thu nhận và xử lý (2.6, 2.7) → phiên bản, nguồn gốc và toàn vẹn (2.8) → quản trị người tham gia (2.9) → triển khai, tiến hóa và tổng hợp (2.10, 2.11).
 
 ## Thuộc tính chất lượng dùng làm tiêu chí so sánh
 
@@ -52,7 +52,15 @@ Hai biểu hiện khác nhau theo vùng của cùng một khái niệm không ph
 
 **Thứ ba, tồn tại biến thiên giữa những người ký.** Ngay trong cùng một lớp và cùng một vùng, cách thực hiện giữa các cá nhân vẫn khác nhau về tốc độ, biên độ và chi tiết hình học. Biến thiên này không phải lỗi thu; nó là thuộc tính của hiện tượng được quan sát.
 
-Hệ quả: hệ thống phải liên kết mẫu với **người ký** và **phiên thu** tương ứng. Thông tin người ký có ý nghĩa trực tiếp đối với thiết kế giao thức đánh giá. AUTSL, chẳng hạn, sử dụng các nhóm người ký tách biệt giữa các tập dữ liệu để đánh giá khả năng tổng quát hóa sang người ký chưa xuất hiện trong quá trình huấn luyện \cite{sincan_autsl_2020}. WLASL cũng cung cấp thông tin về nhiều người ký và các mẫu tương ứng, qua đó cho phép phân tích dữ liệu theo chủ thể \cite{li_wlasl_baibao_2020}. Vì vậy, danh tính hoặc định danh nghiên cứu của người ký là siêu dữ liệu cần thiết để xây dựng các phép chia dữ liệu phù hợp; không nên suy diễn rằng mọi bộ dữ liệu tham chiếu đều sử dụng cùng một giao thức độc lập người ký.
+Hệ quả cần được phát biểu theo điều kiện thu, không phát biểu như một mệnh lệnh tuyệt đối. Đối với **thu có kiểm soát** — nơi nền tảng biết ai đang ký và trong phiên nào — quan hệ mẫu–người ký–phiên thu cần được ghi nhận ngay tại đường thu, vì như đoạn dưới sẽ chỉ ra, nó không tái tạo được về sau. Đối với dữ liệu **đã có từ trước** hoặc thu qua đường không xác định được chủ thể, quan hệ ấy có thể khuyết; khi đó mẫu vẫn dùng được cho một số mục đích và không dùng được cho một số mục đích khác. Nói cách khác, đây là một **thuộc tính quyết định phạm vi sử dụng** của mẫu, chứ không phải một điều kiện để mẫu tồn tại:
+
+\[
+\text{Phạm vi sử dụng}(m) = f\big(\text{độ đầy đủ của nguồn gốc}(m)\big).
+\]
+
+Phân biệt này quan trọng vì nó tách hai loại thiếu sót thường bị gộp: một hệ thống **không ghi** quan hệ đó là khiếm khuyết thiết kế; một tập dữ liệu **không có** quan hệ đó là giới hạn về trạng thái dữ liệu. Hai loại đòi hỏi hai cách xử lý khác nhau, và chỉ loại thứ nhất sửa được bằng cách sửa hệ thống.
+
+Thông tin người ký có ý nghĩa trực tiếp đối với thiết kế giao thức đánh giá. AUTSL, chẳng hạn, sử dụng các nhóm người ký tách biệt giữa các tập dữ liệu để đánh giá khả năng tổng quát hóa sang người ký chưa xuất hiện trong quá trình huấn luyện \cite{sincan_autsl_2020}. WLASL cũng cung cấp thông tin về nhiều người ký và các mẫu tương ứng, qua đó cho phép phân tích dữ liệu theo chủ thể \cite{li_wlasl_baibao_2020}. Vì vậy, danh tính hoặc định danh nghiên cứu của người ký là siêu dữ liệu cần thiết để xây dựng các phép chia dữ liệu phù hợp; không nên suy diễn rằng mọi bộ dữ liệu tham chiếu đều sử dụng cùng một giao thức độc lập người ký.
 
 Nếu quan hệ mẫu–người ký không được ghi nhận, một phép chia độc lập người ký **không thể tái lập được về sau**, kể cả khi dữ liệu vẫn còn nguyên vẹn: thông tin cần thiết để thực hiện phép chia đã không tồn tại trong hệ thống ngay từ đầu.
 
@@ -79,17 +87,21 @@ Ngoài ý nghĩa nghiên cứu, thông tin người ký còn có ý nghĩa quả
 
 ### 2.1.2. Dữ liệu nguồn và dữ liệu dẫn xuất
 
-Hai khái niệm cần được phân biệt và giữ tách bạch trong toàn bộ luận văn.
+**Ba** khái niệm cần được phân biệt, không phải hai. Gộp hai khái niệm đầu là một nhầm lẫn thường gặp và nó dẫn tới một suy luận sai về nghĩa vụ lưu trữ.
 
-**Dữ liệu nguồn (source data)** là dữ liệu quan sát ban đầu — trong bài toán này là bản ghi hình của một lần thực hiện ký hiệu. Nó là thứ gần nhất với hiện tượng được quan sát mà hệ thống có được.
+**Tín hiệu nguồn (source signal)** là hiện tượng vật lý được quan sát: chuyển động của người ký trước ống kính. Nó tồn tại độc lập với hệ thống, và mọi thứ hệ thống có được đều là kết quả của một phép ghi nhận áp lên nó.
 
-**Dữ liệu dẫn xuất (derived data)** là dữ liệu được tạo ra bằng một phép biến đổi áp lên dữ liệu nguồn, chẳng hạn chuỗi điểm mốc trích từ video.
+**Tạo tác nguồn được lưu giữ (retained source artifact)** là bản ghi của tín hiệu ấy mà hệ thống **thực sự giữ lại** — chẳng hạn một tệp video. Đây là một quyết định kiến trúc, không phải một tất yếu.
 
-Điểm quan trọng không nằm ở định nghĩa mà ở quan hệ giữa hai lớp:
+**Dữ liệu dẫn xuất (derived data)** là dữ liệu được tạo ra bằng một phép biến đổi áp lên tín hiệu nguồn hoặc lên tạo tác nguồn, chẳng hạn chuỗi điểm mốc.
+
+Quan hệ giữa ba khái niệm:
 
 \[
-\text{Nguồn} \neq \text{Biểu diễn dẫn xuất}.
+\text{Tín hiệu nguồn} \neq \text{Tạo tác nguồn được lưu giữ} \neq \text{Dữ liệu dẫn xuất}.
 \]
+
+Một phép trích xuất có thể quan sát tín hiệu nguồn mà không tạo ra tạo tác nguồn được lưu giữ. Khi phép trích xuất diễn ra tại thiết bị và chỉ dữ liệu dẫn xuất được truyền lên nền tảng, sự tồn tại của mẫu không hàm ý sự tồn tại của video nguồn trong hệ thống. Câu *"mẫu này có video gốc"* khi đó là sai, còn câu *"mẫu này bắt nguồn từ một quan sát thị giác"* vẫn đúng. Hai mệnh đề tách nhau ở đúng chỗ nào trong kiến trúc được trình bày ở mục 2.6.8.
 
 Một biểu diễn dẫn xuất có thể nhỏ hơn nhiều lần và thuận tiện hơn cho xử lý, nhưng **không đương nhiên bảo toàn toàn bộ thông tin của nguồn**. Khi phép biến đổi có mất mát, ba hệ quả phát sinh.
 
@@ -140,17 +152,21 @@ Nếu đề tài là thu thập và quản lý dữ liệu, thì câu hỏi *"th
 | Tính nhất quán | Các quan hệ có mâu thuẫn nhau không? | Ràng buộc toàn vẹn tham chiếu và toàn vẹn xuyên phạm vi (mục 2.1.5, 2.2.6) |
 | Tính duy nhất | Cùng một lần đóng góp có bị ghi thành nhiều mẫu không? | Ràng buộc duy nhất; khóa lũy đẳng (mục 2.7.2) |
 | Đầy đủ về nguồn gốc | Có biết mẫu này từ ai, phiên nào, nguồn nào không? | Quan hệ bắt buộc tới người ký và phiên thu tại đường thu |
-| Trạng thái kiểm duyệt | Mẫu đã được người có thẩm quyền chấp nhận chưa? | Máy trạng thái kiểm duyệt, tách khỏi kiểm tra kỹ thuật |
+| Chất lượng thu nhận và biểu diễn | Dữ liệu có đủ ổn định và đầy đủ để dùng được về sau không? | Chỉ số chất lượng tính tự động trên chính dữ liệu; kiểm tra đặc trưng, tách khỏi kiểm tra cấu trúc |
 
 *Nguồn: tác giả tổng hợp; các chiều đặt tên theo hướng nhiều chiều của \cite{wang_beyond_1996}, cơ chế kiểm tra suy ra từ yêu cầu của mục 2.1.3.*
 
 Dòng cuối bảng chứa một phân biệt cần được giữ nghiêm ngặt trong toàn quyển: **hợp lệ về kỹ thuật và được chấp nhận vào bộ dữ liệu là hai trạng thái khác nhau**:
 
 \[
-\text{HợpLệVềLượcĐồ} = \text{đúng} \;\nRightarrow\; \text{ĐượcDuyệtVàoBộDữLiệu} = \text{đúng}.
+\text{HợpLệVềLượcĐồ} \;\nRightarrow\; \text{ĐủĐiềuKiệnVàoBộDữLiệu}.
 \]
 
-Một mẫu có thể đúng số chiều, đủ trường bắt buộc, trỏ tới lớp tồn tại — và vẫn không dùng được vì người ký thực hiện sai ký hiệu, khung hình bị che, hoặc điều kiện thu không đạt. Máy có thể kiểm chiều thứ nhất; chiều thứ hai cần đánh giá của người. Gộp hai trạng thái này vào một cờ duy nhất khiến hệ thống hoặc từ chối dữ liệu còn dùng được, hoặc công bố dữ liệu chưa ai xem.
+Một mẫu có thể đúng số chiều, đủ trường bắt buộc, trỏ tới lớp tồn tại — và vẫn không dùng được vì người ký thực hiện sai ký hiệu, khung hình bị che, hoặc điều kiện thu không đạt.
+
+Hai chiều này khác nhau ở **loại câu hỏi**, không chỉ ở độ khó. Chiều thứ nhất hỏi dữ liệu có đúng hình dạng đã quy ước hay không — trả lời được bằng đối chiếu với lược đồ. Chiều thứ hai hỏi dữ liệu có phản ánh đúng hiện tượng cần ghi hay không. Một phần của chiều thứ hai vẫn đo được tự động từ chính dữ liệu, chẳng hạn tỉ lệ khung thiếu điểm mốc hay mức dao động bất thường của quỹ đạo; phần còn lại — *"ký hiệu này thực hiện đúng chưa"* — thì không.
+
+Điều cần rút ra là hai chiều phải **biểu diễn được tách nhau**, chứ không phải là chiều thứ hai bắt buộc phải do người trả lời. Gộp chúng vào một cờ duy nhất khiến hệ thống hoặc từ chối dữ liệu còn dùng được, hoặc phát hành dữ liệu mà chưa có căn cứ nào về chất lượng. Các cách trả lời chiều thứ hai, cùng ràng buộc mà mỗi cách đặt ra, được phân tích ở mục 2.1.5.
 
 ### 2.1.5. Kiểm tra tại thời điểm thu và làm sạch hậu kỳ
 
@@ -175,23 +191,39 @@ Từ sáu chiều trên phát sinh một quyết định kiến trúc: **kiểm 
 
 *Nguồn: tác giả tổng hợp.*
 
-Bảng trên giữ năm tiêu chí phân định. Bản đầy đủ, bổ sung cách xử lý khi văn bản được sửa đổi và khả năng kiểm toán, được trình bày tại **Phụ lục F.9, Bảng F-15**.
+**Định hướng được chọn và lý do.** Phương án kết hợp phù hợp, với một quy tắc phân loại tường minh: **ràng buộc về cấu trúc và về quản trị được cưỡng chế tại thời điểm thu, còn đánh giá chất lượng mang tính định tính được xử lý ở một khâu tách rời khỏi đường thu**. Tiêu chí phân loại là khả năng tái tạo: quan hệ với người ký, phiên thu và cơ sở xử lý thuộc nhóm thứ nhất vì chúng không dựng lại được; nhận định "ký hiệu này thực hiện chưa chuẩn" thuộc nhóm thứ hai vì nó vẫn đánh giá được từ chính dữ liệu đã lưu.
 
-Bảng trên giữ năm tiêu chí. Bản đầy đủ, bổ sung mức phù hợp với nội dung phương tiện lớn, độ phức tạp hiện thực và mức tường minh của quan hệ nguồn gốc, được trình bày tại **Phụ lục F.8, Bảng F-14**.
+**Phân biệt cần giữ: hợp lệ về cấu trúc không đồng nghĩa với đúng về ngữ nghĩa.**
 
-Bảng trên giữ năm tiêu chí. Ma trận đầy đủ, bổ sung tính đồng nhất của phần cứng người dùng, môi trường thực thi, khả năng mở rộng và khả năng xử lý lại về sau, được trình bày tại **Phụ lục F.6, Bảng F-10**.
+\[
+\text{Hợp lệ theo lược đồ} \ \neq\ \text{Đúng về ngữ nghĩa} \ \neq\ \text{Được chấp nhận vào một bộ dữ liệu}.
+\]
 
-Bảng trên giữ năm tiêu chí. Bản đầy đủ, bổ sung rào cản đối với người đóng góp và khả năng theo dõi độ bao phủ, được trình bày tại **Phụ lục F.6, Bảng F-8**.
+Ba mệnh đề này độc lập với nhau. Một mẫu có thể đủ số khung, đủ chiều đặc trưng, đủ siêu dữ liệu bắt buộc — tức hợp lệ theo lược đồ — mà vẫn ghi lại một ký hiệu thực hiện sai. Ngược lại, một mẫu đúng về ngữ nghĩa vẫn có thể chưa được chấp nhận vào một bộ dữ liệu cụ thể vì lý do phạm vi sử dụng chứ không vì chất lượng.
 
-**Định hướng được chọn và lý do.** Phương án kết hợp phù hợp, với một quy tắc phân loại tường minh: **ràng buộc về cấu trúc và về quản trị được cưỡng chế tại thời điểm thu, còn đánh giá chất lượng mang tính định tính nằm ở một khâu kiểm duyệt riêng**. Tiêu chí phân loại là khả năng tái tạo: quan hệ với người ký, phiên thu và cơ sở xử lý thuộc nhóm thứ nhất vì chúng không dựng lại được; nhận định "ký hiệu này thực hiện chưa chuẩn" thuộc nhóm thứ hai vì nó vẫn đánh giá được từ chính dữ liệu đã lưu.
+**Điều luận văn KHÔNG kết luận từ phân biệt này.** Việc ba mệnh đề tách nhau về mặt khái niệm không kéo theo rằng hệ thống phải có một quy trình phê duyệt thủ công. Nó chỉ nói rằng nếu chỉ có kiểm tra cấu trúc thì mệnh đề thứ hai chưa được trả lời. Các cách trả lời khả dĩ gồm: một khâu duyệt do người thực hiện; một chỉ số chất lượng tự động dùng làm tiêu chí lọc ở khâu chọn mẫu; hoặc chuyển câu hỏi xuống hạ nguồn cho bên xây dựng bộ dữ liệu. Ba cách có chi phí vận hành và mức bảo đảm khác nhau, và **việc chọn cách nào là quyết định của Chương 3**, không phải một kết luận của Chương 2.
 
-**Đánh đổi.** Hệ thống phải mang hai cơ chế thay vì một, và phải biểu diễn được trạng thái trung gian "hợp lệ nhưng chưa duyệt" — một trạng thái mà mô hình một cờ không có. Đây là lý do máy trạng thái của mẫu ở Chương 3 không rút gọn về một trường boolean.
+**Đánh đổi.** Bất kỳ cách nào trong ba cách trên cũng buộc hệ thống biểu diễn được một trạng thái trung gian — "hợp lệ về cấu trúc, chưa kết luận về ngữ nghĩa" — mà một mô hình chỉ có một cờ đúng/sai không diễn đạt được. Đây là ràng buộc mà mô hình trạng thái của mẫu phải đáp ứng, độc lập với việc khâu đánh giá ngữ nghĩa được hiện thực bằng cơ chế nào.
 
 ### 2.1.6. Cơ sở mô hình hóa dữ liệu quan hệ
 
 Các mục trước xác định *dữ liệu nào phải có*. Mục này trình bày cơ sở lý thuyết để chuyển các yêu cầu đó thành một lược đồ cơ sở dữ liệu — nền cho mô hình dữ liệu ở Chương 3 và Phụ lục A.
 
+#### Mô hình thực thể – quan hệ và bốn khái niệm nền
+
+Trước khi phân biệt các mức trừu tượng, cần cố định bốn khái niệm mà mọi mức đều dùng tới. Mô hình thực thể – quan hệ được đề xuất nhằm mô tả dữ liệu bằng những khái niệm gần với nhận thức về miền ứng dụng, thay vì bằng cấu trúc lưu trữ \cite{chen_entity-relationship_1976}.
+
+**Thực thể (entity)** là một loại đối tượng mà miền ứng dụng cần phân biệt và lưu thông tin về nó — người ký, phiên thu, lớp ký hiệu, mẫu. Điều quan trọng không phải định nghĩa mà tiêu chí nhận biết: một khái niệm xứng đáng là thực thể riêng khi nó có **định danh độc lập** và có thuộc tính của riêng nó, chứ không chỉ khi nó xuất hiện thường xuyên trong lời mô tả nghiệp vụ.
+
+**Thuộc tính (attribute)** là một tính chất của thực thể. Ranh giới giữa "một thuộc tính" và "một thực thể riêng" là quyết định thiết kế quan trọng nhất ở mức khái niệm: khi một tính chất bắt đầu có tính chất của chính nó, nó đã trở thành thực thể — đây chính là lập luận dẫn tới việc tách vùng miền ra khỏi bảng mẫu ở phần sau.
+
+**Quan hệ (relationship)** là một liên hệ có nghĩa giữa các thực thể. Quan hệ cũng có thể mang thuộc tính của riêng nó, và khi điều đó xảy ra, mô hình quan hệ ở mức logic biểu diễn nó bằng một thực thể liên kết.
+
+**Lực lượng (cardinality)** xác định mỗi thực thể ở một phía tham gia vào bao nhiêu thể hiện của quan hệ — một–một, một–nhiều, nhiều–nhiều — cùng với **tính tùy chọn**: sự tham gia là bắt buộc hay có thể vắng. Lực lượng là nơi phần lớn ràng buộc nghiệp vụ được phát biểu, và cũng là nơi một mô hình dễ nói mạnh hơn thực tế nhất: khẳng định "mỗi mẫu **phải** thuộc một phiên thu" là một ràng buộc lực lượng, và nó chỉ đúng nếu mọi đường dữ liệu vào hệ thống đều bảo đảm được điều đó.
+
 #### Ba mức mô hình dữ liệu
+
+Mô hình thực thể – quan hệ là **khung khái niệm**, không phải một mức trong dãy dưới đây. Nó cung cấp từ vựng để mô tả miền; ba mức sau đây là ba **mức trừu tượng của thiết kế dữ liệu**, và mức đầu tiên trong đó được xây dựng bằng chính từ vựng ấy. Viết chúng thành một dãy bốn tầng nối tiếp là sai bản chất: ER không đứng trước CDM theo thời gian, nó nằm bên trong CDM như phương tiện biểu đạt.
 
 Thực hành mô hình hóa dữ liệu phân biệt ba mức trừu tượng, mỗi mức trả lời một câu hỏi khác nhau và **không được trộn lẫn** \cite{elmasri_fundamentals_2015}:
 
@@ -282,7 +314,7 @@ Ba loại đầu là nội dung tiêu chuẩn của thiết kế cơ sở dữ l
 
 Giá trị của một bộ dữ liệu nghiên cứu không chỉ phụ thuộc vào số lượng mẫu. FAIR đề xuất bốn thuộc tính định hướng cho dữ liệu khoa học: có thể tìm thấy, có thể truy cập, có khả năng tương tác và có khả năng tái sử dụng \cite{wilkinson_fair_2016}. Bổ sung cho hướng tiếp cận này, *Datasheets for Datasets* nhấn mạnh việc tài liệu hóa động cơ xây dựng, thành phần, quá trình thu thập, cách sử dụng dự kiến và các giới hạn của bộ dữ liệu \cite{gebru_datasheets_2021}. Hai hướng tiếp cận đều cho thấy siêu dữ liệu và nguồn gốc dữ liệu không phải phần phụ thêm sau khi thu thập, mà là thành phần cần thiết để dữ liệu có thể được diễn giải và tái sử dụng.
 
-Trong phạm vi luận văn, một bộ dữ liệu vì vậy được xem là một đối tượng có vòng đời, bao gồm tối thiểu dữ liệu quan sát, danh mục ký hiệu, thông tin ngôn ngữ và phương ngữ, người ký và phiên thu, nguồn gốc dữ liệu, trạng thái kiểm duyệt, phiên bản và cơ sở sử dụng. Cách nhìn này khác với cách tổ chức dữ liệu như một thư mục tệp: thư mục có thể cho biết tệp nằm ở đâu nhưng không tự biểu diễn được ai tạo dữ liệu, dữ liệu thuộc phạm vi quản trị nào, phiên bản nào đã được công bố, hoặc điều kiện nào cho phép dữ liệu được phân phối.
+Trong phạm vi luận văn, một bộ dữ liệu vì vậy được xem là một đối tượng có vòng đời, bao gồm tối thiểu dữ liệu quan sát, danh mục ký hiệu, thông tin ngôn ngữ và phương ngữ, người ký và phiên thu, nguồn gốc dữ liệu, trạng thái đánh giá chất lượng và phạm vi sử dụng, phiên bản và cơ sở sử dụng. Cách nhìn này khác với cách tổ chức dữ liệu như một thư mục tệp: thư mục có thể cho biết tệp nằm ở đâu nhưng không tự biểu diễn được ai tạo dữ liệu, dữ liệu thuộc phạm vi quản trị nào, phiên bản nào đã được công bố, hoặc điều kiện nào cho phép dữ liệu được phân phối.
 
 Vòng đời cũng làm phát sinh sự khác biệt giữa **dữ liệu đang làm việc** và **dữ liệu đã công bố**. Trạng thái đang làm việc có thể tiếp tục thay đổi khi thêm mẫu, hiệu chỉnh siêu dữ liệu hoặc rà soát chất lượng; ngược lại, một phiên bản đã được dùng làm tham chiếu nghiên cứu cần có khả năng truy lại đúng nội dung tại thời điểm công bố. Yêu cầu này là cơ sở cho cơ chế phiên bản bất biến và truy xuất nguồn gốc ở mục 2.8.
 
@@ -292,7 +324,7 @@ Các công trình liên quan phục vụ những giai đoạn khác nhau của v
 
 **Bộ dữ liệu** là kết quả của một quá trình thu thập. WLASL và AUTSL là các bộ dữ liệu tham chiếu cho nhận dạng ngôn ngữ ký hiệu \cite{li_wlasl_baibao_2020,sincan_autsl_2020}. Trong chương này, chúng chủ yếu được dùng để minh họa rằng dữ liệu dùng lại được cần có siêu dữ liệu về lớp ký hiệu, mẫu và người ký; chúng không phải đối tượng mà đề tài cạnh tranh trực tiếp.
 
-**Từ điển chuẩn hóa** là tài nguyên tham chiếu về từ vựng. Từ điển Ngôn ngữ ký hiệu Việt Nam của dự án QIPEDC cung cấp một nguồn tham chiếu cho danh mục từ vựng \cite{bogddt_qipedc_2019}. Vai trò của loại tài nguyên này đối với nền tảng là cung cấp điểm xuất phát cho danh mục; nó không thay thế tập nhiều mẫu được thu từ nhiều người ký và nhiều phiên phục vụ nghiên cứu thực nghiệm.
+**Tài nguyên từ vựng tham chiếu** là nguồn tra cứu về từ vựng của một ngôn ngữ ký hiệu. Từ điển Ngôn ngữ ký hiệu Việt Nam của dự án QIPEDC cung cấp một nguồn tham chiếu cho danh mục từ vựng \cite{bogddt_qipedc_2019}. Luận văn dùng cách gọi này thay vì "từ điển chuẩn hoá": các nguồn được khảo sát không cho thấy tài nguyên ấy được ban hành như một chuẩn có hiệu lực bắt buộc, nên một cách gọi mạnh hơn sẽ vượt quá điều nguồn nói. Vai trò của loại tài nguyên này đối với nền tảng là cung cấp điểm xuất phát cho danh mục; nó không thay thế tập nhiều mẫu được thu từ nhiều người ký và nhiều phiên phục vụ nghiên cứu thực nghiệm.
 
 **Công cụ chú giải** hỗ trợ gán nhãn và mô tả dữ liệu đã tồn tại. ELAN là môi trường chú giải đa phương thức được sử dụng rộng rãi trong nghiên cứu ngôn ngữ \cite{wittenburg_elan_2006}. Loại công cụ này giải quyết tốt thao tác chú giải nhưng không mặc nhiên cung cấp mô hình quản trị nhiều tổ chức, vòng đời đồng thuận hay cơ chế cô lập dữ liệu theo tenant.
 
@@ -310,7 +342,7 @@ Một dạng tổ chức khác thường xuất hiện ở giai đoạn đầu c
 | Lưu trữ tệp + thư mục thủ công | Thu thập, lưu trữ | Dựa trên quy ước thủ công | Dựa trên quy ước | Dựa trên quy trình ngoài hệ thống |
 | REDCap | Thu thập, quản lý nghiên cứu | Dự án, đa điểm, quyền theo dự án | Biểu mẫu tổng quát | Có thể cấu hình theo nghiên cứu |
 | Dataverse, Zenodo | Nộp lưu, lưu giữ, công bố | Collection/community và quyền của kho | Không phải trọng tâm | Không phải chức năng cốt lõi của giai đoạn thu |
-| **Phân hệ của luận văn** | **Thu nhận → quản trị → công bố** | **Tenant → workspace → project** | **Ngôn ngữ → phương ngữ → lớp ký hiệu, có phiên bản** | **Gắn với chủ thể, mẫu và phiên thu trong đường thu** |
+| **Phân hệ của luận văn** | **Thu nhận → quản lý → sử dụng ở hạ nguồn** (phát hành là nhánh tuỳ trường hợp) | **Tổ chức → không gian làm việc → dự án** | **Ngôn ngữ → phương ngữ → lớp ký hiệu, có phiên bản** | **Khả năng liên kết chủ thể dữ liệu với điều kiện sử dụng** |
 
 *Nguồn: tác giả tổng hợp trong phạm vi các lớp công cụ được khảo sát.*
 
@@ -424,7 +456,7 @@ Mô hình này để dữ liệu của mọi tenant trong cùng các bảng, ph�
 
 **Ưu điểm.** Chỉ tồn tại một lược đồ, nên thay đổi cấu trúc được thực hiện tập trung một lần và không phát sinh lệch lược đồ giữa các tenant. Các quan hệ dữ liệu được định nghĩa một lần và áp dụng thống nhất. Khởi tạo một tenant mới là một thao tác ghi dữ liệu chứ không phải cấp phát hạ tầng. Các nghiệp vụ ở phạm vi nền tảng đọc ngang nhiều tenant trở nên khả thi thay vì phải tổng hợp từ nhiều nguồn. Mô hình đặc biệt phù hợp khi các tenant **cùng vận hành trên một mô hình miền chung** — như trường hợp các đơn vị cùng thu dữ liệu ngôn ngữ ký hiệu theo cùng một cấu trúc khái niệm đã mô tả ở mục 2.1.6.
 
-**Nhược điểm — và đây là nhược điểm quyết định.** Cô lập chuyển hoàn toàn từ ranh giới vật lý sang ranh giới logic. Một cột khóa phạm vi **tự nó chỉ là dữ liệu định danh**; nó không có năng lực cưỡng chế nào. Nếu cơ chế bảo vệ chỉ là quy ước "mọi truy vấn phải thêm điều kiện lọc theo tenant", thì độ an toàn của toàn hệ thống bằng độ an toàn của **truy vấn cẩu thả nhất trong toàn bộ mã nguồn**, kể cả những truy vấn sẽ được viết trong tương lai bởi người không biết quy ước đó. Đây là một tính chất bất lợi nghiêm trọng vì nó không suy giảm dần: một chỗ sót là đủ, và lỗi loại này thường **không sinh ra triệu chứng** — truy vấn trả về nhiều dữ liệu hơn dự kiến chứ không báo lỗi.
+**Nhược điểm.** Cô lập chuyển hoàn toàn từ ranh giới vật lý sang ranh giới logic. Một cột khóa phạm vi **tự nó chỉ là dữ liệu định danh**; nó không có năng lực cưỡng chế nào. Nếu cơ chế bảo vệ chỉ là quy ước "mọi truy vấn phải thêm điều kiện lọc theo tenant", thì độ an toàn của toàn hệ thống bằng độ an toàn của **truy vấn cẩu thả nhất trong toàn bộ mã nguồn**, kể cả những truy vấn sẽ được viết trong tương lai bởi người không biết quy ước đó. Đây là một tính chất bất lợi nghiêm trọng vì nó không suy giảm dần: một chỗ sót là đủ, và lỗi loại này thường **không sinh ra triệu chứng** — truy vấn trả về nhiều dữ liệu hơn dự kiến chứ không báo lỗi.
 
 Nhận định này là cơ sở trực tiếp cho mục 2.4: khi chọn lược đồ dùng chung, câu hỏi kiến trúc kế tiếp không còn là *"có nên cô lập không"* mà là *"đặt cơ chế cưỡng chế ở tầng nào để một truy vấn nghiệp vụ thông thường không thể vô tình bỏ qua nó"*.
 
@@ -446,7 +478,9 @@ Cách diễn đạt bất biến này ở tầng lược đồ là đưa khóa p
 FK\,(Project.tenant,\; Project.workspace) \rightarrow Workspace\,(tenant,\; workspace).
 \]
 
-Khi khóa ngoại mang theo khóa phạm vi, một quan hệ vượt tenant trở thành **không biểu diễn được** ở tầng cấu trúc, thay vì chỉ là một trạng thái mà mã ứng dụng được kỳ vọng sẽ tránh. Đây là cùng một nguyên lý sẽ được lặp lại ở mục 2.4: chuyển một bất biến từ chỗ *phải nhớ* sang chỗ *không thể vi phạm*. Chi tiết hiện thực và phạm vi áp dụng thuộc Chương 3 và Phụ lục A; điều cần giữ ở mức lý thuyết là **toàn vẹn tham chiếu không hàm ý toàn vẹn xuyên phạm vi**, và hai loại này cần hai cơ chế khác nhau.
+Khi khóa ngoại mang theo khóa phạm vi, một quan hệ vượt tenant trở thành **không biểu diễn được** ở tầng cấu trúc, thay vì chỉ là một trạng thái mà mã ứng dụng được kỳ vọng sẽ tránh. Đây là cùng một nguyên lý được lặp lại ở mục 2.4: chuyển một bất biến từ chỗ *phải nhớ* sang chỗ *không thể vi phạm*.
+
+Ở mức lý thuyết, điều cần giữ là **toàn vẹn tham chiếu không hàm ý toàn vẹn xuyên phạm vi**: hai loại toàn vẹn này cần hai cơ chế khác nhau. Chi tiết hiện thực và phạm vi áp dụng thuộc Chương 3 và Phụ lục A.
 
 ### 2.2.7. So sánh ba mô hình và định hướng được chọn
 
@@ -468,11 +502,11 @@ Bảng trên chỉ giữ bảy tiêu chí dẫn trực tiếp tới lựa chọn
 
 **Định hướng được chọn.** Đối với phân hệ được nghiên cứu, mô hình lược đồ dùng chung là mô hình phù hợp, dựa trên ba lý do có thể kiểm chứng bằng chính đặc điểm bài toán. Thứ nhất, các tenant cùng vận hành trên một mô hình dữ liệu ngôn ngữ ký hiệu chung — cùng khái niệm lớp ký hiệu, phương ngữ, người ký, phiên thu — nên một lược đồ thống nhất phản ánh đúng miền chứ không phải là sự đơn giản hóa. Thứ hai, hệ thống còn đang tiến hóa, nên khả năng thay đổi cấu trúc **một lần** thay vì lặp trên *N* bản là điều kiện thực tế để phát triển tiếp. Thứ ba, các nghiệp vụ ở phạm vi nền tảng — thống kê, đối soát, công bố danh mục dùng chung — đọc ngang qua nhiều tenant, và mô hình này hỗ trợ chúng tự nhiên.
 
-**Đánh đổi mà lựa chọn này mang theo** phải được phát biểu thẳng, và gồm hai nghĩa vụ chứ không phải một. Nghĩa vụ thứ nhất: ranh giới tenant trở thành ranh giới logic, nên nền tảng phải có một cơ chế cô lập đủ mạnh ở tầng cơ sở dữ liệu, đặt tại vị trí mà mã nghiệp vụ không thể vô tình bỏ qua — nội dung mục 2.4. Nghĩa vụ thứ hai, ít được chú ý hơn: lược đồ phải cưỡng chế toàn vẹn xuyên phạm vi như mục 2.2.6 đã nêu, vì cơ chế lọc theo phạm vi không tự phát hiện một quan hệ đã được tạo ra sai ngay từ đầu.
+**Đánh đổi** gồm hai nghĩa vụ, không phải một. Nghĩa vụ thứ nhất: ranh giới tenant trở thành ranh giới logic, nên nền tảng phải có một cơ chế cô lập đủ mạnh ở tầng cơ sở dữ liệu, đặt tại vị trí mà mã nghiệp vụ không thể vô tình bỏ qua — nội dung mục 2.4. Nghĩa vụ thứ hai, ít được chú ý hơn: lược đồ phải cưỡng chế toàn vẹn xuyên phạm vi như mục 2.2.6 đã nêu, vì cơ chế lọc theo phạm vi không tự phát hiện một quan hệ đã được tạo ra sai ngay từ đầu.
 
 ### 2.2.8. Các chiều cô lập khác và hạn mức tài nguyên
 
-Cô lập trong hệ thống đa thuê bao không chỉ liên quan đến dữ liệu. Krebs và cộng sự phân tích các khía cạnh cô lập liên quan đến dữ liệu, an ninh và hiệu năng trong ứng dụng multi-tenant \cite{krebs_architectural_2012}. Trong phạm vi luận văn, cô lập dữ liệu và cô lập an ninh là trọng tâm được hiện thực và kiểm thử trực tiếp; chiều hiệu năng được phản ánh thông qua hạn mức tài nguyên theo tenant.
+Cô lập trong hệ thống đa thuê bao không chỉ liên quan đến dữ liệu. Krebs và cộng sự phân tích các khía cạnh cô lập liên quan đến dữ liệu, an ninh và hiệu năng trong ứng dụng multi-tenant \cite{krebs_architectural_2012}. Trong phạm vi luận văn, cô lập dữ liệu và cô lập an ninh là hai chiều được đặt làm trọng tâm nghiên cứu; chiều hiệu năng được xem xét ở mức hạn mức tài nguyên theo tenant. Mức độ hiện thực và kết quả đo của từng chiều thuộc Chương 3 và Chương 4.
 
 Hạn mức cần được nhìn như một cơ chế bảo vệ tài nguyên dùng chung, không chỉ là thành phần của bảng giá. Một tenant có thể vẫn tuân thủ ranh giới dữ liệu nhưng tiêu thụ số lượng mẫu, người dùng, tác vụ hoặc tài nguyên xử lý quá lớn, từ đó làm suy giảm dịch vụ dành cho tenant khác. Đây là dạng nhiễu mà ranh giới dữ liệu không chặn được, vì nó không đi qua đường dữ liệu. Vì vậy quota là một lớp giới hạn mức sử dụng trong không gian chia sẻ, độc lập với cơ chế cô lập dữ liệu.
 
@@ -484,7 +518,9 @@ Không phải mọi nội dung của nền tảng đều phù hợp để lưu t
 
 Với **tham chiếu định địa chỉ theo vị trí**, định danh cho biết đối tượng nằm ở đâu. Nội dung có thể bị thay thế tại cùng vị trí nếu hệ thống lưu trữ cho phép, nên vị trí tự nó không chứng minh nội dung vẫn là bản ban đầu. Với **tham chiếu định địa chỉ theo nội dung (content-addressed reference)**, định danh được suy ra từ giá trị băm mật mã của nội dung. Khi dùng một hàm băm có tính kháng va chạm phù hợp, việc chủ động tìm một nội dung khác có cùng giá trị băm được xem là bất khả thi về mặt tính toán trong điều kiện thực tế \cite{nist_fips180_4_2015}. Bên nhận có thể băm lại nội dung để kiểm tra nó có khớp với định danh đã lưu hay không.
 
-Cơ chế này cung cấp khả năng phát hiện thay đổi nội dung, nhưng **không phải cơ chế kiểm soát truy cập**. Row-Level Security bảo vệ hàng dữ liệu trong PostgreSQL và không tự mở rộng sang kho đối tượng bên ngoài, nên tài nguyên ngoài cơ sở dữ liệu cần một đường truy cập riêng dùng cùng ngữ cảnh tenant và cùng nguyên tắc mặc định từ chối. Hai nguyên lý chi phối đường đó: *complete mediation* yêu cầu mọi truy cập được kiểm tại điểm sử dụng, và một thành phần có quyền rộng truy cập tài nguyên thay mặt người dùng mà không kiểm lại phạm vi sẽ rơi vào dạng lỗi *confused deputy* \cite{saltzer_protection_1975,hardy_confused_1988}. Hệ quả thực tế: nếu kho cho phép đọc chỉ bằng việc biết định danh thì định danh trở thành một chứng chỉ truy cập, và tính bí mật của đường dẫn không phải một cơ chế bảo vệ.
+Cơ chế này cung cấp khả năng phát hiện thay đổi nội dung, nhưng **không phải cơ chế kiểm soát truy cập**. Row-Level Security bảo vệ hàng dữ liệu trong PostgreSQL và không tự mở rộng sang kho đối tượng bên ngoài. Tài nguyên ngoài cơ sở dữ liệu vì vậy cần một đường truy cập riêng, dùng cùng ngữ cảnh tenant và cùng nguyên tắc mặc định từ chối.
+
+Hai nguyên lý chi phối đường đó. *Complete mediation* yêu cầu mọi truy cập được kiểm tại điểm sử dụng. Một thành phần có quyền rộng truy cập tài nguyên thay mặt người dùng mà không kiểm lại phạm vi sẽ rơi vào dạng lỗi *confused deputy* \cite{saltzer_protection_1975,hardy_confused_1988}. Hệ quả thực tế: nếu kho cho phép đọc chỉ bằng việc biết định danh thì định danh trở thành một chứng chỉ truy cập, và tính bí mật của đường dẫn không phải một cơ chế bảo vệ.
 
 Việc lưu siêu dữ liệu và nội dung trên hai hệ thống khác nhau còn làm phát sinh bài toán ghi kép, được phân tích ở mục 2.7.4.
 
@@ -572,6 +608,16 @@ Từ góc độ lược đồ, một commons có quản trị cần có khả n�
 
 Cách hiện thực dữ liệu dùng chung cộng đồng trong hệ thống — chẳng hạn ánh xạ nó vào loại phạm vi nào, luồng phê duyệt nào và policy nào — là quyết định thiết kế của Chương 3, không phải tính chất phổ quát của data commons.
 
+Cần thêm một bất biến nữa, vì bốn thành phần trong công thức trên rất dễ bị đọc thành một tuyên bố về hiện trạng:
+
+\[
+\text{Khái niệm commons} \neq \text{Hiện thực hoá ở thời gian chạy}.
+\]
+
+Một hệ thống có thể **đăng ký** một phạm vi cộng đồng — đặt tên nó, dành riêng nó, cho nó một vị trí trong mô hình phân quyền — mà chưa vận hành đầy đủ vòng đời đóng góp, công bố và rút lui trên phạm vi đó. Hai trạng thái ấy khác nhau, và khoảng cách giữa chúng là khoảng cách giữa một phạm vi đã được định nghĩa và một miền dữ liệu đang hoạt động.
+
+Vì vậy Chương 2 mô tả commons như một **phạm vi được quản trị** ở mức khái niệm. Nó không phát biểu rằng một commons dữ liệu ngôn ngữ ký hiệu đã vận hành đầy đủ trong hệ thống nào; mức độ hiện thực hoá thuộc Chương 3, và phát biểu về nó phải nêu rõ phần nào đã có, phần nào mới là phạm vi đã đăng ký.
+
 ### 2.3.4. Ba cách chia sẻ danh mục giữa nền tảng và tenant
 
 Một tenant mới thường cần bắt đầu từ danh mục chuẩn của nền tảng thay vì từ một danh mục rỗng. Có ba cách tổ chức quan hệ này, khác nhau ở chỗ **kết quả phân giải một mục danh mục phụ thuộc vào cái gì**.
@@ -607,11 +653,21 @@ Sau thời điểm sao chép, tenant phát triển danh mục riêng độc lậ
 
 *Nguồn: tác giả tổng hợp; tiêu chí phân biệt chính là sự phụ thuộc của kết quả phân giải vào trạng thái thượng nguồn tại thời điểm truy vấn.*
 
-Bảng trên giữ sáu tiêu chí phân định. Ma trận đầy đủ, gồm chi phí lưu trữ, khả năng tuỳ biến danh mục riêng và khả năng truy vết nguồn gốc của từng mục danh mục, được trình bày tại **Phụ lục F.3, Bảng F-2**.
+Bảng trên giữ sáu tiêu chí. Bản đầy đủ, gồm chi phí lưu trữ, khả năng tuỳ biến danh mục riêng và khả năng truy vết nguồn gốc của từng mục danh mục, được trình bày tại **Phụ lục F.3, Bảng F-2**.
 
 **Định hướng được chọn và lý do.** Yêu cầu chi phối ở đây là khả năng tái lập: một bộ dữ liệu đã dùng cho một thí nghiệm phải truy lại được **đúng không gian nhãn** đã sử dụng. Cách A và cách B đều để kết quả phân giải phụ thuộc trạng thái thượng nguồn tại thời điểm truy vấn, nên cả hai đều không thỏa mãn yêu cầu này. Cách C thỏa mãn, đồng thời cho phép tenant mở rộng danh mục riêng mà không phải sửa danh mục gốc — một nhu cầu thực tế khi các đơn vị khác nhau ghi nhận những biến thể phương ngữ khác nhau.
 
-**Đánh đổi và điều kiện tiên quyết.** Chi phí trực tiếp là trùng lặp siêu dữ liệu và nghĩa vụ quản lý quan hệ giữa bản sao và nguồn. Nhưng ràng buộc quan trọng hơn là một điều kiện tiên quyết: **cơ chế ghim chỉ có ý nghĩa khi phiên bản được ghim là bất biến**. Nếu cùng một số phiên bản có thể trỏ tới nội dung khác sau một lần cập nhật, tham chiếu phiên bản không còn bảo đảm khả năng tái lập, và cách C suy thoái về đúng vấn đề của cách B — chỉ khác là ẩn kỹ hơn. Vì vậy lựa chọn ở mục này **phụ thuộc trực tiếp** vào cơ chế phiên bản bất biến trình bày ở mục 2.8.1.
+**Một bất biến rút ra từ so sánh trên.** Khác biệt giữa cách B và cách C không phải khác biệt về chi phí lưu trữ mà về **thời điểm** quan hệ với danh mục gốc phát huy tác dụng:
+
+\[
+\text{Kế thừa lúc TẠO} \neq \text{Tra cứu dự phòng lúc CHẠY}.
+\]
+
+Cách C dùng danh mục nền tảng làm **nguồn khởi tạo**: quan hệ ấy phát huy tác dụng đúng một lần, tại thời điểm tạo, và sau đó chấm dứt. Cách B dùng nó làm **đường lùi khi truy vấn**: quan hệ ấy phát huy tác dụng ở mọi lượt đọc, mãi mãi. Hai cơ chế nghe gần nhau vì cùng mô tả "tenant thừa hưởng danh mục chung", nhưng chỉ cơ chế thứ hai làm kết quả phân giải phụ thuộc trạng thái thượng nguồn.
+
+Phân biệt này còn có hệ quả về an toàn ngoài phạm vi tái lập: một đường lùi lúc chạy là một đường mà truy vấn của tenant này có thể chạm tới dữ liệu ngoài phạm vi của nó. Đó là lý do bất biến trên được phát biểu ở đây chứ không chỉ ở mục 2.8, và vì sao nó phải được giữ cùng bất biến \(\text{Dùng chung} \neq \text{Không có phạm vi}\) ở mục 2.3.2.
+
+**Đánh đổi và điều kiện tiên quyết.** Chi phí trực tiếp là trùng lặp siêu dữ liệu và nghĩa vụ quản lý quan hệ giữa bản sao và nguồn. Nhưng ràng buộc quan trọng hơn là một điều kiện tiên quyết: **cơ chế ghim chỉ có ý nghĩa khi phiên bản được ghim là bất biến**. Nếu cùng một số phiên bản có thể trỏ tới nội dung khác sau một lần cập nhật, tham chiếu phiên bản không còn bảo đảm khả năng tái lập, và cách C suy thoái về đúng vấn đề của cách B, nhưng khó phát hiện hơn vì tham chiếu vẫn trông ổn định. Vì vậy lựa chọn ở mục này **phụ thuộc trực tiếp** vào cơ chế phiên bản bất biến trình bày ở mục 2.8.1.
 
 > ### ▣ HÌNH 2-4 — Ba cách chia sẻ danh mục và sự phụ thuộc vào trạng thái thượng nguồn
 > **Loại:** sơ đồ ba nhánh có trục thời gian · **Công cụ đề nghị:** draw.io
@@ -648,7 +704,7 @@ Một sai lầm thường gặp là đồng nhất "cô lập tenant" với "cô
 
 *Nguồn: tác giả tổng hợp từ \cite{krebs_architectural_2012,saltzer_protection_1975}.*
 
-Hai tầng cuối đáng được nhấn mạnh vì chúng thường bị bỏ sót. Kho nội dung nằm ngoài phạm vi cưỡng chế của cơ sở dữ liệu, như đã nêu ở mục 2.2.9. Tác vụ nền thì chạy **ngoài vòng đời của một yêu cầu HTTP**, nên không tự nhiên thừa hưởng ngữ cảnh tenant từ phiên người dùng; nếu thiết kế không quy định rõ tác vụ nền lấy ngữ cảnh từ đâu, đường dễ nhất là cho worker chạy với quyền rộng — và khi đó toàn bộ công sức ở ba tầng trên trở thành vô nghĩa đối với mọi dữ liệu đi qua worker.
+Hai tầng cuối thường bị bỏ sót. Kho nội dung nằm ngoài phạm vi cưỡng chế của cơ sở dữ liệu, như đã nêu ở mục 2.2.9. Tác vụ nền thì chạy **ngoài vòng đời của một yêu cầu HTTP**, nên không tự nhiên thừa hưởng ngữ cảnh tenant từ phiên người dùng; nếu thiết kế không quy định rõ tác vụ nền lấy ngữ cảnh từ đâu, cách cài đặt đơn giản nhất là cho worker chạy với quyền rộng, và khi đó ranh giới ở ba tầng trên không còn hiệu lực đối với mọi dữ liệu đi qua worker.
 
 > ### ▣ HÌNH 2-5 — Năm tầng cần cô lập trên đường đi của một yêu cầu
 > **Loại:** sơ đồ luồng có các trạm kiểm soát · **Công cụ đề nghị:** draw.io
@@ -669,7 +725,7 @@ Thứ hai, **lỗi không sinh triệu chứng**. Một truy vấn sót điều 
 
 Thứ ba, và là điểm quyết định, **cơ chế phụ thuộc vào trí nhớ của người viết mã trong tương lai**. Một quy ước được thiết lập hôm nay không ràng buộc được hàm sẽ được viết sáu tháng sau bởi người chưa từng đọc quy ước đó. Vì vậy khả năng bảo vệ suy giảm theo thời gian và theo số lượng người tham gia, ngay cả khi không có thay đổi nào về kiến trúc.
 
-Cần nói rõ: đây không phải một lập luận lý thuyết. Kinh nghiệm xây dựng chính hệ thống này cung cấp bằng chứng cho nhận định trên, và bằng chứng đó được trình bày trong biên bản quyết định kiến trúc ở Phụ lục E.
+Đặc tính của lớp lỗi này quyết định vì sao lọc ở tầng ứng dụng không đủ. Lỗi thiếu điều kiện lọc theo phạm vi có ba tính chất bất lợi cùng lúc: nó **phân tán** — có thể xuất hiện ở bất kỳ truy vấn nào trong hệ thống; nó **im lặng** — một truy vấn thiếu điều kiện vẫn chạy đúng cú pháp và trả về kết quả trông hợp lệ; và số cơ hội mắc lỗi **tăng theo số đường truy vấn**, tức tăng liên tục suốt vòng đời hệ thống. Một cơ chế phòng vệ dựa trên việc mọi truy vấn đều được viết đúng vì vậy yếu dần theo thời gian, kể cả khi quy ước ban đầu được phát biểu rõ ràng.
 
 ### 2.4.3. Gán phạm vi tự động ở tầng trung gian
 
@@ -719,7 +775,7 @@ Mà viết:
 
 > Cưỡng chế ở tầng cơ sở dữ liệu **đưa điều kiện phạm vi ra khỏi trách nhiệm của truy vấn nghiệp vụ thông thường** và loại bỏ lớp lỗi thiếu điều kiện lọc, **trong phạm vi mô hình đe dọa và ranh giới tin cậy đã nêu**.
 
-Phát biểu thứ hai yếu hơn nhưng đúng, và nó vẫn là một phát biểu mạnh: lớp lỗi mà nó loại bỏ chính là lớp lỗi đã thực sự xảy ra trong hệ thống này, ghi ở Phụ lục E.
+Phát biểu thứ hai yếu hơn nhưng đúng, và nó vẫn là một phát biểu mạnh: lớp lỗi mà nó loại bỏ chính là lớp lỗi phân tán, im lặng và tăng theo số đường truy vấn đã mô tả ở mục 2.4.2 — tức lớp lỗi mà một quy ước lập trình khó chống lại nhất. Bằng chứng thực nghiệm về việc lớp lỗi này có xuất hiện hay không trong một hệ thống cụ thể thuộc phạm vi Chương 4.
 
 > ### ▣ HÌNH 2-6 — Hai mô hình đe dọa và ranh giới tin cậy của cơ chế cô lập
 > **Loại:** sơ đồ ranh giới tin cậy · **Công cụ đề nghị:** draw.io
@@ -791,7 +847,7 @@ Mỗi lớp xử lý một loại lỗi khác nhau, và không lớp nào phủ 
 
 *Nguồn: tác giả tổng hợp từ \cite{postgresql_rls_2026,saltzer_protection_1975,krebs_architectural_2012,bezemer_multi-tenant_2010,shostack_threat_2014}.*
 
-Bảng trên giữ bảy tiêu chí quyết định. Ma trận đầy đủ mười tiêu chí, bổ sung mức độ dễ triển khai, khả năng kiểm chứng bằng kiểm thử hành vi và chi phí vận hành, được trình bày tại **Phụ lục F.4, Bảng F-3**.
+Bảng trên giữ bảy tiêu chí. Bản đầy đủ mười tiêu chí, bổ sung mức độ dễ triển khai, khả năng kiểm chứng bằng kiểm thử hành vi và chi phí vận hành, được trình bày tại **Phụ lục F.4, Bảng F-3**.
 
 **Định hướng được chọn.** Với mô hình lược đồ dùng chung đã chọn ở mục 2.2.7, cưỡng chế ở tầng cơ sở dữ liệu là tầng bảo vệ chính, kết hợp với ràng buộc lược đồ, phân quyền ở tầng ứng dụng và kiểm soát phạm vi ở đường đọc nội dung. Lập luận quyết định là tiêu chí "khả năng suy giảm theo thời gian": một cơ chế dựa vào việc lập trình viên nhớ làm đúng sẽ hỏng ở **hàm được viết sau khi quy ước được đặt ra**, và hỏng theo kiểu không sinh triệu chứng. Đặt cơ chế ở cơ sở dữ liệu bảo vệ luôn cả những đường mã chưa được viết.
 
@@ -877,7 +933,7 @@ Trong hệ đa thuê bao, quan hệ `Người dùng → Vai trò → Quyền` ch
 
 Casbin mô tả mô hình RBAC with Domains, trong đó domain có thể được dùng để biểu diễn phạm vi mà một lần gán vai có hiệu lực \cite{casbin_authors_casbin_2024,casbin_authors_rbac_2026}. Với hệ thống đang xét, tenant, workspace và project tạo thành các loại phạm vi mà policy có thể tham chiếu.
 
-Điểm cần nhấn mạnh — và là một trong những phân biệt dễ bỏ sót nhất của mục này — là quan hệ chứa giữa các phạm vi **không tự động tạo ra kế thừa quyền**:
+Quan hệ chứa giữa các phạm vi **không tự động tạo ra kế thừa quyền**:
 
 \[
 \text{Phân cấp tài nguyên} \neq \text{Phân cấp vai trò}.
@@ -937,7 +993,7 @@ Một thiết kế phổ biến là dùng access token thời gian sống ngắn
 
 Mức thứ ba trả lời một câu hỏi mà hai mức đầu không trả lời: **người đang cầm phiên này có còn là chủ sở hữu hợp pháp của nó tại thời điểm hành động hay không**. Một phiên hợp lệ chỉ chứng minh rằng tại một thời điểm nào đó trong quá khứ, ai đó đã xác thực thành công. Với một thiết bị bị bỏ lại trong trạng thái đã đăng nhập, hoặc một token bị đánh cắp còn trong hạn, hai mức đầu vẫn cho kết quả "được phép" trong khi giả định nền của chúng đã không còn đúng.
 
-Hướng dẫn NIST SP 800-63B-4 trình bày các yêu cầu và khuyến nghị về xác thực, quản lý phương tiện xác thực, xác thực nhiều yếu tố và vòng đời xác thực \cite{nist_sp800_63b_2025}. Trong kiến trúc ứng dụng, điều này tạo cơ sở cho cơ chế **xác thực lại (step-up authentication)** trước các thao tác có mức rủi ro cao. Tiêu chí xác định thao tác nào cần mức thứ ba không phải mức độ "quan trọng" một cách cảm tính, mà là ba tính chất cụ thể: thao tác khó hoặc không đảo ngược được; thao tác mở rộng quyền của chính người thực hiện hoặc của người khác; hoặc thao tác đưa dữ liệu ra ngoài phạm vi kiểm soát hiện tại. Ba nhóm này trùng phần lớn với nhóm sự kiện cần ghi nhận đặc biệt trong nhật ký kiểm toán ở mục 2.5.9 — không phải trùng hợp, vì cả hai đều xuất phát từ mức độ hệ quả của hành động. Cách hiện thực cụ thể thuộc Chương 3.
+Hướng dẫn NIST SP 800-63B-4 trình bày các yêu cầu và khuyến nghị về xác thực, quản lý phương tiện xác thực, xác thực nhiều yếu tố và vòng đời xác thực \cite{nist_sp800_63b_2025}. Trong kiến trúc ứng dụng, điều này tạo cơ sở cho cơ chế **xác thực lại (step-up authentication)** trước các thao tác có mức rủi ro cao. Tiêu chí xác định thao tác nào cần mức thứ ba không phải mức độ "quan trọng" một cách cảm tính, mà là ba tính chất cụ thể: thao tác khó hoặc không đảo ngược được; thao tác mở rộng quyền của chính người thực hiện hoặc của người khác; hoặc thao tác đưa dữ liệu ra ngoài phạm vi kiểm soát hiện tại. Ba nhóm này trùng phần lớn với nhóm sự kiện cần ghi nhận đặc biệt trong nhật ký kiểm toán ở mục 2.5.9 . Cả hai đều xuất phát từ mức độ hệ quả của hành động. Cách hiện thực cụ thể thuộc Chương 3.
 
 ### 2.5.9. Khả năng truy vết và quy trách nhiệm
 
@@ -953,7 +1009,7 @@ Cần phân biệt hai loại nhật ký thường bị gộp làm một.
 AuditEvent = (\text{Chủ thể}, \text{Hành động}, \text{Phạm vi}, \text{Tài nguyên}, \text{Thời điểm}, \text{Kết quả}).
 \]
 
-Thành phần **kết quả** đáng được nhấn mạnh vì nó hay bị bỏ: một nỗ lực thực hiện hành động **bị từ chối** cũng là một sự kiện kiểm toán, và trong nhiều trường hợp là sự kiện đáng chú ý hơn một hành động thành công. Nếu chỉ ghi những gì thành công, hệ thống không có dữ liệu nào về việc có ai đó đang thử vượt ranh giới.
+Thành phần **kết quả** hay bị bỏ: một nỗ lực thực hiện hành động **bị từ chối** cũng là một sự kiện kiểm toán, và trong nhiều trường hợp là sự kiện đáng chú ý hơn một hành động thành công. Nếu chỉ ghi những gì thành công, hệ thống không có dữ liệu nào về việc có ai đó đang thử vượt ranh giới.
 
 **Bảng 2-21. Nhật ký vận hành và nhật ký kiểm toán**
 
@@ -967,7 +1023,7 @@ Thành phần **kết quả** đáng được nhấn mạnh vì nó hay bị b�
 
 *Nguồn: tác giả tổng hợp từ \cite{saltzer_protection_1975,nist_sp800_63b_2025}; yêu cầu về khả năng chứng minh liên hệ với các nghĩa vụ ở mục 2.9.*
 
-Bảng trên giữ năm tiêu chí phân định hai loại nhật ký. Bản đầy đủ, bổ sung nhóm người đọc, thời gian lưu và mức kiểm soát việc sửa hoặc xoá, được trình bày tại **Phụ lục F.5, Bảng F-6**.
+Bảng trên giữ năm tiêu chí. Bản đầy đủ, bổ sung nhóm người đọc, thời gian lưu và mức kiểm soát việc sửa hoặc xoá, được trình bày tại **Phụ lục F.5, Bảng F-6**.
 
 Một nhóm sự kiện cần mức ghi nhận cao hơn thao tác đọc ghi thông thường: thay đổi việc gán vai và quyền; xóa hoặc thanh lọc dữ liệu; công bố một phiên bản ra ngoài; thay đổi trạng thái đồng thuận; và thay đổi cấu hình của chính cơ chế kiểm soát. Đặc điểm chung của nhóm này là chúng **thay đổi tập những gì có thể xảy ra về sau**, chứ không chỉ thay đổi dữ liệu — đúng nhóm cần mức chứng minh danh tính thứ ba ở mục 2.5.8.
 
@@ -996,9 +1052,35 @@ Việc phân lớp giúp tránh một lỗi phổ biến: dùng RBAC để thay 
 
 Tên đề tài có hai vế ngang hàng: **thu thập** và **quản lý** dữ liệu. Các mục 2.2–2.5 và 2.8–2.9 xây dựng cơ sở cho vế thứ hai. Mục này xây dựng cơ sở cho vế thứ nhất, và cần được đọc như một trục lý thuyết độc lập chứ không phải phần phụ của mục biểu diễn dữ liệu.
 
-Phạm vi của mục cần được giới hạn rõ ngay từ đầu. Luận văn nghiên cứu **thu thập dữ liệu như một quá trình có tổ chức và có quản trị**: đơn vị thu, phương thức thu, chiến lược thu, độ bao phủ, và kiểm tra tại thời điểm thu. Luận văn **không** nghiên cứu xử lý tín hiệu thô — cắt ghép video, chuẩn hóa khung hình, khử nhiễu, phân đoạn tự động, tăng cường dữ liệu hay so sánh định dạng nén. Những nội dung đó thuộc đường ống tiền xử lý thị giác máy tính, nằm ngoài phạm vi của một phân hệ thu thập và quản lý dữ liệu. Thành phần ước lượng điểm mốc xuất hiện ở mục 2.6.6 vì nó là **kỹ thuật thu nhận** mà đường thu sử dụng, không phải vì nó là đối tượng nghiên cứu.
+Phạm vi của mục cần được giới hạn rõ ngay từ đầu. Luận văn nghiên cứu **thu thập dữ liệu như một quá trình có tổ chức và có quản trị**: đơn vị thu, phương thức thu, chiến lược thu, độ bao phủ, và kiểm tra tại thời điểm thu. Luận văn **không** nghiên cứu xử lý tín hiệu thô — cắt ghép video, chuẩn hóa khung hình, khử nhiễu, phân đoạn tự động, tăng cường dữ liệu hay so sánh định dạng nén. Những nội dung đó thuộc đường ống tiền xử lý thị giác máy tính, nằm ngoài phạm vi của một phân hệ thu thập và quản lý dữ liệu. Thành phần ước lượng điểm mốc xuất hiện ở mục 2.6.7 vì nó là **kỹ thuật thu nhận** mà đường thu sử dụng, không phải vì nó là đối tượng nghiên cứu.
 
-### 2.6.1. Đơn vị thu thập và mô hình phiên thu
+### 2.6.1. Ba khái niệm bị gộp dưới một chữ "thu"
+
+Tiếng Việt dùng "thu thập" và "thu nhận" gần như thay thế được cho nhau, còn tiếng Anh phân biệt ba thuật ngữ ở ba tầng khác nhau. Phân biệt này cần được đặt ngay đầu mục, vì phần còn lại của 2.6 nói về ba thứ khác nhau và một thuật ngữ chung sẽ làm chúng lẫn vào nhau.
+
+**Thu thập dữ liệu (data collection)** là **toàn bộ quá trình có tổ chức** làm cho dữ liệu hình thành hoặc được tiếp nhận: xác định mục tiêu bao phủ, tổ chức phiên thu, xác lập giao thức, phân công vai trò, đặt điều kiện sử dụng. Đây là một khái niệm ở tầng **quy trình và quản trị**, không phải ở tầng kỹ thuật.
+
+**Thu nhận tín hiệu (data acquisition)** là **bước kỹ thuật** lấy tín hiệu hoặc một biểu diễn của tín hiệu từ nguồn quan sát: ghi hình, ước lượng điểm mốc, lấy mẫu theo tần số khung. Đây là bước duy nhất trong ba bước có tiếp xúc với hiện tượng vật lý.
+
+**Nạp dữ liệu vào nền tảng (data ingestion / import)** là đưa dữ liệu **đã tồn tại bên ngoài** vào trong ranh giới của hệ thống: nhận tệp người dùng tải lên, nhập từ một bộ dữ liệu khác, ánh xạ không gian nhãn của nguồn sang danh mục của hệ thống.
+
+Quan hệ giữa ba khái niệm là quan hệ **bao hàm ở tầng khác nhau**, không phải ba bước nối tiếp của một dây chuyền:
+
+\[
+\text{Thu thập} \supset \{\text{Thu nhận tín hiệu},\ \text{Nạp dữ liệu}\}.
+\]
+
+Phép bao hàm này là **phân loại đường vào trong phạm vi nền tảng**, không phải một phát biểu về toàn bộ lịch sử hình thành của dữ liệu. Xét tại ranh giới tiếp nhận của nền tảng, một mẫu hoặc được hình thành qua đường thu nhận trực tiếp, hoặc được đưa vào từ dữ liệu đã tồn tại. Hai khái niệm mô tả hai cơ chế đầu vào khác nhau; chúng **không** phủ định việc dữ liệu được nạp vào có thể đã bắt nguồn từ một quá trình thu nhận trước đó ở bên ngoài nền tảng.
+
+Phân biệt này quan trọng vì nó tránh một suy luận sai dễ mắc: từ chỗ một mẫu đi vào bằng đường nạp, kết luận rằng nó không có nguồn gốc thu nhận nào. Điều đúng là nền tảng **không quan sát được** quá trình thu nhận ấy, chứ không phải quá trình ấy không tồn tại. Nói cách khác, thu nhận và nạp là hai đường vào khác nhau của cùng một quá trình thu thập, và mỗi mẫu đi vào bằng đúng một trong hai — tính "đúng một" nói về cơ chế đầu vào, không nói về tiểu sử của dữ liệu. Hai hệ quả:
+
+Thứ nhất, một nền tảng có thể tổ chức thu thập rất tốt mà **không** tự thực hiện bước thu nhận tín hiệu nào — nếu toàn bộ dữ liệu đến bằng đường nạp. Ngược lại, một hệ thống thực hiện thu nhận tín hiệu tinh vi vẫn có thể **không có** quá trình thu thập: nó ghi được dữ liệu nhưng không trả lời được dữ liệu ấy phục vụ mục tiêu bao phủ nào, thu theo giao thức nào, dùng được cho việc gì.
+
+Thứ hai, và quan trọng hơn cho các mục sau: **nguồn gốc của một mẫu phụ thuộc vào nó đi vào bằng đường nào.** Ở đường thu nhận, hệ thống *quan sát* được bối cảnh vì chính nó dẫn dắt quy trình. Ở đường nạp, mọi siêu dữ liệu về bối cảnh đều là *khai báo* của bên đóng góp. Đây là gốc của phân biệt quan sát – khai báo ở mục 2.6.3.
+
+Phân biệt này thuần tuý khái niệm. Việc một hệ thống cụ thể có hiện thực đường nạp hay không, và hiện thực tới mức nào, là câu hỏi của Chương 3; Chương 2 chỉ khẳng định rằng nếu cả hai đường cùng tồn tại thì chúng phải phân biệt được trong lược đồ, vì chúng sinh ra siêu dữ liệu có mức tin cậy khác nhau.
+
+### 2.6.2. Đơn vị thu thập và mô hình phiên thu
 
 Một hệ thống thu dữ liệu có thể tổ chức quanh hai đơn vị khác nhau, và lựa chọn giữa chúng có hệ quả sâu hơn vẻ ngoài.
 
@@ -1010,7 +1092,7 @@ Một hệ thống thu dữ liệu có thể tổ chức quanh hai đơn vị kh
 \text{Người tham gia} \rightarrow \text{Phiên thu} \rightarrow \text{Mẫu}.
 \]
 
-Một phiên thu là **bối cảnh chung của một nhóm mẫu được thu cùng nhau**, và có thể gắn với: người ký, người vận hành, phạm vi tenant và dự án, thời điểm, phương thức thu, tập lớp ký hiệu được nhắm tới, và trạng thái đồng thuận áp dụng cho phiên đó.
+Một phiên thu là **bối cảnh chung của một nhóm mẫu được thu cùng nhau**, và có thể gắn với: người ký, người vận hành, phạm vi tenant và dự án, thời điểm, phương thức thu, và tập lớp ký hiệu được nhắm tới.
 
 Lý do phiên thu là một thực thể cần thiết chứ không phải siêu dữ liệu tùy chọn nằm ở những câu hỏi mà mô hình chỉ có `Người ký → Mẫu` **không trả lời được**:
 
@@ -1019,11 +1101,13 @@ Lý do phiên thu là một thực thể cần thiết chứ không phải siêu
 - Một lần thu đã bao phủ những lớp nào, và còn thiếu lớp nào so với mục tiêu?
 - Hai mẫu giống nhau bất thường là do trùng lặp dữ liệu hay vì chúng đến từ cùng một phiên?
 
-Câu hỏi thứ hai đáng được nhấn mạnh vì nó là câu hỏi vận hành thật. Không có thực thể phiên, phạm vi ảnh hưởng của một sự cố thu chỉ có thể ước lượng bằng cách lọc theo thời gian và người ký — một phép suy đoán, không phải một truy vấn.
+Câu hỏi thứ hai là câu hỏi vận hành thật. Không có thực thể phiên, phạm vi ảnh hưởng của một sự cố thu chỉ có thể ước lượng bằng cách lọc theo thời gian và người ký — một phép suy đoán, không phải một truy vấn.
 
-Phiên thu cũng là đơn vị tự nhiên để gắn **trạng thái đồng thuận** (mục 2.9.3) và **phương thức thu** (mục 2.6.2), vì cả hai đều là thuộc tính của bối cảnh chứ không phải của từng mẫu riêng lẻ. Ghi chúng ở mức mẫu sẽ lặp lại cùng một giá trị hàng trăm lần và tạo ra khả năng các bản sao lệch nhau — đúng dạng bất thường mà chuẩn hóa ở mục 2.1.6 loại trừ.
+Phiên thu cũng là đơn vị tự nhiên để gắn **phương thức thu** (mục 2.6.3), vì đó là thuộc tính của bối cảnh chứ không phải của từng mẫu riêng lẻ. Ghi nó ở mức mẫu sẽ lặp lại cùng một giá trị hàng trăm lần và tạo ra khả năng các bản sao lệch nhau — đúng dạng bất thường mà chuẩn hóa ở mục 2.1.6 loại trừ. Khi nghiệp vụ yêu cầu, phiên thu cũng có thể liên kết tới bối cảnh quản trị hoặc cơ sở sử dụng đang áp dụng cho lần thu đó.
 
-### 2.6.2. Ba phương thức thu nhận dữ liệu
+Cần tránh một suy diễn gần đúng ở đây: **đồng thuận không phải là một thuộc tính của phiên thu.** Theo mô hình ở mục 2.9.3, đồng thuận là quan hệ giữa một *chủ thể dữ liệu* với một *văn bản*, ở một *phiên bản*, tại một *thời điểm*, cho một *phạm vi sử dụng* — và nó được kiểm tại thao tác mà phạm vi ấy điều chỉnh, chứ không phải tại nơi dữ liệu được tạo ra. Một phiên thu có thể tham chiếu tới trạng thái đồng thuận đang áp dụng, nhưng lưu đồng thuận **như một trường của phiên thu** sẽ làm mất hai tính chất thiết yếu: nó gắn với chủ thể chứ không với bối cảnh, và nó thay đổi được sau thời điểm thu.
+
+### 2.6.3. Ba phương thức thu nhận dữ liệu
 
 Không phải mọi mẫu đều đến với hệ thống theo cùng một cách, và **cách nó đến là một phần của nguồn gốc dữ liệu**.
 
@@ -1045,23 +1129,23 @@ Không phải mọi mẫu đều đến với hệ thống theo cùng một các
 
 *Nguồn: tác giả tổng hợp; tiêu chí phân biệt chính là việc siêu dữ liệu bối cảnh do hệ thống quan sát hay do bên đóng góp khai báo.*
 
-Bảng trên giữ năm tiêu chí ảnh hưởng trực tiếp tới nguồn gốc và mức kiểm soát quy trình. Ma trận đầy đủ giữa thu trực tiếp, đóng góp tệp đã có và nhập từ nguồn ngoài — bổ sung tính đồng nhất về định dạng, cách ánh xạ vào danh mục lớp và khả năng tận dụng dữ liệu đã tồn tại — được trình bày tại **Phụ lục F.6, Bảng F-7**.
+Bảng trên giữ năm tiêu chí. Bản đầy đủ giữa thu trực tiếp, đóng góp tệp đã có và nhập từ nguồn ngoài — bổ sung tính đồng nhất về định dạng, cách ánh xạ vào danh mục lớp và khả năng tận dụng dữ liệu đã tồn tại — được trình bày tại **Phụ lục F.6, Bảng F-7**.
 
 **Kết luận định hướng.** Nền tảng **không nên coi mọi mẫu là như nhau chỉ vì chúng cùng được lưu ở một định dạng**. Phương thức thu là một thuộc tính nguồn gốc phải được ghi nhận, vì nó cho biết **quan hệ người ký được thiết lập bằng cách nào**.
 
-Cần phát biểu hệ quả này ở đúng mức. Sự phân biệt quan sát – khai báo **không tự nó** chia dữ liệu thành phần đáng tin và phần không đáng tin: một định danh người ký được khai báo vẫn có thể hoàn toàn đáng tin nếu nguồn nhập có nguồn gốc và tài liệu chứng minh tốt. Phát biểu đúng là:
+Sự phân biệt quan sát – khai báo **không tự nó** chia dữ liệu thành phần đáng tin và phần không đáng tin: một định danh người ký được khai báo vẫn có thể hoàn toàn đáng tin nếu nguồn nhập có nguồn gốc và tài liệu chứng minh tốt. Phát biểu đúng là:
 
 > Phân tích độc lập người ký có cơ sở vững nhất khi danh tính người ký được ghi nhận như một phần của bối cảnh thu có kiểm soát. Với dữ liệu được nhập hoặc đóng góp về sau, độ tin cậy của phân tích phụ thuộc vào nguồn gốc và bằng chứng chống lưng cho siêu dữ liệu người ký được khai báo.
 
 Nói cách khác, mức tin cậy của một trường siêu dữ liệu phụ thuộc vào **cách nó được xác lập**, chứ không chỉ vào giá trị của nó. Vì vậy điều hệ thống cần làm không phải là xếp hạng nguồn dữ liệu, mà là **ghi lại cách xác lập** để bên tiêu thụ ở hạ nguồn tự đánh giá được — nếu hai loại này không phân biệt được trong lược đồ, giới hạn đó không phát biểu được ở bất kỳ đâu về sau.
 
-Cách phân biệt này cũng nối trực tiếp với ranh giới tin cậy ở mục 2.6.7: dữ liệu do máy khách hoặc người đóng góp cung cấp nằm ngoài phạm vi quan sát của máy chủ, và phải được xử lý theo đúng nguyên tắc dành cho đầu vào không được tin cậy.
+Cách phân biệt này cũng nối trực tiếp với ranh giới tin cậy ở mục 2.6.8: dữ liệu do máy khách hoặc người đóng góp cung cấp nằm ngoài phạm vi quan sát của máy chủ, và phải được xử lý theo đúng nguyên tắc dành cho đầu vào không được tin cậy.
 
-### 2.6.3. Thu có hướng dẫn và đóng góp mở
+### 2.6.4. Thu có hướng dẫn và đóng góp mở
 
 Từ ba phương thức trên phát sinh một quyết định về **chiến lược thu**.
 
-**Thu có hướng dẫn.** Hệ thống dẫn người dùng qua một trình tự xác định: chọn người ký → chọn lớp ký hiệu cần thu → thực hiện → ghi mẫu. Vì lớp và người ký được xác định **trước** khi mẫu tồn tại, siêu dữ liệu đầy đủ theo thiết kế chứ không nhờ kỷ luật của người nhập. Độ bao phủ (mục 2.6.4) theo dõi được theo thời gian thực. Đổi lại, quy trình cứng hơn và đòi hỏi tổ chức phiên thu.
+**Thu có hướng dẫn.** Hệ thống dẫn người dùng qua một trình tự xác định: chọn người ký → chọn lớp ký hiệu cần thu → thực hiện → ghi mẫu. Vì lớp và người ký được xác định **trước** khi mẫu tồn tại, siêu dữ liệu đầy đủ theo thiết kế chứ không nhờ kỷ luật của người nhập. Độ bao phủ (mục 2.6.5) theo dõi được theo thời gian thực. Đổi lại, quy trình cứng hơn và đòi hỏi tổ chức phiên thu.
 
 **Đóng góp mở.** Người dùng tải dữ liệu lên rồi mô tả sau. Rào cản đóng góp thấp và tận dụng được dữ liệu đã có, nhưng siêu dữ liệu phụ thuộc hoàn toàn vào khai báo, quan hệ người ký và phiên thu có thể không xác định được, và việc ánh xạ nhãn dễ sai lệch.
 
@@ -1077,11 +1161,11 @@ Từ ba phương thức trên phát sinh một quyết định về **chiến l�
 
 *Nguồn: tác giả tổng hợp.*
 
-**Định hướng được chọn và lý do.** Chiến lược kết hợp phù hợp: **thu có hướng dẫn cho dữ liệu thu mới, kèm một đường đóng góp riêng cho dữ liệu đã tồn tại với yêu cầu siêu dữ liệu tường minh**. Hai đường phục vụ hai mục tiêu khác nhau và không nên bị ép về một quy trình chung. Ép dữ liệu đã có đi qua quy trình thu có hướng dẫn sẽ loại bỏ nguồn dữ liệu hợp lệ; ngược lại, hạ chuẩn luồng thu mới xuống mức của luồng đóng góp sẽ vứt bỏ chính lợi thế mà một nền tảng thu có được so với một thư mục tệp.
+**Định hướng được chọn và lý do.** Chiến lược kết hợp phù hợp: **thu có hướng dẫn cho dữ liệu thu mới, kèm một đường đóng góp riêng cho dữ liệu đã tồn tại với yêu cầu siêu dữ liệu tường minh**. Hai đường phục vụ hai mục tiêu khác nhau và không nên bị ép về một quy trình chung. Ép dữ liệu đã có đi qua quy trình thu có hướng dẫn sẽ loại bỏ nguồn dữ liệu hợp lệ; ngược lại, hạ chuẩn luồng thu mới xuống mức của luồng đóng góp sẽ làm mất chính lợi thế mà một nền tảng thu có được so với một thư mục tệp.
 
 **Đánh đổi.** Hệ thống phải duy trì hai đường thu với hai tập ràng buộc khác nhau, và — quan trọng hơn — phải **ghi nhận mẫu đến theo đường nào**, vì nếu không, sự khác biệt về độ tin cậy của siêu dữ liệu sẽ biến mất khỏi dữ liệu và không phát biểu được ở hạ nguồn.
 
-### 2.6.4. Độ bao phủ và các chiều lấy mẫu
+### 2.6.5. Độ bao phủ và các chiều lấy mẫu
 
 Đây là điểm mà một nền tảng thu thập khác rõ nhất so với một kho chứa tệp: **thu thập không phải là làm tăng số lượng mẫu**.
 
@@ -1101,9 +1185,9 @@ Một bộ dữ liệu có thể có rất nhiều mẫu mà vẫn không dùng 
 | Phiên thu | Bao nhiêu mẫu đến từ cùng một bối cảnh thu duy nhất? | Đa dạng biểu kiến cao nhưng đa dạng thực tế thấp |
 | Phương thức thu | Tỉ lệ giữa thu trực tiếp, đóng góp và nhập ngoài là bao nhiêu? | Không biết phần nào của dữ liệu có nguồn gốc quan sát được |
 
-*Nguồn: tác giả tổng hợp; các chiều suy ra từ đặc trưng dữ liệu ở mục 2.1.1 và mô hình phiên thu ở mục 2.6.1.*
+*Nguồn: tác giả tổng hợp; các chiều suy ra từ đặc trưng dữ liệu ở mục 2.1.1 và mô hình phiên thu ở mục 2.6.2.*
 
-Chiều **phiên thu** là chiều dễ bị bỏ qua nhất và cũng tinh vi nhất. Một trăm mẫu của cùng một lớp, cùng một người ký, thu liên tiếp trong một buổi, không cung cấp lượng thông tin tương đương một trăm mẫu trải trên nhiều buổi khác nhau — nhưng hai trường hợp này **trông giống hệt nhau** nếu hệ thống chỉ đếm số mẫu. Chỉ có thực thể phiên thu mới cho phép phân biệt.
+Chiều **phiên thu** dễ bị bỏ qua nhất. Một trăm mẫu của cùng một lớp, cùng một người ký, thu liên tiếp trong một buổi, không cung cấp lượng thông tin tương đương một trăm mẫu trải trên nhiều buổi khác nhau — nhưng hai trường hợp này **trông giống hệt nhau** nếu hệ thống chỉ đếm số mẫu. Chỉ có thực thể phiên thu mới cho phép phân biệt.
 
 **Phạm vi trách nhiệm của nền tảng cần được phát biểu thận trọng.** Luận văn không đề xuất một giao thức lấy mẫu tối ưu, không thực hiện lấy mẫu phân tầng có kiểm soát và không tuyên bố dữ liệu thu được là đại diện cho một tổng thể. Phát biểu đúng là:
 
@@ -1111,7 +1195,7 @@ Chiều **phiên thu** là chiều dễ bị bỏ qua nhất và cũng tinh vi n
 
 Đây là ranh giới phải giữ. Một hệ thống đo được độ lệch là một hệ thống cho phép người dùng nhận ra vấn đề và điều chỉnh kế hoạch thu; một hệ thống *tuyên bố* dữ liệu cân bằng lại đang đưa ra một khẳng định thống kê mà nó không có cơ sở để đưa ra.
 
-### 2.6.5. Giao thức thu như một khái niệm tách khỏi lược đồ
+### 2.6.6. Giao thức thu như một khái niệm tách khỏi lược đồ
 
 Hai đơn vị cùng sử dụng một nền tảng, với cùng một lược đồ dữ liệu, vẫn có thể tạo ra hai bộ dữ liệu **không so sánh được với nhau** nếu họ thu theo hai quy trình khác nhau. Từ đó phát sinh một phân biệt cần giữ:
 
@@ -1129,7 +1213,7 @@ Protocol = (\text{Tập lớp nhắm tới},\ \text{Bối cảnh người tham g
 
 Cần nêu rõ giới hạn: đây là một **khái niệm để giải thích** vai trò của siêu dữ liệu phiên thu và quy tắc kiểm tra; Chương 2 không khẳng định hệ thống phải có một thực thể mang đúng tên gọi này. Mức độ hiện thực hóa thuộc Chương 3.
 
-### 2.6.6. Các mức biểu diễn dữ liệu thu nhận
+### 2.6.7. Các mức biểu diễn dữ liệu thu nhận
 
 **Video nguồn.** Giữ toàn bộ tín hiệu quan sát: bàn tay, cơ thể, khuôn mặt và bối cảnh. Đây là biểu diễn duy nhất cho phép **trích xuất lại một loại đặc trưng khác về sau**, nên là biểu diễn duy nhất không khóa chặt hệ thống vào giả định nghiên cứu hiện tại. Đổi lại, dung lượng lớn, băng thông tải lên cao, và mức phơi bày thông tin cá nhân cao nhất.
 
@@ -1152,13 +1236,13 @@ Cần nêu rõ giới hạn: đây là một **khái niệm để giải thích*
 
 *Nguồn: tác giả tổng hợp; các mức định tính, không phải kết quả đo. Số liệu định lượng về hiệu quả lưu trữ được trình bày ở Chương 4.*
 
-Bảng trên giữ sáu tiêu chí quyết định. Ma trận đầy đủ — bổ sung băng thông tải lên, chi phí tính toán ở hạ nguồn, và việc từng thành phần khuôn mặt, đầu và tư thế cơ thể được giữ lại hay mất đi — được trình bày tại **Phụ lục F.6, Bảng F-9**.
+Bảng trên giữ sáu tiêu chí. Bản đầy đủ — bổ sung băng thông tải lên, chi phí tính toán ở hạ nguồn, và việc từng thành phần khuôn mặt, đầu và tư thế cơ thể được giữ lại hay mất đi — được trình bày tại **Phụ lục F.6, Bảng F-9**.
 
 **Định hướng được chọn và lý do.** Điểm mốc bàn tay được chọn làm biểu diễn dẫn xuất chính: nó cung cấp trực tiếp thông tin hình học mà đường xử lý hạ nguồn hiện sử dụng; nó cho phép **video thô không bắt buộc phải rời khỏi máy người dùng** trong những luồng chỉ cần điểm mốc; và nó giảm mạnh cả dung lượng lưu trữ lẫn chi phí tính toán tập trung.
 
-**Đánh đổi.** Đây là phép biến đổi có mất mát và **mất mát là một chiều** (mục 2.1.2): nếu bản ghi nguồn không được giữ theo một chính sách riêng, một nghiên cứu tương lai cần thành phần phi thủ công sẽ phải thu lại. Và **không được lập luận rằng điểm mốc là dữ liệu ẩn danh** (mục 2.6.9). Lựa chọn biểu diễn dẫn xuất **không đồng nhất với** quyết định có lưu bản ghi nguồn hay không; hai quyết định độc lập.
+**Đánh đổi.** Đây là phép biến đổi có mất mát và **mất mát là một chiều** (mục 2.1.2): nếu bản ghi nguồn không được giữ theo một chính sách riêng, một nghiên cứu tương lai cần thành phần phi thủ công sẽ phải thu lại. Và **không được lập luận rằng điểm mốc là dữ liệu ẩn danh** (mục 2.6.10). Lựa chọn biểu diễn dẫn xuất **không đồng nhất với** quyết định có lưu bản ghi nguồn hay không; hai quyết định độc lập.
 
-Về các họ mô hình ước lượng điểm mốc: OpenPose là một công trình tiêu biểu cho ước lượng tư thế nhiều người dựa trên keypoint \cite{cao_openpose_2021}; MediaPipe cung cấp một khung xây dựng đường ống tri giác đa nền tảng \cite{lugaresi_mediapipe_2019}; MediaPipe Hands tập trung vào bàn tay với bộ phát hiện lòng bàn tay và mô hình dự đoán 21 điểm mốc cho mỗi bàn tay, hướng tới suy luận thời gian thực trên thiết bị \cite{zhang_mediapipe_2020}. MediaPipe Hands phù hợp với đường thu điểm mốc bàn tay và với yêu cầu chạy tại máy khách ở mục 2.6.7, đồng thời không đòi hỏi phát triển một mô hình điểm mốc riêng.
+Về các họ mô hình ước lượng điểm mốc: OpenPose là một công trình tiêu biểu cho ước lượng tư thế nhiều người dựa trên keypoint \cite{cao_openpose_2021}; MediaPipe cung cấp một khung xây dựng đường ống tri giác đa nền tảng \cite{lugaresi_mediapipe_2019}; MediaPipe Hands tập trung vào bàn tay với bộ phát hiện lòng bàn tay và mô hình dự đoán 21 điểm mốc cho mỗi bàn tay, hướng tới suy luận thời gian thực trên thiết bị \cite{zhang_mediapipe_2020}. MediaPipe Hands phù hợp với đường thu điểm mốc bàn tay và với yêu cầu chạy tại máy khách ở mục 2.6.8, đồng thời không đòi hỏi phát triển một mô hình điểm mốc riêng.
 
 Trong luận văn, MediaPipe Hands được sử dụng như một **thành phần thu nhận có sẵn**, không phải đối tượng nghiên cứu thị giác máy tính: luận văn không huấn luyện lại, không mở rộng, không tuyên bố cải thiện mô hình điểm mốc, và không thực hiện phép đo đối chứng nào giữa ba họ mô hình trên — nên cũng không tuyên bố họ nào vượt trội.
 
@@ -1175,7 +1259,7 @@ Biểu diễn này không nên được mô tả như tái dựng hình học 3D
 > **Phải thể hiện:** một bàn tay với 21 điểm được đánh số theo thứ tự của mô hình, các cạnh nối theo cấu trúc ngón; chú thích nhóm điểm theo cổ tay và năm ngón; một ghi chú nêu rõ mỗi điểm có ba thành phần tọa độ và **thành phần độ sâu là tương đối theo mô hình**, không phải toạ độ 3D tuyệt đối; góc dưới ghi phép tính 21 × 3 × 2 = 126 giá trị mỗi khung.
 > **Chú thích dưới hình:** *Hình 2-7: Cấu trúc 21 điểm mốc bàn tay của MediaPipe Hands. Nguồn: vẽ lại từ \cite{zhang_mediapipe_2020}.*
 
-### 2.6.7. Trích xuất tại máy khách và tại máy chủ
+### 2.6.8. Trích xuất tại máy khách và tại máy chủ
 
 Trục quyết định này độc lập với trục biểu diễn: phép trích xuất đặc trưng chạy ở đâu.
 
@@ -1193,15 +1277,20 @@ Trục quyết định này độc lập với trục biểu diễn: phép tríc
 
 **Định hướng được chọn.** Trích xuất tại máy khách cho đường thu điểm mốc, nhằm phân bố tải tính toán và giảm nhu cầu chuyển dữ liệu thị giác trong những luồng nghiệp vụ không cần đến nó.
 
-**Đánh đổi**, gồm ba hệ quả kiến trúc. Thứ nhất, **phân bố tải xử lý**: một phần công việc thị giác được thực hiện ở biên, nhưng mức tiết kiệm cụ thể phải được đo ở chương thực nghiệm thay vì suy ra bằng lý thuyết, và sự không đồng nhất về phần cứng người dùng trở thành một biến mới ảnh hưởng tới chất lượng dữ liệu. Thứ hai, **giảm mức phơi bày** trong những luồng không cần video thô — nhưng không đồng nghĩa dữ liệu đã vô danh (mục 2.6.9). Thứ ba, và quyết định về mặt an ninh, **dịch chuyển ranh giới tin cậy**: máy khách nằm **ngoài** cơ sở tính toán được tin cậy định nghĩa ở mục 2.4.5, nên mọi dữ liệu nó gửi là đầu vào không đáng tin cho tới khi được kiểm tra.
+**Đánh đổi**, gồm ba hệ quả kiến trúc. Thứ nhất, **phân bố tải xử lý**: một phần công việc thị giác được thực hiện ở biên, nhưng mức tiết kiệm cụ thể phải được đo ở chương thực nghiệm thay vì suy ra bằng lý thuyết, và sự không đồng nhất về phần cứng người dùng trở thành một biến mới ảnh hưởng tới chất lượng dữ liệu. Thứ hai, **giảm mức phơi bày** trong những luồng không cần video thô — nhưng không đồng nghĩa dữ liệu đã vô danh (mục 2.6.10). Thứ ba, và quyết định về mặt an ninh, **dịch chuyển ranh giới tin cậy**: máy khách nằm **ngoài** cơ sở tính toán được tin cậy định nghĩa ở mục 2.4.5, nên mọi dữ liệu nó gửi là đầu vào không đáng tin cho tới khi được kiểm tra.
 
-### 2.6.8. Kiểm tra tại thời điểm thu
+### 2.6.9. Kiểm tra tại thời điểm thu
 
 Mục 2.1.4 đã nêu sáu chiều chất lượng và mục 2.1.5 đã chọn chiến lược kết hợp. Ở đây, các nguyên tắc đó được đặt vào đúng đường thu, và phân thành ba loại kiểm tra khác nhau về **ai thực hiện được**.
 
 **Kiểm tra cấu trúc — máy thực hiện được ngay.** Số chiều và khoảng giá trị của chuỗi điểm mốc; lớp ký hiệu được tham chiếu có tồn tại; người ký được tham chiếu có tồn tại; quan hệ giữa mẫu, phiên thu và phạm vi tenant có nhất quán (mục 2.2.6). Toàn bộ nhóm này phải được kiểm **ở máy chủ**, kể cả khi máy khách đã kiểm — không phải vì nghi ngờ người dùng, mà vì một máy khách lỗi tạo ra dữ liệu sai giống hệt một máy khách cố ý.
 
-**Kiểm tra tính đầy đủ — máy thực hiện được, nhưng là câu hỏi khác.** Mẫu có đủ thông tin để dùng được về sau hay không: có người ký, có phiên thu, có nguồn gốc, có trạng thái đồng thuận phù hợp. Đây là nhóm ràng buộc thuộc loại **không tái tạo được** theo tiêu chí ở mục 2.1.5, nên nó phải được cưỡng chế tại thời điểm thu.
+**Kiểm tra tính đầy đủ — máy thực hiện được, nhưng là câu hỏi khác.** Mẫu có đủ thông tin để dùng được về sau hay không. Nhóm ràng buộc này thuộc loại **không tái tạo được** theo tiêu chí ở mục 2.1.5, nên chỗ đứng của nó phụ thuộc vào đường mà dữ liệu đi vào (mục 2.6.1):
+
+- **Đường thu có kiểm soát.** Những siêu dữ liệu mà giao thức thu yêu cầu — chẳng hạn người ký, phiên thu, nguồn gốc — phải được kiểm ngay tại thời điểm thu, vì sau thời điểm đó chúng không dựng lại được.
+- **Đường nạp dữ liệu đã tồn tại.** Một phần các siêu dữ liệu ấy có thể không tồn tại ở nguồn. Khi đó điều hệ thống làm được không phải là bắt buộc chúng phải có, mà là **ghi nhận mức đầy đủ của nguồn gốc**, để mức ấy quyết định phạm vi sử dụng ở hạ nguồn.
+
+**Đồng thuận không thuộc nhóm kiểm tra này.** Nó được kiểm tại thao tác mà phạm vi đồng thuận điều chỉnh — huấn luyện, phát hành, phân phối — chứ không phải tại thời điểm thu; xem mục 2.9.3. Đưa nó vào cổng kiểm tại đường thu vừa sai vị trí, vừa tạo ra một bảo đảm giả: đồng thuận có thể được rút sau thời điểm thu, nên một phép kiểm chỉ chạy lúc thu không nói gì về trạng thái tại lúc dữ liệu được dùng.
 
 **Rà soát ngữ nghĩa — máy không quyết định thay được.** Người ký có thực hiện đúng ký hiệu của lớp đã chọn không; điều kiện thu có đạt không; mẫu có dùng được về mặt chuyên môn không. Do đó:
 
@@ -1212,14 +1301,16 @@ Mục 2.1.4 đã nêu sáu chiều chất lượng và mục 2.1.5 đã chọn c
 Ba loại kiểm tra trên gợi ý một vòng đời khái niệm cho mẫu:
 
 \[
-\text{Đã thu} \rightarrow \text{Đã kiểm cấu trúc} \rightarrow \text{Đã rà soát} \rightarrow \text{Đủ điều kiện vào bộ dữ liệu}.
+\text{Tiếp nhận} \rightarrow \text{Kiểm tra} \rightarrow \text{Quản lý} \rightarrow \text{Đánh giá điều kiện cho một mục đích cụ thể}.
 \]
 
-Cần nêu rõ đây là **vòng đời khái niệm**, dùng để phân biệt các loại điều kiện; nó không hàm ý mọi hệ thống phải có đúng bốn trạng thái mang đúng tên gọi này. Điều bắt buộc về mặt lý thuyết chỉ là: trạng thái "hợp lệ về cấu trúc" và trạng thái "được chấp nhận" phải phân biệt được với nhau, vì gộp chúng vào một cờ duy nhất buộc hệ thống hoặc từ chối dữ liệu còn dùng được, hoặc công bố dữ liệu chưa ai xem.
+Cần nêu rõ đây là **vòng đời khái niệm**, dùng để phân biệt các loại điều kiện; nó không hàm ý mọi hệ thống phải có đúng bốn trạng thái mang đúng tên gọi này. Điều bắt buộc về mặt lý thuyết chỉ là: trạng thái "hợp lệ về cấu trúc" và trạng thái "đủ điều kiện cho một mục đích" phải phân biệt được với nhau, vì gộp chúng vào một cờ duy nhất buộc hệ thống hoặc từ chối dữ liệu còn dùng được, hoặc phát hành dữ liệu mà chưa có căn cứ nào về chất lượng.
+
+Hai điểm nữa cần giữ khi đọc chuỗi trên. Thứ nhất, **rà soát ngữ nghĩa không phải một nút bắt buộc** trên chuỗi này: nó là một trong ba cách trả lời câu hỏi chất lượng ngữ nghĩa ở mục 2.1.5, và cách nào được chọn là quyết định quy trình. Thứ hai, bước cuối mang tên "cho một mục đích cụ thể" có chủ đích — điều kiện đủ để một mẫu đi vào một tập huấn luyện nội bộ khác với điều kiện đủ để nó được phát hành ra ngoài. Vì vậy đây không phải một trạng thái tuyệt đối mà mẫu đạt được một lần rồi giữ mãi.
 
 Về những thuộc tính mà **chỉ máy khách quan sát được** — chẳng hạn một chỉ số ổn định của việc phát hiện bàn tay trong lúc thu — máy chủ không thể tái lập chúng. Chúng vẫn có ích như thông tin tham khảo, nhưng không nên được xem là bằng chứng chất lượng và không nên là điều kiện duy nhất để một mẫu được chấp nhận. Ghi nhận chúng kèm nhãn nguồn gốc là cách xử lý trung thực hơn là im lặng coi chúng như dữ liệu đo được. Ngược lại, các thuộc tính thuộc thẩm quyền của máy chủ — thời điểm tiếp nhận, danh tính người thao tác, phạm vi tenant — **không được lấy từ payload** ngay cả khi máy khách có gửi, vì làm vậy cho phép máy khách tự khai báo ngữ cảnh an ninh của chính nó.
 
-### 2.6.9. Giới hạn của biểu diễn điểm mốc
+### 2.6.10. Giới hạn của biểu diễn điểm mốc
 
 Hai giới hạn phải được phát biểu thẳng và giữ nhất quán trong toàn quyển.
 
@@ -1227,11 +1318,11 @@ Hai giới hạn phải được phát biểu thẳng và giữ nhất quán tro
 
 **Điểm mốc không đương nhiên là dữ liệu ẩn danh.** Việc loại bỏ hình ảnh khuôn mặt làm **giảm mức phơi bày**, nhưng không tự động đưa dữ liệu ra khỏi phạm vi quản trị dữ liệu cá nhân. Hướng dẫn về kỹ thuật ẩn danh nhấn mạnh sự khác biệt giữa dữ liệu thực sự không còn khả năng quy về cá nhân và dữ liệu đã được giảm hoặc tách định danh nhưng vẫn có khả năng liên kết lại \cite{wp29_anonymisation_2014}. Một chuỗi điểm mốc vẫn là dữ liệu về một con người cụ thể; khả năng quy về cá nhân phụ thuộc vào nội dung, dữ liệu liên kết sẵn có và mục đích xử lý — mà trong một nền tảng có quan hệ mẫu–người ký–phiên thu, dữ liệu liên kết là thứ **luôn tồn tại theo thiết kế**. Thuật ngữ dùng thống nhất trong luận văn vì vậy là **"giảm mức phơi bày"** hoặc **"không lộ diện"**, không phải "ẩn danh" \cite{quochoi_luat_bvdlcn_2025}.
 
-### 2.6.10. Nguồn gốc của quá trình thu: ghi gì và không ghi gì
+### 2.6.11. Nguồn gốc của quá trình thu: ghi gì và không ghi gì
 
 Mục 2.8.5 sẽ trình bày khung đối tượng – hoạt động – chủ thể cho nguồn gốc nói chung. Riêng với hoạt động thu, có thể liệt kê các chiều nguồn gốc cần cân nhắc: **ai** (người ký, người vận hành), **cái gì** (lớp ký hiệu, mẫu), **khi nào** (phiên thu, thời điểm), **bằng cách nào** (phương thức thu, biểu diễn), và **trong phạm vi nào** (tenant, dự án, điều kiện đồng thuận và sử dụng).
 
-Điểm cần nhấn mạnh là một nguyên tắc **giới hạn**, không phải một lời kêu gọi thu thập nhiều hơn:
+Nguyên tắc ở đây mang tính **giới hạn**, không phải một lời kêu gọi thu thập nhiều hơn:
 
 > Nguồn gốc của quá trình thu chỉ nên ghi những thuộc tính bối cảnh thực sự cần cho nghiên cứu, quản trị hoặc truy vết vận hành. Thu thập thêm siêu dữ liệu **không tự động tốt hơn**, vì mỗi thuộc tính được ghi thêm đều làm tăng gánh nặng quản lý và mở rộng phạm vi dữ liệu cá nhân phải bảo vệ.
 
@@ -1301,7 +1392,7 @@ Các mẫu như *Idempotent Receiver*, *Guaranteed Delivery* và *Dead Letter Ch
 
 Trước khi bàn về nhất quán giữa hai kho, cần xác định đơn vị nhất quán bên trong một kho. Một giao dịch cơ sở dữ liệu tạo ra một ranh giới mà bên trong đó nhiều thao tác được xem là một đơn vị duy nhất: hoặc toàn bộ có hiệu lực, hoặc không thao tác nào có hiệu lực. Bốn thuộc tính thường được gán cho ranh giới này — tính nguyên tử, tính nhất quán, tính cô lập và tính bền vững — được hệ thống hóa trong \cite{harder_principles_1983}.
 
-Ý nghĩa đối với bài toán không nằm ở định nghĩa mà ở **phạm vi** của ranh giới. Một thao tác tạo mẫu thường gồm nhiều thao tác ghi liên quan: bản ghi mẫu, quan hệ tới người ký và phiên thu, cập nhật số đếm, ghi sự kiện kiểm toán. Tất cả những thao tác này nằm trong cùng một cơ sở dữ liệu, nên chúng **có thể** nằm trong một giao dịch: hoặc mẫu tồn tại đầy đủ với mọi quan hệ, hoặc không tồn tại. Đây cũng là ranh giới mà ngữ cảnh tenant được gắn vào ở mục 2.4.7 — không phải trùng hợp, vì cả hai đều muốn cùng một đơn vị công việc.
+Ý nghĩa đối với bài toán không nằm ở định nghĩa mà ở **phạm vi** của ranh giới. Một thao tác tạo mẫu thường gồm nhiều thao tác ghi liên quan: bản ghi mẫu, quan hệ tới người ký và phiên thu, cập nhật số đếm, ghi sự kiện kiểm toán. Tất cả những thao tác này nằm trong cùng một cơ sở dữ liệu, nên chúng **có thể** nằm trong một giao dịch: hoặc mẫu tồn tại đầy đủ với mọi quan hệ, hoặc không tồn tại. Đây cũng là ranh giới mà ngữ cảnh tenant được gắn vào ở mục 2.4.7 . Cả hai đều cần cùng một đơn vị công việc.
 
 Nhưng phát biểu quan trọng là phát biểu phủ định: **việc ghi một tệp vào kho nội dung bên ngoài nằm ngoài ranh giới đó**. Kho tệp không tham gia giao dịch của cơ sở dữ liệu; nó không nhận lệnh hoàn tác khi giao dịch bị hủy. Đây chính là nguồn gốc của bài toán ở mục tiếp theo, và nó là hệ quả trực tiếp của quyết định lưu nội dung ngoài cơ sở dữ liệu ở mục 2.7.5 — một ví dụ điển hình cho việc một lựa chọn kiến trúc tạo ra một lớp vấn đề mới thay vì chỉ tối ưu một chỉ số.
 
@@ -1414,6 +1505,29 @@ DatasetVersion = \{\,r_1, r_2, \ldots, r_n\,\} \ \cup\ \{\,VocabularyVersion\,\}
 
 **Định hướng được chọn và lý do.** Mô hình bản kê tham chiếu thỏa mãn đồng thời hai yêu cầu vốn xung đột trong hai mô hình còn lại: khả năng tái lập của mô hình B và chi phí lưu trữ của mô hình A. Với dữ liệu gồm tệp phương tiện, khoảng cách chi phí giữa B và C không phải chi tiết kỹ thuật mà là điều kiện khả thi.
 
+**Hai mức phiên bản và vai trò khác nhau của chúng.** Đây là phân biệt dễ mất nhất trong cả mục 2.8, vì tiếng Việt dùng một chữ "phiên bản" cho cả hai:
+
+\[
+\text{Phiên bản danh mục} \ \neq\ \text{Phiên bản bộ dữ liệu}.
+\]
+
+Phiên bản **danh mục** cố định *không gian nhãn*: tại một trạng thái danh mục xác định, tập lớp – phương ngữ – nhóm từ vựng là gì. Phiên bản **bộ dữ liệu** cố định *thành phần mẫu*: đúng những mẫu nào đã đi vào một lần dùng cụ thể. Hai câu hỏi khác nhau, và cơ chế trả lời chúng cũng khác nhau.
+
+Quan hệ giữa hai mức là quan hệ **điều kiện cần**, không phải quan hệ tương đương:
+
+\[
+\text{Ghim phiên bản danh mục} \Rightarrow \text{cố định không gian nhãn},
+\]
+\[
+\text{cố định không gian nhãn} \ \not\Rightarrow\ \text{bộ dữ liệu tái lập được}.
+\]
+
+Muốn một bộ dữ liệu tái lập được, cần **cả hai**: không gian nhãn cố định *và* tập mẫu cố định. Phần thứ hai là thứ bản kê tham chiếu của mô hình C cung cấp.
+
+Hai mức vì vậy phục vụ hai mục đích khác nhau và không thay thế nhau: phiên bản hoá **danh mục** phục vụ cố định không gian nhãn; phiên bản hoá **bộ dữ liệu** phục vụ cố định thành phần mẫu, và được trình bày ở đây như một **hướng mở rộng của vòng đời tạo tác dữ liệu**. Mức độ hiện thực của từng mức thuộc phạm vi Chương 3.
+
+Phân biệt này cũng là lý do luận văn không phát biểu rằng cơ chế danh mục có phiên bản tự nó làm cho một bộ dữ liệu tái lập được. Phát biểu đúng và hẹp hơn: nó **bảo toàn không gian nhãn** ứng với một trạng thái danh mục xác định.
+
 **Đánh đổi.** Mô hình này đòi hỏi quản lý một đồ thị tham chiếu, và tính đúng đắn của nó phụ thuộc vào một tính chất của các đối tượng khác — tính bất biến — chứ không chỉ phụ thuộc vào chính nó. Nói cách khác, mô hình C **chuyển một phần nghĩa vụ sang tầng lưu trữ đối tượng**, và nghĩa vụ đó phải được kiểm chứng chứ không giả định.
 
 > ### ▣ HÌNH 2-8 — Ba mô hình quản lý phiên bản bộ dữ liệu
@@ -1460,8 +1574,8 @@ Giá trị của khung này đối với bài toán nằm ở chỗ nó **buộc
 | Thành phần | Trong miền dữ liệu ngôn ngữ ký hiệu |
 |---|---|
 | Đối tượng | Bản ghi nguồn; chuỗi điểm mốc; phiên bản danh mục; phiên bản bộ dữ liệu; gói công bố |
-| Hoạt động | Thu nhận một mẫu; trích xuất điểm mốc; kiểm duyệt; công bố phiên bản; đồng bộ |
-| Chủ thể | Người ký (chủ thể dữ liệu); người vận hành thu; người kiểm duyệt; tổ chức; thành phần phần mềm thực hiện xử lý |
+| Hoạt động | Thu nhận một mẫu; trích xuất điểm mốc; đánh giá chất lượng (nếu có); công bố phiên bản; đồng bộ |
+| Chủ thể | Người ký (chủ thể dữ liệu); người vận hành thu; người rà soát (nếu có); tổ chức; thành phần phần mềm thực hiện xử lý |
 
 *Nguồn: tác giả ánh xạ theo khung khái niệm của \cite{moreau_prov_dm_2013}.*
 
@@ -1475,7 +1589,7 @@ Cần nêu rõ giới hạn của việc mượn khung này: luận văn sử d�
 
 > ### ▣ HÌNH 2-9 — Chuỗi nguồn gốc theo khung đối tượng – hoạt động – chủ thể
 > **Loại:** sơ đồ ba làn · **Công cụ đề nghị:** draw.io
-> **Phải thể hiện:** ba làn ngang — đối tượng, hoạt động, chủ thể; chuỗi thời gian từ trái sang phải qua bốn hoạt động (thu nhận → trích xuất → kiểm duyệt → công bố); mũi tên "được sinh ra bởi" nối làn đối tượng xuống làn hoạt động, mũi tên "gắn với" nối làn hoạt động xuống làn chủ thể; hoạt động **thu nhận** được tô nhấn kèm chú "chủ thể của hoạt động này không suy ra được từ dữ liệu hệ thống — phải ghi tại thời điểm thu".
+> **Phải thể hiện:** ba làn ngang — đối tượng, hoạt động, chủ thể; chuỗi thời gian từ trái sang phải qua bốn hoạt động (thu nhận → trích xuất → đánh giá chất lượng → công bố), trong đó hoạt động thứ ba vẽ nét mảnh kèm chú "tuỳ quy trình"; mũi tên "được sinh ra bởi" nối làn đối tượng xuống làn hoạt động, mũi tên "gắn với" nối làn hoạt động xuống làn chủ thể; hoạt động **thu nhận** được tô nhấn kèm chú "chủ thể của hoạt động này không suy ra được từ dữ liệu hệ thống — phải ghi tại thời điểm thu".
 > **Chú thích dưới hình:** *Hình 2-9: Chuỗi nguồn gốc theo khung đối tượng – hoạt động – chủ thể.*
 
 ### 2.8.6. Hàm băm, bản kê và chữ ký số
@@ -1604,7 +1718,7 @@ Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15 được ban hành ng�
 
 Đáng chú ý là cả năm năng lực này đều đã phát sinh từ các lập luận kỹ thuật độc lập trước đó trong chương; yêu cầu pháp lý ở đây **củng cố** chứ không tạo mới các ràng buộc kiến trúc. Đây là một dấu hiệu tốt về tính nhất quán của thiết kế: một hệ thống phải thêm cơ chế mới hoàn toàn để đáp ứng nghĩa vụ pháp lý thường là hệ thống đã bỏ sót điều gì đó ở tầng thiết kế dữ liệu.
 
-Việc dữ liệu đã được chuyển sang điểm mốc hoặc dạng đặc trưng không đương nhiên đưa nó ra khỏi phạm vi quản trị dữ liệu cá nhân. Mức độ nhận dạng phải được đánh giá dựa trên khả năng liên kết với cá nhân, dữ liệu phụ trợ và mục đích xử lý \cite{wp29_anonymisation_2014,quochoi_luat_bvdlcn_2025}. Điểm này đã được nêu ở mục 2.6.5 và nhắc lại ở đây vì nó là chỗ mà một suy diễn sai sẽ dẫn tới việc bỏ qua toàn bộ các nghĩa vụ của mục này.
+Việc dữ liệu đã được chuyển sang điểm mốc hoặc dạng đặc trưng không đương nhiên đưa nó ra khỏi phạm vi quản trị dữ liệu cá nhân. Mức độ nhận dạng phải được đánh giá dựa trên khả năng liên kết với cá nhân, dữ liệu phụ trợ và mục đích xử lý \cite{wp29_anonymisation_2014,quochoi_luat_bvdlcn_2025}. Điểm này đã được nêu ở mục 2.6.6 và nhắc lại ở đây vì nó là chỗ mà một suy diễn sai sẽ dẫn tới việc bỏ qua toàn bộ các nghĩa vụ của mục này.
 
 Phần này chỉ chuyển các yêu cầu liên quan thành ràng buộc kiến trúc phục vụ luận văn thuộc lĩnh vực Công nghệ phần mềm; nó không nhằm tuyên bố nền tảng đã đạt tuân thủ pháp lý toàn diện. Đánh giá tuân thủ đầy đủ còn phụ thuộc quy trình vận hành, nội dung văn bản, vai trò pháp lý của các bên và bối cảnh triển khai thực tế.
 
@@ -1642,11 +1756,11 @@ Bảng trên giữ năm tiêu chí. Bản đầy đủ, bổ sung độ phức t
 
 **Định hướng được chọn và lý do.** Kiểu nguyên khối có mô-đun phù hợp với **phân hệ và bối cảnh triển khai hiện tại**, vì hai lý do gắn trực tiếp với các lập luận trước đó. Thứ nhất, phần lớn giá trị của thiết kế nằm ở các **bất biến xuyên nhiều thực thể** — toàn vẹn xuyên phạm vi (mục 2.2.6), ngữ cảnh tenant theo giao dịch (mục 2.4.7), ghi dữ liệu nghiệp vụ cùng bản ghi công việc trong một giao dịch (mục 2.7.4) — và cả ba được duy trì một cách tự nhiên bên trong một ranh giới giao dịch quan hệ dùng chung. Thứ hai, quy mô nhóm phát triển và quy mô triển khai chưa tạo ra áp lực mà một kiến trúc phân tán được thiết kế để giải quyết.
 
-Phát biểu này cần được đọc đúng mức. Nó **không** khẳng định rằng kiến trúc vi dịch vụ không duy trì được các bất biến trên: vi dịch vụ vẫn có thể duy trì chúng bằng các mẫu phối hợp phân tán, chỉ với chi phí phối hợp và vận hành cao hơn. Lập luận ở đây là về **mức phù hợp trong bối cảnh hiện tại**, không phải về khả năng về nguyên tắc. Một phân rã theo hướng dịch vụ vẫn khả thi về sau cho những thành phần mà yêu cầu nhất quán và đặc tính mở rộng của chúng biện minh được cho chi phí phối hợp bổ sung.
+Lập luận này nói về **mức phù hợp trong bối cảnh hiện tại**, không về khả năng nguyên tắc: kiến trúc vi dịch vụ vẫn duy trì được các bất biến trên bằng những mẫu phối hợp phân tán, với chi phí phối hợp và vận hành cao hơn. Một phân rã theo hướng dịch vụ vẫn khả thi về sau cho các thành phần mà yêu cầu nhất quán và đặc tính mở rộng biện minh được cho chi phí bổ sung.
 
 **Đánh đổi.** Việc mở rộng riêng một năng lực khó hơn, và ranh giới mô-đun không được cưỡng chế bởi hạ tầng nên phải được duy trì bằng kỷ luật thiết kế và rà soát.
 
-**Một phân biệt cần giữ khi mô tả hệ thống.** Việc một hệ thống chạy nhiều tiến trình hoặc nhiều container **không làm cho nó trở thành kiến trúc vi dịch vụ**. Một ứng dụng web, một worker nền, một broker và một cơ sở dữ liệu là bốn tiến trình phục vụ **một** ứng dụng có mô-đun; chúng không phải bốn dịch vụ nghiệp vụ độc lập với hợp đồng riêng và vòng đời triển khai riêng. Cách mô tả chính xác cho kiến trúc dạng này là *ứng dụng web có mô-đun kèm hạ tầng xử lý nền*, không phải *kiến trúc vi dịch vụ*. Phát biểu này cần được giữ nhất quán ở Chương 3.
+Số tiến trình không xác định kiểu kiến trúc. Một ứng dụng web, một worker nền, một broker và một cơ sở dữ liệu là bốn tiến trình phục vụ **một** ứng dụng có mô-đun, không phải bốn dịch vụ nghiệp vụ độc lập với hợp đồng riêng và vòng đời triển khai riêng. Cách mô tả chính xác cho kiến trúc dạng này là *ứng dụng web có mô-đun kèm hạ tầng xử lý nền*, và cách gọi này được giữ nhất quán ở Chương 3.
 
 ### 2.10.2. Đóng gói và triển khai
 
@@ -1708,16 +1822,24 @@ Các cơ sở lý thuyết trong chương có thể được nhìn qua hai vòng
 | Chuyển tiếp trong vòng đời dữ liệu | Điều kiện quản trị cần kiểm tra |
 |---|---|
 | Bản ghi nguồn → mẫu hợp lệ | chủ thể/nguồn gốc được xác định; ràng buộc cấu trúc và quản trị đạt tại thời điểm thu; cơ sở xử lý và quyền đóng góp phù hợp |
-| Mẫu hợp lệ → mẫu được duyệt | đánh giá chất lượng định tính bởi người có thẩm quyền |
-| Mẫu được duyệt → phiên bản bộ dữ liệu đã công bố | phiên bản bất biến, bản kê/hash/chữ ký khi được yêu cầu; đồng thuận còn hiệu lực |
+| Mẫu hợp lệ → mẫu đủ điều kiện đưa vào bộ dữ liệu | kết luận về chất lượng ngữ nghĩa — bằng đánh giá của người có thẩm quyền, bằng tiêu chí tự động, hoặc do bên xây dựng bộ dữ liệu quyết định ở hạ nguồn (xem 2.1.5) |
+| Mẫu đủ điều kiện → phiên bản bộ dữ liệu đã công bố | phiên bản bất biến, bản kê/hash/chữ ký khi được yêu cầu; đồng thuận còn hiệu lực |
 | Phiên bản bộ dữ liệu → phân phối | điều kiện cấp phép/tái sử dụng đã được xác lập |
 | Phân phối → bên nhận bên ngoài | điều kiện truy cập hoặc thỏa thuận sử dụng tương ứng được chấp nhận |
 
-*Nguồn: tác giả tổng hợp. Chuyển tiếp thứ hai phản ánh sự phân biệt ở mục 2.1.4 giữa hợp lệ về lược đồ và được duyệt vào bộ dữ liệu.*
+*Nguồn: tác giả tổng hợp. Chuyển tiếp thứ hai phản ánh sự phân biệt ở mục 2.1.5 giữa hợp lệ về lược đồ, đúng về ngữ nghĩa và đủ điều kiện vào một bộ dữ liệu.*
+
+**Chuỗi này là một vòng đời trung tính, không phải một quy trình đã chọn.** Diễn đạt ở mức khái quát nhất:
+
+\[
+\text{Thu nhận} \rightarrow \text{Kiểm tra} \rightarrow \text{Quản lý} \rightarrow \text{Tham chiếu có kiểm soát / sử dụng ở hạ nguồn},
+\]
+
+trong đó **phát hành và chia sẻ ra ngoài là một nhánh tuỳ trường hợp**, không phải bước bắt buộc của mọi mẫu. Cần tránh cách đọc chuỗi thành một dây chuyền cố định kiểu *thu → duyệt → phiên bản → công bố*: cách đọc đó gán cho hệ thống hai thứ mà Chương 2 không kết luận — một khâu phê duyệt bắt buộc do người thực hiện (xem 2.1.5), và một giả định rằng mọi dữ liệu cuối cùng đều được công bố. Nhiều mẫu sẽ dừng lại ở bước quản lý và chỉ được tham chiếu nội bộ, và đó là một trạng thái hợp lệ chứ không phải một vòng đời dở dang.
 
 > ### ▣ HÌNH 2-10 — Vòng đời dữ liệu và vòng đời quản trị với các cổng kiểm soát
 > **Loại:** sơ đồ hai làn song song có cổng · **Công cụ đề nghị:** draw.io
-> **Phải thể hiện:** làn trên là vòng đời dữ liệu (bản ghi nguồn → mẫu hợp lệ → mẫu được duyệt → phiên bản đã công bố → phân phối → bên nhận bên ngoài); làn dưới là vòng đời quản trị với các điều kiện tương ứng; giữa hai làn là **năm cổng** đặt đúng vị trí năm chuyển tiếp của Bảng 2-41, mỗi cổng ghi điều kiện phải đạt; cổng thứ hai ghi rõ "đánh giá của con người, không tự động hoá được"; cổng cuối vẽ khác biệt kèm chú "vượt quá phạm vi cưỡng chế kỹ thuật — xem Bảng 2-37 mức 4".
+> **Phải thể hiện:** làn trên là vòng đời dữ liệu (bản ghi nguồn → mẫu hợp lệ → mẫu đủ điều kiện → phiên bản đã công bố → phân phối → bên nhận bên ngoài); làn dưới là vòng đời quản trị với các điều kiện tương ứng; giữa hai làn là **năm cổng** đặt đúng vị trí năm chuyển tiếp của Bảng 2-41, mỗi cổng ghi điều kiện phải đạt; cổng thứ hai ghi rõ "kết luận về chất lượng ngữ nghĩa — ba cách trả lời, xem 2.1.5" và **không** khẳng định cách nào đã được chọn; cổng cuối vẽ khác biệt kèm chú "vượt quá phạm vi cưỡng chế kỹ thuật — xem Bảng 2-37 mức 4".
 > **Chú thích dưới hình:** *Hình 2-10: Vòng đời dữ liệu và vòng đời quản trị với các cổng kiểm soát.*
 
 Từ hai vòng đời này có thể tổng hợp bốn quan hệ chính. Thứ nhất, nhiều tổ chức dùng chung hạ tầng làm phát sinh yêu cầu cô lập ở cả cơ sở dữ liệu, lược đồ và đường truy cập nội dung ngoài cơ sở dữ liệu. Thứ hai, cô lập dữ liệu và phân quyền nghiệp vụ trả lời hai câu hỏi khác nhau, và cả hai đều không trả lời câu hỏi thứ ba — điều gì đã thực sự xảy ra. Thứ ba, dữ liệu chỉ có khả năng tái sử dụng đáng tin cậy khi đi kèm siêu dữ liệu, nguồn gốc và phiên bản bất biến. Thứ tư, khi nền tảng trực tiếp tạo dữ liệu từ người tham gia, quản trị chủ thể, cơ sở xử lý và bằng chứng chấp thuận phải xuất hiện ngay trong đường thu.
@@ -1728,21 +1850,25 @@ Mục 2.1.8 đã giới thiệu các lớp công cụ liên quan ở mức đủ
 
 **Bảng 2-42. Đối chiếu các hệ thống liên quan theo tiêu chí của chương**
 
-| Tiêu chí | ELAN | REDCap | Dataverse, Zenodo | WLASL, AUTSL | QIPEDC | Phân hệ của luận văn |
+| Tiêu chí | ELAN | REDCap | Dataverse, Zenodo | WLASL, AUTSL | QIPEDC | **Định hướng của phân hệ** |
 |---|---|---|---|---|---|---|
-| Giai đoạn chính trong vòng đời | Chú giải | Thu thập theo biểu mẫu | Nộp lưu và công bố | Sản phẩm dữ liệu đã hình thành | Tài nguyên từ vựng tham chiếu | Thu nhận, quản trị và công bố |
-| **Thu trực tiếp có hướng dẫn** | Không phải trọng tâm | Biểu mẫu có hướng dẫn, không phải thu thị giác | Không | Không áp dụng | Không phải nền tảng thu | **Có, dẫn theo lớp và người ký** |
-| **Đóng góp tệp đã có** | Làm việc trên dữ liệu đã có | Có thể đính kèm | Là phương thức chính | Không áp dụng | Không áp dụng | **Có, đường riêng có yêu cầu siêu dữ liệu** |
-| **Theo dõi độ bao phủ theo lớp × người ký × vùng** | Không phải trọng tâm | Theo dõi được ở mức bản ghi | Không phải trọng tâm | Là thuộc tính của bản phát hành | Là danh mục, không phải dữ liệu mẫu | **Đo được qua siêu dữ liệu bắt buộc** |
-| Mô hình miền chuyên biệt cho ngôn ngữ ký hiệu | Hỗ trợ chú giải đa phương thức | Không chuyên biệt | Không | Có, ở mức nội dung dữ liệu | Có, ở mức từ vựng | Có, ở mức lược đồ |
-| Danh mục ngôn ngữ – phương ngữ – lớp có phiên bản | Không phải trọng tâm | Không có danh mục miền | Siêu dữ liệu và phiên bản ở mức đối tượng nộp lưu | Không phải cơ chế của bộ dữ liệu | Có ngữ cảnh vùng, không có cơ chế phiên bản cho tenant | Thành phần cốt lõi |
-| Mô hình người ký và phiên thu | Có thể chú giải | Có thể cấu hình theo nghiên cứu | Do người nộp khai báo | Có siêu dữ liệu tương ứng | Không áp dụng | Thực thể bậc nhất, gắn từ thời điểm thu |
-| Phạm vi nhiều tổ chức | Không phải trọng tâm | Dự án và nghiên cứu đa điểm | Phạm vi của kho | Không áp dụng | Không áp dụng | Tenant – workspace – project |
-| Đồng thuận gắn với chủ thể tại thời điểm thu | Quy trình ngoài công cụ | Có thể cấu hình | Không thuộc giai đoạn thu | Không thuộc phạm vi công cụ | Không áp dụng | Mối quan tâm của đường thu |
+| Giai đoạn chính trong vòng đời | Chú giải | Thu thập theo biểu mẫu | Nộp lưu và công bố | Sản phẩm dữ liệu đã hình thành | Tài nguyên từ vựng tham chiếu | Thu nhận, quản trị, và tham chiếu có kiểm soát |
+| **Thu trực tiếp có hướng dẫn** | Không phải trọng tâm | Biểu mẫu có hướng dẫn, không phải thu thị giác | Không | Không áp dụng | Không phải nền tảng thu | Đặt làm trọng tâm: dẫn theo lớp và người ký |
+| **Nạp dữ liệu đã tồn tại** | Làm việc trên dữ liệu đã có | Có thể đính kèm | Là phương thức chính | Không áp dụng | Không áp dụng | Đường vào riêng, yêu cầu siêu dữ liệu khai báo (2.6.1) |
+| **Theo dõi độ bao phủ theo lớp × người ký × vùng** | Không phải trọng tâm | Theo dõi được ở mức bản ghi | Không phải trọng tâm | Là thuộc tính của bản phát hành | Là danh mục, không phải dữ liệu mẫu | Yêu cầu siêu dữ liệu bắt buộc để độ bao phủ đo được |
+| Mô hình miền chuyên biệt cho ngôn ngữ ký hiệu | Hỗ trợ chú giải đa phương thức | Không chuyên biệt | Không | Có, ở mức nội dung dữ liệu | Có, ở mức từ vựng | Đặt ở mức lược đồ |
+| Danh mục ngôn ngữ – phương ngữ – lớp có phiên bản | Không phải trọng tâm | Không có danh mục miền | Siêu dữ liệu và phiên bản ở mức đối tượng nộp lưu | Không phải cơ chế của bộ dữ liệu | Có ngữ cảnh vùng, không có cơ chế phiên bản cho tenant | Thành phần cốt lõi của thiết kế |
+| Mô hình người ký và phiên thu | Có thể chú giải | Có thể cấu hình theo nghiên cứu | Do người nộp khai báo | Có siêu dữ liệu tương ứng | Không áp dụng | Thực thể bậc nhất, ghi nhận tại thời điểm thu có kiểm soát (2.1.1) |
+| Phạm vi nhiều tổ chức | Không phải trọng tâm | Dự án và nghiên cứu đa điểm | Phạm vi của kho | Không áp dụng | Không áp dụng | Phân cấp tổ chức – không gian làm việc – dự án |
+| Đồng thuận gắn với chủ thể tại thời điểm thu | Quy trình ngoài công cụ | Có thể cấu hình | Không thuộc giai đoạn thu | Không thuộc phạm vi công cụ | Không áp dụng | Mối quan tâm của đường thu, không phải bước hậu kỳ |
 
 *Nguồn: tác giả tổng hợp trong phạm vi các lớp công cụ được khảo sát, dựa trên \cite{wittenburg_elan_2006,harris_research_2009,harris_redcap_2019,crosas_dataverse_2011,cern_openaire_zenodo_2013,li_wlasl_baibao_2020,sincan_autsl_2020,bogddt_qipedc_2019}; các ô mô tả trọng tâm thiết kế của từng lớp công cụ, **không phải** đánh giá chất lượng.*
 
-Bảng trên giữ chín tiêu chí định vị. Ma trận đầy đủ, bổ sung cô lập ở tầng cơ sở dữ liệu, phiên bản của bộ dữ liệu, xử lý bất đồng bộ nội dung phương tiện và quan hệ với bên tiêu thụ ở hạ nguồn, được trình bày tại **Phụ lục F.11, Bảng F-17**.
+**Cách đọc cột cuối.** Cột này ghi **định hướng thiết kế** rút ra từ các mục 2.1–2.10, không phải bản kiểm kê những gì hệ thống đã xây. Nó trả lời câu hỏi *"phân hệ đặt trọng tâm ở đâu, và vì sao"*, cùng loại câu hỏi mà năm cột trước trả lời cho năm lớp công cụ kia. Câu hỏi *"cơ chế đó nằm ở bảng nào, đường nào, đã được đo ra sao"* thuộc Chương 3 và Chương 4; áp dụng quy tắc \(\text{Được chọn} \neq \text{Đã hiện thực} \neq \text{Đã kiểm chứng}\) ở mục 2.11.4.
+
+Phân biệt này không làm yếu bảng. Năm cột đầu cũng mô tả trọng tâm thiết kế chứ không liệt kê năng lực đã kiểm chứng của từng công cụ, nên đọc cột cuối theo cùng một thước là cách đọc **nhất quán**, không phải cách đọc dè dặt.
+
+Bảng trên giữ chín tiêu chí. Bản đầy đủ, bổ sung cô lập ở tầng cơ sở dữ liệu, phiên bản của bộ dữ liệu, xử lý bất đồng bộ nội dung phương tiện và quan hệ với bên tiêu thụ ở hạ nguồn, được trình bày tại **Phụ lục F.11, Bảng F-17**.
 
 Đọc theo cột, bảng cho thấy một quy luật: mỗi hệ thống mạnh ở đúng giai đoạn mà nó được thiết kế cho. ELAN mạnh ở chú giải. REDCap mạnh ở thu thập có cấu trúc theo biểu mẫu và quản trị dự án nghiên cứu. Dataverse và Zenodo mạnh ở lưu giữ, mô tả và phân phối đối tượng nghiên cứu đã hình thành. WLASL và AUTSL là sản phẩm dữ liệu, không phải hạ tầng. Đọc theo hàng, bảng cho thấy các hàng về **danh mục có phiên bản**, **cô lập nhiều tổ chức** và **đồng thuận tại thời điểm thu** là những hàng mà không lớp công cụ nào đặt làm trọng tâm đồng thời.
 
@@ -1780,6 +1906,22 @@ Trong cả ba chuỗi, mỗi bước là hệ quả của bước trước chứ
 
 Bảng dưới đây tập hợp toàn bộ các quyết định đã được lập luận trong chương. Nó là điểm nối giữa Chương 2 và Chương 3: mỗi dòng nêu **định hướng và lý do**, còn cách hiện thực và mức độ hoàn thành thuộc Chương 3 và Chương 4.
 
+**Cách đọc bảng này — quy tắc bắt buộc.** Đây là bảng tổng hợp **quyết định lý thuyết**, không phải bản kiểm kê năng lực đã có. Ba trạng thái sau đây tách rời nhau và không suy ra được nhau:
+
+\[
+\text{Được chọn} \neq \text{Đã hiện thực} \neq \text{Đã kiểm chứng}.
+\]
+
+Một định hướng được chọn là một lập luận đã hoàn tất trong Chương 2. Nó chưa nói gì về việc hệ thống đã xây phần đó hay chưa, và càng chưa nói gì về việc phần đã xây có được đo bằng một phép đo có khả năng thất bại hay không. Vì bảng này nằm ở điểm hội tụ của cả chương, một cách đọc lỏng ở đây sẽ vô hiệu hoá mọi giới hạn đã phát biểu cẩn thận ở các mục trước.
+
+Ba nhóm nhãn được dùng khi đối chiếu sang Chương 3:
+
+| Nhãn | Nghĩa |
+|---|---|
+| **Định hướng kiến trúc** | lựa chọn được lập luận từ lý thuyết — trạng thái mặc định của mọi dòng trong bảng dưới |
+| **Hướng mở rộng** | phù hợp với lập luận nhưng chưa hiện thực |
+| **Được áp dụng trong phân hệ** | chỉ dùng khi Chương 3 chứng minh được có đối tượng tương ứng trong hệ thống |
+
 **Bảng 2-43. Tóm tắt các nhóm quyết định kiến trúc và định hướng được chọn**
 
 | Nhóm quyết định | Định hướng được chọn | Mục |
@@ -1791,18 +1933,29 @@ Bảng dưới đây tập hợp toàn bộ các quyết định đã được l
 | Mô hình phân quyền | RBAC theo phạm vi, kế thừa khai báo tường minh | 2.5.6, 2.5.7 |
 | Ghi nhận hành động | Nhật ký kiểm toán tách khỏi nhật ký vận hành | 2.5.9 |
 | Kế thừa danh mục | Sao chép một lần, ghim phiên bản | 2.3.4 |
-| Đơn vị và chiến lược thu thập | Theo phiên thu; kết hợp thu có hướng dẫn và đóng góp mở | 2.6.1, 2.6.3 |
-| Trách nhiệm về độ bao phủ | Đo được và quản trị được, không bảo đảm cân bằng | 2.6.4 |
-| Biểu diễn và vị trí trích xuất | Điểm mốc bàn tay làm biểu diễn dẫn xuất; trích xuất tại máy khách | 2.6.6, 2.6.7 |
+| Đơn vị và chiến lược thu thập | Theo phiên thu; kết hợp thu có hướng dẫn và đóng góp mở | 2.6.2, 2.6.4 |
+| Trách nhiệm về độ bao phủ | Đo được và quản trị được, không bảo đảm cân bằng | 2.6.5 |
+| Biểu diễn và vị trí trích xuất | Điểm mốc bàn tay làm biểu diễn dẫn xuất; trích xuất tại máy khách | 2.6.7, 2.6.8 |
 | Tổ chức bước xử lý | Ngắn thì đồng bộ, dài hoặc cần thử lại thì bất đồng bộ | 2.7.1 |
 | Nhất quán giữa hai kho | Giao dịch cục bộ kèm khôi phục bất đồng bộ | 2.7.4 |
 | Lưu nội dung | Ngoài CSDL, siêu dữ liệu trong CSDL | 2.7.5 |
-| Phiên bản và nguồn gốc | Bản kê tham chiếu, ghim danh mục; khung đối tượng – hoạt động – chủ thể | 2.8.2, 2.8.5 |
+| Phiên bản và nguồn gốc | Ghim phiên bản **danh mục**; bản kê tham chiếu cho phiên bản **bộ dữ liệu**; khung đối tượng – hoạt động – chủ thể | 2.8.2, 2.8.5 |
 | Bảo đảm toàn vẹn | Bản kê băm kèm chữ ký số; xác minh fail-closed | 2.8.6, 2.8.7 |
-| Mô hình đồng thuận | Có phiên bản, gắn chủ thể dữ liệu | 2.9.3 |
+| Mô hình đồng thuận | Có phiên bản, giới hạn theo phạm vi; phân biệt chấp thuận mức tài khoản với đồng thuận của chủ thể dữ liệu | 2.9.2, 2.9.3 |
 | Kiểu kiến trúc và tiến hoá | Nguyên khối có mô-đun; thay thế dần có chế độ song song | 2.10.1, 2.10.3 |
 
-*Nguồn: tác giả tổng hợp từ các lập luận trong Chương 2.*
+*Nguồn: tác giả tổng hợp từ các lập luận trong Chương 2. Mọi dòng ở trạng thái **định hướng kiến trúc**; xem quy tắc đọc ở đầu mục.*
+
+**Bốn dòng cần đặc biệt thận trọng khi đối chiếu sang Chương 3**, vì chúng dễ bị nâng lên nhãn "được áp dụng trong phân hệ" mà không có đối tượng tương ứng chống lưng:
+
+| Dòng | Phần đã có thể áp dụng | Phần thuộc **hướng mở rộng** |
+|---|---|---|
+| Phiên bản và nguồn gốc | ghim phiên bản **danh mục** — cố định không gian nhãn | phiên bản **bộ dữ liệu** ở mức bản kê bất biến — cố định tập mẫu (xem 2.8.2) |
+| Vòng đời tạo tác nghiên cứu | — | đăng ký thực nghiệm và phiên bản mô hình như thực thể có vòng đời |
+| Bảo đảm toàn vẹn | ký và xác minh hiện vật có phiên bản | thẩm quyền ký gắn theo **từng tổ chức** thay vì theo cấu hình triển khai |
+| Phạm vi dùng chung cộng đồng | phạm vi được **đăng ký** và chịu cùng cơ chế kiểm tra | vòng đời đóng góp – công bố – rút lui vận hành đầy đủ trên phạm vi đó (xem 2.3.3) |
+
+Bốn dòng này không phải khiếm khuyết của lập luận: lập luận dẫn tới chúng vẫn đứng vững. Chúng là chỗ mà **khoảng cách giữa lập luận và hiện trạng lớn nhất**, nên là chỗ một câu viết lỏng gây thiệt hại nhiều nhất.
 
 Bảng trên là **bản tóm tắt theo nhóm**, đủ để theo dõi mạch lập luận của chương và để đối chiếu với Chương 3. Danh mục **đầy đủ ba mươi mốt quyết định** — mỗi dòng ghi các phương án đã cân nhắc, định hướng được chọn, lý do chính, đánh đổi phải chấp nhận và mục tương ứng của Chương 2 — được trình bày tại **Phụ lục F.11, Bảng F-18**. Không quyết định nào bị lược bỏ; bảng ở đây chỉ gộp những quyết định cùng một trục thành một dòng.
 

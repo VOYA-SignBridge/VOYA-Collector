@@ -74,7 +74,8 @@ class TestExport:
         api_keys.create_key(doomed_tenant, name="ci")
         webhooks.create_endpoint(doomed_tenant, url="https://hooks.example.com/x")
 
-        job = tenant_lifecycle.request_export(doomed_tenant, scope="metadata")
+        job = tenant_lifecycle.request_export(doomed_tenant, scope="metadata",
+                                              export_purpose="tenant_portability")
         result = tenant_lifecycle.run_export(job["export_id"])
         assert result["status"] == "ready"
 
@@ -103,7 +104,7 @@ class TestExport:
         tenant_admin.create_tenant(stranger, clone_catalog=False, plan_code="free")
         plans._clear_caches()
         try:
-            job = tenant_lifecycle.request_export(doomed_tenant)
+            job = tenant_lifecycle.request_export(doomed_tenant, export_purpose="tenant_portability")
             tenant_lifecycle.run_export(job["export_id"])
             with pytest.raises(tenant_lifecycle.LifecycleError) as caught:
                 tenant_lifecycle.export_file(stranger, job["export_id"])
@@ -113,7 +114,7 @@ class TestExport:
             plans._clear_caches()
 
     def test_an_expired_export_refuses_to_download(self, doomed_tenant):
-        job = tenant_lifecycle.request_export(doomed_tenant)
+        job = tenant_lifecycle.request_export(doomed_tenant, export_purpose="tenant_portability")
         tenant_lifecycle.run_export(job["export_id"])
         with system_scope("test: age the export past its TTL"):
             db._execute(
@@ -128,7 +129,7 @@ class TestExport:
     def test_cleanup_removes_the_file_from_disk(self, doomed_tenant):
         """Bản xuất là bản sao ĐẦY ĐỦ dữ liệu của một tổ chức. Đánh dấu hết hạn
         trong bảng mà để tệp nằm lại là chưa dọn gì cả."""
-        job = tenant_lifecycle.request_export(doomed_tenant)
+        job = tenant_lifecycle.request_export(doomed_tenant, export_purpose="tenant_portability")
         tenant_lifecycle.run_export(job["export_id"])
         path = tenant_lifecycle.export_file(doomed_tenant, job["export_id"])
         assert path.exists()
@@ -193,6 +194,40 @@ class TestPurgeBrakes:
         assert caught.value.status_code == 409
         assert "bản xuất" in str(caught.value)
 
+    def test_a_release_export_does_not_satisfy_the_purge_prerequisite(self, doomed_tenant):
+        """C5-13 — một gói ĐÃ LỌC không phải bản sao dữ liệu của tổ chức.
+
+        Điều kiện trước khi xoá tồn tại để trả lời đúng một câu: *dữ liệu đã được
+        mang ra chưa?* Một gói `research_release` trả lời "một phần" — phần đủ
+        điều kiện phát hành. Nhận nó rồi cho xoá vĩnh viễn nghĩa là phần bị lọc
+        biến mất mà chưa từng được hoàn trả cho ai.
+
+        Và phần dễ mất nhất theo đường này chính là mẫu của người đã rút đồng
+        thuận: rút đồng thuận là dừng việc SỬ DỤNG, không phải đồng ý bị xoá.
+        """
+        _soft_delete(doomed_tenant, days_ago=999)
+        job = tenant_lifecycle.request_export(
+            doomed_tenant, export_purpose="research_release")
+        tenant_lifecycle.run_export(job["export_id"])
+
+        preview = tenant_lifecycle.purge_preview(doomed_tenant)
+        print(f"\n[evidence] co goi phat hanh 'ready' -> has_ready_export="
+              f"{preview['has_ready_export']}")
+        assert preview["has_ready_export"] is False, (
+            "một gói phát hành đã lọc được tính là bản hoàn trả dữ liệu")
+
+        with pytest.raises(tenant_lifecycle.LifecycleError) as caught:
+            tenant_lifecycle.purge_tenant(
+                doomed_tenant, confirm_tenant_id=doomed_tenant)
+        assert caught.value.status_code == 409
+
+        # Chốt hiệu lực: gói hoàn trả thì ĐƯỢC. Không có vế này, ca trên cũng
+        # xanh với một bản vá chặn tất cả mọi loại gói.
+        job2 = tenant_lifecycle.request_export(
+            doomed_tenant, export_purpose="tenant_portability")
+        tenant_lifecycle.run_export(job2["export_id"])
+        assert tenant_lifecycle.purge_preview(doomed_tenant)["has_ready_export"] is True
+
     def test_the_preview_reports_real_numbers_and_changes_nothing(self, doomed_tenant):
         """"Bạn có chắc không?" mà không kèm con số là câu hỏi người ta bấm qua
         theo phản xạ."""
@@ -214,7 +249,7 @@ class TestPurgeExecution:
 
         api_keys.create_key(doomed_tenant, name="sẽ biến mất")
         webhooks.create_endpoint(doomed_tenant, url="https://hooks.example.com/gone")
-        job = tenant_lifecycle.request_export(doomed_tenant)
+        job = tenant_lifecycle.request_export(doomed_tenant, export_purpose="tenant_portability")
         tenant_lifecycle.run_export(job["export_id"])
         _soft_delete(doomed_tenant, days_ago=999)
 
@@ -274,7 +309,7 @@ class TestPurgeExecution:
             tenant_admin.set_home_tenant(user["id"], doomed_tenant, role="admin")
             tenant_admin.add_member(survivor_tenant, user["id"])
 
-            job = tenant_lifecycle.request_export(doomed_tenant)
+            job = tenant_lifecycle.request_export(doomed_tenant, export_purpose="tenant_portability")
             tenant_lifecycle.run_export(job["export_id"])
             _soft_delete(doomed_tenant, days_ago=999)
             tenant_lifecycle.purge_tenant(

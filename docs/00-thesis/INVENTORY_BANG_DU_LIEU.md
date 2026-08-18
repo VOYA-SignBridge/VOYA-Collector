@@ -11,7 +11,7 @@ thả từng bảng trên PowerDesigner rồi sửa dây.
 
 ---
 
-## 0. Ba đính chính về tiền đề, cần chốt trước khi vẽ
+## 0. Năm đính chính về tiền đề, cần chốt trước khi vẽ
 
 ### 0.1 Không phải "80+ bảng" — mà là **58 bảng và 1 khung nhìn**
 
@@ -91,6 +91,52 @@ Lập luận hay nhất của §5 Phụ lục A — "cơ chế cách ly không t
 giờ có chính sách. Lập luận vẫn đúng với `users` (truy vấn đăng nhập chạy trước khi
 biết tổ chức), nên nó cần được viết lại quanh `users`, không quanh `tenants`.
 
+### 0.4 "3.860 mẫu" đếm dôi 440 so với số lần người thật ký
+
+`samples` có cột `augment_id`. Phân bố đo ngày 17/08:
+
+| `augment_id` | Số dòng | Là gì |
+|---:|---:|---|
+| 0 | **3.420** | bản gốc — một lần người thật thực hiện một ký hiệu |
+| 1 | 110 | bản tăng cường do máy sinh |
+| 2–7 | 55 mỗi mức, cộng 330 | bản tăng cường do máy sinh |
+| | **3.860** | tổng số **dòng** |
+
+Nghĩa là **440 dòng (11,4 %) không phải một lần ký của con người**, mà là biến
+thể sinh ra từ một bản gốc. Định nghĩa "sample = một lần thực hiện một ký hiệu"
+sai với đúng nhóm này.
+
+Hệ quả bắt buộc cho Chương 4: mọi câu "thu được 3.860 mẫu" phải đổi thành
+**3.420 mẫu gốc + 440 bản tăng cường**. Con số dùng để nói về công sức thu thập
+và về đa dạng người ký là **3.420**; con số 3.860 chỉ dùng được khi nói về kích
+thước tập đưa vào huấn luyện. Trộn hai con số này là cách tự thổi phồng quy mô
+dữ liệu mà người phản biện kiểm được bằng một câu `GROUP BY augment_id`.
+
+### 0.5 Hai đường vượt ranh giới tổ chức, cùng nằm ngoài phép đo cách ly
+
+Phép đo cách ly (P0-B, 17/08) chạy trên mặt phẳng **đọc theo yêu cầu HTTP**. Có
+hai đường ghi/đọc **không** đi qua mặt phẳng đó:
+
+| Đường | Vị trí | Bản chất |
+|---|---|---|
+| Xuất bộ dữ liệu | `/api/dataset/export` | đọc theo phạm vi lời gọi |
+| **Đồng bộ Google Sheets** | [export_tasks.py:82](backend/app/export_tasks.py#L82) | `_load_all_samples_unscoped()` → **một** bảng tính dùng chung |
+
+Đường thứ hai đáng nêu riêng vì nó **ra khỏi hệ thống**: `google_sheets_samples_spreadsheet_id`
+là **một** giá trị duy nhất trong cấu hình, nên mọi mẫu của mọi tổ chức đổ vào
+cùng một bảng tính. Chú thích ngay tại chỗ nói rõ đây là chủ ý ("bảng tính là
+ảnh chụp TOÀN kho vào một bảng duy nhất, không phải bản xuất theo tổ chức").
+
+**Mức phơi nhiễm thực tế hôm nay bằng không**, và phải nói đúng như vậy: cả
+3.860 mẫu đều thuộc tenant `default`, tenant `community` có 0 mẫu. Đây là một
+**ranh giới thiết kế bị vượt qua**, chưa phải một vụ rò rỉ đã xảy ra. Nó trở
+thành rò rỉ thật đúng vào ngày tổ chức thứ hai thu mẫu đầu tiên.
+
+Cách viết đúng cho Chương 3: cách ly được cưỡng chế ở tầng CSDL cho đường đọc
+theo yêu cầu; đường đồng bộ ra dịch vụ ngoài **chạy bằng quyền hệ thống và
+không mang phạm vi tổ chức** — đó là một hạn chế đã biết, không phải một lỗ hổng
+chưa phát hiện.
+
 ---
 
 ## 1. Quy ước phân loại
@@ -167,6 +213,24 @@ ngang tổ chức) · `System` (siêu dữ liệu vận hành).
 >    một bảng**. Ở CDM nên là một thực thể `Role` có phân biệt nguồn, không phải
 >    hai thực thể.
 
+**Độ lấp đầy thực tế** (đo 17/08, không suy từ lược đồ):
+
+| tenant | `workspaces` | `projects` |
+|---|---:|---:|
+| `default` | 1 | 1 |
+| `community` | 0 | 0 |
+
+Hai bảng đều **có** dòng — nhưng cả hệ thống chỉ có **một** workspace và **một**
+project, trong khi có 2 tổ chức. Quan trọng hơn con số: 3.860 mẫu và 63 lớp
+**không mang `project_id`**, nên cây `Tenant ⊃ Workspace ⊃ Project` tồn tại ở
+tầng phân quyền nhưng **chưa phân vùng dữ liệu**.
+
+Ở CDM vẫn vẽ đủ ba cấp vì ba cấp có thật ở `memberships`, nhưng quan hệ
+`Project ──< Sample` **không được vẽ**: nó không tồn tại ở bất kỳ tầng nào. Đây
+đúng là khoảng cách mà [PROPOSAL_COMPLIANCE_MATRIX](docs/10-issues/PROPOSAL_COMPLIANCE_MATRIX.md)
+xếp P1 ở mức `PARTIAL`, và là câu hỏi tự nhiên nhất hội đồng có thể đặt ra khi
+đọc Mục tiêu 1.
+
 ### M3 — Kho dữ liệu mẫu (6 bảng)
 
 | Bảng | Khoá chính | Type | Scope | Cha | Nối giữa | Lifecycle | RLS |
@@ -178,13 +242,83 @@ ngang tổ chức) · `System` (siêu dữ liệu vận hành).
 | `signers` | `signer_id` | Child | Tenant | `tenants` | — | Mutable | ✔ |
 | `signer_aliases` | (`tenant_id`,`old_signer_id`) | History | Tenant | `signers` | — | Append-only | ✔ |
 
+> **`capture_sessions` là thực thể quản lý được, không phải một nhãn.** Sáu
+> đường nghiệp vụ trong [label_sessions.py](backend/app/routers/label_sessions.py):
+> liệt kê phiên của một lớp, **xoá** phiên, **chuyển chủ sở hữu** (`/reassign`),
+> đọc khung hình, hỏi trạng thái dựng preview, và tải `preview.mp4` dựng lại từ
+> điểm mốc. Có `/reassign` nghĩa là quyền sở hữu một phiên thu **đổi được** —
+> đó là một vòng đời, nên ở CDM `CaptureSession` phải là một thực thể có hành
+> vi, không phải thuộc tính gộp của `Sample`.
+>
+> **`region` là một phần định danh lớp — và chỉ thật sự có hiệu lực từ 17/08/2026.**
+> Khoá duy nhất phải vẽ ở PDM là **5 cột**:
+> (`tenant_id`, `slug`, `language`, `dialect`, `region`).
+>
+> Bản 4 cột `uq_classes_tenant_slug_lang_dialect` tồn tại **song song** trên
+> `signdb` cho tới 17/08. Vì chặt hơn, nó vô hiệu hoá `region` trên thực tế:
+> `region` có trong khoá trên giấy nhưng cơ sở dữ liệu vẫn từ chối hai lớp chỉ
+> khác vùng miền. Đã gỡ bằng `app.cli.migrate --to 5`; chứng cứ hai chiều ghi ở
+> [KNOWN_ISSUES](docs/10-issues/KNOWN_ISSUES.md).
+>
+> Tầng ứng dụng **đã khớp** với khoá 5 cột — `region` nằm trong phép so tìm lớp
+> ([dataset_manager.py:887](backend/app/dataset_manager.py#L887)). Đừng chép lại
+> phát biểu cũ "ứng dụng dùng 4 cột, CSDL dùng 5"; lệch tầng đó đã được vá, và
+> nói nó còn tồn tại là hạ thấp hệ thống sai sự thật.
+>
 > **`samples` KHÔNG có khoá ngoại tới `raw_uploads`.** Xuất xứ từ tệp tải lên tới
 > mẫu đặc trưng **không** được cưỡng chế ở tầng ràng buộc — nó chỉ tồn tại qua
 > cột `source_type` và quy ước đặt tên. Đừng vẽ `RAW_UPLOAD 1──1..* SAMPLE` như
 > một quan hệ có thật.
 >
-> **Hai cột quy kết, đừng gộp ở CDM:** `auth_user_id` = tài khoản thu mẫu;
-> `signer_id` = người ký, tức chủ thể dữ liệu. Hai vai nghiệp vụ khác nhau.
+> **"Không có import từ nguồn ngoài" đúng với kho mẫu, nhưng nói vậy là thiếu.**
+> Không có đường nạp nào ghi vào `samples`/`classes` từ một bộ dữ liệu bên ngoài
+> — điều đó đúng. Nhưng bốn script QIPEDC **có tồn tại và đã chạy**:
+> `tai_mau_qipedc.py`, `doi_chieu_danhmuc_qipedc.py`, `gan_nhan_qipedc.py`,
+> `lap_muc_luc_qipedc.py`. Chúng lấy **4.362 mục** từ điển quốc gia và **200
+> clip**, dùng cho phép đo hiệu quả lưu trữ
+> ([MEASUREMENT_storage_efficiency](docs/00-thesis/MEASUREMENT_storage_efficiency.md))
+> và cho bản đối chiếu danh mục
+> ([DOI_CHIEU_QIPEDC](docs/00-thesis/DOI_CHIEU_QIPEDC.md)) — **không** ghi vào
+> kho mẫu.
+>
+> Phân biệt này phải giữ nguyên ở cả hai chiều: nói "có import QIPEDC" là
+> overclaim, nói "không đụng tới QIPEDC" là tự bỏ mất phần việc đã làm được.
+> Câu đúng: *dữ liệu QIPEDC được dùng làm **đối chứng đo lường**, không làm
+> **nguồn dữ liệu huấn luyện**.*
+>
+> **Bốn cột quy kết, không phải hai** — đo trên 3.860 mẫu ngày 17/08:
+>
+> | Cột | Có giá trị | Là ai |
+> |---|---:|---|
+> | `user_id` | 3.860 (100 %) | định danh nội bộ của lượt thu, luôn có |
+> | `auth_user_id` | 3.694 (95,7 %) | **tài khoản đã đăng nhập** lúc thu |
+> | `username` | 1.169 (30,3 %) | tên hiển thị chép lại tại thời điểm thu |
+> | `signer_id` | 1.674 (43,4 %) | **người ký** — chủ thể dữ liệu |
+>
+> Chỉ `auth_user_id` và `signer_id` là hai vai nghiệp vụ khác nhau và không được
+> gộp ở CDM. Hai cột còn lại là **hiện vật lịch sử**: `user_id` có mặt từ trước
+> khi hệ thống có tài khoản, `username` là bản sao chụp lại tên — cả hai đều
+> không dùng để suy ra chủ thể dữ liệu.
+>
+> Con số 1.674 không phải ngẫu nhiên: nó **đúng bằng** số mẫu của chiến dịch
+> `isds2026_v1`, và 2.186 mẫu không thuộc chiến dịch nào có `signer_id` = NULL
+> **toàn bộ**. Nghĩa là quy kết chủ thể dữ liệu chỉ được thiết lập cho đúng một
+> chiến dịch thu. Đây là ràng buộc phải nêu ở phần hạn chế, vì đường phát hành
+> dữ liệu dựa trên `signer_consents`, mà bảng đó khoá theo (`tenant_id`,`signer_id`).
+>
+> **Nối thử toàn kho vào đồng thuận còn hiệu lực** (`withdrawn_at IS NULL`):
+>
+> | | Số mẫu | Tỉ lệ |
+> |---|---:|---:|
+> | Nối được vào một đồng thuận còn hiệu lực | **430** | 11,1 % |
+> | Có `signer_id` nhưng **không có** bản ghi đồng thuận | 1.244 | 32,2 % |
+> | Không có `signer_id`, không nối được về nguyên tắc | 2.186 | 56,6 % |
+>
+> Toàn bảng `signer_consents` hiện có **đúng 1 dòng / 1 người ký**. Nói cách
+> khác: cơ chế đồng thuận đã chạy được, nhưng **88,9 % kho mẫu hiện chưa phát
+> hành được** theo đúng luật mà chính hệ thống cưỡng chế. Đây là hạn chế về
+> **dữ liệu**, không phải về mã — và phải viết đúng như vậy, vì hai loại hạn chế
+> này được hội đồng đánh giá rất khác nhau.
 
 ### M4 — Danh mục & Registry (11 bảng)
 
@@ -197,7 +331,7 @@ ngang tổ chức) · `System` (siêu dữ liệu vận hành).
 | `recognition_profiles` | (`tenant_id`,`profile_id`) | Catalogue | Tenant | `tenants` | — | Mutable | ✔ |
 | `vocabulary_groups` | (`tenant_id`,`group_id`) | Catalogue | Tenant | `tenants` | — | Mutable | ✔ |
 | `vocabulary_registry_meta` | `tenant_id` | Child (1:1) | Tenant | `tenants` | — | Mutable | ✔ |
-| `registry_versions` | (`tenant_id`,`version`) | **Version** | Tenant | `tenants` | — | **Immutable** | ✔ |
+| `registry_versions` | (`tenant_id`,`version`) | **Version** | Tenant | `tenants` | — | Immutable **theo quy ước** (không có trigger) | ✔ |
 | `community_dialects` | `dialect_id` | Catalogue | **Community** | — | — | Mutable | — |
 | `community_profiles` | `profile_id` | Catalogue | **Community** | — | — | Mutable | — |
 | `community_versions` | `version` | Version | **Community** | — | — | Immutable | — |
@@ -331,6 +465,22 @@ signer_consents(kind, version)                   → legal_documents(kind, versi
 
 Hai dòng cuối không phải khoá phạm vi mà là **khoá ghim phiên bản**: một bản ghi
 đồng thuận trỏ tới đúng phiên bản văn bản đã ký, và văn bản đó bất biến sau công bố.
+
+### 4.1 Sáu trigger — bất biến duy nhất được cưỡng chế ở tầng CSDL
+
+| Trigger | Bảng | Bảo vệ điều gì |
+|---|---|---|
+| `trg_legal_documents_freeze` | `legal_documents` | bất biến sau công bố |
+| `trg_legal_events_append_only` | `legal_document_events` | chỉ thêm |
+| `ct_memberships_chain` | `memberships` | membership cấp dưới phải có membership cấp trên |
+| `ct_role_assignments_scope` | `role_assignments` | lần gán vai khớp phạm vi của membership |
+| `ct_role_permissions_dominance` | `role_permissions` | vai không cấp được quyền vượt cấp |
+| `ct_roles_tenant_type` | `roles` | vai nền tảng và vai tổ chức không lẫn nhau |
+
+**`registry_versions` KHÔNG nằm trong danh sách này.** Tính bất biến của ảnh chụp
+registry là quy ước ở tầng ứng dụng, không có trigger đứng sau — khác hẳn
+`legal_documents`. Chương 3 phải nói đúng mức bảo đảm của từng cái, đừng gộp cả
+hai vào một câu "bất biến".
 
 ---
 

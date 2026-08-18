@@ -2,8 +2,8 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useI18n } from "../../i18n";
 import {
-  BuildingIcon, ChartBarIcon, GlobeIcon, InboxIcon, LinkIcon, ShieldCheckIcon,
-  ShieldIcon, UserIcon,
+  BuildingIcon, ChartBarIcon, FolderIcon, GlobeIcon, InboxIcon, LinkIcon,
+  ShieldCheckIcon, ShieldIcon, UserIcon,
 } from "../../components/ui/Icons";
 import type { ReactNode } from "react";
 
@@ -48,6 +48,10 @@ const ITEMS: Item[] = [
   // việc sửa một chữ trong tên đăng nhập.
   { key: "Đồng thuận", href: "/settings/consents", icon: <ShieldCheckIcon className={ICON} /> },
   { key: "Tổ chức", href: "/settings/organization", icon: <BuildingIcon className={ICON} /> },
+  // Workspace/Project nằm NGAY DƯỚI Tổ chức vì đó đúng là quan hệ chứa nhau:
+  // tenant ⊃ workspace ⊃ project. Đặt nó ở chỗ khác trong danh sách là làm mất
+  // đúng thông tin mà thứ tự đang mang.
+  { key: "Workspace", href: "/settings/workspaces", icon: <FolderIcon className={ICON} /> },
   { key: "Gói dịch vụ", href: "/settings/billing", icon: <ChartBarIcon className={ICON} /> },
   // Tích hợp đòi vai trò biên tập ở máy chủ. Hiện nó cho người không có quyền
   // là mời họ bấm vào một trang chắc chắn 403 — một ngõ cụt có sẵn nhãn.

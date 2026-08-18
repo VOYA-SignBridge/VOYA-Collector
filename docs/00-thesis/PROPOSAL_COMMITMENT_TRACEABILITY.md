@@ -427,6 +427,19 @@ Ghi thẳng vào artifact. Nhờ vậy, nếu P0-B đạt thì bằng chứng v�
 lệ trong đúng phạm vi nó kiểm tra** — thay vì bị bác vì một suy diễn vượt phạm vi.
 Xem `MODEL_tenant_ml_domain.md` §3.
 
+**Cập nhật 16\08\2026 — lý do loại trừ đã đổi, và đổi theo hướng mạnh hơn.**
+Câu trên loại trừ bốn bảng đó vì chúng *nằm ngoài phạm vi đo*. Phép đo của nhóm
+C3 cho thấy chúng **không tồn tại trong CSDL đang chạy**: chỉ có DDL trong hai
+tệp SQL không được thi hành, và `routers/experiments.py` không được nối vào ứng
+dụng.
+
+Khác biệt này có lợi cho artifact chứ không hại. "Ngoài phạm vi" là một lời hứa
+sẽ phải trả sau; "không tồn tại" là một sự thật kiểm chứng được, kèm chốt hồi quy
+ở `backend/tests/test_c3_output_ledger.py`. Nhưng nó cũng cấm một cách diễn đạt
+mà bản cũ còn để ngỏ: **không được viết rằng hệ thống có một lớp
+experiment-tracking sở hữu theo người dùng**. Không có lớp nào cả — có một thiết
+kế cho lớp đó.
+
 **Nếu không:**
 
 > *Partially evidenced* — database/runtime-role isolation and selected request

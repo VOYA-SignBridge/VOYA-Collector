@@ -561,7 +561,7 @@ class TestEndpointHaiChieu:
                                    clone_catalog=False, plan_code="plus")
         plans._clear_caches()
         try:
-            job = tenant_lifecycle.request_export(tid)
+            job = tenant_lifecycle.request_export(tid, export_purpose="tenant_portability")
             tenant_lifecycle.run_export(job["export_id"])
             # Phạm vi hệ thống là BẮT BUỘC ở đây: `tenants` bật FORCE RLS từ
             # 15/08/2026, nên `voya_test_owner` — dù là chủ sở hữu bảng — cũng

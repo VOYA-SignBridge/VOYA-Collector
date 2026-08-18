@@ -8,14 +8,27 @@ trong Chương 3 bị bác bằng chính mã nguồn.
 
 ```
 ✓   có, và ĐƯỢC CƯỠNG CHẾ theo phạm vi tenant
-△   ĐÃ HIỆN THỰC, nhưng phạm vi sở hữu khác đích (theo người dùng / theo máy)
+△   ĐÃ HIỆN THỰC và đang chạy, nhưng phạm vi sở hữu khác đích (theo máy)
+◌   có THIẾT KẾ + DDL trong kho mã, KHÔNG tồn tại trong CSDL đang chạy
 ○   mới là KIẾN TRÚC ĐÍCH, chưa có mã
 ```
 
-Ba mức, không phải hai. `△` và `○` khác nhau ở chỗ quan trọng: `model_versions`
-**có tồn tại và đang chạy** — chỉ là mô hình sở hữu chưa trùng ranh giới tenant
-đích; còn con trỏ `active_version` thì **chưa có dòng mã nào**. Gộp chúng vào một
-ký hiệu sẽ khiến người đọc tưởng model registry chưa được xây.
+Bốn mức, không phải hai — và ranh giới đắt nhất nằm giữa `△` và `◌`.
+
+`△` nói "chạy thật, chỉ khác ranh giới sở hữu". `◌` nói "có bản vẽ và có DDL,
+nhưng bảng không nằm trong cơ sở dữ liệu đang chạy". Hai câu ấy nghe gần nhau và
+chịu được hai lượt chất vấn rất khác nhau: câu đầu mời hội đồng hỏi *"cho xem
+`tenant_id` của bảng đó"*, câu sau thì không.
+
+Bản trước của tệp này xếp `model_versions` vào `△` kèm lập luận rằng gộp nó với
+`○` sẽ "khiến người đọc tưởng model registry chưa được xây". Lo lắng ấy hợp lý,
+nhưng bản sửa cho nó không phải là đôn lên một mức: phép đo ngày 16\08\2026 cho
+thấy bảng đó không tồn tại trong CSDL chạy thật. `◌` giữ được đúng điều cần giữ —
+công việc thiết kế là có thật — mà không khẳng định một thứ mở `psql` ra là thấy
+sai.
+
+Chỗ duy nhất còn ở `△` là **thẩm quyền ký SOT**: nó chạy thật, chỉ neo theo MÁY
+chứ không theo tenant.
 
 ---
 
@@ -143,10 +156,16 @@ Upload ────────┘                                              
 |---|---|---|---|
 | Thu nhận | `classes`, `samples` | **`tenant_id`** | **ĐÃ CƯỠNG CHẾ** (RLS + cổng CSV) |
 | Việc huấn luyện (ứng dụng) | `training_jobs` | **`tenant_id`** | **ĐÃ CƯỠNG CHẾ** |
-| Bộ dữ liệu | `datasets` | `created_by`, `owner_user_id` → `users` | **KHÔNG có `tenant_id`** |
-| Phiên bản bộ dữ liệu | `dataset_versions` | qua `dataset_id` | **KHÔNG có `tenant_id`** |
-| Thí nghiệm | `experiments` | `created_by` → `users` | **KHÔNG có `tenant_id`** |
-| Model | `model_versions` | qua `experiment_id` | **KHÔNG có `tenant_id`** |
+| Bộ dữ liệu | `datasets` | `created_by`, `owner_user_id` → `users` | **KHÔNG có `tenant_id`** — và **không có bảng** trong CSDL đang chạy |
+| Phiên bản bộ dữ liệu | `dataset_versions` | qua `dataset_id` | nt. |
+| Thí nghiệm | `experiments` | `created_by` → `users` | nt. |
+| Model | `model_versions` | qua `experiment_id` | nt. |
+
+Cột "Phạm vi" của bốn hàng cuối mô tả **DDL trong kho mã**, không mô tả một bảng
+đang tồn tại. Giữ lại vì nó cho thấy mô hình sở hữu mà thiết kế cũ đã chọn — và
+mô hình ấy đúng là theo người dùng, không theo tenant. Nhưng đọc bảng này mà kết
+luận "hệ thống có một model registry sở hữu theo người dùng" là sai: chưa có
+hàng nào, chưa có bảng nào.
 
 ```
 grep -c tenant_id backend/app/storage/experiment_tracking_db.py
@@ -199,10 +218,15 @@ Chỉ con trỏ triển khai đổi.
 Rollback là **lựa chọn**, không phải **đột biến phá huỷ**. Không dùng `DELETE v5`
 để rollback.
 
-**Trạng thái:** `model_versions` có `is_published` / `published_at` và endpoint
-`POST /models/{version_id}/promote`, nên có khái niệm giai đoạn. Một con trỏ
-`active_version` tách khỏi `latest` cùng nhật ký kiểm toán
-(`who/when/tenant/model/from→to/reason`) là **THIẾT KẾ**, chưa hiện thực.
+**Trạng thái:** DDL của `model_versions` có `is_published` / `published_at`, và
+`routers/experiments.py` có `POST /models/{version_id}/promote` — nên khái niệm
+giai đoạn đã được **thiết kế** đến mức endpoint. Nhưng router đó không được nối
+vào ứng dụng và bảng không được tạo, nên hiện chưa có đường chạy nào. Con trỏ
+`active_version` tách khỏi `latest`, cùng nhật ký kiểm toán
+(`who/when/tenant/model/from→to/reason`), cũng là **THIẾT KẾ**, chưa hiện thực.
+
+Cả mục 5 này vì vậy nên đọc là **đặc tả hành vi rollback mong muốn**, không phải
+mô tả một cơ chế đang vận hành.
 
 Đối chiếu với S7 của SOT: ở SOT, một bản cũ hợp lệ **ghi đè giá trị chung** — đó
 chính là kiểu rollback phá huỷ mà mô hình model registry phải tránh.
@@ -299,12 +323,20 @@ Không thể giả vờ M5 chưa từng học X. Việc có xoá model dẫn xu�
 
 > Trong implementation hiện tại, phạm vi tenant được cưỡng chế trực tiếp đối với
 > lớp thu nhận và quản lý dữ liệu cốt lõi, bao gồm lớp, mẫu, các đường Live
-> Capture/Upload và luồng `training_jobs`. Một nhánh theo dõi thực nghiệm và phiên
-> bản mô hình tồn tại song song, trong đó `datasets`, `dataset_versions`,
-> `experiments` và `model_versions` hiện được sở hữu theo **người dùng** thay vì
-> mang `tenant_id`. Vì vậy, kiến trúc đích hướng tới vòng đời ML theo tenant,
-> nhưng việc cưỡng chế phạm vi tenant chưa được áp dụng đồng nhất cho toàn bộ lớp
-> thực nghiệm và model registry.
+> Capture/Upload và luồng `training_jobs`. Lớp theo dõi thực nghiệm và đăng ký
+> phiên bản mô hình — `datasets`, `dataset_versions`, `experiments`,
+> `model_versions` — tồn tại ở dạng **thiết kế và DDL trong kho mã, không được
+> tạo trong cơ sở dữ liệu đang chạy**; router tương ứng không được nối vào ứng
+> dụng. Vì vậy, mô hình mô tả một vòng đời ML theo tenant, còn phần đã hiện thực
+> và đo được dừng ở lớp dữ liệu và `training_jobs`; lớp thực nghiệm/model
+> registry chưa phải một năng lực đang vận hành, nên cũng không nằm trong phép
+> đo cách ly.
+
+> **Ghi chú kiểm chứng.** Khẳng định "không tồn tại trong CSDL đang chạy" là kết
+> quả đo ngày 16\08\2026 trên CSDL kiểm thử, vốn được dựng bằng chính
+> `ensure_tables()` của môi trường chạy thật. `backend/tests/test_c3_output_ledger.py`
+> giữ một chốt hồi quy: nếu bốn bảng đó xuất hiện, bài kiểm đỏ và đoạn văn này
+> phải được viết lại — chứ không âm thầm trở thành đúng.
 
 Và Community:
 
@@ -325,12 +357,12 @@ Tenant                      ✓ classes                  tenant-scoped, RLS
  ├─ Data collection         ✓ samples                  tenant-scoped, RLS
  ├─ Dataset / version       ✓ capture / upload         tenant-scoped
  ├─ Training                ✓ training_jobs            tenant-scoped
- ├─ Experiment              ────────────────────────────────────────────────
- ├─ Model registry          △ datasets                 sở hữu theo NGƯỜI DÙNG
- └─ SOT                     △ dataset_versions         sở hữu theo NGƯỜI DÙNG
-                            △ experiments              sở hữu theo NGƯỜI DÙNG
-                            △ model_versions           sở hữu theo NGƯỜI DÙNG
-                            △ thẩm quyền ký SOT        theo MÁY
+ ├─ Experiment              △ thẩm quyền ký SOT        theo MÁY, không theo tenant
+ ├─ Model registry          ────────────────────────────────────────────────
+ └─ SOT                     ◌ datasets                 DDL trong kho, KHÔNG có
+                            ◌ dataset_versions         trong CSDL đang chạy
+                            ◌ experiments
+                            ◌ model_versions
                             ────────────────────────────────────────────────
                             ○ active_version / rollback pointer
                             ○ thẩm quyền ký theo tenant
@@ -339,13 +371,33 @@ Tenant                      ✓ classes                  tenant-scoped, RLS
                             ○ provenance seed khi bootstrap tenant
 ```
 
-Đọc bảng này: hàng `△` là **đã có và đang chạy**, chỉ khác ranh giới sở hữu so với
-đích. Hàng `○` là **chưa có mã**. Phân biệt ấy quan trọng — `model_versions` tồn
-tại thật với `checkpoint_hash` và lineage qua `experiment_id`; nói nó "chưa có" là
-tự hạ thấp phần đã làm được.
+Đọc bảng này — **bốn** mức, không phải ba:
+
+| | nghĩa |
+|---|---|
+| `✓` | đang chạy, mang `tenant_id`, có RLS |
+| `△` | đang chạy thật, nhưng ranh giới sở hữu khác đích |
+| `◌` | có thiết kế và DDL trong kho mã, **không tồn tại trong CSDL đang chạy** |
+| `○` | chưa có mã |
+
+Mức `◌` được tách ra ngày 16\08\2026, sau khi phép đo cho thấy bốn bảng ấy không
+được `ensure_tables()` tạo và `routers/experiments.py` không được nối vào ứng
+dụng. Trước đó chúng nằm ở `△` kèm một câu dặn: *"`model_versions` tồn tại thật
+với `checkpoint_hash` và lineage qua `experiment_id`; nói nó 'chưa có' là tự hạ
+thấp phần đã làm được."*
+
+Câu ấy đã bị gỡ, và lý do đáng ghi lại. Nó không chỉ dán nhãn sai — nó **dặn
+người viết Chương 3 đi bảo vệ một năng lực không tồn tại**, trước một hội đồng có
+quyền mở CSDL ra xem. Nhầm `◌` thành `○` chỉ làm quyển sách khiêm tốn quá mức;
+nhầm `◌` thành `△` là một khẳng định sai sự thật ở chỗ dễ kiểm chứng nhất.
+
+Chỗ đúng để không tự hạ thấp là mô tả cho đúng cái đang có: một thiết kế lược đồ
+đầy đủ cho model registry, đã viết thành DDL và một router, **chưa nối vào vòng
+đời chạy**. Đó là công việc thật, và mô tả như vậy không ai bắt bẻ được.
 
 Tự chỉ ra trước thì hội đồng không bắt được lỗi *"sơ đồ vẽ tenant bao
-ModelVersion nhưng bảng không có `tenant_id`"*.
+ModelVersion nhưng bảng không có `tenant_id`"* — và, sau lần sửa này, cũng không
+bắt được lỗi nặng hơn: *"bảng ấy đâu?"*
 
 ### Hai đường huấn luyện — nói đúng mức
 

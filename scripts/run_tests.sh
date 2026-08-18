@@ -139,6 +139,41 @@ fi
 extra="$extra -e GOOGLE_DRIVE_TIMEOUT_SECONDS=${VOYA_TEST_GDRIVE_TIMEOUT:-5}"
 extra="$extra -e GOOGLE_DRIVE_NUM_RETRIES=${VOYA_TEST_GDRIVE_RETRIES:-1}"
 
+# 4) Danh tính revision. Ảnh test KHÔNG có `git`, nên công cụ nào cần biết nó
+#    đang chụp revision nào phải được máy chủ nói cho. Tính ở đây, một chỗ, để
+#    mọi công cụ chạy qua script này khai cùng một revision.
+#    KHÔNG dùng `git -C "$REPO"`: `MSYS_NO_PATHCONV=1` ở đầu tệp tắt chuyển đổi
+#    đường dẫn, nên `git.exe` nhận `/e/...` và trả `fatal: cannot change to`.
+#    `cd` của shell thì hiểu đường dẫn MSYS.
+#
+#    Và nếu đọc git hỏng thì trạng thái cây là "khong-ro", KHÔNG phải "sach".
+#    Bản đầu để chúng độc lập, nên một lượt `rev-parse` thất bại vẫn báo cây
+#    sạch — một công cụ hỏng đưa ra con số trấn an còn tệ hơn một công cụ im.
+if command -v git >/dev/null 2>&1 && [ -d "$REPO/.git" ]; then
+  _rev=$(cd "$REPO" && git rev-parse HEAD 2>/dev/null) || _rev=""
+  if [ -n "$_rev" ]; then
+    _st=$(cd "$REPO" && git status --porcelain 2>/dev/null) && _ok=1 || _ok=0
+    if [ "$_ok" = "1" ]; then
+      _n=$(printf '%s' "$_st" | grep -c . || true)
+      [ "$_n" -eq 0 ] && _tree="sach" || _tree="ban:${_n}"
+    else
+      _tree="khong ro"
+    fi
+    extra="$extra -e VOYA_ASBUILT_REVISION=$_rev -e VOYA_ASBUILT_TREE=$_tree"
+  fi
+fi
+
+# Lệnh chạy trong container. Mặc định là pytest; đổi được để chạy một công cụ
+# khác trên ĐÚNG DSN test này thay vì dựng lại 90 dòng tính DSN ở nơi khác — và
+# bản sao thứ hai ấy chắc chắn sẽ lệch khỏi bản này.
+#
+# Lưu ý về hai lớp chặn khi override:
+#   lớp 1 (script này)  VẪN áp dụng — DSN đã bị viết lại, tên CSDL cấm vẫn bị từ chối
+#   lớp 2 (conftest)    KHÔNG chạy, vì nó là fixture của pytest
+# Nên công cụ nào chạy qua đường này phải TỰ kiểm `current_database()`. Xem
+# `scripts/reverse_asbuilt_schema.py` để biết cách làm.
+VOYA_TEST_CMD="${VOYA_TEST_CMD:-python -m pytest}"
+
 exec docker run --rm \
   --network "$NETWORK" \
   --env-file "$ENV_FILE_MOUNT" \
@@ -149,4 +184,4 @@ exec docker run --rm \
   $extra \
   -v "$REPO_MOUNT:/src" -w /src \
   "$IMAGE" \
-  python -m pytest "$@"
+  $VOYA_TEST_CMD "$@"

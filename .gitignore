@@ -248,3 +248,13 @@ docs/00-thesis/SignBridge_Reference/*KHONG_DUNG*
 # nên thư mục này là scratch chứ không phải hồ sơ.
 .measurement/
 *.bak2
+
+# Bản nén của chính thư mục `docs/` (36 MB). Nó là bản sao, không phải nguồn:
+# mọi thứ bên trong đã được theo dõi ở dạng tệp rời. Đưa vào lịch sử git thì
+# mỗi lần nén lại sinh một blob 36 MB mới không khử trùng lặp được.
+/docs.zip
+
+# Bản Word do người khác gửi tới. Nội dung đã được chuyển vào các tệp Markdown
+# của quyển; giữ bản nhị phân trong git thì không diff được và không ai biết
+# bản nào mới hơn.
+*.docx

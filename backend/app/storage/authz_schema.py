@@ -138,6 +138,7 @@ TENANT_SCOPED_AUTHZ_TABLES: tuple[str, ...] = (
     "projects",
     "memberships",
     "event_outbox",
+    "project_allocations",
 )
 
 #: Bảng danh mục dùng chung: đọc được cả dòng nền tảng lẫn dòng của mình, nhưng
@@ -1711,6 +1712,61 @@ _OUTBOX_DDL: list[str] = [
 #:   * `_TRIGGER_DDL` SAU `_DATA_MIGRATION_DDL` — di trú chép dữ liệu lịch sử,
 #:     trong đó có dòng đã thu hồi và role đã tắt mà trigger sẽ từ chối. Gắn
 #:     trigger trước nghĩa là di trú thất bại và bảng cũ không bao giờ bị bỏ.
+#: Cấp phát hạn mức xuống cấp project.
+#:
+#: Vì sao là một bảng riêng chứ không phải thêm cột vào `projects`
+#: ---------------------------------------------------------------
+#: Số chỉ tiêu cấp phát được sẽ tăng — hôm nay là mẫu, dung lượng và lượt huấn
+#: luyện; ngày mai có thể là phút GPU. Mỗi chỉ tiêu một cột nghĩa là mỗi lần
+#: thêm một chỉ tiêu lại phải di trú lược đồ, và bảng `projects` dần biến thành
+#: bảng hạn mức đội lốt bảng cây phạm vi.
+#:
+#: Mô hình khoá–giá trị ở đây trả giá bằng việc CSDL không kiểm được tên chỉ
+#: tiêu, và cái giá đó được chấp nhận có ý thức — cùng đánh đổi đã chọn ở
+#: `tenant_usage_daily`, và tên chỉ tiêu ở cả hai chỗ dùng chung một từ vựng.
+#:
+#: `allocated` NULL nghĩa là KHÔNG GIỚI HẠN — cùng quy ước với `plans`. Đây là
+#: chỗ dễ đọc nhầm nhất trong lược đồ, nên nó được ghi lại ở mọi bảng có mặt.
+_PROJECT_ALLOCATION_DDL: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS project_allocations (
+        -- KHÔNG viết `REFERENCES tenants (...)` ở đây. Lượt cấp khoá ngoại
+        -- chung cho mọi bảng trong `TENANT_SCOPED_AUTHZ_TABLES` đã thêm
+        -- `fk_project_allocations_tenant` với ON DELETE **RESTRICT**. Khai
+        -- thêm một khoá CASCADE ở đây không "nới" gì: hai ràng buộc cùng áp
+        -- thì cái chặt hơn thắng, nên kết quả là hai khoá trùng nhau, một cái
+        -- không bao giờ có tác dụng, và người đọc lược đồ tin nhầm rằng dòng
+        -- cấp phát tự ra đi theo tenant. Nó không.
+        tenant_id    TEXT NOT NULL,
+        project_id   UUID NOT NULL,
+        metric       TEXT NOT NULL,
+        allocated    BIGINT,
+        note         TEXT NOT NULL DEFAULT '',
+        updated_by   UUID REFERENCES users (id) ON DELETE SET NULL,
+        updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+        PRIMARY KEY (tenant_id, project_id, metric),
+
+        -- Cấp phát âm không có nghĩa. NULL vẫn qua được: NULL là "không giới
+        -- hạn", không phải "chưa điền".
+        CONSTRAINT ck_project_allocations_nonneg
+            CHECK (allocated IS NULL OR allocated >= 0)
+    )
+    """,
+    # Khoá ngoại GHÉP, cùng lý do với mọi khoá ghép khác trong lược đồ: khoá đơn
+    # cho phép một dòng cấp phát của tenant A trỏ tới project của tenant B, và
+    # cơ sở dữ liệu sẽ không phản đối vì khoá vẫn tồn tại.
+    add_constraint(
+        "project_allocations",
+        "fk_project_allocations_project",
+        "FOREIGN KEY (tenant_id, project_id) "
+        "REFERENCES projects (tenant_id, project_id) ON DELETE CASCADE",
+    ),
+    "CREATE INDEX IF NOT EXISTS ix_project_allocations_project "
+    "ON project_allocations (project_id)",
+]
+
+
 AUTHZ_DDL_STATEMENTS: list[str] = [
     *_TENANT_TYPE_DDL,
     *_HIERARCHY_DDL,
@@ -1723,6 +1779,9 @@ AUTHZ_DDL_STATEMENTS: list[str] = [
     *_TRIGGER_DDL,
     *_PASSCODE_DDL,
     *_OUTBOX_DDL,
+    # Sau `_HIERARCHY_DDL` vì khoá ngoại ghép trỏ tới `projects`; đặt trước nó
+    # thì câu `ALTER TABLE ... ADD CONSTRAINT` hỏng ở máy dựng từ số không.
+    *_PROJECT_ALLOCATION_DDL,
 ]
 
 

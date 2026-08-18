@@ -15,7 +15,8 @@ biểu ranh giới cách ly thành một **mệnh đề kiểm chứng được*
 mệnh đề ấy chỉ đúng khi bốn tầng cùng có mặt.
 
 > Một truy vấn không khai báo tổ chức trả về **không hàng nào**, chứ không phải
-> mọi hàng. Và ứng dụng **không tự vô hiệu hoá được** cơ chế đó.
+> mọi hàng. Và **đường truy vấn nghiệp vụ của ứng dụng không tự vô hiệu hoá được**
+> cơ chế đó.
 
 Mệnh đề này có một ranh giới phải nêu kèm mỗi lần nó được dùng. Nó phát biểu về
 **đường truy vấn của ứng dụng**: cơ chế đưa điều kiện phạm vi ra khỏi trách nhiệm

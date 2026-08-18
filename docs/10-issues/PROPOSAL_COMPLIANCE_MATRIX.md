@@ -203,11 +203,26 @@ B+-3 padmin    -> /admin/data-report        200
 
 | | |
 |---|---|
-| Evidence | `region` đã thành một phần định danh lớp (commit `f882414`); registry/version; shared catalogue |
+| Evidence | `region` là một phần định danh lớp **và đã có hiệu lực trên `signdb` từ 17/08/2026**; registry/version; shared catalogue |
 | Evidence — 3 vế | CHƯA XÁC MINH đủ |
 | **Status** | **`PARTIAL`** |
 | **Gap** | Phải chứng minh **cả ba** vế, không chỉ "có bảng vocabulary": (a) canonical/shared tồn tại; (b) tenant mở rộng được; (c) **canonical KHÔNG bị tenant làm biến đổi**. Vế (c) là vế dễ thiếu nhất và cũng là vế đề cương hứa mạnh nhất. |
 | **Decision** | Checklist riêng, sau P2. |
+
+> **Đính chính 17/08/2026 — dòng Evidence trên từng SAI trong ~2 ngày.**
+> Commit `f882414` đưa `region` vào định danh lớp ở **mã**, nhưng trên `signdb`
+> chỉ mục cũ 4 cột `uq_classes_tenant_slug_lang_dialect` **vẫn còn**, và vì chặt
+> hơn nên nó vô hiệu hoá `region` ở tầng cơ sở dữ liệu. Trong khoảng đó, cam kết
+> "biến thể phương ngữ theo vùng" **không hiện thực được**, dù mã đã đúng.
+>
+> Đã gỡ bằng `migrate --to 5`, có sao lưu và **chứng cứ hai chiều** (biến thể
+> vùng vào được; trùng hoàn toàn vẫn bị chặn) — chi tiết ở
+> [KNOWN_ISSUES, đợt 2026-08-17](docs/10-issues/KNOWN_ISSUES.md).
+>
+> Bài học cho chính bảng này: *"commit đã có" không phải bằng chứng cho một cam
+> kết về hành vi hệ thống.* Một dòng Evidence trỏ tới commit chỉ chứng minh mã
+> đã đổi; nó không chứng minh **cơ sở dữ liệu đang chạy** hành xử theo mã đó.
+> Với P4, bằng chứng đúng loại là một cặp INSERT có đối chứng, không phải một mã băm commit.
 
 ---
 
@@ -317,6 +332,7 @@ và ghi chúng là phần vượt phạm vi đã có sẵn.
 | C2a `training_jobs.tenant_id` tường minh | P2 | DONE — 9/9 |
 | C2b chủ sở hữu operational split | P2 | DONE — 21/21, xem dưới |
 | C2c cưỡng chế resolver + ma trận C2-1..C2-7 | P2 | DONE — 18/18, xem dưới |
+| C3 giam hãm đầu ra (6 mặt phẳng) | P2 + **P6** | DONE — xem dưới |
 | C export/training (7 caller còn lại) | P2 + **P6** + P8 | chưa |
 | D internal (9) | P2 + **P6** | chưa |
 | E maintenance ledger (21) | P2 | chưa |
@@ -399,6 +415,43 @@ tưởng là mã chết.
 
 **Hai hiện vật lịch sử:** giữ, không gán chủ, không dùng được lúc chạy. Chi tiết
 và điều kiện backfill-có-chứng-cứ ở `KNOWN_ISSUES.md`.
+
+### C3 — giam hãm đầu ra huấn luyện (16/08/2026)
+
+**Proposal trace:** P2 (logical tenant isolation), củng cố P6. **KHÔNG** dùng để
+tuyên bố P7: đề cương đòi cả isolation, async processing và signed/versioned
+synchronization như ba mục riêng.
+
+**Bất biến:** `Train(T)` → mọi đầu ra bền vững thuộc T. Thẩm quyền của mọi đầu
+ra là `PersistedTrainingJob.tenant_id`, không phải yêu cầu đang chạy, không phải
+hiện vật đang ghi, không phải tiền tố đường dẫn có sẵn.
+
+| Mặt phẳng | Trạng thái | Bằng chứng |
+|---|---|---|
+| 1. hàng model registry | **NOT APPLICABLE** — không tồn tại trong runtime | `test_c3_output_ledger.py` + guard |
+| 2. hàng model version | **NOT APPLICABLE** — như trên | như trên |
+| 3. siêu dữ liệu hiện vật | **FIXED + VERIFIED** — cache toàn tiến trình | `test_c3_job_read_confinement.py` |
+| 4. đường dẫn lưu trữ | **FIXED + VERIFIED** — 2 lỗi thật đã vá | `test_c3_storage_confinement.py` |
+| 5. hợp đồng lớp đầu ra | DONE ở C1 | `test_training_tenant_no_default_fallback.py` |
+| 6. sự kiện / webhook | DONE ở C1 | như trên |
+| (phát sinh) chỉ số epoch | **FIXED + VERIFIED** — migration + FK ghép | `test_c3_metric_ownership.py` |
+| (phát sinh) WebSocket | **FIXED + VERIFIED** — tự bind phạm vi | `test_c3_ws_unscoped_read.py` |
+
+**Bốn lỗi thật, cả bốn đều đo được trước khi vá:**
+
+1. `training_jobs` là `dict` toàn tiến trình — B đọc được job của A, gồm
+   `checkpoint_path`. `_restore_jobs_from_db` nạp job của MỌI tổ chức lúc khởi
+   động, nên lỗ mở sẵn sau mỗi lần restart.
+2. WebSocket chạy ngoài mọi phạm vi (`TenantScopeMiddleware` bỏ qua non-HTTP).
+3. Đường dự phòng gắn checkpoint của tổ chức khác vào job — rồi mọi phép kiểm
+   phạm vi phía sau đều ĐẠT vì hàng job thuộc A thật.
+4. Lượt dọn định kỳ xoá checkpoint xuyên tổ chức — rủi ro toàn vẹn, theo lịch.
+
+**Còn lại là nợ gia cố, không phải lỗ hổng:** tên checkpoint không mang định
+danh (`{model_type}_{stamp}.pt`), thư mục `outputs/` vẫn phẳng. Sau bốn bản vá,
+không còn năng lực xuyên tenant nào đo được. Đề xuất
+`OUTPUTS_DIR/<tenant_id>/<job_id>/` **chỉ cho hiện vật mới** — issue riêng, và
+đường dẫn không bao giờ là thẩm quyền.
 
 **Không nằm trong backlog an ninh — và đây là lý do chạy hết P0 chưa phải là
 xong đề tài:** P1 Workspace–Project, P3 RBAC ba tầng đầu-cuối, P4 vocabulary ba

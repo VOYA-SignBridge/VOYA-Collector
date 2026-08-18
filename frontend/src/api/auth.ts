@@ -16,7 +16,37 @@ export type AuthUser = {
    * và cũng không được để người dùng gõ vào.
    */
   tenant_id?: string | null;
+  /**
+   * Vai của tài khoản TRONG tổ chức của nó — `admin` · `editor` · `viewer`, hoặc
+   * `null` khi không có vai nào ở tầng tenant.
+   *
+   * Khác hẳn `is_admin`, vốn là quản trị **nền tảng**. Trước khi có trường này,
+   * thanh điều hướng chỉ đọc được `is_admin`, nên quản trị viên của một tổ chức
+   * không thấy console của chính mình dù máy chủ cho họ vào.
+   *
+   * Dùng để VẼ giao diện, không phải để quyết định quyền — quyền do
+   * `require_tenant_admin` cưỡng chế ở từng điểm cuối.
+   */
+  tenant_role?: string | null;
 };
+
+/**
+ * Vai ở tầng tenant được vào console tổ chức.
+ *
+ * Phải khớp `tenant_admin.TENANT_ADMIN_ROLES` phía máy chủ, hiện là `("admin",)`
+ * — vai ở tầng tenant là `admin` · `editor` · `viewer`, KHÔNG có tiền tố
+ * `tenant_`. Danh sách này chỉ quyết định link có hiện hay không; lệch nhau thì
+ * hậu quả là một link thừa dẫn tới 403, không phải một lỗ quyền.
+ */
+export const TENANT_ADMIN_ROLES = ["admin"] as const;
+
+export function isTenantAdmin(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.is_admin) return true; // cửa thoát hiểm của người vận hành nền tảng
+  return TENANT_ADMIN_ROLES.includes(
+    (user.tenant_role ?? "") as (typeof TENANT_ADMIN_ROLES)[number],
+  );
+}
 
 export type RegisterPayload = {
   username: string;

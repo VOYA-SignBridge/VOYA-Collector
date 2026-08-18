@@ -41,6 +41,11 @@ const LegalDocumentPage = lazy(() => import("./pages/LegalDocumentPage"));
 const AccountPage = lazy(() => import("./pages/AccountPage"));
 const ConsentsPage = lazy(() => import("./pages/settings/ConsentsPage"));
 const OrganizationPage = lazy(() => import("./pages/OrganizationPage"));
+const WorkspacesPage = lazy(() => import("./pages/settings/WorkspacesPage"));
+const ConsoleLayout = lazy(() => import("./pages/console/ConsoleLayout"));
+const ConsoleHomePage = lazy(() => import("./pages/console/ConsoleHomePage"));
+const ConsoleAllocationsPage = lazy(() => import("./pages/console/ConsoleAllocationsPage"));
+const ConsolePoliciesPage = lazy(() => import("./pages/console/ConsolePoliciesPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const SupportPage = lazy(() => import("./pages/SupportPage"));
 const TrashPage = lazy(() => import("./pages/TrashPage"));
@@ -254,6 +259,27 @@ function App() {
                   ROUTE chứ không phải một tab trong state: `/settings/security`
                   phải chia sẻ được, đánh dấu được và quay-lại được — và thông
                   báo bảo mật trỏ tới đây bằng đường dẫn. */}
+              {/* Console của QUẢN TRỊ TỔ CHỨC. Tách khỏi `/admin` (nền tảng) và
+                  khỏi `/settings` (tài khoản của tôi) vì đó là ba thẩm quyền
+                  khác nhau — xem chú thích đầu `ConsoleLayout`. Vỏ console
+                  KHÔNG phải hàng rào quyền; máy chủ vẫn cưỡng chế. */}
+              <Route
+                path="/console"
+                element={
+                  <ProtectedRoute>
+                    <ConsoleLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<ConsoleHomePage />} />
+                <Route path="members" element={<OrganizationPage />} />
+                <Route path="workspaces" element={<WorkspacesPage />} />
+                <Route path="allocations" element={<ConsoleAllocationsPage />} />
+                <Route path="billing" element={<BillingPage />} />
+                <Route path="integrations" element={<IntegrationsPage />} />
+                <Route path="policies" element={<ConsolePoliciesPage />} />
+              </Route>
+
               <Route
                 path="/settings"
                 element={
@@ -276,6 +302,10 @@ function App() {
                     đúng cái gộp khái niệm mà trang này sinh ra để gỡ. Quyền
                     thật do `require_tenant_admin` ở máy chủ cưỡng chế. */}
                 <Route path="organization" element={<OrganizationPage />} />
+                {/* Hai tầng phạm vi dưới tenant. Route riêng chứ không phải một
+                    tab trong trang Tổ chức: nó phải chia sẻ được cho người chấm
+                    và phải mở thẳng được từ tài liệu. */}
+                <Route path="workspaces" element={<WorkspacesPage />} />
                 <Route path="billing" element={<BillingPage />} />
                 <Route path="integrations" element={<IntegrationsPage />} />
                 <Route path="support" element={<SupportPage />} />

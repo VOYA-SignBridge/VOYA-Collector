@@ -44,6 +44,7 @@ from app.routers import (
     two_factor as two_factor_router,
     upload,
     verification,
+    workspaces as workspaces_router,
     vocabulary,
 )
 from app import metrics
@@ -312,6 +313,7 @@ app.include_router(training.router)
 app.include_router(admin.router)
 app.include_router(sot_admin.router)
 app.include_router(tenants.router)
+app.include_router(workspaces_router.router)
 app.include_router(billing.router)
 app.include_router(integrations.router)
 app.include_router(verification.router)
@@ -338,6 +340,7 @@ api_v1.include_router(training.router)
 api_v1.include_router(admin.router)
 api_v1.include_router(sot_admin.router)
 api_v1.include_router(tenants.router)
+api_v1.include_router(workspaces_router.router)
 api_v1.include_router(billing.router)
 api_v1.include_router(integrations.router)
 api_v1.include_router(verification.router)
