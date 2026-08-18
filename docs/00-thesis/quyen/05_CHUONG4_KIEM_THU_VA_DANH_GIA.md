@@ -881,6 +881,8 @@ thật, và cả hai đều đã được vá cùng với bất biến chặn t�
 
 #### g) Lượt chạy 18/08/2026 — con số được công bố trong quyển
 
+*Kết quả đầy đủ kèm bằng chứng từng ca: `MEASUREMENT_test_suite.md`.*
+
 Sau khi đóng băng cây mã ở ảnh chụp `05bd8ea`, bộ kiểm thử được chạy lại đầy đủ:
 
 ```
