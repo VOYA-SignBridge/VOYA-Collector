@@ -176,8 +176,10 @@ STARTUP_EXCEPTIONS: tuple[StartupException, ...] = (
     StartupException(
         label="seed_vocabulary_registry_meta_row",
         reason="Một dòng meta cho mỗi tenant, khoá chính là tenant_id. Không "
-               "mang dữ liệu, chỉ mở chỗ cho registry ghi vào.",
-        fingerprint="INSERT INTO vocabulary_registry_meta(tenant_id) VALUES('default')",
+               "mang dữ liệu, chỉ mở chỗ cho registry ghi vào. Từ v7 nó trỏ "
+               "vào phiên bản CAO NHẤT có thật — hoặc NULL khi chưa công bố "
+               "gì — thay vì để cột rơi vào DEFAULT 1 và tạo con trỏ treo.",
+        fingerprint="INSERT INTO vocabulary_registry_meta(tenant_id, version)",
         guard="ON CONFLICT DO NOTHING",
     ),
     StartupException(
@@ -275,6 +277,14 @@ _MUTATING_VERBS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ALTER COLUMN ... TYPE", re.compile(
         r"\bALTER\s+COLUMN\s+\w+\s+(SET\s+DATA\s+)?TYPE\b", re.IGNORECASE)),
     ("SET NOT NULL", re.compile(r"\bSET\s+NOT\s+NULL\b", re.IGNORECASE)),
+    # Hai chiều NGƯỢC lại của `SET NOT NULL`, bổ sung 24/08/2026. Chúng trông
+    # hiền hơn vì không thể ngã trên dữ liệu đang có, nhưng đó chính là lý do
+    # phải bắt: một câu NỚI ràng buộc chạy im lặng ở mọi lần khởi động sẽ gỡ
+    # mất phép kiểm mà không lần triển khai nào ghi lại. `DROP DEFAULT` còn đổi
+    # ngữ nghĩa của MỌI câu INSERT sau đó — đúng thứ vừa gây ra v7, nơi một
+    # DEFAULT 1 lặng lẽ dựng con trỏ trỏ vào phiên bản chưa tồn tại.
+    ("DROP NOT NULL", re.compile(r"\bDROP\s+NOT\s+NULL\b", re.IGNORECASE)),
+    ("DROP DEFAULT", re.compile(r"\bDROP\s+DEFAULT\b", re.IGNORECASE)),
     ("RENAME", re.compile(r"\bRENAME\b", re.IGNORECASE)),
     ("ALTER TYPE", re.compile(r"\bALTER\s+TYPE\b", re.IGNORECASE)),
     ("GRANT", re.compile(r"\bGRANT\b", re.IGNORECASE)),

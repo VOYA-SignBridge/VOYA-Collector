@@ -83,8 +83,17 @@ PURGE_ORDER: tuple[str, ...] = (
     "dialect_aliases", "classes",                # -> dialects, vocabulary_groups
     "vocabulary_groups",                         # <- classes
     "signer_consents", "signer_aliases",         # -> signers
+    # `vocabulary_registry_meta` PHẢI đi TRƯỚC `registry_versions`, và thứ tự
+    # này đảo lại ngày 24/08/2026 vì quan hệ cha–con giữa hai bảng vừa được
+    # KHAI BÁO ra: `fk_vocabulary_registry_meta_version` làm dòng meta thành
+    # CON trỏ tới phiên bản registry.
+    #
+    # Trước khoá ngoại ấy, hai bảng chỉ liên quan theo quy ước, nên thứ tự nào
+    # cũng chạy. Sau nó, xoá cha trước bị từ chối và cả lượt purge dừng giữa
+    # chừng — nghĩa là tenant mất một phần dữ liệu nhưng vẫn còn tồn tại.
+    "vocabulary_registry_meta",                  # -> registry_versions
     "registry_versions", "recognition_profiles", "dialects",
-    "vocabulary_registry_meta", "signers",
+    "signers",
     # PDM v5 — mặt phẳng phân quyền. Thứ tự trong khối này KHÔNG tuỳ ý.
     #
     # Vì sao danh sách này KHÔNG còn `*_member_roles` và `*_members`

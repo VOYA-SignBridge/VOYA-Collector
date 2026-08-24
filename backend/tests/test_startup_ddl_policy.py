@@ -99,6 +99,21 @@ class TestDangerousShapesNeverReachStartup:
          "ALTER TABLE roles RENAME COLUMN name TO role_code"),
         ("tighten_to_not_null",
          "ALTER TABLE tenants ALTER COLUMN plan_code SET NOT NULL"),
+        # Chiều NGƯỢC lại, chuyển sang đây ngày 24/08/2026. Trước đó nó nằm ở
+        # danh sách "additive được phép", dưới nhãn `relax_default`.
+        #
+        # Nới ràng buộc không phải phép cộng. `SET NOT NULL` bị chặn vì nó có
+        # thể NGÃ trên dữ liệu xấu — tức nó ồn ào, và ồn ào thì thấy được.
+        # `DROP NOT NULL` thì không bao giờ ngã: nó lặng lẽ gỡ một phép kiểm ở
+        # mọi lần khởi động, không lần triển khai nào ghi lại, và không ai biết
+        # phiên bản nào đã làm điều đó. Bất đối xứng theo đúng hướng sai.
+        ("relax_to_nullable",
+         "ALTER TABLE probe ALTER COLUMN note DROP NOT NULL"),
+        # `DROP DEFAULT` đổi ngữ nghĩa của MỌI câu INSERT sau nó. Đây chính là
+        # hình dạng đứng sau v7: một `DEFAULT 1` lặng lẽ dựng con trỏ registry
+        # trỏ vào phiên bản chưa tồn tại, suốt nhiều tháng không ai thấy.
+        ("drop_column_default",
+         "ALTER TABLE probe ALTER COLUMN note DROP DEFAULT"),
         ("table_to_view_swap",
          "DROP VIEW IF EXISTS tenant_members"),
         ("privilege_change",
@@ -116,7 +131,6 @@ class TestDangerousShapesNeverReachStartup:
         ("create_table", "CREATE TABLE IF NOT EXISTS probe (id INT)"),
         ("create_index", "CREATE INDEX IF NOT EXISTS ix_probe ON probe (id)"),
         ("add_column", "ALTER TABLE probe ADD COLUMN IF NOT EXISTS note TEXT"),
-        ("relax_default", "ALTER TABLE probe ALTER COLUMN note DROP NOT NULL"),
         ("enable_rls", "ALTER TABLE probe ENABLE ROW LEVEL SECURITY"),
         ("replace_view", "CREATE OR REPLACE VIEW probe_view AS SELECT 1"),
     ])

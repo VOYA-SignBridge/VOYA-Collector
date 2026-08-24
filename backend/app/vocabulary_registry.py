@@ -250,7 +250,11 @@ def registry_version(tenant_id: str = DEFAULT_TENANT) -> int:
     rows = _fetch_all(
         "SELECT version FROM vocabulary_registry_meta WHERE tenant_id = %s", (tenant_id,)
     )
-    return int(rows[0]["version"]) if rows else 0
+    # Hai cách nói "chưa công bố gì" đều quy về 0 ở tầng gọi: KHÔNG có dòng
+    # meta, và có dòng nhưng `version` NULL (mốc từ v7). Giữ 0 ở đây để chữ ký
+    # hàm không đổi — NULL là chuyện của CSDL, nơi nó phân biệt được "chưa có"
+    # với "phiên bản số 0" mà một cột NOT NULL không nói nổi.
+    return int(rows[0]["version"] or 0) if rows else 0
 
 
 # --------------------------------------------------------------------------- write
@@ -315,26 +319,37 @@ def _bump(tenant_id: str, created_by: Optional[str] = None, note: str = "") -> i
             unchanged = True
         else:
             unchanged = False
+            # THỨ TỰ QUAN TRỌNG: tạo phiên bản thật TRƯỚC, dời con trỏ SAU.
+            #
+            # Bản trước làm ngược — `UPDATE ... SET version = version + 1` rồi
+            # mới `INSERT INTO registry_versions`. Từ khi có khoá ngoại ghép
+            # `(tenant_id, version) -> registry_versions`, câu UPDATE ấy trỏ
+            # vào một phiên bản chưa ra đời và bị từ chối. Nó chưa lộ trên sản
+            # xuất chỉ vì nhánh này đòi nội dung thật sự đổi, và từ lúc khoá
+            # ngoại được thêm thì chưa có lượt đổi nào.
+            #
+            # `COALESCE(version, 0)` đọc được cả NULL (chưa công bố gì, mốc mới
+            # từ v7) lẫn số thật. Khoá tư vấn ở đầu hàm đã tuần tự hoá, nên đọc
+            # rồi cộng một là an toàn — không cần `RETURNING` để nguyên tử.
             cur.execute(
-                "UPDATE vocabulary_registry_meta SET version = version + 1, updated_at = NOW() "
-                "WHERE tenant_id = %s RETURNING version",
+                "SELECT COALESCE(version, 0) FROM vocabulary_registry_meta "
+                "WHERE tenant_id = %s",
                 (tenant_id,),
             )
-            row = cur.fetchone()
-            if row is None:
-                cur.execute(
-                    "INSERT INTO vocabulary_registry_meta(tenant_id, version) VALUES(%s, 1) "
-                    "RETURNING version",
-                    (tenant_id,),
-                )
-                row = cur.fetchone()
-            version = int(row[0])
+            hien_tai = cur.fetchone()
+            version = (int(hien_tai[0]) if hien_tai else 0) + 1
             payload["registry_version"] = version
             payload["content_hash"] = digest
             cur.execute(
                 "INSERT INTO registry_versions(tenant_id, version, content_hash, snapshot, note, created_by) "
                 "VALUES(%s, %s, %s, %s, %s, %s) ON CONFLICT (tenant_id, version) DO NOTHING",
                 (tenant_id, version, digest, Json(payload), note or None, created_by or None),
+            )
+            cur.execute(
+                "INSERT INTO vocabulary_registry_meta(tenant_id, version) VALUES(%s, %s) "
+                "ON CONFLICT (tenant_id) DO UPDATE "
+                "   SET version = EXCLUDED.version, updated_at = NOW()",
+                (tenant_id, version),
             )
 
     if unchanged:
@@ -1008,8 +1023,13 @@ def clone_catalog_to_tenant(tenant_id: str, created_by: Optional[str] = None) ->
             )
             counts["profiles"] += 1
 
+        # NULL, không phải 0. Tenant vừa được clone chưa CÔNG BỐ registry nào —
+        # `_bump()` mới là chỗ sinh ra phiên bản đầu tiên. Số 0 từng được dùng
+        # làm mốc "chưa có gì", nhưng nó là một phiên bản KHÔNG BAO GIỜ tồn tại
+        # trong `registry_versions`, nên từ khi có khoá ngoại ghép nó làm hỏng
+        # đúng lượt tạo tenant. Xem `_SQL_V7_REGISTRY_POINTER_NULL_SENTINEL`.
         _execute(
-            "INSERT INTO vocabulary_registry_meta(tenant_id, version) VALUES(%s, 0) "
+            "INSERT INTO vocabulary_registry_meta(tenant_id, version) VALUES(%s, NULL) "
             "ON CONFLICT (tenant_id) DO NOTHING",
             (tenant_id,),
         )

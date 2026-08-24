@@ -53,10 +53,26 @@ def to_chuc():
     try:
         yield tid, cls
     finally:
+        # Dọn theo `PURGE_ORDER`, KHÔNG theo danh sách bảng tự liệt kê.
+        #
+        # Bản đầu liệt kê tay bốn bảng và bỏ sót phần còn lại, nên tenant nào
+        # chạm tới một bảng ngoài danh sách sẽ không xoá được — khoá ngoại
+        # RESTRICT chặn câu `DELETE FROM tenants`, và vì lỗi bị nuốt, nó rò
+        # lặng lẽ. Đo ngày 24/08/2026 trên `signdb_test`: **135 tenant** tồn
+        # đọng, và chúng làm một test KHÔNG liên quan đỏ — bất biến "mọi tổ
+        # chức đang sống đều có đăng ký đang mở" của bộ đọc SOT.
+        #
+        # `PURGE_ORDER` là nguồn sự thật duy nhất cho thứ tự lá-trước-gốc, và
+        # nó được cập nhật mỗi khi có bảng mới. Một bản sao ở đây sẽ trôi khỏi
+        # nó ngay lần thêm bảng kế tiếp.
+        from app.tenant_lifecycle import PURGE_ORDER
+
         with system_scope("test: don to chuc thu nghiem"):
-            for bang in ("samples", "capture_sessions", "collection_sessions",
-                         "classes"):
-                db._execute(f"DELETE FROM {bang} WHERE tenant_id = %s", (tid,))
+            for bang in PURGE_ORDER:
+                try:
+                    db._execute(f"DELETE FROM {bang} WHERE tenant_id = %s", (tid,))
+                except Exception:  # bảng có thể chưa tồn tại ở bản cài tối thiểu
+                    pass
             db._execute("DELETE FROM tenants WHERE tenant_id = %s", (tid,))
 
 
@@ -82,7 +98,7 @@ def test_ghi_mau_la_co_ngay_buoi_thu_va_phien_thu(to_chuc):
     with system_scope("test: doc lai"):
         row = db._fetch_all(
             "SELECT c.tenant_id, c.class_uid, c.session_id, c.signer_id, "
-            "       s.session_code, s.tenant_id AS tenant_cha, s.signer_id AS signer_cha "
+            "       s.session_code, s.tenant_id AS tenant_cha "
             "FROM capture_sessions c JOIN collection_sessions s "
             "  ON s.collection_session_id = c.collection_session_id "
             "WHERE c.capture_session_id = %s", (cap,))[0]
@@ -91,8 +107,8 @@ def test_ghi_mau_la_co_ngay_buoi_thu_va_phien_thu(to_chuc):
     assert row["class_uid"] == cls
     assert row["session_code"] == row["session_id"] == "1787000000001"
     # Người ký KHÔNG được suy ra ở tầng phiên — xem docstring của
-    # `ensure_capture_session`.
-    assert row["signer_id"] is None and row["signer_cha"] is None
+    # `ensure_capture_session`. Bảng cha không còn cột người ký từ v6.
+    assert row["signer_id"] is None
 
 
 def test_thieu_du_kien_thi_tra_None_chu_khong_no(to_chuc):
@@ -173,9 +189,14 @@ def test_ma_phien_trung_nhau_giua_hai_to_chuc_khong_dinh_vao_nhau(to_chuc):
         assert _dem(tid, "collection_sessions") == 1
         assert _dem(tid2, "collection_sessions") == 1
     finally:
+        from app.tenant_lifecycle import PURGE_ORDER
+
         with system_scope("test: don to chuc thu hai"):
-            for bang in ("capture_sessions", "collection_sessions", "classes"):
-                db._execute(f"DELETE FROM {bang} WHERE tenant_id = %s", (tid2,))
+            for bang in PURGE_ORDER:
+                try:
+                    db._execute(f"DELETE FROM {bang} WHERE tenant_id = %s", (tid2,))
+                except Exception:
+                    pass
             db._execute("DELETE FROM tenants WHERE tenant_id = %s", (tid2,))
 
 

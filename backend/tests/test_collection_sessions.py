@@ -62,8 +62,12 @@ def cur():
         conn.close()
 
 
-def _dung_buoi(cur, *, signer_id=None):
-    """Một tenant + lớp + buổi thu dùng được, trả về (tenant, lớp, buổi)."""
+def _dung_buoi(cur, *, signers=()):
+    """Một tenant + lớp + buổi thu dùng được, trả về (tenant, lớp, buổi).
+
+    `signers` tạo sẵn các hàng `signers` cho tenant ấy. Chúng KHÔNG được gắn
+    vào buổi thu: từ v6 `collection_sessions` không còn cột người ký.
+    """
     tid = f"test-{uuid.uuid4().hex[:8]}"
     cur.execute("INSERT INTO tenants(tenant_id, display_name, slug) VALUES(%s,%s,%s)",
                 (tid, "Thử buổi thu", tid))
@@ -71,15 +75,15 @@ def _dung_buoi(cur, *, signer_id=None):
     cur.execute(
         "INSERT INTO classes(class_uid, tenant_id, slug, label_original, language, "
         "region, is_active) VALUES(%s,%s,'b','B','vn','common',true)", (cls, tid))
-    if signer_id:
+    for sid in signers:
         cur.execute(
             "INSERT INTO signers(signer_id, display_name, tenant_id) VALUES(%s,%s,%s)",
-            (signer_id, signer_id, tid))
+            (sid, sid, tid))
     buoi = str(uuid.uuid4())
     cur.execute(
         "INSERT INTO collection_sessions(collection_session_id, tenant_id, "
-        "session_code, signer_id) VALUES(%s,%s,%s,%s)",
-        (buoi, tid, f"code-{uuid.uuid4().hex[:6]}", signer_id))
+        "session_code) VALUES(%s,%s,%s)",
+        (buoi, tid, f"code-{uuid.uuid4().hex[:6]}"))
     return tid, cls, buoi
 
 
@@ -140,32 +144,64 @@ def test_capture_session_khong_gan_duoc_vao_buoi_cua_tenant_khac(cur):
             (str(uuid.uuid4()), khac, cls_khac, buoi))
 
 
-def test_nguoi_ky_cua_capture_session_khong_duoc_khac_nguoi_ky_cua_buoi(cur):
-    """Ràng buộc biện minh cho việc nâng `signer_id` lên bảng cha.
+def test_mot_buoi_thu_chua_duoc_HAI_nguoi_ky_khac_nhau(cur):
+    """ĐỐI CHỨNG DƯƠNG của v6 — bài quan trọng nhất tệp này.
 
-    Không có nó, hai tầng là hai bản sao và không gì bắt chúng khớp — đúng
-    tình trạng mà việc thêm tầng cha lẽ ra phải chấm dứt.
+    Từ 23 đến 24/08/2026 lược đồ có `collection_sessions.signer_id` cùng một
+    khoá ngoại ghép ba cột bắt người ký của capture session phải TRÙNG người ký
+    của buổi. Chính bài test này, ở phiên bản trước, ghim bất biến ấy lại.
+
+    Nó sai. Đo bằng nhãn thô trên sản xuất: 10/253 capture session chứa từ hai
+    nhãn người ký trở lên — hai người thay phiên ký cùng một từ trong một lượt
+    quay. Buổi `1784530308361` mang `signer_id = 'S011'` trong khi chứa Khoa,
+    Minh và Trân.
+
+    Nên phép khẳng định bị ĐẢO CHIỀU: điều trước kia phải bị từ chối thì nay
+    phải chạy được. Chừng nào bài này còn xanh, v6 còn thật sự đã gỡ bất biến
+    sai chứ không chỉ bỏ một cột.
     """
-    tid, cls, buoi = _dung_buoi(cur, signer_id="S900")
+    tid, cls, buoi = _dung_buoi(cur, signers=("S900", "S901"))
+    cls2 = f"cls_{uuid.uuid4().hex[:8]}"
     cur.execute(
-        "INSERT INTO signers(signer_id, display_name, tenant_id) VALUES('S901','S901',%s)",
-        (tid,))
+        "INSERT INTO classes(class_uid, tenant_id, slug, label_original, language, "
+        "region, is_active) VALUES(%s,%s,'b2','B2','vn','common',true)", (cls2, tid))
+
+    for lop, nguoi_ky in ((cls, "S900"), (cls2, "S901")):
+        cur.execute(
+            "INSERT INTO capture_sessions(capture_session_id, tenant_id, class_uid, "
+            "session_id, collection_session_id, signer_id) VALUES(%s,%s,%s,%s,%s,%s)",
+            (str(uuid.uuid4()), tid, lop, f"s-{lop[-4:]}", buoi, nguoi_ky))
+
+    cur.execute(
+        "SELECT count(DISTINCT signer_id) FROM capture_sessions "
+        "WHERE collection_session_id = %s", (buoi,))
+    assert cur.fetchone()[0] == 2, "một buổi thu phải chứa được hai người ký"
+
+
+def test_nguoi_ky_van_phai_thuoc_dung_tenant(cur):
+    """v6 gỡ bất biến SAI, không gỡ cách ly tenant.
+
+    Không có bài này, một bản vá "gỡ hết ràng buộc người ký cho xong" cũng
+    xanh ở bài trên.
+    """
+    tid, cls, buoi = _dung_buoi(cur, signers=("S900",))
+    khac = f"test-{uuid.uuid4().hex[:8]}"
+    cur.execute("INSERT INTO tenants(tenant_id, display_name, slug) VALUES(%s,%s,%s)",
+                (khac, "Tenant khác", khac))
+    cur.execute("INSERT INTO signers(signer_id, display_name, tenant_id) "
+                "VALUES('S999','S999',%s)", (khac,))
 
     with pytest.raises(psycopg2.errors.ForeignKeyViolation):
         cur.execute(
             "INSERT INTO capture_sessions(capture_session_id, tenant_id, class_uid, "
-            "session_id, collection_session_id, signer_id) VALUES(%s,%s,%s,'x',%s,'S901')",
+            "session_id, collection_session_id, signer_id) VALUES(%s,%s,%s,'x',%s,'S999')",
             (str(uuid.uuid4()), tid, cls, buoi))
 
 
 def test_capture_session_chua_biet_nguoi_ky_thi_van_gan_duoc(cur):
-    """Chuyển tiếp an toàn: ràng buộc trên KHÔNG được bắt phải khai người ký.
-
-    2186/3864 mẫu chưa có người ký. Một ràng buộc đòi hỏi nó sẽ chặn đúng phần
-    dữ liệu đang cần được nối lại — nên MATCH SIMPLE (NULL là thoả mãn) là
-    hình dạng đúng, không phải sự lỏng lẻo.
-    """
-    tid, cls, buoi = _dung_buoi(cur, signer_id="S900")
+    """2186/3864 mẫu chưa có người ký. Chưa biết thì để NULL — và NULL phải đi
+    qua được, nếu không thì đúng phần dữ liệu đang cần nối lại bị chặn."""
+    tid, cls, buoi = _dung_buoi(cur, signers=("S900",))
     cur.execute(
         "INSERT INTO capture_sessions(capture_session_id, tenant_id, class_uid, "
         "session_id, collection_session_id, signer_id) VALUES(%s,%s,%s,'x',%s,NULL)",
@@ -173,6 +209,23 @@ def test_capture_session_chua_biet_nguoi_ky_thi_van_gan_duoc(cur):
     cur.execute("SELECT count(*) FROM capture_sessions WHERE collection_session_id = %s",
                 (buoi,))
     assert cur.fetchone()[0] == 1
+
+
+def test_buoi_thu_khong_con_cot_nguoi_ky(cur):
+    """Hậu điều kiện v6, kiểm như một bất biến sống.
+
+    Một lượt sửa sau này thêm lại cột ấy — kèm ràng buộc khớp — sẽ tái lập
+    đúng lỗi v6 sinh ra để gỡ. Bài này bắt được việc đó.
+    """
+    cur.execute(
+        "SELECT count(*) FROM information_schema.columns "
+        "WHERE table_name = 'collection_sessions' AND column_name = 'signer_id'")
+    assert cur.fetchone()[0] == 0
+    cur.execute(
+        "SELECT count(*) FROM pg_constraint "
+        "WHERE conname IN ('fk_capture_sessions_collection_signer', "
+        "                  'uq_collection_sessions_signer_scope')")
+    assert cur.fetchone()[0] == 0
 
 
 def test_xoa_buoi_thu_chi_go_con_tro_chu_khong_hong(cur):
@@ -224,6 +277,43 @@ def test_bang_co_tenant_id_phai_co_mat_o_ca_ba_so_dang_ky():
     assert scoped - set(RLS_TABLES) == set(), "bảng tenant-scoped thiếu policy RLS"
     assert scoped - set(PURGE_ORDER) == _NGOAI_LE_PURGE, "bảng tenant-scoped thiếu ở PURGE_ORDER"
     assert set(PURGE_ORDER) - scoped == _NGOAI_LE_SCOPED
+
+
+def test_vai_ung_dung_voi_toi_duoc_moi_bang_tenant_scoped(cur):
+    """Việc thứ TƯ khi thêm một bảng có `tenant_id`, và là việc dễ quên nhất.
+
+    Ba việc kia — `TENANT_SCOPED_TABLES`, `RLS_TABLES`, `PURGE_ORDER` — đều
+    nằm trong mã và thấy được khi đọc diff. Việc thứ tư nằm ở CƠ SỞ DỮ LIỆU:
+    vai ứng dụng phải được CẤP QUYỀN trên bảng mới.
+
+    Nó im lặng theo cách tệ nhất. `ALTER DEFAULT PRIVILEGES` chỉ áp cho bảng do
+    ĐÚNG vai đã chạy câu ấy tạo ra, nên một bảng sinh ra bởi vai khác lọt lưới.
+    Và bộ test không bắt được, vì test chạy bằng một vai có nhiều quyền hơn vai
+    sản xuất — đúng kiểu "xanh vì đo bằng dụng cụ sai".
+
+    Đo ngày 24/08/2026 trên `signdb_test`: bốn bảng mà `voya_app` không đọc nổi
+    (`collection_sessions`, `project_allocations`, `regions`, `tenant_purges`).
+    Hậu quả không dừng ở bảng ấy: `purge_tenant` chạy dưới vai ứng dụng nuốt
+    lỗi quyền, tenant không xoá được, rác dồn lại, và cuối cùng làm ĐỎ một test
+    chẳng liên quan gì — bất biến "mọi tổ chức đang sống đều có đăng ký đang
+    mở" của bộ đọc SOT.
+
+    `regions` chỉ cần SELECT: nó là danh mục tham chiếu, quyền ghi bị thu có
+    chủ đích (xem `REFERENCE_TABLES` trong `provision_db_roles`).
+    """
+    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = 'voya_app'")
+    if cur.fetchone() is None:
+        pytest.skip("cơ sở dữ liệu này không có vai ứng dụng")
+
+    cur.execute(
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+        "  AND c.relname = ANY(%s) "
+        "  AND NOT has_table_privilege('voya_app', c.oid, 'SELECT') "
+        "ORDER BY 1",
+        (list(db.TENANT_SCOPED_TABLES),))
+    thieu = [r[0] for r in cur.fetchall()]
+    assert thieu == [], f"vai ứng dụng không đọc được: {', '.join(thieu)}"
 
 
 def test_buoi_thu_bi_xoa_truoc_khi_xoa_nguoi_ky():

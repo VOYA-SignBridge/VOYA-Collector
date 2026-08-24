@@ -63,12 +63,30 @@ logger = logging.getLogger(__name__)
 #: chứng minh được là an toàn lúc khởi động, đưa chúng vào tập một chiều thì
 #: payload đổi, nên "phải lên phiên bản mới".
 #:
-#: Lập luận đó lộn ngược nhân quả. `v6` đã có nghĩa nghiệp vụ: mô hình gói
-#: Free/Plus/Pro/Enterprise (`docs/07-business/BILLING_MODEL_V6.md`). Còn việc phân loại
-#: DDL khởi động là *kiến trúc triển khai*, không phải một phiên bản nghiệp vụ
-#: của lược đồ. Nếu phân loại lại làm checksum đổi thì lỗi nằm ở chỗ
-#: `migration_payload()` được dựng từ một tập DẪN XUẤT — xem chú thích ở đó.
-APP_SCHEMA_VERSION = 5
+#: Lập luận đó lộn ngược nhân quả. Việc phân loại DDL khởi động là *kiến trúc
+#: triển khai*, không phải một phiên bản nghiệp vụ của lược đồ. Nếu phân loại
+#: lại làm checksum đổi thì lỗi nằm ở chỗ `migration_payload()` được dựng từ
+#: một tập DẪN XUẤT — xem chú thích ở đó.
+#:
+#: v6 KHÔNG còn dành cho Billing (24/08/2026)
+#: ------------------------------------------
+#: Số này từng được giữ chỗ cho mô hình gói Free/Plus/Pro/Enterprise
+#: (`docs/07-business/BILLING_MODEL_V6.md`). Đổi ý có lý do, không phải tiện tay:
+#:
+#:   Billing v6   chưa hoàn tất, chưa phát hành, chưa có gì trên sản xuất
+#:   v6 hiện tại  gỡ một BẤT BIẾN SAI đã được áp lên `signdb` và đang có khả
+#:                năng TỪ CHỐI dữ liệu hợp lệ
+#:
+#: Một lỗi lược đồ đang sống trên sản xuất được ưu tiên hơn việc giữ một con số
+#: cho tính năng chưa ra đời.
+#:
+#: v7 cũng KHÔNG phải Billing (24/08/2026)
+#: ---------------------------------------
+#: Cùng lý do, lần thứ hai trong một ngày. Khoá ngoại ghép thêm ngày 23/08 làm
+#: lộ ra hai giá trị mốc bịa trong `vocabulary_registry_meta.version` (0 lúc
+#: clone, DEFAULT 1 lúc gieo), và hậu quả là **tạo tenant mới hỏng**. v7 đổi
+#: mốc ấy sang NULL. Billing lùi tiếp sang **v8**.
+APP_SCHEMA_VERSION = 7
 
 #: Lược đồ CŨ NHẤT mà ảnh này còn chạy đúng trên đó.
 #:
@@ -80,6 +98,9 @@ APP_SCHEMA_VERSION = 5
 #: được lược đồ cũ, để hằng số này ở lại con số cũ. Khi đó một ảnh mới triển
 #: khai được TRƯỚC lượt migration — thứ tự đảo ngược đó là cách duy nhất để
 #: triển khai không có thời gian chết.
+#:
+#: v6 ở lại 5 theo đúng luật đó, dù nó GỠ chứ không thêm: ba câu của v6 chỉ bỏ
+#: những thứ mã v6 không còn nhắc tới, nên ảnh v6 chạy đúng trên lược đồ v5.
 MIN_SUPPORTED_SCHEMA_VERSION = 5
 
 #: Tên bảng sổ đăng bạ. Số ít chủ ý: nó ghi các lượt ĐÃ ÁP DỤNG, không phải

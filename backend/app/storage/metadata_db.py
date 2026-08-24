@@ -285,9 +285,56 @@ _SQL_BOOTSTRAP_DEFAULT_TENANT = (
     f"SELECT '{DEFAULT_TENANT_ID}', 'VOYA', '{DEFAULT_TENANT_ID}' "
     f"WHERE NOT EXISTS (SELECT 1 FROM tenants WHERE tenant_id = '{DEFAULT_TENANT_ID}')"
 )
+#: Con trỏ "registry hiện hành" của tenant khởi tạo.
+#:
+#: Bản trước là `INSERT ... (tenant_id) VALUES('default')` và để cột `version`
+#: rơi vào DEFAULT 1. Trên một cơ sở dữ liệu chưa công bố registry nào, đó là
+#: một con trỏ TREO: nó nói "đang ở phiên bản 1" trong khi `registry_versions`
+#: rỗng. Không ai thấy suốt thời gian dài vì không có gì kiểm nó — cho tới khi
+#: `fk_vocabulary_registry_meta_version` ra đời ngày 23/08/2026 và bước gieo
+#: bắt đầu ngã trên mọi bản cài mới.
+#:
+#: Nay nó trỏ vào phiên bản CAO NHẤT có thật, và `max()` trên tập rỗng cho
+#: NULL — tức "chưa công bố gì", đúng nghĩa. Không còn phụ thuộc DEFAULT.
+#:
+#: `SELECT ... FROM registry_versions` không có GROUP BY nên luôn trả đúng một
+#: hàng, kể cả khi bảng rỗng; câu này vì thế luôn chèn hoặc luôn đụng khoá.
 _SQL_SEED_VOCAB_REGISTRY_META = (
-    f"INSERT INTO vocabulary_registry_meta(tenant_id) VALUES('{DEFAULT_TENANT_ID}') "
+    f"INSERT INTO vocabulary_registry_meta(tenant_id, version) "
+    f"SELECT '{DEFAULT_TENANT_ID}', max(version) FROM registry_versions "
+    f"WHERE tenant_id = '{DEFAULT_TENANT_ID}' "
     f"ON CONFLICT DO NOTHING"
+)
+
+#: ---------------------------------------------------------------------------
+#: v7 — "chưa công bố registry" là NULL, không phải 0 và không phải 1.
+#:
+#: Ngày 24/08/2026 khoá ngoại ghép `(tenant_id, version) -> registry_versions`
+#: làm lộ ra HAI giá trị mốc bịa nằm trong cùng một cột:
+#:
+#:     clone_catalog_to_tenant  ghi 0  -> phiên bản 0 KHÔNG BAO GIỜ tồn tại
+#:     DEFAULT của cột           là 1  -> phiên bản 1 chưa chắc tồn tại
+#:
+#: Cả hai đều là cách viết "chưa có gì" bằng một con số trông như có gì. Với
+#: khoá ngoại, cả hai thành lỗi: tạo tenant mới hỏng ở câu clone, và bước gieo
+#: hỏng trên bản cài mới.
+#:
+#: Lối thoát KHÔNG phải gỡ khoá ngoại. Cột đã có sẵn cách nói "chưa có" mà
+#: không cần bịa: NULL. Khoá ngoại MATCH SIMPLE cho NULL đi qua, nên giữ
+#: nguyên phép kiểm mà vẫn biểu diễn được trạng thái rỗng.
+#:
+#: Bài học đã ghi vào docs/01-architecture/MIGRATION_CHECKLIST.md: trước khi
+#: gắn khoá ngoại lên một cột ĐÃ CÓ, phải liệt kê mọi giá trị mốc và mọi
+#: DEFAULT của cột đó — kiểm dữ liệu hiện có là chưa đủ, vì giá trị mốc chỉ
+#: xuất hiện ở đường GHI.
+_SQL_V7_REGISTRY_POINTER_DROP_DEFAULT = (
+    "ALTER TABLE vocabulary_registry_meta ALTER COLUMN version DROP DEFAULT"
+)
+_SQL_V7_REGISTRY_POINTER_DROP_NOT_NULL = (
+    "ALTER TABLE vocabulary_registry_meta ALTER COLUMN version DROP NOT NULL"
+)
+_SQL_V7_REGISTRY_POINTER_NULL_SENTINEL = (
+    "UPDATE vocabulary_registry_meta SET version = NULL WHERE version = 0"
 )
 
 #: C3 — `training_metrics` nhận chủ sở hữu TỪ HÀNG JOB CHA.
@@ -338,7 +385,9 @@ _SQL_CREATE_COLLECTION_SESSIONS = """
         collection_session_id UUID PRIMARY KEY,
         tenant_id             TEXT NOT NULL,
         session_code          TEXT NOT NULL,
-        signer_id             TEXT,
+        -- KHÔNG có `signer_id` ở đây, và đó là kết luận chứ không phải thiếu
+        -- sót: xem khối chú thích ở `_V6_DROP_COLLECTION_SIGNER_FK`. Một buổi
+        -- thu chứa được nhiều người ký; người ký sống ở tầng mẫu.
         opened_by_user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
         source_type           TEXT,
         started_at            TIMESTAMP WITH TIME ZONE,
@@ -354,24 +403,25 @@ _SQL_CREATE_COLLECTION_SESSIONS = """
     )
     """
 
-#: Gom capture session thành buổi. Ba phép gộp, mỗi phép có lý do riêng:
+#: Gom capture session thành buổi. Hai phép gộp, mỗi phép có lý do riêng:
 #:
-#:   max(signer_id)    an toàn vì 0/57 buổi có quá một người ký (đã đo)
 #:   max(source_type)  an toàn vì 0/57 buổi đổi nguồn (đã đo)
 #:   array_agg(...)[1] KHÔNG phải phép gộp tuỳ tiện — nó lấy tài khoản của
 #:                     capture session SỚM NHẤT, tức "ai mở buổi này", là điều
 #:                     duy nhất còn đúng khi buổi có nhiều tài khoản
 #:
+#: Từng có phép gộp thứ ba, `max(signer_id)`, và nó là cái sai đã gọi v6 ra
+#: đời: nó dựng một người ký cho cả buổi từ một cột vốn không đáng tin.
+#:
 #: `ON CONFLICT DO NOTHING` trên khoá tự nhiên `(tenant_id, session_code)` làm
 #: bước này chạy lại được: lần thứ hai không sinh thêm buổi nào.
 _SQL_BACKFILL_COLLECTION_SESSIONS = (
     "INSERT INTO collection_sessions ("
-    "  collection_session_id, tenant_id, session_code, signer_id, "
+    "  collection_session_id, tenant_id, session_code, "
     "  opened_by_user_id, source_type, started_at, ended_at, created_at) "
-    "SELECT gen_random_uuid(), g.tenant_id, g.session_id, g.signer_id, "
+    "SELECT gen_random_uuid(), g.tenant_id, g.session_id, "
     "       g.opened_by, g.source_type, g.started_at, g.ended_at, g.created_at "
     "FROM (SELECT c.tenant_id, c.session_id, "
-    "             max(c.signer_id)   AS signer_id, "
     "             max(c.source_type) AS source_type, "
     "             min(c.started_at)  AS started_at, "
     "             max(c.ended_at)    AS ended_at, "
@@ -387,6 +437,54 @@ _SQL_LINK_CAPTURE_TO_COLLECTION = (
     "FROM collection_sessions s "
     "WHERE s.tenant_id = c.tenant_id AND s.session_code = c.session_id "
     "  AND c.collection_session_id IS NULL"
+)
+
+#: ---------------------------------------------------------------------------
+#: v6 — GỠ một bất biến sai: "buổi thu có đúng một người ký".
+#:
+#: Ngày 23/08/2026 bảng `collection_sessions` ra đời mang cột `signer_id`, cùng
+#: một khoá ngoại ghép ba cột bắt người ký của capture session phải TRÙNG người
+#: ký của buổi. Căn cứ lúc ấy: 0/57 buổi có quá một `capture_sessions.signer_id`.
+#:
+#: Căn cứ ấy SAI, và sai theo kiểu tệ nhất — nó đo bằng chính cột không đáng
+#: tin. Đo lại bằng NHÃN THÔ (`samples.user_id`), thứ đã chứng minh là bằng
+#: chứng tốt hơn:
+#:
+#:     buổi thu          52/60  một nhãn      8 buổi có 2–3 nhãn
+#:     capture session  243/253 một nhãn     10 phiên có 2–3 nhãn
+#:
+#: Nhãn đổi ngay BÊN TRONG một capture session — hai người thay phiên ký cùng
+#: một từ trong một lượt quay. Người ký là thuộc tính của MẪU, không của tầng
+#: phiên nào. Buổi `1784530308361` mang `signer_id = 'S011'` trong khi chứa
+#: Khoa, Minh và Trân: một id gộp ba người.
+#:
+#: Ràng buộc ấy đúng trên dữ liệu HÔM NAY chỉ vì `capture_sessions.signer_id`
+#: phần lớn NULL hoặc bị gộp vào signer tự sinh. Ngay khi danh tính được gỡ
+#: đúng, nó sẽ TỪ CHỐI dữ liệu hợp lệ. Đó là lý do v6 tồn tại và là lý do nó
+#: giành số thứ tự từ Billing.
+#:
+#: Bằng chứng vì sao bất biến này bị loại: `docs/02-data/db/v6_collection_signer_evidence.csv`
+#: (60 dòng, chụp trước khi DROP). Không phải để khôi phục lược đồ — để trả lời
+#: được câu "vì sao" sau này.
+#:
+#: KHÔNG đụng tới `capture_sessions.signer_id` và `samples.signer_id`: dữ liệu
+#: mới chứng minh buổi thu không mang được người ký, CHƯA chứng minh capture
+#: session một-lớp thì không.
+_V6_DROP_COLLECTION_SIGNER_FK = (
+    "ALTER TABLE capture_sessions "
+    "DROP CONSTRAINT IF EXISTS fk_capture_sessions_collection_signer"
+)
+#: Khoá ứng viên ba cột chỉ sinh ra để làm ĐÍCH cho khoá ngoại ngay trên. Đã
+#: kiểm 24/08/2026: không khoá ngoại nào khác trỏ vào nó, không truy vấn nào
+#: dùng nó. Hết đích thì hết lý do tồn tại.
+_V6_DROP_COLLECTION_SIGNER_UNIQUE = (
+    "ALTER TABLE collection_sessions "
+    "DROP CONSTRAINT IF EXISTS uq_collection_sessions_signer_scope"
+)
+#: Bỏ cột kéo theo `fk_collection_sessions_signer` — Postgres tự gỡ khoá ngoại
+#: của một cột không còn nữa, nên không cần câu riêng.
+_V6_DROP_COLLECTION_SIGNER_COLUMN = (
+    "ALTER TABLE collection_sessions DROP COLUMN IF EXISTS signer_id"
 )
 
 #: Bước ĐỊNH HÌNH DỮ LIỆU: chạy trong phạm vi hệ thống theo giao dịch, và phải
@@ -420,11 +518,36 @@ MIGRATION_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
     #
     # Ghi ra đây để người đọc sổ đăng ký sau này đừng kết luận ngược: nhìn thấy
     # nó ở đây KHÔNG có nghĩa migration là nơi phải gieo registry meta.
+    # Hậu điều kiện có HAI vế từ v7. Vế một là vế cũ: dòng meta phải có mặt.
+    # Vế hai là BẤT BIẾN mà khoá ngoại sinh ra để giữ, kiểm cho MỌI tenant chứ
+    # không riêng tenant khởi tạo — một con trỏ trỏ vào phiên bản không tồn tại
+    # nghĩa là bộ từ vựng đang phát hành không truy nguyên được.
+    #
+    # Vế hai bắt được đúng thứ vế một bỏ lọt: một bản vá gieo bừa `version = 1`
+    # vẫn thoả "có đúng một dòng".
     _SQL_SEED_VOCAB_REGISTRY_META: (
         "migration:v5:seed-vocabulary-registry-meta",
         (_SQL_SEED_VOCAB_REGISTRY_META,),
-        f"SELECT count(*) = 1 FROM vocabulary_registry_meta "
-        f"WHERE tenant_id = '{DEFAULT_TENANT_ID}'",
+        f"SELECT (SELECT count(*) FROM vocabulary_registry_meta "
+        f"         WHERE tenant_id = '{DEFAULT_TENANT_ID}') = 1 "
+        f"   AND NOT EXISTS (SELECT 1 FROM vocabulary_registry_meta m "
+        f"                    WHERE m.version IS NOT NULL "
+        f"                      AND NOT EXISTS (SELECT 1 FROM registry_versions r "
+        f"                                       WHERE r.tenant_id = m.tenant_id "
+        f"                                         AND r.version = m.version))",
+    ),
+    # v7 — đổi mốc 0 thành NULL. Hậu điều kiện là chính bất biến của khoá ngoại,
+    # phát biểu độc lập với nó: nếu ai đó gỡ khoá ngoại thì câu này vẫn phải
+    # đúng, và migration vẫn phải dừng khi nó sai.
+    _SQL_V7_REGISTRY_POINTER_NULL_SENTINEL: (
+        "migration:v7:registry-pointer-empty-is-null",
+        (_SQL_V7_REGISTRY_POINTER_NULL_SENTINEL,),
+        "SELECT NOT EXISTS (SELECT 1 FROM vocabulary_registry_meta m "
+        "                    WHERE m.version = 0 "
+        "                       OR (m.version IS NOT NULL "
+        "                           AND NOT EXISTS (SELECT 1 FROM registry_versions r "
+        "                                            WHERE r.tenant_id = m.tenant_id "
+        "                                              AND r.version = m.version)))",
     ),
     # Hậu điều kiện có HAI vế, và vế thứ hai mới là vế bảo mật:
     #
@@ -445,16 +568,17 @@ MIGRATION_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
     # capture session vào buổi. Chạy riêng câu đầu để lại một bảng buổi thu mà
     # không ai trỏ tới; chạy riêng câu sau thì không có gì để trỏ.
     #
-    # Hậu điều kiện có BA vế, và vế thứ ba mới là vế đắt:
+    # Hậu điều kiện có HAI vế:
     #
     #   1. không capture session nào còn mồ côi   -> backfill đã phủ hết
     #   2. buổi cha đúng tenant và đúng mã phiên  -> gom ĐÚNG nhóm
-    #   3. người ký hai tầng không mâu thuẫn      -> nâng cột lên KHÔNG bịa
     #
     # Chỉ kiểm vế một thì một bản vá gom bừa mọi capture session vào một buổi
-    # duy nhất vẫn "đạt". Vế hai phân biệt "đã nối" với "nối đúng chỗ". Vế ba
-    # là thứ duy nhất chứng minh việc nâng `signer_id` lên cha không làm mất
-    # hoặc đổi danh tính người ký của bất kỳ capture session nào.
+    # duy nhất vẫn "đạt"; vế hai phân biệt "đã nối" với "nối đúng chỗ".
+    #
+    # Từng có vế thứ ba — "người ký hai tầng không mâu thuẫn" — và nó biến mất
+    # cùng cột `collection_sessions.signer_id` ở v6. Nó không bị nới lỏng: thứ
+    # nó canh đã được chứng minh là một bất biến SAI.
     _SQL_BACKFILL_COLLECTION_SESSIONS: (
         "migration:v5:group-capture-sessions-into-collection-sessions",
         (_SQL_BACKFILL_COLLECTION_SESSIONS, _SQL_LINK_CAPTURE_TO_COLLECTION),
@@ -464,9 +588,7 @@ MIGRATION_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "WHERE c.collection_session_id IS NULL "
         "   OR s.collection_session_id IS NULL "
         "   OR s.tenant_id    IS DISTINCT FROM c.tenant_id "
-        "   OR s.session_code IS DISTINCT FROM c.session_id "
-        "   OR (c.signer_id IS NOT NULL "
-        "       AND s.signer_id IS DISTINCT FROM c.signer_id)",
+        "   OR s.session_code IS DISTINCT FROM c.session_id",
     ),
 }
 
@@ -1786,11 +1908,24 @@ MIGRATION_STATEMENTS = [
     f"""
     CREATE TABLE IF NOT EXISTS vocabulary_registry_meta (
         tenant_id TEXT PRIMARY KEY DEFAULT '{DEFAULT_TENANT_ID}',
-        version   BIGINT NOT NULL DEFAULT 1,
+        -- NULL = chưa công bố registry nào. Trước v7 cột này là
+        -- `NOT NULL DEFAULT 1`, và cả hai nửa đều sai: DEFAULT 1 dựng một con
+        -- trỏ trỏ vào phiên bản chưa tồn tại, còn NOT NULL ép mọi đường ghi
+        -- phải BỊA ra một con số cho trạng thái rỗng (`clone` chọn số 0).
+        --
+        -- Bản cài mới sinh ra đã đúng hình dạng này, nên hai câu
+        -- `_SQL_V7_REGISTRY_POINTER_DROP_*` là no-op ở đó; chúng tồn tại cho
+        -- những cơ sở dữ liệu đã dựng trước 24/08/2026.
+        version   BIGINT,
         updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     )
     """,
-    _SQL_SEED_VOCAB_REGISTRY_META,
+    # `_SQL_SEED_VOCAB_REGISTRY_META` từng đứng NGAY ĐÂY và phải chuyển xuống
+    # sau `registry_versions` (24/08/2026): từ v7 nó đọc `max(version)` của
+    # bảng ấy, mà bảng ấy được tạo cách đây mười mấy dòng bên dưới. Trên một cơ
+    # sở dữ liệu TRỐNG, câu gieo vì thế ngã với `relation "registry_versions"
+    # does not exist` — và vì nó là bước dữ liệu (ném lỗi, không nuốt), cả lượt
+    # migrate dừng. Không lộ trên máy đã có dữ liệu, chỉ lộ ở bản cài mới.
     "CREATE INDEX IF NOT EXISTS idx_dialects_status ON dialects(tenant_id, status, is_active)",
     "CREATE INDEX IF NOT EXISTS idx_dialects_created_by ON dialects(created_by)",
     # ---------------------------------------------------------------------
@@ -1818,6 +1953,10 @@ MIGRATION_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_registry_versions_hash ON registry_versions(content_hash)",
+    # Gieo con trỏ registry — PHẢI đứng sau `registry_versions`, vì nó đọc
+    # `max(version)` của bảng ấy để không dựng ra một con trỏ treo. Xem chú
+    # thích ở chỗ nó từng đứng, phía trên.
+    _SQL_SEED_VOCAB_REGISTRY_META,
     # ---------------------------------------------------------------------
     # Community plane — the bootstrap template, owned by system admins.
     #
@@ -3945,33 +4084,24 @@ MIGRATION_STATEMENTS = [
     "collection_session_id UUID",
     _add_constraint("collection_sessions", "uq_collection_sessions_tenant",
                     "UNIQUE (tenant_id, collection_session_id)"),
-    # Khoá ứng viên BA cột, và nó tồn tại chỉ để làm đích cho ràng buộc khớp
-    # người ký ngay dưới. `collection_session_id` đã là khoá chính nên bộ ba
-    # chắc chắn duy nhất — câu này không loại được hàng nào.
-    _add_constraint("collection_sessions", "uq_collection_sessions_signer_scope",
-                    "UNIQUE (tenant_id, collection_session_id, signer_id)"),
-    _add_constraint("collection_sessions", "fk_collection_sessions_signer",
-                    "FOREIGN KEY (tenant_id, signer_id) "
-                    "REFERENCES signers(tenant_id, signer_id) ON UPDATE CASCADE"),
     _add_constraint(
         "capture_sessions", "fk_capture_sessions_collection",
         "FOREIGN KEY (tenant_id, collection_session_id) "
         "REFERENCES collection_sessions(tenant_id, collection_session_id) "
         "ON DELETE SET NULL (collection_session_id)"),
-    # CHUYỂN TIẾP AN TOÀN cho `signer_id`, đúng nghĩa "giữ ở cả hai tầng rồi mới
-    # bỏ bản sao con". Ràng buộc này KHÔNG bắt capture session phải khai người
-    # ký — MATCH SIMPLE coi khoá có thành phần NULL là thoả mãn, nên 2186 hàng
-    # chưa có người ký đi qua tự do. Nó chỉ nói: NẾU con khai người ký thì phải
-    # trùng người ký của buổi. Đó là thứ biến "hai bản sao" thành "một sự thật
-    # có bản sao được kiểm".
-    _add_constraint(
-        "capture_sessions", "fk_capture_sessions_collection_signer",
-        "FOREIGN KEY (tenant_id, collection_session_id, signer_id) "
-        "REFERENCES collection_sessions"
-        "(tenant_id, collection_session_id, signer_id) "
-        "ON DELETE SET NULL (collection_session_id)"),
     _SQL_BACKFILL_COLLECTION_SESSIONS,
     _SQL_LINK_CAPTURE_TO_COLLECTION,
+    # v6 — gỡ bất biến sai. Ba câu MỘT CHIỀU nên chỉ chạy qua `app.cli.migrate`,
+    # không chạy lúc khởi động. `IF EXISTS` để chúng luỹ đẳng: trên bản cài mới,
+    # cột và ràng buộc chưa từng ra đời nên cả ba là no-op.
+    _V6_DROP_COLLECTION_SIGNER_FK,
+    _V6_DROP_COLLECTION_SIGNER_UNIQUE,
+    _V6_DROP_COLLECTION_SIGNER_COLUMN,
+    # v7 — thứ tự BẮT BUỘC: bỏ DEFAULT và NOT NULL trước, rồi mới đặt NULL
+    # được. Đảo lại thì câu UPDATE ngã vì cột chưa nhận NULL.
+    _SQL_V7_REGISTRY_POINTER_DROP_DEFAULT,
+    _SQL_V7_REGISTRY_POINTER_DROP_NOT_NULL,
+    _SQL_V7_REGISTRY_POINTER_NULL_SENTINEL,
     # ---------------------------------------------------------------------
     # v3.15 — Vòng lặp khoá ngoại tenant, lần thứ hai. Xem chú thích ở
     # TENANT_FK_LOOP_SQL: các bảng v3 và v4 vừa được tạo bên trên, sau khi lượt

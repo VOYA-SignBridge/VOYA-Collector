@@ -120,15 +120,92 @@ def _v5() -> tuple[tuple[str, str], ...]:
     )
 
 
+def _v6() -> tuple[tuple[str, str], ...]:
+    """Ba câu của v6: gỡ bất biến "buổi thu có đúng một người ký".
+
+    Vì sao v6 KHÔNG còn là Billing
+    -------------------------------
+    Số này từng được giữ chỗ cho mô hình gói Free/Plus/Pro/Enterprise, và chú
+    thích cũ ở đây dặn "thêm mục v6 là việc CUỐI CÙNG của lượt Billing". Lời
+    dặn ấy vẫn đúng VỚI BILLING — điều đổi là ai được dùng con số này.
+
+        Billing v6      chưa hoàn tất, chưa phát hành, chưa có gì trên sản xuất
+        bất biến dưới   đã áp lên `signdb` ngày 23/08/2026, và sẽ TỪ CHỐI dữ
+                        liệu hợp lệ ngay khi danh tính người ký được gỡ đúng
+
+    Một lỗi lược đồ đang sống được ưu tiên hơn một con số giữ chỗ cho tính năng
+    chưa ra đời. Billing chuyển sang v7.
+
+    Vì sao chỉ có ba câu
+    --------------------
+    `users.role_id`, `samples_class_uid_fkey` và vài khoản dọn dẹp khác cũng
+    đang chờ DROP, nhưng KHÔNG đi cùng chuyến này. Một migration sửa lỗi ngắn,
+    một lý do duy nhất, hậu điều kiện đọc hết trong một hơi — thứ ấy audit
+    được. Gộp thêm ba việc không liên quan thì lần sau không ai trả lời nổi
+    "v6 đã sửa cái gì".
+
+    Thứ tự BẮT BUỘC: khoá ngoại trước, rồi khoá ứng viên nó trỏ tới, rồi cột.
+    Đảo lại thì Postgres từ chối vì còn phụ thuộc.
+
+    Cả ba đều `IF EXISTS`, nên trên một bản cài mới — nơi cột chưa từng ra đời
+    — v6 là ba no-op. Đó là điều kiện để `--to 6` chạy được ở mọi xuất phát
+    điểm, không chỉ trên máy đã đi qua ngày 23/08.
+    """
+    from app.storage import metadata_db as mdb
+
+    return (
+        ("drop_collection_signer_fk", mdb._V6_DROP_COLLECTION_SIGNER_FK),
+        ("drop_collection_signer_unique", mdb._V6_DROP_COLLECTION_SIGNER_UNIQUE),
+        ("drop_collection_signer_column", mdb._V6_DROP_COLLECTION_SIGNER_COLUMN),
+    )
+
+
+def _v7() -> tuple[tuple[str, str], ...]:
+    """Ba câu của v7: "chưa công bố registry" là NULL, không phải 0 hay 1.
+
+    Vì sao có v7 ngay sau v6
+    ------------------------
+    Cùng một lỗi, hai lần trong một ngày: gắn khoá ngoại lên một cột ĐÃ CÓ mà
+    chỉ kiểm dữ liệu hiện có, không kiểm đường GHI. Khoá ngoại ghép
+    `(tenant_id, version) -> registry_versions` thêm ngày 23/08/2026 đúng về
+    nguyên tắc, nhưng cột ấy đang mang hai giá trị mốc bịa:
+
+        clone_catalog_to_tenant  ghi 0   phiên bản 0 KHÔNG BAO GIỜ tồn tại
+        DEFAULT của cột           là 1   phiên bản 1 chưa chắc tồn tại
+
+    Hậu quả đo được: `INSERT INTO vocabulary_registry_meta(tenant_id, version)
+    VALUES('probe-fk', 0)` bị từ chối, và `tenant_admin.py` không bọc lỗi ấy —
+    **tạo tenant mới hỏng**. Chưa nổ trên sản xuất chỉ vì stack đang tắt.
+
+    Vì sao KHÔNG gỡ khoá ngoại cho xong
+    -----------------------------------
+    Gỡ là quay về trạng thái yếu hơn rồi vẫn phải làm việc này. Cột vốn đã có
+    sẵn cách nói "chưa có gì" mà không cần bịa số: NULL. Khoá ngoại MATCH
+    SIMPLE cho NULL đi qua, nên giữ được phép kiểm mà vẫn biểu diễn được trạng
+    thái rỗng.
+
+    Thứ tự BẮT BUỘC: bỏ DEFAULT, bỏ NOT NULL, rồi mới đặt được NULL.
+
+    Đi kèm ở tầng mã, và thiếu một trong ba thì v7 vô nghĩa:
+      * `clone_catalog_to_tenant` ghi NULL thay cho 0;
+      * `_bump()` TẠO `registry_versions` trước rồi mới dời con trỏ — bản cũ
+        làm ngược và cũng bị chính khoá ngoại ấy chặn;
+      * bước gieo trỏ vào `max(version)` có thật thay vì để rơi vào DEFAULT.
+    """
+    from app.storage import metadata_db as mdb
+
+    return (
+        ("registry_pointer_drop_default", mdb._SQL_V7_REGISTRY_POINTER_DROP_DEFAULT),
+        ("registry_pointer_drop_not_null", mdb._SQL_V7_REGISTRY_POINTER_DROP_NOT_NULL),
+        ("registry_pointer_empty_is_null", mdb._SQL_V7_REGISTRY_POINTER_NULL_SENTINEL),
+    )
+
+
 #: Phiên bản -> hàm dựng dãy có nhãn.
-#:
-#: v6 CỐ Ý vắng mặt. Mô hình gói Free/Plus/Pro/Enterprise còn dang dở
-#: (`docs/07-business/BILLING_MODEL_V6.md`), và một payload chưa hoàn chỉnh mà đã có mục ở
-#: đây thì lần `--to 6` đầu tiên sẽ đóng dấu một checksum của bản nửa vời —
-#: rồi bất biến vĩnh viễn. Thêm mục v6 là việc CUỐI CÙNG của lượt Billing v6,
-#: không phải việc đầu tiên.
 MIGRATION_HISTORY = {
     5: _v5,
+    6: _v6,
+    7: _v7,
 }
 
 
