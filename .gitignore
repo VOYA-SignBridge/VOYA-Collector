@@ -92,6 +92,13 @@ processed/analysis
 *.json
 processed/splits
 *.csv
+# CSV BẰNG CHỨNG đã được chọn lọc và version hoá — ngoại lệ hẹp của luật
+# trên. Luật `*.csv` đúng cho dữ liệu sinh ra (samples.csv, labels.csv);
+# thư mục này giữ thứ khác hẳn: phiếu quyết định và ảnh chụp bằng chứng
+# cho một lượt sửa lược đồ. Hai lần phải `git add -f` tay (986fd93,
+# fafde53) là dấu hiệu luật thiếu ngoại lệ, không phải người hay quên.
+!docs/02-data/db/evidence/
+!docs/02-data/db/evidence/*.csv
 
 *.md
 *.txt
