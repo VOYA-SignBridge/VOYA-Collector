@@ -147,8 +147,63 @@ def _public_user(user: dict) -> dict:
     dạng (hồ sơ hoặc vé hai bước) đã vô tình gỡ luôn bộ lọc, và băm bcrypt đi ra
     theo mọi lượt đăng nhập thành công.
     """
-    return UserOut(**user).model_dump() if hasattr(UserOut, "model_dump") \
-        else UserOut(**user).dict()
+    return UserOut(**_with_capabilities(user)).model_dump() \
+        if hasattr(UserOut, "model_dump") \
+        else UserOut(**_with_capabilities(user)).dict()
+
+
+def _with_capabilities(user: dict) -> dict:
+    """Thêm hai trường DẪN XUẤT vào hồ sơ: `tenant_role` và `can_moderate`.
+
+    Vì sao là một hàm chứ không phải chép ở mỗi nơi
+    ------------------------------------------------
+    Bốn endpoint trả về hình dạng "người dùng hiện tại": `/login`, bước hai của
+    xác thực hai lớp, `/refresh`, và `/me`. Trước 24/08/2026 chỉ `/me` tính hai
+    trường này; ba chỗ kia trả `UserOut` với giá trị mặc định, nên cùng một
+    người trong cùng một phiên nhận hai câu trả lời khác nhau:
+
+        POST /auth/login   can_moderate=false  tenant_role=null
+        GET  /auth/me      can_moderate=true   tenant_role=admin
+
+    Chưa cắn ai vì `useAuth` lấy người dùng từ `/me`. Nhưng người viết tiếp mà
+    dùng kết quả đăng nhập sẽ nhận `can_moderate` sai một cách im lặng, và hậu
+    quả là nút kiểm duyệt biến mất với đúng người có quyền.
+
+    Vì sao KHÔNG sửa mặc định của `UserOut`
+    ---------------------------------------
+    `can_moderate` là giá trị dẫn xuất theo quyền và ngữ cảnh. Đổi mặc định
+    `False` thành thứ khác chỉ đổi kiểu sai — nơi trả hồ sơ phải TÍNH nó.
+
+    Đây là siêu dữ liệu để VẼ giao diện, không phải nơi quyết định thẩm quyền.
+    Điểm cuối kiểm duyệt vẫn tự kiểm quyền phía máy chủ; xem
+    `routers/moderation.require_moderator`.
+
+    Hỏng thì trả giá trị trung tính chứ không làm ngã cả endpoint: đây là điểm
+    cuối mà giao diện gọi trước mọi thứ khác, và để nó ngã vì một chi tiết
+    trang trí là đổi một mục menu thiếu lấy một màn hình trắng.
+    """
+    from app.vocabulary_registry import tenant_role
+
+    out = dict(user)
+    try:
+        out["tenant_role"] = tenant_role(
+            str(out.get("tenant_id") or ""), str(out.get("id") or "")
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được vai tổ chức cho %s", out.get("id"))
+        out["tenant_role"] = None
+
+    # Tra ở ĐÂY, không nhét vào `get_current_user` — mọi endpoint đi qua phụ
+    # thuộc đó, và thêm một lượt đọc bảng vào nó để phục vụ một mục menu là trả
+    # giá trên từng request.
+    try:
+        from app.moderation_admin import can_moderate
+
+        out["can_moderate"] = can_moderate(out)
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được quyền kiểm duyệt cho %s", out.get("id"))
+        out["can_moderate"] = False
+    return out
 
 
 def _validate_consents(payload: "RegisterRequest") -> dict:
@@ -650,7 +705,10 @@ def refresh(request: Request, response: Response):
         csrf_token=generate_csrf_token(),
         request=request,
     )
-    return user
+    # Cùng hình dạng với `/login` và `/me`. Giao diện gọi điểm cuối này khi vé
+    # ngắn hạn hết hạn, và nếu nó trả hồ sơ NGHÈO hơn thì mỗi lần làm mới phiên
+    # là một lần người dùng lặng lẽ mất mục Kiểm duyệt trên thanh điều hướng.
+    return _with_capabilities(user)
 
 
 @router.post("/logout", response_model=MessageResponse)
@@ -685,32 +743,10 @@ def me(current_user=Depends(get_current_user)):
     đi qua phụ thuộc đó, nên thêm một truy vấn thành viên vào nó là trả giá một
     lượt đọc bảng trên từng request để phục vụ đúng một màn hình.
     """
-    from app.vocabulary_registry import tenant_role
-
-    user = dict(current_user)
-    try:
-        user["tenant_role"] = tenant_role(
-            str(user.get("tenant_id") or ""), str(user.get("id") or "")
-        )
-    except Exception:  # noqa: BLE001
-        # Không tra được vai thì trả `None` chứ đừng làm hỏng `/auth/me` — đây
-        # là điểm cuối mà SPA gọi trước mọi thứ khác, và để nó ngã vì một chi
-        # tiết trang trí là đổi một cái link thiếu lấy một màn hình trắng.
-        logger.warning("[AUTH][ME] không tra được vai tổ chức cho %s", user.get("id"))
-        user["tenant_role"] = None
-
-    # Cùng lý lẽ như `tenant_role` ngay trên: tra ở ĐÂY, không nhét vào
-    # `get_current_user` — mọi endpoint đi qua phụ thuộc đó, và thêm một lượt
-    # đọc bảng vào nó để phục vụ một mục menu là trả giá trên từng request.
-    try:
-        from app.moderation_admin import can_moderate
-
-        user["can_moderate"] = can_moderate(user)
-    except Exception:  # noqa: BLE001
-        logger.warning("[AUTH][ME] không tra được quyền kiểm duyệt cho %s",
-                       user.get("id"))
-        user["can_moderate"] = False
-    return user
+    # Cùng một phép tính với `/login`, `/refresh` và bước hai của xác thực hai
+    # lớp — xem `_with_capabilities`. Bốn endpoint này phải trả cùng câu trả lời
+    # cho cùng một người.
+    return _with_capabilities(current_user)
 
 
 class UpdateProfileRequest(BaseModel):
