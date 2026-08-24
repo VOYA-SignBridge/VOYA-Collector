@@ -70,7 +70,6 @@ export default function ConsolePoliciesPage() {
                   <th className="px-3 py-2">{t("Bản")}</th>
                   <th className="px-3 py-2">{t("Hiệu lực từ")}</th>
                   <th className="px-3 py-2">{t("Buộc chấp thuận lại")}</th>
-                  <th className="px-3 py-2">{t("Mã băm nội dung")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -93,18 +92,12 @@ export default function ConsolePoliciesPage() {
                         {d.requires_reconsent ? t("Có") : t("Không")}
                       </Badge>
                     </td>
-                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">
-                      {(d.content_hash ?? "").slice(0, 16)}…
-                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        <p className="text-sm text-slate-500">
-          {t("Nội dung một bản đã công bố không sửa được — cưỡng chế bằng trigger ở tầng cơ sở dữ liệu. Mã băm cho phép đối chiếu rằng bản đang đọc đúng là bản đã ký.")}
-        </p>
       </section>
 
       <section className="space-y-3">

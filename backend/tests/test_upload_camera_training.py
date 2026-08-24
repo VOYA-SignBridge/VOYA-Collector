@@ -95,6 +95,11 @@ def _fake_class():
     return SimpleNamespace(
         class_uid="SOTTEST_cls", slug="test-slug", label_original="xin chào",
         language="vn", dialect="common", class_idx=1, folder_name=lambda: "class_test",
+        # `tenant_id` PHAI co: ban sao gia lap cua `ClassMetadata` la mot mo
+        # hinh cua lop that, va lop that mang truong nay. `save_sequence_npz`
+        # doc no de dong dau to chuc len dong du lieu — thieu no o day thi
+        # ban sao gia lap noi doi ve hinh dang cua thu no thay the.
+        tenant_id="default",
         hands_required=None,      # 1 | 2 | None (unknown) — falls back to payload
         semantic_label="",
         vocabulary_scope="",      # "common" | "profile_specific" | ""
@@ -131,8 +136,18 @@ def _post_video(c, *, label="xin chào", upload_uid=None, extra=None):
         data["upload_uid"] = upload_uid
     if extra:
         data.update(extra)
+    # Chữ ký MP4 THẬT ở 12 byte đầu: `....ftyp` + nhãn thương hiệu. Phần thân
+    # vẫn là rác, và như thế là đúng — mọi thứ giải mã nó đều đã bị mock ở các
+    # test dưới.
+    #
+    # Trước đây chỗ này gửi `\x00\x01\x02fake-mp4-bytes`. Nó đi lọt vì hồi ấy
+    # không ai hỏi tệp có phải video không; từ khi `upload.py` kiểm chữ ký
+    # container, một tên tệp `.mp4` với nội dung bất kỳ trả 415. Sửa đồ giả cho
+    # giống thật là đúng hướng: bài test này nói về một lượt tải video THÀNH
+    # CÔNG, nên đầu vào của nó phải là thứ hệ thống chịu nhận.
+    mp4 = b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00fake-mp4-bytes"
     return c.post("/api/v1/upload/video",
-                  files={"file": ("clip.mp4", b"\x00\x01\x02fake-mp4-bytes", "video/mp4")},
+                  files={"file": ("clip.mp4", mp4, "video/mp4")},
                   data=data, headers=_csrf(c))
 
 

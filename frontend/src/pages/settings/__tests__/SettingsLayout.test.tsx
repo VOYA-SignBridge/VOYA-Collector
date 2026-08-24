@@ -57,15 +57,19 @@ describe("SettingsLayout", () => {
     expect(hrefs).not.toContain("/settings/contact");
   });
 
-  it("gom đủ 8 mục cho quản trị viên", () => {
+  it("gom đủ 9 mục cho quản trị viên", () => {
+    // 20/08: 8 -> 9. Con số này đã LỆCH sẵn trước phiên sửa giao diện — mục
+    // "Workspace" được thêm vào `SettingsLayout` mà không ai chỉnh test, nên
+    // hai khẳng định dưới đây đỏ từ trước. Sửa số chứ không gỡ khẳng định:
+    // chính nó là thứ bắt người thêm mục phải dừng lại một nhịp.
     renderSettings(true);
-    expect(screen.getAllByRole("link")).toHaveLength(8);
+    expect(screen.getAllByRole("link")).toHaveLength(9);
   });
 
   it("giấu Tích hợp với người dùng thường — trang đó chắc chắn 403", () => {
     renderSettings(false);
     expect(screen.queryByText("Tích hợp")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link")).toHaveLength(7);
+    expect(screen.getAllByRole("link")).toHaveLength(8);
   });
 
   it("dịch nhãn mục sang tiếng Anh", () => {

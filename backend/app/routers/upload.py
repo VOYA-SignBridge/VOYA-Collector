@@ -65,6 +65,54 @@ def _safe_path_part(value: str | None, fallback: str) -> str:
     return "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in text)
 
 
+#: Chu ky container video, ghi bang HEX cua bon byte dau. Dung hex chu khong
+#: dung escape nhi phan trong nguon: mot chuoi kieu "\x1a" rat de bi mot lop
+#: xu ly trung gian dien giai som, va luc do nguon mang byte that thay vi van ban.
+_VIDEO_MAGIC_HEAD_HEX = {
+    "1a45dfa3",   # EBML  — WebM / MKV
+    "000001ba",   # MPEG-PS
+    "000001b3",   # MPEG-1 video
+}
+
+
+def _peek_head(upload_file, n: int = 16) -> bytes:
+    """Doc `n` byte dau roi TRA CON TRO VE cho cu — khong tieu thu luong."""
+    try:
+        pos = upload_file.tell()
+        head = upload_file.read(n)
+        upload_file.seek(pos)
+        return head or b""
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"cannot read uploaded file: {exc}") from exc
+
+
+def _looks_like_video(head: bytes) -> bool:
+    """True khi `head` mang chu ky cua mot container video da biet.
+
+    Kiem CHU KY chu khong kiem duoi tep hay `content_type`: ca hai deu do phia
+    goi tu khai, nen chung noi len y dinh chu khong noi len noi dung.
+
+    Danh sach nay CO Y giu chat, va no khong thay the bo giai ma — OpenCV/FFmpeg
+    van la trong tai cuoi cung. Cong nay chi keo loi ve DAU VAO, truoc khi mot
+    lop tu vung kip duoc dang ky cho mot tep hoa ra khong phai video.
+
+    MPEG-TS co y KHONG nam trong danh sach: chu ky cua no la mot byte 0x47 duy
+    nhat, nen bat ky tep nao bat dau bang chu "G" cung lot — mot cong nhu vay
+    khong chan duoc gi va chi tao cam giac an toan.
+    """
+    if len(head) < 12:
+        return False
+    if head[4:8] == b"ftyp":                              # MP4 / MOV / M4V / 3GP
+        return True
+    if head[:4].hex() in _VIDEO_MAGIC_HEAD_HEX:
+        return True
+    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":     # AVI
+        return True
+    if head[:3] == b"FLV":                                # Flash Video
+        return True
+    return False
+
+
 def _measure_upload_size(upload_file, *, max_bytes: int) -> int:
     try:
         upload_file.seek(0, 2)
@@ -153,6 +201,19 @@ async def upload_video(
         )
     except Exception:
         pass
+
+    # Cong dinh dang, dat TRUOC `get_or_register_class` — thu tu nay la trong tam.
+    #
+    # Cho toi ban nay, mot tep khong phai video van di qua duoc day va DE LAI mot
+    # lop tu vung: lop duoc dang ky truoc khi bat ky thu gi ve tep duoc kiem, nen
+    # mot lan tai len that bai van sinh ra rac phai don bang tay. Tu choi o day
+    # thi khong con gi de don.
+    if not _looks_like_video(_peek_head(file.file)):
+        log.warning("[UPLOAD][video] tu choi: khong nhan ra chu ky container video")
+        raise HTTPException(
+            status_code=415,
+            detail="Tep khong phai dinh dang video duoc ho tro (MP4/MOV/WebM/MKV/AVI).",
+        )
 
     # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
     class_meta = await asyncio.to_thread(

@@ -33,7 +33,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageHeader from "../components/ui/PageHeader";
-import RequestOrganizationCard from "../components/organization/RequestOrganizationCard";
+import CreateOrganizationCard from "../components/organization/CreateOrganizationCard";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Modal from "../components/ui/Modal";
@@ -58,6 +58,8 @@ import {
   exportDownloadUrl,
   fetchExports,
   fetchInvitations,
+  fetchMyTenant,
+  memberIdentity,
   fetchMembers,
   fetchSubscription,
   fetchTenant,
@@ -70,6 +72,7 @@ import {
   type MemberRoleOrNone,
   type SubscriptionInfo,
   type Tenant,
+  type MyTenant,
   type TenantExport,
   type TenantInvitation,
   type TenantMember,
@@ -116,6 +119,8 @@ export default function OrganizationPage() {
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [denied, setDenied] = useState(false);
+  // Thông tin tổ chức ở mức THÀNH VIÊN, nạp khi lượt gác cổng trả 403.
+  const [myTenant, setMyTenant] = useState<MyTenant | null>(null);
   const [error, setError] = useState("");
 
   // Bộ đếm lượt tải: một lượt nạp chậm không được ghi đè kết quả mới hơn.
@@ -154,6 +159,10 @@ export default function OrganizationPage() {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403) {
         setDenied(true);
+        // 403 ở đây nghĩa là "bạn không quản trị tổ chức này", KHÔNG phải
+        // "bạn không có tổ chức". Hỏi tiếp bằng cửa dành cho thành viên để
+        // trang trả lời được đúng câu người dùng hỏi: tôi đang ở tổ chức nào.
+        fetchMyTenant().then(setMyTenant).catch(() => setMyTenant(null));
       } else {
         setError(friendlyError(err, t("Không đọc được thông tin tổ chức của bạn.")));
       }
@@ -165,6 +174,24 @@ export default function OrganizationPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Bản xuất "full" mất khoảng một phút thật (đóng gói vài nghìn mẫu), nên một
+  // danh sách chỉ nạp một lần trông y hệt một danh sách bị treo: người dùng bấm
+  // "Xuất", thấy dòng "Đang chờ", rồi không có gì đổi nữa cho tới khi họ tự F5.
+  // Hỏi lại mỗi 3 giây CHỪNG NÀO còn bản xuất chưa xong, và dừng ngay khi hết —
+  // không có bản nào đang chạy thì không có lý do gì để hỏi tiếp.
+  const hasPendingExport = exports.some(
+    (ex) => ex.status === "pending" || ex.status === "running",
+  );
+  useEffect(() => {
+    if (!hasPendingExport || !tenantId) return;
+    const id = setInterval(() => {
+      fetchExports(tenantId)
+        .then(setExports)
+        .catch(() => undefined);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [hasPendingExport, tenantId]);
 
   const pendingInvitations = useMemo(
     () => invitations.filter((i) => !i.accepted_at && !i.revoked_at),
@@ -184,20 +211,122 @@ export default function OrganizationPage() {
           />
           {/* Bản trước dừng ở câu "hãy liên hệ quản trị viên hệ thống" — một
               ngõ cụt có thiện chí: nói ra việc cần làm mà không đưa cách làm. */}
-          <RequestOrganizationCard />
+          <CreateOrganizationCard onCreated={load} />
         </div>
       </>
     );
   }
 
   if (denied) {
+    // Thành viên thường. Trước đây chỗ này chỉ có một câu từ chối, và câu đó
+    // trả lời cho một câu hỏi khác hẳn câu người ta hỏi: người dùng vào đây để
+    // biết MÌNH ĐANG Ở TỔ CHỨC NÀO, chứ không phải để xin quyền quản trị.
     return (
       <>
-        <PageHeader title={t("Tổ chức của tôi")} />
-        <NoticeCard
-          title={t("Bạn không phải quản trị viên của tổ chức này")}
-          body={t("Trang này dành cho người quản trị tổ chức. Bạn vẫn dùng được mọi tính năng đóng góp dữ liệu như bình thường — chỉ phần quản lý thành viên là do quản trị viên tổ chức phụ trách.")}
+        <PageHeader
+          title={t("Tổ chức của tôi")}
+          subtitle={t("Tổ chức bạn đang thuộc về và vai trò của bạn trong đó.")}
+          breadcrumb={[{ label: t("Trang chủ"), href: "/" }, { label: t("Tổ chức") }]}
         />
+        <div className="space-y-4">
+          {myTenant ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-start gap-4">
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-ctu-blue/10 text-ctu-blue">
+                  <BuildingIcon className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-lg font-semibold text-slate-900">
+                    {myTenant.display_name || myTenant.tenant_id}
+                  </h2>
+                  <p className="mt-0.5 font-mono text-xs text-slate-400">{myTenant.tenant_id}</p>
+                </div>
+                <Badge variant="info">{roleLabel(parseRole(myTenant.my_role ?? ""))}</Badge>
+              </div>
+
+              <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {t("Thành viên")}
+                  </dt>
+                  <dd className="mt-1 text-2xl font-bold tabular-nums text-slate-900">
+                    {myTenant.member_count}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {t("Quản trị viên")}
+                  </dt>
+                  <dd className="mt-1 text-2xl font-bold tabular-nums text-slate-900">
+                    {myTenant.admin_count}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {t("Gói")}
+                  </dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-700">
+                    {myTenant.plan_code || "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {t("Vai của bạn")}
+                  </dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-700">
+                    {roleLabel(parseRole(myTenant.my_role ?? ""))}
+                  </dd>
+                </div>
+              </dl>
+
+              {/* Ai cùng tổ chức với tôi. Thành viên thấy TÊN và VAI — đủ để
+                  biết hỏi ai; không có thư và mã tài khoản, vì đó là công cụ
+                  của quản trị viên chứ không phải thông tin định hướng. */}
+              {myTenant.members.length > 0 && (
+                <div className="mt-6 border-t border-slate-100 pt-4">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {t("Thành viên trong tổ chức")}
+                  </h3>
+                  <ul className="divide-y divide-slate-100">
+                    {myTenant.members.map((m, i) => (
+                      <li
+                        key={`${m.username ?? "?"}-${i}`}
+                        className="flex items-center justify-between gap-3 py-2"
+                      >
+                        <span className="min-w-0 truncate text-sm text-slate-800">
+                          {m.username || t("(không tên)")}
+                          {m.is_me && (
+                            <span className="ml-2 text-xs font-medium text-ctu-blue">
+                              {t("— bạn")}
+                            </span>
+                          )}
+                        </span>
+                        <Badge variant={m.role === "admin" ? "info" : "default"}>
+                          {roleLabel(parseRole(m.role ?? ""))}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <NoticeCard
+              title={t("Không đọc được thông tin tổ chức")}
+              body={t("Bạn vẫn đóng góp dữ liệu bình thường. Hãy thử tải lại trang.")}
+            />
+          )}
+
+          <NoticeCard
+            title={t("Phần quản lý do quản trị viên tổ chức phụ trách")}
+            body={t("Mời thành viên, đổi vai và mang dữ liệu của tổ chức đi là việc của quản trị viên. Bạn vẫn dùng được mọi tính năng đóng góp dữ liệu như bình thường.")}
+          />
+
+          {/* Lối ra cho người muốn tự chủ: lập tổ chức riêng và làm quản trị
+              viên của nó. Cảnh báo dữ liệu ở lại được bật, vì người đọc màn
+              hình này ĐANG ở trong một tổ chức khác. */}
+          <CreateOrganizationCard onCreated={load} warnDataStays />
+        </div>
       </>
     );
   }
@@ -588,10 +717,12 @@ function MembersSection({
                 <tr key={m.user_id} className="border-b border-slate-100 last:border-0">
                   <td className="py-3 pr-4">
                     <div className="font-medium text-slate-900">
-                      {m.username ?? t("(không tên)")}
+                      {memberIdentity(m).primary}
                       {isMe && <span className="ml-2 text-xs text-slate-400">{t("— bạn")}</span>}
                     </div>
-                    <div className="text-xs text-slate-500">{m.email ?? "—"}</div>
+                    {memberIdentity(m).secondary ? (
+                      <div className="text-xs text-slate-500">{memberIdentity(m).secondary}</div>
+                    ) : null}
                   </td>
                   <td className="py-3 pr-4">
                     {/* Không cho tự hạ vai của CHÍNH MÌNH: một tổ chức không còn
@@ -682,7 +813,14 @@ function InvitationsSection({
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<InvitationCreated | null>(null);
 
-  const canInvite = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && !busy;
+  // Hợp lệ khi là một địa chỉ thư, HOẶC một tên đăng nhập (>= 3 ký tự, không
+  // khoảng trắng). Máy chủ mới là nơi phân giải tên đăng nhập thành tài khoản
+  // và từ chối khi không có ai tên đó — chỗ này chỉ chặn ô trống và khoảng
+  // trắng, để nút không bật lên cho một chuỗi chắc chắn vô nghĩa.
+  const target = email.trim();
+  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target);
+  const looksLikeUsername = /^[^\s@]{3,}$/.test(target);
+  const canInvite = (looksLikeEmail || looksLikeUsername) && !busy;
 
   const invite = useCallback(async () => {
     if (!canInvite) return;
@@ -727,12 +865,14 @@ function InvitationsSection({
     >
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
         <label className="min-w-[220px] flex-1">
-          <span className="mb-1 block text-xs font-medium text-slate-500">{t("Email người được mời")}</span>
+          <span className="mb-1 block text-xs font-medium text-slate-500">
+            {t("Email hoặc tên đăng nhập")}
+          </span>
           <input
-            type="email"
+            type="text"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="vd: giangvien@ctu.edu.vn"
+            placeholder={t("vd: giangvien@ctu.edu.vn — hoặc: minh123")}
             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-ctu-blue focus:outline-none focus:ring-1 focus:ring-ctu-blue"
           />
         </label>
@@ -786,6 +926,13 @@ function InvitationsSection({
             {/* `email_sent` nói thật. Thư hỏng KHÔNG huỷ lời mời — nó vẫn hợp lệ,
                 chỉ là phải gửi liên kết bằng tay. Gộp hai trường hợp này lại là
                 để người dùng ngồi chờ một lá thư không bao giờ tới. */}
+            {created.invited_username ? (
+              <p className="text-sm text-slate-700">
+                {t("Đã mời tài khoản {ten}. Thư đi tới địa chỉ đã đăng ký của họ.", {
+                  ten: created.invited_username,
+                })}
+              </p>
+            ) : null}
             {created.email_sent ? (
               <p className="text-sm text-slate-700">
                 <Trans

@@ -42,6 +42,7 @@ import {
   fetchMembers,
   fetchPurgePreview,
   fetchTenants,
+  memberIdentity,
   purgeTenant,
   removeMember,
   requestExport,
@@ -153,6 +154,19 @@ export default function AdminTenantsPage() {
     setPurgeConfirm("");
     loadDetail(selected);
   }, [selected, loadDetail]);
+
+  // Bản xuất "full" chạy khoảng một phút. Một bảng chỉ nạp một lần thì không
+  // phân biệt được với một bảng hỏng — hỏi lại chừng nào còn việc chưa xong.
+  const hasPendingExport = exports.some(
+    (ex) => ex.status === "pending" || ex.status === "running",
+  );
+  useEffect(() => {
+    if (!hasPendingExport || !selected) return;
+    const id = setInterval(() => {
+      fetchExports(selected).then(setExports).catch(() => undefined);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [hasPendingExport, selected]);
 
   const run = async (key: string, fn: () => Promise<void>, ok: string) => {
     setBusy(key);
@@ -284,10 +298,17 @@ export default function AdminTenantsPage() {
               <div className="space-y-1.5 mb-4">
                 {members.map((m) => (
                   <div key={m.user_id} className="flex items-center gap-2 text-sm border-b border-slate-50 pb-1.5">
-                    <span className="text-slate-700">{m.username || m.user_id}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-slate-700">{memberIdentity(m).primary}</span>
+                      {memberIdentity(m).secondary ? (
+                        <span className="block truncate text-xs text-slate-500">
+                          {memberIdentity(m).secondary}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="text-slate-400 text-xs">{m.email}</span>
                     <select
-                      aria-label={t("Vai của {username}", { username: m.username || m.user_id })}
+                      aria-label={t("Vai của {username}", { username: memberIdentity(m).primary })}
                       value={m.role ?? NO_ROLE_OPTION}
                       disabled={busy === `role-${m.user_id}`}
                       onChange={(e) => run(`role-${m.user_id}`, async () => {

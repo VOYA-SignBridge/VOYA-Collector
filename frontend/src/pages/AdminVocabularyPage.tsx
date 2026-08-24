@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../hooks/useToast";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import PageHeader from "../components/ui/PageHeader";
+import CatalogVersionSection from "../components/vocabulary/CatalogVersionSection";
 import { dialectLabel } from "../config/dialectLabels";
 import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
 import { Trans, useI18n } from "../i18n";
@@ -160,6 +161,9 @@ export default function AdminVocabularyPage() {
           so_ho_so: profiles.length,
         })}
       />
+
+      {/* ---------------- Phiên bản danh mục (UC10) ---------------- */}
+      <CatalogVersionSection />
 
       {/* ---------------- Pending queue ---------------- */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

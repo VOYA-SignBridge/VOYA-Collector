@@ -421,6 +421,15 @@ export function ArrowRightIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ArrowLeftIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M20 12H4" />
+      <path d="m10 18-6-6 6-6" />
+    </Icon>
+  );
+}
+
 export function TrendUpIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>

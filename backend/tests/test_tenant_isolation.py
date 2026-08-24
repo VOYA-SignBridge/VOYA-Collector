@@ -685,6 +685,25 @@ class TestRequestTenantResolution:
             # đọc được tenant nào, và không trả lời được câu hỏi nào mà người gọi
             # chưa hỏi về chính mình.
             "access_gate.py",
+            # `moderation_admin.py` — CHỈ hàm `can_moderate`.
+            #
+            # Nó trả lời "tài khoản này có được duyệt dữ liệu không", và câu ấy
+            # cắt ngang mọi tenant theo định nghĩa: `community_reviewer` được
+            # gán trong tenant CỘNG ĐỒNG nhưng người giữ nó có thể đang có phạm
+            # vi request ở tenant nhà của mình. Hỏi trong phạm vi hiện tại sẽ
+            # không thấy grant đó và từ chối đúng người được mời để duyệt.
+            #
+            # Hình dạng truy vấn là thứ làm việc nới phạm vi này an toàn: một
+            # phép tra theo `user_id` ĐÃ BIẾT, `LIMIT 1`, trả về một hằng số.
+            # Nó không liệt kê được thành viên, không đọc được tenant nào, và
+            # không trả lời câu hỏi nào mà người gọi chưa hỏi về chính mình —
+            # cùng lập luận với `access_gate.py` ngay trên.
+            #
+            # `decide_session` KHÔNG crossing và không được phép trở thành như
+            # vậy: nó nhận `tenant_id` từ chỗ gọi và mọi câu đọc/ghi đều mang
+            # mệnh đề ấy. Một quyết định kiểm duyệt không biết mình thuộc tổ
+            # chức nào là một quyết định áp nhầm tổ chức.
+            "moderation_admin.py",
             # `consent_gate.py` — CHỈ hàm cầu nối `_sync_signer_consent_inner`.
             # Nó chạy từ luồng đăng ký và từ lần đóng góp đầu tiên, tức mặt
             # phẳng danh tính, nơi người dùng có thể chưa có phạm vi tenant nào.

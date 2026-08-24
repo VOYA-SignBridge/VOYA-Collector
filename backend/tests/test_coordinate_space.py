@@ -169,6 +169,9 @@ class TestWriterStamping:
             label_original = "test"
             language = "vn"
             dialect = "common"
+            # Ban sao gia lap cua `ClassMetadata` phai mang truong nay:
+            # `save_sequence_npz` doc no de dong dau to chuc len dong du lieu.
+            tenant_id = "default"
             vocabulary_scope = ""
             recognition_profile = ""
             vocabulary_group = ""

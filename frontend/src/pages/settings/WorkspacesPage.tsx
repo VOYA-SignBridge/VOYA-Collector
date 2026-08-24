@@ -14,16 +14,24 @@
  * trong tài liệu phải kèm mệnh đề đó. Trang này cùng `routers/workspaces.py`
  * đóng đúng khoảng trống ấy.
  *
- * Ba điều trang này TỪ CHỐI làm
- * ------------------------------
- * 1. **Không giấu hai giới hạn còn lại.** Băng thông tin ở đầu trang in ra
- *    nguyên văn: dữ liệu chưa mang `project_id`, và `AUTHZ_MODE` đang là
- *    `shadow`. Một trang tạo được project mà im lặng về hai điều đó sẽ được đọc
- *    thành "phân quyền bốn cấp đã chạy" — sai, và sai theo hướng có lợi cho
- *    người viết tài liệu, tức là kiểu sai tệ nhất.
- * 2. **Không tự suy ra quyền.** Nút sửa ẩn theo `is_admin`/vai tổ chức chỉ để
+ * Hai giới hạn còn lại — KHÔNG hiện trên giao diện nữa
+ * -----------------------------------------------------
+ * Tới 19/08/2026 vẫn đúng: dữ liệu (mẫu, lớp, tác vụ huấn luyện) chưa mang
+ * `project_id`, và `AUTHZ_MODE` còn là `shadow` nên vai cấp workspace/project
+ * chưa đổi được kết quả kiểm quyền. Băng cảnh báo in hai điều đó ở đầu trang
+ * đã được gỡ theo yêu cầu.
+ *
+ * Gỡ băng KHÔNG đóng hai khoảng trống. Nghĩa là trang này giờ có thể bị đọc
+ * thành "phân quyền bốn cấp đã chạy". Chỗ duy nhất còn ghi lại sự thật là
+ * `docs/01-architecture/TENANT_ISOLATION.md` và `docs/03-security/AUTHORIZATION.md`
+ * — mọi phát biểu trong luận văn về RBAC bốn cấp phải lấy từ đó, đừng lấy từ
+ * việc trang này im lặng.
+ *
+ * Hai điều trang này TỪ CHỐI làm
+ * -------------------------------
+ * 1. **Không tự suy ra quyền.** Nút sửa ẩn theo `is_admin`/vai tổ chức chỉ để
  *    khỏi mời người dùng bấm vào thứ chắc chắn 403; máy chủ vẫn là nơi cưỡng chế.
- * 3. **Không cho lưu trữ workspace/project mặc định.** Máy chủ từ chối, và giao
+ * 2. **Không cho lưu trữ workspace/project mặc định.** Máy chủ từ chối, và giao
  *    diện nói trước lý do thay vì để người dùng nhận 409.
  *
  * @i18n-key-table — nhãn trạng thái là KHOÁ từ điển, dịch tại chỗ đọc.
@@ -37,8 +45,9 @@ import EmptyState from "../../components/ui/EmptyState";
 import LoadingSpinner from "../../components/ui/LoadingSpinner";
 import ErrorBanner from "../../components/ErrorBanner";
 import {
-  BuildingIcon, FolderIcon, UsersIcon, InfoCircleIcon, TrashIcon, CheckIcon,
+  BuildingIcon, FolderIcon, UsersIcon, TrashIcon, CheckIcon,
 } from "../../components/ui/Icons";
+import { fetchMembers, type TenantMember } from "../../api/tenants";
 import { useAuth } from "../../contexts/AuthContext";
 import { isTenantAdmin } from "../../api/auth";
 import { useToast } from "../../hooks/useToast";
@@ -50,6 +59,7 @@ import {
   updateWorkspace,
   type Project, type ScopeMember, type ScopeRole, type ScopeSummary, type Workspace,
 } from "../../api/workspaces";
+import { memberOptionLabel } from "../../api/tenants";
 
 const STATUS_TONE: Record<string, "success" | "default" | "danger"> = {
   ACTIVE: "success",
@@ -77,6 +87,13 @@ export default function WorkspacesPage() {
   const [wsDesc, setWsDesc] = useState("");
   const [prjName, setPrjName] = useState("");
   const [prjDesc, setPrjDesc] = useState("");
+  // Thành viên của TỔ CHỨC — nguồn cho ô chọn người khi gán vai.
+  //
+  // Trước đây chỗ này là một ô nhập UUID. Không ai thuộc UUID của đồng nghiệp,
+  // nên ô đó chỉ dùng được bằng cách đi tra ở chỗ khác rồi dán vào — và dán sai
+  // một ký tự thì lỗi trả về là "không tìm thấy", không nói được là gõ nhầm hay
+  // người đó chưa vào tổ chức.
+  const [tenantMembers, setTenantMembers] = useState<TenantMember[]>([]);
   const [grantUser, setGrantUser] = useState("");
   const [grantRole, setGrantRole] = useState("");
 
@@ -105,6 +122,15 @@ export default function WorkspacesPage() {
   }, [t]);
 
   useEffect(() => { void loadWorkspaces(); }, [loadWorkspaces]);
+
+  // Danh sách thành viên tổ chức, nạp một lần. Hỏng thì bỏ qua: ô chọn người
+  // rỗng vẫn tốt hơn một trang không mở được.
+  useEffect(() => {
+    if (!user?.tenant_id) return;
+    fetchMembers(user.tenant_id)
+      .then((rows) => setTenantMembers(rows.filter((m) => m.is_active)))
+      .catch(() => setTenantMembers([]));
+  }, [user?.tenant_id]);
 
   const loadDetail = useCallback(async (workspaceId: string, projectId: string) => {
     try {
@@ -148,31 +174,6 @@ export default function WorkspacesPage() {
         subtitle={t("Hai tầng phạm vi bên trong tổ chức: nhóm công việc và phạm vi hoạt động.")}
         breadcrumb={[{ label: t("Trang chủ"), href: "/" }, { label: t("Workspace") }]}
       />
-
-      {/* Băng này KHÔNG được gỡ khi chưa đóng hai khoảng trống nó nêu. Xem chú
-          thích đầu tệp: nó là thứ ngăn trang được đọc thành một lời tuyên bố
-          rằng phân quyền bốn cấp đã có hiệu lực. */}
-      {summary && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <div className="mb-2 flex items-center gap-2 font-semibold">
-            <InfoCircleIcon className="h-4 w-4" aria-hidden="true" />
-            {t("Trạng thái thật của hai tầng phạm vi này")}
-          </div>
-          <ul className="ml-5 list-disc space-y-1">
-            <li>
-              {summary.data_carries_project_id
-                ? t("Dữ liệu đã mang project_id.")
-                : t("Dữ liệu (mẫu, lớp, tác vụ huấn luyện) hiện CHƯA mang project_id — tạo project không tự phân dữ liệu về project.")}
-            </li>
-            <li>
-              {t("Chế độ phân quyền: {mode}.", { mode: summary.authz_mode })}{" "}
-              {summary.authz_mode === "shadow"
-                ? t("Casbin đang QUAN SÁT; hệ phân quyền cũ hai phạm vi là bên quyết định, nên vai cấp workspace/project chưa đổi được kết quả kiểm quyền.")
-                : t("Casbin là bên quyết định.")}
-            </li>
-          </ul>
-        </div>
-      )}
 
       {summary && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -296,7 +297,7 @@ export default function WorkspacesPage() {
                     )}
                     {current.is_default && (
                       <span className="text-xs text-slate-500">
-                        {t("Workspace mặc định không lưu trữ được — dữ liệu chưa mang project_id vẫn đang rơi về đây.")}
+                        {t("Workspace mặc định không lưu trữ được.")}
                       </span>
                     )}
                   </div>
@@ -489,13 +490,20 @@ export default function WorkspacesPage() {
                         );
                       }}
                     >
-                      <input
+                      <select
                         value={grantUser}
                         onChange={(e) => setGrantUser(e.target.value)}
-                        placeholder={t("Mã tài khoản (UUID) của thành viên tổ chức")}
-                        aria-label={t("Mã tài khoản")}
-                        className="min-w-[240px] flex-1 rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
-                      />
+                        aria-label={t("Thành viên")}
+                        className="min-w-[240px] flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">{t("— chọn thành viên —")}</option>
+                        {tenantMembers.map((m) => (
+                          <option key={m.user_id} value={m.user_id}>
+                            {memberOptionLabel(m)}
+                            {m.username && m.email ? ` (${m.email})` : ""}
+                          </option>
+                        ))}
+                      </select>
                       <select
                         value={grantRole}
                         onChange={(e) => setGrantRole(e.target.value)}

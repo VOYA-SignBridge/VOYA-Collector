@@ -168,6 +168,13 @@ RLS_TABLES: tuple[str, ...] = (
     # schema v3
     "audit_log", "capture_sessions", "signer_aliases", "signer_consents",
     "training_job_classes", "vocabulary_groups",
+    # `collection_sessions` (23/08/2026) — buổi thu, cha của capture session.
+    # Bảng cha PHẢI chịu cùng policy với bảng con, và lý do đã có tiền lệ ngay
+    # bên dưới với `training_metrics`: khi chỉ một tầng được bảo vệ, mọi đường
+    # đọc đi thẳng vào tầng kia đều lách được. Ở đây tầng cha còn mang danh
+    # tính người ký và thời điểm thu — rò nó là rò lịch trình thu thập của một
+    # tổ chức khác.
+    "collection_sessions",
     # C3 (16/08/2026). Bảng cha `training_jobs` có RLS từ lâu, bảng con thì
     # không — nên quyền sở hữu của đầu ra huấn luyện đứt đúng ở đó. Cổng duy
     # nhất bảo vệ chỉ số là hàng job cha, và mọi đường đọc bỏ qua hàng cha đọc

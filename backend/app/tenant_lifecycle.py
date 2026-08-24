@@ -69,7 +69,17 @@ PURGE_ORDER: tuple[str, ...] = (
     "training_metrics",                          # -> training_jobs, tenants(RESTRICT)
     "training_job_classes", "training_jobs",     # -> classes, users
     "raw_uploads",                               # -> classes, dialects
-    "capture_sessions",                          # -> classes, signers
+    "capture_sessions",                          # -> classes, signers, collection_sessions
+    # `collection_sessions` PHẢI đi SAU `capture_sessions`: capture session trỏ
+    # lên buổi thu, nên xoá buổi trước sẽ bị khoá ngoại từ chối. Và nó phải đi
+    # TRƯỚC `signers` vì chính nó trỏ xuống người ký.
+    #
+    # Đừng trông vào `ON DELETE SET NULL` của `fk_capture_sessions_collection`
+    # để khỏi phải liệt kê ở đây: SET NULL gỡ con trỏ chứ không xoá hàng, và
+    # hàng buổi thu còn sót lại mang `tenant_id` với khoá ngoại RESTRICT sẽ làm
+    # bước `DELETE FROM tenants` cuối lượt purge bị từ chối — đúng vết đã ghi
+    # cho `training_metrics` và `project_allocations`.
+    "collection_sessions",                       # -> signers
     "dialect_aliases", "classes",                # -> dialects, vocabulary_groups
     "vocabulary_groups",                         # <- classes
     "signer_consents", "signer_aliases",         # -> signers
@@ -318,7 +328,8 @@ def run_export(export_id: str) -> Dict[str, Any]:
         raise
 
 
-def _ten_tep_duoc_phep(tenant: str, scope_yeu_cau: str) -> tuple:
+def _ten_tep_duoc_phep(tenant: str, scope_yeu_cau: str, *,
+                       ap_kiem_duyet: bool) -> tuple:
     """(tên tệp đủ điều kiện, bản kê) cho một mức phạm vi đồng thuận.
 
     Trả về TÊN TỆP chứ không phải đường dẫn: hàng mẫu ghi `file_path` theo bố cục
@@ -326,10 +337,35 @@ def _ten_tep_duoc_phep(tenant: str, scope_yeu_cau: str) -> tuple:
     một lượt chuyển phương ngữ. Tên `sample_<uid>.npz` có mang `sample_uid` nên
     nó là thứ duy nhất bền qua những lượt ấy.
     """
-    from app import consent_gate
+    from app import consent_gate, moderation
     from app.dataset_samples import list_samples
 
     rows = list_samples(tenant)
+
+    # Cổng kiểm duyệt chỉ áp cho nhánh PHÁT HÀNH, không áp cho hoàn trả.
+    #
+    # Hàm này phục vụ hai nhánh với hai ngữ nghĩa trái ngược:
+    #
+    #   phát hành   tệp ngoài `duoc_phep` bị LOẠI
+    #   hoàn trả    tệp ngoài `duoc_phep` bị ĐÁNH DẤU, vẫn đi vào gói
+    #
+    # Bản đầu lọc ở đây cho cả hai, và `test_c5_7` bắt được ngay: gói hoàn trả
+    # là "trả lại dữ liệu của CHÍNH tổ chức". Một mẫu họ vừa thu, chưa ai duyệt,
+    # vẫn là dữ liệu của họ — đánh dấu nó "bị hạn chế" trong gói hoàn trả là
+    # trả lời sai một câu hỏi hoàn toàn khác.
+    #
+    # Kiểm duyệt hỏi "cái này có được dùng CHUNG không", không hỏi "cái này có
+    # phải của anh không".
+    #
+    # Chạy TRƯỚC cổng đồng thuận vì rẻ hơn: một phép so chuỗi trên từng dòng,
+    # không phải nạp bảng đồng thuận và giải chuỗi bí danh người ký.
+    if ap_kiem_duyet:
+        truoc_kd = len(rows)
+        rows = moderation.filter_rows(rows, viewer_id=None).kept
+        if len(rows) != truoc_kd:
+            logger.info("[RELEASE] cong kiem duyet giu lai %d/%d mau",
+                        len(rows), truoc_kd)
+
     ket_qua = consent_gate.filter_rows(rows, scope=scope_yeu_cau, tenant_id=tenant)
 
     def _ten(row: Dict[str, Any]) -> str:
@@ -381,7 +417,8 @@ def _add_feature_files(bundle: zipfile.ZipFile, tenant: str, *,
         # Cả hai nhánh đều cần biết ai bị hạn chế: nhánh phát hành để LOẠI,
         # nhánh hoàn trả để ĐÁNH DẤU.
         muc = export_purpose if la_phat_hanh else "research_release"
-        duoc_phep, ket_qua, giu_lai = _ten_tep_duoc_phep(tenant, muc)
+        duoc_phep, ket_qua, giu_lai = _ten_tep_duoc_phep(
+            tenant, muc, ap_kiem_duyet=la_phat_hanh)
 
     added = 0
     loai_vi_dong_thuan = 0

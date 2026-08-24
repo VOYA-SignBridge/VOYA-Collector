@@ -103,6 +103,19 @@ SAMPLE_FIELDS = [
     # as the bootstrap tenant — a silent reassignment of another tenant's whole
     # corpus, undetectable afterwards because the CSV never held the evidence.
     TENANT_COLUMN,
+    # Trạng thái kiểm duyệt: pending | approved | rejected. Nối vào CUỐI, cùng
+    # lý do Sheets-mirror như hai cột trên.
+    #
+    # Vì sao CSV phải mang nó chứ không để riêng ở Postgres: đây là cột quyết
+    # định mẫu có được dùng ngoài phạm vi người đóng góp hay không, và
+    # `init_db()` dựng lại toàn bộ bảng từ tệp này khi phép kiểm lược đồ hỏng.
+    # Không có cột ở đây thì lượt dựng lại trả mọi dòng về `pending` — khoá cả
+    # corpus đã công bố ra khỏi mọi lượt huấn luyện, và không có bằng chứng nào
+    # trong tệp để phục hồi.
+    #
+    # Ba cột vết kiểm toán đi kèm (`reviewed_by`, `reviewed_at`, `review_note`)
+    # CỐ Ý ở lại Postgres: tệp này được nhân bản sang Google Sheets.
+    "review_status",
 ]
 
 
@@ -436,6 +449,40 @@ def _ensure_samples_file():
         pass
 
 
+#: Ba trạng thái kiểm duyệt, khớp `ck_samples_review_status`.
+REVIEW_PENDING = "pending"
+REVIEW_APPROVED = "approved"
+REVIEW_REJECTED = "rejected"
+
+
+def initial_review_status() -> str:
+    """Mẫu mới bắt đầu ở trạng thái nào. Luôn là CHỜ DUYỆT.
+
+    Không có ngoại lệ theo tenant, và điều đó là một quyết định đã sửa
+    -------------------------------------------------------------------
+    Bản đầu miễn kiểm duyệt cho tenant tổ chức, với lý lẽ "dữ liệu của họ không
+    rời khỏi tổ chức và họ không có hàng đợi kiểm duyệt". Cả hai vế đều sai:
+
+    * Tenant CÓ kiểm duyệt, chỉ khác ở chỗ AI được duyệt — và câu trả lời là
+      cấp của dữ liệu. Quản trị tenant duyệt được mọi thứ trong tenant; quản
+      trị workspace duyệt trong workspace của mình và các project bên trong nó;
+      trong một project thì chỉ quản trị project hoặc người duyệt project.
+      Người đóng góp bình thường thì không. Cấp bậc đó đã có sẵn trong danh mục
+      vai, nên "không có hàng đợi" chưa bao giờ đúng.
+    * Miễn theo tenant biến một cổng chất lượng thành thứ bật/tắt theo cấu
+      hình, và một biến môi trường bị bỏ quên sẽ tắt lặng lẽ toàn bộ khâu kiểm
+      duyệt: mọi đóng góp tự động thành đã duyệt, không một dòng log, không một
+      mẫu nào lọt vào hàng đợi để ai đó nhận ra.
+
+    Một mẫu chưa ai xem thì THEO ĐỊNH NGHĨA là chưa được duyệt. Trạng thái khởi
+    đầu không phải chỗ để đặt chính sách — chính sách nằm ở chỗ ai bấm nút
+    duyệt, và đó là việc của `sample.moderate` cùng phạm vi của nó.
+
+    Xem docs/01-architecture/COMMUNITY_MODERATION.md §3 và §4.
+    """
+    return REVIEW_PENDING
+
+
 def append_sample_row(row: Dict[str, Any]):
     # Stamp the owning tenant before anything touches the file. csv.DictWriter
     # is configured with restval="", so a row dict that simply omits the key
@@ -443,6 +490,16 @@ def append_sample_row(row: Dict[str, Any]):
     # belonging to nobody, in the source of truth, with no error raised.
     # Copied rather than mutated: callers pass dicts they still use afterwards.
     row = {**row, TENANT_COLUMN: tenant_id_of(row)}
+    # Trạng thái duyệt đóng dấu ở ĐÂY, cùng chốt và cùng lý do với tenant ngay
+    # trên: `restval=""` biến một khoá bị bỏ quên thành ô RỖNG trong nguồn sự
+    # thật, trong khi Postgres lại điền `pending` theo default của cột — hai
+    # nguồn nói hai chuyện về cùng một dòng, và bên sai là bên mà bộ lọc đọc.
+    #
+    # `row.get(...) or` chứ không phải `setdefault`: chỗ gọi CÓ quyền nói rõ
+    # trạng thái (một lượt nhập lại, một bản sao đã duyệt), và câu này chỉ điền
+    # khi họ im lặng.
+    if not (row.get("review_status") or "").strip():
+        row["review_status"] = initial_review_status()
     _ensure_samples_file()
     lock = FileLock(str(SAMPLES_CSV) + ".lock")
     with lock:
@@ -741,6 +798,18 @@ def save_sequence_npz(
         "storage_contract_version",
         "npz_v3_split_raw" if raw_available else "npz_v1_legacy",
     )
+    # Trạng thái kiểm duyệt cũng vào sidecar. Sidecar là bản ghi xuất xứ của
+    # ĐÚNG lần ghi này — nó phải mô tả dòng thật sự được tạo ra, và trạng thái
+    # duyệt là một phần của dòng ấy.
+    #
+    # Hôm nay chưa có bộ đọc tự động nào dựng lại một dòng samples.csv từ đây;
+    # nó là hồ sơ cho việc đối chiếu và cho các lượt sửa chữa thủ công. Thiếu
+    # trường này thì một lượt dựng lại như thế không có gì để nói về trạng thái
+    # duyệt, và mặc định an toàn (`pending`) sẽ khoá cả mẫu đã duyệt.
+    #
+    # Cùng phép giải tenant như `append_sample_row` dùng cho dòng CSV.
+    metadata.setdefault(
+        "review_status", initial_review_status())
     # ------------------------------------------------------------------
     # The recording goes to disk FIRST, in its own archive, before anything
     # derived from it exists.
@@ -844,51 +913,80 @@ def save_sequence_npz(
     except ValueError:
         relative_path = result_path  # fallback: keep absolute if outside DATASET_ROOT
 
-    append_sample_row(
-        {
-            "sample_uid": sample_uid,
-            "class_uid": class_meta.class_uid,
-            "slug": class_meta.slug,
-            "label_original": class_meta.label_original,
-            "language": class_meta.language,
-            "dialect": class_meta.dialect,
-            "source_type": source_type,
-            "user_id": meta.get("user_id") or meta.get("user", ""),
-            "session_id": meta.get("session_id", ""),
-            "fps_original": meta.get("fps_original", meta.get("fps", "")),
-            "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
-            "seq_len": str(sequence.shape[0]),
-            "augment_id": str(augment_id),
-            "completeness": str(meta.get("completeness", "")),
-            "file_path": relative_path,
-            # storage_url is always None here (Drive upload is deferred to Celery),
-            # so the old `if storage_url` guard dropped the key entirely. Persist the
-            # computed storage_key immediately; the async task fills storage_url later.
-            "storage_key": storage_key or "",
-            "storage_url": storage_url or "",
-            "checksum": metadata.get("checksum", ""),
-            "created_at": created_at,
-            "left_hand_ratio": str(meta.get("left_hand_ratio", "")),
-            "right_hand_ratio": str(meta.get("right_hand_ratio", "")),
-            "both_hands_ratio": str(meta.get("both_hands_ratio", "")),
-            "jitter": str(meta.get("jitter", "")),
-            "quality_flags": str(meta.get("quality_flags", "") or ""),
-            "signer_id": str(meta.get("signer_id", "") or ""),
-            "collection_campaign": str(meta.get("collection_campaign", "") or ""),
-            "raw_landmarks_available": "1" if metadata.get("raw_landmarks_available") else "0",
-            "normalization_version": str(meta.get("normalization_version", "") or ""),
-            "preprocess_contract_version": str(meta.get("preprocess_contract_version", "") or ""),
-            "sequence_length_original": str(meta.get("sequence_length_original", "") or ""),
-            "quality_status": str(meta.get("quality_status", "") or ""),
-            "auth_user_id": str(meta.get("auth_user_id", "") or ""),
-        }
-    )
+    # Hoisted khoi loi goi de dict nay dung duoc HAI lan: mot lan ghi CSV,
+    # mot lan giai ra trang thai duyet cho ban sao Postgres ben duoi.
+    # `append_sample_row` CHEP dict chu khong sua no, nen bien nay giu
+    # nguyen hinh dang ma phep giai tenant nhin thay.
+    csv_row = {
+        # Tenant đi theo LỚP, và phải nêu tường minh ở đây.
+        #
+        # `append_sample_row` có đóng dấu tenant, nhưng nó đóng bằng
+        # `tenant_id_of(row)` — hàm ấy đọc khoá này, không thấy thì rơi về
+        # tenant khởi tạo. Phép rơi-về đó ĐÚNG cho mục đích nó sinh ra (những
+        # dòng CSV có trước khi tenant tồn tại) và SAI ở đây, nơi tenant là một
+        # dữ kiện đã biết chắc.
+        #
+        # Đo ngày 21/08/2026 trước khi vá: dòng dựng ra mang `tenant_id = None`,
+        # nên mẫu thu cho lớp của tenant X được ghi là của `default` — trong khi
+        # tệp `.npz` lại nằm dưới `_tenants/X/`, vì `hierarchy_path()` đọc
+        # `class_meta.tenant_id`. Hai mặt phẳng cách ly chỉ vào hai nơi khác
+        # nhau cho cùng một mẫu, và nó hỏng theo cả hai hướng: X không thấy mẫu
+        # của chính mình, còn `default` thì thấy một dòng trỏ vào tệp của X.
+        #
+        # Không lộ ra trên máy đang chạy vì ở đó chỉ `default` có dữ liệu.
+        # `test_capture_tenant_propagation.py` canh chỗ này.
+        TENANT_COLUMN: class_meta.tenant_id,
+        "sample_uid": sample_uid,
+        "class_uid": class_meta.class_uid,
+        "slug": class_meta.slug,
+        "label_original": class_meta.label_original,
+        "language": class_meta.language,
+        "dialect": class_meta.dialect,
+        "source_type": source_type,
+        "user_id": meta.get("user_id") or meta.get("user", ""),
+        "session_id": meta.get("session_id", ""),
+        "fps_original": meta.get("fps_original", meta.get("fps", "")),
+        "fps_processed": meta.get("fps_processed", meta.get("fps", "")),
+        "seq_len": str(sequence.shape[0]),
+        "augment_id": str(augment_id),
+        "completeness": str(meta.get("completeness", "")),
+        "file_path": relative_path,
+        # storage_url is always None here (Drive upload is deferred to Celery),
+        # so the old `if storage_url` guard dropped the key entirely. Persist the
+        # computed storage_key immediately; the async task fills storage_url later.
+        "storage_key": storage_key or "",
+        "storage_url": storage_url or "",
+        "checksum": metadata.get("checksum", ""),
+        "created_at": created_at,
+        "left_hand_ratio": str(meta.get("left_hand_ratio", "")),
+        "right_hand_ratio": str(meta.get("right_hand_ratio", "")),
+        "both_hands_ratio": str(meta.get("both_hands_ratio", "")),
+        "jitter": str(meta.get("jitter", "")),
+        "quality_flags": str(meta.get("quality_flags", "") or ""),
+        "signer_id": str(meta.get("signer_id", "") or ""),
+        "collection_campaign": str(meta.get("collection_campaign", "") or ""),
+        "raw_landmarks_available": "1" if metadata.get("raw_landmarks_available") else "0",
+        "normalization_version": str(meta.get("normalization_version", "") or ""),
+        "preprocess_contract_version": str(meta.get("preprocess_contract_version", "") or ""),
+        "sequence_length_original": str(meta.get("sequence_length_original", "") or ""),
+        "quality_status": str(meta.get("quality_status", "") or ""),
+        "auth_user_id": str(meta.get("auth_user_id", "") or ""),
+    }
+    append_sample_row(csv_row)
 
     # Also persist metadata to Postgres if configured
     try:
-        from app.storage.metadata_db import insert_sample
+        from app.storage.metadata_db import ensure_capture_session, insert_sample
 
         db_row = {
+            # Cùng nguồn với dòng CSV bên trên, và phải nêu ở CẢ HAI: hai dict
+            # được dựng ở hai chỗ khác nhau trong cùng hàm này, nên một lần sửa
+            # chỉ chạm một bên sẽ làm nguồn sự thật và bản sao lệch nhau.
+            #
+            # Bỏ khoá này không sinh lỗi nào: `optional_tenant_id` biến nó thành
+            # NULL, rồi `SQL_UPSERT_SAMPLE` thay NULL bằng tenant khởi tạo. Một
+            # phân vùng sai, hoàn toàn im lặng.
+            TENANT_COLUMN: class_meta.tenant_id,
             "sample_uid": sample_uid,
             "class_uid": class_meta.class_uid,
             "slug": class_meta.slug,
@@ -921,6 +1019,31 @@ def save_sequence_npz(
             "preprocess_contract_version": meta.get("preprocess_contract_version"),
             "sequence_length_original": meta.get("sequence_length_original"),
             "quality_status": meta.get("quality_status"),
+            # Nêu TƯỜNG MINH, không để SQL rơi về mặc định. Hai dict — dict ghi
+            # CSV ở trên và dict này — đều không nêu tenant, nên cả hai giải ra
+            # cùng một tenant và phải ra cùng một trạng thái. Bỏ khoá này thì
+            # `SQL_UPSERT_SAMPLE` rơi về `pending` bất kể tenant, và một mẫu của
+            # tổ chức sẽ nằm chờ một hàng đợi kiểm duyệt không tồn tại — trong
+            # khi samples.csv, tức nguồn sự thật, ghi `approved`.
+            "review_status": initial_review_status(),
+            # Phân cấp buổi thu được dựng NGAY tại đây, không chờ backfill.
+            #
+            # Trước 24/08/2026 cột này luôn NULL lúc ghi và chỉ được điền khi
+            # ai đó chạy `app.cli.migrate` — đo được một mẫu chờ 4 ngày 15 giờ.
+            # `ensure_capture_session` là luỹ đẳng theo khoá tự nhiên
+            # `(tenant_id, class_uid, session_id)`, nên 60 mẫu của cùng một lớp
+            # trong cùng một lượt ngồi quay dùng lại đúng một phiên, và một lượt
+            # thử lại không nhân bản gì.
+            #
+            # Trả None là chấp nhận được: mẫu vẫn được ghi như trước, chỉ là
+            # chưa có phiên cha. Không đánh đổi việc ghi mẫu lấy việc dựng phiên.
+            "capture_session_id": ensure_capture_session(
+                tenant_id=class_meta.tenant_id,
+                class_uid=class_meta.class_uid,
+                session_id=meta.get("session_id", ""),
+                auth_user_id=meta.get("auth_user_id"),
+                source_type=source_type,
+            ),
         }
         insert_sample(db_row)
     except Exception as e:

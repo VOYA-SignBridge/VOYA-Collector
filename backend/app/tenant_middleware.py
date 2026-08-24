@@ -29,10 +29,21 @@ Resolution order
 
 Note what is deliberately absent: no header or query parameter can choose the
 tenant. Honouring a client-supplied `X-Tenant-Id` would make the isolation
-boundary a request field. When per-request tenant selection is introduced for
-users who belong to several tenants, it has to be validated against membership
-before it reaches this function — see docs/01-architecture/MULTITENANT_ARCHITECTURE.md
-§4.3.
+boundary a request field.
+
+Selecting between several tenants (added 22/08/2026)
+----------------------------------------------------
+One account can belong to more than one organisation, so the sidebar needs a
+way to say which one it is showing. That selection lives in
+`users.active_tenant_id` — a column the server writes, never a field the client
+sends — and only `POST /tenants/switch` writes it, after checking membership.
+The URL segment `/org/<id>/...` is a MIRROR of that state for the address bar's
+benefit; it is not what decides scope, and forging it changes nothing.
+
+This is the shape the note in docs/01-architecture/MULTITENANT_ARCHITECTURE.md
+§4.3 asked for: "validated against membership before it reaches this function".
+`_tenant_of_user` re-checks membership anyway — see its docstring for why once
+is not enough.
 """
 
 from __future__ import annotations
@@ -51,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 def _tenant_of_user(user_id: str) -> Optional[str]:
-    """The tenant a user belongs to, or None.
+    """The tenant a user is acting in, or None.
 
     This read runs in system scope, and it has to: it is the step that DECIDES
     the request's scope, so filtering it by that scope is circular. `users`
@@ -59,20 +70,57 @@ def _tenant_of_user(user_id: str) -> Optional[str]:
     unscoped read matches nothing — every request would resolve to anonymous
     and the whole deployment would look logged out.
 
-    The exemption is this one statement, selecting one column for one id. It
-    cannot enumerate, and it returns nothing a caller did not already prove they
-    are by presenting a valid token.
+    The exemption is this one statement, selecting one row for one id. It cannot
+    enumerate, and it returns nothing a caller did not already prove they are by
+    presenting a valid token.
+
+    Home tenant vs the one they are LOOKING AT
+    -------------------------------------------
+    `users.tenant_id` is where this account lives. `users.active_tenant_id` is
+    the organisation they switched into — one account can belong to several, and
+    the sidebar has to show one of them. Only `POST /tenants/switch` writes that
+    column, and only after checking membership.
+
+    Membership is re-checked HERE anyway, in the same statement
+    -----------------------------------------------------------
+    Checking it once at switch time is not enough: a membership can be revoked
+    while the pointer still says otherwise, and then every later request would
+    keep scoping into an organisation the person was removed from. The `EXISTS`
+    below costs nothing extra (same round trip) and makes a stale pointer
+    degrade to the home tenant instead of granting access.
+
+    The `EXISTS` joins `tenants` too, and that join is the second half of the
+    same rule. Membership alone is not enough: soft-deleting an organisation
+    leaves every `tenant_members` row exactly as it was, so a check that only
+    asked about membership would keep scoping people into an organisation that
+    has been shut down. Measured 22/08/2026 — a test asserting the pointer goes
+    inert after `tenants.deleted_at` is set failed until this join existed.
+
+    That is also why the column carries no foreign key: a deleted organisation
+    must make the pointer INERT, not block the deletion.
     """
     from app.storage.metadata_db import _fetch_all
     from app.tenant_context import system_scope
 
     with system_scope("middleware: resolve the scope, which cannot need a scope"):
         rows = _fetch_all(
-            "SELECT tenant_id FROM users WHERE id = %s AND is_active", (user_id,)
+            "SELECT u.tenant_id AS home, "
+            "       CASE WHEN u.active_tenant_id IS NOT NULL AND EXISTS ( "
+            "                 SELECT 1 FROM tenant_members m "
+            "                    JOIN tenants t ON t.tenant_id = m.tenant_id "
+            "                  WHERE m.user_id = u.id "
+            "                    AND m.tenant_id = u.active_tenant_id "
+            "                    AND m.status = 'ACTIVE' AND m.removed_at IS NULL "
+            "                    AND t.deleted_at IS NULL AND t.is_active) "
+            "            THEN u.active_tenant_id END AS active "
+            "  FROM users u WHERE u.id = %s AND u.is_active",
+            (user_id,),
         )
     if not rows:
         return None
-    return (rows[0].get("tenant_id") or "").strip() or None
+    row = rows[0]
+    active = (row.get("active") or "").strip()
+    return active or (row.get("home") or "").strip() or None
 
 
 def resolve_tenant(access_cookie: Optional[str], bearer: Optional[str]) -> Optional[str]:

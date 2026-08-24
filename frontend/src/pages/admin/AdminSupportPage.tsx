@@ -25,6 +25,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 
 import {
   CATEGORY_LABEL, authorKindOf, fetchSupportQueue, fetchTicket, replyToTicket,
@@ -98,6 +99,9 @@ function formatWhen(iso: string): string {
 export default function AdminSupportPage() {
   const { t } = useI18n();
 
+  // Phiếu cần mở, lấy từ ĐƯỜNG DẪN — xem effect bên dưới.
+  const { id: ticketFromUrl } = useParams<{ id?: string }>();
+
   const [filter, setFilter] = useState<TicketStatus | null>(null);
   const [items, setItems] = useState<TicketSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,6 +166,20 @@ export default function AdminSupportPage() {
       setError(friendlyError(err, t("Không mở được hội thoại.")));
     }
   };
+
+  // Mở thẳng phiếu mà đường dẫn chỉ tới.
+  //
+  // Thông báo "phiếu hỗ trợ mới" trỏ vào một phiếu cụ thể. Trước đây nó trỏ tới
+  // `/admin/support/<id>` — một đường KHÔNG có route nào khớp — nên cú nhấp rơi
+  // vào trang không tìm thấy. Nay đường ấy có route, và đây là chỗ đọc nó.
+  //
+  // `openTab` là một hàm dựng lại mỗi lượt render nên KHÔNG đưa vào danh sách
+  // phụ thuộc: làm thế sẽ chạy lại effect sau mỗi lần gõ phím trong ô soạn trả
+  // lời, và mỗi lượt lại kéo tab đang xem về phiếu trong URL.
+  useEffect(() => {
+    if (ticketFromUrl) void openTab(ticketFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketFromUrl]);
 
   const closeTab = (id: string) => {
     setTabs((list) => {

@@ -258,14 +258,28 @@ class TestRowAccessor:
 # 2. Both CSV schemas carry the column, and adding it shifted nothing
 # ---------------------------------------------------------------------------
 
-def test_sample_fields_end_with_tenant_id():
+def test_sample_fields_never_shift_existing_columns():
+    """Bất biến thật là *cột cũ không xê dịch*, không phải *tenant_id đứng cuối*.
+
+    Bài này trước đây khẳng định `SAMPLE_FIELDS[-1] == TENANT_COLUMN`, đúng vào
+    lúc `tenant_id` là cột mới nhất. Ngày 21/08/2026 thêm `review_status`
+    (trạng thái kiểm duyệt cộng đồng) và nó phải nằm SAU `tenant_id` — đúng theo
+    chính lý do nêu ở đây: bản nhân bản Google Sheets phát header nguyên văn
+    thành dòng 1, nên một cột chèn vào bất kỳ đâu ngoài vị trí cuối sẽ đẩy mọi
+    cột Sheets hiện có sang phải một ô.
+
+    Đây là lần thứ HAI cùng một bài kiểm phải đổi hình vì cùng một lý do —
+    `test_label_fields_never_shift_existing_columns` đã đi qua đúng chuyện này
+    ngày 14/08 khi thêm cột `region`. Ghim theo VỊ TRÍ, không theo "đứng cuối".
+    """
     from app.dataset_samples import SAMPLE_FIELDS
 
-    # Position is a real constraint: the Google Sheets mirror writes the header
-    # verbatim as row 1, so a column inserted anywhere but the end shifts every
-    # existing Sheets column one place right.
-    assert SAMPLE_FIELDS[-1] == TENANT_COLUMN
     assert SAMPLE_FIELDS.count(TENANT_COLUMN) == 1
+    # 32 là vị trí của tenant_id từ khi nó được thêm; thay đổi số này nghĩa là
+    # một cột đã bị chèn vào TRƯỚC nó, và bảng tính Sheets đang chạy đã lệch.
+    assert SAMPLE_FIELDS.index(TENANT_COLUMN) == 32
+    # Cột mới nhất đứng cuối.
+    assert SAMPLE_FIELDS[-1] == "review_status"
 
 
 def test_label_fields_never_shift_existing_columns():

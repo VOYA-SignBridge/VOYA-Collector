@@ -33,6 +33,11 @@ def _fake_class():
     return SimpleNamespace(
         class_uid="SOTTEST_vidcls", slug="test-slug", label_original="test",
         language="vn", dialect="common", class_idx=1, folder_name=lambda: "class_test",
+        # `tenant_id` PHAI co: ban sao gia lap cua `ClassMetadata` la mot mo
+        # hinh cua lop that, va lop that mang truong nay. `save_sequence_npz`
+        # doc no de dong dau to chuc len dong du lieu — thieu no o day thi
+        # ban sao gia lap noi doi ve hinh dang cua thu no thay the.
+        tenant_id="default",
         hierarchy_path=lambda: "/tmp/class_test",  # used only in a summary log line
     )
 

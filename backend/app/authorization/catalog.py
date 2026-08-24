@@ -206,6 +206,29 @@ PERMISSIONS: tuple[Permission, ...] = (
     Permission("sample.read", PROJECT, "Đọc mẫu dữ liệu", api_assignable=True),
     Permission("sample.create", PROJECT, "Thu và nộp mẫu mới", api_assignable=True),
     Permission("sample.annotate", PROJECT, "Gán nhãn và sửa siêu dữ liệu của mẫu"),
+    # Quyết định một mẫu có được dùng ngoài phạm vi người đóng góp hay không.
+    #
+    # SENSITIVE vì nó là cái nút biến dữ liệu riêng thành dữ liệu chung — cùng
+    # hạng với `dataset.publish`, không phải với `sample.annotate`.
+    #
+    # Phạm vi PROJECT, và phạm vi ấy CHÍNH LÀ cấp bậc người duyệt: một vai
+    # phạm vi rộng hơn mang theo mọi quyền PROJECT, nên
+    # `tenant_administrator` duyệt được khắp tenant, `workspace_administrator`
+    # duyệt trong workspace của mình và các project bên trong nó, còn
+    # `project_administrator` / `project_reviewer` chỉ trong project của họ.
+    # Không cần ba quyền riêng cho ba cấp — `scope_resolver` đã trả lời câu
+    # "grant này với tới đâu".
+    #
+    # Người đóng góp KHÔNG tự duyệt dữ liệu của chính mình, và điều đó cần HAI
+    # thứ chứ không phải một:
+    #
+    #   * không có hậu tố `.read`, nên `_read_only()` bỏ qua nó — các vai
+    #     viewer và `community_member` không nhận;
+    #   * có tên trong danh sách loại trừ của `_PROJECT_CONTRIBUTOR_PERMS`,
+    #     phải viết TƯỜNG MINH vì tập đó được `_codes()` sinh ra và mọi quyền
+    #     PROJECT mới tự chảy vào nếu không bị loại.
+    Permission("sample.moderate", PROJECT,
+               "Duyệt hoặc từ chối mẫu trước khi nó được dùng chung", SENSITIVE),
     # Thay cho: kiểm `is_owner or is_admin` ở routers/label_sessions.py.
     Permission("sample.delete", PROJECT, "Xoá mẫu của người khác", SENSITIVE),
     Permission("sample.export", PROJECT, "Tải mẫu thô ra ngoài", SENSITIVE,
@@ -305,7 +328,17 @@ def _read_only(scope: str) -> tuple[str, ...]:
 _PROJECT_CONTRIBUTOR_PERMS: tuple[str, ...] = _codes(
     scope=PROJECT,
     exclude=(PERM.PROJECT_MANAGE, PERM.PROJECT_MEMBER_MANAGE,
-             PERM.DATASET_DELETE, PERM.CLASS_DELETE, PERM.TRAINING_PROMOTE),
+             PERM.DATASET_DELETE, PERM.CLASS_DELETE, PERM.TRAINING_PROMOTE,
+             # Người đóng góp KHÔNG duyệt dữ liệu — kể cả của chính mình.
+             #
+             # Phải loại TƯỜNG MINH, vì tập này được SINH RA từ `_codes()` chứ
+             # không viết tay: mọi quyền PROJECT mới đều tự chảy vào đây trừ
+             # khi có tên trong danh sách loại trừ. Thêm `sample.moderate` mà
+             # quên dòng này thì `project_contributor` và `community_curator`
+             # lặng lẽ được quyền duyệt, và cả hai bài kiểm ở
+             # `test_sample_review_status.py::TestAiDuocDuyet` sẽ đỏ — chúng
+             # đỏ đúng chỗ này, ngày 21/08/2026.
+             PERM.SAMPLE_MODERATE),
 )
 
 #: Quyền chỉ thuộc về CHỦ tenant, không thuộc quản trị viên.
@@ -376,6 +409,35 @@ BUILTIN_ROLES: tuple[BuiltinRole, ...] = (
                     # import từ chối role có quyền trùng lặp.
                 )
                 + _PROJECT_CONTRIBUTOR_PERMS,
+                tenant_type=COMMUNITY),
+
+    # Người kiểm duyệt của cộng đồng. Chuyên gia được quản trị viên nền tảng
+    # mời và cấp vai; KHÔNG phải một bậc của thang quản trị.
+    #
+    # Vì sao tách khỏi `community_curator` thay vì thêm quyền vào đó
+    # --------------------------------------------------------------
+    # Curator là vai BIÊN TẬP: nó mang `vocabulary.manage`, `registry.publish`
+    # và cả bộ quyền đóng góp project. Người kiểm duyệt được mời để PHÁN XÉT
+    # dữ liệu của người khác. Gộp hai việc lại là cho một người quyền sửa đúng
+    # thứ họ đang duyệt, và ranh giới giữa người đóng góp với người kiểm duyệt
+    # biến mất — cùng lý do `project_reviewer` tồn tại tách khỏi
+    # `project_contributor`.
+    #
+    # KHÔNG có `sample.create`: nếu người kiểm duyệt cũng đóng góp thì họ giữ
+    # thêm `community_member`, và hai vai cộng lại. Một vai vừa thu vừa duyệt
+    # sẽ tự duyệt mẫu của chính mình mà không ai đọc ra điều đó từ tên vai.
+    BuiltinRole("community_reviewer", "Community Reviewer", TENANT,
+                "Chuyên gia duyệt dữ liệu cộng đồng trước khi công khai",
+                (
+                    PERM.TENANT_READ,
+                    PERM.REGISTRY_READ, PERM.VOCABULARY_READ,
+                    PERM.WORKSPACE_READ, PERM.PROJECT_READ,
+                    PERM.CLASS_READ, PERM.SAMPLE_READ,
+                    PERM.SAMPLE_MODERATE,
+                    PERM.SIGNER_READ,
+                    PERM.LABEL_SESSION_READ,
+                    PERM.DATASET_READ,
+                ),
                 tenant_type=COMMUNITY),
 
     # --- TENANT ----------------------------------------------------------
@@ -462,10 +524,16 @@ BUILTIN_ROLES: tuple[BuiltinRole, ...] = (
 
     # Vai MỚI của v5. Duyệt chứ không tạo: gán nhãn lại và quản lý phiên gán
     # nhãn của người khác, nhưng KHÔNG thu mẫu mới và KHÔNG xoá.
+    #
+    # `SAMPLE_MODERATE` phải liệt kê TƯỜNG MINH ở đây. Tập quyền của vai này
+    # được viết tay chứ không sinh bằng `_codes(scope=PROJECT)`, nên một quyền
+    # PROJECT mới KHÔNG tự chảy vào — và vai này chính là "editor" trong quy
+    # tắc "ở cấp project chỉ quản trị hoặc editor mới được duyệt".
     BuiltinRole("project_reviewer", "Project Reviewer", PROJECT,
                 "Duyệt và sửa nhãn dữ liệu do người khác đóng góp",
                 _read_only(PROJECT) + (
                     PERM.SAMPLE_ANNOTATE,
+                    PERM.SAMPLE_MODERATE,
                     PERM.CLASS_UPDATE,
                     PERM.LABEL_SESSION_MANAGE,
                 )),

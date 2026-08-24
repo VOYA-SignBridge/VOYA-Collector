@@ -14,6 +14,25 @@ tổ chức giữ dữ liệu thật, và GHI được vào danh mục lớp c�
 
 Mỗi test dưới đây chốt một mắt xích. Chúng phải đỏ nếu ai đó hoàn tác bất kỳ
 mắt nào — kể cả khi hai mắt còn lại vẫn đúng.
+
+CẬP NHẬT 22/08/2026 — mắt xích MỘT được mở lại có chủ ý
+--------------------------------------------------------
+Tên tệp giờ chỉ đúng một nửa, và giữ nguyên tên là có lý do: lịch sử git phải
+chỉ thẳng vào chỗ khẳng định bị đảo.
+
+Đăng ký lại rơi vào tenant khởi tạo — nhưng tenant ấy giờ **là Cộng đồng**, nơi
+mọi người được phép có mặt. Cách vá của v4 (mỗi lượt đăng ký một tổ chức riêng)
+bị bỏ vì nó đẻ ra một tenant rỗng kèm bản sao danh mục từ vựng cho mỗi người
+thử nền tảng.
+
+Lỗ hổng KHÔNG mở lại, vì thứ bịt nó đã đổi: không còn là sự tách biệt tenant mà
+là TẬP QUYỀN. `community_member` mang đọc + `sample.create` + `upload.create`,
+và KHÔNG mang `class.create`; route `POST /classes/register` gác bằng
+`require_tenant_editor`. Hai thứ độc lập, và
+`test_thanh_vien_cong_dong_KHONG_tao_duoc_lop` canh cả hai.
+
+Hai bài về gói/chủ/hậu tố ngẫu nhiên KHÔNG bị xoá — chúng DỜI sang đường tự lập
+tổ chức, nơi hành vi ấy thật sự sống bây giờ.
 """
 
 from __future__ import annotations
@@ -217,103 +236,157 @@ def _register(anon_client, *, username: str, email: str, org: str | None = None)
 
 
 class TestSignupNeverLandsInTheBootstrapTenant:
-    def test_a_self_serve_signup_gets_its_own_tenant(self, anon_client, registered_accounts):
-        """Mắt xích một: tài khoản mới KHÔNG ở tenant gốc.
+    def test_dang_ky_vao_cong_dong_va_KHONG_lap_to_chuc(
+        self, anon_client, registered_accounts
+    ):
+        """Mắt xích một, viết lại ở v6 — và mắt xích ĐỔI chứ lỗ hổng thì không.
 
-        Đây là khẳng định trung tâm của cả tệp. Nếu nó đỏ, lỗ hổng đã mở lại.
+        v4 vá lỗ bằng cách TÁCH tenant: mỗi lượt đăng ký sinh một tổ chức riêng.
+        v6 bỏ cách ấy, vì nó đẻ ra một tenant rỗng kèm bản sao danh mục từ vựng
+        cho mỗi người thử nền tảng, và vì tenant khởi tạo giờ CHÍNH LÀ Cộng
+        đồng — nơi mọi người được phép có mặt.
+
+        Cái bịt lỗ bây giờ là TẬP QUYỀN, không phải sự tách biệt: xem
+        `test_thanh_vien_cong_dong_KHONG_tao_duoc_lop` bên dưới. Bài này chỉ
+        chốt vế đầu — vào đúng chỗ, và không đẻ ra tổ chức nào.
         """
+        from app.storage.authz_schema import COMMUNITY_TENANT_ID
+        from app.tenant_context import system_scope
+
+        with system_scope("test: dem to chuc truoc"):
+            truoc = db._fetch_all("SELECT count(*) AS n FROM tenants")[0]["n"]
+
         username, email = _unique("selfserve"), f"{_unique('selfserve')}@example.com"
-        response = _register(anon_client, username=username, email=email, org="Trường Thử Nghiệm")
+        response = _register(anon_client, username=username, email=email,
+                             org="Truong Thu Nghiem")
         assert response.status_code == 201, response.text
-
         body = response.json()
         registered_accounts.append(username)
 
-        assert body.get("tenant_id") != DEFAULT_TENANT_ID, (
-            "tài khoản tự đăng ký rơi vào tenant gốc — đây CHÍNH LÀ lỗ hổng v4 vá"
-        )
+        assert body.get("tenant_id") == COMMUNITY_TENANT_ID
 
-        from app.tenant_context import system_scope
+        with system_scope("test: dem to chuc sau"):
+            sau = db._fetch_all("SELECT count(*) AS n FROM tenants")[0]["n"]
+        assert sau == truoc, "dang ky van con lap to chuc"
 
-        with system_scope("test: read the freshly created account"):
-            rows = db._fetch_all(
-                "SELECT tenant_id, is_active FROM users WHERE id = %s", (body["id"],)
-            )
-        assert rows and rows[0]["tenant_id"] != DEFAULT_TENANT_ID
+    def test_thanh_vien_cong_dong_KHONG_tao_duoc_lop(self, anon_client,
+                                                     registered_accounts):
+        """Mắt xích BA, và giờ nó gánh phần mà sự tách biệt tenant từng gánh.
 
-    def test_the_new_tenant_carries_a_real_plan_and_the_signer_owns_it(
-        self, anon_client, registered_accounts
-    ):
-        """Tenant mới phải có gói, có chủ, và người tạo phải là admin của nó.
+        Chuỗi lỗ hổng v3 gồm ba mắt: rơi vào tenant gốc + hoạt động ngay +
+        `POST /classes/register` không có cổng quyền nào ngoài "đã đăng nhập".
+        v6 mở lại mắt thứ nhất một cách CÓ CHỦ Ý, nên mắt thứ ba phải giữ.
 
-        Ba thứ này đi cùng nhau: một tenant không gói đi qua mọi cổng hạn mức
-        mà không bị hỏi; một tenant không có admin thì không ai mời được ai;
-        một tenant không chủ thì không biết hoá đơn gửi cho ai.
+        Nó giữ được vì hai thứ độc lập: route gác bằng `require_tenant_editor`,
+        và `community_member` không mang `class.create`. Bài này đỏ nếu ai đó
+        nới một trong hai.
         """
-        username, email = _unique("owner"), f"{_unique('owner')}@example.com"
-        response = _register(anon_client, username=username, email=email, org="Cơ Sở B")
-        assert response.status_code == 201, response.text
-        body = response.json()
-        tenant_id = body["tenant_id"]
+        username, email = _unique("comm"), f"{_unique('comm')}@example.com"
+        res = _register(anon_client, username=username, email=email, org="")
+        assert res.status_code == 201, res.text
         registered_accounts.append(username)
 
+        from fastapi.testclient import TestClient
+
+        from conftest import LoopbackPeer, fresh_client_ip
+        from app.main import app
+
+        client = TestClient(LoopbackPeer(app))
+        dn = client.post("/api/v1/auth/login",
+                         json={"identifier": username, "password": PW},
+                         headers={"X-Forwarded-For": fresh_client_ip()})
+        assert dn.status_code == 200, dn.text
+
+        tao = client.post(
+            "/api/v1/classes/register",
+            json={"label_original": "thu tao lop", "language": "vn",
+                  "dialect": "common"},
+            headers=_csrf(client))
+        client.cookies.clear()
+
+        assert tao.status_code == 403, (
+            f"thanh vien cong dong tao duoc lop (ma {tao.status_code}) — "
+            f"mat xich ba da mo")
+
+    def test_to_chuc_TU_LAP_co_goi_co_chu_va_nguoi_lap_lam_admin(self):
+        """Ba bất biến của một tổ chức tự lập — DỜI CHỖ, không biến mất.
+
+        Chúng từng được kiểm ở đường ĐĂNG KÝ, vì hồi ấy đăng ký tự lập tổ chức.
+        Từ v6 việc lập tổ chức tách ra thành một hành động CÓ CHỦ ĐÍCH sau khi
+        đăng nhập, nên bài kiểm đi theo hành vi chứ không ở lại chỗ cũ.
+
+        Ba thứ đi cùng nhau: một tổ chức không gói đi qua mọi cổng hạn mức mà
+        không bị hỏi; không admin thì không ai mời được ai; không chủ thì không
+        biết hoá đơn gửi cho ai.
+        """
+        from conftest import purge_tenant
+        from app import auth, tenant_admin
         from app.tenant_context import system_scope
 
-        with system_scope("test: inspect the self-serve tenant"):
-            tenant = db._fetch_all(
-                "SELECT plan_code, owner_user_id, is_self_serve, billing_status "
-                "FROM tenants WHERE tenant_id = %s",
-                (tenant_id,),
-            )[0]
-            member = db._fetch_all(
-                "SELECT role FROM tenant_members WHERE tenant_id = %s AND user_id = %s",
-                (tenant_id, body["id"]),
-            )
-            subscription = db._fetch_all(
-                "SELECT plan_code FROM tenant_subscriptions "
-                "WHERE tenant_id = %s AND ended_at IS NULL",
-                (tenant_id,),
-            )
+        name = _unique("owner")
+        user = auth.create_user(username=name, email=f"{name}@example.com",
+                                password=PW)
+        t = None
+        try:
+            t = tenant_admin.create_self_serve_tenant(
+                str(user["id"]), display_name="Co So B")
+            with system_scope("test: soi to chuc tu lap"):
+                row = db._fetch_all(
+                    "SELECT plan_code, owner_user_id, is_self_serve, billing_status "
+                    "  FROM tenants WHERE tenant_id = %s", (t["tenant_id"],))[0]
+                vai = db._fetch_all(
+                    "SELECT role FROM tenant_members "
+                    " WHERE tenant_id = %s AND user_id = %s",
+                    (t["tenant_id"], str(user["id"])))
+                dk = db._fetch_all(
+                    "SELECT plan_code FROM tenant_subscriptions "
+                    " WHERE tenant_id = %s AND ended_at IS NULL", (t["tenant_id"],))
 
-        assert tenant["plan_code"] == "free"
-        assert str(tenant["owner_user_id"]) == str(body["id"])
-        assert tenant["is_self_serve"] is True
-        # v6: `free` là gói VĨNH VIỄN, không phải bản dùng thử. Nên trạng thái
-        # đúng là 'active' — 'trialing' sẽ hứa một cái hạn không bao giờ tới,
-        # và bảng "sắp hết hạn dùng thử" sẽ liệt kê mọi người dùng miễn phí mãi
-        # mãi. Xem docs/07-business/BILLING_MODEL_V6.md, mục "`free` là gói
-        # vĩnh viễn".
-        assert tenant["billing_status"] == "active"
-        assert member and member[0]["role"] == "admin"
-        assert len(subscription) == 1, "phải có đúng một dòng đăng ký đang mở"
+            assert row["plan_code"] == "free"
+            assert str(row["owner_user_id"]) == str(user["id"])
+            assert row["is_self_serve"] is True
+            # `free` là gói VĨNH VIỄN, không phải bản dùng thử: 'trialing' sẽ
+            # hứa một cái hạn không bao giờ tới, và bảng "sắp hết hạn dùng thử"
+            # liệt kê mọi người dùng miễn phí mãi mãi.
+            assert row["billing_status"] == "active"
+            assert vai and vai[0]["role"] == "admin"
+            assert dk and dk[0]["plan_code"] == "free"
+        finally:
+            if t:
+                purge_tenant(t["tenant_id"])
+            _drop_account(name)
 
-    def test_the_tenant_id_does_not_leak_who_else_signed_up(
-        self, anon_client, registered_accounts
-    ):
-        """Hai tổ chức cùng tên phải cho ra hai mã KHÔNG đoán được từ nhau.
+    def test_ma_to_chuc_KHONG_lo_ai_da_lap_truoc(self):
+        """Hai tổ chức TRÙNG TÊN phải ra hai mã không đoán được.
 
-        Một bộ đếm (`truong-b`, `truong-b-2`) biến biểu mẫu đăng ký thành máy
-        dò: thử một cái tên và xem hậu tố trả về là biết đã có bao nhiêu tổ
-        chức trùng tên trên nền tảng.
+        Một bộ đếm (`truong-b`, `truong-b-2`) biến ô tên thành máy dò: thử một
+        cái tên và xem hậu tố trả về là biết đã có bao nhiêu tổ chức trùng tên
+        trên nền tảng.
+
+        Dời từ đường đăng ký sang đường tự lập, cùng lý do như bài trên.
         """
-        ids = []
-        for _ in range(2):
-            username = _unique("dup")
-            response = _register(
-                anon_client, username=username, email=f"{username}@example.com",
-                org="Trường Trùng Tên",
-            )
-            assert response.status_code == 201, response.text
-            body = response.json()
-            registered_accounts.append(username)
-            ids.append(body["tenant_id"])
+        from conftest import purge_tenant
+        from app import auth, tenant_admin
 
-        assert ids[0] != ids[1]
-        assert all(i.startswith("truong-trung-ten-") for i in ids), ids
-        # Không cái nào là bộ đếm.
-        assert not any(i.endswith(("-1", "-2", "-3")) for i in ids), (
-            f"hậu tố đếm được làm lộ số tổ chức trùng tên: {ids}"
-        )
+        ten_tk, tao = [], []
+        try:
+            for _ in range(2):
+                n = _unique("dup")
+                u = auth.create_user(username=n, email=f"{n}@example.com",
+                                     password=PW)
+                ten_tk.append(n)
+                tao.append(tenant_admin.create_self_serve_tenant(
+                    str(u["id"]), display_name="Truong Trung Ten")["tenant_id"])
+
+            assert tao[0] != tao[1], "hai to chuc trung ten ra cung mot ma"
+            assert not tao[1].endswith("-2"), (
+                "hau to la mot BO DEM — o ten tro thanh may do so to chuc "
+                "trung ten da co tren nen tang")
+        finally:
+            for tid in tao:
+                purge_tenant(tid)
+            for n in ten_tk:
+                _drop_account(n)
 
     def test_signup_is_refused_outright_when_self_serve_is_off(
         self, anon_client, monkeypatch, registered_accounts

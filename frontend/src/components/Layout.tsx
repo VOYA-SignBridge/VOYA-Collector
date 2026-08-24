@@ -10,14 +10,19 @@ import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
-import { BuildingIcon, ChipIcon, GearIcon, HandIcon, HomeIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
+import { BuildingIcon, ChipIcon, ClipboardCheckIcon, ClockIcon, GearIcon, HandIcon, HomeIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
 import { prefetchProps } from "../routes/prefetch";
 import { useI18n } from "../i18n";
 
 const AUTH_EVENT = "voya:auth-change";
 
-export type FlatNavItem = { name: string; href: string; icon: ReactNode; end?: boolean };
+export type FlatNavItem = {
+  name: string; href: string; icon: ReactNode; end?: boolean;
+  /** Số việc đang chờ. `0` hoặc thiếu thì không vẽ gì — huy hiệu luôn sáng là
+   *  huy hiệu người ta thôi nhìn. */
+  badge?: number;
+};
 export type NavSection = {
   section: true;
   name: string;
@@ -82,6 +87,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { name: "Trang chủ", href: "/", icon: <HomeIcon className={navIconClass} />, end: true },
     { name: "Đóng góp dữ liệu", href: "/upload", icon: <UploadIcon className={navIconClass} /> },
     { name: "Thư viện nhãn", href: "/labels", icon: <TagIcon className={navIconClass} /> },
+    { name: "Lần thu", href: "/sessions", icon: <ClockIcon className={navIconClass} /> },
     { name: "Nhận dạng realtime", href: "/realtime", icon: <HandIcon className={navIconClass} /> },
     { name: "Huấn luyện model", href: "/training", icon: <ChipIcon className={navIconClass} /> },
   ];
@@ -124,16 +130,85 @@ export default function Layout({ children }: { children: ReactNode }) {
   //
   // Đây vẫn chỉ là việc không mời người dùng bấm vào một trang chắc chắn 403;
   // quyền thật do `require_tenant_admin` ở máy chủ cưỡng chế.
+  // Tên là "Tổ chức", không phải "Console tổ chức". Người dùng cần biết mục
+  // này dẫn tới ĐÂU, không cần biết màn hình bên trong tên là gì — và "console"
+  // là từ của người viết phần mềm, không phải của người dùng nó.
+  //
+  // Đích là `/org` (lớp CHỌN) chứ không phải thẳng vào một tổ chức: một tài
+  // khoản có thể thuộc nhiều tổ chức, nên đi thẳng là đoán hộ họ.
   const consoleItem: FlatNavItem = {
-    name: "Console tổ chức",
-    href: "/console",
+    name: "Tổ chức",
+    href: "/org",
     icon: <BuildingIcon className={navIconClass} />,
   };
 
+  // Lối vào TỔ CHỨC cho người dùng thường.
+  //
+  // Trước đây thanh bên chỉ có `consoleItem`, và nó hiện khi `isTenantAdmin`.
+  // Nghĩa là một tài khoản `editor` — tức phần lớn người dùng — không thấy chữ
+  // "tổ chức" ở đâu hết: không biết mình đang thuộc tổ chức nào, không có
+  // đường xin lập tổ chức riêng, không có chỗ xem ai cùng tổ chức với mình.
+  // Trang `/settings/organization` đã xử lý sẵn CẢ BA trạng thái (chưa có tổ
+  // chức -> thẻ gửi yêu cầu; là thành viên -> thông tin tổ chức; là quản trị
+  // -> quản lý đầy đủ), nó chỉ chưa từng được ai liên kết tới.
+  const organizationItem: FlatNavItem = {
+    name: "Tổ chức",
+    href: "/settings/organization",
+    icon: <BuildingIcon className={navIconClass} />,
+  };
+
+  const coKiemDuyet = Boolean((user as { can_moderate?: boolean } | null)?.can_moderate);
+
+  // Số phiên đang chờ, cho huy hiệu.
+  //
+  // CHỈ hỏi khi người này duyệt được: `/moderation/queue` trả 403 với mọi người
+  // khác, nên hỏi vô điều kiện là bắt mọi phiên đăng nhập trả giá một lượt gọi
+  // hỏng để vẽ một huy hiệu không bao giờ hiện.
+  //
+  // Hỏng thì im: một con số trang trí không được phép làm hỏng thanh điều hướng.
+  const [choDuyet, setChoDuyet] = useState(0);
+  useEffect(() => {
+    if (!coKiemDuyet) {
+      setChoDuyet(0);
+      return;
+    }
+    let huy = false;
+    void import("../api/moderation")
+      .then((m) => m.fetchQueue(1))
+      .then((q) => {
+        if (!huy) setChoDuyet(q.count);
+      })
+      .catch(() => {});
+    return () => {
+      huy = true;
+    };
+  }, [coKiemDuyet]);
+
+  // Kiểm duyệt: chỉ hiện với người BẤM ĐƯỢC.
+  //
+  // Điều kiện là `can_moderate` từ `/auth/me`, KHÔNG phải `is_admin`: người
+  // kiểm duyệt là chuyên gia được mời và không giữ quyền quản trị nền tảng, nên
+  // đọc `is_admin` sẽ giấu mục này khỏi đúng những người nó phục vụ.
+  //
+  // Đây là việc không mời người ta bấm vào một trang chắc chắn 403, không phải
+  // một hàng rào: `require_moderator` ở máy chủ mới cưỡng chế.
+  const moderationItem: FlatNavItem = {
+    name: "Kiểm duyệt",
+    href: "/moderation",
+    icon: <ClipboardCheckIcon className={navIconClass} />,
+    badge: choDuyet,
+  };
+
+
+
   const navigation: AnyNavItem[] = user
-    ? isTenantAdmin(user)
-      ? [...baseNavigation, consoleItem, userTrashItem, settingsItem]
-      : [...baseNavigation, userTrashItem, settingsItem]
+    ? [
+        ...baseNavigation,
+        ...(coKiemDuyet ? [moderationItem] : []),
+        ...(isTenantAdmin(user) ? [consoleItem] : [organizationItem]),
+        userTrashItem,
+        settingsItem,
+      ]
     : baseNavigation;
 
   const handleLogout = useCallback(async () => {
@@ -167,6 +242,11 @@ export default function Layout({ children }: { children: ReactNode }) {
     >
       <span className="mr-3 flex items-center">{item.icon}</span>
       {t(item.name)}
+      {item.badge ? (
+        <span className="ml-2 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-ctu-blue px-1.5 py-0.5 text-xs font-semibold text-white">
+          {item.badge > 99 ? "99+" : item.badge}
+        </span>
+      ) : null}
       <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -332,7 +412,14 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap overflow-x-auto">
+          {/* KHÔNG đặt `overflow-x-auto` ở đây. Một tổ tiên có overflow khác
+              `visible` sẽ cắt mọi con định vị tuyệt đối tràn ra ngoài nó —
+              và bảng thả xuống của cái chuông thông báo là đúng một con như
+              vậy. Triệu chứng rất dễ đọc nhầm: huy hiệu "1" vẫn hiện, bấm vào
+              vẫn mở, nhưng KHÔNG THẤY GÌ, nên trông như lỗi tải dữ liệu chứ
+              không phải lỗi khung. Chỗ chật trên máy hẹp đã được lo bằng
+              `hidden md:flex` và các mục tự ẩn theo breakpoint. */}
+          <div className="hidden md:flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap">
             <div className="hidden sm:flex items-center space-x-2">
               <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-sky-400 animate-pulse" : "bg-slate-300"}`} />
               <span className="text-sm text-slate-600">{hasToken ? t("Đã đăng nhập") : t("Chế độ khách")}</span>

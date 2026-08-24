@@ -107,10 +107,71 @@ STARTUP_EXCEPTIONS: tuple[StartupException, ...] = (
     ),
     StartupException(
         label="seed_community_tenant",
-        reason="Tenant `community` là mặt phẳng dùng chung của registry ba mặt "
+        reason="Tenant cộng đồng là mặt phẳng dùng chung của registry ba mặt "
                "phẳng; nó do MÃ định nghĩa, không do người vận hành tạo.",
-        fingerprint="'community', 'Cộng đồng', 'community', 'COMMUNITY'",
+        # Dấu vân tay KHÔNG chứa mã tenant nữa. Ngày 22/08/2026
+        # `COMMUNITY_TENANT_ID` chuyển từ `'community'` sang tenant đang giữ
+        # corpus, và một dấu vân tay viết cứng mã cũ sẽ lặng lẽ thôi khớp — câu
+        # seed rơi xuống "chưa phân loại" và bị loại khỏi đường khởi động.
+        # Ba giá trị còn lại đủ nhận dạng: chỉ câu này gieo một tenant COMMUNITY
+        # dự trữ trên gói enterprise.
+        fingerprint="'Cộng đồng',",
         guard="WHERE NOT EXISTS",
+    ),
+    StartupException(
+        label="backfill_community_membership",
+        reason="Mọi tài khoản đang hoạt động đều thuộc Cộng đồng. Chỉ THÊM "
+               "dòng cho người chưa có, nhờ `NOT EXISTS` — không sửa, không "
+               "xoá tư cách thành viên nào đã tồn tại.",
+        fingerprint="SELECT u.id, 'TENANT'",
+        guard="NOT EXISTS",
+    ),
+    StartupException(
+        label="backfill_community_role",
+        reason="Tư cách thành viên mà thiếu vai thì tài khoản không ghi được "
+               "gì — `access_gate` từ chối người không có grant nào. Câu này "
+               "gắn `community_member` cho những dòng còn thiếu.",
+        fingerprint="JOIN roles r ON r.role_code = 'community_member'",
+        guard="NOT EXISTS",
+    ),
+    StartupException(
+        label="fix_retired_community_plan",
+        reason="Một câu từ thời v4 gán `plan_code='internal'` cho tenant khởi "
+               "tạo, nhưng `internal` không còn trong bảng `plans`. Mệnh đề "
+               "`NOT EXISTS` giữ phạm vi hẹp: không đụng tenant đang mang gói "
+               "hợp lệ, nên nó không ghi đè một quyết định thương mại.",
+        # Dấu vân tay phải DUY NHẤT. Bản đầu dùng `SET plan_code = 'enterprise'`
+        # và nó trùng với chính câu backfill v4 ngay bên dưới — câu ấy không có
+        # chốt chặn `NOT EXISTS`, nên bộ phân loại báo "ngoại lệ khai chốt chặn
+        # mà câu lệnh không còn có". Mệnh đề tương quan dưới đây chỉ xuất hiện ở
+        # câu vá này.
+        fingerprint="p.plan_code = tenants.plan_code",
+        guard="NOT EXISTS (SELECT 1 FROM plans",
+    ),
+    StartupException(
+        label="retire_legacy_community_row",
+        reason="Máy đã chạy bản trước có một hàng `community` RỖNG mang "
+               "`tenant_type='COMMUNITY'`. Chỉ mục duy nhất chỉ cho phép MỘT "
+               "hàng như vậy, nên hàng cũ phải nghỉ trước khi tenant giữ corpus "
+               "được nâng lên — nếu không cả lượt migration dừng vì trùng khoá. "
+               "Xoá MỀM, vì hàng ấy còn dòng phụ thuộc với khoá ngoại RESTRICT.",
+        # Dấu vân tay CỐ Ý không nhắc tên cột `is_system_reserved`.
+        #
+        # `test_is_system_reserved_is_never_read_by_authorisation` quét cây cú
+        # pháp và bắt mọi chuỗi chứa tên ấy — nó không phân biệt được "khớp một
+        # câu DDL" với "đọc để quyết định quyền", và blanket rule đó là thứ làm
+        # bài kiểm có giá trị. Vế còn lại đủ nhận dạng: đây là câu DUY NHẤT đặt
+        # `tenant_type` về ORGANIZATION.
+        fingerprint="SET tenant_type = 'ORGANIZATION'",
+        guard="WHERE tenant_id = 'community'",
+    ),
+    StartupException(
+        label="revoke_legacy_community_invitations",
+        reason="Lời mời còn treo trỏ vào hàng vừa cho nghỉ. Không thu hồi thì "
+               "người nhận bấm liên kết và gia nhập một tổ chức đã ngừng hoạt "
+               "động — một ngõ cụt không có thông báo nào giải thích.",
+        fingerprint="UPDATE tenant_invitations SET revoked_at = COALESCE",
+        guard="WHERE tenant_id = 'community'",
     ),
     StartupException(
         label="seed_vocabulary_registry_meta_row",
@@ -360,8 +421,12 @@ HISTORICAL_MIGRATIONS: tuple[HistoricalMigration, ...] = (
         r"to_regclass\('public\.user_profiles'\)"),
     _historical(
         "backfill_tenant_plan_codes",
-        "Gói dịch vụ ra đời ở v4.3; tenant có trước đó chưa có `plan_code`.",
-        r"UPDATE tenants SET plan_code = '(internal|school)' WHERE plan_code IS NULL"),
+        "Gói dịch vụ ra đời ở v4.3; tenant có trước đó chưa có `plan_code`. "
+        "Tenant khởi tạo từng lấy `internal`, nhưng gói đó đã bị gỡ khỏi bảng "
+        "`plans` ở v6 — trên máy cài mới nó làm `fk_tenants_plan` đổ. Nay lấy "
+        "`enterprise`; regex nhận cả ba giá trị để máy đã chạy vẫn khớp.",
+        r"UPDATE tenants SET plan_code = '(internal|school|enterprise)' "
+        r"WHERE plan_code IS NULL"),
     _historical(
         "tighten_tenant_plan_code_to_not_null",
         "Siết `NOT NULL` sau khi backfill ở trên đã lấp hết. Chỉ chạy khi cột "

@@ -253,83 +253,127 @@ class Schema:
 #: Một ERD không có tên quan hệ thì chỉ là bản đồ khoá ngoại. Tên phải là ĐỘNG
 #: TỪ đọc được theo chiều con → cha ("mẫu **thuộc lớp** lớp").
 RELATION_VERBS: Dict[str, str] = {
-    "tenant_id": "thuộc về",
-    "plan_code": "theo gói",
-    "user_id": "của",
-    "auth_user_id": "được thu bởi",
-    "actor_user_id": "do",
-    "owner_user_id": "được sở hữu bởi",
-    "external_user_id": "ứng với",
-    "created_by": "được tạo bởi",
-    "updated_by": "được cập nhật bởi",
-    "approved_by": "được duyệt bởi",
-    "published_by": "được công bố bởi",
-    "recorded_by": "được ghi nhận bởi",
-    "merged_by": "được gộp bởi",
-    "revoked_by": "bị thu hồi bởi",
-    "requested_by": "được yêu cầu bởi",
-    "invited_by": "được mời bởi",
-    "accepted_by": "được nhận bởi",
-    "changed_by": "được đổi bởi",
-    "class_uid": "thuộc lớp",
-    "signer_id": "được ký bởi",
-    "dialect": "theo phương ngữ",
-    "language": "bằng ngôn ngữ",
-    "recognition_profile": "dùng hồ sơ",
-    "vocabulary_group": "trong nhóm",
-    "merged_into": "gộp vào",
-    "new_dialect_id": "trỏ tới",
-    "new_signer_id": "trỏ tới",
-    "capture_session_id": "trong phiên",
-    "job_id": "của lượt train",
-    "registry_version": "chốt phiên bản",
-    "endpoint_id": "gửi tới",
-    "role_id": "có vai",
-    "kind": "ghim vào bản",
-    "cloned_from_community_version": "nhân bản từ",
+    "tenant_id": "belongs to",
+    "plan_code": "subscribes to",
+    "user_id": "of",
+    "auth_user_id": "collected by",
+    "actor_user_id": "acted by",
+    "owner_user_id": "owned by",
+    "external_user_id": "maps to",
+    "created_by": "created by",
+    "updated_by": "updated by",
+    "approved_by": "approved by",
+    "published_by": "published by",
+    "recorded_by": "recorded by",
+    "merged_by": "merged by",
+    "revoked_by": "revoked by",
+    "requested_by": "requested by",
+    "invited_by": "invited by",
+    "accepted_by": "accepted by",
+    "changed_by": "changed by",
+    "class_uid": "classified as",
+    "signer_id": "performed by",
+    "dialect": "in dialect",
+    "language": "in language",
+    "recognition_profile": "uses profile",
+    "vocabulary_group": "in group",
+    "merged_into": "merged into",
+    "new_dialect_id": "redirects to",
+    "new_signer_id": "redirects to",
+    "capture_session_id": "in session",
+    "job_id": "of training job",
+    "registry_version": "pins version",
+    "endpoint_id": "delivered to",
+    "role_id": "holds role",
+    "kind": "bound to",
+    "cloned_from_community_version": "cloned from",
 }
 
 
 def relation_name(fk: Dict[str, Any]) -> str:
     """Tên quan hệ, đọc theo chiều con → cha."""
-    return RELATION_VERBS.get(fk["anchor"], "tham chiếu")
+    return RELATION_VERBS.get(fk["anchor"], "references")
 
 
 # =========================================================================== mặt phẳng
 
 PLANES: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
-    ("tenancy", {"label": "GỐC — Tổ chức", "color": "#0B4DA2", "fill": "#E7EEF9",
-                 "tables": ["tenants"]}),
-    ("identity", {"label": "DANH TÍNH & TRUY CẬP", "color": "#6B4FA8", "fill": "#EFEAF8",
-                  "tables": ["users", "roles", "tenant_members", "refresh_tokens",
-                             "password_reset_tokens", "verification_codes"]}),
-    ("corpus", {"label": "CORPUS — Dữ liệu thu được", "color": "#1B6E4A", "fill": "#E4F1EA",
-                "tables": ["samples", "classes", "raw_uploads", "capture_sessions",
-                           "signers", "signer_aliases"]}),
-    ("vocab", {"label": "TỪ VỰNG & REGISTRY (theo tenant)", "color": "#0E6E7A",
-               "fill": "#E2F1F3",
+    # ---- MODULE A — Tenant and Authorization (18 bảng) ----------------------
+    ("tenancy", {"label": "CORE — Tenant, Workspace, Project",
+                 "color": "#0B4DA2", "fill": "#E7EEF9", "module": "A",
+                 "tables": ["tenants", "workspaces", "projects",
+                            "project_allocations"]}),
+    ("authz", {"label": "SCOPED AUTHORIZATION", "color": "#1F4E9C",
+               "fill": "#E3EBF7", "module": "A",
+               "tables": ["memberships", "roles", "permissions",
+                          "role_permissions", "role_assignments",
+                          "tenant_invitations"]}),
+    ("identity", {"label": "IDENTITY AND ACCESS", "color": "#6B4FA8",
+                  "fill": "#EFEAF8", "module": "A",
+                  "tables": ["users", "refresh_tokens", "password_reset_tokens",
+                             "verification_codes", "user_totp",
+                             "user_recovery_codes", "user_action_passcodes",
+                             "api_keys"]}),
+
+    # ---- MODULE B — Vocabulary and Registry (11 bảng) -----------------------
+    ("catalogue", {"label": "PLATFORM CATALOGUE", "color": "#2F6E5A",
+                   "fill": "#E6F1EC", "module": "B",
+                   "tables": ["languages", "regions"]}),
+    ("vocab", {"label": "VOCABULARY AND REGISTRY (tenant-scoped)", "color": "#0E6E7A",
+               "fill": "#E2F1F3", "module": "B",
                "tables": ["dialects", "dialect_aliases", "recognition_profiles",
                           "vocabulary_groups", "vocabulary_registry_meta",
                           "registry_versions"]}),
-    ("community", {"label": "TỪ VỰNG CỘNG ĐỒNG", "color": "#7A6410", "fill": "#F5F0DC",
-                   "tables": ["community_dialects", "community_profiles",
-                              "community_versions"]}),
-    ("training", {"label": "HUẤN LUYỆN", "color": "#8A4B12", "fill": "#F7EBE0",
-                  "tables": ["training_jobs", "training_job_classes", "training_metrics"]}),
-    ("commerce", {"label": "THƯƠNG MẠI & VÒNG ĐỜI TỔ CHỨC", "color": "#A3311F",
-                  "fill": "#F8E7E3",
-                  "tables": ["plans", "tenant_subscriptions", "tenant_usage_daily",
-                             "api_keys", "webhook_endpoints", "webhook_deliveries",
-                             "tenant_exports", "tenant_purges", "tenant_invitations"]}),
-    ("legal", {"label": "PHÁP LÝ, ĐỒNG THUẬN & KIỂM TOÁN", "color": "#8E1F5E",
-               "fill": "#F7E5EF",
+    # Ba bảng `community_*` là DANH MỤC HỆ THỐNG, không phải mặt phẳng Cộng
+    # đồng. Cộng đồng là một HÀNG của `tenants` (`tenant_type='COMMUNITY'`).
+    # Nhãn ở đây phải nói đúng điều đó, vì tên bảng là di sản và gây hiểu nhầm.
+    ("syscat", {"label": "SYSTEM CATALOGUE (community_* table names are legacy)",
+                "color": "#7A6410", "fill": "#F5F0DC", "module": "B",
+                "tables": ["community_dialects", "community_profiles",
+                           "community_versions"]}),
+
+    # ---- MODULE C — Collection and Sample (9 bảng) --------------------------
+    ("corpus", {"label": "CORPUS — Collected data", "color": "#1B6E4A",
+                "fill": "#E4F1EA", "module": "C",
+                "tables": ["samples", "classes", "raw_uploads",
+                           "capture_sessions", "signers", "signer_aliases"]}),
+    ("training", {"label": "TRAINING (downstream)", "color": "#8A4B12",
+                  "fill": "#F7EBE0", "module": "C",
+                  "tables": ["training_jobs", "training_job_classes",
+                             "training_metrics"]}),
+
+    # ---- MODULE D — Governance and Platform (21 bảng) -----------------------
+    ("legal", {"label": "LEGAL, CONSENT AND AUDIT", "color": "#8E1F5E",
+               "fill": "#F7E5EF", "module": "D",
                "tables": ["legal_documents", "legal_document_drafts",
-                          "legal_document_events", "user_consents", "signer_consents",
-                          "audit_log"]}),
-    ("platform", {"label": "NỀN TẢNG & HẠ TẦNG", "color": "#4A5560", "fill": "#ECEEF1",
-                  "tables": ["platform_settings", "languages", "sot_authorized_keys",
-                             "google_sheets_sync_status"]}),
+                          "legal_document_events", "user_consents",
+                          "signer_consents", "audit_log"]}),
+    ("commerce", {"label": "TENANT SERVICES AND INTEGRATION", "color": "#A3311F",
+                  "fill": "#F8E7E3", "module": "D",
+                  "tables": ["plans", "tenant_subscriptions", "tenant_usage_daily",
+                             "tenant_exports", "tenant_purges",
+                             "webhook_endpoints", "webhook_deliveries",
+                             "support_tickets", "support_messages",
+                             "notifications", "event_outbox"]}),
+    ("platform", {"label": "PLATFORM AND INFRASTRUCTURE", "color": "#4A5560",
+                  "fill": "#ECEEF1", "module": "D",
+                  "tables": ["platform_settings", "sot_authorized_keys",
+                             "schema_migrations", "google_sheets_sync_status"]}),
 ])
+
+#: Bốn mô-đun của Chương 3 §3.4.2, mỗi mô-đun một trang PDM (Figure 3.15–3.18).
+#: Thứ tự khoá trong PLANES quyết định thứ tự khối trên trang.
+MODULES: "OrderedDict[str, str]" = OrderedDict([
+    ("A", "Module A: Tenant and Authorization"),
+    ("B", "Module B: Vocabulary and Registry"),
+    ("C", "Module C: Collection and Sample"),
+    ("D", "Module D: Governance and Platform"),
+])
+
+
+def planes_of_module(module: str) -> List[str]:
+    return [k for k, p in PLANES.items() if p.get("module") == module]
+
 
 PLANE_OF: Dict[str, str] = {t: k for k, p in PLANES.items() for t in p["tables"]}
 
@@ -345,31 +389,40 @@ def color_of(table: str) -> Tuple[str, str]:
 #: danh sách thuộc tính hiển thị). Thuộc tính đầu tiên là khoá — nó được gạch
 #: chân theo đúng quy ước Chen.
 CONCEPTUAL_ENTITIES: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
-    ("plans",             {"label": "GÓI DỊCH VỤ", "i": 2, "j": 0,
+    # Hàng 0 — danh mục nền tảng
+    ("plans",             {"label": "SERVICE PLAN", "i": 3, "j": 0,
                            "attrs": ["plan_code", "display_name", "price_cents"]}),
-    ("tenants",           {"label": "TỔ CHỨC", "i": 2, "j": 2,
+
+    # Hàng 2 — hai gốc: tổ chức và tài khoản
+    ("tenants",           {"label": "TENANT", "i": 3, "j": 2,
                            "attrs": ["tenant_id", "display_name", "billing_status"]}),
-    ("users",             {"label": "TÀI KHOẢN", "i": 8, "j": 2,
+    ("users",             {"label": "USER", "i": 11, "j": 2,
                            "attrs": ["id", "username", "email"]}),
-    ("dialects",          {"label": "PHƯƠNG NGỮ", "i": 0, "j": 4,
+
+    # Hàng 4 — thực thể thuộc tổ chức, trải đều để cạnh từ TENANT không chồng
+    ("dialects",          {"label": "DIALECT", "i": 0, "j": 4,
                            "attrs": ["dialect_id", "display_name", "is_alphabet"]}),
-    ("classes",           {"label": "LỚP TỪ VỰNG", "i": 2, "j": 4,
+    ("classes",           {"label": "SIGN CLASS", "i": 3, "j": 4,
                            "attrs": ["class_uid", "label_original", "hands_required"]}),
-    ("signers",           {"label": "NGƯỜI KÝ", "i": 4, "j": 4,
+    ("signers",           {"label": "SIGNER", "i": 6, "j": 4,
                            "attrs": ["signer_id", "display_name", "regional_group"]}),
-    ("registry_versions", {"label": "PHIÊN BẢN\nTỪ VỰNG", "i": 6, "j": 4,
+    ("registry_versions", {"label": "REGISTRY\nVERSION", "i": 9, "j": 4,
                            "attrs": ["version", "content_hash"]}),
-    ("user_consents",     {"label": "CHẤP THUẬN\nTÀI KHOẢN", "i": 8, "j": 4,
+    ("user_consents",     {"label": "USER\nCONSENT", "i": 11, "j": 4,
                            "attrs": ["consent_id", "accepted_at", "withdrawn_at"]}),
-    ("raw_uploads",       {"label": "VIDEO THÔ", "i": 0, "j": 8,
-                           "attrs": ["upload_uid", "original_filename", "status"]}),
-    ("samples",           {"label": "MẪU DỮ LIỆU", "i": 2, "j": 8,
-                           "attrs": ["sample_uid", "file_path", "completeness"]}),
-    ("signer_consents",   {"label": "ĐỒNG THUẬN\nNGƯỜI KÝ", "i": 5, "j": 8,
-                           "attrs": ["consent_id", "scope", "withdrawn_at"]}),
-    ("training_jobs",     {"label": "LƯỢT\nHUẤN LUYỆN", "i": 7, "j": 6,
+
+    # Hàng 6 — lượt huấn luyện nằm giữa REGISTRY VERSION và USER
+    ("training_jobs",     {"label": "TRAINING\nJOB", "i": 9, "j": 6,
                            "attrs": ["job_id", "status", "test_acc"]}),
-    ("legal_documents",   {"label": "VĂN BẢN\nPHÁP LÝ", "i": 8, "j": 8,
+
+    # Hàng 8 — dữ liệu thu được và bằng chứng pháp lý
+    ("raw_uploads",       {"label": "RAW\nUPLOAD", "i": 0, "j": 8,
+                           "attrs": ["upload_uid", "original_filename", "status"]}),
+    ("samples",           {"label": "SAMPLE", "i": 3, "j": 8,
+                           "attrs": ["sample_uid", "file_path", "completeness"]}),
+    ("signer_consents",   {"label": "SIGNER\nCONSENT", "i": 6, "j": 8,
+                           "attrs": ["consent_id", "scope", "withdrawn_at"]}),
+    ("legal_documents",   {"label": "LEGAL\nDOCUMENT", "i": 11, "j": 8,
                            "attrs": ["kind", "version", "content_hash"]}),
 ])
 
@@ -379,39 +432,60 @@ CONCEPTUAL_ENTITIES: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
 #: chứng**: bộ sinh dừng với lỗi nếu khoá ngoại đó không có thật. Đó là thứ giữ
 #: cho một hình vẽ tay không âm thầm nói sai khi lược đồ đổi.
 CONCEPTUAL_RELATIONS: Tuple[Dict[str, Any], ...] = (
-    {"name": "THEO GÓI", "i": 2, "j": 1, "a": "tenants", "b": "plans",
+    # --- gốc: gói dịch vụ và tư cách thành viên ---------------------------
+    {"name": "SUBSCRIBES TO", "i": 3, "j": 1, "a": "tenants", "b": "plans",
      "ca": "N", "cb": "1", "via": ("tenants", "plan_code")},
-    {"name": "THAM GIA", "i": 5, "j": 2, "a": "users", "b": "tenants",
-     "ca": "M", "cb": "N", "via": ("tenant_members", "user_id"),
-     "attrs": ["role"], "assoc": True},
-    {"name": "SỞ HỮU", "i": 0, "j": 3, "a": "tenants", "b": "dialects",
+
+    # `tenant_members` là KHUNG NHÌN trên lát cắt `scope_level='TENANT'` của
+    # `memberships`; khung nhìn không mang khoá ngoại, nên quan hệ phải khai qua
+    # bảng gốc. Khai qua khung nhìn là lỗi đã làm bộ sinh dừng ở lần chạy 18/08.
+    {"name": "PARTICIPATES IN", "i": 7, "j": 2, "a": "users", "b": "tenants",
+     "ca": "M", "cb": "N", "via": ("memberships", "user_id"),
+     "attrs": ["scope_level"], "assoc": True},
+
+    # --- TENANT sở hữu bốn nhóm tài nguyên, mỗi cạnh một cột riêng --------
+    {"name": "OWNS", "i": 0, "j": 3, "a": "tenants", "b": "dialects",
      "ca": "1", "cb": "N", "via": ("dialects", "tenant_id"), "identifying": True},
-    {"name": "SỞ HỮU", "i": 2, "j": 3, "a": "tenants", "b": "classes",
+    {"name": "OWNS", "i": 3, "j": 3, "a": "tenants", "b": "classes",
      "ca": "1", "cb": "N", "via": ("classes", "tenant_id")},
-    {"name": "SỞ HỮU", "i": 4, "j": 3, "a": "tenants", "b": "signers",
+    {"name": "OWNS", "i": 6, "j": 3, "a": "tenants", "b": "signers",
      "ca": "1", "cb": "N", "via": ("signers", "tenant_id")},
-    {"name": "CHỐT", "i": 6, "j": 3, "a": "tenants", "b": "registry_versions",
+    {"name": "PUBLISHES", "i": 9, "j": 3, "a": "tenants", "b": "registry_versions",
      "ca": "1", "cb": "N", "via": ("registry_versions", "tenant_id"),
      "identifying": True},
-    {"name": "CHẤP THUẬN", "i": 8, "j": 3, "a": "users", "b": "user_consents",
+
+    # --- USER và bằng chứng chấp thuận -----------------------------------
+    {"name": "ACCEPTS", "i": 11, "j": 3, "a": "users", "b": "user_consents",
      "ca": "1", "cb": "N", "via": ("user_consents", "user_id")},
-    {"name": "PHÂN LOẠI", "i": 1, "j": 4, "a": "dialects", "b": "classes",
+
+    # --- từ vựng ---------------------------------------------------------
+    {"name": "CLASSIFIES", "i": 1.5, "j": 4, "a": "dialects", "b": "classes",
      "ca": "1", "cb": "N", "via": ("classes", "dialect")},
-    {"name": "NGUỒN CỦA", "i": 0, "j": 6, "a": "classes", "b": "raw_uploads",
-     "ca": "1", "cb": "N", "via": ("raw_uploads", "class_uid")},
-    {"name": "GỒM", "i": 2, "j": 6, "a": "classes", "b": "samples",
-     "ca": "1", "cb": "N", "via": ("samples", "class_uid")},
-    {"name": "KÝ", "i": 4, "j": 6, "a": "signers", "b": "samples",
-     "ca": "1", "cb": "N", "via": ("samples", "signer_id")},
-    {"name": "CẤP", "i": 5, "j": 6, "a": "signers", "b": "signer_consents",
-     "ca": "1", "cb": "N", "via": ("signer_consents", "signer_id")},
-    {"name": "PHÁI", "i": 7, "j": 4, "a": "users", "b": "training_jobs",
-     "ca": "1", "cb": "N", "via": ("training_jobs", "auth_user_id")},
-    {"name": "DÙNG", "i": 6.5, "j": 5, "a": "registry_versions", "b": "training_jobs",
+
+    # --- huấn luyện: ghim KHÔNG GIAN NHÃN, không ghim nội dung bộ dữ liệu -
+    {"name": "PINS", "i": 9, "j": 5, "a": "registry_versions", "b": "training_jobs",
      "ca": "1", "cb": "N", "via": ("training_jobs", "registry_version")},
-    {"name": "GHIM VÀO", "i": 8, "j": 6, "a": "user_consents", "b": "legal_documents",
+    {"name": "SUBMITS", "i": 10.4, "j": 5, "a": "users", "b": "training_jobs",
+     "ca": "1", "cb": "N", "via": ("training_jobs", "auth_user_id")},
+
+    # --- dữ liệu thu được ------------------------------------------------
+    {"name": "SOURCE OF", "i": 0, "j": 6, "a": "classes", "b": "raw_uploads",
+     "ca": "1", "cb": "N", "via": ("raw_uploads", "class_uid")},
+    {"name": "GROUPS", "i": 3, "j": 6, "a": "classes", "b": "samples",
+     "ca": "1", "cb": "N", "via": ("samples", "class_uid")},
+    {"name": "PERFORMS", "i": 4.5, "j": 7, "a": "signers", "b": "samples",
+     "ca": "1", "cb": "N", "via": ("samples", "signer_id")},
+
+    # --- đồng thuận của chủ thể dữ liệu ----------------------------------
+    {"name": "GRANTS", "i": 6, "j": 6, "a": "signers", "b": "signer_consents",
+     "ca": "1", "cb": "N", "via": ("signer_consents", "signer_id")},
+
+    # Hai quan hệ GHIM VÀO khác nhau ở CHỦ THỂ: một là tài khoản chấp thuận
+    # điều khoản dịch vụ, một là CHỦ THỂ DỮ LIỆU cho phép dùng dữ liệu của
+    # mình. Chỉ vế thứ hai chi phối đường phát hành dữ liệu.
+    {"name": "BOUND TO", "i": 11, "j": 6, "a": "user_consents", "b": "legal_documents",
      "ca": "N", "cb": "1", "via": ("user_consents", "kind")},
-    {"name": "GHIM VÀO", "i": 6.5, "j": 9, "a": "signer_consents", "b": "legal_documents",
+    {"name": "BOUND TO", "i": 8.5, "j": 8, "a": "signer_consents", "b": "legal_documents",
      "ca": "N", "cb": "1", "via": ("signer_consents", "kind")},
 )
 
@@ -589,7 +663,7 @@ def build_chen(schema: Schema) -> str:
             out.append(_edge_label(f"{eid}_lbl", card, pos))
 
     _warn_overlaps(node_boxes, "Chen")
-    return _page("1 · ERD khái niệm (Chen)", "".join(out))
+    return _page("1 · Conceptual Data Model — Chen notation", "".join(out))
 
 
 def _warn_overlaps(boxes, page: str) -> None:
@@ -610,6 +684,11 @@ def _warn_overlaps(boxes, page: str) -> None:
 # --------------------------------------------------------------------------- IE
 
 ROW_H, TITLE_H, COL_W, GAP_X, GAP_Y, PAD = 20, 30, 268, 48, 40, 24
+
+#: Bề rộng máng bên trái, nơi in `PK`. Tách khỏi tên thuộc tính bằng một
+#: đường kẻ dọc — cùng bố cục với ký pháp bảng mà draw.io và các công cụ
+#: ERD thương mại dùng: dấu khoá không chen vào giữa danh sách tên.
+KEY_W = 38
 
 
 def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) -> str:
@@ -640,12 +719,28 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
         uqc = {c for u in schema.unique.get(t, []) for c in u}
         res = []
         for col, typ, notnull in schema.columns.get(t, []):
-            tag = ("PK,FK" if col in pkc and col in fkc else
-                   "PK" if col in pkc else "FK" if col in fkc else
-                   "U" if col in uqc else "")
-            if mode != "all" and not tag and col != "tenant_id":
+            # HAI vai trò khác nhau, cố ý tách rời:
+            #
+            #   `role`  quyết định cột có được HIỆN ở chế độ rút gọn không
+            #   `mark`  quyết định in nhãn gì trước tên cột
+            #
+            # Gộp chúng làm một là lỗi đã mắc: khi bỏ nhãn FK/U đi cho gọn, mọi
+            # cột khoá ngoại biến mất khỏi các trang PDM — vì phép lọc đang đọc
+            # chính cái nhãn vừa bị xoá.
+            role = ("PK,FK" if col in pkc and col in fkc else
+                    "PK" if col in pkc else "FK" if col in fkc else
+                    "U" if col in uqc else "")
+            if mode != "all" and not role and col != "tenant_id":
                 continue
-            res.append((col, typ, notnull, tag))
+            # CHỈ khoá chính được đánh dấu.
+            #
+            # Chuẩn chân chim đặt lực lượng và hướng phụ thuộc lên ĐƯỜNG NỐI,
+            # không lên hộp. Một nhãn `FK` trong hộp lặp lại điều mà đường nối
+            # đã nói, và lặp thì có ngày lệch: cột đổi tên hay khoá ngoại bị gỡ
+            # sẽ để lại một nhãn `FK` nói dối. `U` cũng vậy — ràng buộc duy nhất
+            # đã hiện ra ở đầu mút `ERzeroToOne` của quan hệ 1:1.
+            mark = "PK" if col in pkc else ""
+            res.append((col, typ, notnull, mark))
         return res
 
     cursor_x, cursor_y, band_h = PAD, PAD, 0
@@ -706,7 +801,8 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
                          else f"{t}{mark}")
                 out.append(_cell(
                     tid, title,
-                    f'swimlane;fontStyle=1;childLayout=stackLayout;horizontal=1;'
+                    f'swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;'
+                    f'align=center;verticalAlign=middle;'
                     f'startSize={TITLE_H};horizontalStack=0;resizeParent=1;'
                     f'resizeParentMax=0;html=1;collapsible=0;marginBottom=0;'
                     f'swimlaneFillColor={plane["fill"]};strokeColor={plane["color"]};'
@@ -714,21 +810,48 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
                     f'rounded=1;arcSize=6;',
                     gid, tx, ty, COL_W, h))
 
+                # Đường kẻ dọc tách máng khoá khỏi tên thuộc tính. Vẽ MỘT lần
+                # cho cả hộp chứ không kẻ từng hàng: một đường liền chạy hết
+                # thân bảng đọc ra là một cột, còn 46 đoạn kẻ rời thì không.
+                #
+                # Nằm ngoài `childLayout=stackLayout` (cha là nhóm, không phải
+                # bảng) vì stackLayout sẽ xếp nó thành một hàng nữa.
+                so_hang = len(cols_for(t))
+                if so_hang:
+                    out.append(_cell(
+                        f"{tid}_kegach", "",
+                        f'line;direction=north;strokeColor={plane["color"]};'
+                        f'strokeWidth=1;html=1;',
+                        gid, tx + KEY_W, ty + TITLE_H, 1, so_hang * ROW_H))
+
                 cy = TITLE_H
                 for col, typ, notnull, tag in cols_for(t):
+                    # HAI ô cho một hàng: máng khoá bên trái, tên bên phải.
+                    #
+                    # Kiểu dữ liệu KHÔNG in ra. Ký pháp bảng này đọc theo chiều
+                    # dọc — mắt lướt một cột tên; chèn `· text` sau mỗi tên biến
+                    # cột ấy thành văn xuôi và mất luôn cái lợi đó. Kiểu đầy đủ
+                    # nằm ở `SCHEMA_TABLES.md`, nơi nó là thứ người ta đến tìm.
+                    out.append(_cell(
+                        f"r_{t}__{col}__k", tag,
+                        f'text;strokeColor=none;fillColor=none;align=center;'
+                        f'verticalAlign=middle;overflow=hidden;rotatable=0;'
+                        f'html=1;fontSize=9;fontStyle=1;fontColor=#1A1A1A;',
+                        tid, 0, cy, KEY_W, ROW_H))
+
+                    # Ô TÊN mới là đầu neo của đường nối — `row_id` trỏ vào nó.
+                    # Neo vào ô máng sẽ làm đường nối đâm vào giữa hộp.
                     rid = f"r_{t}__{col}"
                     row_id[(t, col)] = rid
-                    label = (f'{tag + "  " if tag else ""}{col}  ·  {typ}'
-                             f'{"" if notnull else " ?"}')
                     out.append(_cell(
-                        rid, label,
+                        rid, col,
                         f'text;strokeColor=none;fillColor=none;align=left;'
-                        f'verticalAlign=middle;spacingLeft=6;spacingRight=6;'
+                        f'verticalAlign=middle;spacingLeft=8;spacingRight=6;'
                         f'overflow=hidden;points=[[0,0.5],[1,0.5]];'
                         f'portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;'
                         f'fontSize=10;fontColor=#1A1A1A;'
-                        f'{"fontStyle=5;" if tag.startswith("PK") else ""}',
-                        tid, 0, cy, COL_W, ROW_H))
+                        f'{"fontStyle=1;" if tag else ""}',
+                        tid, KEY_W, cy, COL_W - KEY_W, ROW_H))
                     cy += ROW_H
             ty += max(h for _t, h in chunk) + GAP_Y
 
@@ -770,7 +893,19 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
 
 
 def _page(name: str, body: str) -> str:
-    return (f'<diagram name="{escape(name)}">'
+    # `id` là BẮT BUỘC trong định dạng .drawio, dù draw.io mở được tệp thiếu nó.
+    #
+    # Trình xuất chính thức thì không: `drawio-export` dừng với
+    # "missing field `@id`" và không ra được tệp ảnh nào. Tệp mở xem thì bình
+    # thường, mà tự động hoá lại hỏng — kiểu lệch chỉ lộ ra khi có người thử
+    # xuất hàng loạt.
+    #
+    # Sinh từ chính TÊN trang: ổn định qua các lượt sinh lại, nên khác biệt giữa
+    # hai bản tệp là khác biệt về NỘI DUNG. Một `uuid4()` ở đây sẽ biến mọi lượt
+    # chạy thành một lượt sửa trong git.
+    import hashlib as _h
+    pid = _h.sha1(name.encode("utf-8")).hexdigest()[:20]
+    return (f'<diagram id="{pid}" name="{escape(name)}">'
             f'<mxGraphModel dx="1400" dy="900" grid="0" gridSize="10" guides="1" '
             f'tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" '
             f'pageWidth="1169" pageHeight="826" math="0" shadow="0">'
@@ -936,16 +1071,20 @@ def main() -> int:
         }, ensure_ascii=False, indent=2))
         return 0
 
+    # Bố cục trang khớp một-một với hình của Chương 3:
+    #   trang 1     — tham chiếu cho Figure 3.13 (CDM), vẽ tay ở PowerDesigner
+    #   trang 2     — tham chiếu cho Figure 3.14 (LDM Overview)
+    #   trang 3     — LDM đủ khoá, dùng để đối chiếu
+    #   trang 4–7   — Figure 3.15–3.18, mỗi mô-đun một trang PDM
     pages = [
         build_chen(schema),
-        build_ie(schema, "2 · Bản đồ quan hệ — chỉ thực thể & đường nối",
+        build_ie(schema, "2 · Relationship Map — entities and links only",
                  None, "none"),
-        build_ie(schema, "3 · ERD logic — chân chim + khoá", None, "keys"),
-        build_ie(schema, "4 · Mặt phẳng dữ liệu — đủ thuộc tính",
-                 ["tenancy", "corpus", "vocab", "community", "training"], "all"),
-        build_ie(schema, "5 · SaaS, pháp lý & danh tính — đủ thuộc tính",
-                 ["tenancy", "identity", "commerce", "legal", "platform"], "all"),
+        build_ie(schema, "3 · Logical Data Model — crow's foot with keys", None, "keys"),
     ]
+    for idx, (mod, title) in enumerate(MODULES.items(), start=4):
+        pages.append(build_ie(schema, f"{idx} · PDM {title}",
+                              planes_of_module(mod), "all"))
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
            f'<mxfile host="app.diagrams.net" type="device">{"".join(pages)}</mxfile>')
     with open(args.out, "w", encoding="utf-8") as fh:
@@ -955,9 +1094,13 @@ def main() -> int:
     print(f"  · trang 1 (Chen):      {len(CONCEPTUAL_ENTITIES)} thực thể, "
           f"{len(CONCEPTUAL_RELATIONS)} quan hệ — đã đối chiếu với lược đồ, khớp")
     print(f"  · trang 2 (bản đồ):    {len(schema.tables)} thực thể, chỉ đường nối")
-    print(f"  · trang 3–5 (IE):      {len(schema.tables)} thực thể "
+    print(f"  · trang 3 (LDM):       {len(schema.tables)} thực thể "
           f"({kinds['strong']} mạnh / {kinds['weak']} yếu / "
           f"{kinds['associative']} kết hợp), {len(schema.fks)} quan hệ")
+    for idx, (mod, title) in enumerate(MODULES.items(), start=4):
+        n = sum(1 for k in planes_of_module(mod)
+                for t in PLANES[k]["tables"] if t in schema.tables)
+        print(f"  · trang {idx} (PDM {mod}):     {n} bảng — {title}")
 
     if args.sql:
         with open(args.sql, "w", encoding="utf-8") as fh:

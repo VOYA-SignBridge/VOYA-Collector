@@ -238,7 +238,11 @@ def reply(ticket_id: str, user_id: str, body: str, author_label: str = "",
             notifications.notify(
                 str(ticket["user_id"]), kind="support",
                 title="Phản hồi mới trên phiếu hỗ trợ",
-                body=ticket["subject"], link=f"/support/{ticket_id}",
+                # Đường CHUẨN, không phải `/support/<id>`. Đường cũ vẫn sống
+                # (App.tsx chuyển hướng và giữ ID) vì các dòng thông báo đã gửi
+                # mang nó, nhưng dòng MỚI thì trỏ thẳng — một cú nhấp không nên
+                # phải đi qua một lượt chuyển hướng để tới nơi.
+                body=ticket["subject"], link=f"/settings/support/{ticket_id}",
                 tenant_id=ticket["tenant_id"])
     else:
         _alert_staff(ticket_id, str(ticket["tenant_id"]), ticket["subject"],

@@ -11,6 +11,7 @@ import Modal from "../components/ui/Modal";
 import ErrorBanner from "../components/ErrorBanner";
 import LoadingScreen from "../components/LoadingScreen";
 import EmptyState from "../components/ui/EmptyState";
+import ProvenanceModal from "../components/ProvenanceModal";
 import { getClassesList } from "../api/dataset";
 import type { ClassRow } from "../types";
 import {
@@ -77,6 +78,8 @@ export default function LabelDetailPage() {
   const [labelsLoading, setLabelsLoading] = useState(false);
   const [labelFilter, setLabelFilter] = useState("");
   const [reassignSaving, setReassignSaving] = useState(false);
+  // Lần thu đang được xem xuất xứ (UC18). Rỗng = modal đóng.
+  const [provenanceOf, setProvenanceOf] = useState<string>("");
 
   const tierState = useRenderTier();
   const { tier } = tierState;
@@ -289,6 +292,15 @@ export default function LabelDetailPage() {
                   : t("Chọn một lần quay")}
               </span>
 
+              {selected && (
+                <button
+                  onClick={() => setProvenanceOf(selected.session_id)}
+                  className="rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:bg-slate-700"
+                >
+                  {t("Xuất xứ")}
+                </button>
+              )}
+
               <label className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -490,6 +502,14 @@ export default function LabelDetailPage() {
           )}
         </div>
       </Modal>
+
+      {provenanceOf && (
+        <ProvenanceModal
+          classUid={info.class_uid}
+          sessionId={provenanceOf}
+          onClose={() => setProvenanceOf("")}
+        />
+      )}
     </div>
   );
 }

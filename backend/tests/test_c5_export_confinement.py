@@ -255,9 +255,16 @@ def dong_thuan_gia(monkeypatch, cay_gia):
     _tao(goc_a / "sample_rut.npz", MB)
     _tao(goc_a / "sample_mo_coi.npz", MB)
 
+    # `review_status` phai co: hai dong nay mo hinh hoa mot kho DANG DUNG DUOC.
+    #
+    # Cong kiem duyet doc o rong thanh "chua duyet" (co y — im lang nghia la
+    # chua biet), nen bo cot di thi ca hai dong bi loai va bai test do vi mot ly
+    # do chang lien quan gi toi dieu no dang kiem: dong thuan.
     monkeypatch.setattr(dataset_samples, "list_samples", lambda *a, **k: [
-        {"sample_uid": "ok", "signer_id": "signer-ok", "file_path": "x/sample_ok.npz"},
-        {"sample_uid": "rut", "signer_id": "signer-rut", "file_path": "x/sample_rut.npz"},
+        {"sample_uid": "ok", "signer_id": "signer-ok", "file_path": "x/sample_ok.npz",
+         "review_status": "approved"},
+        {"sample_uid": "rut", "signer_id": "signer-rut", "file_path": "x/sample_rut.npz",
+         "review_status": "approved"},
     ])
     return cay_gia
 

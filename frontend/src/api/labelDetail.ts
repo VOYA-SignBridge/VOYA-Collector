@@ -115,3 +115,71 @@ export const reassignLabelSession = async (
   );
   return res.data as ReassignSessionResult;
 };
+
+
+// --------------------------------------------------------------------------- xuất xứ
+
+/** Một ô có thể chưa từng được ghi nhận. `null` mang nghĩa đó, và giao diện
+ *  phải hiện nó khác với số 0 hay chuỗi rỗng. */
+export interface SessionProvenance {
+  class_uid: string;
+  session_id: string;
+  sample_count: number;
+  origin: {
+    source_type: string | null;
+    collection_campaign: string | null;
+    created_at: string | null;
+    gdrive_synced: string | null;
+  };
+  context: {
+    label_original: string;
+    slug: string;
+    language: string;
+    dialect: string;
+    signer_id: string | null;
+    signer_name: string | null;
+    contributor_label: string | null;
+    tenant_id: string | null;
+  };
+  derivation: {
+    raw_landmarks_available: string | null;
+    normalization_version: string | null;
+    preprocess_contract_version: string | null;
+    fps_original: number | null;
+    fps_processed: number | null;
+    sequence_length_original: number | null;
+    seq_len: number | null;
+    file_path: string | null;
+    storage_url: string | null;
+    checksum: string | null;
+  };
+  quality: {
+    completeness: number | null;
+    jitter: number | null;
+    left_hand_ratio: number | null;
+    right_hand_ratio: number | null;
+    both_hands_ratio: number | null;
+    quality_flags: string | null;
+    quality_status: string | null;
+  };
+  samples: {
+    sample_uid: string | null;
+    augment_id: string | null;
+    seq_len: number | null;
+    completeness: number | null;
+    jitter: number | null;
+    file_path: string | null;
+    checksum: string | null;
+    storage_url: string | null;
+  }[];
+}
+
+export const getSessionProvenance = async (
+  classUid: string,
+  sessionId: string,
+): Promise<SessionProvenance> => {
+  const res = await axiosClient.get(
+    `/classes/${encodeURIComponent(classUid)}/sessions/${encodeURIComponent(sessionId)}/provenance`,
+  );
+  return res.data as SessionProvenance;
+};

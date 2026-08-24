@@ -107,11 +107,35 @@ MEMBER_STATUSES: tuple[str, ...] = ("ACTIVE", "INVITED", "SUSPENDED", "REMOVED")
 #: Trạng thái vòng đời của workspace/project.
 CONTAINER_STATUSES: tuple[str, ...] = ("ACTIVE", "ARCHIVED", "DELETED")
 
-#: Định danh của tenant cộng đồng dự trữ. Hằng số, không cấu hình được: mã ở ba
-#: nơi (seed, đăng ký, kiểm tra triển khai) phải đồng ý về nó, và một biến môi
+#: Định danh của tenant cộng đồng. Hằng số, không cấu hình được: mã ở ba nơi
+#: (seed, đăng ký, kiểm tra triển khai) phải đồng ý về nó, và một biến môi
 #: trường lệch giữa hai máy sẽ tạo ra HAI tenant cộng đồng — mà chỉ mục duy
 #: nhất bên dưới cấm, nên máy thứ hai sẽ hỏng lúc khởi động chứ không lặng lẽ.
-COMMUNITY_TENANT_ID = "community"
+#:
+#: Vì sao nó TRỎ VÀO tenant khởi tạo (22/08/2026)
+#: ------------------------------------------------
+#: Trước lượt này hằng số là `"community"` — một hàng RIÊNG, và hàng ấy **rỗng**.
+#: Toàn bộ corpus (64 lớp, 3.862 mẫu, mọi tệp `.npz`) nằm ở `default`, tenant có
+#: từ trước khi hệ thống biết tới khái niệm nhiều tổ chức. Cái tên ở một hàng,
+#: dữ liệu ở hàng kia.
+#:
+#: Chuyện đó không chỉ khó đọc — nó CHẶN một tính năng. Trigger
+#: `ct_role_assignments_scope` chỉ cho gán `community_member` trong tenant mang
+#: `tenant_type='COMMUNITY'`, nên một tài khoản mới hoặc vào hàng rỗng (đóng góp
+#: không ai thấy) hoặc vào `default` mà không có vai nào (cổng ghi từ chối, họ
+#: không quay được gì).
+#:
+#: Đổi nhãn KHÔNG dời một byte nào: `tenant_id` của mọi dòng giữ nguyên, đường
+#: dẫn tệp giữ nguyên, RLS giữ nguyên. `tenant_type` không có nhánh xử lý nào
+#: trong mã ứng dụng — nó chỉ nuôi trigger ghim vai và phần hiển thị.
+#:
+#: Rủi ro đi kèm KHÔNG PHẢI do lượt này sinh ra: `normalize_tenant_id("")` rơi
+#: về `default`, nên mất ngữ cảnh tenant là ghi vào Cộng đồng. Điều đó đã đúng
+#: từ trước, vì `default` vốn đã là corpus công khai. Đổi nhãn chỉ làm cái tên
+#: nói đúng sự thật; bịt phép rơi-về là việc riêng.
+#:
+#: Lùi được bằng một câu UPDATE: không có dữ liệu nào bị dời.
+COMMUNITY_TENANT_ID = "default"
 
 #: Bảng mới mang `tenant_id` và vì vậy phải chịu chính sách tenant chuẩn.
 #:
@@ -249,6 +273,59 @@ $$
 #:
 #: Đây là lỗi ĐỘC LẬP với RLS. Chỉ bọc phạm vi hệ thống sẽ biến một lỗi im lặng
 #: thành một lỗi khoá ngoại ồn ào, chứ không làm bản cài mới chạy được.
+#: Cho hàng `community` CŨ nghỉ. PHẢI chạy trước câu sửa nhãn bên dưới.
+#:
+#: Trên máy đã chạy bản trước, hàng ấy đang mang `tenant_type='COMMUNITY'`. Chỉ
+#: mục `uq_tenants_single_community` cho phép ĐÚNG MỘT hàng như vậy, nên nâng
+#: `default` lên COMMUNITY khi hàng cũ còn nguyên sẽ bị chặn bằng lỗi trùng
+#: khoá — và cả lượt migration dừng giữa chừng.
+#:
+#: Xoá MỀM chứ không xoá hẳn, và không phải vì thận trọng suông: hàng ấy còn 14
+#: dòng phụ thuộc (hạn mức ngày, một đăng ký gói, hai lời mời) với khoá ngoại
+#: RESTRICT. Xoá hẳn sẽ bị từ chối. Nó biến khỏi mọi danh sách, và người vận
+#: hành purge sau nếu muốn.
+#:
+#: Câu này KHÔNG chạm gì trên máy cài mới: ở đó không có hàng nào tên
+#: `community`, và mệnh đề cuối cũng chặn nó tự bắn vào chính tenant cộng đồng
+#: nếu có ai đặt lại hằng số về `"community"`.
+#: Vá gói đã nghỉ hưu của tenant cộng đồng.
+#:
+#: Một câu từ thời v4 gán `plan_code = 'internal'` cho tenant khởi tạo, nhưng
+#: `internal` KHÔNG còn trong bảng `plans` (v6 chỉ gieo free/plus/pro/enterprise).
+#: Trên máy đã chạy lâu, ai đó đã sửa tay — sản xuất đang là `enterprise`. Trên
+#: máy cài MỚI thì không: tenant ra đời mang một gói không tồn tại.
+#:
+#: Chuyện này có TRƯỚC lượt đổi nhãn 22/08/2026 và độc lập với nó. Nó chỉ lộ ra
+#: bây giờ vì trước đây tenant cộng đồng là một hàng RIÊNG được gieo kèm
+#: `plan_code = 'enterprise'` tường minh, nên không ai hỏi gói của `default`.
+#:
+#: Mệnh đề `NOT EXISTS` là thứ giữ phạm vi hẹp: câu này KHÔNG đụng tới một
+#: tenant đang mang gói hợp lệ. Gói là trạng thái thương mại — đổi nó khi nó
+#: đang đúng sẽ là ghi đè một quyết định kinh doanh bằng một bước migration.
+_SQL_FIX_RETIRED_COMMUNITY_PLAN = (
+    "UPDATE tenants SET plan_code = 'enterprise' "
+    f" WHERE tenant_id = '{COMMUNITY_TENANT_ID}' "
+    "   AND NOT EXISTS (SELECT 1 FROM plans p WHERE p.plan_code = tenants.plan_code)"
+)
+
+_SQL_RETIRE_LEGACY_COMMUNITY_ROW = (
+    "UPDATE tenants SET tenant_type = 'ORGANIZATION', is_system_reserved = FALSE, "
+    "       is_active = FALSE, deleted_at = COALESCE(deleted_at, NOW()) "
+    " WHERE tenant_id = 'community' "
+    f"   AND '{COMMUNITY_TENANT_ID}' <> 'community'"
+)
+
+#: Lời mời còn treo trỏ vào hàng vừa cho nghỉ.
+#:
+#: Không thu hồi thì người nhận bấm vào liên kết và gia nhập một tổ chức đã
+#: ngừng hoạt động — một ngõ cụt không có thông báo nào giải thích. Thu hồi để
+#: họ nhận được câu trả lời rõ ràng và được mời lại vào đúng chỗ.
+_SQL_REVOKE_LEGACY_COMMUNITY_INVITES = (
+    "UPDATE tenant_invitations SET revoked_at = COALESCE(revoked_at, NOW()) "
+    " WHERE tenant_id = 'community' AND accepted_at IS NULL "
+    f"   AND '{COMMUNITY_TENANT_ID}' <> 'community'"
+)
+
 _SQL_SEED_COMMUNITY_TENANT = f"""
     INSERT INTO tenants (tenant_id, display_name, slug, tenant_type,
                          is_system_reserved, plan_code)
@@ -292,13 +369,78 @@ _SQL_POSTCOND_COMMUNITY_TENANT = (
     f"  AND slug = '{COMMUNITY_TENANT_ID}'"
 )
 
+#: Đưa MỌI tài khoản đang có vào Cộng đồng.
+#:
+#: Từ 22/08/2026 đăng ký không lập tổ chức nữa mà gắn `community_member`. Mười
+#: tài khoản ra đời trước lượt ấy chưa có gì trong Cộng đồng, và không có nó thì
+#: họ mất quyền ghi nếu tổ chức riêng của họ bị gỡ.
+#:
+#: Hai câu, KHÔNG gộp được: một câu dựng tư cách thành viên, một câu gắn vai vào
+#: chính tư cách ấy. Câu thứ hai đọc `membership_id` mà câu thứ nhất vừa tạo.
+#:
+#: `assigned_by_user_id` là chính người đó — câu trả lời trung thực, vì không ai
+#: quyết định việc này; nó đi kèm sự tồn tại của tài khoản. Dựng một "tài khoản
+#: hệ thống" giả để đứng tên sẽ làm nhật ký kiểm toán nói dối.
+_SQL_BACKFILL_COMMUNITY_MEMBERSHIP = (
+    "INSERT INTO memberships (user_id, scope_level, tenant_id, legacy_role, "
+    "                         status, joined_at) "
+    "SELECT u.id, 'TENANT', %(t)s, NULL, 'ACTIVE', NOW() "
+    "  FROM users u "
+    " WHERE u.is_active AND u.deleted_at IS NULL "
+    "   AND NOT EXISTS (SELECT 1 FROM memberships m "
+    "                    WHERE m.user_id = u.id AND m.tenant_id = %(t)s "
+    "                      AND m.scope_level = 'TENANT')"
+) % {"t": f"'{COMMUNITY_TENANT_ID}'"}
+
+_SQL_BACKFILL_COMMUNITY_ROLE = (
+    "INSERT INTO role_assignments (user_id, role_id, membership_id, "
+    "                              assigned_by_user_id) "
+    "SELECT m.user_id, r.role_id, m.membership_id, m.user_id "
+    "  FROM memberships m "
+    "  JOIN roles r ON r.role_code = 'community_member' AND r.is_active "
+    " WHERE m.tenant_id = %(t)s AND m.scope_level = 'TENANT' "
+    "   AND m.status = 'ACTIVE' "
+    "   AND NOT EXISTS (SELECT 1 FROM role_assignments a "
+    "                    WHERE a.user_id = m.user_id AND a.role_id = r.role_id "
+    "                      AND a.membership_id = m.membership_id "
+    "                      AND a.revoked_at IS NULL)"
+) % {"t": f"'{COMMUNITY_TENANT_ID}'"}
+
+#: Hậu điều kiện: KHÔNG còn tài khoản đang hoạt động nào ngoài Cộng đồng.
+#:
+#: Kiểm cả hai vế — có mặt VÀ có vai. Chỉ kiểm vế đầu thì một lượt backfill gắn
+#: membership mà trượt vai vẫn "đạt", và mười người đăng nhập được nhưng không
+#: quay được gì.
+_SQL_POSTCOND_COMMUNITY_BACKFILL = (
+    "SELECT count(*) = 0 FROM users u "
+    " WHERE u.is_active AND u.deleted_at IS NULL "
+    "   AND NOT EXISTS ("
+    "        SELECT 1 FROM memberships m "
+    "          JOIN role_assignments a ON a.membership_id = m.membership_id "
+    "                                 AND a.user_id = m.user_id "
+    "                                 AND a.revoked_at IS NULL "
+    "          JOIN roles r ON r.role_id = a.role_id "
+    "         WHERE m.user_id = u.id AND m.tenant_id = %(t)s "
+    "           AND m.scope_level = 'TENANT' AND m.status = 'ACTIVE' "
+    "           AND r.role_code = 'community_member')"
+) % {"t": f"'{COMMUNITY_TENANT_ID}'"}
+
 #: Bước định hình dữ liệu do mặt phẳng phân quyền sở hữu, khoá theo câu DẪN ĐẦU.
 #: `metadata_db._data_steps()` gộp sổ này với sổ của chính nó.
 AUTHZ_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
     _SQL_SEED_COMMUNITY_TENANT: (
         "migration:v5:seed-community-tenant",
-        (_SQL_SEED_COMMUNITY_TENANT, _SQL_REPAIR_COMMUNITY_TENANT),
+        (_SQL_RETIRE_LEGACY_COMMUNITY_ROW,
+         _SQL_REVOKE_LEGACY_COMMUNITY_INVITES,
+         _SQL_SEED_COMMUNITY_TENANT,
+         _SQL_REPAIR_COMMUNITY_TENANT,
+         _SQL_FIX_RETIRED_COMMUNITY_PLAN),
         _SQL_POSTCOND_COMMUNITY_TENANT,
+    ),
+    _SQL_BACKFILL_COMMUNITY_MEMBERSHIP: (
+        "migration:v6:moi-tai-khoan-deu-thuoc-cong-dong",
+        (_SQL_BACKFILL_COMMUNITY_MEMBERSHIP, _SQL_BACKFILL_COMMUNITY_ROLE),
+        _SQL_POSTCOND_COMMUNITY_BACKFILL,
     ),
 }
 
@@ -314,8 +456,11 @@ _TENANT_TYPE_DDL: list[str] = [
     add_constraint("tenants", "ck_tenants_type",
                    "CHECK (%s)" % _in_list("tenant_type", TENANT_TYPES)),
 
+    _SQL_RETIRE_LEGACY_COMMUNITY_ROW,
+    _SQL_REVOKE_LEGACY_COMMUNITY_INVITES,
     _SQL_SEED_COMMUNITY_TENANT,
     _SQL_REPAIR_COMMUNITY_TENANT,
+    _SQL_FIX_RETIRED_COMMUNITY_PLAN,
 
     # ĐÚNG MỘT tenant cộng đồng. Chỉ mục trên chính cột được lọc: mọi dòng thoả
     # vị từ đều có cùng giá trị 'COMMUNITY', nên tính duy nhất trên cột đó
@@ -1782,6 +1927,17 @@ AUTHZ_DDL_STATEMENTS: list[str] = [
     # Sau `_HIERARCHY_DDL` vì khoá ngoại ghép trỏ tới `projects`; đặt trước nó
     # thì câu `ALTER TABLE ... ADD CONSTRAINT` hỏng ở máy dựng từ số không.
     *_PROJECT_ALLOCATION_DDL,
+    # CUỐI CÙNG, và vị trí này là một phần của tính đúng.
+    #
+    # Hai câu này ghi vào `memberships` và `role_assignments`. Đặt chúng cạnh
+    # khối tenant cộng đồng — nơi chúng thuộc về về mặt chủ đề — làm cả lượt
+    # migration hỏng trên máy dựng từ số không:
+    #
+    #     psycopg2.errors.UndefinedTable: relation "memberships" does not exist
+    #
+    # Chủ đề gom mã lại; THỨ TỰ PHỤ THUỘC quyết định nó chạy được hay không.
+    _SQL_BACKFILL_COMMUNITY_MEMBERSHIP,
+    _SQL_BACKFILL_COMMUNITY_ROLE,
 ]
 
 

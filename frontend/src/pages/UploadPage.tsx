@@ -44,7 +44,10 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="space-y-6">
+    // `space-y-4`, không phải 6: trang này có ba khối xếp dọc cộng một khung
+    // máy ảnh cao, và khoảng cách 6 đẩy chính cái khung ấy xuống dưới mép màn
+    // hình — tức đẩy thứ người ta vào đây để dùng ra khỏi tầm nhìn.
+    <div className="space-y-4">
       <PageHeader 
         title={t("Trung tâm Thu thập Dữ liệu")}
         subtitle={t("Quy trình gọn nhẹ để tạo bộ dữ liệu hiệu quả")}
@@ -70,7 +73,7 @@ export default function UploadPage() {
       )}
 
       {/* Method Selection with Quick Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div
           className={`card card-compact cursor-pointer transition-all duration-200 ${
             tab === "camera"

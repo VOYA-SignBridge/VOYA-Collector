@@ -26,6 +26,7 @@ from app.catalog_sync import (
     bulk_purge_samples,
     empty_sample_trash,
 )
+from app import moderation
 from app.auth import get_current_user, get_current_user_optional, require_admin
 from app.tenant_context import require_tenant
 from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
@@ -271,6 +272,17 @@ def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
     # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
     # vi. Trước 16/08/2026 đường này đọc toàn kho.
     samples = list_samples_v2(require_tenant())
+    # Cổng kiểm duyệt, với NGƯỜI XEM là chính người gọi.
+    #
+    # Đây là chỗ hợp đồng "chưa duyệt thì chỉ chủ dùng được" hiện ra với người
+    # dùng: họ thấy ngay mẫu mình vừa thu, và KHÔNG thấy mẫu chưa duyệt của
+    # người khác. Cùng một danh sách, hai người thấy hai tập khác nhau — đó là
+    # ý định, không phải rò rỉ.
+    #
+    # Lọc SAU khi đã phân giải theo phạm vi tenant: hai cổng độc lập, và cổng
+    # tenant vẫn là cổng đứng trước.
+    samples = moderation.filter_rows(
+        samples, viewer_id=str(current_user.get("id") or "")).kept
     labels_by_uid = _class_uid_to_label_row_map()
     out: List[Dict[str, Any]] = []
     for s in samples:

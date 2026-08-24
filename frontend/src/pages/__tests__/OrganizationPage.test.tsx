@@ -22,6 +22,7 @@ vi.mock('../../api/tenants', async () => {
   return {
     ...actual,
     fetchTenant: vi.fn(),
+    fetchMyTenant: vi.fn(),
     fetchMembers: vi.fn(),
     fetchInvitations: vi.fn(),
     fetchExports: vi.fn(),
@@ -56,6 +57,7 @@ import {
   fetchExports,
   fetchInvitations,
   fetchMembers,
+  fetchMyTenant,
   fetchSubscription,
   fetchTenant,
   removeMember,
@@ -139,6 +141,21 @@ beforeEach(() => {
   ]);
   vi.mocked(fetchInvitations).mockResolvedValue([]);
   vi.mocked(fetchExports).mockResolvedValue([]);
+  // Cửa dành cho THÀNH VIÊN. Chỉ được gọi khi lượt gác cổng trả 403.
+  vi.mocked(fetchMyTenant).mockResolvedValue({
+    tenant_id: 'ctu',
+    display_name: 'VOYA',
+    created_at: null,
+    plan_code: 'free',
+    member_count: 2,
+    admin_count: 1,
+    my_role: 'editor',
+    is_self_serve: false,
+    members: [
+      { username: 'chutochuc', role: 'admin', is_me: false },
+      { username: 'le', role: 'editor', is_me: true },
+    ],
+  });
   vi.mocked(fetchSubscription).mockResolvedValue(subscription());
 });
 
@@ -199,16 +216,19 @@ describe('Gói dịch vụ', () => {
 });
 
 describe('Ngõ cụt phải có lối ra', () => {
-  it('403 nói rõ vì sao, không hiện trang vỡ', async () => {
-    // Một thành viên thường mở trang này sẽ nhận 403 từ `require_tenant_admin`.
-    // Trang trắng ở đây làm người dùng tưởng hệ thống hỏng.
+  it('403 trả lời đúng câu người dùng hỏi: TÔI ĐANG Ở TỔ CHỨC NÀO', async () => {
+    // Một thành viên thường nhận 403 từ `require_tenant_admin`. Trước 20/08 chỗ
+    // này chỉ hiện một câu từ chối — mà "bạn không phải quản trị viên" là câu
+    // trả lời cho một câu hỏi KHÁC HẲN câu người ta vào đây để hỏi.
+    //
+    // Giờ 403 kích hoạt lượt hỏi thứ hai qua cửa dành cho thành viên
+    // (`GET /tenants/me`), và trang hiện tổ chức + vai + danh sách đồng nghiệp.
     vi.mocked(fetchTenant).mockRejectedValue({ response: { status: 403 } });
     renderPage();
 
-    expect(
-      await screen.findByText(/không phải quản trị viên của tổ chức này/i),
-    ).toBeInTheDocument();
-    // Và trấn an đúng chỗ: họ KHÔNG mất tính năng nào khác.
+    // Thông tin tổ chức, không phải lời từ chối.
+    expect(await screen.findByText('VOYA')).toBeInTheDocument();
+    // Vẫn trấn an đúng chỗ: họ KHÔNG mất tính năng nào khác.
     expect(screen.getByText(/vẫn dùng được mọi tính năng đóng góp dữ liệu/i)).toBeInTheDocument();
   });
 
@@ -247,19 +267,24 @@ describe('Lời mời', () => {
     ).toBeInTheDocument();
   });
 
-  it('khoá nút khi email chưa hợp lệ', async () => {
+  it('nhận CẢ email lẫn tên đăng nhập, chặn thứ chắc chắn vô nghĩa', async () => {
+    // Đổi 20/08: ô mời không còn chỉ nhận email. Quản trị viên tổ chức thường
+    // biết đồng nghiệp qua TÊN TÀI KHOẢN chứ không thuộc địa chỉ thư của họ, và
+    // bắt họ đoán địa chỉ là cách chắc chắn để lời mời đi lạc. Máy chủ mới là
+    // nơi phân giải tên thành tài khoản; chỗ này chỉ chặn ô trống và chuỗi quá
+    // ngắn, để nút không bật lên cho thứ không thể là ai cả.
     renderPage();
     const button = await screen.findByRole('button', { name: /Gửi lời mời/ });
+    const box = screen.getByPlaceholderText(/giangvien@ctu.edu.vn/);
     expect(button).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText(/giangvien@ctu.edu.vn/), {
-      target: { value: 'khong-phai-email' },
-    });
+    fireEvent.change(box, { target: { value: 'ab' } });
     expect(button).toBeDisabled();
 
-    fireEvent.change(screen.getByPlaceholderText(/giangvien@ctu.edu.vn/), {
-      target: { value: 'ok@ctu.edu.vn' },
-    });
+    fireEvent.change(box, { target: { value: 'minh123' } });
+    expect(button).toBeEnabled();
+
+    fireEvent.change(box, { target: { value: 'ok@ctu.edu.vn' } });
     expect(button).toBeEnabled();
   });
 });

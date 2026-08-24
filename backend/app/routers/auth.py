@@ -72,6 +72,12 @@ class RegisterRequest(BaseModel):
     # không cần bịa ra tên trường để dùng được sản phẩm.
     organization_name: Optional[str] = Field(None, max_length=120)
 
+    # Gói dịch vụ cho tổ chức vừa tạo. CHỈ những gói được đánh dấu tự phục vụ
+    # mới nhận ở đây — `_resolve_plan(..., must_be_self_serve=True)` cưỡng chế
+    # điều đó ở tầng dịch vụ, nên một người gọi gửi thẳng `enterprise` sẽ bị từ
+    # chối chứ không được cấp. Bỏ trống thì dùng gói mặc định của nền tảng.
+    plan_code: Optional[str] = Field(None, max_length=50)
+
     # Số hiệu bản Điều khoản và Quyền riêng tư mà người dùng ĐÃ ĐỌC.
     #
     # Không phải boolean. Một cờ "đã tích" trả lời được "có bấm không" nhưng
@@ -113,6 +119,16 @@ class UserOut(BaseModel):
     # do `require_tenant_admin` cưỡng chế ở từng điểm cuối; một client sửa
     # trường này chỉ tự vẽ thêm một cái link dẫn tới 403.
     tenant_role: Optional[str] = None
+    # Người này có bấm được nút Duyệt / Từ chối không.
+    #
+    # Cùng tính chất với `tenant_role`: dữ liệu để VẼ giao diện, không phải để
+    # quyết định quyền. Máy chủ vẫn cưỡng chế ở `require_moderator`; một client
+    # sửa cờ này chỉ tự vẽ ra một mục menu dẫn tới 403.
+    #
+    # Cần vì `is_admin` KHÔNG thay được: người kiểm duyệt là chuyên gia được
+    # mời, không phải người vận hành nền tảng, nên đọc `is_admin` để ẩn/hiện
+    # mục Kiểm duyệt sẽ giấu nó khỏi đúng những người nó sinh ra để phục vụ.
+    can_moderate: bool = False
 
 
 class MessageResponse(BaseModel):
@@ -368,33 +384,31 @@ def register(payload: RegisterRequest, request: Request):
         # up in, not the one it was created in a moment ago.
         user = _fetch_user_by_id(user["id"]) or user
     else:
-        # Tự phục vụ: tổ chức riêng, người này làm chủ.
+        # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
         #
-        # Tài khoản được tạo TRƯỚC tenant, nên trong khoảnh khắc giữa hai bước
-        # nó vẫn mang tenant gốc. Nếu bước tạo tenant hỏng, tài khoản bị VÔ
-        # HIỆU HOÁ chứ không để nguyên: một tài khoản chết trong tenant gốc là
-        # phiền toái phải khắc phục bằng tay, còn một tài khoản SỐNG trong
-        # tenant gốc đúng là lỗ hổng mà cả đoạn này sinh ra để bịt. Thứ tự
-        # ngược lại — tenant trước, tài khoản sau — chỉ đổi chỗ vấn đề: một
-        # username trùng sẽ để lại tenant mồ côi mà `ON DELETE RESTRICT` không
-        # cho dọn, vì danh mục đã được sao chép vào đó.
+        # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
+        # mời. Điều đó sai ở hai mức:
+        #
+        #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
+        #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
+        #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
+        #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
+        #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
+        #
+        # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
+        # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
+        # được ngay cả khi bước gắn vai bên dưới trượt.
+        #
+        # Nhưng gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì
+        # `access_gate` từ chối mọi lượt ghi — họ đăng nhập được, xem được, và
+        # không quay được. Trạng thái đó trông như hỏng chứ không như bị chặn,
+        # nên nó vào log ở mức ERROR chứ không im lặng.
         try:
-            tenant = tenant_admin.create_self_serve_tenant(
-                user["id"],
-                display_name=(payload.organization_name or "").strip() or payload.username,
-            )
-        except tenant_admin.TenantError as exc:
-            _deactivate_stranded_account(user["id"], reason=str(exc))
-            raise HTTPException(
-                status_code=exc.status_code,
-                detail=f"Không tạo được tổ chức cho tài khoản: {exc}",
-            ) from exc
-        except Exception as exc:
-            _deactivate_stranded_account(user["id"], reason=type(exc).__name__)
-            raise
-        logger.info(
-            "[REGISTER] tài khoản %s tự tạo tổ chức %s", user["id"], tenant["tenant_id"]
-        )
+            tenant_admin.join_community(user["id"])
+        except Exception:
+            logger.exception(
+                "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
+                "không ghi được gì cho tới khi có người cấp vai", user["id"])
         user = _fetch_user_by_id(user["id"]) or user
 
     _send_welcome_verification(user)
@@ -684,6 +698,18 @@ def me(current_user=Depends(get_current_user)):
         # tiết trang trí là đổi một cái link thiếu lấy một màn hình trắng.
         logger.warning("[AUTH][ME] không tra được vai tổ chức cho %s", user.get("id"))
         user["tenant_role"] = None
+
+    # Cùng lý lẽ như `tenant_role` ngay trên: tra ở ĐÂY, không nhét vào
+    # `get_current_user` — mọi endpoint đi qua phụ thuộc đó, và thêm một lượt
+    # đọc bảng vào nó để phục vụ một mục menu là trả giá trên từng request.
+    try:
+        from app.moderation_admin import can_moderate
+
+        user["can_moderate"] = can_moderate(user)
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH][ME] không tra được quyền kiểm duyệt cho %s",
+                       user.get("id"))
+        user["can_moderate"] = False
     return user
 
 

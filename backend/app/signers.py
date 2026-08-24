@@ -151,3 +151,42 @@ def get_signer(signer_id: str) -> Optional[Dict[str, str]]:
         if (r.get("signer_id") or "").strip() == signer_id:
             return r
     return None
+
+
+def update_signer(signer_id: str, *, display_name: Optional[str] = None,
+                  regional_group: Optional[str] = None,
+                  is_active: Optional[bool] = None) -> Optional[Dict[str, str]]:
+    """Sửa phần MÔ TẢ của một hồ sơ người ký. `signer_id` không đổi được.
+
+    Đổi `signer_id` là đổi khoá mà mọi mẫu đã thu đang trỏ tới, và cột ấy nằm
+    trong `samples.csv` lẫn `samples.signer_id` — nên nó không phải một trường
+    sửa được từ giao diện. Muốn hai id chỉ về một người thì dùng đường gộp
+    (`signer_aliases`), ở đó quyết định được ghi lại kèm lý do.
+
+    `is_active=False` giữ nguyên hồ sơ và mọi quan hệ lịch sử của nó; nó chỉ
+    rút hồ sơ khỏi danh sách chọn khi thu mẫu.
+    """
+    lock = FileLock(str(SIGNERS_CSV) + ".lock")
+    with lock:
+        rows = _load_rows_locked()
+        target: Optional[Dict[str, str]] = None
+        for r in rows:
+            if (r.get("signer_id") or "").strip() == signer_id:
+                target = r
+                break
+        if target is None:
+            return None
+        if display_name is not None:
+            target["display_name"] = display_name.strip()
+        if regional_group is not None:
+            target["regional_group"] = regional_group.strip()
+        if is_active is not None:
+            target["is_active"] = "1" if is_active else "0"
+        _write_rows_locked(rows)
+
+    try:
+        from app.storage.metadata_db import upsert_signer
+        upsert_signer(target)
+    except Exception as exc:
+        logger.warning("[SIGNER] DB mirror failed for %s: %s", signer_id, exc)
+    return target

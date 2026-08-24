@@ -204,6 +204,41 @@ def build_sample_class_index(sources) -> dict:
     return index
 
 
+def load_unapproved_ids(sources) -> dict:
+    """sample_id -> lý do, cho mọi mẫu CHƯA qua kiểm duyệt.
+
+    Trả về đúng hình dạng của `load_excluded_ids` để gộp thẳng vào cùng một cơ
+    chế: một manifest là **bản công bố**, và loại ở tầng manifest giữ được mọi
+    split đã phát hành trước đó vẫn chạy — cùng lý lẽ đã ghi cho tệp quyết định.
+
+    Vì sao không lọc bằng `moderation.filter_rows` trên chính `rows`
+    -----------------------------------------------------------------
+    `build_manifest` dựng dòng từ cây `.npz` chứ không từ `samples.csv`, nên
+    dòng nó tạo ra KHÔNG mang `review_status`. Cổng đọc sự im lặng thành "chưa
+    duyệt" (đúng theo thiết kế), nên lọc ở đó sẽ loại sạch mọi thứ. Trạng thái
+    phải tra từ chính tệp giữ nó.
+
+    Mẫu KHÔNG có dòng nào trong `samples.csv` không rơi vào đây: những tệp ấy đã
+    được `unlabeled` / `unreadable` xử lý, và thêm một luật thứ hai vào cùng chỗ
+    sẽ làm một bản phát hành teo lại vì một lý do khác hẳn thứ báo cáo nói.
+    """
+    from app.moderation import APPROVED, status_of
+
+    out: dict = {}
+    for src in sources:
+        src = Path(src)
+        if not src.exists():
+            continue
+        for r in _read_csv(src):
+            sid = (r.get("sample_id") or r.get("sample_uid") or "").strip()
+            if not sid or sid in out:
+                continue
+            tt = status_of(r)
+            if tt != APPROVED:
+                out[sid] = f"chua qua kiem duyet (review_status={tt})"
+    return out
+
+
 def load_excluded_ids(path: Path | None) -> dict:
     """sample_id -> reason, from a decisions file.
 
@@ -394,7 +429,14 @@ def main() -> int:
 
     legacy_user_index = build_legacy_user_index(args.legacy_user_sources)
     sample_class_index = build_sample_class_index(args.legacy_user_sources)
-    excluded_ids = load_excluded_ids(args.exclude)
+    # Cổng kiểm duyệt và tệp quyết định dùng CHUNG một cơ chế loại trừ.
+    #
+    # Tệp quyết định thắng khi trùng: một mẫu bị loại vì lý do chất lượng thì
+    # lý do ấy đáng đọc hơn "chưa qua kiểm duyệt", kể cả khi cả hai đều đúng.
+    chua_duyet = load_unapproved_ids(args.legacy_user_sources)
+    if chua_duyet:
+        print(f"[kiem-duyet] loai {len(chua_duyet)} mau chua qua kiem duyet")
+    excluded_ids = {**chua_duyet, **load_excluded_ids(args.exclude)}
     rows, unreadable, unlabeled, excluded, augmented = build_manifest(
         args.features_root, labels_rows, signer_name_to_id, legacy_user_index,
         excluded_ids=excluded_ids, sample_class_index=sample_class_index)

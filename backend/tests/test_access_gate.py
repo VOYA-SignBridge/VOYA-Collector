@@ -179,3 +179,42 @@ class TestReachableSurface:
         assert client.get("/api/v1/health/live").status_code == 200
         assert client.get("/api/v1/health/ready").status_code == 200
         assert client.get("/metrics").status_code == 200
+
+    def test_thu_vien_cong_khai_KHONG_ke_ten_tenant(self, client):
+        """Mở để XEM không có nghĩa là mở để BIẾT kho này của ai.
+
+        `/classes/list` từng trả `"tenant_id": "default"` trên mỗi dòng cho
+        khách vãng lai. Không rò một hàng dữ liệu nào, nhưng rò định danh nội bộ
+        của kho đang phục vụ — cùng họ với lỗi `count` toàn cục đã ghi trong
+        chính endpoint ấy: "không thấy lớp của tenant khác nhưng vẫn BIẾT chúng
+        tồn tại".
+
+        Vì sao GIẢ LẬP nguồn thay vì đọc dữ liệu thật
+        ----------------------------------------------
+        `list_classes` đọc `labels.csv`, và suite cô lập các tệp dataset — nên
+        trên bộ test danh sách rỗng, vòng lặp kiểm chạy 0 lần, và bài test sẽ
+        xanh mà không chứng minh gì. Giả lập một dòng làm phép kiểm không phụ
+        thuộc vào việc máy chạy test có corpus hay không.
+
+        Đối chứng âm nằm ngay trong bài: `to_label_row()` PHẢI còn `tenant_id`,
+        vì chính hàm ấy dựng các dòng ghi vào `labels.csv`. Bỏ cột khỏi tệp đó
+        sẽ mất phân vùng tenant trong nguồn sự thật — nên phép gỡ bắt buộc phải
+        nằm ở tầng phản hồi, và đối chứng này là thứ ghim nó ở đúng chỗ.
+        """
+        from unittest.mock import patch
+
+        class _LopGia:
+            def to_label_row(self):
+                return {"class_uid": "u1", "slug": "s", "label_original": "x",
+                        "tenant_id": "default"}
+
+        gia = _LopGia()
+        # Đối chứng âm: nguồn có mang tenant_id.
+        assert "tenant_id" in gia.to_label_row()
+
+        with patch("app.routers.classes.list_classes", return_value=[gia]):
+            body = client.get("/api/v1/classes/list").json()
+
+        assert body["count"] == 1, "gia lap khong toi duoc endpoint"
+        for row in body["items"]:
+            assert "tenant_id" not in row, f"van ke ten tenant: {row}"

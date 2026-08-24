@@ -55,6 +55,11 @@ export type RegisterPayload = {
   /** Tên tổ chức, dùng để đặt tên cho tenant mà lượt đăng ký này tạo ra. */
   organization_name?: string;
   /**
+   * Gói cho tổ chức vừa tạo. Chỉ gói tự phục vụ được nhận; máy chủ từ chối
+   * phần còn lại, nên biểu mẫu không được cho chọn chúng.
+   */
+  plan_code?: string;
+  /**
    * Số hiệu bản văn bản mà người dùng vừa đọc và đồng ý.
    *
    * Máy chủ đối chiếu lại số hiệu này với bản đang hiệu lực; gửi số cũ sẽ bị

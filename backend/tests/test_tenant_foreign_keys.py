@@ -161,6 +161,89 @@ def test_a_real_tenant_is_accepted(rollback_cursor):
     assert rollback_cursor.fetchone()[0] == 1
 
 
+# ------------------------------------------------- tham chiếu chéo tenant
+#
+# `tenant_id` trỏ về một tenant CÓ THẬT là điều kiện cần, không phải điều kiện
+# đủ. Câu hỏi thứ hai — hàng này có trỏ sang dữ liệu của tenant KHÁC không —
+# được trả lời bằng khoá ngoại GHÉP. Ngày 23/08/2026 kiểm lại toàn bộ: 24 khoá
+# ghép đã có, đúng hai chỗ bị bỏ sót, và cả hai đều nằm dưới đây.
+
+
+def test_sample_khong_tro_duoc_sang_capture_session_cua_tenant_khac(rollback_cursor):
+    """`fk_samples_capture_session` chỉ hỏi capture session có tồn tại không.
+
+    Nó trả lời "có" cho một capture session thuộc tenant bất kỳ, nên một mẫu
+    của tenant A gắn được vào buổi thu của tenant B — hai mặt phẳng cách ly
+    đều không thấy, vì `samples.tenant_id` vẫn đúng và tệp vẫn nằm đúng chỗ.
+    Thứ chặn được là khoá ghép `(tenant_id, capture_session_id)`.
+    """
+    tid = f"test-{uuid.uuid4().hex[:8]}"
+    rollback_cursor.execute(
+        "INSERT INTO tenants(tenant_id, display_name, slug) VALUES(%s, %s, %s)",
+        (tid, "Thử chéo", tid))
+    rollback_cursor.execute(
+        "INSERT INTO classes(class_uid, tenant_id, slug, label_original, "
+        "language, region, is_active) VALUES(%s, %s, 'xt', 'XT', 'vn', "
+        "'common', true)", (f"cls_{uuid.uuid4().hex[:8]}", tid))
+    rollback_cursor.execute(
+        "SELECT class_uid FROM classes WHERE tenant_id = %s", (tid,))
+    cls = rollback_cursor.fetchone()[0]
+    cap = str(uuid.uuid4())
+    rollback_cursor.execute(
+        "INSERT INTO capture_sessions(capture_session_id, tenant_id, class_uid, "
+        "session_id) VALUES(%s, %s, %s, 'probe')", (cap, tid, cls))
+
+    rollback_cursor.execute(
+        "SELECT sample_uid FROM samples WHERE tenant_id = 'default' "
+        "AND deleted_at IS NULL LIMIT 1")
+    mau = rollback_cursor.fetchone()
+    if mau is None:
+        pytest.skip("khong co mau nao cua tenant 'default' de thu")
+
+    with pytest.raises(psycopg2.errors.ForeignKeyViolation):
+        rollback_cursor.execute(
+            "UPDATE samples SET capture_session_id = %s WHERE sample_uid = %s",
+            (cap, mau[0]))
+
+
+def test_xoa_capture_session_chi_go_con_tro_chu_khong_hong(rollback_cursor):
+    """Đây là lý do khoá ghép phải viết `SET NULL (capture_session_id)`.
+
+    `ON DELETE SET NULL` trần sẽ đặt NULL cho CẢ HAI cột của khoá, mà
+    `samples.tenant_id` là NOT NULL — nên xoá một capture session sẽ nổ thay vì
+    gỡ con trỏ, và hành vi cũ của khoá một cột lặng lẽ mất. Danh sách cột giữ
+    nguyên hành vi ấy.
+    """
+    rollback_cursor.execute(
+        "SELECT capture_session_id FROM samples "
+        "WHERE capture_session_id IS NOT NULL AND tenant_id = 'default' LIMIT 1")
+    row = rollback_cursor.fetchone()
+    if row is None:
+        pytest.skip("khong co mau nao dang gan capture session")
+    cap = row[0]
+
+    rollback_cursor.execute("DELETE FROM capture_sessions WHERE capture_session_id = %s",
+                            (cap,))
+    rollback_cursor.execute(
+        "SELECT count(*) FILTER (WHERE capture_session_id IS NOT NULL), "
+        "       count(*) FILTER (WHERE tenant_id IS NULL) "
+        "FROM samples WHERE sample_uid IN "
+        "  (SELECT sample_uid FROM samples WHERE capture_session_id = %s)", (cap,))
+    con_tro, mat_tenant = rollback_cursor.fetchone()
+    assert con_tro == 0, "con trỏ phải được gỡ"
+    assert mat_tenant == 0, "tenant_id không được đụng tới"
+
+
+def test_con_tro_registry_hien_hanh_phai_tro_vao_phien_ban_co_that(rollback_cursor):
+    """`vocabulary_registry_meta` nói "tenant X đang ở phiên bản Y" nhưng trước
+    23/08/2026 không có gì bảo đảm Y tồn tại. Một con trỏ trỏ vào hư vô ở đây
+    nghĩa là bộ từ vựng đang phát hành không truy nguyên được."""
+    with pytest.raises(psycopg2.errors.ForeignKeyViolation):
+        rollback_cursor.execute(
+            "UPDATE vocabulary_registry_meta SET version = 999999 "
+            "WHERE tenant_id = 'default'")
+
+
 # ---------------------------------------------------------------- migration
 
 def test_the_migration_builds_its_sql_from_the_constant():

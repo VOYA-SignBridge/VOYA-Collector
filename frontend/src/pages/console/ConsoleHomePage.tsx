@@ -12,7 +12,6 @@
 
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import Badge from "../../components/ui/Badge";
 import LoadingSpinner from "../../components/ui/LoadingSpinner";
 import ErrorBanner from "../../components/ErrorBanner";
 import { useI18n } from "../../i18n";
@@ -88,7 +87,10 @@ export default function ConsoleHomePage() {
             ))}
           </div>
           <Link
-            to="/console/allocations"
+            // Tương đối, không tuyệt đối: trang này giờ được vẽ ở
+            // `/org/<id>` nên một đường `/console/...` sẽ rơi vào chuyển hướng
+            // và đánh mất mã tổ chức đang xem.
+            to="settings/allocations"
             className="mt-4 inline-block text-sm font-medium text-ctu-blue hover:underline"
           >
             {t("Chia hạn mức xuống từng project →")}
@@ -96,27 +98,6 @@ export default function ConsoleHomePage() {
         </section>
       )}
 
-      {/* Danh sách này là phần TRUNG THỰC của trang. Nó nêu đúng những gì chưa
-          có hiệu lực, thay vì để bốn thẻ số ở trên được đọc thành "mọi thứ đã
-          chạy". Gỡ nó đi chỉ hợp lệ khi hai dòng dưới đã đóng thật. */}
-      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        <h2 className="mb-2 font-semibold">{t("Trạng thái thật của cơ chế phạm vi")}</h2>
-        <ul className="ml-5 list-disc space-y-1">
-          <li>
-            {t("Chế độ phân quyền:")}{" "}
-            <Badge variant={scope?.authz_mode === "casbin" ? "success" : "default"} size="sm">
-              {scope?.authz_mode ?? "—"}
-            </Badge>{" "}
-            {scope?.authz_mode === "shadow" &&
-              t("— Casbin đang quan sát, hệ cũ hai phạm vi là bên quyết định.")}
-          </li>
-          <li>
-            {scope?.data_carries_project_id
-              ? t("Dữ liệu đã mang project_id.")
-              : t("Dữ liệu chưa mang project_id — cấp phát ở cấp project là hạn mức dự kiến, chưa tự chặn đường ghi.")}
-          </li>
-        </ul>
-      </section>
     </div>
   );
 }

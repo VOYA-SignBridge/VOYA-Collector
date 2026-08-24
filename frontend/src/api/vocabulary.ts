@@ -180,3 +180,49 @@ export async function updateDialect(
     return toError(e);
   }
 }
+
+
+// --------------------------------------------------------------------------- phiên bản danh mục (UC10)
+
+/**
+ * Một bản danh mục ĐÃ ĐÓNG BĂNG. Nội dung của nó không sửa được; muốn đổi thì
+ * công bố bản mới. `content_hash` là thứ cho phép đối chiếu rằng bản đang đọc
+ * đúng là bản đã công bố.
+ */
+export interface CatalogVersion {
+  version: number;
+  content_hash: string;
+  note: string | null;
+  created_at: string;
+  created_by_username: string | null;
+}
+
+export interface CatalogState {
+  dialects: unknown[];
+  profiles: unknown[];
+  /** Băm của danh mục ĐANG SỐNG (chưa công bố). */
+  content_hash: string;
+  latest_version: number | null;
+  /** Băm của bản công bố gần nhất. Khác `content_hash` = đã sửa từ lần công bố. */
+  latest_content_hash: string | null;
+}
+
+const CATALOG = "/api/v1/vocabulary/catalog";
+
+export async function getCatalogState(): Promise<CatalogState> {
+  const res = await axiosClient.get<CatalogState>(CATALOG);
+  return res.data;
+}
+
+export async function getCatalogVersions(limit = 50): Promise<CatalogVersion[]> {
+  const res = await axiosClient.get<{ items: CatalogVersion[] }>(`${CATALOG}/versions`, {
+    params: { limit },
+  });
+  return res.data.items;
+}
+
+/** Công bố. Bất biến theo NỘI DUNG: danh mục không đổi thì trả về bản đã có. */
+export async function publishCatalog(note: string): Promise<{ version: number; created: boolean }> {
+  const res = await axiosClient.post(`${CATALOG}/publish`, { note });
+  return res.data;
+}

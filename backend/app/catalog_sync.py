@@ -1301,6 +1301,105 @@ def sync_soft_delete_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any
         return {"deleted": True, "soft": True, "sample_uid": sample_uid}
 
 
+def sync_set_review_status(
+    capture_session_id: str,
+    status: str,
+    *,
+    tenant_id: str,
+    reviewed_by: str = "",
+    note: str = "",
+) -> Dict[str, Any]:
+    """Đóng dấu trạng thái kiểm duyệt lên MỌI mẫu của một phiên thu.
+
+    Vì sao hàm này ở ĐÂY chứ không ở `moderation_admin`
+    ----------------------------------------------------
+    Mô-đun này sở hữu `samples.csv`: khoá tệp, thứ tự ghi, và phép hoàn nguyên
+    khi hỏng đều nằm ở đây. Bản đầu tôi viết phần ghi tệp thẳng trong
+    `moderation_admin`, và `test_file_backed_tenant_isolation` bắt được — nó
+    liệt kê tường minh những mô-đun được phép đọc TOÀN KHO, kèm tiêu chí
+    "không bao giờ là một đường phục vụ request".
+
+    Bài kiểm ấy đúng, và cách sửa không phải là nới danh sách: một đường request
+    không nên tự đi đọc cả kho. Nó nên gọi mô-đun đã có trách nhiệm ấy, nơi
+    logic tuần tự hoá chỉ tồn tại một bản.
+
+    Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`
+    ---------------------------------------------------------
+    `thuoc_phien` hỏi trong PHẠM VI: người gọi được quyết định trên phiên nào.
+    `tat_ca` dùng để ghi lại toàn bộ tệp nên phải TOÀN CỤC — ghi từ một danh
+    sách đã lọc theo tenant sẽ xoá trắng hàng của mọi tenant khác.
+    """
+    ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
+    sid = str(capture_session_id or "").strip()
+
+    from app.storage.metadata_db import _fetch_all
+
+    with _catalog_lock():
+        # THẨM QUYỀN, hỏi POSTGRES chứ không hỏi CSV.
+        #
+        # `capture_session_id` là cột chỉ có ở cơ sở dữ liệu — nó KHÔNG nằm
+        # trong 34 cột của `samples.csv`. Hàng đợi kiểm duyệt cũng dựng từ đó.
+        # Hỏi CSV ở đây thì không tìm thấy phiên nào, và hai màn hình sẽ nói hai
+        # chuyện về cùng một phiên.
+        #
+        # Mệnh đề `tenant_id` là hàng rào: một phiên của tổ chức khác trả 404
+        # giống hệt một phiên không tồn tại.
+        thuoc_phien = _fetch_all(
+            "SELECT sample_uid, auth_user_id::text AS auth_user_id, label_original "
+            "  FROM samples "
+            " WHERE capture_session_id = %s AND tenant_id = %s AND deleted_at IS NULL",
+            (sid, scope),
+        )
+        uids = {str(r["sample_uid"]) for r in thuoc_phien}
+        if not uids:
+            raise CatalogSyncError(
+                f"Khong tim thay phien thu {sid}", status_code=404,
+                error_code="CAPTURE_SESSION_NOT_FOUND")
+
+        # TUẦN TỰ HOÁ.
+        tat_ca = _load_all_samples_unscoped()
+        truoc = [dict(r) for r in tat_ca]
+        cham_csv = 0
+        for r in tat_ca:
+            if str(r.get("sample_uid") or "") in uids:
+                r["review_status"] = status
+                cham_csv += 1
+
+        # Lệch giữa hai bên là chuyện PHẢI KÊU, không phải chuyện bỏ qua.
+        #
+        # `samples.csv` là nguồn sự thật. Một mẫu có trong Postgres mà không có
+        # trong tệp nghĩa là quyết định vừa ghi sẽ bị lượt đồng bộ kế tiếp xoá
+        # đi — im lặng, và người kiểm duyệt tưởng mình đã làm xong. Ghi WARNING
+        # để chuyện đó để lại dấu vết thay vì biến mất.
+        if cham_csv != len(uids):
+            logger.warning(
+                "[MODERATION] phien %s: %d/%d mau co trong samples.csv. "
+                "Nhung mau thieu se mat trang thai duyet o luot dong bo sau.",
+                sid, cham_csv, len(uids))
+
+        from app.storage.metadata_db import _execute
+
+        try:
+            _write_samples_csv(tat_ca)
+            _execute(
+                "UPDATE samples SET review_status = %s, reviewed_by = %s, "
+                "       reviewed_at = NOW(), review_note = %s "
+                " WHERE capture_session_id = %s AND tenant_id = %s "
+                "   AND deleted_at IS NULL",
+                (status, reviewed_by or None, (note or "").strip(), sid, scope),
+            )
+        except Exception:
+            # Hoàn tệp về nguyên trạng. Postgres là BẢN SAO nên một lượt ghi
+            # hỏng ở đó tự lành ở lượt đồng bộ sau; tệp thì không.
+            _write_samples_csv(truoc)
+            raise
+
+    return {"capture_session_id": sid, "review_status": status,
+            "sample_count": len(uids), "rows": thuoc_phien}
+
+
 def sync_restore_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Restore a soft-deleted sample: clear deleted_at and re-add its samples.csv
     row from the DB record.

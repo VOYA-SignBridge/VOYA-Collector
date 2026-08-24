@@ -19,6 +19,7 @@ import RouteErrorBoundary from "./components/RouteErrorBoundary";
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const LabelDetailPage = lazy(() => import("./pages/LabelDetailPage"));
+const CollectionSessionsPage = lazy(() => import("./pages/CollectionSessionsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
 const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPage"));
 const TrainingPipeline = lazy(() => import("./pages/training/TrainingPipeline"));
@@ -33,6 +34,8 @@ const AdminResourcesPage = lazy(() => import("./pages/AdminResourcesPage"));
 const AdminActivityPage = lazy(() => import("./pages/AdminActivityPage"));
 const AdminDataPage = lazy(() => import("./pages/AdminDataPage"));
 const SotAdminPage = lazy(() => import("./pages/SotAdminPage"));
+const AdminSignersPage = lazy(() => import("./pages/AdminSignersPage"));
+const AdminProcessingPage = lazy(() => import("./pages/AdminProcessingPage"));
 const AdminVocabularyPage = lazy(() => import("./pages/AdminVocabularyPage"));
 const AdminLegalPage = lazy(() => import("./pages/AdminLegalPage"));
 const AdminTenantsPage = lazy(() => import("./pages/AdminTenantsPage"));
@@ -42,7 +45,20 @@ const AccountPage = lazy(() => import("./pages/AccountPage"));
 const ConsentsPage = lazy(() => import("./pages/settings/ConsentsPage"));
 const OrganizationPage = lazy(() => import("./pages/OrganizationPage"));
 const WorkspacesPage = lazy(() => import("./pages/settings/WorkspacesPage"));
-const ConsoleLayout = lazy(() => import("./pages/console/ConsoleLayout"));
+const ModerationPage = lazy(() => import("./pages/ModerationPage"));
+const OrgPickerPage = lazy(() => import("./pages/org/OrgPickerPage"));
+const OrgLayout = lazy(() => import("./pages/org/OrgLayout"));
+const OrgUploadPage = lazy(() =>
+  import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgUploadPage })));
+const OrgLabelsPage = lazy(() =>
+  import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgLabelsPage })));
+const OrgSessionsPage = lazy(() =>
+  import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgSessionsPage })));
+const OrgRealtimePage = lazy(() =>
+  import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgRealtimePage })));
+const OrgTrainingPage = lazy(() =>
+  import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgTrainingPage })));
+const OrgSettingsLayout = lazy(() => import("./pages/org/OrgSettingsLayout"));
 const ConsoleHomePage = lazy(() => import("./pages/console/ConsoleHomePage"));
 const ConsoleAllocationsPage = lazy(() => import("./pages/console/ConsoleAllocationsPage"));
 const ConsolePoliciesPage = lazy(() => import("./pages/console/ConsolePoliciesPage"));
@@ -85,6 +101,13 @@ function ProtectedRoute({
 function RedirectToLabelDetail() {
   const { id = "" } = useParams();
   return <Navigate to={`/labels/${id}`} replace />;
+}
+
+// Cùng lý do và cùng hình dạng: hỗ trợ đã chuyển vào Cài đặt, và các thông báo
+// đã gửi trước lượt chuyển ấy vẫn mang đường `/support/<id>`. Giữ ID lại.
+function SupportTicketRedirect() {
+  const { id = "" } = useParams();
+  return <Navigate to={id ? `/settings/support/${id}` : "/settings/support"} replace />;
 }
 
 function App() {
@@ -180,6 +203,14 @@ function App() {
               />
               <Route path="/admin/labels/:id" element={<RedirectToLabelDetail />} />
 
+              <Route
+                path="/sessions"
+                element={
+                  <ProtectedRoute>
+                    <CollectionSessionsPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="/realtime" element={<RealtimeRecognitionPage />} />
 
               {/* Thông báo và hỗ trợ: mọi thành viên đã đăng nhập, KHÔNG phải
@@ -196,7 +227,12 @@ function App() {
               {/* Hỗ trợ đã chuyển vào Cài đặt. Giữ chuyển hướng: thông báo
                   "phản hồi mới trên phiếu" gửi trước hôm nay trỏ vào đây. */}
               <Route path="/support" element={<Navigate to="/settings/support" replace />} />
-              <Route path="/support/:id" element={<Navigate to="/settings/support" replace />} />
+              {/* Giữ ID khi chuyển hướng. Bản trước ném nó đi và đưa mọi thông
+                  báo "phản hồi mới trên phiếu #X" về cùng một danh sách — người
+                  dùng phải tự đi tìm lại đúng thứ vừa được báo. Những thông báo
+                  ấy đã nằm sẵn trong cơ sở dữ liệu với đường dẫn cũ, nên đường
+                  này phải chuyển tiếp ID chứ không chỉ tồn tại. */}
+              <Route path="/support/:id" element={<SupportTicketRedirect />} />
 
               <Route
                 path="/training"
@@ -235,9 +271,15 @@ function App() {
                 <Route path="data" element={<AdminDataPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
                 <Route path="support" element={<AdminSupportPage />} />
+                {/* Cùng trang, mở sẵn một phiếu. Thông báo "phiếu hỗ trợ
+                    mới" trỏ vào đây kèm ID; trước đây không route nào khớp
+                    nên cú nhấp rơi vào trang không tìm thấy. */}
+                <Route path="support/:id" element={<AdminSupportPage />} />
                 <Route path="resources" element={<AdminResourcesPage />} />
                 <Route path="activity" element={<AdminActivityPage />} />
                 <Route path="sot" element={<SotAdminPage />} />
+                <Route path="signers" element={<AdminSignersPage />} />
+                <Route path="processing" element={<AdminProcessingPage />} />
                 {/* Duyệt phương ngữ do người đóng góp đề xuất. Thiếu route này
                     thì đề xuất từ AddDialectModal nằm chờ mãi mãi. */}
                 <Route path="vocabulary" element={<AdminVocabularyPage />} />
@@ -259,26 +301,72 @@ function App() {
                   ROUTE chứ không phải một tab trong state: `/settings/security`
                   phải chia sẻ được, đánh dấu được và quay-lại được — và thông
                   báo bảo mật trỏ tới đây bằng đường dẫn. */}
-              {/* Console của QUẢN TRỊ TỔ CHỨC. Tách khỏi `/admin` (nền tảng) và
-                  khỏi `/settings` (tài khoản của tôi) vì đó là ba thẩm quyền
-                  khác nhau — xem chú thích đầu `ConsoleLayout`. Vỏ console
-                  KHÔNG phải hàng rào quyền; máy chủ vẫn cưỡng chế. */}
+              {/* TỔ CHỨC. Hai tầng, và tầng ngoài là thứ mới:
+
+                  /org            chọn tổ chức — một người có thể thuộc nhiều
+                  /org/<id>/...   vỏ của MỘT tổ chức
+
+                  Đoạn `<id>` là BẢN SAO của `users.active_tenant_id` để liên
+                  kết chia sẻ được. Máy chủ đọc cột chứ không đọc đường dẫn, nên
+                  gõ tay mã của tổ chức khác vào đây không cho xem dữ liệu của
+                  họ — xem `tenant_middleware`.
+
+                  Tách khỏi `/admin` (nền tảng) và `/settings` (tài khoản của
+                  tôi): ba thẩm quyền khác nhau. Vỏ KHÔNG phải hàng rào quyền;
+                  máy chủ vẫn cưỡng chế. */}
+              {/* Kiểm duyệt ở CẤP CAO NHẤT, không nằm trong `/admin`.
+
+                  Người kiểm duyệt giữ `community_reviewer`, không giữ
+                  `is_admin` — đặt trang này sau `requireAdmin` sẽ chặn đúng
+                  những người nó sinh ra để phục vụ. Quyền do
+                  `require_moderator` ở máy chủ cưỡng chế. */}
               <Route
-                path="/console"
+                path="/moderation"
                 element={
                   <ProtectedRoute>
-                    <ConsoleLayout />
+                    <ModerationPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/org"
+                element={
+                  <ProtectedRoute>
+                    <OrgPickerPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/org/:tenantId"
+                element={
+                  <ProtectedRoute>
+                    <OrgLayout />
                   </ProtectedRoute>
                 }
               >
                 <Route index element={<ConsoleHomePage />} />
+                <Route path="upload" element={<OrgUploadPage />} />
+                <Route path="labels" element={<OrgLabelsPage />} />
+                <Route path="sessions" element={<OrgSessionsPage />} />
+                <Route path="realtime" element={<OrgRealtimePage />} />
+                <Route path="training" element={<OrgTrainingPage />} />
                 <Route path="members" element={<OrganizationPage />} />
-                <Route path="workspaces" element={<WorkspacesPage />} />
-                <Route path="allocations" element={<ConsoleAllocationsPage />} />
-                <Route path="billing" element={<BillingPage />} />
-                <Route path="integrations" element={<IntegrationsPage />} />
-                <Route path="policies" element={<ConsolePoliciesPage />} />
+                <Route path="settings" element={<OrgSettingsLayout />}>
+                  <Route index element={<WorkspacesPage />} />
+                  <Route path="allocations" element={<ConsoleAllocationsPage />} />
+                  <Route path="billing" element={<BillingPage />} />
+                  <Route path="integrations" element={<IntegrationsPage />} />
+                  <Route path="policies" element={<ConsolePoliciesPage />} />
+                </Route>
               </Route>
+
+              {/* Địa chỉ cũ của console. Giữ chuyển hướng chứ không xoá: chúng
+                  đã đi ra ngoài trong tài liệu và dấu trang. Tất cả về `/org`,
+                  nơi người dùng chọn tổ chức rồi mới vào — mã tổ chức không suy
+                  ra được từ đường cũ. */}
+              <Route path="/console" element={<Navigate to="/org" replace />} />
+              <Route path="/console/*" element={<Navigate to="/org" replace />} />
 
               <Route
                 path="/settings"
@@ -309,6 +397,7 @@ function App() {
                 <Route path="billing" element={<BillingPage />} />
                 <Route path="integrations" element={<IntegrationsPage />} />
                 <Route path="support" element={<SupportPage />} />
+                <Route path="support/:id" element={<SupportPage />} />
                 <Route path="language" element={<LanguageSettingsPage />} />
               </Route>
 

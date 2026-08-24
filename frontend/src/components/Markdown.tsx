@@ -200,6 +200,25 @@ export default function Markdown({ text }: { text: string }) {
       while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
         items.push(lines[i].replace(/^\s*([-*]|\d+\.)\s+/, ""));
         i += 1;
+        // Gom PHẦN ĐUÔI của mục vừa rồi: những dòng liền sau nó mà không mở
+        // một khối mới. Markdown gọi đây là "lazy continuation".
+        //
+        // Trước 19/08 vòng lặp dừng ngay khi dòng kế không bắt đầu bằng dấu
+        // gạch đầu dòng, nên một mục viết trên hai dòng bị xé làm đôi: nửa đầu
+        // thành mục danh sách, nửa sau thành một đoạn văn riêng. Với chữ
+        // thường thì chỉ hơi lạ, nhưng một cụm `**đậm**` bắc qua chỗ ngắt sẽ
+        // mất dấu đóng ở nửa này và mất dấu mở ở nửa kia — hai dấu sao hiện ra
+        // nguyên văn giữa một văn bản pháp lý. Bốn văn bản đã công bố có tám
+        // chỗ như vậy.
+        while (
+          i < lines.length &&
+          lines[i].trim() &&
+          !/^\s*([-*]|\d+\.)\s+/.test(lines[i]) &&
+          !/^\s*(#{1,6}\s|>|-{3,}\s*$|_{3,}\s*$|\*{3,}\s*$)/.test(lines[i])
+        ) {
+          items[items.length - 1] += ` ${lines[i].trim()}`;
+          i += 1;
+        }
       }
       const ListTag = ordered ? "ol" : "ul";
       push(

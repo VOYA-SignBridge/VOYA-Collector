@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 
 import {
   CATEGORY_LABEL,
@@ -71,6 +72,10 @@ function formatWhen(iso: string): string {
 
 export default function SupportPage() {
   const { t } = useI18n();
+  // Phiếu cần mở, lấy từ ĐƯỜNG DẪN. Thông báo "phản hồi mới trên phiếu"
+  // trỏ thẳng vào một phiếu cụ thể; không đọc tham số này thì cú nhấp chỉ
+  // mở danh sách và người dùng phải tự đi tìm lại thứ vừa được báo.
+  const { id: ticketFromUrl } = useParams<{ id?: string }>();
 
   const [tickets, setTickets] = useState<TicketSummary[]>([]);
   const [open, setOpen] = useState<Ticket | null>(null);
@@ -116,6 +121,16 @@ export default function SupportPage() {
       if (!quiet) setError(friendlyError(err, t("Không mở được hội thoại.")));
     }
   }, [t]);
+
+  // Mở thẳng phiếu mà đường dẫn chỉ tới.
+  //
+  // Chạy TÁCH khỏi lượt nạp danh sách bên dưới, và không phụ thuộc vào nó: một
+  // phiếu đã giải quyết có thể không còn trong danh sách mặc định, nhưng cú
+  // nhấp từ thông báo vẫn phải mở được nó. Nối hai việc lại sẽ tạo ra đúng một
+  // ca hỏng — thông báo về phiếu cũ dẫn tới một màn hình trống.
+  useEffect(() => {
+    if (ticketFromUrl) void loadTicket(ticketFromUrl);
+  }, [ticketFromUrl, loadTicket]);
 
   useEffect(() => {
     void loadList();

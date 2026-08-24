@@ -155,7 +155,23 @@ def list_endpoint(language: Optional[str] = None, dialect: Optional[str] = None)
     # rò siêu dữ liệu mà không rò một hàng nào.
     metas = list_classes(language=language, dialect=dialect,
                          tenant_id=require_tenant())
-    return {"count": len(metas), "items": [m.to_label_row() for m in metas]}
+    # `tenant_id` bị GỠ khỏi phản hồi. Đường này nằm trong `PUBLIC_ROUTES`, nên
+    # khách vãng lai gọi được — và nó đang trả về tên tenant nội bộ của kho
+    # đang phục vụ.
+    #
+    # Không mất mát gì: phạm vi đã do `require_tenant()` quyết TRƯỚC truy vấn,
+    # nên mọi dòng trong danh sách này đều thuộc đúng một tenant và người gọi
+    # không có lựa chọn nào khác để phân biệt. Trường ấy chỉ trả lời một câu
+    # hỏi mà người gọi không được phép hỏi.
+    #
+    # Gỡ ở ĐÂY chứ không sửa `to_label_row()`: cùng hàm ấy dựng các dòng ghi
+    # vào `labels.csv`, và bỏ cột khỏi tệp đó sẽ mất phân vùng tenant trong
+    # chính nguồn sự thật.
+    return {
+        "count": len(metas),
+        "items": [{k: v for k, v in m.to_label_row().items() if k != "tenant_id"}
+                  for m in metas],
+    }
 
 
 @router.get("/suggest")
@@ -394,7 +410,16 @@ def community_stats():
         return {"labels_count": 0, "total_samples": 0,
                 "contributors_count": 0, "regions_count": 0}
     metas = list_classes(tenant_id=cong_bo)
-    samples = list_samples(cong_bo)
+    # KHÔNG có người xem: bốn con số này là số CÔNG BỐ, đọc được bởi khách vãng
+    # lai. Đếm cả mẫu chưa duyệt nghĩa là công bố quy mô của thứ chưa ai xét —
+    # và một người đóng góp có thể suy ra mẫu của mình đã vào kho công khai
+    # trong khi nó vẫn đang nằm trong hàng đợi.
+    #
+    # `contributors_count` là chỗ rò rõ nhất: nó đếm người, nên một người vừa
+    # gửi mẫu đầu tiên sẽ làm con số nhích lên trước khi có ai duyệt gì.
+    from app import moderation
+
+    samples = moderation.filter_rows(list_samples(cong_bo), viewer_id=None).kept
 
     contributors = {
         (s.get("user_id") or "").strip() for s in samples

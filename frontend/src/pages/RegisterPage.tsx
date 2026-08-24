@@ -83,6 +83,9 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [documents, setDocuments] = useState<LegalDocument[]>([]);
+  // Đăng ký tự phục vụ TẠO một tổ chức. Hai ô dưới đây là phần "đăng ký tổ
+  // chức" của lượt đăng ký tài khoản — chúng không xuất hiện khi người dùng
+  // tới từ lời mời, vì lúc đó tổ chức đã có sẵn và người mời đã chọn gói.
   const [accepted, setAccepted] = useState(false);
 
   /**
@@ -92,6 +95,7 @@ export default function RegisterPage() {
    * là hành động bật cưỡng chế, nên một bản triển khai chưa công bố gì vẫn cho
    * đăng ký và biểu mẫu này không được hỏi một câu không có câu trả lời.
    */
+
   const loadDocuments = useCallback(async () => {
     const found = await Promise.all(REQUIRED_KINDS.map(fetchDocumentOrNull));
     setDocuments(found.filter((d): d is LegalDocument => d !== null));
@@ -154,7 +158,10 @@ export default function RegisterPage() {
         username: form.username.trim(),
         email: form.email.trim(),
         password: form.password,
-        ...(invitationToken ? { invitation_token: invitationToken } : {}),
+        ...(invitationToken
+          ? { invitation_token: invitationToken }
+          : {
+            }),
         ...consents,
       }).then(() => login({
         identifier: form.email.trim(),
@@ -260,6 +267,18 @@ export default function RegisterPage() {
             </button>
           }
         />
+
+        {/* Không còn khối "Tổ chức của bạn" ở đây.
+            ---------------------------------------------------------------
+            Đăng ký KHÔNG lập tổ chức nữa (22/08/2026). Tài khoản mới vào
+            Cộng đồng với vai `community_member` và đóng góp được ngay.
+
+            Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm sau khi đăng nhập ở trang
+            Tổ chức — nơi có chỗ chọn gói và nói rõ trần số tổ chức. Hỏi tên
+            tổ chức và gói ngay ở bước đăng ký là bắt một người chỉ muốn đóng
+            góp vài cử chỉ phải trả lời hai câu không liên quan, rồi sinh ra
+            một tenant rỗng kèm một bản sao danh mục từ vựng cho mỗi người
+            thử nền tảng. */}
 
         {/* Ô đồng ý chỉ xuất hiện khi hệ thống ĐÃ công bố văn bản. Hiện một ô
             trỏ tới trang trống sẽ thu được chữ ký cho một bản văn không tồn

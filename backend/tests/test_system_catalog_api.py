@@ -323,7 +323,20 @@ def test_community_is_a_reserved_tenant_under_the_same_rules():
         "SELECT tenant_id, tenant_type, is_system_reserved FROM tenants "
         " WHERE tenant_type = 'COMMUNITY'")
     assert len(rows) == 1, f"phai co DUNG mot tenant cong dong, thay {len(rows)}"
-    assert rows[0]["tenant_id"] == "community"
+    # Hoi theo HANG SO, khong viet cung ma tenant.
+    #
+    # Ngay 22/08/2026 tenant cong dong chuyen sang chinh tenant dang giu corpus:
+    # hang `community` von RONG, trong khi 64 lop va 3.862 mau nam o tenant khoi
+    # tao. Cai ten o mot hang, du lieu o hang kia — va trigger
+    # `ct_role_assignments_scope` chi cho gan `community_member` trong tenant
+    # mang tenant_type='COMMUNITY', nen mot tai khoan moi hoac vao hang rong
+    # (dong gop khong ai thay) hoac vao noi co du lieu ma khong co vai nao.
+    #
+    # Dieu bai nay kiem KHONG doi: dung MOT tenant cong dong, du tru, va chiu
+    # cung luat nhu moi tenant khac. Chi cai ten la doi.
+    from app.storage.authz_schema import COMMUNITY_TENANT_ID
+
+    assert rows[0]["tenant_id"] == COMMUNITY_TENANT_ID
     assert rows[0]["is_system_reserved"] is True
 
     # Chỉ mục duy nhất là thứ làm câu "đúng một" thành một bất biến của cơ sở dữ

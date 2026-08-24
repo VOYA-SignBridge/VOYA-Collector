@@ -34,7 +34,6 @@ import Button from "../../components/ui/Button";
 import EmptyState from "../../components/ui/EmptyState";
 import LoadingSpinner from "../../components/ui/LoadingSpinner";
 import ErrorBanner from "../../components/ErrorBanner";
-import { InfoCircleIcon } from "../../components/ui/Icons";
 import { useAuth } from "../../contexts/AuthContext";
 import { isTenantAdmin } from "../../api/auth";
 import { useToast } from "../../hooks/useToast";
@@ -134,17 +133,6 @@ export default function ConsoleAllocationsPage() {
         subtitle={t("Chia hạn mức của gói cước xuống từng project trong một workspace.")}
       />
 
-      <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-        <div className="mb-1 flex items-center gap-2 font-semibold">
-          <InfoCircleIcon className="h-4 w-4" aria-hidden="true" />
-          {t("Cách đọc bảng này")}
-        </div>
-        <ul className="ml-5 list-disc space-y-1">
-          <li>{t("Ô để TRỐNG nghĩa là không giới hạn — không phải bằng không.")}</li>
-          <li>{t("Tổng cấp phát của mọi project không vượt được trần của gói; máy chủ từ chối nếu vượt.")}</li>
-          <li>{t("Cấp phát là hạn mức dự kiến cho từng nhóm; nó không tự chặn đường ghi cho tới khi dữ liệu mang project_id.")}</li>
-        </ul>
-      </div>
 
       {error && <ErrorBanner message={error} />}
       {loading && <LoadingSpinner size="lg" label={t("Đang tải…")} />}

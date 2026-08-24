@@ -69,14 +69,21 @@ describe('LegalDocumentPage', () => {
     expect(await screen.findByText('2026-08-08')).toBeInTheDocument();
   });
 
-  it('hiện mã băm để người đọc đối chiếu được với chấp thuận của mình', async () => {
-    // Không có chỗ này thì "văn bản có mã băm" chỉ là một tính chất trên giấy:
-    // người dùng không có cách nào so bản mình đang xem với bản mình đã ký.
+  it('KHÔNG hiện mã băm trên trang văn bản', async () => {
+    // Đổi ngày 20/08 theo yêu cầu sản phẩm. Mã băm vẫn được tính, vẫn lưu, và
+    // `user_consents` vẫn ghi lại — thứ bị gỡ là MÀN HÌNH, không phải cơ chế.
+    // Một chuỗi 64 ký tự hex giữa trang điều khoản không nói gì với người đọc
+    // văn bản; ai cần đối chiếu thì đối chiếu qua API.
+    //
+    // Test giữ nguyên chứ không xoá: nó khoá lại QUYẾT ĐỊNH đó. Nếu mai kia mã
+    // băm quay lại trang này thì phải là một lựa chọn có người ký tên, chứ
+    // không phải một lần dán nhầm.
     vi.mocked(fetchContent).mockResolvedValue(DOC);
 
     renderAt('/legal/terms');
 
-    expect(await screen.findByText(/abc123def456/)).toBeInTheDocument();
+    await screen.findByText('Mục một nói về tài khoản.');
+    expect(screen.queryByText(/abc123def456/)).not.toBeInTheDocument();
   });
 
   it('truyền ?version= xuống API để mở đúng bản đã ký', async () => {

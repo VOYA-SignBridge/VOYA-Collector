@@ -47,6 +47,11 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         "sequence_length_original", "quality_status",
         # multi-tenant (A1)
         "tenant_id",
+        # v6 — kiểm duyệt cộng đồng. Bắt buộc có mặt ở bên đọc: thiếu nó thì
+        # ảnh chụp nhập vào một lược đồ không có cột, và trạng thái duyệt của
+        # cả kho biến mất trong im lặng — máy khôi phục sẽ tin rằng chưa ai
+        # duyệt gì. Xem docs/01-architecture/COMMUNITY_MODERATION.md §2.3.
+        "review_status",
     ],
     "raw_uploads": [
         "upload_uid", "class_uid", "slug", "label_original", "language", "dialect",

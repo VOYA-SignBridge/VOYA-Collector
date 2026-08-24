@@ -76,6 +76,8 @@ class TestSplitWrite:
             label_original = "test"
             language = "vn"
             dialect = "common"
+            # Xem ghi chu cung ten o test_reassign_sheets_owner.py.
+            tenant_id = "default"
 
             def hierarchy_path(self):
                 return tmp_path / "dataset" / "features" / "vn" / "common" / "class_t"

@@ -487,6 +487,282 @@ def _slugify_tenant(text: str) -> str:
     return slug if slug and slug[0].isalnum() else f"t{slug}" if slug else "tenant"
 
 
+#: Số tổ chức tối đa một tài khoản được TỰ LẬP, theo gói.
+#:
+#: Chỉ `free` có `is_self_serve = TRUE`, nên hôm nay đây là bảng một dòng — và
+#: viết nó thành bảng thay vì một hằng số là để lúc mở tự phục vụ cho gói trả
+#: phí thì con số ở đúng chỗ, chứ không phải một `if plan == "free"` mọc thêm.
+#:
+#: Trần tồn tại để chặn rác, không phải để bán hàng: một tài khoản đúc tổ chức
+#: rỗng hàng loạt sẽ làm danh sách của người vận hành thành vô dụng. Ba là đủ
+#: cho một người thật (thử nghiệm, lớp học, dự án) và vẫn chặn được kịch bản kia.
+SELF_SERVE_TENANT_CAP: Dict[str, int] = {"free": 3}
+
+#: Dùng khi gói không có trong bảng trên. Một gói MỚI không được mặc định là
+#: không giới hạn — đó là hướng hỏng mở.
+SELF_SERVE_TENANT_CAP_DEFAULT = 1
+
+
+def count_tenants_owned_by(user_id: str) -> int:
+    """Số tổ chức còn sống mà tài khoản này đang sở hữu.
+
+    Cùng lý do vượt-ranh-giới như `tenant_owned_by` ngay dưới: câu hỏi phải
+    nhìn được mọi tenant mới trả lời đúng.
+
+    `deleted_at IS NULL` — tổ chức đã xoá mềm KHÔNG tính vào trần. Người dùng
+    lập rồi bỏ một tổ chức không đáng bị khoá vĩnh viễn một ô, và ân hạn 30 ngày
+    trước khi xoá vĩnh viễn sẽ biến trần thành một cái bẫy chờ.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    with system_scope("tenant admin: dem to chuc mot tai khoan so huu"):
+        rows = _fetch_all(
+            "SELECT count(*) AS n FROM tenants "
+            " WHERE owner_user_id = %s AND deleted_at IS NULL",
+            (str(user_id),),
+        )
+    return int(rows[0]["n"]) if rows else 0
+
+
+def join_community(user_id: str) -> bool:
+    """Đưa một tài khoản vào Cộng đồng với vai `community_member`.
+
+    Trả về True nếu vừa gắn, False nếu đã có sẵn. Idempotent.
+
+    Vì sao MỌI tài khoản mới đi qua đây
+    ------------------------------------
+    Trước 22/08/2026, đăng ký không kèm lời mời sẽ **tự lập một tổ chức riêng**
+    cho người đăng ký. Điều đó sai ở hai mức:
+
+    * Về sản phẩm: một người chỉ muốn đóng góp vài cử chỉ không cần một tổ chức
+      mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm sau khi đăng nhập.
+    * Về dữ liệu: mỗi tài khoản mới sinh ra một tenant rỗng kèm một bản sao
+      danh mục từ vựng. Mười người thử nền tảng là mười tenant rác.
+
+    Vai chứ không chỉ tư cách thành viên
+    -------------------------------------
+    Gắn membership mà quên vai thì tài khoản đó **không ghi được gì**:
+    `access_gate` từ chối người không có grant nào, nên họ đăng nhập được, xem
+    được, và không quay được — một trạng thái tệ hơn cả bị chặn thẳng, vì nó
+    trông như hỏng.
+
+    `community_member` mang `sample.create` và `upload.create`. Nó KHÔNG mang
+    quyền quản trị và KHÔNG mang `sample.moderate`: người đóng góp không tự
+    duyệt dữ liệu của chính mình.
+    """
+    from app.storage.authz_schema import COMMUNITY_TENANT_ID
+    from app.storage.metadata_db import _execute, _fetch_all
+    from app.authorization.catalog import COMMUNITY_DEFAULT_ROLE
+
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+
+    with system_scope("tenant admin: dua tai khoan moi vao cong dong"):
+        san = _fetch_all(
+            "SELECT membership_id FROM memberships "
+            " WHERE user_id = %s AND tenant_id = %s AND scope_level = 'TENANT'",
+            (uid, COMMUNITY_TENANT_ID))
+        if san:
+            membership_id = str(san[0]["membership_id"])
+        else:
+            rows = _fetch_all(
+                "INSERT INTO memberships (user_id, scope_level, tenant_id, "
+                "                         legacy_role, status, joined_at) "
+                "VALUES (%s, 'TENANT', %s, NULL, 'ACTIVE', NOW()) "
+                "RETURNING membership_id",
+                (uid, COMMUNITY_TENANT_ID))
+            membership_id = str(rows[0]["membership_id"])
+
+        vai = _fetch_all(
+            "SELECT role_id FROM roles WHERE role_code = %s AND is_active",
+            (COMMUNITY_DEFAULT_ROLE,))
+        if not vai:
+            logger.error("[COMMUNITY] khong tim thay vai %s; tai khoan %s se "
+                         "khong ghi duoc gi", COMMUNITY_DEFAULT_ROLE, uid)
+            return False
+
+        da_co = _fetch_all(
+            "SELECT 1 FROM role_assignments "
+            " WHERE user_id = %s AND role_id = %s AND membership_id = %s "
+            "   AND revoked_at IS NULL LIMIT 1",
+            (uid, str(vai[0]["role_id"]), membership_id))
+        if da_co:
+            return False
+
+        # `assigned_by_user_id` là chính họ, và đó là câu trả lời trung thực:
+        # không có người nào cấp vai này — nó đi kèm việc đăng ký. Dựng một
+        # "tài khoản hệ thống" giả để đứng tên sẽ làm nhật ký kiểm toán nói dối
+        # rằng có ai đó đã quyết định.
+        _execute(
+            "INSERT INTO role_assignments (user_id, role_id, membership_id, "
+            "                              assigned_by_user_id) "
+            "VALUES (%s, %s, %s, %s)",
+            (uid, str(vai[0]["role_id"]), membership_id, uid))
+
+    logger.info("[COMMUNITY] %s da vao cong dong voi vai %s",
+                uid, COMMUNITY_DEFAULT_ROLE)
+    return True
+
+
+def tenant_owned_by(user_id: str) -> Optional[Dict[str, Any]]:
+    """Tổ chức mà tài khoản này ĐANG SỞ HỮU, hoặc None.
+
+    Sống ở đây chứ không ở router, và đó không phải sở thích sắp xếp: câu hỏi
+    "người này đã sở hữu tổ chức nào chưa" là câu hỏi VƯỢT RANH GIỚI tenant —
+    nó phải nhìn được mọi tenant mới trả lời đúng. `routers/tenants.py` cố ý
+    không chứa một lời gọi `system_scope` nào, và `test_tenant_isolation.py`
+    khoá điều đó lại bằng một danh sách cho phép nêu đích danh từng tệp. Một
+    handler HTTP chạy dưới danh nghĩa MỌI tenant là hình dạng dễ mọc lỗ nhất.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    with system_scope("tenant admin: tim to chuc do tai khoan nay so huu"):
+        rows = _fetch_all(
+            "SELECT tenant_id, display_name FROM tenants "
+            "WHERE owner_user_id = %s AND deleted_at IS NULL LIMIT 1",
+            (str(user_id),),
+        )
+    return rows[0] if rows else None
+
+
+def list_tenants_of_user(user_id: str) -> List[Dict[str, Any]]:
+    """MỌI tổ chức mà tài khoản này đang là thành viên hoạt động.
+
+    Vì sao endpoint `/tenants/me` không đủ
+    ---------------------------------------
+    `/tenants/me` trả về tổ chức NHÀ — đúng một cái, cái mà middleware phân giải
+    từ `users.tenant_id`. Nhưng lược đồ cho phép một người thuộc nhiều tổ chức
+    (`tenant_members` khoá chính `(tenant_id, user_id)`), và cho tới hàm này
+    người đó **không có cách nào biết mình còn ở đâu nữa**: giao diện chỉ hỏi
+    được về tổ chức nhà, nên các tư cách thành viên khác vô hình.
+
+    Sống ở module này chứ không ở router, cùng lý do với `tenant_owned_by`: câu
+    hỏi cố ý VƯỢT ranh giới tenant, và `routers/tenants.py` không được chứa
+    `system_scope`.
+
+    `is_home` là cờ nói tổ chức nào đang nhận DỮ LIỆU MỚI — không phải "tổ chức
+    đang xem". Hai khái niệm đó còn trùng nhau chừng nào chưa có đường chuyển
+    tenant; tách tên ngay từ bây giờ để lúc tách thật không phải đổi hợp đồng.
+
+    Chỉ được gọi với id CỦA CHÍNH người gọi. Hàm không tự kiểm điều đó — nó
+    không biết ai đang gọi — nên chỗ gọi phải lấy id từ phiên, đừng nhận từ
+    tham số đường dẫn.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    uid = str(user_id or "").strip()
+    if not uid:
+        return []
+
+    with system_scope("tenant admin: liet ke moi to chuc cua mot tai khoan"):
+        rows = _fetch_all(
+            # `t.tenant_type` KHÔNG kèm `t.is_system_reserved`, và đó là chủ ý.
+            # Cột ấy là NHÃN ("đừng xoá tenant này"), không phải quyền, và
+            # `test_is_system_reserved_is_never_read_by_authorisation` cấm nó
+            # xuất hiện ngoài nơi định nghĩa — chính xác để nó không bao giờ trở
+            # thành `if is_system_reserved: return True` ở đâu đó.
+            #
+            # Giao diện không mất gì: câu hỏi nó cần trả lời là "đây có phải
+            # Cộng đồng không", và `tenant_type = 'COMMUNITY'` trả lời trực tiếp
+            # câu đó thay vì suy ra từ một nhãn về vòng đời.
+            "SELECT t.tenant_id, t.display_name, t.tenant_type, "
+            "       m.role, m.created_at AS joined_at, "
+            "       (u.tenant_id = t.tenant_id) AS is_home "
+            "  FROM tenant_members m "
+            "  JOIN tenants t ON t.tenant_id = m.tenant_id "
+            "  JOIN users   u ON u.id = m.user_id "
+            " WHERE m.user_id = %s "
+            "   AND m.status = 'ACTIVE' AND m.removed_at IS NULL "
+            "   AND t.deleted_at IS NULL AND t.is_active "
+            " ORDER BY is_home DESC, t.display_name, t.tenant_id",
+            (uid,),
+        )
+    return [dict(r) for r in rows]
+
+
+class NotAMember(Exception):
+    """Người gọi không phải thành viên đang hoạt động của tổ chức đó."""
+
+
+def set_active_tenant(user_id: str, tenant_id: str) -> Dict[str, Any]:
+    """Đổi tổ chức mà tài khoản này ĐANG XEM. Trả về trạng thái sau khi đổi.
+
+    Đây là cửa DUY NHẤT ghi `users.active_tenant_id`, và nó tồn tại để phép chọn
+    tổ chức không bao giờ là một trường của request. Xem `tenant_middleware`.
+
+    Về tới tổ chức NHÀ thì xoá con trỏ, không phải trỏ vào nhà
+    ----------------------------------------------------------
+    Hai cách biểu diễn cùng một trạng thái là hai cách để chúng lệch nhau: đổi
+    tên tổ chức nhà, hay chuyển tài khoản sang tổ chức khác, sẽ để lại một con
+    trỏ nói điều mà `users.tenant_id` không còn nói. NULL nghĩa là "theo nhà",
+    và nó tự đúng mãi mãi.
+
+    KHÔNG đổi tổ chức nhà. `users.tenant_id` quyết định dữ liệu MỚI thuộc về
+    đâu; trộn hai thứ lại thì một cú bấm để xem tổ chức khác sẽ âm thầm chuyển
+    cả nơi những mẫu sau này được ghi vào.
+    """
+    from app.storage.metadata_db import _execute, _fetch_all
+
+    uid = str(user_id or "").strip()
+    dich = str(tenant_id or "").strip()
+    if not uid or not dich:
+        raise NotAMember("Thiếu tài khoản hoặc tổ chức đích.")
+
+    with system_scope("tenant admin: doi to chuc dang xem"):
+        rows = _fetch_all(
+            "SELECT tenant_id AS home FROM users WHERE id = %s AND is_active", (uid,))
+        if not rows:
+            raise NotAMember("Không tìm thấy tài khoản.")
+        home = (rows[0].get("home") or "").strip()
+
+        if dich == home:
+            _execute(
+                "UPDATE users SET active_tenant_id = NULL WHERE id = %s", (uid,))
+            return {"tenant_id": home, "is_home": True}
+
+        thanh_vien = _fetch_all(
+            "SELECT 1 FROM tenant_members m JOIN tenants t ON t.tenant_id = m.tenant_id "
+            " WHERE m.user_id = %s AND m.tenant_id = %s "
+            "   AND m.status = 'ACTIVE' AND m.removed_at IS NULL "
+            "   AND t.deleted_at IS NULL AND t.is_active LIMIT 1",
+            (uid, dich),
+        )
+        if not thanh_vien:
+            # Cùng thông báo cho "không có tổ chức đó" và "có nhưng anh không ở
+            # trong đó": phân biệt hai ca này biến endpoint thành công cụ dò xem
+            # tổ chức nào tồn tại trên hệ thống.
+            raise NotAMember("Bạn không thuộc tổ chức này.")
+
+        _execute(
+            "UPDATE users SET active_tenant_id = %s WHERE id = %s", (dich, uid))
+    return {"tenant_id": dich, "is_home": False}
+
+
+def find_account_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """Tài khoản mang ĐÚNG tên đăng nhập này, hoặc None. Không khớp một phần.
+
+    Dùng cho đường mời: người mời gõ tên đồng nghiệp, máy chủ tra ra địa chỉ đã
+    đăng ký để gửi lời mời tới đó. Tra cứu phải nhìn ngoài tenant vì người được
+    mời CHƯA thuộc tenant nào của người mời — đó chính là lý do có lời mời.
+
+    Khớp tuyệt đối và chỉ trả về MỘT bản ghi: khớp một phần hoặc trả danh sách
+    gợi ý sẽ biến ô mời thành công cụ dò xem ai có mặt trên nền tảng.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    name = (username or "").strip()
+    if not name:
+        return None
+    with system_scope("tenant admin: phan giai ten dang nhap cho loi moi"):
+        rows = _fetch_all(
+            "SELECT username, email FROM users "
+            "WHERE lower(username) = lower(%s) AND is_active = TRUE LIMIT 1",
+            (name,),
+        )
+    return rows[0] if rows else None
+
+
 def create_self_serve_tenant(
     user_id: str,
     *,

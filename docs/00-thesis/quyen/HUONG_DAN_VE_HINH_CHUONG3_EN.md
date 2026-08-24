@@ -1518,3 +1518,80 @@ thuộc đầy đủ, giá trị cấu hình. Chương đã nói rõ chúng thu�
 **Một lưu ý cuối, quan trọng hơn mười tám điểm trên:** nếu lược đồ hoặc mã nguồn thay
 đổi sau ngày 18/08/2026, **đếm lại trước khi vẽ**. Một hình mang con số cũ trông giống
 hệt một hình mang con số đúng — và đó chính là lý do nó nguy hiểm.
+
+---
+
+# PHỤ CHÚ — NGUỒN SINH TỰ ĐỘNG CHO FIGURE 3.15 – 3.18
+
+## Bộ sinh và bản vẽ
+
+Bốn hình PDM **không vẽ tay**. Chúng sinh trực tiếp từ cơ sở dữ liệu đang chạy:
+
+| | Đường dẫn |
+|---|---|
+| Bộ sinh | `docs/02-data/db/gen_erd.py` |
+| Bản vẽ | `docs/02-data/db/voya_erd.drawio` (7 trang) |
+| Lệnh chạy | `python docs/02-data/db/gen_erd.py` |
+| Chỉ xem số liệu | `python docs/02-data/db/gen_erd.py --stats` |
+
+*Bảng PC-1: Bảy trang của bản vẽ và vai trò trong chương*
+
+| Trang | Nội dung | Dùng cho |
+|:--:|---|---|
+| 1 | ERD khái niệm, ký pháp Chen — 13 thực thể, 16 quan hệ | **Tham chiếu** cho Figure 3.13; hình nộp vẽ tay ở PowerDesigner |
+| 2 | Bản đồ quan hệ — 59 thực thể, chỉ đường nối | **Tham chiếu** cho Figure 3.14 |
+| 3 | ERD logic — chân chim, đủ khoá | Đối chiếu khi vẽ Figure 3.14 |
+| **4** | **PDM Module A: Tenant and Authorization** — 18 bảng | **Figure 3.15** |
+| **5** | **PDM Module B: Vocabulary and Registry** — 11 bảng | **Figure 3.16** |
+| **6** | **PDM Module C: Collection and Sample** — 9 bảng | **Figure 3.17** |
+| **7** | **PDM Module D: Governance and Platform** — 21 bảng | **Figure 3.18** |
+
+## Vì sao PDM sinh máy còn CDM và LDM vẽ tay
+
+Mô hình khái niệm là một **diễn giải**, không phải một sự kiện của cơ sở dữ liệu.
+Không truy vấn nào cho biết `recognition_profile` là *thuộc tính phân loại của lớp*
+còn `dialect` là *một thực thể riêng* — với cơ sở dữ liệu, cả hai đều là khoá ngoại
+như nhau. Chọn cái nào lên CDM là việc của người thiết kế.
+
+Ngược lại, PDM **phải khớp lược đồ từng cột**. Vẽ tay thì nó **sai lặng lẽ** mỗi khi
+lược đồ đổi; sinh máy thì không sai lặng lẽ được.
+
+Bù lại cho phần vẽ tay: mô hình khái niệm trong bộ sinh được **máy kiểm chứng** — mỗi
+quan hệ khai kèm khoá ngoại thật của nó, và bộ sinh **dừng với lỗi** nếu khoá đó không
+tồn tại. Cơ chế này đã bắt được một lỗi thật ngày 18/08 (xem dưới).
+
+## Hai lỗi đã sửa ngày 18/08/2026
+
+**Lỗi 1 — 16 bảng không lên hình.** Bộ sinh viết khi lược đồ còn 44 bảng; nay 59. Mười
+sáu bảng chưa được gán mặt phẳng nên bị bỏ khỏi mọi trang, trong đó có **toàn bộ
+mô-đun phân quyền**: `memberships`, `role_assignments`, `role_permissions`,
+`permissions`, `workspaces`, `projects`, `project_allocations`. Đã gán đủ; mặt phẳng
+nay phủ **59/59 bảng**.
+
+**Lỗi 2 — quan hệ khai qua khoá ngoại không tồn tại.** Quan hệ `THAM GIA` khai đi qua
+`tenant_members.user_id`. Nhưng `tenant_members` là **khung nhìn** trên lát cắt
+`scope_level = 'TENANT'` của `memberships`, và khung nhìn **không mang khoá ngoại**.
+Đã sửa để khai qua bảng gốc `memberships`.
+
+Lỗi thứ hai đáng ghi lại vì nó là ví dụ cho chính cơ chế: bộ sinh **dừng hẳn** thay vì
+vẽ một quan hệ không có thật. Một ERD nói sai về khoá ngoại còn tệ hơn không có ERD nào.
+
+## Đối chiếu số liệu — bản vẽ phải khớp chương
+
+*Bảng PC-2: Số liệu bộ sinh đọc được so với số liệu chương ghi*
+
+| Chỉ tiêu | Bộ sinh đọc từ CSDL | Chương 3 ghi | Khớp |
+|---|:--:|:--:|:--:|
+| Bảng vật lý | 59 | 59 | ✔ |
+| Cột | 636 | 636 *(Phụ lục C)* | ✔ |
+| Khoá ngoại | 123 | 123 | ✔ |
+| Khoá ngoại ghép | 24 | 24 | ✔ |
+| Bảng có Row-Level Security | 35 | 35 | ✔ |
+| Module A | 18 | 18 | ✔ |
+| Module B | 11 | 11 | ✔ |
+| Module C | 9 | 9 | ✔ |
+| Module D | 21 | 21 | ✔ |
+
+**Quy trình bắt buộc trước khi nộp:** chạy lại `gen_erd.py --stats`, đối chiếu với Bảng
+PC-2, rồi mới xuất hình. Nếu một dòng lệch, **sửa chương hoặc sửa lược đồ** — đừng sửa
+hình cho khớp.

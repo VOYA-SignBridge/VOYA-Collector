@@ -21,7 +21,7 @@ const TFA = "/api/v1/2fa";
 // ===========================================================================
 export type NotificationKind =
   | "subscription" | "consent" | "security" | "training"
-  | "support" | "data" | "system";
+  | "support" | "data" | "system" | "moderation";
 
 export type Severity = "info" | "success" | "warning" | "critical";
 
@@ -44,6 +44,7 @@ export const KIND_LABEL: Record<NotificationKind, string> = {
   support: "Hỗ trợ",
   data: "Dữ liệu",
   system: "Hệ thống",
+  moderation: "Kiểm duyệt",
 };
 
 export async function fetchNotifications(

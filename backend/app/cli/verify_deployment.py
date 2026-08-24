@@ -689,7 +689,10 @@ def main() -> int:
             record(PASS, "anh chup dong thuan",
                    f"{len(consents)} nguoi ky, tao luc {meta.get('generated_at')}")
         except SnapshotUnusable as exc:
-            record(WARN, "anh chup dong thuan", str(exc).split(".")[0])
+            # Tach o ". " (het cau), KHONG phai "." — mot thong bao chua ten tep
+            # (`consent_snapshot.json`) bi chat cut ngay tai dau cham cua duoi tep,
+            # va canh bao hien ra khong con doc duoc.
+            record(WARN, "anh chup dong thuan", str(exc).split(". ")[0])
     except Exception as exc:
         record(WARN, "anh chup dong thuan", f"khong kiem tra duoc: {exc}")
 

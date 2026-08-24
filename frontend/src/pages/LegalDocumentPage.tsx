@@ -104,10 +104,14 @@ export default function LegalDocumentPage() {
 
       {!loading && doc && (
         <>
-          {/* Dải siêu dữ liệu. Mã băm hiện ra để người đọc đối chiếu được bản
-              mình đang xem với bản ghi trong chấp thuận của mình — nếu không,
-              "có băm" chỉ là một tính chất trên giấy. */}
-          <dl className="mb-8 grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm sm:grid-cols-4">
+          {/* Dải siêu dữ liệu: loại, bản, hiệu lực, ngôn ngữ.
+
+              Mã băm nội dung KHÔNG hiện ở đây nữa (19/08). Nó vẫn được tính,
+              vẫn lưu, và vẫn là thứ `user_consents` ghi lại — chỗ nó biến mất
+              là MÀN HÌNH, không phải cơ chế. Một chuỗi 64 ký tự hex giữa trang
+              điều khoản không nói được gì với người đọc văn bản, và người cần
+              đối chiếu nó thì đối chiếu qua API. */}
+          <dl className="mb-8 grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm sm:grid-cols-3">
             <div>
               <dt className="text-slate-500">{t("Phiên bản")}</dt>
               <dd className="font-medium text-slate-900">{doc.version}</dd>
@@ -121,15 +125,6 @@ export default function LegalDocumentPage() {
             <div>
               <dt className="text-slate-500">{t("Ngôn ngữ")}</dt>
               <dd className="font-medium text-slate-900">{doc.language}</dd>
-            </div>
-            <div className="col-span-2 sm:col-span-1">
-              <dt className="text-slate-500">{t("Mã băm nội dung")}</dt>
-              <dd
-                className="truncate font-mono text-xs text-slate-700"
-                title={doc.content_hash}
-              >
-                {doc.content_hash.slice(0, 16)}…
-              </dd>
             </div>
           </dl>
 

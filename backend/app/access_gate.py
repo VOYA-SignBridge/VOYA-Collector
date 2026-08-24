@@ -223,6 +223,33 @@ SELF_SERVICE_WRITE_PREFIXES: tuple[str, ...] = (
 #: đặt quyền tự quyết ấy dưới quyền của người khác — sai cả về pháp lý lẫn về
 #: mô hình. `withdraw` càng phải mở: rút đồng thuận không bao giờ được khó hơn
 #: cho đồng thuận.
+#: Duong tu phuc vu khop CHINH XAC, khong theo tien to.
+#:
+#: `/tenants/invitations/accept` la hanh dong cua CHINH nguoi duoc moi: ho doi
+#: mot lien ket lay tu cach thanh vien. Bat no phai co san mot vai tenant la mot
+#: vong lap kin — vai la thu ma chinh loi moi nay cap. Cung hinh dang be tac voi
+#: `/legal/{kind}/accept` ghi ngay tren.
+#:
+#: Vi sao KHONG dat `/tenants/` vao danh sach tien to: lam vay se mien tru moi
+#: thao tac ghi cua quan tri to chuc — tao/xoa to chuc, doi vai, moi nguoi, xoa
+#: sach du lieu. Mot dong cho tien loi doi lay ca mot mat phang quyen.
+#:
+#: Va vi sao khop CHINH XAC chu khong phai tien to cua rieng duong nay: mot
+#: `/tenants/invitations/accept-all` them vao sau nay se im lang thua ke mien
+#: tru nay ma khong ai xet lai.
+SELF_SERVICE_EXACT_PATHS: frozenset = frozenset({
+    "/tenants/invitations/accept",
+    # Đổi tổ chức đang xem. Chỉ ghi MỘT cột trên hàng `users` của chính người
+    # gọi, và chỉ sau khi `set_active_tenant` xác nhận họ là thành viên đang
+    # hoạt động của tổ chức đích — nên nó không cấp thêm gì mà tư cách thành
+    # viên chưa cấp.
+    #
+    # Phải miễn ở đây vì cùng lý do như `/tenants/invitations/accept`: đòi một
+    # vai ở tầng tenant để được XEM tổ chức mình đã thuộc về là một cái bẫy
+    # ngược — người chưa có vai không chuyển sang nổi tổ chức nơi họ có vai.
+    "/tenants/switch",
+})
+
 SELF_SERVICE_LEGAL_ACTIONS: tuple[str, ...] = ("/accept", "/withdraw")
 
 #: Phương thức KHÔNG đổi trạng thái. Chỉ những phương thức ngoài tập này mới đi
@@ -231,6 +258,8 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def _is_self_service_write(path: str) -> bool:
+    if path in SELF_SERVICE_EXACT_PATHS:
+        return True
     if any(path.startswith(p) for p in SELF_SERVICE_WRITE_PREFIXES):
         return True
     return path.startswith("/legal/") and path.endswith(SELF_SERVICE_LEGAL_ACTIONS)
@@ -284,6 +313,31 @@ def _has_any_tenant_grant(user) -> bool:
     định, và `is_admin` CHÍNH LÀ `platform_administrator` được viết bằng một
     cột. Nó đi cùng lúc với cột đó ở Phase D, không sớm hơn.
 
+    Vì sao có câu hỏi THỨ BA (sửa 21/08/2026)
+    ------------------------------------------
+    Bản đầu chỉ hỏi hai câu: grant phạm vi SYSTEM, và vai ở SỔ CŨ
+    (`tenant_members.role`). Câu thứ hai không đọc `role_assignments` chút nào
+    — `tenant_members` là một VIEW trên `memberships` phơi ra `legacy_role AS
+    role`, và cột ấy bị `ck_memberships_legacy_role_valid` giới hạn ở
+    `admin | editor | NULL`.
+
+    Hệ quả đo được: danh mục có 13 vai dựng sẵn; 2 vai phạm vi SYSTEM qua nhờ
+    câu 1; trong 11 vai còn lại chỉ `tenant_administrator` và `tenant_editor`
+    có bản sao ở sổ cũ. **Chín vai còn lại tự nó không đưa được ai qua cổng.**
+
+    Chuyện chưa vỡ ra vì mười tài khoản đang dùng hệ thống đều nắm vai tenant
+    CÓ bản sao — cổng đọc bản sao chứ không đọc vai thật. Nó sẽ vỡ ở tài khoản
+    đầu tiên chỉ nắm vai v5: `community_member` (giữ `sample.create` và
+    `upload.create`) không thể có bản sao nào ở sổ cũ, nên mọi lượt ghi của một
+    thành viên cộng đồng sẽ trả 403. `project_contributor` — vai mà mô tả của
+    chính nó nói là để "đóng góp và gán nhãn dữ liệu trong project" — cũng vậy.
+
+    Câu thứ ba đọc `role_assignments` với `membership_id` KHÔNG NULL, nối
+    `memberships` để một vai gắn vào tư cách thành viên đã gỡ không còn tính.
+    Nó KHÔNG nới thêm gì cho người chưa được cấp gì: trạng thái "không grant
+    nào cả" — kể cả thành viên được mời không kèm vai — vẫn bị từ chối, và
+    `test_access_gate_scope_coverage.py` ghim cả hai chiều đó.
+
     Hỏng-thì-ĐÓNG: một lỗi khi tra cứu trả về `False`. Đây là cổng chặn, và một
     `except` trả `True` sẽ biến mọi sự cố cơ sở dữ liệu thành một lần mở quyền.
     """
@@ -317,6 +371,29 @@ def _has_any_tenant_grant(user) -> bool:
                 (str(user_id),),
             )
             if system_grant:
+                return True
+
+            # Grant v5 gắn với một tư cách thành viên — TENANT, WORKSPACE hoặc
+            # PROJECT. Đây là câu hỏi mà cổng thiếu cho tới 21/08/2026, và nó
+            # là câu duy nhất trả lời được cho chín vai không có bản sao ở sổ
+            # cũ. Xem docstring bên trên.
+            #
+            # Nối `memberships` chứ không chỉ đọc `role_assignments`: một vai
+            # gắn vào tư cách thành viên đã bị gỡ không còn là grant. Nối theo
+            # CẢ `membership_id` và `user_id` — đúng hình khoá ngoại ghép
+            # `fk_role_assignments_membership` — để một dòng gán trỏ vào
+            # membership của người khác không đếm được cho người này.
+            scoped_grant = _fetch_all(
+                "SELECT 1 FROM role_assignments a "
+                "  JOIN roles r ON r.role_id = a.role_id "
+                "  JOIN memberships m ON m.membership_id = a.membership_id "
+                "                    AND m.user_id = a.user_id "
+                " WHERE a.user_id = %s AND a.membership_id IS NOT NULL "
+                "   AND a.revoked_at IS NULL AND r.is_active "
+                "   AND m.status = 'ACTIVE' AND m.left_at IS NULL LIMIT 1",
+                (str(user_id),),
+            )
+            if scoped_grant:
                 return True
 
             tenant_grant = _fetch_all(

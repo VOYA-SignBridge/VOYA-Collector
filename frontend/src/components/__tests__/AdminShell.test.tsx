@@ -52,12 +52,13 @@ describe("AdminShell", () => {
     expect(exits).toHaveLength(1);
   });
 
-  it("dựng đủ 12 mục điều hướng, mỗi mục là một liên kết thật", () => {
+  it("dựng đủ 14 mục điều hướng, mỗi mục là một liên kết thật", () => {
     renderShell();
     // Đếm liên kết thay vì so từng nhãn: mục mới thêm vào sẽ làm con số này
-    // đổi, và đó là lúc người thêm phải quyết định xem 12 mục còn đúng không.
+    // đổi, và đó là lúc người thêm phải quyết định xem con số còn đúng không.
+    // 20/08: 12 -> 14, thêm "Người ký" (UC11) và "Hàng đợi xử lý" (UC16).
     const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(12);
+    expect(links).toHaveLength(14);
     expect(links.map((a) => a.getAttribute("href"))).toContain("/admin/support");
   });
 

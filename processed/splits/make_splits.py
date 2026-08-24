@@ -1524,6 +1524,47 @@ def main():
         enriched.append(r)
     rows = enriched
 
+    # Cổng KIỂM DUYỆT, áp trước mọi bộ lọc khác.
+    #
+    # Vì sao ở ĐÂY chứ không ở trainer
+    # ---------------------------------
+    # Trainer đọc split CSV, và split CSV có 25 cột — KHÔNG mang `review_status`
+    # cũng không mang `auth_user_id`. Lọc ở đó sẽ đọc mọi dòng thành "chưa
+    # duyệt" và loại sạch dữ liệu. Chỗ dữ liệu thật sự được CHỌN là đây: từ
+    # `samples.csv` vào split.
+    #
+    # Vì sao trước sàn số mẫu
+    # ------------------------
+    # Cùng lý do đã ghi cho bộ lọc phương ngữ ngay dưới: sàn phải tính trên
+    # đúng tập con sẽ được dùng. Loại mẫu chưa duyệt SAU khi sàn chạy nghĩa là
+    # một lớp có 12 mẫu — 9 đã duyệt, 3 đang chờ — vượt sàn 10 rồi mới rụng
+    # xuống 9, và split được dựng trên một lớp không đủ điều kiện.
+    #
+    # KHÔNG có người xem
+    # -------------------
+    # Dựng split là bước đóng gói dữ liệu cho một lượt huấn luyện hoặc một bản
+    # phát hành — nó rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ.
+    # Chỉ `approved` đi tiếp.
+    try:
+        from app.moderation import filter_rows as _loc_kiem_duyet
+    except ImportError as exc:            # pragma: no cover - lỗi cấu hình
+        # Hỏng-thì-ĐÓNG. Nuốt lỗi ở đây và chạy tiếp nghĩa là dựng một split
+        # KHÔNG qua kiểm duyệt mà không ai biết — đúng thứ cổng này sinh ra để
+        # chặn. Thà không chạy được còn hơn chạy mà bỏ cổng.
+        raise SystemExit(
+            "Khong import duoc app.moderation nen khong ap duoc cong kiem duyet. "
+            "Chay script nay o noi `app` import duoc (container trainer/backend). "
+            f"Chi tiet: {exc}")
+
+    _kq_kd = _loc_kiem_duyet(rows, viewer_id=None)
+    if _kq_kd.withheld:
+        print(f"[kiem-duyet] {_kq_kd.summary()}")
+    rows = _kq_kd.kept
+    if not rows:
+        raise SystemExit(
+            "Khong con mau nao sau cong kiem duyet. Moi mau deu dang cho duyet "
+            "hoac da bi tu choi — duyet chung truoc khi dung split.")
+
     # Bộ lọc phương ngữ, áp TRƯỚC sàn — và thứ tự đó là bắt buộc.
     #
     # Trainer nhận `--dialect` và tự lọc lại lúc chạy, nên thoạt nhìn lọc ở đây

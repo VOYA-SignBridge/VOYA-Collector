@@ -136,6 +136,127 @@ def list_label_sessions(
     }
 
 
+@router.get("/{class_uid}/sessions/{session_id}/provenance")
+def session_provenance(
+    class_uid: str,
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Xuất xứ của MỘT lần thu (UC18).
+
+    Trả lời ba câu hỏi tách bạch, và không trộn chúng vào nhau:
+
+        nguồn gốc   — vật liệu này từ đâu ra (thu trực tiếp hay nhập vào)
+        ngữ cảnh    — thu trong điều kiện nào, của ai, thuộc lớp nào
+        dẫn xuất    — từ vật liệu gốc tới biểu diễn đang dùng, qua bước nào
+
+    Luật của endpoint này: thứ KHÔNG được ghi lại thì báo là không có. Không suy
+    ra, không điền giá trị hợp lý. Một xuất xứ bịa ra thì sau khi hiện lên màn
+    hình không còn phân biệt được với một xuất xứ có thật, và đó là kiểu sai
+    đắt nhất trong cả hệ thống.
+    """
+    meta = _get_class_or_404(class_uid)
+    groups = list_session_rows(class_uid, tenant_id=require_tenant())
+    rows = groups.get(session_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Không có lần thu này")
+
+    original = pick_original_sample(rows) or {}
+
+    def val(row: Dict[str, Any], key: str):
+        """Ô trống trả về None chứ không phải chuỗi rỗng — giao diện phân biệt
+        được "không ghi nhận" với "ghi nhận một giá trị rỗng"."""
+        v = row.get(key)
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v or None
+
+    def num(row: Dict[str, Any], key: str):
+        v = val(row, key)
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except ValueError:
+            return None
+
+    # Người ký: sổ đăng ký có tên hiển thị, hàng mẫu chỉ có mã. Tra một lượt.
+    signer_id = val(original, "signer_id")
+    signer_name = None
+    if signer_id:
+        try:
+            from app.signers import get_signer
+            rec = get_signer(signer_id)
+            signer_name = (rec or {}).get("display_name") or None
+        except Exception:
+            signer_name = None
+
+    samples = [
+        {
+            "sample_uid": val(r, "sample_uid"),
+            "augment_id": val(r, "augment_id"),
+            "seq_len": num(r, "seq_len"),
+            "completeness": num(r, "completeness"),
+            "jitter": num(r, "jitter"),
+            "file_path": val(r, "file_path"),
+            "checksum": val(r, "checksum"),
+            "storage_url": val(r, "storage_url"),
+        }
+        for r in rows
+    ]
+
+    return {
+        "class_uid": meta.class_uid,
+        "session_id": session_id,
+        "sample_count": len(rows),
+        # --- nguồn gốc -----------------------------------------------------
+        "origin": {
+            "source_type": val(original, "source_type"),
+            "collection_campaign": val(original, "collection_campaign"),
+            "created_at": min((r.get("created_at") or "" for r in rows), default="") or None,
+            "gdrive_synced": val(original, "gdrive_synced"),
+        },
+        # --- ngữ cảnh thu --------------------------------------------------
+        "context": {
+            "label_original": meta.label_original,
+            "slug": meta.slug,
+            "language": meta.language,
+            "dialect": meta.dialect,
+            "signer_id": signer_id,
+            "signer_name": signer_name,
+            "contributor_label": val(original, "user_id"),
+            "tenant_id": val(original, "tenant_id"),
+        },
+        # --- chuỗi dẫn xuất ------------------------------------------------
+        "derivation": {
+            # `raw_landmarks_available` là câu trả lời cho "vật liệu gốc còn giữ
+            # được không". Nó KHÔNG suy ra từ sự tồn tại của tệp npz đã chuẩn hoá.
+            "raw_landmarks_available": val(original, "raw_landmarks_available"),
+            "normalization_version": val(original, "normalization_version"),
+            "preprocess_contract_version": val(original, "preprocess_contract_version"),
+            "fps_original": num(original, "fps_original"),
+            "fps_processed": num(original, "fps_processed"),
+            "sequence_length_original": num(original, "sequence_length_original"),
+            "seq_len": num(original, "seq_len"),
+            "file_path": val(original, "file_path"),
+            "storage_url": val(original, "storage_url"),
+            "checksum": val(original, "checksum"),
+        },
+        # --- chất lượng ----------------------------------------------------
+        "quality": {
+            "completeness": num(original, "completeness"),
+            "jitter": num(original, "jitter"),
+            "left_hand_ratio": num(original, "left_hand_ratio"),
+            "right_hand_ratio": num(original, "right_hand_ratio"),
+            "both_hands_ratio": num(original, "both_hands_ratio"),
+            "quality_flags": val(original, "quality_flags"),
+            "quality_status": val(original, "quality_status"),
+        },
+        "samples": samples,
+    }
+
+
 @router.delete("/{class_uid}/sessions/{session_id}")
 def delete_label_session(
     class_uid: str,

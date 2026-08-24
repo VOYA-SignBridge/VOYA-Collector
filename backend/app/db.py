@@ -181,6 +181,29 @@ def _init_db(full_resync: bool | None = None):
         except Exception as exc:
             logger.warning("[DB_INIT] samples.csv tenant_id migration skipped: %s", exc)
 
+        # Trạng thái kiểm duyệt, cùng ràng buộc thứ tự như hai cột trên:
+        # samples.csv phải mang `review_status` TRƯỚC lượt đồng bộ, nếu không
+        # mọi dòng nó đẩy lên sẽ nhận default của bảng (`pending`) và cả corpus
+        # đã có bỗng nằm trong hàng đợi chờ duyệt.
+        #
+        # `fill="approved"` phản chiếu ĐÚNG những gì DDL làm cho các dòng đã tồn
+        # tại trong Postgres (`ADD COLUMN ... DEFAULT 'approved'`). Hai bên phải
+        # nói cùng một câu: CSV là nguồn sự thật, Postgres là bản sao, và một
+        # lượt dựng lại từ CSV mà đọc ra `pending` sẽ khoá dữ liệu đã công bố ra
+        # khỏi mọi lượt huấn luyện.
+        #
+        # Xem docs/01-architecture/COMMUNITY_MODERATION.md §2.3, §3.
+        try:
+            from app.dataset_samples import ensure_samples_column
+
+            if ensure_samples_column("review_status", fill="approved"):
+                logger.info(
+                    "[DB_INIT] samples.csv: đã thêm cột review_status, "
+                    "dòng cũ backfill 'approved'"
+                )
+        except Exception as exc:
+            logger.warning("[DB_INIT] samples.csv review_status migration skipped: %s", exc)
+
         # labels.csv migrates itself: _ensure_labels_file() detects the outdated
         # header and rewrites it. Touch it here so the migration happens BEFORE
         # the sync rather than on whichever request reads a class first.

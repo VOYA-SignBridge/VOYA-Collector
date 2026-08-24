@@ -309,6 +309,86 @@ _SQL_METRIC_TENANT_NOT_NULL = (
     "ALTER TABLE training_metrics ALTER COLUMN tenant_id SET NOT NULL"
 )
 
+#: BUỔI THU — thực thể bị nhét vào một cột chuỗi suốt từ đầu.
+#:
+#: `capture_sessions.session_id` là mã do trình duyệt sinh (epoch-ms). Đo ngày
+#: 23/08/2026 trên sản xuất: **250 capture session nhưng chỉ 57 mã**. Một mã
+#: gom tới 30 capture session, và mỗi capture session đúng MỘT lớp. Nên cấu
+#: trúc thật là hai tầng, và tầng trên chưa từng được mô hình hoá:
+#:
+#:     BUỔI THU (mã trình duyệt)  1 ──< CAPTURE SESSION ── 1 lớp
+#:                                          └──< MẪU
+#:
+#: Hệ quả của việc thiếu tầng ấy không chỉ là ERD xấu: không có chỗ nào treo
+#: được thuộc tính của cả buổi (ai ký, thu lúc nào, bằng thiết bị gì), nên mỗi
+#: capture session phải chép lại, và không gì bắt các bản chép phải khớp nhau.
+#:
+#: Hai câu hỏi về lực học được TRẢ LỜI BẰNG DỮ LIỆU, không phỏng đoán:
+#:
+#:     signer_id      0/57 buổi có quá một người ký  -> bất biến, nâng lên cha
+#:     auth_user_id   1/57 buổi có HAI tài khoản thu -> KHÔNG bất biến
+#:
+#: Vì thế cột người ký được nâng lên và có ràng buộc bắt hai tầng khớp nhau,
+#: còn cột tài khoản thì KHÔNG. Nó được đặt tên `opened_by_user_id` chứ không
+#: phải `auth_user_id`: buổi `1778859392944` có hai tài khoản cùng thu, nên
+#: một cột tên `auth_user_id` ở tầng này sẽ hứa một điều dữ liệu không giữ —
+#: đúng cái bẫy mà `sequence_length_original` đã mắc.
+_SQL_CREATE_COLLECTION_SESSIONS = """
+    CREATE TABLE IF NOT EXISTS collection_sessions (
+        collection_session_id UUID PRIMARY KEY,
+        tenant_id             TEXT NOT NULL,
+        session_code          TEXT NOT NULL,
+        signer_id             TEXT,
+        opened_by_user_id     UUID REFERENCES users(id) ON DELETE SET NULL,
+        source_type           TEXT,
+        started_at            TIMESTAMP WITH TIME ZONE,
+        ended_at              TIMESTAMP WITH TIME ZONE,
+        note                  TEXT,
+        created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_collection_sessions_natural
+            UNIQUE (tenant_id, session_code),
+        CONSTRAINT collection_sessions_code_not_blank
+            CHECK (session_code <> ''),
+        CONSTRAINT collection_sessions_ends_after_start
+            CHECK (ended_at IS NULL OR started_at IS NULL OR ended_at >= started_at)
+    )
+    """
+
+#: Gom capture session thành buổi. Ba phép gộp, mỗi phép có lý do riêng:
+#:
+#:   max(signer_id)    an toàn vì 0/57 buổi có quá một người ký (đã đo)
+#:   max(source_type)  an toàn vì 0/57 buổi đổi nguồn (đã đo)
+#:   array_agg(...)[1] KHÔNG phải phép gộp tuỳ tiện — nó lấy tài khoản của
+#:                     capture session SỚM NHẤT, tức "ai mở buổi này", là điều
+#:                     duy nhất còn đúng khi buổi có nhiều tài khoản
+#:
+#: `ON CONFLICT DO NOTHING` trên khoá tự nhiên `(tenant_id, session_code)` làm
+#: bước này chạy lại được: lần thứ hai không sinh thêm buổi nào.
+_SQL_BACKFILL_COLLECTION_SESSIONS = (
+    "INSERT INTO collection_sessions ("
+    "  collection_session_id, tenant_id, session_code, signer_id, "
+    "  opened_by_user_id, source_type, started_at, ended_at, created_at) "
+    "SELECT gen_random_uuid(), g.tenant_id, g.session_id, g.signer_id, "
+    "       g.opened_by, g.source_type, g.started_at, g.ended_at, g.created_at "
+    "FROM (SELECT c.tenant_id, c.session_id, "
+    "             max(c.signer_id)   AS signer_id, "
+    "             max(c.source_type) AS source_type, "
+    "             min(c.started_at)  AS started_at, "
+    "             max(c.ended_at)    AS ended_at, "
+    "             min(c.created_at)  AS created_at, "
+    "             (array_agg(c.auth_user_id ORDER BY c.created_at, "
+    "                        c.capture_session_id) "
+    "              FILTER (WHERE c.auth_user_id IS NOT NULL))[1] AS opened_by "
+    "      FROM capture_sessions c GROUP BY c.tenant_id, c.session_id) g "
+    "ON CONFLICT (tenant_id, session_code) DO NOTHING"
+)
+_SQL_LINK_CAPTURE_TO_COLLECTION = (
+    "UPDATE capture_sessions c SET collection_session_id = s.collection_session_id "
+    "FROM collection_sessions s "
+    "WHERE s.tenant_id = c.tenant_id AND s.session_code = c.session_id "
+    "  AND c.collection_session_id IS NULL"
+)
+
 #: Bước ĐỊNH HÌNH DỮ LIỆU: chạy trong phạm vi hệ thống theo giao dịch, và phải
 #: chứng minh HẬU ĐIỀU KIỆN. Xem `_run_data_step` về vì sao rowcount không đủ.
 #:
@@ -360,6 +440,33 @@ MIGRATION_DATA_STEPS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "LEFT JOIN training_jobs j ON j.job_id = m.job_id "
         "WHERE m.tenant_id IS NULL OR j.job_id IS NULL "
         "   OR m.tenant_id IS DISTINCT FROM j.tenant_id",
+    ),
+    # Bước HAI CÂU, và tách đôi thì hỏng: câu đầu sinh buổi thu, câu sau nối
+    # capture session vào buổi. Chạy riêng câu đầu để lại một bảng buổi thu mà
+    # không ai trỏ tới; chạy riêng câu sau thì không có gì để trỏ.
+    #
+    # Hậu điều kiện có BA vế, và vế thứ ba mới là vế đắt:
+    #
+    #   1. không capture session nào còn mồ côi   -> backfill đã phủ hết
+    #   2. buổi cha đúng tenant và đúng mã phiên  -> gom ĐÚNG nhóm
+    #   3. người ký hai tầng không mâu thuẫn      -> nâng cột lên KHÔNG bịa
+    #
+    # Chỉ kiểm vế một thì một bản vá gom bừa mọi capture session vào một buổi
+    # duy nhất vẫn "đạt". Vế hai phân biệt "đã nối" với "nối đúng chỗ". Vế ba
+    # là thứ duy nhất chứng minh việc nâng `signer_id` lên cha không làm mất
+    # hoặc đổi danh tính người ký của bất kỳ capture session nào.
+    _SQL_BACKFILL_COLLECTION_SESSIONS: (
+        "migration:v5:group-capture-sessions-into-collection-sessions",
+        (_SQL_BACKFILL_COLLECTION_SESSIONS, _SQL_LINK_CAPTURE_TO_COLLECTION),
+        "SELECT count(*) = 0 FROM capture_sessions c "
+        "LEFT JOIN collection_sessions s "
+        "       ON s.collection_session_id = c.collection_session_id "
+        "WHERE c.collection_session_id IS NULL "
+        "   OR s.collection_session_id IS NULL "
+        "   OR s.tenant_id    IS DISTINCT FROM c.tenant_id "
+        "   OR s.session_code IS DISTINCT FROM c.session_id "
+        "   OR (c.signer_id IS NOT NULL "
+        "       AND s.signer_id IS DISTINCT FROM c.signer_id)",
     ),
 }
 
@@ -996,7 +1103,13 @@ from app.storage.authz_schema import (  # noqa: E402  (sau `logger`, có chủ �
 )
 
 TENANT_SCOPED_TABLES = (
-    "api_keys", "audit_log", "capture_sessions", "classes", "dialect_aliases",
+    "api_keys", "audit_log", "capture_sessions", "classes",
+    # `collection_sessions` (23/08/2026) — tầng cha của capture session. Có mặt
+    # ở đây là một trong BA việc bắt buộc khi thêm bảng có `tenant_id`; hai
+    # việc kia là `rls.RLS_TABLES` và `tenant_lifecycle.PURGE_ORDER`. Thiếu
+    # việc thứ ba thì lượt xoá tenant sẽ dừng giữa chừng ở khoá ngoại RESTRICT
+    # mà chính vòng lặp dưới đây cấp.
+    "collection_sessions", "dialect_aliases",
     "dialects", "notifications", "raw_uploads", "recognition_profiles",
     "registry_versions", "samples", "signer_aliases", "signer_consents",
     "signers", "support_messages", "support_tickets",
@@ -2866,11 +2979,24 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS owner_user_id UUID",
     "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMP WITH TIME ZONE",
     "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS suspended_reason TEXT",
-    # Backfill trước khi SET NOT NULL. Tenant gốc lấy `internal`; mọi tenant
-    # đã tồn tại lấy `school` chứ không phải `trial` — chúng được người vận
-    # hành tạo tay từ trước, và hạ chúng xuống gói dùng thử là tự dựng một
-    # trần 500 mẫu lên dữ liệu đang chạy.
-    f"UPDATE tenants SET plan_code = 'internal' "
+    # Backfill trước khi SET NOT NULL. Mọi tenant đã tồn tại lấy `school` chứ
+    # không phải `trial` — chúng được người vận hành tạo tay từ trước, và hạ
+    # chúng xuống gói dùng thử là tự dựng một trần 500 mẫu lên dữ liệu đang chạy.
+    #
+    # Tenant gốc từng lấy `'internal'`. Gói đó KHÔNG còn trong bảng `plans` —
+    # v6 chỉ gieo free/plus/pro/enterprise — nên trên một máy cài MỚI câu ấy
+    # dựng ra một hàng mà `fk_tenants_plan` từ chối ngay ở bước thêm khoá
+    # ngoại, và cả lượt migration đi tiếp với một tenant không có gói.
+    #
+    # Đo 22/08/2026:
+    #   ERROR: insert or update on table "tenants" violates foreign key
+    #          constraint "fk_tenants_plan"
+    #   DETAIL: Key (plan_code)=(internal) is not present in table "plans".
+    #
+    # Máy đang chạy không dính vì `default` ở đó đã là `enterprise` từ lâu, nên
+    # mệnh đề `plan_code IS NULL` không bao giờ khớp. Lỗi chỉ sống ở đường cài
+    # mới, và nó nằm im cho tới khi có người dựng máy thứ hai.
+    f"UPDATE tenants SET plan_code = 'enterprise' "
     f"WHERE plan_code IS NULL AND tenant_id = '{DEFAULT_TENANT_ID}'",
     "UPDATE tenants SET plan_code = 'school' WHERE plan_code IS NULL",
     # GIÁ TRỊ MẶC ĐỊNH, không chỉ NOT NULL. Bắt buộc, và đây là lỗi đã mắc
@@ -3701,6 +3827,152 @@ MIGRATION_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_user_recovery_codes_user "
     "ON user_recovery_codes(user_id) WHERE used_at IS NULL",
     # ---------------------------------------------------------------------
+    # v6 — Kiểm duyệt dữ liệu Cộng đồng.
+    # Xem docs/01-architecture/COMMUNITY_MODERATION.md.
+    #
+    # HAI câu ADD rồi SET DEFAULT là MỘT bước. Đừng gộp, đừng tách.
+    # ---------------------------------------------------------------------
+    # `ADD COLUMN ... DEFAULT 'approved'` điền `approved` cho MỌI dòng đã tồn
+    # tại; `SET DEFAULT 'pending'` ngay sau đó quyết định giá trị của dòng MỚI.
+    # Đó là toàn bộ phần "backfill" — cố ý KHÔNG có câu UPDATE nào.
+    #
+    # Vì sao không dùng UPDATE: `UPDATE samples SET review_status = 'approved'
+    # WHERE review_status = 'pending'` chạy lại ở lần khởi động sau sẽ DUYỆT
+    # SẠCH mọi mẫu đang thật sự chờ duyệt. Sổ migration này chạy mỗi lần khởi
+    # động, nên một câu như thế là mìn hẹn giờ. Hình dạng ADD-rồi-SET không
+    # chạy lại được: `IF NOT EXISTS` bỏ qua ở lượt thứ hai, và `SET DEFAULT`
+    # là idempotent.
+    #
+    # Vì sao 3.862 dòng cũ là `approved` chứ không phải `pending`: chúng là
+    # corpus nghiên cứu đã dùng để công bố. Để `pending` thì bộ lọc kiểm duyệt
+    # sẽ loại sạch dữ liệu khỏi MỌI lượt huấn luyện ngay khi nó được bật —
+    # hỏng theo hướng an toàn, nhưng hỏng toàn bộ.
+    #
+    # ĐÂY KHÔNG PHẢI "một cột hai default trái ngược" như `gdrive_synced` (xem
+    # chú thích trong CREATE TABLE samples). Chỗ đó là hai khai báo ĐỘC LẬP bất
+    # đồng, và bên thắng phụ thuộc vào việc CSDL cũ hay mới. Chỗ này là một
+    # chuỗi hai câu ở CÙNG một nơi, nơi chính sự chuyển tiếp là mục đích — nên
+    # `review_status` CỐ Ý không có mặt trong `CREATE TABLE samples`.
+    # Tổ chức mà tài khoản này ĐANG XEM, khác với tổ chức NHÀ (`users.tenant_id`)
+    # nơi dữ liệu mới của họ mặc định thuộc về.
+    #
+    # NULL = đang ở tổ chức nhà. Đó là trạng thái của mọi tài khoản hiện có, nên
+    # cột này không đổi hành vi của ai cho tới khi có người bấm chuyển.
+    #
+    # Vì sao là một CỘT chứ không phải cookie hay header
+    # ---------------------------------------------------
+    # `tenant_middleware` cố ý không nhận tenant từ bất kỳ trường nào của
+    # request: làm thế biến ranh giới cách ly thành một thứ người gọi tự khai.
+    # Một cột do máy chủ ghi, chỉ ghi được qua `POST /tenants/switch` sau khi đã
+    # kiểm tư cách thành viên, giữ nguyên tính chất ấy — đúng như chú thích
+    # "phải được kiểm theo tư cách thành viên TRƯỚC khi tới hàm này".
+    #
+    # KHÔNG có khoá ngoại tới `tenants`: một tổ chức bị xoá phải làm giá trị này
+    # trở nên vô hiệu, chứ không được chặn lượt xoá. Phép đọc ở
+    # `_tenant_of_user` tự bỏ qua giá trị không còn tư cách thành viên, nên một
+    # con trỏ treo sẽ rơi về tổ chức nhà thay vì thành lỗi.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS active_tenant_id TEXT",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL "
+    "DEFAULT 'approved'",
+    "ALTER TABLE samples ALTER COLUMN review_status SET DEFAULT 'pending'",
+    _add_constraint("samples", "ck_samples_review_status",
+                    "CHECK (review_status IN ('pending', 'approved', 'rejected'))"),
+    # Ba cột vết kiểm toán. CỐ Ý không vào `samples.csv`: tệp ấy được nhân bản
+    # sang Google Sheets, và danh tính người duyệt cùng nhận xét về người đóng
+    # góp không thuộc về một bảng tính dùng chung. Chỉ `review_status` đi theo
+    # dữ liệu, vì nó là thứ quyết định dữ liệu có dùng được hay không.
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS reviewed_by UUID "
+    "REFERENCES users(id) ON DELETE SET NULL",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE samples ADD COLUMN IF NOT EXISTS review_note TEXT DEFAULT ''",
+    # Truy vấn nóng duy nhất: hàng đợi chờ duyệt, và huy hiệu đếm nó. Chỉ mục
+    # TỪNG PHẦN vì phần đã duyệt lớn dần vô hạn còn phần chờ duyệt thì không —
+    # cùng lý do với `idx_notifications_unread`.
+    "CREATE INDEX IF NOT EXISTS idx_samples_pending_review "
+    "ON samples(tenant_id, created_at DESC) "
+    "WHERE review_status = 'pending' AND deleted_at IS NULL",
+    # ---------------------------------------------------------------------
+    # Bịt hai lỗ tham chiếu chéo tenant còn lại (kiểm ngày 23/08/2026).
+    #
+    # Toàn bộ lược đồ đã dùng khoá ngoại GHÉP để một hàng của tenant A không
+    # trỏ được sang hàng của tenant B — 24 khoá như vậy, kể cả khoá ba cột
+    # `memberships -> projects`. Hai chỗ bị bỏ sót:
+    #
+    #   samples.capture_session_id      chỉ kiểm capture session CÓ TỒN TẠI,
+    #                                   không kiểm nó cùng tenant
+    #   vocabulary_registry_meta.version  không kiểm gì cả — con trỏ "phiên bản
+    #                                   hiện hành" có thể trỏ vào phiên bản
+    #                                   không tồn tại
+    #
+    # Cả hai đều sạch trên dữ liệu hiện tại (0 hàng lệch tenant, 5/5 con trỏ
+    # registry hợp lệ), nên gắn ràng buộc không cần sửa dữ liệu trước.
+    #
+    # Vì sao `uq_capture_sessions_tenant` phải có trước: khoá ngoại ghép đòi
+    # bên được trỏ có khoá ứng viên đúng hình dạng đó. `capture_session_id` đã
+    # là khoá chính nên cặp `(tenant_id, capture_session_id)` chắc chắn duy
+    # nhất — ràng buộc này không loại được hàng nào, nó chỉ khai báo cho
+    # Postgres biết điều đã đúng sẵn.
+    _add_constraint("capture_sessions", "uq_capture_sessions_tenant",
+                    "UNIQUE (tenant_id, capture_session_id)"),
+    # `SET NULL (capture_session_id)` — danh sách cột là bắt buộc, và đây là
+    # lý do: `ON DELETE SET NULL` trần sẽ đặt NULL cho CẢ HAI cột của khoá,
+    # nhưng `samples.tenant_id` là NOT NULL, nên xoá một capture session sẽ
+    # hỏng thay vì gỡ con trỏ. Dạng có danh sách cột (PostgreSQL 15+, máy chủ
+    # này 17.10) chỉ đặt NULL đúng cột con trỏ và giữ nguyên tenant — khớp với
+    # hành vi của khoá một cột đang có.
+    #
+    # 1001 hàng cũ có `capture_session_id` NULL không bị chặn: MATCH SIMPLE
+    # coi khoá có thành phần NULL là thoả mãn.
+    _add_constraint(
+        "samples", "fk_samples_capture_session_tenant",
+        "FOREIGN KEY (tenant_id, capture_session_id) "
+        "REFERENCES capture_sessions(tenant_id, capture_session_id) "
+        "ON DELETE SET NULL (capture_session_id)"),
+    _add_constraint(
+        "vocabulary_registry_meta", "fk_vocabulary_registry_meta_version",
+        "FOREIGN KEY (tenant_id, version) "
+        "REFERENCES registry_versions(tenant_id, version)"),
+    # ---------------------------------------------------------------------
+    # BUỔI THU — tầng còn thiếu giữa mã phiên và capture session. Xem chú thích
+    # dài ở `_SQL_CREATE_COLLECTION_SESSIONS`.
+    #
+    # Thứ tự trong khối này là bắt buộc: bảng -> cột con -> khoá ứng viên ->
+    # khoá ngoại -> backfill. Và cả khối phải đứng TRƯỚC `TENANT_FK_LOOP_SQL`,
+    # vì vòng lặp ấy cấp khoá ngoại `tenant_id` cho mọi bảng trong
+    # `TENANT_SCOPED_TABLES` và sẽ bỏ qua bảng chưa tồn tại lúc nó đi qua.
+    _SQL_CREATE_COLLECTION_SESSIONS,
+    "ALTER TABLE capture_sessions ADD COLUMN IF NOT EXISTS "
+    "collection_session_id UUID",
+    _add_constraint("collection_sessions", "uq_collection_sessions_tenant",
+                    "UNIQUE (tenant_id, collection_session_id)"),
+    # Khoá ứng viên BA cột, và nó tồn tại chỉ để làm đích cho ràng buộc khớp
+    # người ký ngay dưới. `collection_session_id` đã là khoá chính nên bộ ba
+    # chắc chắn duy nhất — câu này không loại được hàng nào.
+    _add_constraint("collection_sessions", "uq_collection_sessions_signer_scope",
+                    "UNIQUE (tenant_id, collection_session_id, signer_id)"),
+    _add_constraint("collection_sessions", "fk_collection_sessions_signer",
+                    "FOREIGN KEY (tenant_id, signer_id) "
+                    "REFERENCES signers(tenant_id, signer_id) ON UPDATE CASCADE"),
+    _add_constraint(
+        "capture_sessions", "fk_capture_sessions_collection",
+        "FOREIGN KEY (tenant_id, collection_session_id) "
+        "REFERENCES collection_sessions(tenant_id, collection_session_id) "
+        "ON DELETE SET NULL (collection_session_id)"),
+    # CHUYỂN TIẾP AN TOÀN cho `signer_id`, đúng nghĩa "giữ ở cả hai tầng rồi mới
+    # bỏ bản sao con". Ràng buộc này KHÔNG bắt capture session phải khai người
+    # ký — MATCH SIMPLE coi khoá có thành phần NULL là thoả mãn, nên 2186 hàng
+    # chưa có người ký đi qua tự do. Nó chỉ nói: NẾU con khai người ký thì phải
+    # trùng người ký của buổi. Đó là thứ biến "hai bản sao" thành "một sự thật
+    # có bản sao được kiểm".
+    _add_constraint(
+        "capture_sessions", "fk_capture_sessions_collection_signer",
+        "FOREIGN KEY (tenant_id, collection_session_id, signer_id) "
+        "REFERENCES collection_sessions"
+        "(tenant_id, collection_session_id, signer_id) "
+        "ON DELETE SET NULL (collection_session_id)"),
+    _SQL_BACKFILL_COLLECTION_SESSIONS,
+    _SQL_LINK_CAPTURE_TO_COLLECTION,
+    # ---------------------------------------------------------------------
     # v3.15 — Vòng lặp khoá ngoại tenant, lần thứ hai. Xem chú thích ở
     # TENANT_FK_LOOP_SQL: các bảng v3 và v4 vừa được tạo bên trên, sau khi lượt
     # chạy đầu tiên của vòng lặp đã đi qua chỗ chúng còn chưa tồn tại.
@@ -4356,7 +4628,8 @@ INSERT INTO samples(
     seq_len, augment_id, completeness, file_path, storage_url, checksum, created_at, gdrive_synced,
     left_hand_ratio, right_hand_ratio, both_hands_ratio, jitter, quality_flags,
     signer_id, collection_campaign, raw_landmarks_available, normalization_version,
-    preprocess_contract_version, sequence_length_original, quality_status, tenant_id
+    preprocess_contract_version, sequence_length_original, quality_status, tenant_id,
+    review_status, capture_session_id
 )
 VALUES(
     %(sample_uid)s, %(class_uid)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
@@ -4368,7 +4641,17 @@ VALUES(
     -- A brand-new row with no stated tenant belongs to the bootstrap tenant.
     -- An explicit NULL would violate NOT NULL rather than fall back to the
     -- column DEFAULT, so the fallback is spelled out here.
-    COALESCE(%(tenant_id)s, '{DEFAULT_TENANT_ID}')
+    COALESCE(%(tenant_id)s, '{DEFAULT_TENANT_ID}'),
+    -- Nguồn im lặng thì mẫu CHỜ DUYỆT. Hướng hỏng này là chủ ý: một dòng không
+    -- nói gì về việc đã duyệt hay chưa thì chưa được coi là đã duyệt. Đường
+    -- ngược lại — mặc định approved — biến mọi lượt nhập từ nguồn cũ thành một
+    -- lần công khai hàng loạt mà không ai bấm nút nào.
+    --
+    -- Corpus đã có KHÔNG đi qua đây: nó được đóng dấu 'approved' ngay tại câu
+    -- ALTER TABLE thêm cột, và samples.csv mang sẵn giá trị ấy nhờ
+    -- ensure_samples_column(fill="approved") trong db.py.
+    COALESCE(%(review_status)s, 'pending'),
+    %(capture_session_id)s
 )
 ON CONFLICT (sample_uid) DO UPDATE SET
     class_uid = EXCLUDED.class_uid,
@@ -4409,7 +4692,23 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     -- the distinction between "no opinion" (keep what the DB has) and
     -- "belongs to X". (Spelled in prose on purpose: psycopg2 substitutes
     -- placeholders inside comments too, so writing one here would interpolate.)
-    tenant_id = COALESCE(%(tenant_id)s, samples.tenant_id)
+    tenant_id = COALESCE(%(tenant_id)s, samples.tenant_id),
+    -- Cùng bẫy như tenant_id ngay trên, và cùng cách tránh: đọc THAM SỐ chứ
+    -- không đọc EXCLUDED. Giá trị trong EXCLUDED đã bị mệnh đề VALUES thay bằng
+    -- 'pending' khi nguồn im lặng, nên dùng nó ở đây sẽ HẠ CẤP mọi mẫu đã duyệt
+    -- về trạng thái chờ ở lượt đồng bộ kế tiếp — xoá sạch công của người kiểm
+    -- duyệt mà không có lỗi nào.
+    --
+    -- Đọc tham số giữ được phân biệt "không có ý kiến" (giữ nguyên trạng thái
+    -- trong CSDL) với "trạng thái là X".
+    review_status = COALESCE(%(review_status)s, samples.review_status),
+    -- COALESCE giữ con trỏ đã có khi nguồn im lặng, và điều đó quan trọng vì
+    -- lượt đồng bộ CSV->DB chạy định kỳ KHÔNG biết gì về `capture_session_id`
+    -- (cột này không có trong samples.csv). Dùng EXCLUDED trần ở đây sẽ khiến
+    -- mỗi lượt đồng bộ xoá sạch con trỏ vừa dựng, rồi lượt migrate sau lại
+    -- dựng lại — một vòng lặp câm.
+    capture_session_id = COALESCE(EXCLUDED.capture_session_id,
+                                  samples.capture_session_id)
 """
 
 SQL_UPSERT_RAW_UPLOAD = f"""
@@ -4609,7 +4908,126 @@ _SAMPLE_DB_KEYS = (
     "signer_id", "collection_campaign", "raw_landmarks_available", "normalization_version",
     "preprocess_contract_version", "sequence_length_original", "quality_status",
     "tenant_id",   # literal — see the note in _CLASS_DB_KEYS
+    "review_status",
+    # CHỈ có ở cơ sở dữ liệu — `capture_session_id` KHÔNG nằm trong samples.csv,
+    # nên thêm nó ở đây không đụng tới hợp đồng SOT lẫn bản sao Google Sheets.
+    "capture_session_id",
 )
+
+
+#: Dựng buổi thu + phiên thu cho một mẫu SẮP được ghi. Một lượt đi-về.
+#:
+#: Hai câu INSERT nối bằng CTE, mỗi câu `ON CONFLICT DO NOTHING` rồi `COALESCE`
+#: sang hàng đã có. `DO NOTHING` không trả về gì khi đụng độ, nên nhánh COALESCE
+#: thứ hai mới là nhánh chạy ở lần thu THỨ HAI trở đi của cùng một buổi — tức
+#: đường phổ biến nhất, không phải đường ngoại lệ.
+_SQL_ENSURE_CAPTURE_SESSION = """
+WITH buoi_moi AS (
+    INSERT INTO collection_sessions
+        (collection_session_id, tenant_id, session_code, opened_by_user_id)
+    VALUES (gen_random_uuid(), %(tenant)s, %(code)s, %(nguoi)s)
+    ON CONFLICT (tenant_id, session_code) DO NOTHING
+    RETURNING collection_session_id
+),
+buoi AS (
+    SELECT COALESCE(
+        (SELECT collection_session_id FROM buoi_moi),
+        (SELECT collection_session_id FROM collection_sessions
+          WHERE tenant_id = %(tenant)s AND session_code = %(code)s)
+    ) AS id
+),
+phien_moi AS (
+    INSERT INTO capture_sessions
+        (capture_session_id, tenant_id, class_uid, session_id,
+         collection_session_id, auth_user_id, source_type)
+    SELECT gen_random_uuid(), %(tenant)s, %(lop)s, %(code)s, buoi.id,
+           %(nguoi)s, %(nguon)s
+      FROM buoi WHERE buoi.id IS NOT NULL
+    ON CONFLICT (tenant_id, class_uid, session_id) DO NOTHING
+    RETURNING capture_session_id
+)
+SELECT COALESCE(
+    (SELECT capture_session_id FROM phien_moi),
+    (SELECT capture_session_id FROM capture_sessions
+      WHERE tenant_id = %(tenant)s AND class_uid = %(lop)s
+        AND session_id = %(code)s)
+) AS capture_session_id
+"""
+
+
+def ensure_capture_session(
+    *, tenant_id: str, class_uid: str, session_id: str,
+    auth_user_id: Any = None, source_type: str = "",
+) -> str | None:
+    """`capture_session_id` cho một mẫu sắp ghi — dựng cả hai tầng nếu chưa có.
+
+    Vì sao hàm này tồn tại
+    ----------------------
+    Trước 24/08/2026 KHÔNG đường ghi nào tạo capture session. Chúng chỉ ra đời
+    ở `MIGRATION_STATEMENTS`, suy ngược từ `samples` mỗi lượt `app.cli.migrate`.
+    Đo trên sản xuất: một mẫu quay lúc 2026-08-19 01:15 phải chờ tới
+    2026-08-23 16:20 mới có phiên cha — **4 ngày 15 giờ** nằm với
+    `capture_session_id = NULL`.
+
+    Hệ quả không chỉ là một cột trống. Trong quãng ấy mẫu không truy được về
+    buổi thu nào, và hàng đợi kiểm duyệt — vốn gom theo `capture_session_id` —
+    không nhìn thấy nó. Backfill là công cụ cho dữ liệu CŨ; để nó gánh luôn
+    tính nhất quán của dữ liệu MỚI là nhầm vai.
+
+    Vì sao KHÔNG đụng tới `signer_id`
+    ---------------------------------
+    Không tầng phiên nào mang được người ký. Đo ngày 23/08/2026: 10/253 capture
+    session chứa từ hai nhãn người ký trở lên — hai người thay phiên ký cùng
+    một từ trong cùng một lượt quay. Người ký là thuộc tính của MẪU.
+
+    Nên hàm này để `capture_sessions.signer_id` và `collection_sessions.signer_id`
+    NGUYÊN NULL. Điều đó vừa đúng mô hình đích, vừa tránh được ràng buộc
+    `fk_capture_sessions_collection_signer` — ràng buộc ấy đòi người ký của con
+    trùng người ký của cha, và nó sẽ từ chối đúng dữ liệu hợp lệ khi hai tầng
+    khác nhau. Nó đang chờ được gỡ ở v6.
+
+    Và tuyệt đối không tự sinh hàng `signers` để khoá ngoại chịu đi qua: chưa
+    biết người ký thì NULL. Xem `docs/02-data/db/LEGACY_SIGNER_RESOLUTION.md`
+    về việc `S010` đã gộp sáu người thật vì đúng lối tắt đó.
+
+    Vì sao `opened_by_user_id` chỉ ghi lúc TẠO
+    ------------------------------------------
+    Nó là "ai mở buổi", không phải "ai thu buổi này". 1/57 buổi trên sản xuất
+    có hai tài khoản cùng thu, nên cập nhật nó ở mỗi lượt ghi sẽ biến nó thành
+    "người ghi gần nhất" — một con số không trả lời được câu hỏi nào.
+
+    Trả `None` khi thiếu dữ kiện, và người gọi coi đó là chuyện bình thường:
+    mẫu vẫn được ghi, chỉ là chưa có phiên cha, y như trước.
+    """
+    tid = str(tenant_id or "").strip()
+    lop = str(class_uid or "").strip()
+    ma = str(session_id or "").strip()
+    if not (tid and lop and ma):
+        return None
+
+    tham_so = {
+        "tenant": tid, "lop": lop, "code": ma,
+        "nguoi": str(auth_user_id) if auth_user_id else None,
+        "nguon": (source_type or "").strip() or None,
+    }
+
+    # Hai lượt, và lượt thứ hai KHÔNG phải phòng xa vu vơ. `ON CONFLICT DO
+    # NOTHING` thua cuộc trong một cuộc đua sẽ không trả về gì, còn truy vấn
+    # COALESCE nằm CÙNG câu lệnh nên dùng chung ảnh chụp — nó chưa thấy hàng mà
+    # giao dịch kia vừa ghi. Kết quả là NULL cho một hàng CÓ THẬT. Câu lệnh thứ
+    # hai lấy ảnh chụp mới và thấy nó.
+    for _ in range(2):
+        try:
+            rows = _fetch_all(_SQL_ENSURE_CAPTURE_SESSION, tham_so)
+        except Exception as e:
+            logger.warning("[CAPTURE] khong dung duoc phien thu cho %s/%s: %s",
+                           lop, ma, e)
+            return None
+        if rows and rows[0].get("capture_session_id"):
+            return str(rows[0]["capture_session_id"])
+    logger.warning("[CAPTURE] khong lay duoc capture_session_id cho %s/%s sau 2 luot",
+                   lop, ma)
+    return None
 
 
 def insert_sample(row: Dict[str, Any]):
@@ -4652,6 +5070,17 @@ def insert_sample(row: Dict[str, Any]):
     payload["created_at"] = _ts_or_none(payload.get("created_at"))
     if payload.get("gdrive_synced") is None:
         payload["gdrive_synced"] = True
+    # "" -> None, để SQL phân biệt được "nguồn không nói gì" với một giá trị
+    # thật. Ô rỗng là hình dạng mà mọi dòng đến từ CSV mang theo khi tệp chưa
+    # có cột này, và biến nó thành None là thứ kích hoạt hai mệnh đề COALESCE
+    # trong SQL_UPSERT_SAMPLE.
+    payload["review_status"] = (str(payload.get("review_status") or "").strip() or None)
+    # Cùng luật "rỗng nghĩa là không nói gì", nhưng ở đây nó còn là hàng rào
+    # kiểu: cột là UUID, và mọi dòng đến từ CSV đều KHÔNG mang khoá này (nó
+    # không có trong samples.csv). Không có phép quy này thì chuỗi rỗng đi
+    # thẳng vào Postgres và cả lượt đồng bộ ngã với
+    # `invalid input syntax for type uuid`.
+    payload["capture_session_id"] = _uuid_or_none(payload.get("capture_session_id"))
     _execute(SQL_UPSERT_SAMPLE, payload)
 
 

@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import AuthShell from "../components/auth/AuthShell";
-import { inspectInvitation, roleLabel, type InvitationPreview } from "../api/tenants";
+import {
+  acceptInvitation,
+  inspectInvitation,
+  roleLabel,
+  type InvitationPreview,
+} from "../api/tenants";
 import { friendlyError } from "../lib/errors";
 import { BuildingIcon, MailIcon, ShieldIcon } from "../components/ui/Icons";
 import { useAuth } from "../contexts/AuthContext";
@@ -23,14 +28,20 @@ import { useI18n } from "../i18n";
  * ở query, trang **xoá nó khỏi thanh địa chỉ ngay** bằng `replaceState` — muộn
  * còn hơn không: nó chặn được phần lịch sử trình duyệt và phần `Referer`.
  *
- * Vì sao trang này không tự "chấp nhận" lời mời
- * ----------------------------------------------
- * Không có endpoint nào làm việc đó. Lời mời được tiêu thụ **trong lượt đăng
- * ký** (`POST /auth/register` kèm `invitation_token`), và máy chủ kiểm mã
- * TRƯỚC khi tạo tài khoản, đồng thời đòi email khai báo phải khớp email lời
- * mời. Nên nhiệm vụ của trang này gọn: đọc mã, cho người ta thấy họ đang gia
- * nhập đâu, rồi chuyển sang biểu mẫu đăng ký với mã mang theo qua state của
- * router — chứ không phải qua URL một lần nữa.
+ * Hai đường nhận lời mời, tuỳ người đã có tài khoản hay chưa
+ * -----------------------------------------------------------
+ * **Chưa có tài khoản** — mã được tiêu thụ trong lượt đăng ký
+ * (`POST /auth/register` kèm `invitation_token`); máy chủ kiểm mã TRƯỚC khi tạo
+ * tài khoản, nên một mã hỏng không để lại tài khoản mồ côi.
+ *
+ * **Đã có tài khoản** — `POST /tenants/invitations/accept`. Đường này thêm vào
+ * 21/08/2026 để bịt một ngõ cụt im lặng: trước đó lời mời CHỈ tiêu thụ được
+ * trong lượt đăng ký, nên một lời mời gửi tới địa chỉ đã có tài khoản không bao
+ * giờ nhận được — người nhận bị đẩy sang trang đăng ký rồi bị từ chối vì email
+ * đã dùng, còn lời mời nằm lại `pending` cho tới lúc hết hạn, không kèm lời
+ * giải thích nào.
+ *
+ * Dù đi đường nào, mã cũng không quay lại URL: nó đi qua state của router.
  */
 
 function readToken(hash: string, search: string): { token: string; fromQuery: boolean } {
@@ -44,7 +55,7 @@ export default function InvitationPage() {
   const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const [token, setToken] = useState("");
   const [manual, setManual] = useState("");
@@ -52,6 +63,27 @@ export default function InvitationPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const run = useRef(0);
+  const [accepting, setAccepting] = useState(false);
+
+  // So sánh không phân biệt hoa thường và bỏ khoảng trắng hai đầu — máy chủ
+  // chuẩn hoá y hệt trước khi đối chiếu, nên giao diện phải hỏi CÙNG một câu.
+  // Lệch một chút ở đây sẽ hiện nút cho người mà máy chủ sẽ từ chối.
+  const norm = (v: string | undefined | null) => (v || "").trim().toLowerCase();
+  const sameEmail = !!preview && norm(user?.email) === norm(preview.email);
+
+  const onAccept = useCallback(async () => {
+    if (!token) return;
+    setAccepting(true);
+    setError("");
+    try {
+      await acceptInvitation(token);
+      navigate("/organization", { replace: true });
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setAccepting(false);
+    }
+  }, [token, navigate]);
 
   const inspect = useCallback(async (raw: string) => {
     const value = raw.trim();
@@ -133,17 +165,33 @@ export default function InvitationPage() {
             ) : null}
           </dl>
 
-          <p className="text-sm leading-relaxed text-slate-600">
-            {t("Lời mời này nêu đích danh địa chỉ ở trên. Bạn phải đăng ký bằng chính địa chỉ đó — đăng ký bằng email khác sẽ bị từ chối và lời mời vẫn còn nguyên.")}
-          </p>
+          {isAuthenticated ? null : (
+            <p className="text-sm leading-relaxed text-slate-600">
+              {t("Lời mời này nêu đích danh địa chỉ ở trên. Bạn phải đăng ký bằng chính địa chỉ đó — đăng ký bằng email khác sẽ bị từ chối và lời mời vẫn còn nguyên.")}
+            </p>
+          )}
 
           {isAuthenticated ? (
-            // Đăng ký khi đang có phiên sẽ tạo tài khoản THỨ HAI, còn tài khoản
-            // đang đăng nhập thì không vì thế mà vào được tổ chức: lời mời chỉ
-            // tiêu thụ được trong lượt tạo tài khoản. Nói ra thay vì để họ bấm.
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
-              {t("Bạn đang đăng nhập bằng một tài khoản khác. Lời mời chỉ dùng được khi tạo tài khoản mới, nên hãy đăng xuất trước rồi mở lại liên kết này.")}
-            </div>
+            sameEmail ? (
+              // Địa chỉ khớp — nhận thẳng bằng tài khoản đang đăng nhập. Trước
+              // 21/08/2026 nhánh này là một lời xin lỗi: lời mời chỉ tiêu thụ
+              // được trong lượt đăng ký, nên người đã có tài khoản không có
+              // đường nào vào tổ chức đã mời họ.
+              <button
+                type="button"
+                onClick={() => void onAccept()}
+                disabled={accepting}
+                className="w-full rounded-xl bg-ctu-blue px-5 py-3.5 font-semibold text-white shadow-lg shadow-ctu-blue/25 transition hover:bg-ctu-navy disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {accepting ? t("Đang nhận lời mời…") : t("Nhận lời mời")}
+              </button>
+            ) : (
+              // Khác địa chỉ: máy chủ CHẮC CHẮN từ chối (lời mời nêu đích danh
+              // một người). Hiện nút ở đây chỉ để dẫn người ta tới một câu 403.
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800">
+                {t("Lời mời này phát cho một địa chỉ khác với tài khoản bạn đang đăng nhập. Hãy đăng xuất rồi mở lại liên kết này.")}
+              </div>
+            )
           ) : (
             <button
               type="button"

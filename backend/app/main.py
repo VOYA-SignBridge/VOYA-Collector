@@ -25,6 +25,7 @@ from app.routers import (
     auth,
     billing,
     classes,
+    capture_sessions,
     dataset,
     health,
     inference,
@@ -35,6 +36,9 @@ from app.routers import (
     legal_admin,
     notifications as notifications_router,
     realtime_proxy,
+    processing_admin,
+    signers_admin,
+    moderation,
     sot_admin,
     support,
     tenants,
@@ -312,6 +316,10 @@ app.include_router(tts.router)
 app.include_router(training.router)
 app.include_router(admin.router)
 app.include_router(sot_admin.router)
+app.include_router(signers_admin.router)
+app.include_router(moderation.router)
+app.include_router(processing_admin.router)
+app.include_router(capture_sessions.router)
 app.include_router(tenants.router)
 app.include_router(workspaces_router.router)
 app.include_router(billing.router)
@@ -339,6 +347,10 @@ api_v1.include_router(tts.router)
 api_v1.include_router(training.router)
 api_v1.include_router(admin.router)
 api_v1.include_router(sot_admin.router)
+api_v1.include_router(signers_admin.router)
+api_v1.include_router(moderation.router)
+api_v1.include_router(processing_admin.router)
+api_v1.include_router(capture_sessions.router)
 api_v1.include_router(tenants.router)
 api_v1.include_router(workspaces_router.router)
 api_v1.include_router(billing.router)

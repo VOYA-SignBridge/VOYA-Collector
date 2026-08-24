@@ -92,6 +92,53 @@ export function roleLabel(role: MemberRoleOrNone | undefined): string {
   return role ? tr(ROLE_LABEL[role]) : tr(NO_ROLE_LABEL);
 }
 
+/**
+ * Danh tính một thành viên, để hiển thị. **Email đứng trước, tên đi kèm.**
+ *
+ * Vì sao email là chính chứ không phải tên
+ * ----------------------------------------
+ * Tên hiển thị không định danh được ai: kho này đã có `Trâm` và `Trân` là hai
+ * người khác nhau, và `Minh` xuất hiện ở ba tài khoản. Người quản trị đang chọn
+ * ai để cấp quyền cần một thứ **duy nhất** — email là thứ duy nhất trong ba
+ * trường và cũng là thứ lời mời gửi tới. Tên vẫn hiện, vì email một mình thì
+ * khó nhận ra người quen.
+ *
+ * Vì sao `user_id` là phương án CUỐI
+ * -----------------------------------
+ * Ba màn hình trước bản này rơi thẳng ra UUID khi thiếu tên. Một chuỗi 36 ký tự
+ * không giúp người quản trị nhận ra ai, và nó chiếm chỗ đủ để phá bố cục hàng.
+ * Nó chỉ còn là lưới an toàn cuối cùng, và khi phải dùng thì cắt ngắn.
+ */
+export interface MemberIdentity {
+  /** Dòng chính — email nếu có. */
+  primary: string;
+  /** Dòng phụ — tên, chỉ khi nó KHÁC dòng chính. `null` thì đừng dựng thẻ. */
+  secondary: string | null;
+}
+
+export function memberIdentity(m: {
+  username?: string | null;
+  email?: string | null;
+  user_id?: string | null;
+}): MemberIdentity {
+  const email = (m.email || "").trim();
+  const name = (m.username || "").trim();
+  if (email) return { primary: email, secondary: name && name !== email ? name : null };
+  if (name) return { primary: name, secondary: null };
+  const id = (m.user_id || "").trim();
+  return { primary: id ? `${id.slice(0, 8)}…` : "—", secondary: null };
+}
+
+/** Một dòng duy nhất, cho `<option>` — DOM không dựng được hai dòng trong đó. */
+export function memberOptionLabel(m: {
+  username?: string | null;
+  email?: string | null;
+  user_id?: string | null;
+}): string {
+  const { primary, secondary } = memberIdentity(m);
+  return secondary ? `${primary} — ${secondary}` : primary;
+}
+
 /** Giá trị của mục "chưa có vai" trong `<select>`. DOM không giữ được `null`,
  *  nên chuỗi rỗng đi ra và `parseRole` đưa nó về `null` khi gửi đi. */
 export const NO_ROLE_OPTION = "";
@@ -143,6 +190,8 @@ export interface TenantInvitation {
  * chặn mọi chỗ định hiển thị `token` từ danh sách.
  */
 export interface InvitationCreated extends TenantInvitation {
+  /** Có khi và chỉ khi lời mời được tạo bằng TÊN ĐĂNG NHẬP. */
+  invited_username?: string;
   token: string;
   /**
    * Đường liên kết hoàn chỉnh để gửi cho người được mời — **do máy chủ dựng**.
@@ -219,6 +268,37 @@ export async function createTenant(input: {
 }
 
 /** Vòng tenant. */
+/** Tổ chức của chính người đang đăng nhập, ở mức một THÀNH VIÊN được thấy. */
+export interface MyTenant {
+  tenant_id: string;
+  display_name: string | null;
+  created_at: string | null;
+  plan_code: string | null;
+  member_count: number;
+  admin_count: number;
+  my_role: string | null;
+  is_self_serve: boolean | null;
+  /** Đồng nghiệp trong tổ chức: tên và vai. Không có email, không có mã. */
+  members: { username: string | null; role: string | null; is_me: boolean }[];
+}
+
+/**
+ * Tự lập tổ chức. Không nhận `tenant_id` — máy chủ sinh mã kèm hậu tố ngẫu
+ * nhiên, nên không ai dò được tổ chức đã có bằng cách thử tạo trùng tên.
+ */
+export async function createOwnTenant(input: {
+  display_name: string;
+  plan_code?: string;
+}): Promise<Tenant> {
+  const res = await axiosClient.post<Tenant>(`${API_PREFIX}/self-serve`, input);
+  return res.data;
+}
+
+export async function fetchMyTenant(): Promise<MyTenant> {
+  const res = await axiosClient.get<MyTenant>(`${API_PREFIX}/me`);
+  return res.data;
+}
+
 export async function fetchTenant(tenantId: string): Promise<Tenant> {
   const res = await axiosClient.get<Tenant>(`${API_PREFIX}/${tenantId}`);
   return res.data;
@@ -325,14 +405,22 @@ export async function fetchInvitations(
 }
 
 /** Vòng tenant. */
+/**
+ * Mời một người vào tổ chức.
+ *
+ * `identifier` nhận ĐỊA CHỈ THƯ hoặc TÊN ĐĂNG NHẬP. Không nhận mã người dùng:
+ * mã nội bộ không phải thứ con người gõ được, và một ô nhận mã tuỳ ý là một ô
+ * dò được cả nền tảng. Khi mời bằng tên đăng nhập, máy chủ trả về
+ * `invited_username` và CHE địa chỉ thư.
+ */
 export async function createInvitation(
   tenantId: string,
-  email: string,
+  identifier: string,
   role: MemberRoleOrNone = null,
 ): Promise<InvitationCreated> {
   const res = await axiosClient.post<InvitationCreated>(
     `${API_PREFIX}/${tenantId}/invitations`,
-    { email, role },
+    { email: identifier, role },
   );
   return res.data;
 }
@@ -365,6 +453,31 @@ export interface InvitationPreview {
 export async function inspectInvitation(token: string): Promise<InvitationPreview> {
   const res = await axiosClient.post<InvitationPreview>(
     `${API_PREFIX}/invitations/inspect`,
+    { token },
+  );
+  return res.data;
+}
+
+export interface InvitationAccepted {
+  tenant_id: string;
+  role: MemberRoleOrNone;
+}
+
+/**
+ * Nhận lời mời bằng tài khoản **đang đăng nhập**.
+ *
+ * Vì sao cần đường này bên cạnh `/auth/register`: lời mời trước đây chỉ tiêu
+ * thụ được trong lượt tạo tài khoản, nên một lời mời gửi tới địa chỉ đã có tài
+ * khoản là ngõ cụt — người nhận bị đẩy sang trang đăng ký và bị từ chối vì
+ * email đã dùng, còn lời mời nằm lại `pending` cho tới lúc hết hạn.
+ *
+ * Máy chủ lấy email từ **phiên đăng nhập**, không lấy từ thân yêu cầu. Đó là
+ * thứ giữ nguyên hiệu lực của phép kiểm "lời mời này gửi cho ai": nếu email do
+ * người gọi tự khai thì phép kiểm chỉ đối chiếu với chính lời khai đó.
+ */
+export async function acceptInvitation(token: string): Promise<InvitationAccepted> {
+  const res = await axiosClient.post<InvitationAccepted>(
+    `${API_PREFIX}/invitations/accept`,
     { token },
   );
   return res.data;
@@ -483,5 +596,51 @@ export async function purgeTenant(
     confirm_tenant_id: confirmTenantId,
     reason,
   });
+  return res.data;
+}
+
+/**
+ * Một dòng cho MỖI tổ chức mà tài khoản đang gọi thuộc về.
+ *
+ * Khác `fetchMyTenant` ở chỗ căn bản: hàm kia trả về **một** tổ chức — tổ chức
+ * mà request hiện tại đang lấy phạm vi. Hàm này trả về **danh sách** để người
+ * dùng chọn, và một người có thể nằm trong nhiều tổ chức.
+ *
+ * Không có `is_system_reserved`. Cột ấy là nhãn vòng đời ("đừng xoá tổ chức
+ * này"), không phải quyền, và có một bài kiểm cấm nó rời khỏi nơi định nghĩa.
+ * Câu giao diện cần hỏi — "đây có phải Cộng đồng không" — do `tenant_type` trả
+ * lời thẳng.
+ */
+export interface TenantMembershipRow {
+  tenant_id: string;
+  display_name: string | null;
+  tenant_type: string | null;
+  role: string | null;
+  joined_at: string | null;
+  /** Tổ chức NHÀ: nơi dữ liệu mới của tài khoản này mặc định thuộc về. */
+  is_home: boolean;
+}
+
+export async function listMyTenants(): Promise<TenantMembershipRow[]> {
+  const res = await axiosClient.get<TenantMembershipRow[]>(`${API_PREFIX}/mine`);
+  return res.data;
+}
+
+/**
+ * Đổi tổ chức đang XEM. Không đổi tổ chức nhà.
+ *
+ * Phép chọn được ghi ở MÁY CHỦ (`users.active_tenant_id`), không nằm trong một
+ * header hay một đoạn đường dẫn: `tenant_middleware` cố ý không nhận tenant từ
+ * bất kỳ trường nào của request, vì làm thế biến ranh giới cách ly thành thứ
+ * người gọi tự khai. Đoạn `/org/<id>` trên thanh địa chỉ là bản sao của trạng
+ * thái ấy để chia sẻ liên kết, không phải thứ quyết định phạm vi.
+ *
+ * Hệ quả cho chỗ gọi: sau khi hàm này trả về, MỌI lời gọi sau đó đã ở phạm vi
+ * mới. Dữ liệu đang giữ trong bộ nhớ trang là của tổ chức cũ và phải nạp lại.
+ */
+export async function switchTenant(
+  tenantId: string,
+): Promise<{ tenant_id: string; is_home: boolean }> {
+  const res = await axiosClient.post(`${API_PREFIX}/switch`, { tenant_id: tenantId });
   return res.data;
 }

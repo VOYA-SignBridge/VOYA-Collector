@@ -78,8 +78,27 @@ class InvitationCreate(BaseModel):
     # which is not a dependency here, and the rest of this API (RegisterRequest)
     # already takes addresses as plain strings. `create_invitation` normalises
     # and checks the value — one place, shared by every caller.
-    email: str = Field(..., min_length=3, max_length=255)
+    #
+    # Nhận CẢ HAI: một địa chỉ thư, hoặc TÊN ĐĂNG NHẬP của một tài khoản đã có.
+    # Người quản trị tổ chức thường biết đồng nghiệp mình qua tên tài khoản chứ
+    # không thuộc lòng địa chỉ thư của họ, và bắt họ đoán địa chỉ là cách chắc
+    # chắn để lời mời đi lạc. Không nhận `user_id`: mã nội bộ không phải thứ
+    # con người gõ được, và một ô nhận mã tuỳ ý là ô dò được cả nền tảng.
+    email: str = Field(..., min_length=1, max_length=255)
     role: Optional[str] = None
+
+
+class SelfServeTenantCreate(BaseModel):
+    display_name: str = Field(..., min_length=2, max_length=120)
+    plan_code: Optional[str] = Field(None, max_length=50)
+
+
+class InvitationAccept(BaseModel):
+    token: str = Field(..., max_length=512)
+
+
+class ActiveTenantSwitch(BaseModel):
+    tenant_id: str = Field(..., max_length=63)
 
 
 class HomeTenantUpdate(BaseModel):
@@ -148,6 +167,91 @@ def inspect_invitation(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         raise _translate(exc) from exc
 
 
+@router.post("/invitations/accept", dependencies=[Depends(limit_catalog)])
+def accept_invitation(
+    payload: InvitationAccept,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Nhan loi moi bang mot tai khoan DA CO.
+
+    Vi sao endpoint nay phai ton tai
+    --------------------------------
+    Cho toi ban nay, `consume_invitation` chi voi toi duoc tu MOT cho:
+    `POST /auth/register`. He qua la mot loi moi gui toi dia chi DA co tai khoan
+    khong bao gio nhan duoc — nguoi nhan bam lien ket, bi dua toi trang dang ky,
+    va dang ky tu choi vi email da dung. Loi moi nam lai o trang thai `pending`
+    cho toi luc het han, va khong co thong bao nao giai thich vi sao.
+
+    Vi sao email lay tu PHIEN, khong lay tu than yeu cau
+    ----------------------------------------------------
+    `consume_invitation` tu choi khi email khong khop, va do la thu ngan mot
+    lien ket bi chuyen tiep bien hop thu thanh yeu to xac thuc. Neu email do
+    chinh nguoi goi khai thi phep kiem ay tu doi chieu voi loi khai cua ke tan
+    cong — no khong con kiem gi ca. Lay tu phien dang nhap thi no moi la that.
+
+    Chap nhan loi moi DOI to chuc nha
+    ---------------------------------
+    `consume_invitation` ghi `users.tenant_id`, nen du lieu MOI cua tai khoan se
+    roi vao to chuc vua gia nhap. Tu cach thanh vien cu va du lieu da dong gop o
+    to chuc cu KHONG bi dung toi — cung ngu nghia voi `create_own_tenant`.
+    """
+    try:
+        result = tenant_admin.consume_invitation(
+            payload.token,
+            email=str(current_user.get("email") or ""),
+            user_id=str(current_user.get("id") or ""),
+        )
+    except tenant_admin.TenantError as exc:
+        raise _translate(exc) from exc
+
+    audit.record("tenant.invitation.accepted", actor=current_user, request=request,
+                 target_type="tenant", target_id=result["tenant_id"],
+                 tenant_id=result["tenant_id"], detail={"role": result["role"]})
+    logger.info("[TENANT_API] %s nhan loi moi vao %s (vai %s)",
+                current_user.get("username"), result["tenant_id"], result["role"])
+    return result
+
+
+@router.post("/switch", dependencies=[Depends(limit_catalog)])
+def switch_active_tenant(
+    payload: ActiveTenantSwitch,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Doi to chuc ma nguoi goi DANG XEM.
+
+    Vi sao can mot endpoint thay vi mot doan duong dan
+    --------------------------------------------------
+    Mot tai khoan co the thuoc nhieu to chuc, nen giao dien phai noi duoc no
+    dang hien to chuc nao. `tenant_middleware` co y KHONG nhan tenant tu bat ky
+    truong nao cua request — lam the bien ranh gioi cach ly thanh mot thu nguoi
+    goi tu khai. Nen phep chon phai duoc GHI o may chu, sau khi kiem tu cach
+    thanh vien, va do la viec cua endpoint nay.
+
+    Doan `/org/<id>/...` tren thanh dia chi la BAN SAO cua trang thai ay, de
+    nguoi dung sao chep duoc lien ket. No khong quyet dinh pham vi, va gia mao
+    no khong doi duoc gi.
+
+    KHONG doi to chuc NHA
+    ---------------------
+    `users.tenant_id` quyet dinh du lieu MOI thuoc ve dau. Tron hai thu lai thi
+    mot cu bam de XEM to chuc khac se am tham chuyen ca noi nhung mau sau nay
+    duoc ghi vao. Doi nha la viec cua `PUT /tenants/home-assignment/{user_id}`.
+    """
+    try:
+        result = tenant_admin.set_active_tenant(
+            str(current_user.get("id") or ""), payload.tenant_id)
+    except tenant_admin.NotAMember as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    audit.record("tenant.active.switched", actor=current_user, request=request,
+                 target_type="tenant", target_id=result["tenant_id"],
+                 tenant_id=result["tenant_id"],
+                 detail={"is_home": result["is_home"]})
+    return result
+
+
 @router.put("/home-assignment/{user_id}", dependencies=[Depends(limit_catalog)])
 def set_home_tenant(
     user_id: str,
@@ -194,6 +298,163 @@ def create_tenant(
         raise _translate(exc) from exc
     logger.info("[TENANT_API] %s created tenant %s", operator.get("username"), payload.tenant_id)
     return tenant
+
+
+@router.post("/self-serve", status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(limit_catalog)])
+def create_own_tenant(
+    payload: SelfServeTenantCreate,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Người dùng tự lập tổ chức của mình và làm quản trị viên của nó.
+
+    Khác `POST /tenants` ở chỗ nào
+    ------------------------------
+    Endpoint kia là công cụ của người vận hành NỀN TẢNG: nó nhận `tenant_id` do
+    người gọi đặt và không gắn ai vào tổ chức. Endpoint này không nhận mã tổ
+    chức — mã do máy chủ sinh kèm hậu tố ngẫu nhiên, nên không ai dò được danh
+    sách tổ chức đã có bằng cách thử tạo trùng tên.
+
+    Bốn câu hỏi mà một nút "tạo tổ chức" phải trả lời, và câu trả lời ở đây:
+
+        ai được tạo   — tài khoản đã đăng nhập, khi nền tảng đang mở tự phục vụ
+        mỗi người mấy — theo GÓI. Gói `free` cho 3; xem
+                        `tenant_admin.SELF_SERVE_TENANT_CAP`.
+        gói mặc định  — chỉ gói tự phục vụ; `_resolve_plan` cưỡng chế điều đó
+        chặn lạm dụng — cùng bộ giới hạn tần suất với các endpoint danh mục
+
+    Tổ chức cũ KHÔNG bị đụng tới. Dữ liệu đã đóng góp ở lại đó, và tư cách thành
+    viên cũ vẫn còn — thứ đổi là tổ chức NHÀ, tức nơi dữ liệu MỚI sẽ rơi vào.
+    """
+    uid = str(current_user.get("id") or "")
+    # Câu hỏi này vượt ranh giới tenant, nên nó KHÔNG sống ở đây. Xem
+    # `tenant_admin.tenant_owned_by` và chú thích trong module này về việc
+    # `routers/tenants.py` cố ý không chứa lời gọi `system_scope` nào.
+    # Trần theo GÓI, không phải trần cứng bằng 1.
+    #
+    # Bản đầu từ chối ngay khi tài khoản đã sở hữu MỘT tổ chức. Con số ấy quá
+    # chặt cho cách người ta thật sự dùng: một giảng viên có thể cần một tổ chức
+    # để thử, một cho lớp, một cho đề tài. Trần tồn tại để chặn việc đúc tổ chức
+    # rỗng hàng loạt, và ba vẫn chặn được điều đó.
+    #
+    # Đếm ở tầng dịch vụ vì câu hỏi vượt ranh giới tenant — `routers/tenants.py`
+    # cố ý không chứa lời gọi `system_scope` nào.
+    goi = (payload.plan_code or "").strip() or "free"
+    tran = tenant_admin.SELF_SERVE_TENANT_CAP.get(
+        goi, tenant_admin.SELF_SERVE_TENANT_CAP_DEFAULT)
+    dang_co = tenant_admin.count_tenants_owned_by(uid)
+    if dang_co >= tran:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=(f"Tài khoản này đã sở hữu {dang_co} tổ chức — gói "
+                    f"\"{goi}\" cho tối đa {tran}."),
+        )
+
+    try:
+        tenant = tenant_admin.create_self_serve_tenant(
+            uid,
+            display_name=payload.display_name.strip(),
+            plan_code=(payload.plan_code or "").strip() or None,
+        )
+    except tenant_admin.TenantError as exc:
+        raise _translate(exc) from exc
+
+    audit.record("tenant.self_serve_created", actor=current_user, request=request,
+                 target_type="tenant", target_id=tenant["tenant_id"],
+                 tenant_id=tenant["tenant_id"])
+    logger.info("[TENANT_API] %s tu tao to chuc %s",
+                current_user.get("username"), tenant["tenant_id"])
+    return tenant
+
+
+@router.get("/me")
+def get_my_tenant(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Tổ chức CỦA CHÍNH người gọi, ở mức một THÀNH VIÊN được phép thấy.
+
+    `GET /{tenant_id}` đòi quản trị tenant, nên trước endpoint này một tài khoản
+    `editor` — tức phần lớn người dùng — không có cách nào biết mình đang thuộc
+    tổ chức nào. Giao diện phải trả lời bằng một câu từ chối, và "bạn không phải
+    quản trị viên" là câu trả lời cho một câu hỏi khác hẳn câu người ta hỏi.
+
+    Không nhận tenant từ người gọi. Phạm vi lấy từ phiên đăng nhập, đúng chỗ
+    middleware đã phân giải — nên không có tham số nào để giả mạo.
+
+    Trả về ÍT hơn bản dành cho quản trị: tên, số thành viên, vai của chính
+    người gọi. Không danh sách thành viên, không thư điện tử, không lời mời —
+    những thứ đó vẫn thuộc về quản trị tenant.
+    """
+    from app.tenant_context import require_tenant
+
+    scope = require_tenant()
+    try:
+        tenant = tenant_admin.get_tenant(scope)
+        members = tenant_admin.list_members(scope)
+    except tenant_admin.TenantError as exc:
+        raise _translate(exc) from exc
+
+    uid = str(current_user.get("id") or "")
+    my_role = next(
+        (m.get("role") for m in members if str(m.get("user_id") or "") == uid), None
+    )
+
+    # Danh sach dong nghiep, o muc MOT THANH VIEN duoc thay: ten va vai.
+    #
+    # Biet minh dang o to chuc nao ma khong biet ai cung o do la mot nua cau tra
+    # loi — va la nua vo dung khi nguoi ta vao day de tim xem hoi ai. Nhung chi
+    # nua do thoi: KHONG dia chi thu, KHONG ma tai khoan. Hai thu ay la cong cu
+    # cua quan tri vien, va mot danh sach thu cua ca to chuc la thu chep ra duoc
+    # trong mot luot tai trang.
+    roster = [
+        {
+            "username": m.get("username"),
+            "role": m.get("role"),
+            "is_me": str(m.get("user_id") or "") == uid,
+        }
+        for m in members
+        if m.get("is_active", True)
+    ]
+    roster.sort(key=lambda r: (r["role"] != "admin", (r["username"] or "").lower()))
+
+    return {
+        "tenant_id": tenant.get("tenant_id"),
+        "display_name": tenant.get("display_name"),
+        "created_at": tenant.get("created_at"),
+        "plan_code": tenant.get("plan_code"),
+        "member_count": len(members),
+        "admin_count": len([m for m in members if m.get("role") == "admin"]),
+        "my_role": my_role,
+        "is_self_serve": tenant.get("is_self_serve"),
+        "members": roster,
+    }
+
+
+@router.get("/mine", dependencies=[Depends(limit_catalog)])
+def list_my_tenants(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    """Mọi tổ chức người gọi đang thuộc về — không chỉ tổ chức nhà.
+
+    Vì sao đường này phải đứng TRƯỚC `/{tenant_id}`
+    -----------------------------------------------
+    FastAPI khớp route theo thứ tự khai báo. Đặt sau, `mine` sẽ rơi vào
+    `/{tenant_id}` và trở thành một lượt tra tổ chức mang mã "mine" — trả 404
+    cho một đường hoàn toàn hợp lệ, và lỗi đó chỉ hiện ra lúc chạy.
+
+    Không nhận `user_id`
+    --------------------
+    Danh sách này đọc được từ MỌI tenant, nên nếu nhận id từ người gọi thì bất
+    kỳ ai cũng dò được người khác đang ở những tổ chức nào. Id lấy từ phiên, và
+    đó là toàn bộ phép kiểm quyền cần có ở đây: người ta luôn được biết mình ở
+    đâu.
+
+    `is_home` nói tổ chức nào nhận DỮ LIỆU MỚI, không phải "đang xem". Chừng nào
+    chưa có đường chuyển tenant thì hai thứ đó trùng nhau — nhưng giao diện nên
+    đọc đúng tên ngay từ đầu.
+    """
+    return tenant_admin.list_tenants_of_user(str(current_user.get("id") or ""))
 
 
 @router.get("/{tenant_id}")
@@ -374,9 +635,31 @@ def create_invitation(
     from app import public_url
     from app.config import settings
 
+    # Người mời gõ TÊN ĐĂNG NHẬP hay ĐỊA CHỈ THƯ đều được.
+    #
+    # Không có dấu `@` thì đây là tên đăng nhập: tra ra tài khoản rồi mời tới
+    # địa chỉ ĐÃ ĐĂNG KÝ của họ. Địa chỉ đó KHÔNG trả về cho người mời — biết
+    # tên một đồng nghiệp không phải là quyền được biết thư của họ, và một ô
+    # tra cứu trả về địa chỉ là một ô moi dữ liệu danh bạ.
+    #
+    # Tra cứu chỉ khớp ĐÚNG TUYỆT ĐỐI, không khớp một phần, không gợi ý: gợi ý
+    # biến ô này thành công cụ dò xem ai có mặt trên nền tảng.
+    identifier = str(payload.email or "").strip()
+    invited_username: Optional[str] = None
+    if identifier and "@" not in identifier:
+        found = tenant_admin.find_account_by_username(identifier)
+        if not found:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail=f"Không có tài khoản nào tên \"{identifier}\". "
+                       f"Hãy kiểm tra lại tên đăng nhập, hoặc nhập địa chỉ email.",
+            )
+        invited_username = found["username"]
+        identifier = found["email"]
+
     try:
         invitation, token = tenant_admin.create_invitation(
-            tenant_id, str(payload.email), payload.role,
+            tenant_id, identifier, payload.role,
             invited_by=str(inviter.get("id") or "") or None,
         )
     except tenant_admin.TenantError as exc:
@@ -404,12 +687,21 @@ def create_invitation(
             invitation["email"], type(exc).__name__,
         )
 
-    return {
+    out = {
         **invitation,
         "token": token,
         "accept_url": accept_url,
         "email_sent": email_sent,
     }
+    if invited_username:
+        # Mời bằng tên đăng nhập: trả lại TÊN, che ĐỊA CHỈ. Người mời đã biết
+        # tên (họ vừa gõ nó); địa chỉ thì họ chưa từng biết và không cần biết
+        # để lời mời đi tới nơi.
+        out["invited_username"] = invited_username
+        addr = str(invitation.get("email") or "")
+        local, _, domain = addr.partition("@")
+        out["email"] = (local[:1] + "***@" + domain) if domain else "***"
+    return out
 
 
 @router.delete("/{tenant_id}/invitations/{invitation_id}")

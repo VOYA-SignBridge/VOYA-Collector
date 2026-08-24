@@ -267,3 +267,10 @@ docs/00-thesis/SignBridge_Reference/*KHONG_DUNG*
 # của quyển; giữ bản nhị phân trong git thì không diff được và không ai biết
 # bản nào mới hơn.
 *.docx
+
+# Cygwin/MSYS đổ stack khi một tiến trình con chết bất thường — rác, không phải mã.
+*.stackdump
+
+# PNG xuất từ .drawio — sinh lại được bằng docs/02-data/db/gen_erd.py + drawio-export.
+# Nguồn là tệp .drawio, không phải ảnh.
+docs/02-data/db/erd_png/

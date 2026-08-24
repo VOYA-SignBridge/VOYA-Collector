@@ -61,6 +61,11 @@ def _meta_dich(tmp_path: Path):
     return SimpleNamespace(
         class_uid="TARGET", slug="tgt", label_original="Target",
         language="vn", dialect="common",
+        # `tenant_id` PHAI co: ban sao gia lap cua `ClassMetadata` la mot mo
+        # hinh cua lop that, va lop that mang truong nay. `save_sequence_npz`
+        # doc no de dong dau to chuc len dong du lieu — thieu no o day thi
+        # ban sao gia lap noi doi ve hinh dang cua thu no thay the.
+        tenant_id="default",
         folder_name=lambda: "class_tgt_TARGET00",
         hierarchy_path=lambda: tgt,
     )

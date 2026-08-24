@@ -31,6 +31,14 @@ KINDS: Dict[str, str] = {
     "support": "Phản hồi mới trên phiếu hỗ trợ",
     "data": "Bản xuất dữ liệu đã sẵn sàng, hoặc quá trình nhập đã xong",
     "system": "Bảo trì, thay đổi ảnh hưởng tới cách dùng",
+    # Kết quả kiểm duyệt, gửi cho NGƯỜI ĐÓNG GÓP. Thiếu loại này thì lời hứa
+    # "qua kiểm duyệt mới công khai" vô hình với đúng người cần biết.
+    #
+    # Danh sách này là allowlist ĐÓNG, và nó đã làm đúng việc của mình: bản đầu
+    # của `moderation_admin` gửi `kind="moderation"` khi loại ấy chưa có ở đây,
+    # nên thông báo bị bỏ kèm một dòng ERROR thay vì lặng lẽ tạo ra một loại mà
+    # giao diện không có nhãn để hiển thị.
+    "moderation": "Dữ liệu của bạn đã được duyệt hoặc bị từ chối",
 }
 
 SEVERITIES = ("info", "success", "warning", "critical")

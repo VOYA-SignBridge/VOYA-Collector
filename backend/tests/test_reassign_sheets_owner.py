@@ -47,6 +47,11 @@ def _fake_target_meta(tmp_path: Path):
     return SimpleNamespace(
         class_uid="TARGET", slug="tgt", label_original="Target",
         language="vn", dialect="common",
+        # `tenant_id` PHAI co: ban sao gia lap cua `ClassMetadata` la mot mo
+        # hinh cua lop that, va lop that mang truong nay. `save_sequence_npz`
+        # doc no de dong dau to chuc len dong du lieu — thieu no o day thi
+        # ban sao gia lap noi doi ve hinh dang cua thu no thay the.
+        tenant_id="default",
         folder_name=lambda: "class_tgt_TARGET00",
         hierarchy_path=lambda: tgt,
     )
@@ -378,6 +383,11 @@ def test_save_sequence_npz_persists_auth_user_id_and_display_name(monkeypatch, t
     class_meta = SimpleNamespace(
         class_uid="C1", slug="x", label_original="X",
         language="vn", dialect="common",
+        # `tenant_id` PHAI co: ban sao gia lap cua `ClassMetadata` la mot mo
+        # hinh cua lop that, va lop that mang truong nay. `save_sequence_npz`
+        # doc no de dong dau to chuc len dong du lieu — thieu no o day thi
+        # ban sao gia lap noi doi ve hinh dang cua thu no thay the.
+        tenant_id="default",
         folder_name=lambda: "class_x_00000000",
         hierarchy_path=lambda: class_dir,
     )
@@ -407,6 +417,8 @@ def test_save_sequence_npz_missing_auth_user_id_is_null_not_crash(monkeypatch, t
     class_dir = tmp_path / "features" / "vn" / "common" / "class_y_00000000"
     class_meta = SimpleNamespace(
         class_uid="C2", slug="y", label_original="Y", language="vn", dialect="common",
+        # Xem ghi chu cung ten o cac stub tren: lop that mang truong nay.
+        tenant_id="default",
         folder_name=lambda: "class_y_00000000", hierarchy_path=lambda: class_dir,
     )
     captured = {}

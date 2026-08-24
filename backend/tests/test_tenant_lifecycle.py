@@ -546,26 +546,57 @@ class TestRegistration:
 
         purge_registered_account(username)
 
-    def test_open_registration_gets_its_own_tenant_not_the_public_one(self, anon_client):
-        """Đảo ngược một khẳng định CŨ, có chủ ý.
+    def test_dang_ky_KHONG_lap_to_chuc_ma_vao_cong_dong(self, anon_client):
+        """Đảo ngược một khẳng định, lần thứ HAI — và lần này lý do khác hẳn.
 
-        Test này trước đây khẳng định `tenant_id == DEFAULT_TENANT_ID` và nó
-        xanh — vì hành vi lúc đó đúng là như vậy. Đó chính là lỗ hổng: tenant
-        gốc giữ toàn bộ dữ liệu thật, `users.is_active` mặc định TRUE, nên bất
-        kỳ ai đăng ký được đều thành thành viên hoạt động của tổ chức đó.
+        Lịch sử của bài này đáng đọc, vì nó là ba trạng thái chứ không phải hai:
 
-        Một test chốt đúng hành vi sai sẽ bảo vệ cái sai đó. Giữ nguyên tên tệp
-        và vị trí để lịch sử git chỉ thẳng vào chỗ khẳng định bị đảo.
+        v3   `tenant_id == DEFAULT_TENANT_ID`, và đó là một LỖ HỔNG: tenant gốc
+             giữ toàn bộ dữ liệu thật, `users.is_active` mặc định TRUE, và vai
+             mặc định lúc ấy (`viewer`) đọc được hoá đơn, nhật ký kiểm toán và
+             danh sách khoá API. Ai đăng ký được là thành viên hoạt động ở đó.
+        v4   mỗi lượt đăng ký sinh một tenant RIÊNG. Bịt được lỗ, nhưng đổi lấy
+             một tenant rỗng kèm bản sao danh mục từ vựng cho mỗi người thử
+             nền tảng.
+        v6   quay lại tenant dùng chung — nhưng nó giờ là **Cộng đồng**, và cái
+             bịt lỗ KHÔNG còn là sự tách biệt tenant mà là TẬP QUYỀN:
+             `community_member` chỉ mang đọc + `sample.create` + `upload.create`.
+
+        Nên bài này ghim CẢ HAI vế. Chỉ ghim vế đầu là ghim lại đúng lỗ hổng v3.
         """
+        from app.storage.authz_schema import COMMUNITY_TENANT_ID
+
         name = f"t{uuid.uuid4().hex[:10]}"
         try:
+            with system_scope("test: dem to chuc truoc khi dang ky"):
+                truoc = db._fetch_all("SELECT count(*) AS n FROM tenants")[0]["n"]
+
             res = anon_client.post("/api/v1/auth/register", json={
                 "username": name, "email": f"{name}@example.test",
                 "password": "correct horse battery",
                 **registration_consents(),
             })
             assert res.status_code == 201, res.text
-            assert res.json()["tenant_id"] != DEFAULT_TENANT_ID
+            uid = res.json()["id"]
+
+            # 1. Vào Cộng đồng, và KHÔNG sinh tổ chức nào.
+            assert res.json()["tenant_id"] == COMMUNITY_TENANT_ID
+            with system_scope("test: dem to chuc sau khi dang ky"):
+                sau = db._fetch_all("SELECT count(*) AS n FROM tenants")[0]["n"]
+            assert sau == truoc, "dang ky van con lap to chuc"
+
+            # 2. Có vai `community_member`, và KHÔNG có vai quản trị nào.
+            with system_scope("test: doc vai vua cap"):
+                vai = db._fetch_all(
+                    "SELECT r.role_code FROM role_assignments a "
+                    "  JOIN roles r ON r.role_id = a.role_id "
+                    " WHERE a.user_id = %s AND a.revoked_at IS NULL", (uid,))
+                cu = db._fetch_all(
+                    "SELECT role FROM tenant_members WHERE user_id = %s", (uid,))
+            ma_vai = {r["role_code"] for r in vai}
+            assert ma_vai == {"community_member"}, f"vai bat ngo: {ma_vai}"
+            assert all(r["role"] is None for r in cu), (
+                "tai khoan moi khong duoc mang vai o so cu (admin/editor)")
         finally:
             self._cleanup(name)
 
@@ -635,9 +666,11 @@ class TestRegistration:
         lượt đăng ký rơi vào, nên test vẫn xanh kể cả khi trường `tenant_id`
         được tôn trọng — miễn là người gọi tình cờ điền đúng "default".
 
-        Bây giờ mỗi lượt tự đăng ký sinh một tenant riêng có hậu tố ngẫu nhiên,
-        nên "khác tenant người gọi nêu" là một khẳng định thật sự chặt: không
-        giá trị nào người gọi gửi lên có thể trùng nó.
+        Từ v6 mọi lượt đăng ký đều vào Cộng đồng, nên khẳng định trở lại dạng
+        "bằng một hằng số". Điều đó tự nó chứng minh ít — nhưng fixture `tenant`
+        dựng một tổ chức có hậu tố NGẪU NHIÊN, và bài này gửi đúng mã đó lên.
+        Nếu trường `tenant_id` được tôn trọng thì tài khoản sẽ nằm ở tenant ngẫu
+        nhiên ấy, không thể trùng Cộng đồng. Phép so vẫn chặt.
         """
         name = f"t{uuid.uuid4().hex[:10]}"
         try:
@@ -647,10 +680,12 @@ class TestRegistration:
                 **registration_consents(),
                 "tenant_id": tenant,
             })
+            from app.storage.authz_schema import COMMUNITY_TENANT_ID
+
             assert res.status_code == 201, res.text
             landed = res.json()["tenant_id"]
             assert landed != tenant, "trường tenant_id do người gọi gửi đã được tôn trọng"
-            assert landed != DEFAULT_TENANT_ID
+            assert landed == COMMUNITY_TENANT_ID
         finally:
             self._cleanup(name)
 
@@ -900,3 +935,296 @@ class TestTheLinkAndTheMail:
                     expires_hours=168,
                 )
         assert "SECRET-TOKEN" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Nhan loi moi bang mot tai khoan DA CO
+# ---------------------------------------------------------------------------
+
+
+class TestNhanLoiMoiBangTaiKhoanDaCo:
+    """`POST /tenants/invitations/accept`.
+
+    Vi sao lop test nay ton tai: truoc khi co endpoint kia, `consume_invitation`
+    chi voi toi duoc tu `POST /auth/register`. Mot loi moi gui toi dia chi DA co
+    tai khoan vi the khong bao gio nhan duoc — nguoi nhan bam lien ket, roi vao
+    trang dang ky, va dang ky tu choi vi email da dung. Loi moi nam lai `pending`
+    cho toi luc het han, khong kem thong bao nao.
+
+    Do la mot ngo cut IM LANG, nen no can mot test noi thang ra.
+    """
+
+    def _client(self, user):
+        from app.auth import get_current_user
+        from app.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    def _reset(self):
+        from app.auth import get_current_user
+        from app.main import app
+
+        app.dependency_overrides.pop(get_current_user, None)
+
+    def test_tai_khoan_da_co_nhan_duoc_loi_moi(self, tenant, account):
+        """Chinh cai ngo cut. Tai khoan ton tai TRUOC khi loi moi duoc gui."""
+        user = account()
+        _, token = tenant_admin.create_invitation(tenant, user["email"], "editor")
+        try:
+            r = self._client(user).post(
+                "/tenants/invitations/accept", json={"token": token})
+            assert r.status_code == 200, r.text
+            assert r.json()["tenant_id"] == tenant
+            assert r.json()["role"] == "editor"
+
+            with system_scope("test"):
+                rows = db._fetch_all(
+                    "SELECT role FROM tenant_members WHERE tenant_id = %s AND user_id = %s",
+                    (tenant, user["id"]))
+            assert [r["role"] for r in rows] == ["editor"], "chua thanh thanh vien"
+        finally:
+            self._reset()
+
+    def test_to_chuc_nha_doi_theo(self, tenant, account):
+        """`users.tenant_id` phai tro sang to chuc vua gia nhap — du lieu MOI se
+        roi vao do. Neu khong doi, nguoi ta 'da vao' to chuc nhung moi mau thu
+        them van chay ve to chuc cu, va khong gi bao loi."""
+        user = account()
+        _, token = tenant_admin.create_invitation(tenant, user["email"], "editor")
+        try:
+            assert self._client(user).post(
+                "/tenants/invitations/accept", json={"token": token}).status_code == 200
+            with system_scope("test"):
+                row = db._fetch_all(
+                    "SELECT tenant_id FROM users WHERE id = %s", (user["id"],))[0]
+            assert row["tenant_id"] == tenant
+        finally:
+            self._reset()
+
+    def test_email_khong_khop_bi_tu_choi(self, tenant, account):
+        """Lien ket bi CHUYEN TIEP. Loi moi dich danh mot nguoi; cho bat ky ai
+        cam URL vao thay se bien hop thu thanh yeu to xac thuc."""
+        invited = account()
+        intruder = account()
+        _, token = tenant_admin.create_invitation(tenant, invited["email"], "admin")
+        try:
+            r = self._client(intruder).post(
+                "/tenants/invitations/accept", json={"token": token})
+            assert r.status_code == 403, r.text
+            with system_scope("test"):
+                rows = db._fetch_all(
+                    "SELECT 1 FROM tenant_members WHERE tenant_id = %s AND user_id = %s",
+                    (tenant, intruder["id"]))
+            assert not rows, "ke chuyen tiep lien ket da vao duoc to chuc"
+        finally:
+            self._reset()
+
+    def test_khong_nhan_lai_duoc_lan_hai(self, tenant, account):
+        """Phat lai mot lien ket cu."""
+        user = account()
+        _, token = tenant_admin.create_invitation(tenant, user["email"], "editor")
+        try:
+            c = self._client(user)
+            assert c.post("/tenants/invitations/accept",
+                          json={"token": token}).status_code == 200
+            again = c.post("/tenants/invitations/accept", json={"token": token})
+            assert again.status_code == 409, again.text
+        finally:
+            self._reset()
+
+    def test_ma_khong_ton_tai_tra_404_giong_ma_het_han(self, tenant, account):
+        """Mot ma doan sai va mot lien ket cu phai KHONG phan biet duoc, neu
+        khong endpoint nay thanh cong cu do ma."""
+        user = account()
+        try:
+            r = self._client(user).post(
+                "/tenants/invitations/accept", json={"token": "khong-he-ton-tai"})
+            assert r.status_code == 404, r.text
+        finally:
+            self._reset()
+
+    def test_loi_moi_da_thu_hoi_bi_tu_choi(self, tenant, account):
+        user = account()
+        _, token = tenant_admin.create_invitation(tenant, user["email"], "editor")
+        with system_scope("test"):
+            db._execute(
+                "UPDATE tenant_invitations SET revoked_at = NOW() WHERE token_hash = %s",
+                (tenant_admin.hash_link_token(token),))
+        try:
+            r = self._client(user).post(
+                "/tenants/invitations/accept", json={"token": token})
+            assert r.status_code == 409, r.text
+        finally:
+            self._reset()
+
+
+# ---------------------------------------------------------------------------
+# GET /tenants/mine — moi to chuc cua toi, khong chi to chuc nha
+# ---------------------------------------------------------------------------
+
+
+class TestLietKeMoiToChucCuaToi:
+    """Truoc endpoint nay, mot nguoi thuoc HAI to chuc chi thay duoc mot.
+
+    `/tenants/me` tra ve to chuc NHA — cai ma middleware phan giai tu
+    `users.tenant_id`. Nhung `tenant_members` co khoa chinh `(tenant_id,
+    user_id)`, tuc lo do cho nhieu tu cach thanh vien, va cac tu cach con lai
+    khong co duong nao hien ra. Lop test nay canh dung cho do.
+    """
+
+    def _client(self, user):
+        from app.auth import get_current_user
+        from app.main import app
+
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    def _reset(self):
+        from app.auth import get_current_user
+        from app.main import app
+
+        app.dependency_overrides.pop(get_current_user, None)
+
+    def test_thay_ca_hai_to_chuc_minh_thuoc(self, tenant, other_tenant, account):
+        user = account()
+        tenant_admin.add_member(tenant, user["id"], role="editor")
+        tenant_admin.add_member(other_tenant, user["id"], role="admin")
+        try:
+            r = self._client(user).get("/tenants/mine")
+            assert r.status_code == 200, r.text
+            ids = {t["tenant_id"] for t in r.json()}
+            assert {tenant, other_tenant} <= ids
+        finally:
+            self._reset()
+
+    def test_khong_lo_to_chuc_minh_KHONG_thuoc(self, tenant, other_tenant, account):
+        """Ranh gioi that: chi to chuc cua chinh nguoi goi."""
+        user = account()
+        tenant_admin.add_member(tenant, user["id"], role="editor")
+        try:
+            ids = {t["tenant_id"] for t in self._client(user).get("/tenants/mine").json()}
+            assert other_tenant not in ids, "lo mot to chuc nguoi goi khong thuoc"
+        finally:
+            self._reset()
+
+    def test_khong_bao_gio_co_HAI_to_chuc_cung_la_nha(self, tenant, other_tenant, account):
+        """`is_home` tra loi 'du lieu MOI roi vao dau', khong phai 'dang xem gi'.
+
+        Bat bien la KHONG QUA MOT, chu khong phai dung mot — xem test ke duoi.
+        Hai to chuc cung mang co nha nghia la `users.tenant_id` khong con quyet
+        dinh duoc noi mau moi roi vao, va do la mot loi im lang.
+        """
+        user = account()
+        tenant_admin.add_member(tenant, user["id"], role="editor")
+        tenant_admin.add_member(other_tenant, user["id"], role="editor")
+        try:
+            rows = self._client(user).get("/tenants/mine").json()
+            homes = [t for t in rows if t["is_home"]]
+            assert len(homes) <= 1, f"co {len(homes)} to chuc cung mang co nha"
+        finally:
+            self._reset()
+
+    def test_to_chuc_nha_co_the_khong_nam_trong_danh_sach(self, tenant, account):
+        """Mot trang thai that, va la thu giao dien phai xu ly.
+
+        `create_user` dat nha = tenant khoi tao, con tu cach thanh vien thi
+        khong tu sinh. Nen mot tai khoan vua tao co `users.tenant_id` tro toi
+        mot to chuc ma ho KHONG phai thanh vien — va `mine` khong tra ve dong
+        nao mang `is_home`.
+
+        Day chinh la tin hieu de dinh tuyen: khong co dong nao la nha (hoac danh
+        sach rong) nghia la nguoi nay chua thuoc to chuc nao that su, va man
+        hinh dau cua ho phai la Community chu khong phai dashboard cua mot to
+        chuc ho khong o trong do.
+        """
+        user = account()
+        tenant_admin.add_member(tenant, user["id"], role="editor")
+        try:
+            rows = self._client(user).get("/tenants/mine").json()
+            assert [t for t in rows if t["tenant_id"] == tenant]
+            assert not [t for t in rows if t["is_home"]], (
+                "test nay gia dinh tai khoan moi co nha o tenant khoi tao; "
+                "neu hanh vi do doi thi sua dinh tuyen o frontend theo"
+            )
+        finally:
+            self._reset()
+
+    def test_tu_cach_da_go_khong_con_hien(self, tenant, account):
+        user = account()
+        tenant_admin.add_member(tenant, user["id"], role="editor")
+        tenant_admin.remove_member(tenant, user["id"])
+        try:
+            ids = {t["tenant_id"] for t in self._client(user).get("/tenants/mine").json()}
+            assert tenant not in ids, "to chuc da go van con trong danh sach"
+        finally:
+            self._reset()
+
+    def test_mine_khong_bi_nuot_boi_route_tenant_id(self, account):
+        """Thu tu khai bao route: `/mine` phai dung TRUOC `/{tenant_id}`.
+
+        Neu dat sau, `mine` tro thanh mot luot tra to chuc mang ma "mine" va tra
+        404 cho mot duong hoan toan hop le — mot loi chi hien ra luc chay.
+        """
+        user = account()
+        try:
+            r = self._client(user).get("/tenants/mine")
+            assert r.status_code == 200, r.text
+            assert isinstance(r.json(), list)
+        finally:
+            self._reset()
+
+
+class TestTranTuLapToChuc:
+    """Gói `free` cho TỐI ĐA 3 tổ chức tự lập, không phải 1.
+
+    Bản đầu từ chối ngay khi tài khoản đã sở hữu một tổ chức. Con số ấy quá chặt
+    cho cách người ta thật sự dùng — một giảng viên cần một tổ chức để thử, một
+    cho lớp, một cho đề tài. Trần tồn tại để chặn việc đúc tổ chức rỗng hàng
+    loạt, và ba vẫn chặn được điều đó.
+    """
+
+    def test_tran_cua_goi_free_la_ba(self):
+        """Ghim con số ở DANH MỤC, không ở một câu `if` rải trong router."""
+        assert tenant_admin.SELF_SERVE_TENANT_CAP["free"] == 3
+
+    def test_goi_la_thi_tran_la_MOT_chu_khong_phai_vo_han(self):
+        """Một gói chưa khai báo trần KHÔNG được mặc định là không giới hạn —
+        đó là hướng hỏng mở."""
+        assert tenant_admin.SELF_SERVE_TENANT_CAP_DEFAULT == 1
+        assert tenant_admin.SELF_SERVE_TENANT_CAP.get(
+            "goi-chua-ton-tai", tenant_admin.SELF_SERVE_TENANT_CAP_DEFAULT) == 1
+
+    def test_dem_dung_so_to_chuc_dang_so_huu(self, account):
+        from conftest import purge_tenant
+
+        u = account()
+        assert tenant_admin.count_tenants_owned_by(str(u["id"])) == 0
+
+        tao = []
+        try:
+            for i in range(2):
+                t = tenant_admin.create_self_serve_tenant(
+                    str(u["id"]), display_name=f"To chuc {i}")
+                tao.append(t["tenant_id"])
+            assert tenant_admin.count_tenants_owned_by(str(u["id"])) == 2
+        finally:
+            for tid in tao:
+                purge_tenant(tid)
+
+    def test_to_chuc_da_xoa_mem_KHONG_tinh_vao_tran(self, account):
+        """Lập rồi bỏ một tổ chức không đáng bị khoá vĩnh viễn một ô.
+
+        Ân hạn 30 ngày trước khi xoá vĩnh viễn sẽ biến trần thành cái bẫy chờ
+        nếu tổ chức đã xoá mềm vẫn bị đếm.
+        """
+        from conftest import purge_tenant
+
+        u = account()
+        t = tenant_admin.create_self_serve_tenant(str(u["id"]), display_name="Bo di")
+        try:
+            assert tenant_admin.count_tenants_owned_by(str(u["id"])) == 1
+            tenant_admin.delete_tenant(t["tenant_id"])
+            assert tenant_admin.count_tenants_owned_by(str(u["id"])) == 0
+        finally:
+            purge_tenant(t["tenant_id"])

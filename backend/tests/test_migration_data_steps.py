@@ -580,14 +580,22 @@ class TestBanCaiMoi:
                           "WHERE tenant_id = 'default'")
                 assert c.fetchone()[0] == 1, "dong registry meta khong ra doi"
 
+                # Hoi theo HANG SO, khong viet cung ma tenant.
+                #
+                # Ngay 22/08/2026 `COMMUNITY_TENANT_ID` chuyen tu `'community'`
+                # sang tenant dang giu corpus. Mot bai kiem viet cung ma cu se
+                # do voi "tenant cong dong khong ra doi" — dung ve chu, sai ve
+                # y: tenant cong dong CO ra doi, chi la duoi mot cai ten khac.
+                from app.storage.authz_schema import COMMUNITY_TENANT_ID
+
                 c.execute(
                     "SELECT tenant_type, is_system_reserved, slug, plan_code "
-                    "FROM tenants WHERE tenant_id = 'community'")
+                    "FROM tenants WHERE tenant_id = %s", (COMMUNITY_TENANT_ID,))
                 cd = c.fetchone()
                 assert cd is not None, "tenant cong dong khong ra doi"
                 assert cd[0] == "COMMUNITY"
                 assert cd[1] is True
-                assert cd[2] == "community"
+                assert cd[2] == COMMUNITY_TENANT_ID
                 # Không khẳng định mã gói cụ thể — nó là trạng thái thương mại.
                 # Chỉ khẳng định nó HỢP LỆ, tức lỗi `internal` không quay lại.
                 assert cd[3] is not None

@@ -65,8 +65,18 @@ LOP = [
 
 COT_LABELS = ["class_uid", "class_idx", "slug", "label_original", "language",
               "dialect", "folder_name", "region"]
+# `review_status` phải có mặt, và giá trị phải là `approved`.
+#
+# Corpus tổng hợp này mô hình hoá một kho ĐANG DÙNG ĐƯỢC — `make_splits` rót từ
+# nó ra split, nên nó tương ứng với `dataset/samples.csv` thật, nơi cả 3.862
+# dòng mang `approved` sau lượt migration.
+#
+# Bỏ cột đi thì cổng kiểm duyệt đọc sự im lặng thành "chưa duyệt" (đúng như
+# thiết kế: im lặng nghĩa là chưa biết) và loại sạch mọi dòng, rồi `make_splits`
+# dừng với "Khong con mau nao sau cong kiem duyet" — 41 bài đỏ vì một lý do
+# chẳng liên quan gì tới thứ chúng đang kiểm.
 COT_SAMPLES = ["sample_uid", "class_uid", "slug", "label_original", "language",
-               "dialect", "file_path", "signer_id", "user_id"]
+               "dialect", "file_path", "signer_id", "user_id", "review_status"]
 
 
 def _viet(path: Path, cot, hang):
@@ -99,7 +109,8 @@ def kho(tmp_path, monkeypatch):
          "file_path": f"{slug}/{uid}_{i:03d}.npz",
          # Nhiều người ký, nếu không thì các chế độ chia theo nhóm không có
          # gì để phân bổ.
-         "signer_id": f"S{i % 3}", "user_id": f"S{i % 3}"}
+         "signer_id": f"S{i % 3}", "user_id": f"S{i % 3}",
+         "review_status": "approved"}
         for uid, _ci, slug, pn, _vung, n in LOP for i in range(n)
     ])
 
