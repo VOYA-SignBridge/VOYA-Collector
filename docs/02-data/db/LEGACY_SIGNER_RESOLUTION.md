@@ -1,6 +1,7 @@
 # Gỡ danh tính người ký khỏi nhãn cũ
 
-Đo ngày 23/08/2026 trên `signdb`. Bảng làm việc: [legacy_signer_review.csv](legacy_signer_review.csv).
+Đo ngày 23/08/2026 trên `signdb`. Bảng làm việc: [evidence/signer_resolution_matrix.csv](evidence/signer_resolution_matrix.csv)
+(266 khối cần duyệt) · từ điển nhãn: [evidence/legacy_signer_review.csv](evidence/legacy_signer_review.csv).
 
 ## Việc tưởng là gì
 
@@ -91,3 +92,35 @@ ký nên nói rõ giới hạn này.
 | `ngay_dau`, `ngay_cuoi` | khoảng thời gian thu |
 | `tai_khoan_thu` | tài khoản đã bấm nút thu (≠ người ký) |
 | `signer_id_de_xuat`, `trang_thai`, `ghi_chu` | **để trống — phần người điền** |
+
+
+---
+
+## Đơn vị duyệt: đã đo lại ngày 24/08/2026
+
+Bản đầu của tài liệu này ngầm giả định **một nhãn = một người**, nên đề xuất
+duyệt 15 nhãn. Sai. Đo lại theo từng cấp:
+
+| cấp | một nhãn | nhiều nhãn |
+|---|---|---|
+| buổi thu (`collection_session`) | 52/60 | **8** buổi có 2–3 |
+| phiên thu (`capture_session`) | 243/253 | **10** phiên có 2–3 |
+
+Nên **người ký không phải thuộc tính của bất kỳ cấp phiên nào** — đó là lý do v6
+gỡ `collection_sessions.signer_id`.
+
+Nhưng đo tiếp thì ra một cấu trúc dùng được: trong cả 10 phiên nhiều người, các
+nhãn **tách nhau dứt khoát theo thời gian**, không một cặp nào chồng lấn
+(kiểm trên toàn bộ 266 khối: **0 cặp giao nhau**).
+
+```
+2a68d0c5:  Trân 06:52:17–06:53:03 │ Minh 06:53:29–06:55:26 │ Khoa 06:55:52–06:57:39
+c4b163e7:  Trân 07:05:12–07:07:12 │ Minh 07:07:34–07:09:34 │ Khoa 07:10:02–07:12:00
+```
+
+Đây là hành vi thay phiên: một người quay xong lượt của mình rồi nhường máy.
+
+**Đơn vị duyệt đúng là `(capture_session_id, nhãn)`** — một khối mẫu liền mạch
+về thời gian. Có **266 khối** trên 253 phiên, thay cho 3.864 mẫu. Con số đó nhỏ
+đủ để người đọc duyệt tay, và ranh giới khối là do dữ liệu quyết định chứ không
+do ai phỏng đoán.
