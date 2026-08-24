@@ -403,11 +403,16 @@ HISTORICAL_MIGRATIONS: tuple[HistoricalMigration, ...] = (
         "Cùng hình dạng với `languages`: nhóm từ vựng vốn là chuỗi tự do trên "
         "`classes`, được nâng thành bảng riêng.",
         r"INSERT INTO vocabulary_groups .* SELECT DISTINCT"),
-    _historical(
-        "seed_signers_from_samples",
-        "899 mẫu từng trỏ tới S010/S011 — hai id không có dòng nào trong "
-        "`signers`. Backfill v3.10 tạo dòng cho chúng.",
-        r"INSERT INTO signers .* SELECT DISTINCT"),
+    # `seed_signers_from_samples` ĐÃ GỠ 24/08/2026, cùng lượt với câu nó phân
+    # loại. Giữ lại một nhóm lịch sử cho câu đã biến mất chính là thứ
+    # `test_every_historical_group_matches_a_real_statement` gọi là "cửa mở sẵn
+    # không ai còn đi qua": nếu sau này ai dựng lại một câu
+    # `INSERT INTO signers … SELECT DISTINCT`, bộ phân loại sẽ vẫy nó qua với
+    # nhãn "lịch sử" thay vì bắt người viết giải trình.
+    #
+    # Câu bị gỡ là câu tự sinh `signers` để khoá ngoại chịu đi qua — nó đã gộp
+    # sáu người thật thành `S010`. Xem chú thích ở chỗ nó từng đứng trong
+    # `metadata_db.MIGRATION_STATEMENTS`, và `tests/test_no_synthetic_signer.py`.
     _historical(
         "build_capture_sessions_from_samples",
         "Phiên thu ra đời ở v4 và được dựng lại từ mẫu đã có, rồi gắn ngược "

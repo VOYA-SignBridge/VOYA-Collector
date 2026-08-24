@@ -2737,21 +2737,39 @@ MIGRATION_STATEMENTS = [
     WHERE c.vocabulary_group IS NOT NULL
     ON CONFLICT (tenant_id, group_id) DO NOTHING
     """,
-    # 899 mẫu trỏ tới S010/S011 — hai id không có dòng nào trong `signers`.
-    # Tạo dòng cho chúng thay vì gỡ tham chiếu: gỡ là mất thông tin, tạo là
-    # giữ. `note` nói rõ đây là dòng máy sinh, và `display_name` bằng chính id
-    # để không ai nhầm nó với một cái tên đã được xác nhận.
-    """
-    INSERT INTO signers (signer_id, display_name, tenant_id, is_active, created_at, note)
-    SELECT DISTINCT s.signer_id, s.signer_id, s.tenant_id, TRUE, NOW(),
-           'tu sinh 2026-08-08 khi va khoa ngoai: samples tham chieu signer_id chua co dong'
-    FROM samples s
-    WHERE s.signer_id IS NOT NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM signers g
-          WHERE g.tenant_id = s.tenant_id AND g.signer_id = s.signer_id)
-    ON CONFLICT DO NOTHING
-    """,
+    # ĐÃ GỠ 24/08/2026 — câu tự sinh `signers` để khoá ngoại chịu đi qua.
+    #
+    # Nó từng đứng đây với lý lẽ nghe rất xuôi: 899 mẫu trỏ tới S010/S011, hai
+    # id không có dòng nào trong `signers`; "gỡ tham chiếu là mất thông tin,
+    # tạo dòng là giữ". Lý lẽ ấy sai ở chỗ nó coi một id CHƯA BIẾT là một
+    # người, và cái giá chỉ hiện ra sau hai tuần rưỡi:
+    #
+    #     S010  844 mẫu   Ảnh | Khoa | Minh | Nhung | Thư | Trân   <- SÁU người
+    #     S011   55 mẫu   Khoa | Minh | Trân                       <- ba người
+    #
+    # Một hàng máy sinh gộp sáu người thật thành một danh tính, và vì nó có mặt
+    # trong `signers` nên mọi phép đếm, mọi phép chia tập theo người ký đều coi
+    # nó là một người. 899/1678 mẫu có người ký đang trỏ vào hai hàng như vậy.
+    # Xem docs/02-data/db/evidence/ và LEGACY_SIGNER_RESOLUTION.md.
+    #
+    # Vì sao gỡ được mà không cần bump phiên bản: đây là INSERT dữ liệu, không
+    # phải DDL — nó không đổi hình dạng lược đồ. Nó cũng KHÔNG nằm trong payload
+    # đã đóng băng của v5 (11 câu, không có câu này), nên gỡ không viết lại quá
+    # khứ. Thứ thay đổi là hành vi SỬA CHỮA ở những lượt migrate sau.
+    #
+    # Vì sao gỡ mà không sợ vỡ đường ghi: `upload.py` lấy `signer_id` từ
+    # `resolve_signer_for_user`, vốn khớp theo `external_user_id` (UUID tài
+    # khoản) và KHÔNG bao giờ khớp theo tên; không giải được thì trả rỗng và mẫu
+    # vẫn ghi với `signer_id` NULL. Client không gửi được id tuỳ ý. Nên không
+    # đường runtime nào sinh ra một `signer_id` lạ để khoá ngoại phải từ chối.
+    #
+    # Chính sách từ đây:
+    #     danh tính chắc chắn  -> signer_id chuẩn
+    #     chưa biết / mơ hồ    -> signer_id = NULL
+    #     nhãn cũ              -> giữ nguyên samples.user_id làm chứng cứ
+    # KHÔNG có nhánh thứ tư biến "chưa biết" thành một thực thể giả.
+    #
+    # Ghim bằng `tests/test_no_synthetic_signer.py`.
     # Phiên thu. `array_agg(...)[1]` vì Postgres không có `min(uuid)`.
     #
     # Ba câu CASE là mấu chốt: 15 nhóm chứa NHIỀU người ký, nên lấy đại một

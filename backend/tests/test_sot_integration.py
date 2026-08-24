@@ -158,11 +158,35 @@ def sot():
             db._execute("DELETE FROM classes WHERE class_uid LIKE %s", ("SOTTEST_%",))
         except Exception:
             pass
+        # Dọn thư mục Drive — và KHÔNG nuốt lỗi.
+        #
+        # Bản trước bọc `except Exception: pass`. Hậu quả đo được ngày
+        # 24/08/2026: **15 thư mục `SOT_PYIT_*` nằm ở gốc Drive dùng chung**,
+        # tích từ nhiều lượt chạy, không ai biết chúng ở đâu ra — người đọc
+        # tưởng SOT của Community bị sinh trùng mỗi lần khởi động.
+        #
+        # Với một test tạo TÀI NGUYÊN TỪ XA, dọn dẹp hỏng trong im lặng là
+        # không chấp nhận được: nó không hỏng ở máy mình mà hỏng ở tài sản
+        # dùng chung, và không lượt chạy nào báo. Nên ở đây lỗi được nêu tên,
+        # kèm ĐÚNG tên thư mục để người ta xoá tay được.
+        con_sot: list[str] = []
         for r in h.roots:
             try:
-                get_gdrive_client().delete_path(r)
-            except Exception:
-                pass
+                if not get_gdrive_client().delete_path(r):
+                    con_sot.append(f"{r} (khong tim thay)")
+            except Exception as exc:
+                con_sot.append(f"{r} ({type(exc).__name__}: {exc})")
+        if con_sot:
+            # Cảnh báo chứ không `raise`: ném ở teardown sẽ che kết quả THẬT của
+            # bài test vừa chạy, và một lượt dọn hỏng không làm phép kiểm sai.
+            # Nhưng nó phải KÊU.
+            import warnings
+
+            warnings.warn(
+                "[SOT-IT] khong don duoc thu muc Drive, se ton dong o goc: "
+                + "; ".join(con_sot),
+                stacklevel=1,
+            )
 
 
 # ---------------------------------------------------------------------------
