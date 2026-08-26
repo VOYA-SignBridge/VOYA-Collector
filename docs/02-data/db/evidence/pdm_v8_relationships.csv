@@ -1,0 +1,132 @@
+group,entity1_parent,entity2_child,relationship_name,code,label,child_cols,parent_cols,is_composite,parent_card,child_card,on_delete,verb1,verb2,name_class,human_confirmed,constraint_name
+A,users,api_keys,User creates API Key,USER_CREATES_API_KEY,,created_by,id,N,0..1,0..N,SET NULL,creates,is created by,A,Y,api_keys_created_by_fkey
+A,users,api_keys,User revokes API Key,USER_REVOKES_API_KEY,,revoked_by,id,N,0..1,0..N,SET NULL,revokes,is revoked by,A,Y,api_keys_revoked_by_fkey
+A,tenants,api_keys,Tenant scopes API Key,TENANT_SCOPES_API_KEY,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_api_keys_tenant
+E,users,audit_log,User is recorded as Actor in Audit Log,USER_IS_RECORDED_AS_ACTOR_IN_AUDIT_LOG,audit actor,actor_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,audit_log_actor_user_id_fkey
+E,tenants,audit_log,Tenant scopes Audit Log Entry,TENANT_SCOPES_AUDIT_LOG_ENTRY,optional scope,tenant_id,tenant_id,N,0..1,0..N,RESTRICT,,,B,Y,fk_audit_log_tenant
+D,users,capture_sessions,User operates Capture Session,USER_OPERATES_CAPTURE_SESSION,,auth_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,capture_sessions_auth_user_id_fkey
+D,classes,capture_sessions,Class is captured in Capture Session,CLASS_IS_CAPTURED_IN_CAPTURE_SESSION,,tenant_id+class_uid,tenant_id+class_uid,Y,1,0..N,NO ACTION,,,C,Y,fk_capture_sessions_class
+D,collection_sessions,capture_sessions,Collection Session contains Capture Session,COLLECTION_SESSION_CONTAINS_CAPTURE_SESSION,,tenant_id+collection_session_id,tenant_id+collection_session_id,Y,0..1,0..N,SET NULL,,,C,Y,fk_capture_sessions_collection
+D,signers,capture_sessions,Capture Session references summarized Signer,CAPTURE_SESSION_REFERENCES_SUMMARIZED_SIGNER,,tenant_id+signer_id,tenant_id+signer_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_capture_sessions_signer
+D,tenants,capture_sessions,Tenant owns Capture Session,TENANT_OWNS_CAPTURE_SESSION,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_capture_sessions_tenant
+C,dialects,classes,Dialect varies Class,DIALECT_VARIES_CLASS,,tenant_id+dialect,tenant_id+dialect_id,Y,0..1,0..N,NO ACTION,,,C,Y,classes_dialect_fkey
+C,regions,classes,Region localizes Class,REGION_LOCALIZES_CLASS,,region,code,N,1,0..N,NO ACTION,,,B,Y,classes_region_fkey
+C,languages,classes,Language categorizes Class,LANGUAGE_CATEGORIZES_CLASS,,language,code,N,0..1,0..N,NO ACTION,,,B,Y,fk_classes_language
+C,recognition_profiles,classes,Recognition Profile profiles Class,RECOGNITION_PROFILE_PROFILES_CLASS,,tenant_id+recognition_profile,tenant_id+profile_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_classes_recognition_profile
+C,tenants,classes,Tenant owns Class,TENANT_OWNS_CLASS,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_classes_tenant
+C,vocabulary_groups,classes,Vocabulary Group groups Class,VOCABULARY_GROUP_GROUPS_CLASS,,tenant_id+vocabulary_group,tenant_id+group_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_classes_vocabulary_group
+D,users,collection_sessions,User opens Collection Session,USER_OPENS_COLLECTION_SESSION,,opened_by_user_id,id,N,0..1,0..N,SET NULL,opens,is opened by,A,Y,collection_sessions_opened_by_user_id_fkey
+D,tenants,collection_sessions,Tenant owns Collection Session,TENANT_OWNS_COLLECTION_SESSION,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_collection_sessions_tenant
+C,users,community_dialects,User updates Community Dialect,USER_UPDATES_COMMUNITY_DIALECT,,updated_by,id,N,0..1,0..N,SET NULL,updates,is updated by,A,Y,community_dialects_updated_by_fkey
+C,users,community_profiles,User updates Community Profile,USER_UPDATES_COMMUNITY_PROFILE,,updated_by,id,N,0..1,0..N,SET NULL,updates,is updated by,A,Y,community_profiles_updated_by_fkey
+C,users,community_versions,User creates Community Version,USER_CREATES_COMMUNITY_VERSION,,created_by,id,N,0..1,0..N,SET NULL,creates,is created by,A,Y,community_versions_created_by_fkey
+C,users,dialect_aliases,User merges Dialect Alias,USER_MERGES_DIALECT_ALIAS,,merged_by,id,N,0..1,0..N,SET NULL,merges,is merged by,A,Y,dialect_aliases_merged_by_fkey
+C,dialects,dialect_aliases,Dialect is target of Dialect Alias,DIALECT_IS_TARGET_OF_DIALECT_ALIAS,,tenant_id+new_dialect_id,tenant_id+dialect_id,Y,1,0..N,NO ACTION,,,C,Y,fk_dialect_aliases_new
+C,tenants,dialect_aliases,Tenant scopes Dialect Alias,TENANT_SCOPES_DIALECT_ALIAS,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_dialect_aliases_tenant
+C,users,dialects,User approves Dialect,USER_APPROVES_DIALECT,,approved_by,id,N,0..1,0..N,SET NULL,approves,is approved by,A,Y,dialects_approved_by_fkey
+C,users,dialects,User creates Dialect,USER_CREATES_DIALECT,,created_by,id,N,0..1,0..N,SET NULL,creates,is created by,A,Y,dialects_created_by_fkey
+C,languages,dialects,Language includes Dialect,LANGUAGE_INCLUDES_DIALECT,,language,code,N,1,0..N,NO ACTION,,,B,Y,fk_dialects_language
+C,dialects,dialects,Dialect is merge target of Dialect,DIALECT_IS_MERGE_TARGET_OF_DIALECT,,tenant_id+merged_into,tenant_id+dialect_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_dialects_merged_into
+C,tenants,dialects,Tenant scopes Dialect,TENANT_SCOPES_DIALECT,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_dialects_tenant
+H,tenants,event_outbox,Tenant scopes Outbox Event,TENANT_SCOPES_OUTBOX_EVENT,optional scope,tenant_id,tenant_id,N,0..1,0..N,RESTRICT,,,B,Y,fk_event_outbox_tenant
+E,users,legal_document_drafts,User creates Legal Document Draft,USER_CREATES_LEGAL_DOCUMENT_DRAFT,,created_by,id,N,0..1,0..N,SET NULL,creates,is created by,A,Y,legal_document_drafts_created_by_fkey
+E,users,legal_document_drafts,User updates Legal Document Draft,USER_UPDATES_LEGAL_DOCUMENT_DRAFT,,updated_by,id,N,0..1,0..N,SET NULL,updates,is updated by,A,Y,legal_document_drafts_updated_by_fkey
+E,users,legal_documents,User publishes Legal Document,USER_PUBLISHES_LEGAL_DOCUMENT,actor/action,published_by,id,N,0..1,0..N,SET NULL,,,B,Y,legal_documents_published_by_fkey
+A,memberships,memberships,Membership is parent of Membership for Same User,MEMBERSHIP_IS_PARENT_OF_MEMBERSHIP_FOR_SAME_USER,hierarchy,parent_membership_id+user_id,membership_id+user_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_memberships_parent
+A,projects,memberships,Project scopes Membership,PROJECT_SCOPES_MEMBERSHIP,scope,tenant_id+workspace_id+project_id,tenant_id+workspace_id+project_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_memberships_project
+A,tenants,memberships,Tenant scopes Membership,TENANT_SCOPES_MEMBERSHIP,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_memberships_tenant
+A,workspaces,memberships,Workspace scopes Membership,WORKSPACE_SCOPES_MEMBERSHIP,scope,tenant_id+workspace_id,tenant_id+workspace_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_memberships_workspace
+A,tenants,memberships,Tenant scopes Membership,TENANT_SCOPES_MEMBERSHIP,,tenant_id,tenant_id,N,1,0..N,CASCADE,,,B,Y,memberships_tenant_id_fkey
+A,users,memberships,User holds Membership,USER_HOLDS_MEMBERSHIP,,user_id,id,N,1,0..N,CASCADE,,,B,Y,memberships_user_id_fkey
+H,tenants,notifications,Tenant scopes Notification,TENANT_SCOPES_NOTIFICATION,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_notifications_tenant
+H,users,notifications,User receives Notification,USER_RECEIVES_NOTIFICATION,recipient,user_id,id,N,1,0..N,CASCADE,,,B,Y,notifications_user_id_fkey
+B,users,password_reset_tokens,User has Password Reset Token,USER_HAS_PASSWORD_RESET_TOKEN,password recovery,user_id,id,N,1,0..N,CASCADE,,,B,Y,password_reset_tokens_user_id_fkey
+H,users,platform_settings,User updates Platform Setting,USER_UPDATES_PLATFORM_SETTING,,updated_by,id,N,0..1,0..N,SET NULL,updates,is updated by,A,Y,platform_settings_updated_by_fkey
+A,projects,project_allocations,Project has Project Allocation,PROJECT_HAS_PROJECT_ALLOCATION,allocation,tenant_id+project_id,tenant_id+project_id,Y,1,0..N,CASCADE,,,C,Y,fk_project_allocations_project
+A,tenants,project_allocations,Tenant scopes Project Allocation,TENANT_SCOPES_PROJECT_ALLOCATION_RESTRICT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_project_allocations_tenant
+A,tenants,project_allocations,Tenant scopes Project Allocation,TENANT_SCOPES_PROJECT_ALLOCATION_CASCADE,scope,tenant_id,tenant_id,N,1,0..N,CASCADE,,,B,Y,project_allocations_tenant_id_fkey
+A,users,project_allocations,User updates Project Allocation,USER_UPDATES_PROJECT_ALLOCATION,,updated_by,id,N,0..1,0..N,SET NULL,updates,is updated by,A,Y,project_allocations_updated_by_fkey
+A,workspaces,projects,Workspace contains Project,WORKSPACE_CONTAINS_PROJECT,,tenant_id+workspace_id,tenant_id+workspace_id,Y,1,0..N,RESTRICT,,,C,Y,fk_inv_ten_02_project_workspace
+A,tenants,projects,Tenant scopes Project,TENANT_SCOPES_PROJECT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_projects_tenant
+D,classes,raw_uploads,Class classifies Raw Upload,CLASS_CLASSIFIES_RAW_UPLOAD,,tenant_id+class_uid,tenant_id+class_uid,Y,0..1,0..N,NO ACTION,,,C,Y,fk_raw_uploads_class_tenant
+D,dialects,raw_uploads,Dialect categorizes Raw Upload,DIALECT_CATEGORIZES_RAW_UPLOAD,,tenant_id+dialect,tenant_id+dialect_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_raw_uploads_dialect
+D,languages,raw_uploads,Language categorizes Raw Upload,LANGUAGE_CATEGORIZES_RAW_UPLOAD,,language,code,N,0..1,0..N,NO ACTION,,,B,Y,fk_raw_uploads_language
+D,tenants,raw_uploads,Tenant owns Raw Upload,TENANT_OWNS_RAW_UPLOAD,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_raw_uploads_tenant
+D,users,raw_uploads,User uploads Raw Upload,USER_UPLOADS_RAW_UPLOAD,,auth_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,raw_uploads_auth_user_id_fkey
+C,tenants,recognition_profiles,Tenant scopes Recognition Profile,TENANT_SCOPES_RECOGNITION_PROFILE,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_recognition_profiles_tenant
+B,users,refresh_tokens,User holds Refresh Token,USER_HOLDS_REFRESH_TOKEN,session credential,user_id,id,N,1,0..N,CASCADE,,,B,Y,refresh_tokens_user_id_fkey
+C,tenants,registry_versions,Tenant scopes Registry Version,TENANT_SCOPES_REGISTRY_VERSION,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_registry_versions_tenant
+C,users,registry_versions,User creates Registry Version,USER_CREATES_REGISTRY_VERSION,,created_by,id,N,0..1,0..N,SET NULL,creates,is created by,A,Y,registry_versions_created_by_fkey
+A,memberships,role_assignments,Membership carries Role Assignment,MEMBERSHIP_CARRIES_ROLE_ASSIGNMENT,RBAC scope,membership_id+user_id,membership_id+user_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_role_assignments_membership
+A,users,role_assignments,User grants Role through Role Assignment,USER_GRANTS_ROLE_THROUGH_ROLE_ASSIGNMENT,actor/action,assigned_by_user_id,id,N,1,0..N,RESTRICT,,,B,Y,role_assignments_assigned_by_user_id_fkey
+A,users,role_assignments,User revokes Role Assignment,USER_REVOKES_ROLE_ASSIGNMENT,actor/action,revoked_by_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,role_assignments_revoked_by_user_id_fkey
+A,roles,role_assignments,Role is granted through Role Assignment,ROLE_IS_GRANTED_THROUGH_ROLE_ASSIGNMENT,,role_id,role_id,N,1,0..N,RESTRICT,,,B,Y,role_assignments_role_id_fkey
+A,users,role_assignments,User receives Role Assignment,USER_RECEIVES_ROLE_ASSIGNMENT,subject,user_id,id,N,1,0..N,CASCADE,,,B,Y,role_assignments_user_id_fkey
+A,permissions,role_permissions,Permission is granted through Role Permission,PERMISSION_IS_GRANTED_THROUGH_ROLE_PERMISSION,RBAC,permission_code,permission_code,N,1,0..N,RESTRICT,,,B,Y,fk_role_permissions_permission
+A,roles,role_permissions,Role contains Role Permission,ROLE_CONTAINS_ROLE_PERMISSION,RBAC,role_id,role_id,N,1,0..N,CASCADE,,,B,Y,fk_role_permissions_role
+A,users,roles,User creates Role,USER_CREATES_ROLE,actor/action,created_by_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,fk_roles_creator
+A,tenants,roles,Tenant scopes Custom Role,TENANT_SCOPES_CUSTOM_ROLE,scope,tenant_id,tenant_id,N,0..1,0..N,CASCADE,,,B,Y,fk_roles_tenant
+D,capture_sessions,samples,Capture Session contains Sample (legacy key),CAPTURE_SESSION_CONTAINS_SAMPLE_LEGACY_KEY,,capture_session_id,capture_session_id,N,0..1,0..N,SET NULL,,,B,Y,fk_samples_capture_session
+D,capture_sessions,samples,Capture Session contains Sample,CAPTURE_SESSION_CONTAINS_SAMPLE,,tenant_id+capture_session_id,tenant_id+capture_session_id,Y,0..1,0..N,SET NULL,,,C,Y,fk_samples_capture_session_tenant
+D,classes,samples,Class labels Sample,CLASS_LABELS_SAMPLE,,tenant_id+class_uid,tenant_id+class_uid,Y,0..1,0..N,NO ACTION,,,C,Y,fk_samples_class_tenant
+D,languages,samples,Language categorizes Sample,LANGUAGE_CATEGORIZES_SAMPLE,,language,code,N,0..1,0..N,NO ACTION,,,B,Y,fk_samples_language
+D,signers,samples,Signer performs Sample,SIGNER_PERFORMS_SAMPLE,,tenant_id+signer_id,tenant_id+signer_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_samples_signer
+D,tenants,samples,Tenant owns Sample,TENANT_OWNS_SAMPLE,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_samples_tenant
+D,users,samples,User records Sample,USER_RECORDS_SAMPLE,,auth_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,samples_auth_user_id_fkey
+D,classes,samples,Class labels Sample (legacy key),CLASS_LABELS_SAMPLE_LEGACY_KEY,,class_uid,class_uid,N,0..1,0..N,NO ACTION,,,B,Y,samples_class_uid_fkey
+D,dialects,samples,Dialect categorizes Sample,DIALECT_CATEGORIZES_SAMPLE,,tenant_id+dialect,tenant_id+dialect_id,Y,0..1,0..N,NO ACTION,,,C,Y,samples_dialect_fkey
+D,users,samples,User reviews Sample,USER_REVIEWS_SAMPLE,,reviewed_by,id,N,0..1,0..N,SET NULL,reviews,is reviewed by,A,Y,samples_reviewed_by_fkey
+D,signers,signer_aliases,Signer is target of Signer Alias,SIGNER_IS_TARGET_OF_SIGNER_ALIAS,,tenant_id+new_signer_id,tenant_id+signer_id,Y,1,0..N,NO ACTION,,,C,Y,fk_signer_aliases_new
+D,tenants,signer_aliases,Tenant scopes Signer Alias,TENANT_SCOPES_SIGNER_ALIAS,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_signer_aliases_tenant
+D,users,signer_aliases,User merges Signer Alias,USER_MERGES_SIGNER_ALIAS,,merged_by,id,N,0..1,0..N,SET NULL,merges,is merged by,A,Y,signer_aliases_merged_by_fkey
+E,legal_documents,signer_consents,Legal Document Version anchors Signer Consent,LEGAL_DOCUMENT_VERSION_ANCHORS_SIGNER_CONSENT,legal evidence,kind+version,kind+version,Y,1,0..N,RESTRICT,,,C,Y,fk_signer_consents_document
+E,signers,signer_consents,Signer is subject of Signer Consent,SIGNER_IS_SUBJECT_OF_SIGNER_CONSENT,consent subject,tenant_id+signer_id,tenant_id+signer_id,Y,1,0..N,NO ACTION,,,C,Y,fk_signer_consents_signer
+E,tenants,signer_consents,Tenant scopes Signer Consent,TENANT_SCOPES_SIGNER_CONSENT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_signer_consents_tenant
+E,users,signer_consents,User records Signer Consent,USER_RECORDS_SIGNER_CONSENT,recorder,recorded_by,id,N,0..1,0..N,SET NULL,,,B,Y,signer_consents_recorded_by_fkey
+D,tenants,signers,Tenant manages Signer,TENANT_MANAGES_SIGNER,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_signers_tenant
+D,users,signers,User Account corresponds to Signer,USER_ACCOUNT_CORRESPONDS_TO_SIGNER,,external_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,fk_signers_user
+G,tenants,storage_reservations,Tenant has Storage Reservation,TENANT_HAS_STORAGE_RESERVATION,quota reservation,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_storage_reservations_tenant
+H,tenants,support_messages,Tenant scopes Support Message,TENANT_SCOPES_SUPPORT_MESSAGE,scope / RLS,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_support_messages_tenant
+H,users,support_messages,User is recorded as Author of Support Message,USER_IS_RECORDED_AS_AUTHOR_OF_SUPPORT_MESSAGE,optional author,author_id,id,N,0..1,0..N,SET NULL,,,B,Y,support_messages_author_id_fkey
+H,support_tickets,support_messages,Support Ticket contains Support Message,SUPPORT_TICKET_CONTAINS_SUPPORT_MESSAGE,support hierarchy,ticket_id,ticket_id,N,1,0..N,CASCADE,,,B,Y,support_messages_ticket_id_fkey
+H,tenants,support_tickets,Tenant scopes Support Ticket,TENANT_SCOPES_SUPPORT_TICKET,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_support_tickets_tenant
+H,users,support_tickets,User opens Support Ticket,USER_OPENS_SUPPORT_TICKET,requester,user_id,id,N,0..1,0..N,SET NULL,,,B,Y,support_tickets_user_id_fkey
+E,tenants,tenant_exports,Tenant scopes Tenant Export,TENANT_SCOPES_TENANT_EXPORT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_tenant_exports_tenant
+E,users,tenant_exports,User requests Tenant Export,USER_REQUESTS_TENANT_EXPORT,,requested_by,id,N,0..1,0..N,SET NULL,requests,is requested by,A,Y,tenant_exports_requested_by_fkey
+A,tenants,tenant_invitations,Tenant scopes Tenant Invitation,TENANT_SCOPES_TENANT_INVITATION,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_tenant_invitations_tenant
+A,users,tenant_invitations,User accepts Tenant Invitation,USER_ACCEPTS_TENANT_INVITATION,,accepted_by,id,N,0..1,0..N,SET NULL,accepts,is accepted by,A,Y,tenant_invitations_accepted_by_fkey
+A,users,tenant_invitations,User invites Tenant Invitation,USER_INVITES_TENANT_INVITATION,,invited_by,id,N,0..1,0..N,SET NULL,invites,is invited by,A,Y,tenant_invitations_invited_by_fkey
+G,tenants,tenant_storage,Tenant maintains Storage Counter,TENANT_MAINTAINS_STORAGE_COUNTER,storage accounting,tenant_id,tenant_id,N,1,0..1,RESTRICT,,,B,Y,fk_tenant_storage_tenant
+G,tenants,tenant_subscriptions,Tenant has Subscription Record,TENANT_HAS_SUBSCRIPTION_RECORD,subscription history,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_tenant_subscriptions_tenant
+G,users,tenant_subscriptions,User changes Tenant Subscription,USER_CHANGES_TENANT_SUBSCRIPTION,,changed_by,id,N,0..1,0..N,SET NULL,changes,is changed by,A,Y,tenant_subscriptions_changed_by_fkey
+G,plans,tenant_subscriptions,Plan is selected by Tenant Subscription,PLAN_IS_SELECTED_BY_TENANT_SUBSCRIPTION,entitlement history,plan_code,plan_code,N,1,0..N,NO ACTION,,,B,Y,tenant_subscriptions_plan_code_fkey
+G,tenants,tenant_usage_daily,Tenant records Daily Usage,TENANT_RECORDS_DAILY_USAGE,usage accounting,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_tenant_usage_daily_tenant
+A,community_versions,tenants,Community Version seeds Tenant,COMMUNITY_VERSION_SEEDS_TENANT,provenance,cloned_from_community_version,version,N,0..1,0..N,NO ACTION,,,B,Y,fk_tenants_cloned_version
+A,users,tenants,User owns Tenant,USER_OWNS_TENANT,ownership,owner_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,fk_tenants_owner_user
+A,plans,tenants,Plan defines Tenant Entitlements,PLAN_DEFINES_TENANT_ENTITLEMENTS,entitlement,plan_code,plan_code,N,1,0..N,RESTRICT,,,B,Y,fk_tenants_plan
+F,classes,training_job_classes,Class is referenced by Training Job Class,CLASS_IS_REFERENCED_BY_TRAINING_JOB_CLASS,class mapping,class_uid,class_uid,N,0..1,0..N,SET NULL,,,B,Y,fk_training_job_classes_class
+F,tenants,training_job_classes,Tenant scopes Training Job Class,TENANT_SCOPES_TRAINING_JOB_CLASS,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_training_job_classes_tenant
+F,training_jobs,training_job_classes,Training Job contains Training Job Class,TRAINING_JOB_CONTAINS_TRAINING_JOB_CLASS,job composition,job_id,job_id,N,1,0..N,CASCADE,,,B,Y,training_job_classes_job_id_fkey
+F,registry_versions,training_jobs,Registry Version anchors Training Job,REGISTRY_VERSION_ANCHORS_TRAINING_JOB,provenance,tenant_id+registry_version,tenant_id+version,Y,0..1,0..N,NO ACTION,,,C,Y,fk_training_jobs_registry
+F,tenants,training_jobs,Tenant scopes Training Job,TENANT_SCOPES_TRAINING_JOB,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_training_jobs_tenant
+F,users,training_jobs,User is recorded as Actor for Training Job,USER_IS_RECORDED_AS_ACTOR_FOR_TRAINING_JOB,optional actor,auth_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,training_jobs_auth_user_id_fkey
+F,training_jobs,training_metrics,Training Job records Training Metric (legacy key),TRAINING_JOB_RECORDS_TRAINING_METRIC_LEGACY_KEY,legacy key,job_id,job_id,N,1,0..N,CASCADE,,,B,Y,fk_training_metrics_job
+F,training_jobs,training_metrics,Training Job records Training Metric,TRAINING_JOB_RECORDS_TRAINING_METRIC,tenant-aware,tenant_id+job_id,tenant_id+job_id,Y,1,0..N,CASCADE,,,C,Y,fk_training_metrics_job_tenant
+F,tenants,training_metrics,Tenant scopes Training Metric,TENANT_SCOPES_TRAINING_METRIC,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_training_metrics_tenant
+B,users,user_action_passcodes,User has Action Passcode,USER_HAS_ACTION_PASSCODE,privileged action credential,user_id,id,N,1,0..1,CASCADE,,,B,Y,user_action_passcodes_user_id_fkey
+E,legal_documents,user_consents,Legal Document Version anchors User Consent,LEGAL_DOCUMENT_VERSION_ANCHORS_USER_CONSENT,legal evidence,kind+version,kind+version,Y,1,0..N,RESTRICT,,,C,Y,user_consents_kind_version_fkey
+E,users,user_consents,User records User Consent,USER_RECORDS_USER_CONSENT,recorder,recorded_by,id,N,0..1,0..N,SET NULL,,,B,Y,user_consents_recorded_by_fkey
+E,users,user_consents,User is subject of User Consent,USER_IS_SUBJECT_OF_USER_CONSENT,consent subject,user_id,id,N,1,0..N,CASCADE,,,B,Y,user_consents_user_id_fkey
+B,users,user_recovery_codes,User has Recovery Code,USER_HAS_RECOVERY_CODE,account recovery,user_id,id,N,1,0..N,CASCADE,,,B,Y,user_recovery_codes_user_id_fkey
+B,users,user_totp,User has TOTP Credential,USER_HAS_TOTP_CREDENTIAL,MFA credential,user_id,id,N,1,0..1,CASCADE,,,B,Y,user_totp_user_id_fkey
+A,tenants,users,Tenant provides Default Context for User,TENANT_PROVIDES_DEFAULT_CONTEXT_FOR_USER,context,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_users_tenant
+A,roles,users,Legacy Role is referenced by User,LEGACY_ROLE_IS_REFERENCED_BY_USER,legacy,role_id,role_id,N,0..1,0..N,NO ACTION,,,B,Y,users_role_id_fkey
+B,users,verification_codes,User is associated with Verification Code,USER_IS_ASSOCIATED_WITH_VERIFICATION_CODE,optional verification subject,user_id,id,N,0..1,0..N,CASCADE,,,B,Y,verification_codes_user_id_fkey
+C,tenants,vocabulary_groups,Tenant scopes Vocabulary Group,TENANT_SCOPES_VOCABULARY_GROUP,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_vocabulary_groups_tenant
+C,tenants,vocabulary_registry_meta,Tenant maintains Vocabulary Registry Metadata,TENANT_MAINTAINS_VOCABULARY_REGISTRY_METADATA,,tenant_id,tenant_id,N,1,0..1,RESTRICT,,,B,Y,fk_vocabulary_registry_meta_tenant
+C,registry_versions,vocabulary_registry_meta,Registry Version is selected by Vocabulary Registry Metadata,REGISTRY_VERSION_IS_SELECTED_BY_VOCABULARY_REGISTRY_METADATA,,tenant_id+version,tenant_id+version,Y,0..1,0..1,NO ACTION,,,C,Y,fk_vocabulary_registry_meta_version
+H,tenants,webhook_deliveries,Tenant scopes Webhook Delivery,TENANT_SCOPES_WEBHOOK_DELIVERY,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_webhook_deliveries_tenant
+H,webhook_endpoints,webhook_deliveries,Webhook Endpoint is target of Webhook Delivery,WEBHOOK_ENDPOINT_IS_TARGET_OF_WEBHOOK_DELIVERY,delivery lifecycle,endpoint_id,endpoint_id,N,1,0..N,CASCADE,,,B,Y,webhook_deliveries_endpoint_id_fkey
+H,tenants,webhook_endpoints,Tenant scopes Webhook Endpoint,TENANT_SCOPES_WEBHOOK_ENDPOINT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_webhook_endpoints_tenant
+H,users,webhook_endpoints,User creates Webhook Endpoint,USER_CREATES_WEBHOOK_ENDPOINT,,created_by,id,N,0..1,0..N,SET NULL,creates,is created by,A,Y,webhook_endpoints_created_by_fkey
+A,tenants,workspaces,Tenant contains Workspace,TENANT_CONTAINS_WORKSPACE,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_workspaces_tenant

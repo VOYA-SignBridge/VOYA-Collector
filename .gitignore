@@ -281,3 +281,10 @@ docs/00-thesis/SignBridge_Reference/*KHONG_DUNG*
 # PNG xuất từ .drawio — sinh lại được bằng docs/02-data/db/gen_erd.py + drawio-export.
 # Nguồn là tệp .drawio, không phải ảnh.
 docs/02-data/db/erd_png/
+# BỘ SINH tài liệu PDM — ngoại lệ hẹp của `*.sql` và `*.txt`. Ba tài liệu PDM
+# tuyên bố "sinh từ catalog, không gõ tay dòng nào"; không có mấy tệp này thì
+# lời tuyên bố ấy không kiểm chứng được và cũng không dựng lại được. Luật gốc
+# đúng cho tệp SQL/TXT sinh ra lúc chạy; thư mục này giữ NGUỒN.
+!docs/02-data/db/pdm_tools/
+!docs/02-data/db/pdm_tools/*.sql
+!docs/02-data/db/pdm_tools/*.txt

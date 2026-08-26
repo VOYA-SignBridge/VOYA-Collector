@@ -1,0 +1,109 @@
+table_name,object_name,kind,columns,predicate
+api_keys,api_keys_pkey,PRIMARY KEY,key_id,""
+api_keys,api_keys_prefix_key,UNIQUE CONSTRAINT,prefix,""
+audit_log,audit_log_pkey,PRIMARY KEY,audit_id,""
+capture_sessions,capture_sessions_pkey,PRIMARY KEY,capture_session_id,""
+capture_sessions,uq_capture_sessions_natural,UNIQUE CONSTRAINT,tenant_id+class_uid+session_id,""
+capture_sessions,uq_capture_sessions_tenant,UNIQUE CONSTRAINT,tenant_id+capture_session_id,""
+classes,classes_pkey,PRIMARY KEY,class_uid,""
+classes,uq_classes_tenant_class_uid,UNIQUE INDEX,tenant_id+class_uid,""
+classes,uq_classes_tenant_class_idx,UNIQUE INDEX (MOT PHAN),tenant_id+class_idx,((deleted_at IS NULL) AND (class_idx IS NOT NULL))
+classes,uq_classes_tenant_slug_lang_dialect_region,UNIQUE INDEX (MOT PHAN),tenant_id+slug+language+dialect+region,(deleted_at IS NULL)
+collection_sessions,collection_sessions_pkey,PRIMARY KEY,collection_session_id,""
+collection_sessions,uq_collection_sessions_natural,UNIQUE CONSTRAINT,tenant_id+session_code,""
+collection_sessions,uq_collection_sessions_tenant,UNIQUE CONSTRAINT,tenant_id+collection_session_id,""
+community_dialects,community_dialects_pkey,PRIMARY KEY,dialect_id,""
+community_profiles,community_profiles_pkey,PRIMARY KEY,profile_id,""
+community_versions,community_versions_pkey,PRIMARY KEY,version,""
+dialect_aliases,dialect_aliases_pkey,PRIMARY KEY,tenant_id+old_dialect_id,""
+dialects,dialects_pkey,PRIMARY KEY,tenant_id+dialect_id,""
+event_outbox,event_outbox_pkey,PRIMARY KEY,event_id,""
+google_sheets_sync_status,google_sheets_sync_status_pkey,PRIMARY KEY,id,""
+google_sheets_sync_status,google_sheets_sync_status_table_name_key,UNIQUE CONSTRAINT,table_name,""
+languages,languages_pkey,PRIMARY KEY,code,""
+legal_document_drafts,legal_document_drafts_pkey,PRIMARY KEY,draft_id,""
+legal_document_drafts,uq_legal_draft_open,UNIQUE INDEX (MOT PHAN),kind,"(status = ANY (ARRAY['draft'::text, 'in_review'::text, 'approved'::text]))"
+legal_document_events,legal_document_events_pkey,PRIMARY KEY,event_id,""
+legal_documents,legal_documents_pkey,PRIMARY KEY,doc_id,""
+legal_documents,legal_documents_kind_version_unique,UNIQUE CONSTRAINT,kind+version,""
+legal_documents,uq_legal_effective,UNIQUE INDEX,kind+effective_from,""
+memberships,memberships_pkey,PRIMARY KEY,membership_id,""
+memberships,uq_memberships_id_user,UNIQUE CONSTRAINT,membership_id+user_id,""
+memberships,uq_memberships_project_user,UNIQUE INDEX (MOT PHAN),tenant_id+project_id+user_id,(scope_level = 'PROJECT'::text)
+memberships,uq_memberships_tenant_user,UNIQUE INDEX (MOT PHAN),tenant_id+user_id,(scope_level = 'TENANT'::text)
+memberships,uq_memberships_workspace_user,UNIQUE INDEX (MOT PHAN),tenant_id+workspace_id+user_id,(scope_level = 'WORKSPACE'::text)
+notifications,notifications_pkey,PRIMARY KEY,notification_id,""
+password_reset_tokens,password_reset_tokens_pkey,PRIMARY KEY,token_hash,""
+permissions,permissions_pkey,PRIMARY KEY,permission_code,""
+plans,plans_pkey,PRIMARY KEY,plan_code,""
+platform_settings,platform_settings_pkey,PRIMARY KEY,key,""
+project_allocations,project_allocations_pkey,PRIMARY KEY,tenant_id+project_id+metric,""
+projects,projects_pkey,PRIMARY KEY,project_id,""
+projects,uq_projects_tenant_scope,UNIQUE CONSTRAINT,tenant_id+project_id,""
+projects,uq_projects_workspace_scope,UNIQUE CONSTRAINT,tenant_id+workspace_id+project_id,""
+projects,uq_projects_default_active,UNIQUE INDEX (MOT PHAN),tenant_id+workspace_id,((is_default = true) AND (status = 'ACTIVE'::text) AND (deleted_at IS NULL))
+projects,uq_projects_workspace_name,UNIQUE INDEX (MOT PHAN),tenant_id+workspace_id+name,(deleted_at IS NULL)
+raw_uploads,raw_uploads_pkey,PRIMARY KEY,upload_uid,""
+recognition_profiles,recognition_profiles_pkey,PRIMARY KEY,tenant_id+profile_id,""
+refresh_tokens,refresh_tokens_pkey,PRIMARY KEY,token_hash,""
+regions,regions_pkey,PRIMARY KEY,code,""
+registry_versions,registry_versions_pkey,PRIMARY KEY,tenant_id+version,""
+role_assignments,role_assignments_pkey,PRIMARY KEY,assignment_id,""
+role_assignments,uq_role_assignments_scoped,UNIQUE INDEX (MOT PHAN),membership_id+role_id,((membership_id IS NOT NULL) AND (revoked_at IS NULL))
+role_assignments,uq_role_assignments_system,UNIQUE INDEX (MOT PHAN),user_id+role_id,((membership_id IS NULL) AND (revoked_at IS NULL))
+role_permissions,pk_role_permissions,PRIMARY KEY,role_id+permission_code,""
+roles,roles_pkey,PRIMARY KEY,role_id,""
+roles,uq_roles_tenant_scope_key,UNIQUE CONSTRAINT,role_id+scope_level,""
+roles,uq_roles_builtin_code,UNIQUE INDEX (MOT PHAN),role_code,(tenant_id IS NULL)
+roles,uq_roles_custom_code,UNIQUE INDEX (MOT PHAN),tenant_id+role_code,(tenant_id IS NOT NULL)
+roles,uq_roles_platform_scope_name,UNIQUE INDEX (MOT PHAN),scope_level+role_code,(tenant_id IS NULL)
+roles,uq_roles_tenant_scope_name,UNIQUE INDEX (MOT PHAN),tenant_id+scope_level+role_code,(tenant_id IS NOT NULL)
+samples,samples_pkey,PRIMARY KEY,sample_uid,""
+schema_migrations,schema_migrations_pkey,PRIMARY KEY,version+applied_at,""
+signer_aliases,signer_aliases_pkey,PRIMARY KEY,tenant_id+old_signer_id,""
+signer_consents,signer_consents_pkey,PRIMARY KEY,consent_id,""
+signer_consents,uq_signer_consents_live,UNIQUE INDEX (MOT PHAN),tenant_id+signer_id+scope,(withdrawn_at IS NULL)
+signers,signers_pkey,PRIMARY KEY,signer_id,""
+signers,uq_signers_tenant_signer_id,UNIQUE INDEX,tenant_id+signer_id,""
+sot_authorized_keys,sot_authorized_keys_pkey,PRIMARY KEY,public_key,""
+sot_authorized_keys,sot_authorized_keys_name_key,UNIQUE CONSTRAINT,name,""
+storage_reservations,storage_reservations_pkey,PRIMARY KEY,reservation_id,""
+support_messages,support_messages_pkey,PRIMARY KEY,message_id,""
+support_tickets,support_tickets_pkey,PRIMARY KEY,ticket_id,""
+tenant_exports,tenant_exports_pkey,PRIMARY KEY,export_id,""
+tenant_invitations,tenant_invitations_pkey,PRIMARY KEY,invitation_id,""
+tenant_invitations,tenant_invitations_token_hash_key,UNIQUE CONSTRAINT,token_hash,""
+tenant_invitations,uq_tenant_invitations_open,UNIQUE INDEX (MOT PHAN),tenant_id+email,((accepted_at IS NULL) AND (revoked_at IS NULL))
+tenant_purges,tenant_purges_pkey,PRIMARY KEY,purge_id,""
+tenant_storage,tenant_storage_pkey,PRIMARY KEY,tenant_id,""
+tenant_subscriptions,tenant_subscriptions_pkey,PRIMARY KEY,subscription_id,""
+tenant_subscriptions,uq_tenant_subscriptions_open,UNIQUE INDEX (MOT PHAN),tenant_id,(ended_at IS NULL)
+tenant_usage_daily,tenant_usage_daily_pkey,PRIMARY KEY,tenant_id+usage_date+metric,""
+tenants,tenants_pkey,PRIMARY KEY,tenant_id,""
+tenants,tenants_slug_key,UNIQUE CONSTRAINT,slug,""
+tenants,uq_tenants_single_community,UNIQUE INDEX (MOT PHAN),tenant_type,(tenant_type = 'COMMUNITY'::text)
+training_job_classes,training_job_classes_pkey,PRIMARY KEY,job_id+class_idx,""
+training_jobs,training_jobs_pkey,PRIMARY KEY,job_id,""
+training_jobs,uq_training_jobs_tenant_job,UNIQUE CONSTRAINT,tenant_id+job_id,""
+training_metrics,training_metrics_pkey,PRIMARY KEY,job_id+epoch,""
+user_action_passcodes,user_action_passcodes_pkey,PRIMARY KEY,user_id,""
+user_consents,user_consents_pkey,PRIMARY KEY,consent_id,""
+user_consents,uq_consent_live,UNIQUE INDEX (MOT PHAN),user_id+kind,(withdrawn_at IS NULL)
+user_recovery_codes,user_recovery_codes_pkey,PRIMARY KEY,code_hash,""
+user_totp,user_totp_pkey,PRIMARY KEY,user_id,""
+users,users_pkey,PRIMARY KEY,id,""
+users,users_email_key,UNIQUE CONSTRAINT,email,""
+users,users_phone_number_key,UNIQUE CONSTRAINT,phone_number,""
+users,users_username_key,UNIQUE CONSTRAINT,username,""
+users,uq_users_tenant_email,UNIQUE INDEX,tenant_id+email,""
+users,uq_users_tenant_username,UNIQUE INDEX,tenant_id+username,""
+verification_codes,verification_codes_pkey,PRIMARY KEY,challenge_id,""
+verification_codes,uq_verification_codes_live,UNIQUE INDEX (MOT PHAN),user_id+purpose,(consumed_at IS NULL)
+vocabulary_groups,vocabulary_groups_pkey,PRIMARY KEY,tenant_id+group_id,""
+vocabulary_registry_meta,vocabulary_registry_meta_pkey,PRIMARY KEY,tenant_id,""
+webhook_deliveries,webhook_deliveries_pkey,PRIMARY KEY,delivery_id,""
+webhook_endpoints,webhook_endpoints_pkey,PRIMARY KEY,endpoint_id,""
+workspaces,workspaces_pkey,PRIMARY KEY,workspace_id,""
+workspaces,uq_workspaces_tenant_scope,UNIQUE CONSTRAINT,tenant_id+workspace_id,""
+workspaces,uq_workspaces_default_active,UNIQUE INDEX (MOT PHAN),tenant_id,((is_default = true) AND (status = 'ACTIVE'::text) AND (deleted_at IS NULL))
+workspaces,uq_workspaces_tenant_name,UNIQUE INDEX (MOT PHAN),tenant_id+name,(deleted_at IS NULL)

@@ -1,0 +1,69 @@
+table_name,constraint_name,columns,scope,rule
+audit_log,audit_log_action_not_blank,action,mot cot,CHECK ((action <> ''::text))
+capture_sessions,capture_sessions_ends_after_start,started_at+ended_at,BAT BIEN NHIEU COT,CHECK (((ended_at IS NULL) OR (started_at IS NULL) OR (ended_at >= started_at)))
+capture_sessions,capture_sessions_session_id_not_blank,session_id,mot cot,CHECK ((session_id <> ''::text))
+collection_sessions,collection_sessions_code_not_blank,session_code,mot cot,CHECK ((session_code <> ''::text))
+collection_sessions,collection_sessions_ends_after_start,started_at+ended_at,BAT BIEN NHIEU COT,CHECK (((ended_at IS NULL) OR (started_at IS NULL) OR (ended_at >= started_at)))
+event_outbox,ck_event_outbox_attempts,attempts,mot cot,CHECK ((attempts >= 0))
+event_outbox,ck_event_outbox_status,dispatch_status,mot cot,"CHECK ((dispatch_status = ANY (ARRAY['PENDING'::text, 'IN_FLIGHT'::text, 'DONE'::text, 'FAILED'::text])))"
+event_outbox,ck_event_outbox_type_not_blank,event_type_code,mot cot,CHECK ((event_type_code <> ''::text))
+legal_document_drafts,ck_legal_drafts_kind,kind,mot cot,"CHECK ((kind = ANY (ARRAY['terms'::text, 'privacy'::text, 'data_contribution'::text, 'guardian'::text])))"
+legal_document_drafts,ck_legal_drafts_revision,revision,mot cot,CHECK ((revision >= 1))
+legal_document_drafts,ck_legal_drafts_status,status,mot cot,"CHECK ((status = ANY (ARRAY['draft'::text, 'in_review'::text, 'approved'::text, 'published'::text, 'discarded'::text])))"
+legal_document_events,ck_legal_events_action_not_blank,action,mot cot,CHECK ((action <> ''::text))
+legal_documents,ck_legal_documents_body_format,body_format,mot cot,"CHECK ((body_format = ANY (ARRAY['markdown'::text, 'text'::text, 'file'::text])))"
+legal_documents,ck_legal_documents_file_pair,body_format+file_key,BAT BIEN NHIEU COT,CHECK (((body_format = 'file'::text) = (file_key IS NOT NULL)))
+legal_documents,legal_documents_kind_valid,kind,mot cot,"CHECK ((kind = ANY (ARRAY['terms'::text, 'privacy'::text, 'data_contribution'::text, 'guardian'::text])))"
+memberships,ck_memberships_left_consistent,status+left_at,BAT BIEN NHIEU COT,CHECK (((status = 'REMOVED'::text) = (left_at IS NOT NULL)))
+memberships,ck_memberships_legacy_role_tenant_only,scope_level+legacy_role,BAT BIEN NHIEU COT,CHECK (((scope_level = 'TENANT'::text) OR (legacy_role IS NULL)))
+memberships,ck_memberships_legacy_role_valid,legacy_role,mot cot,"CHECK (((legacy_role IS NULL) OR (legacy_role = ANY (ARRAY['admin'::text, 'editor'::text]))))"
+memberships,ck_memberships_scope_level,scope_level,mot cot,"CHECK ((scope_level = ANY (ARRAY['TENANT'::text, 'WORKSPACE'::text, 'PROJECT'::text])))"
+memberships,ck_memberships_shape,scope_level+workspace_id+project_id,BAT BIEN NHIEU COT,CHECK ((((scope_level = 'TENANT'::text) AND (workspace_id IS NULL) AND (project_id IS NULL)) OR ((scope_level = 'WORKSPACE'::text) AND (workspace_id IS NOT NULL) AND (project_id IS NULL)) OR ((scope_level = 'PROJECT'::text) AND (workspace_id IS NOT NULL) AND (project_id IS NOT NULL))))
+memberships,ck_memberships_status,status,mot cot,"CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'INVITED'::text, 'SUSPENDED'::text, 'REMOVED'::text])))"
+notifications,notifications_severity_valid,severity,mot cot,"CHECK ((severity = ANY (ARRAY['info'::text, 'success'::text, 'warning'::text, 'critical'::text])))"
+permissions,ck_permissions_code_shape,permission_code,mot cot,CHECK ((permission_code ~ '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'::text))
+permissions,ck_permissions_risk,risk_level,mot cot,"CHECK ((risk_level = ANY (ARRAY['NORMAL'::text, 'SENSITIVE'::text, 'CRITICAL'::text])))"
+permissions,ck_permissions_scope,applicable_scope,mot cot,"CHECK ((applicable_scope = ANY (ARRAY['SYSTEM'::text, 'TENANT'::text, 'WORKSPACE'::text, 'PROJECT'::text])))"
+permissions,ck_permissions_system_not_api_assignable,applicable_scope+is_api_assignable,BAT BIEN NHIEU COT,CHECK ((NOT ((applicable_scope = 'SYSTEM'::text) AND is_api_assignable)))
+permissions,ck_permissions_system_not_custom_role,applicable_scope+is_custom_role_allowed,BAT BIEN NHIEU COT,CHECK ((NOT ((applicable_scope = 'SYSTEM'::text) AND is_custom_role_allowed)))
+plans,ck_plans_billing_period,billing_period,mot cot,"CHECK ((billing_period = ANY (ARRAY['monthly'::text, 'yearly'::text, 'none'::text])))"
+plans,ck_plans_limits_non_negative,max_seats+max_samples+max_storage_mb+max_classes+max_training_jobs_per_month+max_concurrent_training_jobs+max_queued_training_jobs+max_api_keys+max_webhook_endpoints+price_cents+trial_days,BAT BIEN NHIEU COT,"CHECK (((COALESCE(max_seats, 0) >= 0) AND (COALESCE(max_samples, 0) >= 0) AND (COALESCE(max_storage_mb, 0) >= 0) AND (COALESCE(max_classes, 0) >= 0) AND (COALESCE(max_training_jobs_per_month, 0) >= 0) AND (max_concurrent_training_jobs >= 0) AND (max_queued_training_jobs >= 0) AND (max_api_keys >= 0) AND (max_webhook_endpoints >= 0) AND (price_cents >= 0) AND (trial_days >= 0)))"
+plans,ck_plans_v6_limits_non_negative,max_workspaces+max_projects+included_training_credits+audit_retention_days,BAT BIEN NHIEU COT,"CHECK (((COALESCE(max_workspaces, 0) >= 0) AND (COALESCE(max_projects, 0) >= 0) AND (COALESCE(included_training_credits, 0) >= 0) AND (COALESCE(audit_retention_days, 0) >= 0)))"
+project_allocations,ck_project_allocations_nonneg,allocated,mot cot,CHECK (((allocated IS NULL) OR (allocated >= 0)))
+projects,ck_projects_status,status,mot cot,"CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'ARCHIVED'::text, 'DELETED'::text])))"
+role_assignments,ck_role_assignments_revoked_consistent,revoked_by_user_id+revoked_at,BAT BIEN NHIEU COT,CHECK (((revoked_by_user_id IS NULL) OR (revoked_at IS NOT NULL)))
+roles,ck_role_ownership,tenant_id+scope_level+is_builtin,BAT BIEN NHIEU COT,CHECK (((is_builtin AND (tenant_id IS NULL)) OR ((NOT is_builtin) AND (tenant_id IS NOT NULL) AND (scope_level <> 'SYSTEM'::text))))
+roles,ck_roles_scope_level,scope_level,mot cot,"CHECK ((scope_level = ANY (ARRAY['SYSTEM'::text, 'TENANT'::text, 'WORKSPACE'::text, 'PROJECT'::text])))"
+roles,ck_roles_system_is_platform_owned,tenant_id+scope_level,BAT BIEN NHIEU COT,CHECK (((scope_level <> 'SYSTEM'::text) OR (tenant_id IS NULL)))
+roles,ck_roles_tenant_type_constraint,tenant_type_constraint,mot cot,"CHECK (((tenant_type_constraint IS NULL) OR (tenant_type_constraint = ANY (ARRAY['COMMUNITY'::text, 'ORGANIZATION'::text]))))"
+samples,ck_samples_review_status,review_status,mot cot,"CHECK ((review_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])))"
+samples,samples_file_path_is_local,file_path,mot cot,CHECK (((file_path IS NULL) OR (file_path !~~ 'http%'::text)))
+samples,samples_uid_is_hex10,sample_uid,mot cot,CHECK ((sample_uid ~ '^[0-9a-f]{10}$'::text))
+signer_aliases,signer_aliases_not_self,old_signer_id+new_signer_id,BAT BIEN NHIEU COT,CHECK ((old_signer_id <> new_signer_id))
+signer_consents,signer_consents_scope_valid,scope,mot cot,"CHECK ((scope = ANY (ARRAY['internal_training'::text, 'research_release'::text, 'public_library'::text])))"
+signer_consents,signer_consents_withdraw_after_grant,granted_at+withdrawn_at,BAT BIEN NHIEU COT,CHECK (((withdrawn_at IS NULL) OR (withdrawn_at >= granted_at)))
+storage_reservations,ck_storage_reservations_not_negative,bytes,mot cot,CHECK ((bytes >= 0))
+support_messages,ck_support_author_kind,author_kind,mot cot,"CHECK ((author_kind = ANY (ARRAY['user'::text, 'staff'::text, 'bot'::text])))"
+support_messages,ck_support_author_kind_matches,is_staff+author_kind,BAT BIEN NHIEU COT,CHECK (((author_kind = 'staff'::text) = is_staff))
+support_tickets,support_tickets_category_valid,category,mot cot,"CHECK ((category = ANY (ARRAY['account'::text, 'billing'::text, 'data'::text, 'bug'::text, 'other'::text])))"
+support_tickets,support_tickets_priority_valid,priority,mot cot,"CHECK ((priority = ANY (ARRAY['low'::text, 'normal'::text, 'high'::text, 'urgent'::text])))"
+support_tickets,support_tickets_status_valid,status,mot cot,"CHECK ((status = ANY (ARRAY['open'::text, 'pending'::text, 'resolved'::text, 'closed'::text])))"
+tenant_exports,ck_tenant_exports_purpose,export_purpose,mot cot,"CHECK ((export_purpose = ANY (ARRAY['tenant_portability'::text, 'internal_training'::text, 'research_release'::text, 'public_library'::text])))"
+tenant_exports,ck_tenant_exports_scope,scope,mot cot,"CHECK ((scope = ANY (ARRAY['metadata'::text, 'full'::text])))"
+tenant_exports,ck_tenant_exports_status,status,mot cot,"CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'ready'::text, 'failed'::text, 'expired'::text])))"
+tenant_invitations,tenant_invitations_accept_is_complete,accepted_at+accepted_by,BAT BIEN NHIEU COT,CHECK (((accepted_by IS NULL) OR (accepted_at IS NOT NULL)))
+tenant_invitations,tenant_invitations_email_lower,email,mot cot,CHECK ((email = lower(email)))
+tenant_invitations,tenant_invitations_role_valid,role,mot cot,"CHECK (((role IS NULL) OR (role = ANY (ARRAY['admin'::text, 'editor'::text]))))"
+tenant_storage,ck_tenant_storage_not_negative,bytes_used,mot cot,CHECK ((bytes_used >= 0))
+tenants,ck_tenants_billing_status,billing_status,mot cot,"CHECK ((billing_status = ANY (ARRAY['trialing'::text, 'active'::text, 'past_due'::text, 'suspended'::text, 'cancelled'::text])))"
+tenants,ck_tenants_type,tenant_type,mot cot,"CHECK ((tenant_type = ANY (ARRAY['COMMUNITY'::text, 'ORGANIZATION'::text])))"
+user_action_passcodes,ck_user_action_passcodes_failed_count,failed_count,mot cot,CHECK ((failed_count >= 0))
+user_action_passcodes,ck_user_action_passcodes_status,status,mot cot,"CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'LOCKED'::text, 'REVOKED'::text])))"
+user_consents,ck_user_consents_source,source,mot cot,"CHECK ((source = ANY (ARRAY['user'::text, 'backfill'::text, 'import'::text])))"
+users,users_email_lower,email,mot cot,CHECK ((email = lower(email)))
+verification_codes,verification_codes_attempts_bounded,attempts+max_attempts,BAT BIEN NHIEU COT,CHECK (((attempts >= 0) AND (attempts <= max_attempts)))
+verification_codes,verification_codes_channel_valid,channel,mot cot,"CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text])))"
+verification_codes,verification_codes_purpose_valid,purpose,mot cot,"CHECK ((purpose = ANY (ARRAY['verify_email'::text, 'verify_phone'::text, 'reset_password'::text])))"
+vocabulary_groups,vocabulary_groups_id_not_blank,group_id,mot cot,CHECK ((group_id <> ''::text))
+webhook_deliveries,ck_webhook_deliveries_status,status,mot cot,"CHECK ((status = ANY (ARRAY['pending'::text, 'delivered'::text, 'failed'::text, 'dropped'::text])))"
+workspaces,ck_workspaces_status,status,mot cot,"CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'ARCHIVED'::text, 'DELETED'::text])))"
