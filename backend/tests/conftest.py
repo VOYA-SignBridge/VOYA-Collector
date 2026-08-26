@@ -230,6 +230,93 @@ class _MirroringOverrides(dict):
             super().pop(get_current_user_optional, None)
 
 
+#: Mọi thư bộ test "gửi", giữ lại trong bộ nhớ. Bài nào cần khẳng định có thư
+#: đi ra thì đọc danh sách này thay vì tin vào một hộp thư thật.
+THU_DA_CHAN: list = []
+
+#: Tách ra một hằng cho gọn chỗ dùng.
+_BAO_CHAN = "[EMAIL] da chan %d thu — khong la nao roi mang."
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _chan_moi_duong_gui_thu_that():
+    """Bộ test KHÔNG BAO GIỜ được gửi một lá thư thật. Không có ngoại lệ.
+
+    Sự cố 25/08/2026
+    -----------------
+    `scripts/run_tests.sh` truyền NGUYÊN `.env` sản xuất vào container test, nên
+    container nhận đúng thông tin đăng nhập Gmail thật:
+
+        SMTP_HOST=smtp.gmail.com
+        SMTP_USER=<hộp thư thật>
+        SMTP_PASSWORD=<mật khẩu ứng dụng thật>
+
+    Mọi bài test chạm đường mời thành viên hoặc đường gửi mã xác minh đều gửi
+    thư THẬT tới địa chỉ bịa (`a@example.test`, `Someone@Example.test`, …).
+
+    Vì sao không ai phát hiện suốt thời gian qua: Gmail **nhận** thư ở tầng
+    SMTP — nó chưa biết địa chỉ đích ở tên miền khác có tồn tại hay không — nên
+    `email_service._send` không thấy ngoại lệ nào và lượt chạy vẫn xanh. Thư
+    không gửi được quay về SAU ĐÓ, bất đồng bộ, dưới dạng bounce vào hộp thư
+    NGƯỜI GỬI. Đo được: hơn ba nghìn thư.
+
+    Chặn ở đâu và vì sao ở đó
+    --------------------------
+    Thay `smtplib.SMTP`/`SMTP_SSL` chứ KHÔNG làm rỗng `settings.smtp_host`.
+    Làm rỗng `smtp_host` sẽ đổi hành vi của chính thứ đang được kiểm: nhánh
+    `loggable=False` chuyển sang ném `EmailNotConfigured`, nên bài test sẽ đi
+    một đường mã khác hẳn đường chạy trên máy thật. Chặn ở tầng socket giữ
+    nguyên mọi nhánh logic — dựng thư, đăng nhập, `send_message` — và chỉ cắt
+    đúng thứ phải cắt: gói tin ra ngoài.
+
+    Đây là lớp THỨ HAI. Lớp thứ nhất ở `scripts/run_tests.sh` trỏ `SMTP_HOST`
+    vào một tên miền không bao giờ phân giải được. Cùng hình dạng hai lớp với
+    phần chặn pytest ghi vào cơ sở dữ liệu sản xuất, và cùng lý do: lớp một làm
+    đường đúng dễ đi, lớp hai làm đường sai đi không được.
+    """
+    import smtplib
+
+    class _SMTPGia:
+        """Nhận đúng những lời gọi `_send` dùng, và không mở socket nào."""
+
+        def __init__(self, host="", port=0, *a, **kw):
+            self.host, self.port = host, port
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self, *a, **kw):
+            return None
+
+        def login(self, user, password, *a, **kw):
+            return None
+
+        def send_message(self, msg, *a, **kw):
+            THU_DA_CHAN.append({
+                "to": msg.get("To"), "from": msg.get("From"),
+                "subject": msg.get("Subject"),
+            })
+            return {}
+
+        def quit(self, *a, **kw):
+            return None
+
+    that_smtp, that_ssl = smtplib.SMTP, smtplib.SMTP_SSL
+    smtplib.SMTP, smtplib.SMTP_SSL = _SMTPGia, _SMTPGia
+    try:
+        yield
+    finally:
+        smtplib.SMTP, smtplib.SMTP_SSL = that_smtp, that_ssl
+        if THU_DA_CHAN:
+            # In ra chứ không im: con số này là thứ duy nhất cho biết suite đang
+            # chạm bao nhiêu đường gửi thư, và nếu lớp chặn bị gỡ thì đúng ngần
+            # ấy thư sẽ đi ra thật.
+            print(_BAO_CHAN % len(THU_DA_CHAN))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _mirror_auth_overrides():
     """Cài lớp gương chiếu một lần cho cả phiên chạy."""

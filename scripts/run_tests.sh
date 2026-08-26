@@ -182,6 +182,31 @@ fi
 # `scripts/reverse_asbuilt_schema.py` để biết cách làm.
 VOYA_TEST_CMD="${VOYA_TEST_CMD:-python -m pytest}"
 
+# --------------------------------------------------------------------------
+# Thư: lớp chặn THỨ NHẤT.
+#
+# `--env-file` ở dưới truyền NGUYÊN `.env` sản xuất vào container, nên tới
+# 25/08/2026 container test nhận đúng thông tin đăng nhập Gmail thật và mọi bài
+# chạm đường mời thành viên hay đường gửi mã xác minh đều gửi thư THẬT tới địa
+# chỉ bịa (`a@example.test`, `Someone@Example.test`, …).
+#
+# Không lượt chạy nào đỏ vì chuyện đó: Gmail NHẬN thư ở tầng SMTP — nó chưa biết
+# địa chỉ đích ở tên miền khác có tồn tại không — nên `_send` không thấy ngoại lệ
+# nào. Thư không gửi được quay về SAU ĐÓ, dưới dạng bounce vào hộp thư NGƯỜI
+# GỬI. Đo được: hơn ba nghìn thư.
+#
+# `.invalid` là TLD dành riêng (RFC 2606) — bảo đảm không bao giờ phân giải
+# được, nên không gói tin nào tới được một máy chủ thư thật. Cố ý KHÔNG để rỗng:
+# `smtp_host` rỗng làm `_send` đổi nhánh sang ném `EmailNotConfigured`, tức là
+# bài test sẽ đi một đường mã khác đường chạy trên máy thật.
+#
+# Lớp THỨ HAI ở `backend/tests/conftest.py` thay hẳn `smtplib.SMTP`, nên kể cả
+# khi ai đó chạy pytest thẳng bằng `docker run` mà không qua tệp này thì vẫn
+# không lá thư nào đi ra. Lớp một làm đường đúng dễ đi; lớp hai làm đường sai
+# đi không được.
+# --------------------------------------------------------------------------
+extra="$extra -e SMTP_HOST=smtp.test.invalid"
+
 exec docker run --rm \
   --network "$NETWORK" \
   --env-file "$ENV_FILE_MOUNT" \

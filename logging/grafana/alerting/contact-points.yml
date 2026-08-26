@@ -7,7 +7,11 @@ contactPoints:
       - uid: admin-email-receiver
         type: email
         settings:
-          addresses: minhb2203567@student.ctu.edu.vn
+          # Hộp thư NHẬN cảnh báo. Đổi 25/08/2026 khỏi địa chỉ sinh viên
+          # (@student.ctu.edu.vn) theo yêu cầu: hộp thư ấy đang bị dồn thư tự
+          # động. Đây là người NHẬN, khác với tài khoản GỬI ở `SMTP_*` trong
+          # `.env` — hai thứ đó độc lập và đổi cái này không đụng cái kia.
+          addresses: minhyukichi@gmail.com
           singleEmail: true
           subject: '{{ template "email.voya.subject" . }}'
           message: '{{ template "email.voya.message" . }}'
