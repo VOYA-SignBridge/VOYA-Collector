@@ -14,6 +14,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import {
+  createCatalogDialect,
   getCatalogState,
   getCatalogVersions,
   publishCatalog,
@@ -36,6 +37,8 @@ export default function CatalogVersionSection() {
   const [state, setState] = useState<CatalogState | null>(null);
   const [versions, setVersions] = useState<CatalogVersion[]>([]);
   const [note, setNote] = useState("");
+  const [newDialect, setNewDialect] = useState("");
+  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -57,6 +60,31 @@ export default function CatalogVersionSection() {
   // "Đã sửa từ lần công bố" là một phép SO SÁNH BĂM, không phải so ngày.
   const inSync = !!state && state.latest_content_hash === state.content_hash;
   const neverPublished = !!state && state.latest_version === null;
+
+  // Thêm vào KHUÔN, không phải vào danh mục của tổ chức đang đăng nhập. Tổ
+  // chức đã tồn tại KHÔNG đổi gì — nhân bản xảy ra lúc TẠO tổ chức, không phải
+  // như một đường vọng lại lúc chạy.
+  const addDialect = async () => {
+    const ten = newDialect.trim();
+    if (!ten) return;
+    setAdding(true);
+    try {
+      const res = await createCatalogDialect({ display_name: ten });
+      toast.success(
+        res.created
+          ? t("Đã thêm “{d}” vào khuôn. Công bố để đóng băng thay đổi này.", {
+              d: res.dialect.dialect_id,
+            })
+          : t("“{d}” đã có sẵn trong khuôn.", { d: res.dialect.dialect_id }),
+      );
+      setNewDialect("");
+      await load();
+    } catch (e) {
+      toast.error(friendlyError(e, t("Không thêm được phương ngữ vào khuôn")));
+    } finally {
+      setAdding(false);
+    }
+  };
 
   const publish = async () => {
     setBusy(true);
@@ -126,6 +154,31 @@ export default function CatalogVersionSection() {
           <dd className="mt-1 font-mono text-sm text-slate-700">{short(state?.content_hash)}</dd>
         </div>
       </dl>
+
+      <div className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+        <p className="mb-2 text-sm font-medium text-slate-700">
+          {t("Thêm phương ngữ vào khuôn")}
+        </p>
+        <p className="mb-3 text-xs text-slate-500">
+          {t("Khuôn là thứ mọi tổ chức MỚI được nhân bản từ đó. Tổ chức đã tồn tại không đổi gì — muốn thêm cho một tổ chức cụ thể thì làm ở danh mục của tổ chức đó.")}
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="min-w-[220px] flex-1">
+            <span className="mb-1 block text-xs font-medium text-slate-500">
+              {t("Tên hiển thị")}
+            </span>
+            <input
+              value={newDialect}
+              onChange={(e) => setNewDialect(e.target.value)}
+              placeholder={t("vd: Chữ số")}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ctu-blue/30"
+            />
+          </label>
+          <Button variant="secondary" onClick={addDialect} disabled={adding || !newDialect.trim()}>
+            {adding ? t("Đang thêm…") : t("Thêm vào khuôn")}
+          </Button>
+        </div>
+      </div>
 
       <div className="mb-5 flex flex-wrap items-end gap-2">
         <label className="min-w-[220px] flex-1">

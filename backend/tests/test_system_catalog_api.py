@@ -138,6 +138,7 @@ def test_missing_version_is_404_not_an_empty_body(client):
     ("post", "/api/v1/vocabulary/catalog/publish"),
     ("post", "/api/v1/vocabulary/catalog/seed"),
     ("post", "/api/v1/vocabulary/catalog/clone"),
+    ("post", "/api/v1/vocabulary/catalog/dialects"),
 ])
 def test_tenant_user_is_refused_on_every_community_route(tenant_user_client, method, path):
     # starlette 0.27's TestClient.get() takes no `json=`, so only the writes
@@ -518,3 +519,117 @@ def test_the_catalog_router_no_longer_squats_on_the_community_namespace():
     squatting = sorted(p for p in paths if "/vocabulary/community" in p)
     assert not squatting, f"config endpoints still mounted under community: {squatting}"
     assert any("/vocabulary/catalog" in p for p in paths), "catalog routes missing"
+
+
+# ===========================================================================
+# Thêm — cửa ghi đã THIẾU cho tới 25/08/2026
+# ===========================================================================
+#
+# `community_dialects` là KHUÔN mọi tenant mới được nhân bản từ đó. Trước lượt
+# này nó chỉ lớn lên được từ `config/dialects.seed.csv`: `PATCH` sửa được dòng
+# đã có, `POST /seed` chạy lại tệp, và không đường nào tạo được dòng mới.
+#
+# Hậu quả đo được trên sản xuất: `chu-so` và `pho-thong` duyệt ở tenant
+# `default` ngày 14/08; bốn tenant tạo sau đó — một cái tạo ngày 22/08, tám
+# ngày sau — đều thiếu đúng hai phương ngữ ấy.
+
+def _xoa_community_dialect(did: str) -> None:
+    db._execute("DELETE FROM community_dialects WHERE dialect_id = %s", (did,))
+
+
+def test_them_duoc_phuong_ngu_vao_khuon(client):
+    ten = f"Kiem Tra {uuid.uuid4().hex[:6]}"
+    r = client.post("/api/v1/vocabulary/catalog/dialects", json={"display_name": ten})
+    assert r.status_code == 201, r.text
+    row = r.json()["dialect"]
+    did = row["dialect_id"]
+    try:
+        assert r.json()["created"] is True
+        assert row["is_active"] is True
+        # Xếp CUỐI: `display_order` là thứ tự người vận hành đã sắp, dòng mới
+        # không được chen vào giữa.
+        khac = db._fetch_all(
+            "SELECT max(display_order) AS m FROM community_dialects "
+            " WHERE dialect_id <> %s", (did,))
+        assert row["display_order"] >= int(khac[0]["m"] or 0)
+
+        # Và nó phải hiện ra ở ảnh chụp danh mục — nếu không thì lượt nhân bản
+        # cho tenant mới vẫn không thấy.
+        trong_khuon = [d["dialect_id"] for d in client.get(
+            "/api/v1/vocabulary/catalog").json()["dialects"]]
+        assert did in trong_khuon
+    finally:
+        _xoa_community_dialect(did)
+
+
+def test_them_lai_dung_ten_ay_la_luy_dang_khong_phai_loi(client):
+    ten = f"Kiem Tra {uuid.uuid4().hex[:6]}"
+    r1 = client.post("/api/v1/vocabulary/catalog/dialects", json={"display_name": ten})
+    did = r1.json()["dialect"]["dialect_id"]
+    try:
+        r2 = client.post("/api/v1/vocabulary/catalog/dialects", json={"display_name": ten})
+        assert r2.status_code == 200, "lần hai không phải 201 — không có gì được tạo"
+        assert r2.json()["created"] is False
+        n = db._fetch_all(
+            "SELECT count(*) AS n FROM community_dialects WHERE dialect_id = %s", (did,))
+        assert int(n[0]["n"]) == 1
+    finally:
+        _xoa_community_dialect(did)
+
+
+def test_hai_ten_khac_nhau_tren_MOT_slug_thi_bao_xung_dot(client):
+    """Gộp im lặng hai tên vào một dòng là cách mất một trong hai."""
+    r1 = client.post("/api/v1/vocabulary/catalog/dialects",
+                     json={"display_name": "Hoà Đê Kiểm"})
+    did = r1.json()["dialect"]["dialect_id"]
+    try:
+        r2 = client.post("/api/v1/vocabulary/catalog/dialects",
+                         json={"display_name": "hoa de kiem"})
+        assert r2.status_code == 409
+    finally:
+        _xoa_community_dialect(did)
+
+
+def test_ten_rong_bi_tu_choi(client):
+    r = client.post("/api/v1/vocabulary/catalog/dialects", json={"display_name": "   "})
+    assert r.status_code == 400
+
+
+def test_them_vao_khuon_KHONG_tu_cong_bo(client, version_floor):
+    """Công bố là hành động có chủ ý kèm ghi chú. Tự công bố mỗi lần thêm sẽ
+    lấp lịch sử bằng những phiên bản không ai chọn tạo."""
+    ten = f"Kiem Tra {uuid.uuid4().hex[:6]}"
+    r = client.post("/api/v1/vocabulary/catalog/dialects", json={"display_name": ten})
+    did = r.json()["dialect"]["dialect_id"]
+    try:
+        rows = db._fetch_all("SELECT COALESCE(MAX(version), 0) AS v FROM community_versions")
+        assert int(rows[0]["v"]) == version_floor
+    finally:
+        _xoa_community_dialect(did)
+
+
+def test_tenant_moi_nhan_duoc_phuong_ngu_vua_them(client):
+    """Bài chứng minh lỗ hổng ĐÃ đóng.
+
+    Đây là điều duy nhất thật sự quan trọng: thêm vào khuôn mà tenant mới không
+    nhận được thì cửa ghi này vô nghĩa.
+    """
+    from app import tenant_admin
+    from conftest import purge_tenant
+
+    ten = f"Kiem Tra {uuid.uuid4().hex[:6]}"
+    did = client.post("/api/v1/vocabulary/catalog/dialects",
+                      json={"display_name": ten}).json()["dialect"]["dialect_id"]
+    tid = f"cat{uuid.uuid4().hex[:9]}"
+    try:
+        tenant_admin.create_tenant(tid, clone_catalog=True, plan_code="free")
+        co = db._fetch_all(
+            "SELECT count(*) AS n FROM dialects WHERE tenant_id = %s AND dialect_id = %s",
+            (tid, did))
+        assert int(co[0]["n"]) == 1, (
+            "tenant mới KHÔNG nhận được phương ngữ vừa thêm vào khuôn — đúng lỗi "
+            "mà cửa ghi này sinh ra để đóng"
+        )
+    finally:
+        purge_tenant(tid)
+        _xoa_community_dialect(did)

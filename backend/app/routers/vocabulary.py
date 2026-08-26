@@ -10,6 +10,8 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from app import audit
 from app import vocabulary_registry as vr
@@ -272,6 +274,48 @@ def seed_system_catalog(current_user: Dict[str, Any] = Depends(_system_admin)):
     no endpoint that overwrites admin edits from a CSV.
     """
     return vr.seed_system_catalog(created_by=_actor(current_user))
+
+
+@catalog_router.post("/dialects", status_code=status.HTTP_201_CREATED)
+def create_catalog_dialect(
+    request: Request,
+    payload: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(_system_admin),
+):
+    """Thêm một phương ngữ vào KHUÔN Community — cửa ghi còn thiếu.
+
+    Trước lượt này danh mục Community chỉ lớn lên được từ
+    `config/dialects.seed.csv`: `PATCH` sửa được dòng đã có, `POST /seed` chạy
+    lại tệp, và không đường nào tạo được dòng mới. Nên mọi phương ngữ duyệt sau
+    lần cài đầu đều không bao giờ tới được tenant tạo sau đó.
+
+    Đây KHÔNG phải `POST /vocabulary/dialects`: cửa kia thêm vào danh mục của
+    MỘT tổ chức. Cửa này sửa khuôn của cả nền tảng, nên nó đòi quyền quản trị
+    hệ thống.
+
+    `201` khi tạo mới, `200` khi đã có sẵn đúng tên ấy (luỹ đẳng).
+    """
+    try:
+        row, created = vr.create_catalog_dialect(
+            str(payload.get("display_name") or ""),
+            language=str(payload.get("language") or "vn"),
+            is_alphabet=bool(payload.get("is_alphabet")),
+            note=str(payload.get("note") or ""),
+            created_by=_actor(current_user),
+        )
+    except vr.DialectConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    audit.record(
+        "vocabulary.catalog.dialect_created", actor=current_user, request=request,
+        target_type="community_dialect", target_id=row["dialect_id"],
+        detail={"created": created})
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        content={"dialect": jsonable_encoder(row), "created": created},
+    )
 
 
 @catalog_router.patch("/dialects/{dialect_id}")

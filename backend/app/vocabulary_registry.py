@@ -849,6 +849,78 @@ def update_catalog_dialect(dialect_id: str, changes: Dict[str, Any],
                                  _COMMUNITY_DIALECT_COLUMNS, changes, updated_by)
 
 
+def create_catalog_dialect(
+    display_name: str,
+    *,
+    language: str = "vn",
+    is_alphabet: bool = False,
+    note: str = "",
+    created_by: Optional[str] = None,
+) -> Tuple[Dict[str, Any], bool]:
+    """Thêm một phương ngữ vào danh mục Community. System-admin plane only.
+
+    Vì sao hàm này phải tồn tại (25/08/2026)
+    -----------------------------------------
+    `community_dialects` là KHUÔN mà mọi tenant mới được nhân bản từ đó
+    (`clone_catalog_to_tenant`). Tới lượt vá này, nó chỉ lớn lên được từ
+    `config/dialects.seed.csv` qua `seed_system_catalog`, và câu ấy là
+    `ON CONFLICT DO NOTHING`. `update_catalog_dialect` thì là `UPDATE ... WHERE`
+    — sửa được dòng đã có, KHÔNG tạo được dòng mới.
+
+    Hệ quả đo được trên sản xuất: `chu-so` và `pho-thong` được duyệt ở tenant
+    `default` ngày 14/08. Bốn tenant tạo SAU đó — gồm một tenant tạo ngày 22/08,
+    tám ngày sau — đều thiếu đúng hai phương ngữ ấy. Khuôn đứng yên ở tệp CSV
+    trong khi danh mục của tenant đi tiếp.
+
+    Vì sao KHÔNG tự chép từ tenant `default`
+    -----------------------------------------
+    Cách sửa "duyệt ở `default` thì tự thêm vào Community" nghe gọn hơn và nó
+    SAI: `default` là tenant BOOTSTRAP, không phải Community. Hai mặt phẳng đó
+    được tách ra có chủ ý (xem docs/TENANT_ISOLATION_AND_AUTHZ.md §10). Kế thừa
+    xảy ra lúc TẠO tenant, không phải như một đường vọng lại lúc chạy. Một
+    phương ngữ vào khuôn của cả nền tảng phải là một quyết định của quản trị
+    viên hệ thống, không phải hệ quả phụ của việc ai đó thu dữ liệu.
+
+    Trả về `(row, created)`. `created=False` nghĩa là đã có sẵn ĐÚNG tên ấy —
+    luỹ đẳng, không phải lỗi. Tên khác trên cùng một slug thì ném
+    `DialectConflict`: gộp im lặng hai tên vào một dòng là cách mất một trong
+    hai.
+
+    KHÔNG tự công bố. Công bố là một hành động có chủ ý kèm ghi chú — xem
+    `publish_catalog_version`.
+    """
+    from app.storage.metadata_db import _execute, _fetch_all
+
+    display_name = (display_name or "").strip()
+    dialect_id = slugify_dialect(display_name)
+    if not dialect_id:
+        raise ValueError("Tên phương ngữ không hợp lệ (rỗng sau khi chuẩn hoá).")
+
+    existing = _fetch_all(
+        "SELECT * FROM community_dialects WHERE dialect_id = %s", (dialect_id,))
+    if existing:
+        row = existing[0]
+        if (row["display_name"] or "").strip().lower() == display_name.lower():
+            return row, False
+        raise DialectConflict(dialect_id, row["display_name"])
+
+    # Xếp cuối. `display_order` là thứ tự HIỂN THỊ do người vận hành sắp, nên
+    # dòng mới không được chen vào giữa danh sách người ta đã sắp.
+    _execute(
+        "INSERT INTO community_dialects(dialect_id, display_name, language, "
+        "is_alphabet, display_order, is_active, note, updated_by) "
+        "VALUES(%s, %s, %s, %s, "
+        "  (SELECT COALESCE(max(display_order), 0) + 1 FROM community_dialects), "
+        "  TRUE, %s, %s)",
+        (dialect_id, display_name, language, bool(is_alphabet),
+         (note or "").strip() or None, created_by),
+    )
+    logger.info("[VOCAB] community dialect %s (%s) created by=%s",
+                dialect_id, display_name, created_by)
+    return _fetch_all(
+        "SELECT * FROM community_dialects WHERE dialect_id = %s", (dialect_id,))[0], True
+
+
 def update_catalog_profile(profile_id: str, changes: Dict[str, Any],
                              updated_by: Optional[str] = None) -> Dict[str, Any]:
     """Edit the system catalogue's recognition profile. System-admin plane only."""

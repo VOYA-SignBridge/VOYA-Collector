@@ -221,6 +221,36 @@ export async function getCatalogVersions(limit = 50): Promise<CatalogVersion[]> 
   return res.data.items;
 }
 
+/** Một phương ngữ trong KHUÔN Community (không phải của một tổ chức). */
+export interface CatalogDialect {
+  dialect_id: string;
+  display_name: string;
+  language: string;
+  is_alphabet: boolean;
+  is_active: boolean;
+  display_order: number;
+  note: string | null;
+}
+
+/**
+ * Thêm một phương ngữ vào KHUÔN mà mọi tổ chức MỚI được nhân bản từ đó.
+ *
+ * Khác hẳn `POST /vocabulary/dialects`: cửa kia thêm vào danh mục của MỘT tổ
+ * chức. Cửa này sửa khuôn của cả nền tảng, nên nó đòi quyền quản trị hệ thống
+ * và KHÔNG tự công bố — công bố vẫn là một hành động riêng, có ghi chú.
+ *
+ * `created = false` nghĩa là đã có sẵn đúng tên ấy: luỹ đẳng, không phải lỗi.
+ */
+export async function createCatalogDialect(payload: {
+  display_name: string;
+  language?: string;
+  is_alphabet?: boolean;
+  note?: string;
+}): Promise<{ dialect: CatalogDialect; created: boolean }> {
+  const res = await axiosClient.post(`${CATALOG}/dialects`, payload);
+  return res.data;
+}
+
 /** Công bố. Bất biến theo NỘI DUNG: danh mục không đổi thì trả về bản đã có. */
 export async function publishCatalog(note: string): Promise<{ version: number; created: boolean }> {
   const res = await axiosClient.post(`${CATALOG}/publish`, { note });

@@ -233,6 +233,12 @@ CATALOG_PLANE_FUNCTIONS = {
     "clone_catalog_to_tenant", "system_catalog_snapshot", "seed_system_catalog",
     "publish_catalog_version", "list_catalog_versions", "get_catalog_version",
     "_update_catalog_row", "update_catalog_dialect", "update_catalog_profile",
+    # 25/08/2026 — cửa ghi còn thiếu của khuôn. Tới trước lượt này danh mục
+    # Community chỉ lớn lên được từ `config/dialects.seed.csv`, nên mọi phương
+    # ngữ duyệt sau lần cài đầu không bao giờ tới được tenant tạo sau đó.
+    # Nó thuộc mặt phẳng NÀY chứ không phải mặt phẳng tenant: hàng rào ở
+    # router là `_system_admin`, không phải `_require_registry_editor`.
+    "create_catalog_dialect",
 }
 
 

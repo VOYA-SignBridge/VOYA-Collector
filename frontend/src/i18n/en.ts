@@ -2390,4 +2390,20 @@ export const EN: Record<string, string> = {
   "Tên tổ chức, ví dụ: Khoa Công nghệ Thông tin": "Organization name, for example: Faculty of Information Technology",
   "Tự đăng ký được. Tối đa {n} tổ chức.": "Self-serve. Up to {n} organizations.",
   "Đang lập…": "Creating…",
+  "Đã thêm “{d}” vào khuôn. Công bố để đóng băng thay đổi này.":
+    "Added “{d}” to the template. Publish to freeze this change.",
+  "“{d}” đã có sẵn trong khuôn.":
+    "“{d}” is already in the template.",
+  "Không thêm được phương ngữ vào khuôn":
+    "Could not add the dialect to the template",
+  "Thêm phương ngữ vào khuôn":
+    "Add a dialect to the template",
+  "Khuôn là thứ mọi tổ chức MỚI được nhân bản từ đó. Tổ chức đã tồn tại không đổi gì — muốn thêm cho một tổ chức cụ thể thì làm ở danh mục của tổ chức đó.":
+    "The template is what every NEW organisation is cloned from. Existing organisations are unchanged — to add one for a specific organisation, do it in that organisation’s own catalogue.",
+  "vd: Chữ số":
+    "e.g. Digits",
+  "Đang thêm…":
+    "Adding…",
+  "Thêm vào khuôn":
+    "Add to template",
 };
