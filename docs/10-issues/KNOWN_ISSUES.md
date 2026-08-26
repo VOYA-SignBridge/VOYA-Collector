@@ -1442,3 +1442,132 @@ không đổi lại chút an toàn nào.
   `tenant_portability`, tức là hành vi cũ và là mức không cấp quyền.
 - Chưa đo: đường Drive (`storage_url` trỏ `gdrive://`) không đi qua
   `iter_tenant_feature_files`. `scope=full` chỉ đóng gói tệp cục bộ.
+
+---
+
+## Cài mới thiếu ràng buộc: câu `ALTER` chạy TRƯỚC `CREATE TABLE` (phát hiện 25/08/2026)
+
+Phát hiện khi kiểm tra hội tụ của v8 (`cài mới → v8` so với `v5 → v8`). **Không
+phải lỗi của v8** — v8 hội tụ hoàn toàn, 45/45 đối tượng khớp trên cả hai đường.
+Đây là một khoảng lệch có sẵn mà phép so sánh ấy làm lộ ra.
+
+### Cơ chế
+
+`_run_ddl` ghi log rồi **đi tiếp** khi một câu hỏng (đúng và cần thiết cho
+`IF NOT EXISTS` chạy lại). Nhưng vài câu `ALTER TABLE <t> ...` trong
+`MIGRATION_STATEMENTS` đứng **trước** câu `CREATE TABLE <t>` của chính bảng ấy.
+Trên một cơ sở dữ liệu đã có bảng, chúng chạy bình thường. Trên một cơ sở dữ liệu
+TRẮNG, chúng hỏng với `relation ... does not exist`, bị nuốt, và **không bao giờ
+chạy lại** — vì lượt sau `IF NOT EXISTS` thấy bảng đã có và đi qua.
+
+Đo được: 18 câu bị nuốt trên một lượt cài mới, thuộc ba bảng.
+
+### Hậu quả thật — chỉ MỘT bảng
+
+| Bảng | Câu bị nuốt | Hậu quả |
+|---|---|---|
+| `refresh_tokens` | 4 | **Không** — `CREATE TABLE` đã khai đủ cả ba cột |
+| `support_messages` | 7 | **Không** — `CREATE TABLE` đã khai đủ |
+| `legal_documents` | 7 | **CÓ** — xem dưới |
+
+Trên một bản cài mới, `legal_documents` thiếu:
+
+* `ck_legal_documents_file_pair` — ràng buộc "bản `file` phải có tệp"
+* `idx_legal_documents_kind_lang` — chỉ mục của MỌI lượt mở trang văn bản
+* và `ck_legal_documents_body_format` giữ nguyên bản HẸP: `('markdown','text')`
+
+Nghĩa là **trên một bản triển khai mới, không công bố được văn bản pháp lý dạng
+tệp** (PDF/DOCX): `CHECK` từ chối `body_format = 'file'`. Bốn cột `file_*` vẫn
+có (chúng nằm trong `CREATE TABLE`), nên lỗi chỉ hiện ra lúc ghi.
+
+Máy đang chạy (`signdb`) **không** bị: nó đi lên từ một cơ sở dữ liệu đã có bảng,
+nên cả bảy câu đều chạy.
+
+### Cách sửa
+
+Chuyển bảy câu `legal_documents` xuống **sau** `CREATE TABLE legal_documents`
+trong `MIGRATION_STATEMENTS`. Thuần thứ tự, không đổi nội dung câu nào, nên
+không cần phiên bản lược đồ mới. Kiểm bằng cách dựng một cơ sở dữ liệu trắng,
+migrate, rồi so `pg_constraint` với máy đang chạy.
+
+Đáng làm cùng lúc: một phép kiểm chặn *cả lớp* lỗi này — với mỗi bảng, khẳng
+định không câu `ALTER TABLE t` nào đứng trước `CREATE TABLE t` trong
+`MIGRATION_STATEMENTS`. Chuyển thứ tự thì rẻ; đi tìm lần thứ tư thì không.
+
+**Chưa sửa**: nằm ngoài phạm vi Billing v8 đã duyệt ("không đưa cleanup khác vào
+migration này").
+
+---
+
+## Hai khoá ngoại đối lập trên `project_allocations.tenant_id` (26/08/2026)
+
+Phát hiện khi dựng bảng quan hệ PDM cho nhóm A. Cùng một cột mang **hai** khoá
+ngoại tới cùng một bảng cha, với hành vi xoá **mâu thuẫn**:
+
+| Ràng buộc | ON DELETE |
+|---|---|
+| `fk_project_allocations_tenant` | **RESTRICT** |
+| `project_allocations_tenant_id_fkey` | **CASCADE** |
+
+PostgreSQL cưỡng chế **cả hai**, nên khi xoá một tenant thì `RESTRICT` chặn
+trước và `CASCADE` **không bao giờ chạy được**. Hành vi thực tế là hạn chế; câu
+`CASCADE` là một ràng buộc chết.
+
+### Nguyên nhân: tồn dư của lược đồ cũ, KHÔNG phải lỗi mã hiện tại
+
+`CREATE TABLE project_allocations` trong `app/storage/authz_schema.py` **cố ý
+không** viết `REFERENCES tenants (...)`, và có hẳn một khối chú thích giải thích
+vì sao. Nên:
+
+| | có FK `CASCADE`? |
+|---|---|
+| bản **cài mới** | **không** — mã hiện tại chỉ tạo `fk_project_allocations_tenant` |
+| bản **nâng cấp** (gồm sản xuất) | **có** — giữ lại từ phiên bản mã cũ |
+
+Hai bản cài do đó khác nhau ở đúng ràng buộc này. Hành vi thực tế trên sản xuất
+vẫn là `RESTRICT`, vì cả hai ràng buộc cùng tồn tại và cái chặt hơn thắng.
+
+Điều nguy hiểm không phải hành vi — hành vi đang an toàn, và an toàn theo đúng
+hướng ta muốn — mà là **người đọc lược đồ sản xuất sẽ thấy `CASCADE`** và tin
+rằng xoá tenant tự dọn phần cấp phát. Nó không.
+
+Cách xử lý sau này: một migration có phiên bản để gỡ ràng buộc dư
+`project_allocations_tenant_id_fkey`, giữ `fk_project_allocations_tenant`. Là
+câu một chiều nên phải đi kèm một phiên bản lược đồ.
+
+**Chưa sửa**, và không sửa trong luồng ERD/PDM. Trên PDM hai ràng buộc mang
+**một** Relationship Name và **hai** Code (`..._RESTRICT`, `..._CASCADE`) —
+không bịa hai ngữ nghĩa nghiệp vụ chỉ để hợp thức hoá hai ràng buộc vật lý.
+
+---
+
+## OPEN — cấp phát project chia một ngân sách v8 đã thôi cưỡng chế
+
+**Cần quyết định về sản phẩm.** Đây KHÔNG phải lỗi lược đồ và cũng không phải
+lỗi Data Dictionary: từ điển mô tả đúng thứ đang có. Vấn đề là sản phẩm để
+người quản trị chia một "ngân sách" mà hệ thống không còn kiểm.
+
+`workspace_admin.ALLOCATABLE_METRICS` cho phép chia ba chỉ tiêu cho từng
+project, và chặn khi tổng phần cấp vượt trần của gói:
+
+| metric | cột gói | còn cưỡng chế ở cấp tổ chức sau v8? |
+|---|---|:--:|
+| `samples` | `max_samples` | **KHÔNG** |
+| `storage_mb` | `max_storage_mb` | có |
+| `training_jobs_per_month` | `max_training_jobs_per_month` | **KHÔNG** |
+
+v8 (25/08/2026) chủ động gỡ `samples` và `training_jobs_per_month` khỏi
+`USAGE_METRICS`: hai hạn mức thương mại chồng lên cùng một tài nguyên, và ràng
+buộc dữ liệu duy nhất từ v8 là DUNG LƯỢNG. Lượt gỡ ấy không rà tới màn hình cấp
+phát, nên đến giờ nó vẫn chia hai chỉ tiêu không ai cưỡng chế.
+
+Hệ quả cho người dùng: một quản trị viên cân đối cẩn thận `samples` giữa các
+project, tin rằng con số ấy có hiệu lực, trong khi không cổng nào đọc nó.
+
+**Hướng nghiêng** (chưa chốt): bỏ `samples` và `training_jobs_per_month` khỏi
+`ALLOCATABLE_METRICS`, **không** khôi phục hai quota đã chủ động loại ở v8.
+
+Một điểm nữa cần thể hiện trên giao diện dù quyết định thế nào:
+`project_allocations.allocated = NULL` nghĩa là **KHÔNG GIỚI HẠN**, không phải
+"chưa điền". Đọc ngược chỗ này sẽ khiến người vận hành tưởng mình chưa cấp phát
+gì trong khi thực tế là đã cấp không giới hạn.
