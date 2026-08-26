@@ -45,6 +45,21 @@ export interface QuotaLine {
   unlimited: boolean;
   /** null khi không có trần — giao diện dùng nó để quyết định có vẽ thanh không. */
   percent: number | null;
+  /**
+   * Đơn vị của `used`/`limit`. Vắng mặt nghĩa là đếm được (số khoá API, số
+   * webhook). `"bytes"` ở dòng dung lượng, và nó KHÔNG được hiển thị bằng
+   * `toLocaleString` như một phép đếm.
+   */
+  unit?: "bytes";
+  /**
+   * Có cổng nào THẬT SỰ đọc trần này không.
+   *
+   * Backend tự khai thay vì để chỗ này suy từ việc `limit` có số hay không.
+   * Bảng `plans` mang bốn cột chưa cổng nào cưỡng chế; trước v8 chúng ra API y
+   * hệt các trần đang chạy, nên người mua không phân biệt được một cam kết với
+   * một chỗ giữ sẵn.
+   */
+  enforced?: boolean;
 }
 
 export interface BillingSummary {

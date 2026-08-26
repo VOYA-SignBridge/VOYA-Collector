@@ -1162,7 +1162,9 @@ async def start_training(
     Lập lịch chia lượt thật cần bộ chạy tự chọn job thay vì nhận từ hàng đợi
     Celery — thay đổi lớn hơn nhiều và chưa cần ở quy mô này.
     """
-    guard_quota(current_user, "training_jobs_this_month")
+    # `training_jobs_this_month` đã gỡ ở v8 — chặn theo SỐ LẦN trong khi thứ
+    # tốn kém là compute. Hai câu dưới KHÔNG phải hạn mức gói mà là kiểm soát
+    # an toàn cho bộ chạy GPU: job vượt mức vào hàng đợi, không bị từ chối.
     guard_quota(current_user, "training_jobs_running")
     guard_quota(current_user, "training_jobs_queued")
 

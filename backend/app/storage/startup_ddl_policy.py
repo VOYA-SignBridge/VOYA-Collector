@@ -285,6 +285,17 @@ _MUTATING_VERBS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # DEFAULT 1 lặng lẽ dựng con trỏ trỏ vào phiên bản chưa tồn tại.
     ("DROP NOT NULL", re.compile(r"\bDROP\s+NOT\s+NULL\b", re.IGNORECASE)),
     ("DROP DEFAULT", re.compile(r"\bDROP\s+DEFAULT\b", re.IGNORECASE)),
+    # `SET DEFAULT`, bổ sung 25/08/2026 — nốt nửa còn lại của cùng một luật.
+    #
+    # Chặn `DROP DEFAULT` mà thả `SET DEFAULT` là bất đối xứng vô nghĩa: cả hai
+    # đổi vĩnh viễn ngữ nghĩa của MỌI câu INSERT không nêu cột ấy, và cả hai đều
+    # không bao giờ ngã nên chạy im lặng ở mọi lần khởi động.
+    #
+    # Đo được ngay khi thêm luật này: `tenants.plan_code` có HAI câu `SET
+    # DEFAULT` trái ngược cùng chạy mỗi lượt — `'trial'` rồi `'free'` — và
+    # `trial` thì không còn là gói nào cả. Trạng thái cuối đúng chỉ vì thứ tự
+    # trong danh sách, không vì ai quyết định thế.
+    ("SET DEFAULT", re.compile(r"\bSET\s+DEFAULT\b", re.IGNORECASE)),
     ("RENAME", re.compile(r"\bRENAME\b", re.IGNORECASE)),
     ("ALTER TYPE", re.compile(r"\bALTER\s+TYPE\b", re.IGNORECASE)),
     ("GRANT", re.compile(r"\bGRANT\b", re.IGNORECASE)),

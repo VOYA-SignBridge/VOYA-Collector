@@ -85,8 +85,16 @@ logger = logging.getLogger(__name__)
 #: Cùng lý do, lần thứ hai trong một ngày. Khoá ngoại ghép thêm ngày 23/08 làm
 #: lộ ra hai giá trị mốc bịa trong `vocabulary_registry_meta.version` (0 lúc
 #: clone, DEFAULT 1 lúc gieo), và hậu quả là **tạo tenant mới hỏng**. v7 đổi
-#: mốc ấy sang NULL. Billing lùi tiếp sang **v8**.
-APP_SCHEMA_VERSION = 7
+#: mốc ấy sang NULL.
+#:
+#: v8 — Billing, và nó KHÔNG đổi hình dạng gì (25/08/2026)
+#: -------------------------------------------------------
+#: Mô hình bốn gói đã chạy trên sản xuất từ 13/08 nhưng vào bằng cửa sau: các
+#: câu nằm trong `MIGRATION_STATEMENTS` mà không thuộc payload nào, nên chạy
+#: lại mỗi lượt migrate và không con số nào ghim được chúng. v8 đặt tên và đóng
+#: dấu cho thứ đã tồn tại — no-op trên sản xuất, chạy thật trên bản cài mới, và
+#: hai đường phải hội tụ.
+APP_SCHEMA_VERSION = 8
 
 #: Lược đồ CŨ NHẤT mà ảnh này còn chạy đúng trên đó.
 #:

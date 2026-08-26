@@ -28,12 +28,24 @@ Hệ quả thực tế cho kế hoạch 15 bước:
 Vì vậy bảng dưới đây gộp các bước của kế hoạch thành **4 phiên bản lược đồ**, chứ
 không phải 15.
 
-| Phiên bản | Gồm bước | Nội dung một chiều |
-|---|---|---|
-| **v6** | 1 | Đổi mã gói, `billing_exempt`, cột hạn mức mới, giá nullable |
-| **v7** | 2 + 3 + 4 | Bỏ `max_seats/max_samples/max_classes`, enforce storage, quota workspace/project |
-| **v8** | 5 + 6 + 7 | Training credits + ledger, bỏ `training_seconds`/`max_training_jobs_per_month`, `price_cents` → `price_minor_units`, bỏ `quarterly` |
-| **v9** | 8 + 9 | `billing_customers`, `subscriptions`, `invoices`, `invoice_items`, `payments`, `billing_webhook_events` |
+> **Đánh số lại, 25/08/2026.** Bảng bên dưới viết ngày 13/08 và gán Billing vào
+> v6–v9. Kế hoạch ấy KHÔNG còn đúng: v6 và v7 đã bị dùng cho việc khác và đóng
+> dấu thật (v6 gỡ bất biến người ký của Collection Session, v7 đổi con trỏ
+> registry sang sentinel NULL). Số đã tiêu thì không lấy lại được — chính mục 0
+> này nói vậy. Billing bắt đầu ở **v8**.
+
+| Phiên bản | Gồm bước | Nội dung một chiều | Trạng thái |
+|---|---|---|---|
+| ~~v6~~ → **v8** | 1 | Đổi mã gói, `billing_exempt`, cột hạn mức mới, giá nullable | **ĐÃ LÀM** 25/08/2026 |
+| ~~v7~~ → **v8** | 2 + 3 | Bỏ cưỡng chế `max_seats/max_samples/max_classes`, enforce storage | **ĐÃ LÀM** 25/08/2026 |
+| chưa xếp | 4 | Quota workspace/project | hoãn |
+| chưa xếp | 5 + 6 + 7 | Training credits + ledger, `price_cents` → `price_minor_units`, bỏ `quarterly` | hoãn |
+| chưa xếp | 8 + 9 | `billing_customers`, `subscriptions`, `invoices`, `invoice_items`, `payments`, `billing_webhook_events` | hoãn |
+
+Bước 1–3 gộp vào **một** phiên bản (v8) chứ không hai, vì phần đổi mã gói **đã
+chạy trên sản xuất từ 13/08** qua một cửa sau: các câu nằm trong
+`MIGRATION_STATEMENTS` mà không thuộc payload phiên bản nào. v8 không đổi hình
+dạng cơ sở dữ liệu — nó đặt tên và đóng dấu cho thứ đã tồn tại.
 
 Bước 10–15 là mã ứng dụng, không cần phiên bản lược đồ mới.
 
@@ -43,24 +55,35 @@ Bước 10–15 là mã ứng dụng, không cần phiên bản lược đồ m�
 
 `plan_code` là mã ổn định, `display_name` chỉ để hiển thị.
 
-| | `free` | `plus` | `pro` | `enterprise` |
-|---|---|---|---|---|
-| Thành viên | ∞ | ∞ | ∞ | ∞ |
-| Workspace | 1 | 5 | 20 | NULL (custom) |
-| Project | 5 | 25 | 100 | NULL |
-| Storage | 5 GB | 50 GB | 250 GB | NULL |
-| Sample / Class | ∞ | ∞ | ∞ | ∞ |
-| Training credits / kỳ | 60 | 250 | 1 000 | NULL |
-| Training đồng thời | 1 | 2 | 4 | NULL |
-| Audit retention | 7 ngày | 30 ngày | 180 ngày | NULL (∞) |
-| API key | 0 | 3 | 25 | NULL |
-| Webhook | 0 | 2 | 10 | NULL |
-| Visibility / Share / Fork / Provenance | ✓ | ✓ | ✓ | ✓ |
-| Giá | 0 | chưa công bố | chưa công bố | theo hợp đồng |
+Cột **Cưỡng chế** nói có cổng nào THẬT SỰ đọc trần ấy hay không. Nó không phải
+chú thích: một dòng chưa cưỡng chế nằm trong bảng giá mà không được đánh dấu là
+một lời hứa bán ra mà hệ thống không giữ. Nguồn sự thật là
+`app/plans.py :: PLAN_LIMIT_ENFORCEMENT`, và API trả nó ra dưới khoá
+`usage._plan.enforcement` để giao diện khỏi phải suy từ việc một cột có số.
+
+| | `free` | `plus` | `pro` | `enterprise` | Cưỡng chế |
+|---|---|---|---|---|---|
+| Thành viên | ∞ | ∞ | ∞ | ∞ | — (∞) |
+| Storage | 5 GB | 50 GB | 250 GB | NULL | **CÓ** — `app/storage_quota.py` |
+| API key | 0 | 3 | 25 | NULL | **CÓ** — `plans.check_quota` |
+| Webhook | 0 | 2 | 10 | NULL | **CÓ** — `plans.check_quota` |
+| Training đồng thời | 1 | 2 | 4 | NULL | **CÓ** (an toàn vận hành, không phải hạn mức thương mại) |
+| Sample / Class | ∞ | ∞ | ∞ | ∞ | — (∞ từ v8) |
+| Workspace | 1 | 5 | 20 | NULL (custom) | chưa |
+| Project | 5 | 25 | 100 | NULL | chưa |
+| Training credits / kỳ | 60 | 250 | 1 000 | NULL | chưa |
+| Audit retention | 7 ngày | 30 ngày | 180 ngày | NULL (∞) | chưa |
+| Giá | 0 | chưa công bố | chưa công bố | theo hợp đồng | — |
 
 `NULL` = **không giới hạn**, quy ước đã có từ v4 và không đổi. Mọi con số là
 **seed**, sửa được lúc chạy qua `PATCH /billing/plans/{code}` — không hằng số nào
 trong mã được phép nhắc lại chúng.
+
+**Visibility / Share / Fork / Provenance đã BỎ khỏi bảng này** (25/08/2026).
+Chúng từng đứng đây với dấu ✓ cho cả bốn gói, tức là được trình bày như một tính
+năng đã có. Không có tính năng nào như vậy trong mã. Một dòng ✓ cho thứ chưa tồn
+tại là mục nguy hiểm nhất trong cả bảng, vì nó trông giống một cam kết đã giao.
+Mô tả thiết kế vẫn còn ở mục 6 và ở đó nó là **kế hoạch**, không phải bảng giá.
 
 ### `free` là gói vĩnh viễn
 
@@ -249,7 +272,10 @@ tự cộng add-on là cách chắc chắn để hai màn hình cho hai con số
 
 ---
 
-## 6. Visibility / Share / Fork là chức năng lõi
+## 6. Visibility / Share / Fork là chức năng lõi — CHƯA TRIỂN KHAI
+
+> Mục này là THIẾT KẾ, không phải mô tả hệ thống đang chạy. Tính đến 25/08/2026
+> chưa có mã nào hiện thực nó. Đừng trích mục này vào tài liệu bán hàng.
 
 Không dùng làm paywall. Có ở cả Free.
 

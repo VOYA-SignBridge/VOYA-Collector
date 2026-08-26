@@ -1729,6 +1729,21 @@ def sync_purge_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
         sample_file = _resolve_sample_file_path(source)
         if sample_file and not sample_file.is_absolute():
             sample_file = Path(settings.dataset_root) / sample_file
+        # Đo TRƯỚC khi gỡ. Sau khi gỡ thì không còn gì để `stat()`, và đoán lại
+        # kích thước từ siêu dữ liệu là bịa. Ba tệp, vì một mẫu là ba tệp: đặc
+        # trưng, kho raw, sidecar. Xem
+        # docs/07-business/BILLABLE_STORAGE_INVENTORY.md.
+        da_giai_phong = 0
+        if sample_file:
+            from app.dataset_samples import raw_archive_path
+
+            for _t in (sample_file, sample_file.with_suffix(".json"),
+                       raw_archive_path(sample_file)):
+                try:
+                    da_giai_phong += _t.stat().st_size
+                except OSError:
+                    continue
+
         try:
             if sample_file and sample_file.exists():
                 sample_file.unlink()
@@ -1738,6 +1753,19 @@ def sync_purge_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
             _purge_raw_archive(sample_file, sample_uid)
         except Exception as exc:
             logger.warning("[CATALOG] purge sample file remove failed for %s: %s", sample_uid, exc)
+            da_giai_phong = 0   # không chắc đã gỡ được gì thì đừng trừ
+
+        # Trừ ở lượt dọn Thùng rác, KHÔNG ở lượt xoá mềm: xoá mềm giữ tệp lại,
+        # nên trừ sớm là tặng không dung lượng cho dữ liệu vẫn đang chiếm đĩa.
+        if da_giai_phong:
+            try:
+                from app import storage_quota
+
+                storage_quota.uncharge(scope, da_giai_phong)
+            except Exception as exc:
+                # Lượt đối chiếu hằng ngày sẽ sửa; đây chỉ là để người vừa dọn
+                # thấy dung lượng giảm ngay thay vì phải chờ tới hôm sau.
+                logger.warning("[CATALOG] khong tru duoc bo dem dung luong (%s)", exc)
 
         if target is not None:
             _write_samples_csv([r for r in rows if r.get("sample_uid") != sample_uid])

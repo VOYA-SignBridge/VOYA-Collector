@@ -111,3 +111,64 @@ def _announce_quota_exceeded(tenant_id: str, exc: QuotaExceeded) -> None:
         })
     except Exception:
         pass
+
+
+def storage_full_http(exc) -> HTTPException:
+    """`StorageQuotaExceeded` -> 402 kèm mã máy đọc được.
+
+    Tách ra vì hạn mức dung lượng bị vượt ở HAI thời điểm — lúc nhận việc và lúc
+    quyết toán — và hai chỗ ấy phải trả về cùng một hình dạng. Giao diện không
+    được phải phân biệt "bị chặn trước khi ghi" với "bị chặn sau khi đo": với
+    người dùng thì cả hai là "hết dung lượng".
+
+    Vì sao mã lỗi là dữ liệu chứ không phải câu chữ
+    ------------------------------------------------
+    Trước v8 mọi trường hợp trả 402 kèm một câu tiếng Việt, nên giao diện không
+    phân biệt được "hết dung lượng" với "hết hạn mức project" và không hiện được
+    đúng nút. `X-Quota-Code` là thứ máy đọc; câu trong `detail` là cho người.
+    """
+    return HTTPException(
+        status_code=exc.status_code,
+        detail=str(exc),
+        headers={
+            "X-Quota-Code": exc.code,
+            "X-Quota-Metric": "storage_bytes",
+            "X-Quota-Used": str(exc.used),
+            "X-Quota-Limit": str(exc.limit),
+        },
+    )
+
+
+def guard_storage(
+    current_user: Optional[Dict[str, Any]],
+    request: Optional[Any] = None,
+    *,
+    nbytes: Optional[int] = None,
+):
+    """Giữ chỗ dung lượng cho một lượt ghi, hoặc trả 402 kèm mã máy đọc được.
+
+    Trả về `storage_quota.Reservation` — người gọi PHẢI tiêu nó, bằng `settle()`
+    khi đã ghi xong và đo được, hoặc `release()` khi lượt ghi hỏng. Một khoản
+    không được tiêu sẽ giam chỗ của tổ chức cho tới khi hết hạn.
+
+    Kích thước lấy theo thứ tự: `nbytes` nếu người gọi tính được một cận trên
+    thật, rồi tới `Content-Length` của yêu cầu, cuối cùng là 0. Giữ chỗ 0 byte
+    vẫn phải qua phép nhận việc — một tổ chức đã chạm trần bị chặn ngay ở đây
+    chứ không phải sau khi đã ghi xong tệp.
+    """
+    from app import storage_quota
+
+    tenant = tenant_of(current_user)
+    if nbytes is not None:
+        n = max(0, int(nbytes))
+    elif request is not None:
+        try:
+            n = max(0, int(request.headers.get("content-length") or 0))
+        except (TypeError, ValueError):
+            n = 0
+    else:
+        n = 0
+    try:
+        return storage_quota.reserve(tenant, n)
+    except storage_quota.StorageQuotaExceeded as exc:
+        raise storage_full_http(exc) from exc

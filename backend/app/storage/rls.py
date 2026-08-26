@@ -175,6 +175,12 @@ RLS_TABLES: tuple[str, ...] = (
     # tính người ký và thời điểm thu — rò nó là rò lịch trình thu thập của một
     # tổ chức khác.
     "collection_sessions",
+    # `tenant_storage` (v8): bộ đếm dung lượng là số liệu kinh doanh của một
+    # tổ chức — đọc được nó của tổ chức khác là biết họ có bao nhiêu dữ liệu.
+    "tenant_storage",
+    # `storage_reservations` (v8): rò cùng thứ, ở dạng chi tiết hơn — một dãy
+    # khoản giữ chỗ có mốc thời gian là lịch trình tải lên của một tổ chức.
+    "storage_reservations",
     # C3 (16/08/2026). Bảng cha `training_jobs` có RLS từ lâu, bảng con thì
     # không — nên quyền sở hữu của đầu ra huấn luyện đứt đúng ở đó. Cổng duy
     # nhất bảo vệ chỉ số là hàng job cha, và mọi đường đọc bỏ qua hàng cha đọc

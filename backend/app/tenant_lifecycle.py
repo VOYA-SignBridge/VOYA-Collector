@@ -48,6 +48,13 @@ PURGE_ORDER: tuple[str, ...] = (
     # v4 — không bảng nào bị bảng khác trỏ tới, nên đi trước cho gọn
     "webhook_deliveries", "webhook_endpoints", "api_keys",
     "tenant_exports", "tenant_usage_daily", "tenant_subscriptions",
+    # `tenant_storage` (v8): không bảng nào trỏ tới nó nên đứng đâu cũng được;
+    # đặt cạnh các bảng vận hành khác của tenant cho dễ đọc.
+    "tenant_storage",
+    # `storage_reservations` (v8): cũng không bị trỏ tới. Xoá tenant giữa lúc
+    # một lượt tải lên đang bay sẽ bỏ lại khoản giữ chỗ; xoá ở đây để lượt quét
+    # khoản treo không phải đi tìm một tenant đã không còn.
+    "storage_reservations",
     # v6 — `support_messages` PHẢI đi trước `support_tickets`: nó có khoá ngoại
     # trỏ tới phiếu, nên xoá phiếu trước sẽ bị từ chối. `notifications` không bị
     # bảng nào trỏ tới nên đứng đâu cũng được; đặt cạnh nhau cho dễ đọc.

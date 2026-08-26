@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from app.storage.schema_version import (
+    APP_SCHEMA_VERSION,
     MigrationChecksumMismatch,
     MigrationChecksumMissing,
     canonical_sql,
@@ -99,7 +100,15 @@ class TestChecksumSensitivity:
 
 
 class TestChecksumGateDecision:
-    """Ba trạng thái, ba kết luận khác nhau."""
+    """Ba trạng thái, ba kết luận khác nhau.
+
+    Mọi ca ở đây giả lập một cơ sở dữ liệu đóng dấu ĐÚNG phiên bản của ảnh, và
+    con số ấy phải lấy từ `APP_SCHEMA_VERSION` chứ không viết cứng. Bản trước
+    ghi cứng `5`; khi ảnh lên v8, `checksum_problem` bắt đầu trả `None` cho một
+    cơ sở dữ liệu v5 — ĐÚNG, vì so checksum giữa hai phiên bản là vô nghĩa và
+    lệch phiên bản đã có cổng riêng — nhưng ba ca này đỏ vì con số cứng, không
+    vì hành vi sai. Bài test hỏng theo lịch chứ không theo lỗi.
+    """
 
     def _patched(self, monkeypatch, version, recorded, has_column=True):
         import app.storage.schema_version as sv
@@ -109,15 +118,16 @@ class TestChecksumGateDecision:
         return object()   # cursor gia; khong ai cham toi no
 
     def test_a_matching_checksum_is_accepted(self, monkeypatch):
-        cur = self._patched(monkeypatch, 5, migration_checksum())
+        cur = self._patched(monkeypatch, APP_SCHEMA_VERSION, migration_checksum())
         assert checksum_problem(cur) is None
 
     def test_a_changed_checksum_is_refused(self, monkeypatch):
-        cur = self._patched(monkeypatch, 5, "0" * 64)
+        cur = self._patched(monkeypatch, APP_SCHEMA_VERSION, "0" * 64)
         problem = checksum_problem(cur)
         assert isinstance(problem, MigrationChecksumMismatch)
-        # Thông điệp phải dạy đúng cách sửa: bump phiên bản, không sửa v5.
-        assert "v6" in str(problem)
+        # Thông điệp phải dạy đúng cách sửa: bump phiên bản, không sửa
+        # phiên bản đã áp.
+        assert f"v{APP_SCHEMA_VERSION + 1}" in str(problem)
 
     def test_a_missing_checksum_is_refused_not_filled(self, monkeypatch):
         """Trạng thái của sản xuất ngay sau lượt triển khai mang cột này lên.
@@ -126,7 +136,7 @@ class TestChecksumGateDecision:
         khiến một migration đã bị sửa tự hợp thức hoá ở lần chạy kế tiếp — mất
         đúng thứ mà cả cơ chế này sinh ra để giữ.
         """
-        cur = self._patched(monkeypatch, 5, None)
+        cur = self._patched(monkeypatch, APP_SCHEMA_VERSION, None)
         problem = checksum_problem(cur)
         assert isinstance(problem, MigrationChecksumMissing)
         assert "--adopt-checksum" in str(problem)
@@ -138,7 +148,7 @@ class TestChecksumGateDecision:
         assert checksum_problem(cur) is None
 
     def test_a_database_older_than_the_column_is_refused(self, monkeypatch):
-        cur = self._patched(monkeypatch, 5, None, has_column=False)
+        cur = self._patched(monkeypatch, APP_SCHEMA_VERSION, None, has_column=False)
         assert isinstance(checksum_problem(cur), MigrationChecksumMissing)
 
 

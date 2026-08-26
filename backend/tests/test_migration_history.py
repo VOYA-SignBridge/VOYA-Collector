@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from app.storage.migration_history import (
+    MIGRATION_HISTORY,
     V5_CHECKSUM,
     UnknownMigrationVersion,
     labelled_payload,
@@ -50,12 +51,21 @@ class TestVersionFivePayloadIsFrozen:
         assert all(label and not label[0].isdigit() for label in labels)
 
     def test_an_unpackaged_version_is_refused_not_guessed(self):
-        """v6 chưa đóng gói. Đoán payload của nó nghĩa là đóng dấu checksum
-        của một bản nửa vời rồi khoá vĩnh viễn."""
-        with pytest.raises(UnknownMigrationVersion) as caught:
-            migration_payload(6)
+        """Phiên bản chưa đóng gói phải bị TỪ CHỐI, không được đoán.
 
-        assert "v6" in str(caught.value)
+        Đoán payload nghĩa là đóng dấu checksum của một bản nửa vời rồi khoá
+        vĩnh viễn — không sửa lại được, chỉ có thể tạo phiên bản mới.
+
+        Bài này CỐ Ý hỏi phiên bản kế tiếp phiên bản cao nhất đã đóng gói, chứ
+        không hỏi một số cố định. Bản trước ghim `6`, và khi v6/v7/v8 lần lượt
+        được đóng gói thì nó chuyển từ "canh một bất biến" sang "báo đỏ vì công
+        việc đã hoàn thành" — một bài test hỏng theo lịch, không theo lỗi.
+        """
+        chua_dong_goi = max(MIGRATION_HISTORY) + 1
+        with pytest.raises(UnknownMigrationVersion) as caught:
+            migration_payload(chua_dong_goi)
+
+        assert f"v{chua_dong_goi}" in str(caught.value)
 
 
 class TestClassificationDoesNotRewriteHistory:

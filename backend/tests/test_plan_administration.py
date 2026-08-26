@@ -9,6 +9,8 @@ liệu sản xuất; chú thích trong migration hoá ra hứa một API không 
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from app import plans
@@ -126,12 +128,109 @@ class TestQuotaFollowsTheEditedPlan:
             tenant_id, clone_catalog=False, plan_code=scratch_plan
         )
         try:
-            plans.update_plan(scratch_plan, {"max_classes": 0})
+            # `api_keys` chứ không `classes`: từ v8 số lớp KHÔNG còn là hạn
+            # mức thương mại. Bài này kiểm việc SỬA BẢNG GIÁ đổi hành vi chặn
+            # ngay lập tức, nên nó cần một chỉ số còn sống làm phương tiện.
+            plans.update_plan(scratch_plan, {"max_api_keys": 0})
             with pytest.raises(plans.QuotaExceeded):
-                plans.check_quota(tenant_id, "classes", adding=1)
+                plans.check_quota(tenant_id, "api_keys", adding=1)
 
-            plans.update_plan(scratch_plan, {"max_classes": None})
-            plans.check_quota(tenant_id, "classes", adding=1)  # không ném
+            plans.update_plan(scratch_plan, {"max_api_keys": None})
+            plans.check_quota(tenant_id, "api_keys", adding=1)  # không ném
         finally:
             purge_tenant(tenant_id)
             plans._clear_caches()
+
+
+class TestDoiGoiLaMotGiaoDich:
+    """`change_plan` phải hoặc ghi cả hai vế, hoặc không ghi vế nào.
+
+    Vì sao phải có bài này (v8, 25/08/2026)
+    ---------------------------------------
+    Bản trước gọi hai `_execute` liên tiếp, và `_cursor()` dùng `with conn:` nên
+    MỖI lượt gọi là một giao dịch riêng. Đường đi hạnh phúc vẫn xanh: cả hai câu
+    chạy, cả hai commit, mọi phép kiểm đều đúng.
+
+    Cái sai chỉ hiện ra khi câu thứ hai hỏng — và khi đó nó để lại:
+
+        tenants.plan_code       = gói MỚI, đã có hiệu lực cưỡng chế
+        tenant_subscriptions    = KHÔNG có dòng nào cho gói mới
+
+    Tức là một tổ chức bị tính theo một gói mà lịch sử không hề ghi nhận. Không
+    phép kiểm nào bắt được, vì cái sai là một dòng THIẾU chứ không phải một dòng
+    sai. Nên bài test phải BƠM lỗi vào giữa hai vế; test đường hạnh phúc không
+    chứng minh được tính nguyên tử.
+    """
+
+    def test_ve_hai_hong_thi_ve_mot_cung_khong_con(self, monkeypatch):
+        from app import tenant_admin
+        from app.storage.metadata_db import _fetch_all
+        from app.tenant_context import system_scope
+        from conftest import purge_tenant
+
+        tid = f"atm{uuid.uuid4().hex[:9]}"
+        tenant_admin.create_tenant(tid, clone_catalog=False, plan_code="free")
+        try:
+            def _no_giua_chung(*a, **kw):
+                raise RuntimeError("chet may giua hai ve")
+
+            monkeypatch.setattr(tenant_admin, "_open_subscription", _no_giua_chung)
+            with pytest.raises(RuntimeError):
+                tenant_admin.change_plan(tid, "pro")
+
+            with system_scope("test: doc lai goi sau khi bom loi"):
+                rows = _fetch_all(
+                    "SELECT plan_code FROM tenants WHERE tenant_id = %s", (tid,))
+            assert rows[0]["plan_code"] == "free", (
+                "vế một phải bị cuộn lại cùng vế hai — nếu không, tổ chức bị tính "
+                "theo một gói mà lịch sử không ghi nhận"
+            )
+        finally:
+            purge_tenant(tid)
+
+    def test_dong_truoc_mo_sau_cung_la_mot_giao_dich(self, monkeypatch):
+        """Hai câu BÊN TRONG `_open_subscription` cũng phải cùng sống cùng chết.
+
+        Đóng được dòng cũ rồi mở dòng mới hỏng sẽ để lại một tenant KHÔNG có
+        đăng ký nào đang mở — đúng trạng thái mà chỉ mục duy nhất một phần
+        `uq_tenant_subscriptions_open` sinh ra để canh, và nó là trạng thái
+        THIẾU nên chỉ mục ấy im lặng.
+        """
+        from app import tenant_admin
+        from app.storage.metadata_db import _fetch_all
+        from app.tenant_context import system_scope
+        from conftest import purge_tenant
+
+        tid = f"atm{uuid.uuid4().hex[:9]}"
+        tenant_admin.create_tenant(tid, clone_catalog=False, plan_code="free")
+        try:
+            with system_scope("test: dem dong dang mo truoc khi bom loi"):
+                truoc = _fetch_all(
+                    "SELECT subscription_id FROM tenant_subscriptions "
+                    " WHERE tenant_id = %s AND ended_at IS NULL", (tid,))
+
+            that = tenant_admin._open_subscription
+
+            def _hong_o_cau_hai(tenant_id, plan_code, **kw):
+                cur = kw.get("cur")
+                cur.execute(
+                    "UPDATE tenant_subscriptions SET ended_at = NOW(), "
+                    "status = 'superseded' "
+                    " WHERE tenant_id = %s AND ended_at IS NULL", (tenant_id,))
+                raise RuntimeError("chet may sau khi dong, truoc khi mo")
+
+            monkeypatch.setattr(tenant_admin, "_open_subscription", _hong_o_cau_hai)
+            with pytest.raises(RuntimeError):
+                tenant_admin.change_plan(tid, "pro")
+            monkeypatch.setattr(tenant_admin, "_open_subscription", that)
+
+            with system_scope("test: dem lai dong dang mo"):
+                sau = _fetch_all(
+                    "SELECT subscription_id FROM tenant_subscriptions "
+                    " WHERE tenant_id = %s AND ended_at IS NULL", (tid,))
+            assert len(sau) == len(truoc), (
+                "câu đóng phải bị cuộn lại cùng câu mở — nếu không, tenant không "
+                "còn đăng ký nào đang mở và chỉ mục duy nhất không kêu"
+            )
+        finally:
+            purge_tenant(tid)

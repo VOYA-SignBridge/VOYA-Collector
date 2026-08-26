@@ -112,15 +112,20 @@ def _upsert(rows: List[tuple]) -> int:
 def tenant_storage_mb() -> Dict[str, int]:
     """Dung lượng đĩa mỗi tenant đang chiếm, tính bằng MB.
 
-    Đi bộ trên cây thư mục chứ không cộng cột `file_size` — không có cột đó, và
-    thêm nó bây giờ sẽ đúng cho dữ liệu mới còn sai cho 3.860 mẫu đã có. Đi bộ
-    thì chậm hơn nhưng chạy mỗi ngày một lần và luôn nói thật.
+    Uỷ quyền cho `storage_quota._billable_bytes` chứ không tự đi bộ. Vì sao —
+    trước v8 hàm này có định nghĩa "dung lượng" RIÊNG (chỉ cây `features/`),
+    còn bộ đếm hạn mức có định nghĩa khác (thêm kho raw và video thô). Hai con
+    số cùng tên, cùng một trang giao diện, và không bằng nhau. Người dùng thấy
+    hai câu trả lời cho một câu hỏi thì không tin câu nào.
+
+    Bảng hiện vật tính phí ở `docs/07-business/BILLABLE_STORAGE_INVENTORY.md` là
+    định nghĩa DUY NHẤT, và `_billable_bytes` là hiện thực duy nhất của nó.
 
     Lỗi đọc một thư mục không làm hỏng cả phép đo: tenant đó bị bỏ qua và được
     ghi lại, các tenant khác vẫn có số.
     """
-    from app.dataset_manager import iter_tenant_feature_files
     from app.storage.metadata_db import _fetch_all
+    from app.storage_quota import _billable_bytes
     from app.tenant_context import system_scope
 
     with system_scope("usage: list tenants for the storage sweep"):
@@ -129,27 +134,11 @@ def tenant_storage_mb() -> Dict[str, int]:
     out: Dict[str, int] = {}
     for row in rows:
         tenant = row["tenant_id"]
-        total = 0
         try:
-            # KHÔNG `tenant_features_root(tenant).rglob('*')`. Thư mục của tenant
-            # gốc là cha của thư mục mọi tenant khác, nên `rglob` tính dung lượng
-            # của cả nền tảng vào hoá đơn của một tổ chức. Đo được 17\\08\\2026:
-            # 7 MB thay vì 1 MB.
-            for path in iter_tenant_feature_files(tenant):
-                try:
-                    total += path.stat().st_size
-                except OSError:
-                    # Tệp biến mất giữa lúc liệt kê và lúc đo — bình thường
-                    # khi có tiến trình khác đang dọn. Bỏ qua một tệp,
-                    # không bỏ cả tenant.
-                    continue
-        except OSError as exc:
+            out[tenant] = _billable_bytes(tenant) // (1024 * 1024)
+        except Exception as exc:
             logger.warning("[USAGE] %s: không quét được thư mục (%s)", tenant, exc)
             continue
-        except Exception as exc:
-            logger.warning("[USAGE] %s: không giải được thư mục (%s)", tenant, type(exc).__name__)
-            continue
-        out[tenant] = total // (1024 * 1024)
     return out
 
 

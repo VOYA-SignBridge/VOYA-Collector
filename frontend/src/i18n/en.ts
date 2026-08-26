@@ -500,8 +500,8 @@ export const EN: Record<string, string> = {
   "Dataset đã được tải thành công. Hãy tiếp tục để xem chi tiết phân chia tập dữ liệu.":
     "The dataset loaded successfully. Continue to see how it is split.",
   "Di chuyển tự nhiên để có kết quả tốt nhất": "Move naturally for the best results",
-  "Dung lượng lấy theo lần đo gần nhất; các chỉ số còn lại là tổng cộng dồn.":
-    "Size is from the most recent measurement; the other figures are cumulative totals.",
+  "Hoạt động trong kỳ, không phải hạn mức. Dung lượng hiện ở phần Hạn mức phía trên.":
+    "Activity for the period, not a quota. Storage is shown under Limits above.",
   "Dán mã lời mời bạn nhận được, hoặc mở lại liên kết trong thư mời. Nếu liên kết đã hết hạn, hãy đề nghị người mời gửi lại.":
     "Paste the invitation code you received, or reopen the link from the invitation email. If the link has expired, ask the sender for a new one.",
   "Dùng giọng nói để điền nhãn mặc định": "Use your voice to fill in the default label",
@@ -784,7 +784,8 @@ export const EN: Record<string, string> = {
   "Số dòng": "Rows",
   "Số epoch đã chạy": "Epochs run",
   "Số hiệu phiên bản": "Version number",
-  "Số liệu đọc trực tiếp từ dữ liệu hiện có, không phải từ một bộ đếm riêng.": "The figures are read straight from the existing data, not from a separate counter.",
+  "Các chỉ số đếm được đọc thẳng từ dữ liệu hiện có. Dung lượng dùng một bộ đếm riêng, được đối chiếu với đĩa mỗi ngày.":
+    "The countable figures are read straight from the existing data. Storage uses a separate counter, reconciled against disk daily.",
   "Số luồng upload đồng thời:": "Concurrent upload streams:",
   "Số lượng": "Count",
   "Số lượt thu": "Captures",

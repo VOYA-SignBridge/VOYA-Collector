@@ -304,21 +304,22 @@ def is_billing_exempt(tenant_id: Optional[str]) -> bool:
 #: Một bảng duy nhất cho cả đo lẫn chặn. Tách ra hai chỗ là cách chắc chắn để
 #: một ngày nào đó biểu đồ nói 900 còn bộ chặn nói 1200 trên cùng một tenant.
 USAGE_METRICS: Dict[str, Tuple[Optional[str], str, str]] = {
-    "samples": (
-        "max_samples",
-        "SELECT count(*) AS n FROM samples WHERE tenant_id = %s AND deleted_at IS NULL",
-        "số mẫu",
-    ),
-    "classes": (
-        "max_classes",
-        "SELECT count(*) AS n FROM classes WHERE tenant_id = %s AND deleted_at IS NULL",
-        "số lớp từ vựng",
-    ),
-    "seats": (
-        "max_seats",
-        "SELECT count(*) AS n FROM tenant_members WHERE tenant_id = %s",
-        "số thành viên",
-    ),
+    # `samples`, `classes`, `seats` và `training_jobs_this_month` ĐÃ GỠ ở v8
+    # (25/08/2026). Chúng là hạn mức THƯƠNG MẠI, và mô hình bốn gói bỏ cả bốn:
+    #
+    #   * số thành viên thuộc mặt phẳng phân quyền, ở đó vì lý do bảo mật chứ
+    #     không vì lý do thương mại — một người trong 20 project vẫn là một
+    #     thành viên của tenant;
+    #   * `samples` và `classes` là HAI cách nói về cùng một tài nguyên, và
+    #     người dùng không đoán được cái nào chặn mình. Ràng buộc dữ liệu duy
+    #     nhất từ v8 là DUNG LƯỢNG;
+    #   * giới hạn số lượt huấn luyện mỗi tháng chặn theo SỐ LẦN, trong khi thứ
+    #     tốn kém là compute. Nó phạt người chạy nhiều job nhỏ và tha người
+    #     chạy ít job nặng.
+    #
+    # Ba chỉ số huấn luyện còn lại ở dưới KHÔNG phải hạn mức gói. Chúng là
+    # **kiểm soát an toàn vận hành** cho bộ chạy GPU: job thứ hai vào hàng đợi
+    # chứ không bị từ chối. Đừng đem chúng lên bảng giá.
     "api_keys": (
         "max_api_keys",
         "SELECT count(*) AS n FROM api_keys WHERE tenant_id = %s AND revoked_at IS NULL",
@@ -328,12 +329,6 @@ USAGE_METRICS: Dict[str, Tuple[Optional[str], str, str]] = {
         "max_webhook_endpoints",
         "SELECT count(*) AS n FROM webhook_endpoints WHERE tenant_id = %s AND is_active",
         "số webhook",
-    ),
-    "training_jobs_this_month": (
-        "max_training_jobs_per_month",
-        "SELECT count(*) AS n FROM training_jobs WHERE tenant_id = %s "
-        "AND created_at >= date_trunc('month', NOW())",
-        "số lượt huấn luyện trong tháng",
     ),
     "training_jobs_running": (
         "max_concurrent_training_jobs",
@@ -348,6 +343,55 @@ USAGE_METRICS: Dict[str, Tuple[Optional[str], str, str]] = {
         "số lượt huấn luyện đang chờ",
     ),
 }
+
+
+#: Cột hạn mức -> có cổng nào THẬT SỰ cưỡng chế nó không.
+#:
+#: Vì sao phải khai ra (v8, 25/08/2026)
+#: ------------------------------------
+#: Tới v8, bảng `plans` mang bốn cột chưa cổng nào đọc: `max_workspaces`,
+#: `max_projects`, `included_training_credits`, `audit_retention_days`. Chúng có
+#: giá trị thật trong cơ sở dữ liệu và đi thẳng ra API, nên giao diện — và bảng
+#: giá — trình bày chúng y hệt những trần đang chạy. Người mua không có cách nào
+#: phân biệt một cam kết với một chỗ giữ sẵn.
+#:
+#: Cách sửa KHÔNG phải là xoá cột: người vận hành phải sửa được từ bây giờ, và
+#: xoá đi thì cấu hình đã đặt sẽ mất. Cách sửa là để API tự khai điều đó, thay
+#: vì để phía gọi suy từ việc một cột có số.
+#:
+#: Ai thêm cột hạn mức mới mà quên khai ở đây sẽ bị
+#: `tests/test_plans_and_quotas.py` chặn — mặc định của một cột không khai là
+#: "chưa cưỡng chế", nên quên thì hụt về phía khiêm tốn chứ không phải phía hứa
+#: hão.
+PLAN_LIMIT_ENFORCEMENT: Dict[str, bool] = {
+    # Đang cưỡng chế thật, có cổng đọc và có test đỏ-rồi-xanh.
+    "max_storage_mb": True,             # app/storage_quota.py, mọi đường ghi
+    "max_api_keys": True,               # plans.check_quota
+    "max_webhook_endpoints": True,      # plans.check_quota
+    "max_concurrent_training_jobs": True,
+    "max_queued_training_jobs": True,
+    # CHƯA cưỡng chế. Giữ cột để cấu hình không mất, nhưng API phải nói thật.
+    "max_workspaces": False,
+    "max_projects": False,
+    "included_training_credits": False,
+    "audit_retention_days": False,
+    # Đã nghỉ hưu ở v8 (xem chú thích ở `USAGE_METRICS`). Còn cột trong bảng vì
+    # chúng mang dữ liệu lịch sử; không còn cổng nào đọc.
+    "max_seats": False,
+    "max_samples": False,
+    "max_classes": False,
+    "max_training_jobs_per_month": False,
+}
+
+
+def limit_is_enforced(limit_column: str) -> bool:
+    """Cột hạn mức này có cổng nào thật sự đọc không.
+
+    Mặc định FALSE cho cột chưa khai: hụt về phía khiêm tốn. Một hạn mức mới bị
+    hiện là "chưa cưỡng chế" cho tới khi ai đó khai, còn ngược lại thì một cột
+    quên khai sẽ được quảng cáo như một cam kết.
+    """
+    return bool(PLAN_LIMIT_ENFORCEMENT.get(limit_column, False))
 
 
 def current_usage(tenant_id: str, metric: str) -> int:
@@ -392,10 +436,44 @@ def usage_snapshot(tenant_id: str) -> Dict[str, Dict[str, Any]]:
             # Phần trăm chỉ có nghĩa khi có trần; None ở đây để giao diện vẽ
             # thanh tiến trình hoặc không, thay vì chia cho None.
             "percent": None if limit in (None, 0) else round(used * 100.0 / limit, 1),
+            "enforced": limit_is_enforced(limit_column) if limit_column else False,
         }
+
+    # Dung lượng KHÔNG đi qua `USAGE_METRICS`, và đó là chủ ý được ghi lại chứ
+    # không phải một chỗ bị bỏ sót. Mọi chỉ số ở trên đếm bằng `count(*)` trên
+    # bảng nguồn, để không bản sao nào lệch được. Dung lượng không theo được
+    # nguyên tắc đó — đi bộ cây thư mục mất hàng giây — nên nó có bộ đếm bền
+    # riêng, cộng với một lượt đối chiếu hằng ngày. Xem `app/storage_quota.py`.
+    tran_mb = plan.get("max_storage_mb")
+    da_dung = 0
+    try:
+        from app import storage_quota
+
+        da_dung = storage_quota.bytes_used(normalize_tenant_id(tenant_id))
+    except Exception as exc:  # noqa: BLE001
+        # Cùng lựa chọn fail-OPEN với `current_usage`: một bảng mức dùng không
+        # vẽ được không được làm hỏng cả trang Gói dịch vụ.
+        logger.warning("[PLANS] khong doc duoc bo dem dung luong: %s", exc)
+    tran_byte = None if tran_mb is None else int(tran_mb) * 1024 * 1024
+    out["storage"] = {
+        "label": "dung lượng dữ liệu",
+        # Đơn vị là BYTE ở cả ba trường, và tên trường nói rõ điều đó. Bản
+        # trước trộn MB (trần) với số mẫu (mức dùng) trong cùng một khối.
+        "used": da_dung,
+        "limit": tran_byte,
+        "unit": "bytes",
+        "unlimited": tran_byte is None,
+        "percent": (None if not tran_byte
+                    else round(da_dung * 100.0 / tran_byte, 1)),
+        "enforced": limit_is_enforced("max_storage_mb"),
+    }
+
     out["_plan"] = {
         "plan_code": plan.get("plan_code"),
         "display_name": plan.get("display_name"),
+        # Trần nào là cam kết, trần nào mới là chỗ giữ sẵn. Để phía gọi khỏi
+        # phải suy từ việc một cột có số hay không.
+        "enforcement": dict(PLAN_LIMIT_ENFORCEMENT),
     }
     return out
 

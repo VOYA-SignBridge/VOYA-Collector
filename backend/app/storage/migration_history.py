@@ -201,11 +201,58 @@ def _v7() -> tuple[tuple[str, str], ...]:
     )
 
 
+def _v8() -> tuple[tuple[str, str], ...]:
+    """Billing: đưa phần đã LỌT vào cơ sở dữ liệu trở lại kỷ luật versioning.
+
+    Vì sao v8 gần như không có gì mới
+    ----------------------------------
+    Mô hình bốn gói `free/plus/pro/enterprise` **đã chạy trên sản xuất** —
+    `internal/trial/school/institution` biến mất từ 13/08/2026. Nhưng nó vào
+    bằng một cửa sau: các câu nằm trong `MIGRATION_STATEMENTS` mà không thuộc
+    payload phiên bản nào, nên chạy lại ở mỗi lượt `migrate` và **không con số
+    nào ghim được chúng là gì**. Sửa một câu trong đó hôm nay không làm checksum
+    nào đỏ.
+
+    v8 không đổi hình dạng cơ sở dữ liệu. Nó đặt tên và đóng dấu cho thứ đã tồn
+    tại. Trên sản xuất mọi câu là no-op (đều luỹ đẳng, đều đã áp); trên một bản
+    cài mới chúng chạy thật. Hai đường hội tụ về cùng một trạng thái — đó là
+    điều kiện nghiệm thu đầu tiên của lượt này.
+
+    Vì sao KHÔNG phải v6 như tài liệu viết
+    ---------------------------------------
+    `BILLING_MODEL_V6.md` xếp việc này vào v6 và các bước sau vào v7/v8/v9. Kế
+    hoạch ấy viết ngày 13/08, trước khi v6 và v7 bị dùng cho việc khác và đóng
+    dấu thật (v6 gỡ bất biến người ký, v7 con trỏ registry). Số đã tiêu thì
+    không lấy lại được — mục 0 của chính tài liệu nói vậy. Nên Billing bắt đầu
+    ở v8, và ánh xạ bước→phiên bản trong tài liệu phải đánh số lại.
+
+    Vì sao câu `SET DEFAULT` nằm trong đây
+    ---------------------------------------
+    `ALTER TABLE tenants ALTER COLUMN plan_code SET DEFAULT 'free'` từng được
+    bộ phân loại xếp là an toàn lúc khởi động, nên nó chạy ở MỌI lần backend
+    lên — một lượt đổi mô hình gói, im lặng, không phiên bản nào ghi lại. Luật
+    phân loại đã sửa cùng lượt này (xem `_MUTATING_VERBS`), và câu ấy vào đây.
+
+    Thứ tự dưới đây là thứ tự thực thi trong `MIGRATION_STATEMENTS`: khối
+    `plans` trước, khối `tenants` sau. Đảo lại thì câu đặt `billing_exempt` cho
+    tenant gốc chạy trước khi bốn gói kịp đổi tên.
+    """
+    from app.storage import metadata_db as mdb
+
+    cac_cau: list[tuple[str, str]] = []
+    for i, s in enumerate(mdb._BILLING_V6_PLANS):
+        cac_cau.append((f"billing_plans_{i:02d}", s))
+    for i, s in enumerate(mdb._BILLING_V6_TENANTS):
+        cac_cau.append((f"billing_tenants_{i:02d}", s))
+    return tuple(cac_cau)
+
+
 #: Phiên bản -> hàm dựng dãy có nhãn.
 MIGRATION_HISTORY = {
     5: _v5,
     6: _v6,
     7: _v7,
+    8: _v8,
 }
 
 

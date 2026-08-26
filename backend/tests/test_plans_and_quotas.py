@@ -58,7 +58,10 @@ class TestNullMeansUnlimited:
     def test_a_null_limit_never_raises(self, throwaway_tenant):
         _set_plan(throwaway_tenant, "enterprise")
         # Không ném là toàn bộ nội dung khẳng định ở đây.
-        plans.check_quota(throwaway_tenant, "samples", adding=10_000_000)
+        # `api_keys` chứ không `samples`: từ v8 số mẫu KHÔNG còn là hạn mức
+        # thương mại. Bài này kiểm quy ước NULL = không giới hạn, nên nó cần
+        # một chỉ số còn sống làm phương tiện, không cần chỉ số nào cụ thể.
+        plans.check_quota(throwaway_tenant, "api_keys", adding=10_000_000)
 
 
 class TestQuotaArithmetic:
@@ -71,11 +74,11 @@ class TestQuotaArithmetic:
         cho một tenant ở mức 499/500 sẽ cho lọt trọn một lô 5 mẫu, vì mỗi mẫu
         đơn lẻ đều "chưa chạm trần" tại thời điểm được hỏi.
         """
-        _set_plan(throwaway_tenant, "free")  # max_samples = 500
-        # 0 mẫu thật, nên xin thêm 501 phải bị từ chối còn 500 thì không.
-        plans.check_quota(throwaway_tenant, "samples", adding=500)
+        _set_plan(throwaway_tenant, "free")  # max_api_keys = 1
+        # 0 khoá thật, nên xin thêm 2 phải bị từ chối còn 1 thì không.
+        plans.check_quota(throwaway_tenant, "api_keys", adding=1)
         with pytest.raises(plans.QuotaExceeded):
-            plans.check_quota(throwaway_tenant, "samples", adding=501)
+            plans.check_quota(throwaway_tenant, "api_keys", adding=2)
 
     def test_the_refusal_carries_the_numbers_not_just_a_sentence(
         self, throwaway_tenant
@@ -84,9 +87,9 @@ class TestQuotaArithmetic:
         moi con số đó ra từ chuỗi tiếng Việt — chuỗi sẽ đổi."""
         _set_plan(throwaway_tenant, "free")
         with pytest.raises(plans.QuotaExceeded) as caught:
-            plans.check_quota(throwaway_tenant, "samples", adding=99_999)
-        assert caught.value.metric == "samples"
-        assert caught.value.limit == 500
+            plans.check_quota(throwaway_tenant, "api_keys", adding=99_999)
+        assert caught.value.metric == "api_keys"
+        assert caught.value.limit == 1
         assert caught.value.current == 0
         # 402, không phải 403: yêu cầu hợp lệ, gói không đủ — có đường đi tiếp.
         assert caught.value.status_code == 402
@@ -132,10 +135,23 @@ class TestSuspensionClosesWrites:
 
 
 class TestSeats:
-    def test_a_full_tenant_refuses_one_more_member(self, throwaway_tenant):
+    def test_so_thanh_vien_KHONG_con_bi_goi_chan(self, throwaway_tenant):
+        """ĐẢO CHIỀU ở v8 (25/08/2026). Bài này trước đây khẳng định người thứ
+        tư bị từ chối với 402.
+
+        Membership thuộc mặt phẳng PHÂN QUYỀN — nó tồn tại vì lý do bảo mật,
+        không vì lý do thương mại. Bán theo đầu người còn tạo một khuyến khích
+        ngược ở đúng chỗ không nên có: một tổ chức chạm trần sẽ dùng chung tài
+        khoản để tiết kiệm ghế, và dùng chung tài khoản phá mọi vết kiểm toán
+        mà hệ thống này dựng lên.
+
+        `max_seats` vẫn còn trong bảng `plans` (gói Free = 3) — cột chưa bị bỏ
+        vì lý do tương thích. Bài này canh việc con số ấy KHÔNG được cưỡng chế
+        trở lại một cách âm thầm.
+        """
         from app import auth, tenant_admin
 
-        _set_plan(throwaway_tenant, "free")  # max_seats = 3
+        _set_plan(throwaway_tenant, "free")  # max_seats = 3, nhưng không ai đọc
         created = []
         try:
             for _ in range(3):
@@ -151,9 +167,10 @@ class TestSeats:
                 username=name, email=f"{name}@example.com", password="@Minh123456"
             )
             created.append(extra["id"])
-            with pytest.raises(tenant_admin.TenantError) as caught:
-                tenant_admin.add_member(throwaway_tenant, extra["id"])
-            assert caught.value.status_code == 402
+            # Người thứ TƯ, vượt `max_seats = 3` của gói Free. Phải vào được.
+            tenant_admin.add_member(throwaway_tenant, extra["id"])
+            assert "seats" not in plans.USAGE_METRICS, (
+                "`seats` quay lại làm hạn mức gói — xem docstring bài này")
         finally:
             with system_scope("test cleanup: remove seat-test accounts"):
                 for user_id in created:
@@ -237,16 +254,16 @@ class TestPlanChangesAreRecorded:
         from app import tenant_admin
 
         with system_scope("test: pretend the plan is already exceeded"):
-            db._execute("UPDATE plans SET max_samples = 0 WHERE plan_code = 'free'")
+            db._execute("UPDATE plans SET max_api_keys = 0 WHERE plan_code = 'free'")
         plans._clear_caches()
         try:
             tenant_admin.change_plan(throwaway_tenant, "free")  # không ném
             with pytest.raises(plans.QuotaExceeded):
-                plans.check_quota(throwaway_tenant, "samples", adding=1)
+                plans.check_quota(throwaway_tenant, "api_keys", adding=1)
         finally:
             with system_scope("test cleanup: restore the trial plan"):
                 db._execute(
-                    "UPDATE plans SET max_samples = 500 WHERE plan_code = 'free'"
+                    "UPDATE plans SET max_api_keys = 1 WHERE plan_code = 'free'"
                 )
             plans._clear_caches()
 
@@ -262,3 +279,61 @@ class TestLookupFailsClosed:
         plan = plans.plan_for_tenant("khong-ton-tai-dau")
         assert plan["plan_code"] == "free"
         assert plan["max_samples"] == 500
+
+
+class TestHopDongCuongChe:
+    """API phải TỰ KHAI trần nào là cam kết, không để phía gọi suy từ con số.
+
+    Tới v8, bảng `plans` mang bốn cột chưa cổng nào đọc — `max_workspaces`,
+    `max_projects`, `included_training_credits`, `audit_retention_days`. Chúng
+    có giá trị thật và đi thẳng ra API, nên giao diện và bảng giá trình bày
+    chúng y hệt những trần đang chạy. Người mua không có cách nào phân biệt một
+    cam kết với một chỗ giữ sẵn.
+    """
+
+    def test_bon_tran_hoan_lai_phai_bi_danh_dau_chua_cuong_che(self):
+        for cot in ("max_workspaces", "max_projects",
+                    "included_training_credits", "audit_retention_days"):
+            assert plans.limit_is_enforced(cot) is False, (
+                f"{cot} chưa có cổng nào đọc; khai là đã cưỡng chế biến một chỗ "
+                f"giữ sẵn thành một lời hứa"
+            )
+
+    def test_dung_luong_la_tran_du_lieu_dang_cuong_che(self):
+        assert plans.limit_is_enforced("max_storage_mb") is True
+
+    def test_cot_chua_khai_mac_dinh_la_CHUA_cuong_che(self):
+        """Hụt về phía khiêm tốn. Quên khai thì bị hiện là "chưa cưỡng chế", chứ
+        không phải được quảng cáo như một cam kết."""
+        assert plans.limit_is_enforced("max_thu_gi_do_moi_toanh") is False
+
+    def test_moi_cot_sua_duoc_deu_phai_co_mat_trong_hop_dong(self):
+        """Chốt chặn cho lần thêm hạn mức tiếp theo.
+
+        Một cột sửa được nhưng không khai sẽ mặc định là "chưa cưỡng chế" — an
+        toàn, nhưng im lặng. Bài này biến sự im lặng ấy thành một lượt chạy đỏ,
+        để người thêm cột phải quyết định thay vì bỏ lửng.
+        """
+        khong_phai_han_muc = {
+            "display_name", "description", "price_cents",
+            "is_self_serve", "is_listed", "trial_days",
+        }
+        thieu = [
+            c for c in plans.EDITABLE_PLAN_FIELDS
+            if c not in khong_phai_han_muc and c not in plans.PLAN_LIMIT_ENFORCEMENT
+        ]
+        assert not thieu, (
+            f"hạn mức chưa khai trong PLAN_LIMIT_ENFORCEMENT: {thieu}. "
+            f"Khai True nếu có cổng thật đọc nó, False nếu chưa."
+        )
+
+    def test_anh_chup_muc_dung_mang_ca_co_cuong_che_lan_dung_luong_that(self, throwaway_tenant):
+        anh = plans.usage_snapshot(throwaway_tenant)
+        assert "storage" in anh, "dung lượng là trần dữ liệu DUY NHẤT từ v8"
+        assert anh["storage"]["unit"] == "bytes"
+        assert anh["storage"]["enforced"] is True
+        for ten, khoi in anh.items():
+            if ten.startswith("_"):
+                continue
+            assert "enforced" in khoi, f"chỉ số {ten} phải nói rõ có cưỡng chế không"
+        assert anh["_plan"]["enforcement"]["max_workspaces"] is False

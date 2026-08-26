@@ -46,16 +46,32 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "bg-slate-200 text-slate-700",
 };
 
+/**
+ * Thứ tự các dòng hạn mức, quan trọng nhất lên đầu.
+ *
+ * `samples`, `classes`, `seats` và `training_jobs_this_month` ĐÃ GỠ ở v8: mô
+ * hình bốn gói bỏ cả bốn, và từ đó ràng buộc dữ liệu duy nhất là DUNG LƯỢNG.
+ * Để tên cũ lại đây thì vô hại (backend không trả chúng nữa) nhưng nó nói dối
+ * người đọc mã về việc hệ thống đang cưỡng chế cái gì.
+ *
+ * Tên nào backend trả mà không có ở đây vẫn hiện — ở cuối danh sách. Nên thêm
+ * một hạn mức mới ở backend không làm nó biến mất khỏi giao diện.
+ */
 const METRIC_ORDER = [
-  "samples",
-  "classes",
-  "seats",
-  "training_jobs_this_month",
-  "training_jobs_running",
-  "training_jobs_queued",
+  "storage",
   "api_keys",
   "webhook_endpoints",
+  "training_jobs_running",
+  "training_jobs_queued",
 ];
+
+/** MB/GB cho dòng dung lượng; phép đếm cho mọi dòng còn lại. */
+function formatQuotaValue(n: number, unit?: string): string {
+  if (unit !== "bytes") return n.toLocaleString("vi-VN");
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 /** Ngưỡng đổi màu. 100% là đã chặn, 80% là sắp chặn — hai tin khác nhau. */
 function barTone(percent: number): string {
@@ -71,12 +87,12 @@ function QuotaBar({ line }: { line: QuotaLine & { key: string } }) {
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <span className="text-sm font-medium text-slate-700">{line.label}</span>
         <span className="font-mono text-sm tabular-nums text-slate-600">
-          {line.used.toLocaleString("vi-VN")}
+          {formatQuotaValue(line.used, line.unit)}
           {line.unlimited ? (
             <span className="ml-1 text-slate-400">{t("/ không giới hạn")}</span>
           ) : (
             <span className="ml-1 text-slate-400">
-              / {(line.limit ?? 0).toLocaleString("vi-VN")}
+              / {formatQuotaValue(line.limit ?? 0, line.unit)}
             </span>
           )}
         </span>
@@ -108,9 +124,12 @@ function TotalsGrid({ totals }: { totals: Record<string, number> }) {
       t("Thời gian huấn luyện"),
       (v) => (v < 3600 ? t("{n} phút", { n: Math.round(v / 60) }) : t("{n} giờ", { n: (v / 3600).toFixed(1) })),
     ],
-    ["storage_mb", t("Dung lượng"), (v) => (v < 1024 ? `${v} MB` : `${(v / 1024).toFixed(1)} GB`)],
     ["active_users", t("Người đóng góp"), (v) => v.toLocaleString("vi-VN")],
   ];
+  // `storage_mb` CỐ Ý không có ở đây. Dung lượng đã là một dòng hạn mức ở trên,
+  // đọc từ bộ đếm bền và cập nhật ngay khi ghi. Số ở lưới này đến từ lượt gộp
+  // hằng ngày, nên nó trễ tới một ngày — hai con số cho cùng một câu hỏi, lệch
+  // nhau, trên cùng một trang. Người dùng gặp thế thì không tin con nào.
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {cards.map(([key, label, fmt]) => (
@@ -245,7 +264,7 @@ export default function BillingPage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-6">
         <h3 className="mb-1 text-lg font-semibold text-slate-900">{t("Hạn mức")}</h3>
         <p className="mb-2 text-sm text-slate-500">
-          {t("Số liệu đọc trực tiếp từ dữ liệu hiện có, không phải từ một bộ đếm riêng.")}
+          {t("Các chỉ số đếm được đọc thẳng từ dữ liệu hiện có. Dung lượng dùng một bộ đếm riêng, được đối chiếu với đĩa mỗi ngày.")}
         </p>
         <div className="divide-y divide-slate-100">
           {ordered.map((line) => (
@@ -260,7 +279,7 @@ export default function BillingPage() {
             {t("Mức dùng 30 ngày qua")}
           </h3>
           <p className="mb-3 text-sm text-slate-500">
-            {t("Dung lượng lấy theo lần đo gần nhất; các chỉ số còn lại là tổng cộng dồn.")}
+            {t("Hoạt động trong kỳ, không phải hạn mức. Dung lượng hiện ở phần Hạn mức phía trên.")}
           </p>
           <TotalsGrid totals={usage.totals} />
         </section>

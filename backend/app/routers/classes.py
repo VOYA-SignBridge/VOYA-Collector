@@ -30,7 +30,7 @@ from app.catalog_sync import (
 from app.config import settings
 from app.auth import get_current_user, require_admin, require_tenant_editor
 from app.tenant_context import require_tenant
-from app.quota_deps import guard_quota, tenant_of
+from app.quota_deps import tenant_of
 from app.webhooks import emit
 
 router = APIRouter(prefix="/classes", tags=["classes"])
@@ -104,7 +104,8 @@ def register_class(
     là ghi vào danh mục dùng chung của cả tổ chức, không phải dữ liệu riêng
     của người gọi. Xem chú thích ở chính dependency đó về lỗ hổng nó bịt.
     """
-    guard_quota(current_user, "classes")
+    # Hạn mức `classes` đã gỡ ở v8: số lớp không còn là hạn mức thương mại.
+    # Ràng buộc dữ liệu duy nhất là dung lượng — xem `plans.USAGE_METRICS`.
     label = validate_label(payload.get("label"))
     language = validate_language(payload.get("language", "vn"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "")))

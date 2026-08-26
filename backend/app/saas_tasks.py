@@ -196,3 +196,37 @@ def send_support_ticket_emails(self, ticket_id: str, tenant_id: str,
     except Exception as exc:
         logger.error("[SUPPORT] khong gui duoc thu bao phieu %s: %s", ticket_id, exc)
         return {"loi": 1}
+
+
+@celery_app.task(bind=True, platform_wide=True)
+def reconcile_storage_quota(self):
+    """Lớp ba của hạn mức dung lượng: đối chiếu bộ đếm với đĩa.
+
+    Đây là KIỂM TOÁN, không phải một đường ghi thứ hai. Nó không tạo, không xoá
+    hiện vật nào, không đổi gói ai, và không coi một tổ chức đang vượt trần là
+    hỏng dữ liệu — vượt trần sau khi hạ gói là hợp lệ, và phần cưỡng chế đã chặn
+    lượt ghi tiếp theo rồi.
+
+    Dọn khoản giữ chỗ treo TRƯỚC rồi mới đối chiếu. Thứ tự ngược lại vẫn cho ra
+    con số đúng (`_dang_giu()` đã bỏ qua khoản quá hạn theo `expires_at`), nhưng
+    dọn trước giữ cho bảng sổ nhỏ và cho số dòng đã dọn nằm cùng một bản ghi
+    nhật ký với kết quả đối chiếu — hai con số ấy đọc cùng nhau mới có nghĩa.
+
+    Mỗi ngày một lần. Đối chiếu đi bộ toàn bộ cây tệp của mọi tenant, nên nó
+    không phải thứ chạy mỗi giờ; và vì bộ đếm được cập nhật đồng bộ ở mọi đường
+    ghi, một ngày trôi là sai số của một lỗi hiếm chứ không phải của hoạt động
+    bình thường.
+    """
+    from app import storage_quota
+
+    out = {"reservations_swept": 0}
+    try:
+        out["reservations_swept"] = storage_quota.sweep_expired()
+    except Exception as exc:
+        logger.error("[SAAS] dọn khoản giữ chỗ treo hỏng: %s", exc)
+    try:
+        out.update(storage_quota.reconcile())
+    except Exception as exc:
+        logger.error("[SAAS] đối chiếu dung lượng hỏng: %s", exc)
+        out["loi"] = 1
+    return out

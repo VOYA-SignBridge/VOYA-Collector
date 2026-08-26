@@ -159,6 +159,16 @@ beat_schedule = {
         "task": "app.saas_tasks.sweep_support_backlog",
         "schedule": 1800.0,
     },
+    # Hạn mức dung lượng, lớp thứ ba. Bộ đếm được cập nhật đồng bộ ở mọi đường
+    # ghi, nên lượt này KHÔNG phải cách usage được tính — nó là cách ta biết bộ
+    # đếm đã trôi, và trôi bao nhiêu. Mỗi lần lệch là một dòng WARNING kèm hai
+    # con số; im lặng sửa thì bộ đếm cứ trôi mãi mà không ai biết nguyên nhân.
+    #
+    # Mỗi ngày chứ không mỗi giờ: lượt này đi bộ toàn bộ cây tệp của mọi tenant.
+    "reconcile-storage-quota-daily": {
+        "task": "app.saas_tasks.reconcile_storage_quota",
+        "schedule": 86400.0,
+    },
 }
 
 # Vòng đời đăng ký: nhắc trước hạn, gia hạn, ân hạn, khoá mềm.

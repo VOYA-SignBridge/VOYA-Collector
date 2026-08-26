@@ -1249,6 +1249,12 @@ TENANT_SCOPED_TABLES = (
     # dưới quyền NGƯỜI GỌI và chịu đúng policy đó. Bỏ `security_invoker` đi là
     # mở toang view này — xem chú thích ở `_TENANT_MEMBERS_VIEW`.
     "tenant_exports", "tenant_invitations",
+    # `tenant_storage` (v8) — bộ đếm dung lượng. Có `tenant_id` nên phải đủ
+    # BỐN việc: sổ này, `rls.RLS_TABLES`, `PURGE_ORDER`, và QUYỀN cho vai
+    # ứng dụng. Việc thứ tư nằm trong CSDL nên diff không thấy.
+    "tenant_storage",
+    # `storage_reservations` (v8) — sổ giữ chỗ. Cùng bốn việc như trên.
+    "storage_reservations",
     "tenant_subscriptions", "tenant_usage_daily", "training_job_classes",
     # `training_metrics` thêm ở C3 (16/08/2026). Vòng lặp khoá ngoại chạy SAU
     # các câu C3 nên cột đã tồn tại lúc nó đi qua; `CONTINUE WHEN NOT EXISTS`
@@ -3271,6 +3277,58 @@ MIGRATION_STATEMENTS = [
     # trong `_BILLING_V6_TENANTS`.
     #
     # Mặc định FALSE: một tenant mới không được im lặng thoát khỏi mọi hạn mức.
+    # v8 — bộ đếm dung lượng. Xem `app/storage_quota.py` về ba lớp và về vì sao
+    # phép kiểm phải nằm CÙNG câu với phép cộng.
+    #
+    # `BIGINT` chứ không `INTEGER`: `INTEGER` tràn ở 2 GB, tức đúng bằng hạn
+    # mức của gói Free — một cột tràn ngay tại ngưỡng nó sinh ra để canh.
+    #
+    # Thuần THÊM nên đi qua `ensure_tables()`; v8 chỉ đóng gói phần một chiều.
+    """
+    CREATE TABLE IF NOT EXISTS tenant_storage (
+        tenant_id     TEXT PRIMARY KEY,
+        bytes_used    BIGINT NOT NULL DEFAULT 0,
+        reconciled_at TIMESTAMP WITH TIME ZONE,
+        updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT ck_tenant_storage_not_negative CHECK (bytes_used >= 0)
+    )
+    """,
+    # v8 — sổ giữ chỗ. Mỗi lượt ghi đang bay là MỘT DÒNG, không phải một số cộng
+    # vào bộ đếm thứ hai.
+    #
+    # Vì sao là sổ chứ không phải cột `reserved_bytes`
+    # ------------------------------------------------
+    # Hai cách đều cho phép kiểm `dùng + giữ chỗ + tới <= trần`. Khác nhau ở chỗ
+    # một tiến trình CHẾT giữa `reserve` và `settle`:
+    #
+    #   cột đếm   khoản treo lẫn vào tổng, không phân biệt được với một lượt
+    #             tải đang chạy thật. Muốn thu hồi thì phải ĐOÁN.
+    #   sổ        khoản treo có `reservation_id` và `expires_at`. Thu hồi là
+    #             một câu WHERE, không phải một phán đoán.
+    #
+    # Và một hệ quả thứ hai, quan trọng hơn: với sổ thì phần "đang giữ chỗ" là
+    # một tổng ĐƯỢC DẪN XUẤT, nên nó không trôi được. Chỉ còn ĐÚNG MỘT con số có
+    # thể lệch khỏi đĩa (`tenant_storage.bytes_used`), và `reconcile()` biết
+    # chính xác phải sửa cái nào.
+    #
+    # `expires_at` chứ không chỉ `created_at`: hạn dùng là một THUỘC TÍNH của
+    # khoản giữ chỗ, không phải một hằng số nằm trong mã của lượt quét. Đổi thời
+    # hạn cho một loại tải lên nào đó về sau sẽ không làm sai các khoản đã ghi.
+    """
+    CREATE TABLE IF NOT EXISTS storage_reservations (
+        reservation_id UUID PRIMARY KEY,
+        tenant_id      TEXT NOT NULL,
+        bytes          BIGINT NOT NULL,
+        created_at     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        expires_at     TIMESTAMP WITH TIME ZONE NOT NULL,
+        CONSTRAINT ck_storage_reservations_not_negative CHECK (bytes >= 0)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_storage_reservations_tenant "
+    "ON storage_reservations(tenant_id)",
+    # Lượt quét khoản treo hỏi đúng câu này và không quan tâm tenant nào.
+    "CREATE INDEX IF NOT EXISTS idx_storage_reservations_expiry "
+    "ON storage_reservations(expires_at)",
     "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_exempt "
     "BOOLEAN NOT NULL DEFAULT FALSE",
     *_BILLING_V6_TENANTS,

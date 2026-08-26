@@ -617,6 +617,9 @@ class TestRequestTenantResolution:
             "cli/backfill_consents.py",        # operator command
             "cli/legal_store.py",              # operator command
             "cli/backfill_usage.py",           # operator command
+            # Đọc bộ đếm dung lượng của MỌI tenant để so với đĩa — một lượt
+            # kiểm toán toàn nền tảng, đúng nghĩa `system_scope`.
+            "cli/seed_storage_counters.py",    # operator command
             # Thiết lập áp cho cả nền tảng, không thuộc tenant nào.
             "platform_settings.py",
             # Văn bản pháp lý và chấp thuận: gắn với TÀI KHOẢN, không gắn với
@@ -635,6 +638,15 @@ class TestRequestTenantResolution:
             # Gộp số đo qua MỌI tenant trong một lượt GROUP BY. Phạm vi theo
             # tenant của người phái sẽ khiến bảng gộp chỉ có một dòng.
             "usage.py",
+            # v8 — lượt ĐỐI CHIẾU bộ đếm dung lượng, và CHỈ nó. Nó đi bộ thư mục
+            # của mọi tenant rồi ghi đè bộ đếm, nên phải chạy ngoài phạm vi; nó
+            # còn chạy từ celery-beat, nơi không có yêu cầu nào để lấy phạm vi.
+            #
+            # Đường NÓNG của module này — `reserve`, `release`, `settle` — cố ý
+            # KHÔNG mở phạm vi: chúng chạy trong một yêu cầu đã có tenant, và mở
+            # phạm vi ở đó là để một lượt tải của tổ chức A trừ vào bộ đếm của
+            # tổ chức B nếu có ai truyền nhầm tham số.
+            "storage_quota.py",
             # Xác thực bằng khoá API xảy ra TRƯỚC khi biết tenant nào — chính
             # khoá là thứ quyết định tenant. Cùng vòng lặp nhân-quả với auth.py.
             "api_keys.py",

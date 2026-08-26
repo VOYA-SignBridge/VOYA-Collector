@@ -43,7 +43,8 @@ from app.api_validation import (
     save_upload_with_limit,
 )
 from app.auth import get_current_user
-from app.quota_deps import guard_quota, tenant_of
+from app import storage_quota
+from app.quota_deps import guard_storage, storage_full_http, tenant_of
 from app.webhooks import emit
 
 # The limit is declared on the router rather than per endpoint because all three
@@ -126,6 +127,29 @@ def _measure_upload_size(upload_file, *, max_bytes: int) -> int:
     return int(size)
 
 
+def _bytes_da_ghi(npz_path) -> int:
+    """Số byte một mẫu camera thật sự chiếm trên đĩa.
+
+    Một mẫu là BA tệp, không phải một: `.npz` đặc trưng, bản sao trong kho raw
+    (`raw_archive_path`), và sidecar JSON cạnh nó. Chỉ đo tệp đặc trưng sẽ tính
+    thiếu khoảng một phần ba — kho raw giữ `landmarks_raw` và `landmarks_world`,
+    đo được là 33% của một npz v2 — và bộ đếm sẽ lệch đúng chừng ấy mỗi ngày cho
+    tới lượt đối chiếu.
+
+    Bảng hiện vật tính phí ở `docs/07-business/BILLABLE_STORAGE_INVENTORY.md`.
+    """
+    from app.dataset_samples import raw_archive_path
+
+    p = Path(npz_path)
+    tong = 0
+    for q in (p, raw_archive_path(p), p.with_suffix(".json")):
+        try:
+            tong += q.stat().st_size
+        except OSError:
+            continue
+    return tong
+
+
 def _raw_upload_local_path(class_meta, upload_uid: str, original_filename: str) -> Path:
     raw_dir = settings.dataset_root / "raw_videos" / class_meta.language / class_meta.dialect / class_meta.folder_name()
     return raw_dir / f"{upload_uid}_{original_filename}"
@@ -144,15 +168,6 @@ async def upload_video(
 ):
     start = time.time()
     log = logging.getLogger("upload.video")
-
-    # Hạn mức được kiểm TRƯỚC khi đọc tệp lên đĩa. Kiểm sau thì một tổ chức đã
-    # chạm trần vẫn làm máy chủ nhận trọn một video rồi mới bị từ chối.
-    #
-    # `adding=1` dù một video có thể sinh nhiều mẫu: số mẫu chỉ biết được sau
-    # khi trích xuất xong. Hệ quả được chấp nhận: một tenant có thể vượt trần
-    # đúng một video cuối cùng, rồi bị chặn hẳn. Chặt hơn thì phải từ chối
-    # trước khi biết — tức là đoán — và đoán quá tay sẽ chặn nhầm.
-    guard_quota(current_user, "samples")
 
     if not session_id:
         session_id = uuid.uuid4().hex
@@ -215,24 +230,67 @@ async def upload_video(
             detail="Tep khong phai dinh dang video duoc ho tro (MP4/MOV/WebM/MKV/AVI).",
         )
 
-    # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
-    class_meta = await asyncio.to_thread(
-        get_or_register_class, label_original=label, language=language, dialect=dialect or ""
-    )
-
     max_mb = int(getattr(settings, "max_upload_mb", 1024))
     max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
     upload_size = _measure_upload_size(file.file, max_bytes=max_bytes)
     log.info("[UPLOAD][video] bytes_received=%s max_bytes=%s", upload_size, max_bytes)
 
-    original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
-    local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
-    storage_key = local_path.relative_to(settings.dataset_root).as_posix()
+    # Hạn mức dung lượng. Từ v8 thứ được kiểm là DUNG LƯỢNG chứ không phải số
+    # mẫu: hai quota chồng lên cùng một tài nguyên là hai cách nói về một giới
+    # hạn, và người dùng không đoán được cái nào chặn mình.
+    #
+    # Giữ chỗ theo `upload_size` — kích thước ĐO ĐƯỢC — chứ không theo
+    # `Content-Length`. Starlette đã nhận trọn thân yêu cầu vào một tệp tạm
+    # trước khi hàm này chạy, nên `_measure_upload_size` biết sự thật ngay tại
+    # đây, còn `Content-Length` chỉ là con số client khai. Lấy con số khai khi
+    # con số thật nằm ngay trên tay là chọn cái tệ hơn một cách cố ý.
+    #
+    # (Bản trước đặt phép kiểm ở đầu hàm với lý do "chặn trước khi máy chủ nhận
+    # trọn video". Lý do đó không đúng: tới lúc thân hàm chạy thì video đã nằm
+    # trên đĩa máy chủ rồi. Thứ thật sự chặn một tệp quá lớn là `max_upload_mb`
+    # ngay phía trên.)
+    #
+    # Và phép kiểm phải đứng TRƯỚC `get_or_register_class`: đăng ký lớp trước
+    # rồi mới từ chối sẽ để lại một lớp từ vựng rỗng phải dọn bằng tay — đúng
+    # thứ mà cổng định dạng phía trên được dựng lên để tránh.
+    giu_cho = guard_storage(current_user, nbytes=upload_size)
+    da_tieu_giu_cho = False
+    try:
+        # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
+        class_meta = await asyncio.to_thread(
+            get_or_register_class, label_original=label, language=language, dialect=dialect or ""
+        )
 
-    # In thread — large file write + fsync would block the event loop
-    bytes_written, local_path_str = await asyncio.to_thread(
-        save_upload_with_limit, file.file, local_path, max_bytes=max_bytes
-    )
+        original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
+        local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
+        storage_key = local_path.relative_to(settings.dataset_root).as_posix()
+
+        # In thread — large file write + fsync would block the event loop
+        bytes_written, local_path_str = await asyncio.to_thread(
+            save_upload_with_limit, file.file, local_path, max_bytes=max_bytes
+        )
+
+        # Quyết toán bằng byte THẬT, trước khi có dòng metadata nào trỏ tới tệp.
+        # Thứ tự này là điều làm cho `discard` an toàn: tới đây tệp đã tồn tại
+        # nhưng chưa ai biết về nó, nên gỡ đi là gỡ sạch.
+        try:
+            await asyncio.to_thread(
+                storage_quota.settle, giu_cho, bytes_written,
+                discard=lambda: local_path.unlink(missing_ok=True),
+            )
+        except storage_quota.StorageQuotaExceeded as exc:
+            log.warning(
+                "[UPLOAD][video] tu choi sau khi ghi: %s byte khong vua han muc; "
+                "da go tep", bytes_written)
+            raise storage_full_http(exc) from exc
+        da_tieu_giu_cho = True
+    finally:
+        # Bắt CẢ `return` sớm lẫn ngoại lệ. Một khoản giữ chỗ không được tiêu sẽ
+        # giam chỗ của tổ chức cho tới khi hết hạn, và người dùng thấy "hết dung
+        # lượng" cho phần họ chưa hề ghi.
+        if not da_tieu_giu_cho:
+            storage_quota.release(giu_cho)
+
     storage_url = local_path_str
     provider = "local"
 
@@ -404,10 +462,6 @@ async def upload_camera(
     Accept frames (array of arrays) and metadata, save as npz via storage_utils.save_sample
     Payload example: { user: str, label: str, session_id: str, dialect: str, frames: [{timestamp, landmarks}, ...] }
     """
-    # Một lượt thu camera là đúng một mẫu, nên `adding=1` ở đây là con số thật,
-    # không phải xấp xỉ như ở đường video.
-    guard_quota(current_user, "samples")
-
     user = payload.get("user", "") or current_user.get("username", "")
     label = validate_label(payload.get("label"))
     dialect = validate_dialect(normalize_dialect(payload.get("dialect", "common")))
@@ -718,23 +772,53 @@ async def upload_camera(
         "created_at": su.now_str(),
     }
 
+    # Hạn mức dung lượng. Đường này gửi landmark dạng JSON, nên kích thước trên
+    # dây không nói gì về `.npz` sẽ ghi ra — nhưng CẬN TRÊN thì tính được chính
+    # xác, và một cận trên tính được thì tốt hơn hẳn một ước lượng:
+    #
+    #   `_atomic_write_npz` dùng `savez_compressed`, nên tệp ra LUÔN nhỏ hơn
+    #   tổng `nbytes` của các mảng đi vào. Cộng tổng ấy lại là một cận trên
+    #   đúng theo định nghĩa, không phải một phỏng đoán.
+    #
+    # Hệ quả: `settle` trên đường này chỉ có thể GIẢM. Nó vẫn nhận
+    # `absorb_overflow=True` chứ không phải `discard=`, vì tới lúc quyết toán
+    # thì `save_sequence_npz` đã ghi cả samples.csv lẫn Postgres — gỡ tệp lúc ấy
+    # để lại dòng metadata trỏ vào hư không, tệ hơn hẳn một lần vượt trần tạm
+    # thời mà lượt ghi sau đã chặn. Nếu cảnh báo "cận trên SAI" xuất hiện trong
+    # nhật ký thì phép tính dưới đây thiếu một mảng, và đó là một lỗi phải sửa.
+    can_tren = int(seq_padded.nbytes) * 2          # `sequence` + `landmarks_normalized`
+    for _mang in (seq_raw, seq_world, frame_valid_mask,
+                  left_hand_valid_mask, right_hand_valid_mask):
+        if _mang is not None:
+            can_tren += int(np.asarray(_mang).nbytes)
+    can_tren += 64 * 1024                           # sidecar JSON + header npz
+    giu_cho = guard_storage(current_user, nbytes=can_tren)
+
+    da_tieu_giu_cho = False
     try:
-        path = save_sequence_npz(
-            class_meta,
-            seq_padded,
-            meta=meta,
-            augment_id=0,
-            source_type="camera",
-            raw_sequence=seq_raw,
-            world_sequence=seq_world,
-            coordinate_space="wrist_centred_v1",
-            frame_valid_mask=frame_valid_mask,
-            left_hand_valid_mask=left_hand_valid_mask,
-            right_hand_valid_mask=right_hand_valid_mask,
-        )
-    except Exception as e:
-        log.error("[UPLOAD][camera][ERROR] sample save failed: %s", e)
-        return {"success": False, "message": f"Sample upload failed: {e}"}
+        try:
+            path = save_sequence_npz(
+                class_meta,
+                seq_padded,
+                meta=meta,
+                augment_id=0,
+                source_type="camera",
+                raw_sequence=seq_raw,
+                world_sequence=seq_world,
+                coordinate_space="wrist_centred_v1",
+                frame_valid_mask=frame_valid_mask,
+                left_hand_valid_mask=left_hand_valid_mask,
+                right_hand_valid_mask=right_hand_valid_mask,
+            )
+        except Exception as e:
+            log.error("[UPLOAD][camera][ERROR] sample save failed: %s", e)
+            return {"success": False, "message": f"Sample upload failed: {e}"}
+
+        storage_quota.settle(giu_cho, _bytes_da_ghi(path), absorb_overflow=True)
+        da_tieu_giu_cho = True
+    finally:
+        if not da_tieu_giu_cho:
+            storage_quota.release(giu_cho)
 
     # Same audit stream as rejected attempts, so pass/warn/reject rates for a
     # campaign are computable from ONE file.

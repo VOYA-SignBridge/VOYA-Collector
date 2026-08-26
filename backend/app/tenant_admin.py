@@ -360,33 +360,51 @@ def _open_subscription(
     *,
     changed_by: Optional[str] = None,
     note: str = "",
+    cur=None,
 ) -> None:
-    """Đóng dòng đăng ký đang mở (nếu có) rồi mở dòng mới.
+    """Đóng dòng đăng ký đang mở (nếu có) rồi mở dòng mới, TRONG MỘT giao dịch.
 
-    Hai câu, cùng một khối, theo đúng thứ tự đó: chỉ mục duy nhất một phần
-    `uq_tenant_subscriptions_open` chỉ cho phép một dòng `ended_at IS NULL`
-    cho mỗi tenant, nên mở trước đóng sau sẽ vi phạm ràng buộc và cả hai cùng
-    bị huỷ. Trật tự này khiến ràng buộc trở thành thứ bảo vệ chứ không phải
-    thứ cản đường.
+    Thứ tự đóng-trước-mở-sau là bắt buộc: chỉ mục duy nhất một phần
+    `uq_tenant_subscriptions_open` chỉ cho phép một dòng `ended_at IS NULL` cho
+    mỗi tenant, nên mở trước đóng sau sẽ vi phạm ràng buộc.
+
+    Vì sao nhận `cur` (v8, 25/08/2026)
+    -----------------------------------
+    Bản trước gọi `_execute` hai lần, và docstring của nó nói "hai câu, cùng
+    một khối". Lời hứa ấy KHÔNG đúng: `_cursor()` dùng `with conn:` nên mỗi
+    `_execute` là một giao dịch riêng. Chết máy giữa hai câu để lại một tenant
+    **không có đăng ký nào đang mở** — đúng trạng thái mà chỉ mục kia sinh ra
+    để canh, và không phép kiểm nào bắt được vì nó là trạng thái THIẾU.
+
+    Người gọi truyền con trỏ của mình vào để cả cụm — đổi gói và ghi lịch sử —
+    nằm gọn trong một giao dịch.
     """
     import uuid as _uuid
 
-    from app.storage.metadata_db import _execute
+    def _chay(c) -> None:
+        c.execute(
+            "UPDATE tenant_subscriptions SET ended_at = NOW(), status = 'superseded' "
+            "WHERE tenant_id = %s AND ended_at IS NULL",
+            (tenant_id,),
+        )
+        c.execute(
+            "INSERT INTO tenant_subscriptions"
+            "(subscription_id, tenant_id, plan_code, status, changed_by, note) "
+            "VALUES(%s, %s, %s, 'active', %s, %s)",
+            (
+                str(_uuid.uuid4()), tenant_id, plan_code,
+                str(changed_by) if changed_by else None, note,
+            ),
+        )
 
-    _execute(
-        "UPDATE tenant_subscriptions SET ended_at = NOW(), status = 'superseded' "
-        "WHERE tenant_id = %s AND ended_at IS NULL",
-        (tenant_id,),
-    )
-    _execute(
-        "INSERT INTO tenant_subscriptions"
-        "(subscription_id, tenant_id, plan_code, status, changed_by, note) "
-        "VALUES(%s, %s, %s, 'active', %s, %s)",
-        (
-            str(_uuid.uuid4()), tenant_id, plan_code,
-            str(changed_by) if changed_by else None, note,
-        ),
-    )
+    if cur is not None:
+        _chay(cur)
+        return
+
+    from app.storage.metadata_db import _cursor
+
+    with _cursor() as c:
+        _chay(c)
 
 
 def change_plan(
@@ -410,17 +428,29 @@ def change_plan(
     plan = _resolve_plan(plan_code)
 
     from app.plans import _clear_caches
-    from app.storage.metadata_db import _execute
+    from app.storage.metadata_db import _cursor
 
+    # MỘT giao dịch cho cả hai vế, và đó là điều kiện để nguồn sự thật đứng
+    # vững (v8, 25/08/2026).
+    #
+    #   tenants.plan_code       gói HIỆN HÀNH — nguồn ĐỌC của mọi phép cưỡng chế
+    #   tenant_subscriptions    LỊCH SỬ thay đổi
+    #
+    # Bản trước gọi hai `_execute` liên tiếp. Mỗi `_execute` mở và đóng giao
+    # dịch riêng (`_cursor` dùng `with conn:`), nên một lần chết máy giữa hai
+    # câu để lại gói mới có hiệu lực mà lịch sử KHÔNG ghi nhận nó — và không
+    # phép kiểm nào bắt được, vì cái sai là một dòng THIẾU chứ không phải một
+    # dòng sai.
     with system_scope("tenant admin: change the plan of a tenant"):
-        _execute(
-            "UPDATE tenants SET plan_code = %s WHERE tenant_id = %s",
-            (plan["plan_code"], tenant_id),
-        )
-        _open_subscription(
-            tenant_id, plan["plan_code"], changed_by=changed_by,
-            note=note or "Đổi gói qua API quản trị.",
-        )
+        with _cursor() as cur:
+            cur.execute(
+                "UPDATE tenants SET plan_code = %s WHERE tenant_id = %s",
+                (plan["plan_code"], tenant_id),
+            )
+            _open_subscription(
+                tenant_id, plan["plan_code"], changed_by=changed_by,
+                note=note or "Đổi gói qua API quản trị.", cur=cur,
+            )
     _clear_caches()
     logger.info("[TENANT] plan %s -> %s", tenant_id, plan["plan_code"])
     return get_tenant(tenant_id)
@@ -958,23 +988,21 @@ def _assert_not_last_admin(tenant_id: str, user_id: str) -> None:
 
 
 def _assert_seat_available(tenant_id: str, user_id: str) -> None:
-    """Còn ghế trống trong gói cho MỘT người nữa hay không.
+    """KHÔNG còn kiểm gì — số thành viên hết là hạn mức thương mại từ v8.
 
-    Bỏ qua khi người đó đã là thành viên: đổi vai trò của một người đang có
-    không tiêu thêm ghế nào, và tính nó là tiêu ghế sẽ khiến một tenant đầy
-    ghế không sửa nổi vai trò của chính thành viên mình.
+    Giữ hàm rỗng thay vì xoá nó và sửa hai nơi gọi: chỗ này là nơi ĐÚNG để một
+    giới hạn thành viên quay lại nếu sau này có lý do (chống lạm dụng, chẳng
+    hạn), và một hàm có tên nói rõ ý định dễ tìm hơn một lời gọi đã biến mất.
 
-    `QuotaExceeded` được dịch sang `TenantError` ở đây để router chỉ phải biết
-    một loại lỗi từ module này.
+    Vì sao bỏ (mô hình bốn gói, 25/08/2026)
+    ----------------------------------------
+    Membership thuộc mặt phẳng PHÂN QUYỀN — nó tồn tại vì lý do bảo mật, không
+    vì lý do thương mại. Bán theo đầu người còn tạo một khuyến khích ngược ở
+    đúng chỗ không nên có: một tổ chức sẽ dùng chung tài khoản để tiết kiệm
+    ghế, và dùng chung tài khoản là thứ phá mọi vết kiểm toán mà hệ thống này
+    dựng lên. Ràng buộc dữ liệu duy nhất từ v8 là dung lượng.
     """
-    from app.plans import QuotaExceeded, check_quota
-
-    if _member_row(tenant_id, str(user_id)):
-        return
-    try:
-        check_quota(tenant_id, "seats", adding=1)
-    except QuotaExceeded as exc:
-        raise TenantError(str(exc), status_code=exc.status_code) from exc
+    return
 
 
 def add_member(
