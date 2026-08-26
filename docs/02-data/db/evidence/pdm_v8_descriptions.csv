@@ -1,0 +1,450 @@
+table_name,column_name,description,semantic_status,note
+collection_sessions,collection_session_id,Định danh buổi thu.,VERIFIED,
+collection_sessions,tenant_id,Tổ chức sở hữu bản ghi; là phạm vi áp dụng cách ly tenant.,VERIFIED,
+collection_sessions,session_code,"Mã buổi thu do client sinh, duy nhất trong phạm vi một tổ chức.",VERIFIED,"UNIQUE (tenant_id, session_code)"
+collection_sessions,opened_by_user_id,Tài khoản đã mở buổi thu.,VERIFIED,"Là người VẬN HÀNH, không phải người ký"
+collection_sessions,source_type,Kênh thu: camera trực tiếp hay tải video lên.,VERIFIED,
+collection_sessions,started_at,Thời điểm buổi thu bắt đầu.,VERIFIED,
+collection_sessions,ended_at,Thời điểm buổi thu kết thúc; NULL khi chưa đóng.,VERIFIED,CHECK ended_at >= started_at
+collection_sessions,note,Ghi chú tự do của người vận hành.,NEEDS_REVIEW,
+collection_sessions,created_at,Thời điểm tạo bản ghi.,VERIFIED,
+capture_sessions,capture_session_id,Định danh phiên thu một lớp ký hiệu.,VERIFIED,
+capture_sessions,tenant_id,Tổ chức sở hữu bản ghi.,VERIFIED,
+capture_sessions,class_uid,Lớp ký hiệu được thu trong phiên này.,VERIFIED,
+capture_sessions,session_id,"Mã phiên do client gửi; duy nhất theo (tổ chức, lớp), KHÔNG duy nhất một mình.",VERIFIED,"Đo: 61 giá trị khác nhau, một mã trải nhiều lớp"
+capture_sessions,signer_id,"Người ký TÓM TẮT của phiên, giữ lại từ thiết kế cũ.",LEGACY,Dữ liệu bác bỏ giả định một phiên một người: 10/253 phiên mang từ 2 nhãn người ký trở lên. KHÔNG dùng làm chân lý
+capture_sessions,auth_user_id,Tài khoản đã thực hiện phiên thu.,VERIFIED,Khác danh tính người ký
+capture_sessions,source_type,Kênh thu của phiên.,VERIFIED,
+capture_sessions,started_at,Thời điểm phiên bắt đầu.,VERIFIED,
+capture_sessions,ended_at,Thời điểm phiên kết thúc.,VERIFIED,
+capture_sessions,note,Ghi chú tự do.,NEEDS_REVIEW,
+capture_sessions,created_at,Thời điểm tạo bản ghi.,VERIFIED,
+capture_sessions,collection_session_id,Buổi thu chứa phiên này; NULL với dữ liệu có trước khi có phân cấp.,VERIFIED,ON DELETE SET NULL
+signers,signer_id,"Định danh chuẩn hoá của người ký, trong phạm vi một tổ chức.",VERIFIED,
+signers,display_name,Tên hiển thị của người ký.,VERIFIED,
+signers,regional_group,Nhóm vùng miền của người ký.,NEEDS_REVIEW,Quan hệ với bảng regions cần xác nhận
+signers,external_user_id,"Tài khoản hệ thống tương ứng, nếu người ký cũng là người dùng.",VERIFIED,NULL khi người ký không có tài khoản
+signers,is_active,Người ký còn tham gia thu hay không.,VERIFIED,
+signers,created_at,Thời điểm đăng ký người ký.,VERIFIED,
+signers,tenant_id,Tổ chức quản lý hồ sơ người ký.,VERIFIED,
+signers,note,Ghi chú tự do.,NEEDS_REVIEW,
+signers,display_order,Thứ tự hiển thị do người vận hành sắp.,VERIFIED,
+signer_aliases,tenant_id,Tổ chức sở hữu bản ghi gộp.,VERIFIED,
+signer_aliases,old_signer_id,Định danh người ký đã bị gộp đi.,VERIFIED,
+signer_aliases,new_signer_id,Định danh người ký còn lại sau khi gộp.,VERIFIED,
+signer_aliases,reason,Lý do gộp.,VERIFIED,
+signer_aliases,merged_at,Thời điểm gộp.,VERIFIED,
+signer_aliases,merged_by,Người thực hiện gộp.,VERIFIED,
+samples,sample_uid,Định danh mẫu.,VERIFIED,10 ký tự hex
+samples,class_uid,Lớp ký hiệu mà mẫu này mang nhãn.,VERIFIED,
+samples,slug,Bản sao slug của lớp tại thời điểm ghi.,NEEDS_REVIEW,Phi chuẩn hoá; nguồn chuẩn là classes
+samples,label_original,Bản sao nhãn gốc của lớp tại thời điểm ghi.,NEEDS_REVIEW,Phi chuẩn hoá
+samples,language,Ngôn ngữ ký hiệu của mẫu.,VERIFIED,
+samples,dialect,Phương ngữ của mẫu.,VERIFIED,
+samples,source_type,Kênh thu: camera hay video tải lên.,VERIFIED,
+samples,user_id,"Nhãn người ký dạng văn bản tự do, giữ lại làm bằng chứng nguồn gốc.",LEGACY,KHÔNG phải định danh tài khoản. Là nguồn DUY NHẤT cho thấy 10/253 phiên có nhiều người ký
+samples,auth_user_id,Tài khoản đã thực hiện thao tác thu/tải mẫu này.,VERIFIED,Khác hẳn danh tính người ký. 166/3.864 dòng còn trống
+samples,session_id,Mã phiên do client gửi tại thời điểm thu.,VERIFIED,"Đo: 2.867/3.864 dòng có giá trị, 61 giá trị khác nhau"
+samples,fps_original,Tốc độ khung hình của nguồn gốc.,NEEDS_REVIEW,Kiểu text chứ không phải số — cần xác nhận vì sao
+samples,fps_processed,Tốc độ khung hình sau xử lý.,NEEDS_REVIEW,Kiểu text chứ không phải số
+samples,seq_len,Độ dài chuỗi sau khi đệm về độ dài đích.,VERIFIED,
+samples,augment_id,Chỉ số bản tăng cường; 0 là bản gốc.,VERIFIED,
+samples,completeness,Tỷ lệ khung hình có bàn tay hợp lệ.,DERIVED,Tính lại được từ tệp npz
+samples,file_path,"Đường dẫn tệp đặc trưng, tương đối so với gốc dataset.",VERIFIED,
+samples,storage_url,Đường dẫn hoặc URL nơi tệp đang nằm.,VERIFIED,Được cập nhật sau khi đẩy lên Drive
+samples,checksum,Tổng kiểm của tệp đặc trưng.,NEEDS_REVIEW,Thuật toán băm cần xác nhận
+samples,created_at,Thời điểm ghi mẫu.,VERIFIED,
+samples,sheets_synced,Đã đồng bộ sang Google Sheets chưa.,VERIFIED,
+samples,gdrive_synced,Đã đồng bộ lên Google Drive chưa.,VERIFIED,"Bẫy đã biết: CREATE TABLE mặc định FALSE còn ALTER mặc định TRUE, nên máy cài mới và máy cũ khác nhau"
+samples,status,Không còn được cập nhật.,LEGACY,Đo: giá trị duy nhất PENDING trên cả 3.864 dòng. Trạng thái kiểm duyệt sống ở review_status
+samples,error_log,"Thông báo lỗi của lượt xử lý, nếu có.",NEEDS_REVIEW,
+samples,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+samples,storage_key,"Khoá tệp trên kho lưu trữ, tương đối so với gốc dataset.",VERIFIED,
+samples,session_uid,"Mã phiên thứ hai, khác session_id.",NEEDS_REVIEW,"Đo: 991 dòng có giá trị, 109 giá trị khác nhau. Quan hệ với session_id chưa rõ"
+samples,username,Bản sao tên tài khoản tại thời điểm ghi.,LEGACY,Phi chuẩn hoá; đổi tên tài khoản KHÔNG cập nhật ngược về đây
+samples,deleted_at,Thời điểm xoá mềm; tệp VẪN nằm trên đĩa cho tới khi dọn Thùng rác.,VERIFIED,Vì vậy xoá mềm không trả lại dung lượng
+samples,left_hand_ratio,Tỷ lệ khung hình phát hiện được tay trái.,DERIVED,
+samples,right_hand_ratio,Tỷ lệ khung hình phát hiện được tay phải.,DERIVED,
+samples,both_hands_ratio,Tỷ lệ khung hình phát hiện được cả hai tay.,DERIVED,
+samples,jitter,"Độ rung của chuỗi landmark, phân vị 95.",DERIVED,"KHÔNG tính lại được từ dữ liệu đã lưu, khác với completeness"
+samples,quality_flags,Các cờ cảnh báo chất lượng của lượt thu.,DERIVED,
+samples,signer_id,"Danh tính người ký đã chuẩn hoá, khi đã phân định được.",VERIFIED,"2.186/3.864 dòng còn trống, ĐANG ĐÓNG BĂNG chờ duyệt 266 khối thời gian"
+samples,collection_campaign,Đợt thu thập mà mẫu thuộc về.,NEEDS_REVIEW,
+samples,raw_landmarks_available,Có bản landmark thô trong kho raw hay không.,VERIFIED,Kho raw là nửa KHÔNG tái tạo được của một mẫu
+samples,normalization_version,Phiên bản thuật toán chuẩn hoá đã áp cho mẫu.,VERIFIED,Cho phép chạy lại chuẩn hoá mà vẫn biết mẫu nào đã dùng phiên bản nào
+samples,preprocess_contract_version,Phiên bản hợp đồng tiền xử lý.,VERIFIED,
+samples,sequence_length_original,Số khung hình trước khi đệm hoặc cắt.,VERIFIED,
+samples,quality_status,Kết luận chất lượng: đạt hay bị gắn cờ.,DERIVED,
+samples,tenant_id,Tổ chức sở hữu mẫu; là phạm vi áp dụng cách ly tenant.,VERIFIED,Tham gia 5 khoá ngoại ghép cùng lúc — trụ neo tenant của bảng này
+samples,capture_session_id,Phiên thu chứa mẫu này.,VERIFIED,"997/3.864 dòng còn trống — dữ liệu có trước khi đường ghi nối phân cấp. Chỉ có trong CSDL, không có trong samples.csv"
+samples,review_status,Trạng thái kiểm duyệt của mẫu.,VERIFIED,"Giá trị đang có: pending, approved"
+samples,reviewed_by,Tài khoản đã kiểm duyệt mẫu.,VERIFIED,
+samples,reviewed_at,Thời điểm kiểm duyệt.,VERIFIED,
+samples,review_note,Ghi chú của người kiểm duyệt.,VERIFIED,
+raw_uploads,upload_uid,Định danh lượt tải lên; cũng là khoá chống trùng khi client gửi lại.,VERIFIED,
+raw_uploads,class_uid,Lớp ký hiệu của video.,VERIFIED,
+raw_uploads,slug,Bản sao slug của lớp.,NEEDS_REVIEW,Phi chuẩn hoá
+raw_uploads,label_original,Bản sao nhãn gốc của lớp.,NEEDS_REVIEW,Phi chuẩn hoá
+raw_uploads,language,Ngôn ngữ ký hiệu.,VERIFIED,
+raw_uploads,dialect,Phương ngữ.,VERIFIED,
+raw_uploads,source_type,Luôn là video ở bảng này.,VERIFIED,
+raw_uploads,user_id,Nhãn người ký dạng văn bản tự do.,LEGACY,KHÔNG phải định danh tài khoản
+raw_uploads,auth_user_id,Tài khoản đã tải video lên.,VERIFIED,
+raw_uploads,session_id,Mã phiên tại thời điểm tải lên.,VERIFIED,
+raw_uploads,original_filename,"Tên tệp do người dùng gửi lên, đã làm sạch.",VERIFIED,
+raw_uploads,local_path,Đường dẫn video trên đĩa máy chủ.,VERIFIED,Là nguồn quy chủ dung lượng video: thư mục raw_videos KHÔNG phân vùng theo tenant
+raw_uploads,storage_key,Khoá tệp tương đối so với gốc dataset.,VERIFIED,
+raw_uploads,storage_url,Vị trí hiện tại của video; cập nhật sau khi đẩy lên Drive.,VERIFIED,
+raw_uploads,created_at,Thời điểm tải lên.,VERIFIED,
+raw_uploads,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+raw_uploads,deleted_at,Thời điểm xoá mềm; tệp vẫn nằm trên đĩa.,VERIFIED,
+raw_uploads,status,Trạng thái xử lý của lượt tải lên.,NEEDS_REVIEW,Cần xác nhận tập giá trị hợp lệ
+raw_uploads,session_uid,Mã phiên thứ hai.,NEEDS_REVIEW,Cùng câu hỏi như samples.session_uid
+raw_uploads,username,Bản sao tên tài khoản tại thời điểm tải lên.,LEGACY,Phi chuẩn hoá
+raw_uploads,tenant_id,Tổ chức sở hữu video.,VERIFIED,
+tenants,tenant_id,Định danh tổ chức; là giá trị mọi chính sách cách ly tenant so khớp.,VERIFIED,
+tenants,display_name,Tên tổ chức hiển thị cho người dùng.,VERIFIED,
+tenants,slug,Dạng rút gọn của tên tổ chức dùng trong đường dẫn.,NEEDS_REVIEW,Chưa xác nhận nơi tiêu thụ
+tenants,is_active,Tổ chức còn hoạt động hay không.,VERIFIED,
+tenants,created_at,Thời điểm tạo tổ chức.,VERIFIED,
+tenants,deleted_at,Thời điểm xoá mềm tổ chức.,VERIFIED,
+tenants,cloned_from_community_version,Phiên bản danh mục Community mà tổ chức được nhân bản từ đó lúc tạo.,VERIFIED,"Kế thừa xảy ra lúc TẠO, không phải một đường vọng lại lúc chạy"
+tenants,cloned_at,Thời điểm nhân bản danh mục.,VERIFIED,
+tenants,plan_code,Gói dịch vụ hiện hành; là nguồn ĐỌC của mọi phép cưỡng chế hạn mức.,VERIFIED,Lịch sử đổi gói nằm ở tenant_subscriptions
+tenants,billing_status,Trạng thái thanh toán; quyết định tổ chức còn ghi được dữ liệu hay không.,VERIFIED,
+tenants,trial_ends_at,Thời điểm hết hạn dùng thử.,VERIFIED,
+tenants,current_period_start,Đầu kỳ hạn hiện tại của đăng ký.,VERIFIED,
+tenants,current_period_end,Cuối kỳ hạn hiện tại; mốc để nhắc hạn và mở kỳ mới.,VERIFIED,
+tenants,is_self_serve,Tổ chức tự đăng ký hay do quản trị viên nền tảng tạo.,VERIFIED,
+tenants,owner_user_id,Tài khoản được chỉ định làm chủ sở hữu tổ chức; có thể NULL.,VERIFIED,"KHÁC chiều với users.tenant_id — hai quan hệ riêng, không phải nghịch đảo của nhau"
+tenants,suspended_at,Thời điểm tạm ngưng dịch vụ.,VERIFIED,
+tenants,suspended_reason,Lý do tạm ngưng.,VERIFIED,
+tenants,tenant_type,Loại tổ chức: COMMUNITY hay ORGANIZATION.,VERIFIED,"Community là một tenant DỰ TRỮ, không phải một mặt phẳng riêng"
+tenants,is_system_reserved,"Tổ chức do nền tảng giữ chỗ, không được xoá.",VERIFIED,
+tenants,billing_exempt,Miễn trừ hạn mức thương mại.,VERIFIED,Nghĩa là KHÔNG dùng trần để chặn — mức dùng vẫn được đo
+users,id,Định danh tài khoản.,VERIFIED,
+users,username,Tên đăng nhập.,VERIFIED,Được chép sang nhiều bảng dữ liệu làm dấu vết lịch sử
+users,email,Địa chỉ thư điện tử; cũng dùng được để đăng nhập.,VERIFIED,
+users,password_hash,Băm mật khẩu.,VERIFIED,
+users,is_active,Tài khoản còn hoạt động hay không.,VERIFIED,
+users,is_admin,"Quyền quản trị NỀN TẢNG, không phải quyền trong một tổ chức.",VERIFIED,Khác hẳn vai trong tenant; hai thẩm quyền được kiểm riêng
+users,created_at,Thời điểm tạo tài khoản.,VERIFIED,
+users,role_id,Tham chiếu vai trò kiểu cũ. KHÔNG phải đường phân quyền hiện hành.,LEGACY,"Đo: 5/13 tài khoản còn giá trị, trong khi RBAC thật chạy qua 37 membership + 27 role assignment"
+users,phone_number,Số điện thoại dùng cho mã xác minh qua SMS.,VERIFIED,
+users,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+users,deleted_at,Thời điểm xoá mềm tài khoản.,VERIFIED,
+users,tenant_id,Tổ chức dùng làm ngữ cảnh mặc định/dự phòng của tài khoản; quan hệ thành viên và quyền truy cập CÓ THẨM QUYỀN được biểu diễn qua Membership.,VERIFIED,Cố ý không mô tả là 'tổ chức mà người dùng thuộc về' — nói vậy sẽ khiến cột này và Membership trông ngang hàng
+users,email_verified_at,Thời điểm xác minh địa chỉ thư.,VERIFIED,Thư hệ thống chỉ gửi tới địa chỉ ĐÃ xác minh
+users,phone_verified_at,Thời điểm xác minh số điện thoại.,VERIFIED,
+users,sessions_invalid_before,Mốc thu hồi phiên: token phát trước thời điểm này không còn hiệu lực.,VERIFIED,Là mức thu hồi rộng nhất trong ba mức
+users,active_tenant_id,Tổ chức người dùng đang CHỌN làm ngữ cảnh làm việc.,VERIFIED,"Khác `tenant_id`: cái kia là mặc định/dự phòng, cái này là lựa chọn hiện tại"
+memberships,membership_id,Định danh tư cách thành viên.,VERIFIED,
+memberships,user_id,Tài khoản giữ tư cách thành viên này.,VERIFIED,
+memberships,scope_level,"Mức phạm vi: TENANT, WORKSPACE hoặc PROJECT.",VERIFIED,Quyết định hai cột dưới phải NULL hay NOT NULL — xem ck_memberships_shape
+memberships,tenant_id,Tổ chức xác định phạm vi của tư cách thành viên.,VERIFIED,
+memberships,workspace_id,Workspace của tư cách thành viên. NULL khi scope_level = TENANT; NOT NULL với WORKSPACE và PROJECT.,VERIFIED,ck_memberships_shape ràng ba cột thành đúng ba hình dạng hợp lệ
+memberships,project_id,Project của tư cách thành viên. NOT NULL chỉ khi scope_level = PROJECT.,VERIFIED,"Khoá ngoại ghép BA cột (tenant, workspace, project) nên không trỏ được sang project của workspace hay tổ chức khác"
+memberships,parent_membership_id,"Tư cách thành viên cấp trên trong cây phạm vi, của CÙNG một người.",VERIFIED,"Khoá ngoại là (parent_membership_id, user_id) nên cây bị ràng phải cùng một tài khoản"
+memberships,legacy_role,"Vai trò tương thích cũ, chỉ dùng được ở membership cấp tenant.",LEGACY,CHECK giới hạn còn admin|editor và chỉ cho phép khi scope_level = TENANT
+memberships,status,"Trạng thái: ACTIVE, INVITED, SUSPENDED hoặc REMOVED.",VERIFIED,
+memberships,joined_at,Thời điểm gia nhập.,VERIFIED,
+memberships,suspended_at,Thời điểm bị tạm đình chỉ.,VERIFIED,
+memberships,left_at,Thời điểm rời đi. CHECK buộc cột này có giá trị KHI VÀ CHỈ KHI status = REMOVED.,VERIFIED,
+memberships,created_at,Thời điểm tạo bản ghi.,VERIFIED,
+memberships,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+roles,role_id,Định danh vai trò.,VERIFIED,
+roles,role_code,"Mã vai trò ổn định, dùng để tra cứu trong mã nguồn.",VERIFIED,
+roles,description,Mô tả vai trò cho người vận hành.,VERIFIED,
+roles,tenant_id,Tổ chức sở hữu vai trò TUỲ CHỈNH. NULL với vai trò dựng sẵn của nền tảng.,VERIFIED,ck_role_ownership buộc: NULL khi và chỉ khi is_builtin; vai tuỳ chỉnh phải có tenant và không được ở phạm vi SYSTEM
+roles,scope_level,"Phạm vi áp dụng: SYSTEM, TENANT, WORKSPACE hoặc PROJECT.",VERIFIED,Phạm vi SYSTEM chỉ thuộc về nền tảng (tenant_id NULL)
+roles,is_builtin,Vai trò do nền tảng dựng sẵn hay do tổ chức tự tạo.,VERIFIED,Quyết định tenant_id phải NULL hay NOT NULL
+roles,is_active,Vai trò còn dùng được hay đã nghỉ hưu.,VERIFIED,"Vai rác được nhận nuôi bằng cách tắt cờ này, không xoá"
+roles,created_at,Thời điểm tạo vai trò.,VERIFIED,
+roles,role_name,Tên vai trò hiển thị.,NEEDS_REVIEW,Tồn tại song song với role_code sau một lượt di trú; quan hệ giữa hai cột cần xác nhận
+roles,tenant_type_constraint,Giới hạn vai trò chỉ áp cho một loại tổ chức (COMMUNITY hoặc ORGANIZATION).,VERIFIED,NULL nghĩa là không giới hạn theo loại tổ chức
+roles,created_by_user_id,Tài khoản đã tạo vai trò tuỳ chỉnh.,VERIFIED,
+roles,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+role_assignments,assignment_id,Định danh lượt gán vai.,VERIFIED,
+role_assignments,user_id,Tài khoản NHẬN lượt gán vai — chủ thể của quyền.,VERIFIED,"NOT NULL, ON DELETE CASCADE: xoá người thì xoá luôn phép gán"
+role_assignments,role_id,Vai trò được gán.,VERIFIED,
+role_assignments,membership_id,Tư cách thành viên mà lượt gán này gắn vào.,VERIFIED,"Khoá ngoại ghép (membership_id, user_id) bảo đảm vai được gán cho đúng người của membership. NULL với phép gán cấp SYSTEM"
+role_assignments,assigned_by_user_id,Tài khoản THỰC HIỆN việc cấp vai — tác nhân.,VERIFIED,"NOT NULL, ON DELETE RESTRICT: hệ thống TỪ CHỐI xoá người từng cấp vai, tức coi dấu vết uỷ quyền là bằng chứng phải giữ"
+role_assignments,assigned_at,Thời điểm cấp vai.,VERIFIED,
+role_assignments,revoked_by_user_id,Tài khoản THỰC HIỆN việc thu hồi vai — tác nhân thu hồi.,VERIFIED,NULL cho tới khi vai bị thu hồi
+role_assignments,revoked_at,Thời điểm thu hồi vai.,VERIFIED,
+role_assignments,revoke_reason,Lý do thu hồi.,VERIFIED,
+permissions,permission_code,"Mã quyền, dạng `miền.hành_động`.",VERIFIED,CHECK ràng đúng hình dạng ấy bằng biểu thức chính quy
+permissions,description,Mô tả quyền cho người vận hành.,VERIFIED,
+permissions,applicable_scope,"Tầng áp dụng: SYSTEM, TENANT, WORKSPACE hoặc PROJECT.",VERIFIED,
+permissions,risk_level,"Mức rủi ro: NORMAL, SENSITIVE hoặc CRITICAL.",VERIFIED,
+permissions,requires_passcode,Quyền này đòi xác nhận lại bằng mật mã trước khi dùng.,VERIFIED,Cơ chế sudo mode
+permissions,is_api_assignable,Quyền có gán được cho khoá API hay không.,VERIFIED,CHECK cấm quyền phạm vi SYSTEM được gán cho khoá API
+permissions,is_active,Quyền còn hiệu lực hay đã nghỉ hưu.,VERIFIED,
+permissions,created_at,Thời điểm khai báo quyền.,VERIFIED,
+permissions,is_custom_role_allowed,Quyền có được đưa vào vai trò tuỳ chỉnh của tổ chức hay không.,VERIFIED,CHECK cấm quyền phạm vi SYSTEM lọt vào vai tuỳ chỉnh
+role_permissions,role_id,Vai trò được cấp quyền.,VERIFIED,
+role_permissions,permission_code,Quyền được cấp cho vai trò.,VERIFIED,
+role_permissions,granted_at,Thời điểm gắn quyền vào vai trò.,VERIFIED,
+workspaces,workspace_id,Định danh workspace.,VERIFIED,
+workspaces,tenant_id,Tổ chức chứa workspace này.,VERIFIED,
+workspaces,name,"Tên workspace, duy nhất trong phạm vi tổ chức.",VERIFIED,
+workspaces,description,Mô tả workspace.,VERIFIED,
+workspaces,status,Trạng thái workspace.,VERIFIED,
+workspaces,is_default,Workspace mặc định của tổ chức.,VERIFIED,
+workspaces,created_at,Thời điểm tạo.,VERIFIED,
+workspaces,archived_at,Thời điểm lưu trữ.,VERIFIED,
+workspaces,deleted_at,Thời điểm xoá mềm.,VERIFIED,
+projects,project_id,Định danh project.,VERIFIED,
+projects,tenant_id,Tổ chức chứa project này.,VERIFIED,
+projects,workspace_id,Workspace chứa project này.,VERIFIED,"Khoá ngoại ghép (tenant_id, workspace_id) nên project không nằm được trong workspace của tổ chức khác"
+projects,name,"Tên project, duy nhất trong phạm vi workspace.",VERIFIED,Chỉ mục duy nhất MỘT PHẦN: chỉ áp cho hàng chưa xoá mềm
+projects,description,Mô tả project.,VERIFIED,
+projects,status,Trạng thái project.,VERIFIED,
+projects,is_default,Project mặc định của workspace.,VERIFIED,Chỉ mục duy nhất một phần bảo đảm mỗi workspace chỉ có một project mặc định ĐANG HOẠT ĐỘNG
+projects,created_at,Thời điểm tạo.,VERIFIED,
+projects,archived_at,Thời điểm lưu trữ.,VERIFIED,
+projects,deleted_at,Thời điểm xoá mềm.,VERIFIED,
+project_allocations,tenant_id,Tổ chức xác định phạm vi của khoản cấp phát.,VERIFIED,Cột này đang chịu HAI khoá ngoại trùng nhau với hành vi xoá mâu thuẫn (RESTRICT và CASCADE) — xem docs/10-issues/KNOWN_ISSUES.md
+project_allocations,project_id,Project được cấp phát.,VERIFIED,
+project_allocations,metric,"Chỉ tiêu được chia: `samples`, `storage_mb` hoặc `training_jobs_per_month`.",VERIFIED,Ánh xạ sang cột gói qua workspace_admin.ALLOCATABLE_METRICS. CẢNH BÁO: từ v8 chỉ `storage_mb` còn được cưỡng chế ở cấp tổ chức; hai chỉ tiêu kia chia một ngân sách nền tảng không còn kiểm
+project_allocations,allocated,"Phần chỉ tiêu dành cho project này. NULL nghĩa là KHÔNG GIỚI HẠN, không phải chưa điền.",VERIFIED,Tổng phần cấp cho các project không được vượt trần của gói; CHECK cấm giá trị âm
+project_allocations,note,Ghi chú của người vận hành về khoản cấp phát.,VERIFIED,
+project_allocations,updated_by,Tài khoản chỉnh khoản cấp phát gần nhất.,VERIFIED,
+project_allocations,updated_at,Thời điểm chỉnh gần nhất.,VERIFIED,
+tenant_invitations,invitation_id,Định danh lời mời.,VERIFIED,
+tenant_invitations,tenant_id,Tổ chức phát lời mời.,VERIFIED,
+tenant_invitations,email,Địa chỉ thư người được mời; chuẩn hoá lúc ghi.,VERIFIED,
+tenant_invitations,role,Vai trò dự kiến khi người được mời gia nhập.,VERIFIED,
+tenant_invitations,token_hash,Băm của mã mời. Bảng KHÔNG lưu mã gốc.,VERIFIED,Nên một bản sao lưu cơ sở dữ liệu không cho phép ai nhận lời mời hộ
+tenant_invitations,invited_by,Tài khoản đã phát lời mời.,VERIFIED,
+tenant_invitations,created_at,Thời điểm phát lời mời.,VERIFIED,
+tenant_invitations,expires_at,Thời điểm lời mời hết hạn.,VERIFIED,
+tenant_invitations,accepted_at,Thời điểm lời mời được nhận.,VERIFIED,
+tenant_invitations,accepted_by,Tài khoản đã nhận lời mời.,VERIFIED,
+tenant_invitations,revoked_at,Thời điểm thu hồi lời mời.,VERIFIED,Mời lại cùng một địa chỉ sẽ thu hồi lời mời đang mở thay vì tạo thêm
+api_keys,key_id,Định danh khoá API.,VERIFIED,
+api_keys,tenant_id,Tổ chức xác định phạm vi của khoá.,VERIFIED,
+api_keys,name,Tên khoá do người vận hành đặt.,VERIFIED,
+api_keys,prefix,"Tiền tố công khai của khoá, dùng để nhận diện mà không lộ khoá.",VERIFIED,
+api_keys,key_hash,Băm của khoá. Bảng KHÔNG lưu khoá gốc.,VERIFIED,
+api_keys,scopes,Phạm vi thao tác khoá được phép thực hiện.,NEEDS_REVIEW,Kiểu text với mặc định 'read'; cách phân tách nhiều phạm vi cần xác nhận
+api_keys,created_by,Tài khoản đã tạo khoá.,VERIFIED,
+api_keys,created_at,Thời điểm tạo khoá.,VERIFIED,
+api_keys,last_used_at,Lần khoá được dùng gần nhất.,VERIFIED,
+api_keys,expires_at,Thời điểm khoá hết hạn.,VERIFIED,
+api_keys,revoked_at,Thời điểm thu hồi khoá.,VERIFIED,Hạn mức số khoá chỉ đếm khoá CHƯA thu hồi
+api_keys,revoked_by,Tài khoản đã thu hồi khoá.,VERIFIED,
+legal_documents,doc_id,Định danh bản văn bản pháp lý đã công bố.,VERIFIED,
+legal_documents,kind,"Loại văn bản: `terms`, `privacy`, `data_contribution` hoặc `guardian`.",VERIFIED,Cùng với `version` tạo thành khoá tự nhiên mà mọi chấp thuận neo vào
+legal_documents,version,Phiên bản văn bản.,VERIFIED,"`(kind, version)` là đích của khoá ngoại từ user_consents và signer_consents"
+legal_documents,effective_from,Thời điểm văn bản bắt đầu có hiệu lực.,VERIFIED,
+legal_documents,content_hash,Băm nội dung; là thứ chữ ký chấp thuận trỏ vào.,VERIFIED,Bất biến sau khi công bố — sửa nội dung sẽ làm mọi chấp thuận đã ghi không còn khớp
+legal_documents,url,Đường dẫn công khai tới văn bản.,VERIFIED,
+legal_documents,title,Tiêu đề văn bản.,VERIFIED,
+legal_documents,requires_reconsent,Bản này buộc người đã chấp thuận bản cũ phải chấp thuận lại.,VERIFIED,Phân biệt sửa lỗi chính tả với thay đổi thực chất về quyền và nghĩa vụ
+legal_documents,body,Thân văn bản lưu thẳng trong cơ sở dữ liệu.,VERIFIED,
+legal_documents,body_format,"Dạng thân văn bản: `markdown`, `text` hoặc `file`.",VERIFIED,Máy CÀI MỚI thiếu giá trị `file` do một lỗi thứ tự câu lệnh — xem docs/10-issues/KNOWN_ISSUES.md
+legal_documents,language,Ngôn ngữ của bản văn bản.,VERIFIED,
+legal_documents,change_summary,Tóm tắt thay đổi so với bản trước.,VERIFIED,
+legal_documents,published_at,Thời điểm công bố.,VERIFIED,
+legal_documents,published_by,Tài khoản đã công bố văn bản.,VERIFIED,
+legal_documents,storage_backend,Nơi lưu thân văn bản khi không nằm trong cột `body`.,VERIFIED,
+legal_documents,storage_key,Khoá tra thân văn bản trong kho định-địa-chỉ-bằng-nội-dung.,VERIFIED,
+legal_documents,byte_size,Kích thước thân văn bản.,VERIFIED,
+legal_documents,file_key,Khoá tra tệp đính kèm khi `body_format = 'file'`.,VERIFIED,CHECK buộc cột này có giá trị KHI VÀ CHỈ KHI body_format = 'file'
+legal_documents,file_name,Tên tệp gốc của bản văn bản dạng tệp.,VERIFIED,
+legal_documents,file_mime,Kiểu MIME của tệp đính kèm.,VERIFIED,
+legal_documents,file_size,Kích thước tệp đính kèm.,VERIFIED,
+legal_document_drafts,draft_id,Định danh bản thảo văn bản.,VERIFIED,
+legal_document_drafts,kind,Loại văn bản mà bản thảo này nhắm tới.,VERIFIED,
+legal_document_drafts,title,Tiêu đề dự kiến.,VERIFIED,
+legal_document_drafts,language,Ngôn ngữ bản thảo.,VERIFIED,
+legal_document_drafts,body,Thân bản thảo.,VERIFIED,
+legal_document_drafts,body_format,Dạng thân bản thảo.,VERIFIED,
+legal_document_drafts,change_summary,Tóm tắt thay đổi dự kiến.,VERIFIED,
+legal_document_drafts,target_version,Số hiệu phiên bản dự kiến đặt khi công bố.,VERIFIED,
+legal_document_drafts,requires_reconsent,Bản công bố từ bản thảo này sẽ buộc chấp thuận lại.,VERIFIED,
+legal_document_drafts,effective_from,Thời điểm hiệu lực dự kiến.,VERIFIED,
+legal_document_drafts,status,"Trạng thái: `draft`, `in_review`, `approved`, `published` hoặc `discarded`.",VERIFIED,Chỉ mục duy nhất MỘT PHẦN cho phép tối đa một bản thảo đang mở cho mỗi loại văn bản
+legal_document_drafts,revision,"Số lần sửa bản thảo, bắt đầu từ 1.",VERIFIED,
+legal_document_drafts,based_on_version,Phiên bản đã công bố mà bản thảo dựa trên.,VERIFIED,
+legal_document_drafts,published_version,Phiên bản thực tế được công bố từ bản thảo này.,VERIFIED,
+legal_document_drafts,storage_key,Khoá tra thân bản thảo trong kho.,VERIFIED,
+legal_document_drafts,content_hash,Băm nội dung bản thảo.,VERIFIED,
+legal_document_drafts,byte_size,Kích thước thân bản thảo.,VERIFIED,
+legal_document_drafts,created_by,Tài khoản đã tạo bản thảo.,VERIFIED,
+legal_document_drafts,updated_by,Tài khoản sửa bản thảo gần nhất.,VERIFIED,
+legal_document_drafts,created_at,Thời điểm tạo bản thảo.,VERIFIED,
+legal_document_drafts,updated_at,Thời điểm sửa gần nhất.,VERIFIED,
+legal_document_events,event_id,Số thứ tự sự kiện trong sổ.,VERIFIED,
+legal_document_events,occurred_at,Thời điểm sự kiện xảy ra.,VERIFIED,
+legal_document_events,actor_user_id,"Tài khoản thực hiện. Giữ như dấu vết, KHÔNG có khoá ngoại.",VERIFIED,"Cố ý: một sổ đăng bạ không được cản chính hành động nó ghi lại. Bản trước có khoá ngoại và nó chặn lượt xoá tài khoản theo yêu cầu quyền riêng tư, để lại 9 hàng users mồ côi"
+legal_document_events,actor_label,"Nhãn người thực hiện, điền ngay lúc ghi.",VERIFIED,Là danh tính còn lại sau khi tài khoản bị xoá; KHÔNG cập nhật khi người dùng đổi tên
+legal_document_events,action,Hành động được ghi lại.,VERIFIED,
+legal_document_events,kind,"Loại văn bản liên quan. Dấu vết, không phải liên kết.",VERIFIED,
+legal_document_events,version,"Phiên bản văn bản liên quan. Dấu vết, không phải liên kết.",VERIFIED,
+legal_document_events,draft_id,"Bản thảo liên quan. Dấu vết, không phải liên kết.",VERIFIED,
+legal_document_events,revision,Số sửa của bản thảo tại thời điểm sự kiện.,VERIFIED,
+legal_document_events,storage_key,Khoá tra nội dung tại thời điểm sự kiện.,VERIFIED,
+legal_document_events,content_hash,Băm nội dung tại thời điểm sự kiện.,VERIFIED,
+legal_document_events,detail,"Dữ liệu bổ sung của sự kiện, dạng JSON.",VERIFIED,
+user_consents,consent_id,Định danh bản ghi chấp thuận của tài khoản.,VERIFIED,
+user_consents,user_id,Tài khoản LÀ CHỦ THỂ của chấp thuận.,VERIFIED,Khác `recorded_by`: người ghi bằng chứng không nhất thiết là người được ghi nhận
+user_consents,kind,Loại văn bản được chấp thuận.,VERIFIED,
+user_consents,version,Phiên bản văn bản được chấp thuận.,VERIFIED,"Khoá ngoại ghép `(kind, version)` neo chấp thuận vào ĐÚNG MỘT bản; RESTRICT nên không xoá được bản còn người đã chấp thuận"
+user_consents,accepted_at,Thời điểm chấp thuận.,VERIFIED,
+user_consents,ip_hash,Băm địa chỉ IP lúc chấp thuận.,VERIFIED,"Băm chứ không lưu thẳng: đủ để đối chiếu, không đủ để theo dõi"
+user_consents,user_agent,Chuỗi user-agent lúc chấp thuận.,VERIFIED,
+user_consents,withdrawn_at,Thời điểm rút chấp thuận.,VERIFIED,"Rút là rút: bản ghi không bị xoá, nhưng hiệu lực chấm dứt từ mốc này"
+user_consents,source,"Nguồn bản ghi: `user`, `backfill` hoặc `import`.",VERIFIED,Đo trên sản xuất: hiện có `user` và `backfill`. Đây là lý do tên quan hệ dùng 'anchors' chứ không 'signs'
+user_consents,note,Ghi chú kèm bản ghi chấp thuận.,VERIFIED,
+user_consents,recorded_by,Tài khoản đã GHI bản ghi này.,VERIFIED,NULL khi chính người dùng tự chấp thuận qua giao diện
+signer_consents,consent_id,Định danh bản ghi chấp thuận của người ký.,VERIFIED,
+signer_consents,tenant_id,Tổ chức xác định phạm vi của bản ghi.,VERIFIED,
+signer_consents,signer_id,Người ký LÀ CHỦ THỂ của chấp thuận.,VERIFIED,"Khoá ngoại ghép `(tenant_id, signer_id)`"
+signer_consents,scope,"Mức cho phép sử dụng dữ liệu: `internal_training`, `research_release` hoặc `public_library`.",VERIFIED,"Thang ba mức, rộng dần. `tenant_exports.export_purpose` dùng CÙNG bộ từ vựng — đó là chỗ nối chấp thuận vào phép phát hành"
+signer_consents,kind,Loại văn bản được chấp thuận.,VERIFIED,
+signer_consents,version,Phiên bản văn bản được chấp thuận.,VERIFIED,"Cùng cơ chế neo `(kind, version)` như user_consents"
+signer_consents,granted_at,Thời điểm cho phép.,VERIFIED,
+signer_consents,withdrawn_at,Thời điểm rút cho phép.,VERIFIED,CHECK buộc mốc rút không sớm hơn mốc cho phép
+signer_consents,guardian_name,Tên người giám hộ khi người ký chưa đủ tuổi tự quyết.,VERIFIED,
+signer_consents,evidence,Mô tả bằng chứng của lượt cho phép.,VERIFIED,
+signer_consents,recorded_by,Tài khoản đã ghi bản ghi này.,VERIFIED,
+audit_log,audit_id,Số thứ tự dòng kiểm toán.,VERIFIED,
+audit_log,tenant_id,Tổ chức của hành động. NULL với hành động cấp NỀN TẢNG.,VERIFIED,Là bảng duy nhất trong nhóm có tenant_id cho phép NULL — không phải mọi dòng đều thuộc một tổ chức
+audit_log,actor_user_id,Tài khoản thực hiện hành động.,VERIFIED,
+audit_log,actor_label,"Nhãn người thực hiện, chụp lại tại thời điểm ghi.",VERIFIED,"Là bằng chứng lịch sử: KHÔNG cập nhật khi tài khoản đổi tên, và còn lại sau khi tài khoản bị xoá"
+audit_log,action,Hành động được ghi lại; CHECK cấm chuỗi rỗng.,VERIFIED,
+audit_log,target_type,Loại đối tượng bị tác động.,VERIFIED,
+audit_log,target_id,Định danh đối tượng bị tác động.,VERIFIED,
+audit_log,detail,"Dữ liệu bổ sung, dạng JSON.",VERIFIED,
+audit_log,ip_hash,Băm địa chỉ IP của lượt thao tác.,VERIFIED,
+audit_log,created_at,Thời điểm ghi dòng kiểm toán.,VERIFIED,
+tenant_exports,export_id,Định danh lượt xuất dữ liệu.,VERIFIED,
+tenant_exports,tenant_id,Tổ chức yêu cầu xuất.,VERIFIED,
+tenant_exports,requested_by,Tài khoản đã yêu cầu.,VERIFIED,
+tenant_exports,status,"Trạng thái: `pending`, `running`, `ready`, `failed` hoặc `expired`.",VERIFIED,
+tenant_exports,scope,Phạm vi dữ liệu xuất: `metadata` hoặc `full`.,VERIFIED,
+tenant_exports,file_path,Đường dẫn tệp kết quả.,VERIFIED,Tệp xuất CỐ Ý không tính vào hạn mức dung lượng: nó là bản sao của byte đã tính
+tenant_exports,size_bytes,Kích thước tệp kết quả.,VERIFIED,
+tenant_exports,row_counts,"Số hàng đã xuất theo từng bảng, dạng JSON.",VERIFIED,
+tenant_exports,error,Thông báo lỗi khi lượt xuất thất bại.,VERIFIED,
+tenant_exports,created_at,Thời điểm yêu cầu.,VERIFIED,
+tenant_exports,completed_at,Thời điểm hoàn tất.,VERIFIED,
+tenant_exports,expires_at,Thời điểm tệp xuất hết hạn và bị dọn.,VERIFIED,
+tenant_exports,export_purpose,"Mục đích phát hành: `tenant_portability`, `internal_training`, `research_release` hoặc `public_library`.",VERIFIED,Ba giá trị sau TRÙNG bộ từ vựng của signer_consents.scope — đó là chỗ mức chấp thuận quyết định mẫu nào được phép ra khỏi hệ thống
+tenant_purges,purge_id,Định danh lượt xoá tổ chức.,VERIFIED,
+tenant_purges,tenant_id,"Định danh tổ chức đã bị xoá. Là CHỮ, là dấu vết, không phải liên kết.",VERIFIED,Cố ý không có khoá ngoại tới tenants: một khoá ngoại sẽ khiến chính hành động bảng này ghi lại trở nên bất khả thi. Cũng vì thế bảng không nằm trong TENANT_SCOPED_TABLES và không có RLS
+tenant_purges,display_name,Tên tổ chức tại thời điểm xoá.,VERIFIED,
+tenant_purges,requested_by,"Tài khoản đã yêu cầu xoá. Dấu vết, không có khoá ngoại.",VERIFIED,
+tenant_purges,row_counts,"Số hàng đã xoá theo từng bảng, dạng JSON.",VERIFIED,
+tenant_purges,files_removed,Số tệp đã gỡ khỏi kho.,VERIFIED,
+tenant_purges,bytes_removed,Số byte đã giải phóng.,VERIFIED,
+tenant_purges,export_id,"Lượt xuất dữ liệu thực hiện trước khi xoá, nếu có.",VERIFIED,Dấu vết cho thấy tổ chức đã được trao dữ liệu trước khi bị xoá
+tenant_purges,reason,Lý do xoá.,VERIFIED,
+tenant_purges,created_at,Thời điểm xoá.,VERIFIED,
+sot_authorized_keys,public_key,Khoá công khai của máy được phép ghi SOT.,VERIFIED,Khoá công khai không phải bí mật; khoá riêng không bao giờ rời máy ghi
+sot_authorized_keys,name,Tên máy ghi.,VERIFIED,
+sot_authorized_keys,fingerprint,"Vân tay khoá, dùng để đối chiếu nhanh.",VERIFIED,
+sot_authorized_keys,note,Ghi chú của người vận hành.,VERIFIED,
+sot_authorized_keys,added_by,"Người đã thêm khoá, dạng VĂN BẢN.",NEEDS_REVIEW,Kiểu text chứ không phải uuid nên đây không phải tham chiếu tài khoản; lý do thiết kế chưa được ghi lại ở đâu
+sot_authorized_keys,added_at,Thời điểm thêm khoá.,VERIFIED,
+sot_authorized_keys,revoked_at,Thời điểm thu hồi khoá.,VERIFIED,"Bảng này được hợp với danh sách khoá cam kết trong kho mã, nên một máy đăng ký ở đây được tin cậy mà không cần triển khai lại"
+languages,code,Mã ngôn ngữ ký hiệu.,VERIFIED,
+languages,name,Tên ngôn ngữ ký hiệu.,VERIFIED,
+regions,code,Mã vùng miền.,VERIFIED,Dữ liệu tham chiếu dùng chung; bảng KHÔNG có tenant_id
+regions,name_vi,Tên vùng miền tiếng Việt.,VERIFIED,
+regions,name_en,Tên vùng miền tiếng Anh.,VERIFIED,
+regions,status,Trạng thái duyệt của mục vùng miền.,VERIFIED,"Khác `is_active`: cột này nói mục đã được duyệt chưa, cột kia nói còn dùng nữa không"
+regions,sort_order,Thứ tự hiển thị.,VERIFIED,
+regions,is_active,Vùng miền còn được chọn hay đã nghỉ hưu.,VERIFIED,
+regions,note,Ghi chú của người vận hành.,VERIFIED,
+regions,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+dialects,tenant_id,Tổ chức xác định PHẠM VI của mục phương ngữ.,VERIFIED,"Phạm vi, không phải quyền sở hữu chung chung: mỗi tổ chức có danh mục phương ngữ riêng, nhân bản từ khuôn Community lúc tạo"
+dialects,dialect_id,"Định danh phương ngữ, duy nhất trong phạm vi tổ chức.",VERIFIED,Slug này chính là thứ hiện trên giao diện và là tên thư mục lưu mẫu
+dialects,display_name,Tên phương ngữ dạng người đọc.,VERIFIED,
+dialects,language,Ngôn ngữ ký hiệu chứa phương ngữ này.,VERIFIED,
+dialects,is_alphabet,Phương ngữ này là bộ chữ cái ngón tay.,VERIFIED,
+dialects,is_active,Phương ngữ còn được chọn trong các ô chọn hay không.,VERIFIED,"TRỤC KHÁC với `status`. Đo được: `testdatase` có status=approved nhưng is_active=false, nên nó không hiện ở đâu cả"
+dialects,status,"Trạng thái vòng đời của ĐỀ NGHỊ thêm phương ngữ: `pending`, `approved` hoặc `rejected`.",VERIFIED,"TRỤC KHÁC với `is_active`. `pending` = người tạo dùng được ngay, người khác chưa thấy"
+dialects,merged_into,Phương ngữ đích khi mục này bị gộp đi.,VERIFIED,"Từ chối một đề nghị là GỘP, không phải xoá — nếu không, mẫu đã thu dưới phương ngữ ấy sẽ bị bỏ rơi"
+dialects,created_by,Tài khoản đã đề nghị thêm phương ngữ.,VERIFIED,
+dialects,approved_by,Tài khoản đã duyệt.,VERIFIED,
+dialects,created_at,Thời điểm đề nghị.,VERIFIED,
+dialects,approved_at,Thời điểm duyệt.,VERIFIED,
+dialects,note,Ghi chú của người vận hành.,VERIFIED,
+dialects,display_order,Thứ tự hiển thị do người vận hành sắp.,VERIFIED,
+dialect_aliases,tenant_id,Tổ chức xác định phạm vi của bản ghi gộp.,VERIFIED,
+dialect_aliases,old_dialect_id,"Định danh cũ, nay chuyển hướng sang mục khác.",VERIFIED,Bảng này ghi phép CHUYỂN HƯỚNG; nó không định nghĩa thêm một phương ngữ nào
+dialect_aliases,new_dialect_id,Định danh phương ngữ mà mục cũ được gộp vào.,VERIFIED,
+dialect_aliases,merged_at,Thời điểm gộp.,VERIFIED,
+dialect_aliases,merged_by,Tài khoản đã thực hiện gộp.,VERIFIED,
+recognition_profiles,tenant_id,Tổ chức xác định phạm vi của hồ sơ nhận dạng.,VERIFIED,
+recognition_profiles,profile_id,"Định danh hồ sơ nhận dạng, duy nhất trong phạm vi tổ chức.",VERIFIED,
+recognition_profiles,display_name,Tên hồ sơ dạng người đọc.,VERIFIED,
+recognition_profiles,is_trainable,Cờ được mang theo trong ảnh chụp registry.,NEEDS_REVIEW,KHÔNG cổng huấn luyện nào đọc cột này; người đọc duy nhất là app/cli/export_registry_snapshot.py. Ý nghĩa dự kiến cần tác giả xác nhận trước khi mô tả nó như một điều kiện huấn luyện
+recognition_profiles,is_active,Hồ sơ còn được chọn hay đã nghỉ hưu.,VERIFIED,
+recognition_profiles,created_at,Thời điểm tạo hồ sơ.,VERIFIED,
+recognition_profiles,display_order,Thứ tự hiển thị.,VERIFIED,
+vocabulary_groups,tenant_id,Tổ chức xác định phạm vi của nhóm từ vựng.,VERIFIED,
+vocabulary_groups,group_id,"Định danh nhóm từ vựng, duy nhất trong phạm vi tổ chức.",VERIFIED,
+vocabulary_groups,display_name,Tên nhóm dạng người đọc.,VERIFIED,
+vocabulary_groups,display_order,Thứ tự hiển thị.,VERIFIED,
+vocabulary_groups,is_active,Nhóm còn được chọn hay đã nghỉ hưu.,VERIFIED,
+vocabulary_groups,created_at,Thời điểm tạo nhóm.,VERIFIED,
+classes,class_uid,Định danh lớp ký hiệu.,VERIFIED,
+classes,class_idx,Chỉ số lớp dùng khi huấn luyện.,VERIFIED,Chỉ mục duy nhất một phần: chỉ áp cho lớp chưa xoá mềm và có chỉ số
+classes,slug,"Dạng rút gọn của nhãn, dùng đặt tên thư mục và tệp.",VERIFIED,
+classes,label_original,Nhãn gốc do người dùng nhập.,VERIFIED,
+classes,language,Chiều phân loại: ngôn ngữ ký hiệu của lớp.,VERIFIED,
+classes,dialect,Chiều phân loại: phương ngữ của lớp.,VERIFIED,"Khoá ngoại ghép `(tenant_id, dialect)`; cũng là tên thư mục lưu mẫu"
+classes,is_common_global,Lớp thuộc vốn từ phổ thông của mọi ngôn ngữ.,NEEDS_REVIEW,Quan hệ với `vocabulary_scope` cần xác nhận
+classes,is_common_language,Lớp thuộc vốn từ phổ thông trong một ngôn ngữ.,NEEDS_REVIEW,Cùng câu hỏi như `is_common_global`
+classes,folder_name,Tên thư mục vật lý chứa mẫu của lớp.,VERIFIED,
+classes,created_at,Thời điểm đăng ký lớp.,VERIFIED,
+classes,migrated_at,Thời điểm lớp được chuyển sang cấu trúc phân cấp hiện tại.,VERIFIED,
+classes,deleted_at,Thời điểm xoá mềm lớp.,VERIFIED,
+classes,description,Mô tả lớp.,VERIFIED,
+classes,is_active,Lớp còn được thu thêm mẫu hay không.,VERIFIED,
+classes,hands_required,Số bàn tay lớp này cần: 1 hoặc 2.,VERIFIED,Điền theo nguyên tắc lần-thu-đầu-thắng và dùng để chấm chất lượng mẫu
+classes,semantic_label,Nhãn ngữ nghĩa chuẩn hoá của lớp.,VERIFIED,
+classes,vocabulary_scope,Phạm vi vốn từ mà lớp thuộc về.,VERIFIED,Đo trên sản xuất hiện chỉ có `profile_specific`
+classes,recognition_profile,Chiều phân loại: hồ sơ nhận dạng của lớp.,VERIFIED,"Khoá ngoại ghép `(tenant_id, recognition_profile)`"
+classes,vocabulary_group,Chiều phân loại: nhóm từ vựng của lớp.,VERIFIED,"Khoá ngoại ghép `(tenant_id, vocabulary_group)`"
+classes,collection_campaign,Đợt thu thập mà lớp được tạo ra trong đó.,NEEDS_REVIEW,
+classes,motion_type,Lớp là ký hiệu tĩnh hay động.,VERIFIED,Đo được: `static` và `dynamic`
+classes,tenant_id,Tổ chức xác định phạm vi của lớp.,VERIFIED,
+classes,region,Chiều phân loại: vùng miền của lớp — LÀ MỘT PHẦN CỦA ĐỊNH DANH LỚP.,VERIFIED,"Chỉ mục duy nhất gồm NĂM cột (tenant, slug, language, dialect, region), nên hai lớp cùng nhãn khác vùng là hai lớp khác nhau. Mặc định `unclassified`"
+registry_versions,tenant_id,Tổ chức sở hữu phiên bản registry này.,VERIFIED,
+registry_versions,version,Số hiệu phiên bản registry TRONG PHẠM VI một tổ chức.,VERIFIED,"KHÁC `community_versions.version`, vốn đánh số cho khuôn nền tảng"
+registry_versions,content_hash,Băm nội dung của bản chụp.,VERIFIED,"Cho phép biết danh mục hiện tại đã khác bản công bố gần nhất chưa, mà không cần so ngày"
+registry_versions,snapshot,Bản chụp bất biến toàn bộ danh mục của tổ chức tại thời điểm công bố.,VERIFIED,
+registry_versions,note,Ghi chú kèm lượt công bố.,VERIFIED,
+registry_versions,created_by,Tài khoản đã công bố.,VERIFIED,
+registry_versions,created_at,Thời điểm công bố.,VERIFIED,
+vocabulary_registry_meta,tenant_id,Tổ chức mà con trỏ này thuộc về.,VERIFIED,"Đồng thời là khoá chính, nên mỗi tổ chức có nhiều nhất MỘT dòng — quan hệ 1–1"
+vocabulary_registry_meta,version,CON TRỎ tới phiên bản registry đang công bố của tổ chức. NULL = chưa công bố phiên bản nào.,VERIFIED,"Không phải một phiên bản riêng: nó chỉ trỏ vào registry_versions. Trước v7 chỗ này dùng số 0 làm mốc 'chưa có gì', mà 0 là phiên bản KHÔNG BAO GIỜ tồn tại — nên nó làm hỏng lượt tạo tổ chức khi khoá ngoại ghép ra đời"
+vocabulary_registry_meta,updated_at,Thời điểm con trỏ được cập nhật gần nhất.,VERIFIED,
+community_dialects,dialect_id,Định danh phương ngữ trong KHUÔN nền tảng.,VERIFIED,"Khuôn là thứ mọi tổ chức MỚI được nhân bản từ đó. Đây là cấu hình cấp nền tảng, KHÔNG phải dữ liệu của tenant Community dự trữ"
+community_dialects,display_name,Tên phương ngữ trong khuôn.,VERIFIED,
+community_dialects,language,Ngôn ngữ ký hiệu của mục trong khuôn.,VERIFIED,
+community_dialects,is_alphabet,Mục này là bộ chữ cái ngón tay.,VERIFIED,
+community_dialects,display_order,Thứ tự hiển thị trong khuôn.,VERIFIED,
+community_dialects,is_active,Mục có được nhân bản ở trạng thái đang dùng hay không.,VERIFIED,
+community_dialects,note,Ghi chú của quản trị viên hệ thống.,VERIFIED,
+community_dialects,updated_by,Tài khoản sửa khuôn gần nhất.,VERIFIED,
+community_dialects,updated_at,Thời điểm sửa khuôn gần nhất.,VERIFIED,
+community_profiles,profile_id,Định danh hồ sơ nhận dạng trong KHUÔN nền tảng.,VERIFIED,
+community_profiles,display_name,Tên hồ sơ trong khuôn.,VERIFIED,
+community_profiles,is_trainable,Cờ được nhân bản sang recognition_profiles của tổ chức mới.,NEEDS_REVIEW,Cùng câu hỏi như recognition_profiles.is_trainable: không cổng huấn luyện nào đọc
+community_profiles,display_order,Thứ tự hiển thị trong khuôn.,VERIFIED,
+community_profiles,is_active,Hồ sơ có được nhân bản hay không.,VERIFIED,
+community_profiles,note,Ghi chú của quản trị viên hệ thống.,VERIFIED,
+community_profiles,updated_by,Tài khoản sửa khuôn gần nhất.,VERIFIED,
+community_profiles,updated_at,Thời điểm sửa khuôn gần nhất.,VERIFIED,
+community_versions,version,Số hiệu phiên bản của KHUÔN nền tảng.,VERIFIED,"KHÁC `registry_versions.version` (phiên bản registry của một tổ chức) và khác `vocabulary_registry_meta.version` (con trỏ). Ba khái niệm, cùng một chữ"
+community_versions,content_hash,Băm nội dung khuôn tại thời điểm đóng băng.,VERIFIED,Công bố là luỹ đẳng theo NỘI DUNG: khuôn không đổi thì trả về bản đã có chứ không đúc bản trùng
+community_versions,snapshot,Bản chụp bất biến của khuôn tại thời điểm công bố.,VERIFIED,
+community_versions,note,Ghi chú kèm lượt công bố khuôn.,VERIFIED,
+community_versions,created_by,Tài khoản đã công bố khuôn.,VERIFIED,
+community_versions,created_at,Thời điểm công bố khuôn.,VERIFIED,`tenants.cloned_from_community_version` trỏ vào đây để ghi lại tổ chức được tạo từ bản khuôn nào
