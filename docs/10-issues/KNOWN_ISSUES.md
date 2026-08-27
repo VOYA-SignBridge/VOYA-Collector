@@ -1499,21 +1499,78 @@ migration này").
 
 ---
 
-## Hai khoá ngoại đối lập trên `project_allocations.tenant_id` (26/08/2026)
+## `user_consents.ip_hash` băm KHÔNG khoá, trong khi `audit_log.ip_hash` có (26/08/2026)
 
-Phát hiện khi dựng bảng quan hệ PDM cho nhóm A. Cùng một cột mang **hai** khoá
-ngoại tới cùng một bảng cha, với hành vi xoá **mâu thuẫn**:
+Phát hiện khi soát mô tả nhóm E. Hai cột cùng tên, cùng mục đích bề ngoài, hai
+cơ chế khác hẳn:
 
-| Ràng buộc | ON DELETE |
-|---|---|
-| `fk_project_allocations_tenant` | **RESTRICT** |
-| `project_allocations_tenant_id_fkey` | **CASCADE** |
+| Cột | Cơ chế | Muối/khoá |
+|---|---|---|
+| `audit_log.ip_hash` | HMAC-SHA256 | **pepper NGOÀI cơ sở dữ liệu** |
+| `user_consents.ip_hash` | SHA-256 trần | `user_id` — **nằm ngay trong cùng hàng** |
+
+Lập luận vì sao điều đó quan trọng đã được viết sẵn trong chính kho mã này,
+ở docstring `audit.hash_ip`:
+
+> *"Không gian IPv4 chỉ có 4 tỉ giá trị; một bản băm trần là duyệt cạn trong vài
+> giây, nên nó KHÔNG che gì cả — chỉ tạo cảm giác đã che."*
+
+Áp đúng lập luận ấy cho `user_consents.ip_hash`: kẻ có một bản sao cơ sở dữ liệu
+đọc được `user_id` của từng hàng, tức là biết luôn muối, nên duyệt cạn không
+gian IPv4 cho mỗi hàng là việc vài giây. **Cột ấy không ẩn danh địa chỉ IP trước
+một bản sao CSDL bị lộ.**
+
+### Hai thiết kế đối lập là CÓ CHỦ Ý — chỉ có phần mật mã là chưa đồng bộ
+
+Đừng "sửa" bằng cách làm hai cột giống nhau. Chúng trả lời hai câu hỏi ngược nhau
+và cách muối phản ánh đúng điều đó:
+
+* **`audit_log`** cố ý KHÔNG muối theo người thực hiện, để trả lời được *"có phải
+  cùng một nơi vừa thử ba tài khoản quản trị không"*. Đối chiếu chéo tài khoản
+  là TÍNH NĂNG ở đây.
+* **`user_consents`** cố ý muối theo `user_id`, để hai tài khoản cùng một IP KHÔNG
+  đối chiếu được với nhau. Bằng chứng chấp thuận là của từng người.
+
+Thứ chưa đồng bộ không phải cách muối, mà là **việc có khoá hay không**. Sửa đúng
+là giữ nguyên muối theo `user_id` nhưng chuyển sang HMAC với cùng pepper ngoài
+CSDL, tách miền bằng tiền tố riêng — y như `audit-ip` đã làm. Khi đó cả hai cột
+chống được bản sao CSDL bị lộ mà vẫn giữ hai ngữ nghĩa đối chiếu khác nhau.
+
+`audit.hash_ip` còn trả `None` khi thiếu pepper, kèm lý do: *"Ghi một bản băm đảo
+ngược được còn tệ hơn không ghi gì."* Đường ghi chấp thuận chưa có bước đó.
+
+**Chưa sửa.** Là câu một chiều trên dữ liệu đã có (băm cũ không chuyển đổi được
+sang HMAC nếu không còn IP gốc — mà ta cố tình không lưu IP gốc), nên lượt sửa
+phải quyết định xử lý hàng cũ thế nào: để nguyên và đánh dấu cơ chế theo mốc
+thời gian, hay xoá. Đó là quyết định về quyền riêng tư, không phải về mã.
+
+**Trong Data Dictionary**: cả hai cột giữ `VERIFIED` — ta biết rõ chúng là gì.
+Điều được sửa là mô tả: câu cũ ở `user_consents.ip_hash` nói bản băm *"không đủ
+để theo dõi"*, và đó là một khẳng định về thuộc tính mật mã mà cơ chế thực tế
+không bảo đảm.
+
+---
+
+## Hai khoá ngoại đối lập trên cùng một cột `tenant_id` (26/08/2026)
+
+Phát hiện khi dựng bảng quan hệ PDM cho nhóm A. Toàn lược đồ có **đúng hai** cặp
+như vậy: cùng một cột mang **hai** khoá ngoại tới cùng một bảng cha, với hành vi
+xoá **mâu thuẫn**:
+
+| Bảng | Ràng buộc | ON DELETE |
+|---|---|---|
+| `project_allocations` | `fk_project_allocations_tenant` | **RESTRICT** |
+| `project_allocations` | `project_allocations_tenant_id_fkey` | **CASCADE** |
+| `memberships` | `fk_memberships_tenant` | **RESTRICT** |
+| `memberships` | `memberships_tenant_id_fkey` | **CASCADE** |
 
 PostgreSQL cưỡng chế **cả hai**, nên khi xoá một tenant thì `RESTRICT` chặn
 trước và `CASCADE` **không bao giờ chạy được**. Hành vi thực tế là hạn chế; câu
 `CASCADE` là một ràng buộc chết.
 
-### Nguyên nhân: tồn dư của lược đồ cũ, KHÔNG phải lỗi mã hiện tại
+### Hai cặp, HAI nguyên nhân khác nhau — đừng gộp
+
+#### `project_allocations`: tồn dư của lược đồ cũ, KHÔNG phải lỗi mã hiện tại
 
 `CREATE TABLE project_allocations` trong `app/storage/authz_schema.py` **cố ý
 không** viết `REFERENCES tenants (...)`, và có hẳn một khối chú thích giải thích
@@ -1527,17 +1584,48 @@ vì sao. Nên:
 Hai bản cài do đó khác nhau ở đúng ràng buộc này. Hành vi thực tế trên sản xuất
 vẫn là `RESTRICT`, vì cả hai ràng buộc cùng tồn tại và cái chặt hơn thắng.
 
+#### `memberships`: mã HIỆN TẠI dựng lại nó ở MỌI lần cài mới
+
+Cặp thứ hai không phải tồn dư. `CREATE TABLE memberships` trong
+`app/storage/authz_schema.py` khai thẳng
+
+    tenant_id TEXT NOT NULL REFERENCES tenants (tenant_id) ON DELETE CASCADE
+
+sinh ra `memberships_tenant_id_fkey`; đồng thời `memberships` nằm trong
+`TENANT_SCOPED_AUTHZ_TABLES`, nên vòng cấp khoá ngoại chung thêm
+`fk_memberships_tenant` với `ON DELETE RESTRICT`. Vòng ấy chỉ bỏ qua khi một
+ràng buộc **trùng TÊN** đã có, không kiểm cột đã có khoá ngoại nào chưa.
+
+Đo trên hai cơ sở dữ liệu dựng từ số không (`signdb_v8fresh` và `signdb_test`):
+
+| | `memberships` | `project_allocations` |
+|---|---|---|
+| bản **cài mới** | **CÓ** cả hai khoá | chỉ `fk_..._tenant` |
+| bản **nâng cấp** (sản xuất) | **CÓ** cả hai khoá | **CÓ** cả hai khoá |
+
+Chú thích ở `_PROJECT_ALLOCATION_DDL` đã viết đúng bài học này — *"KHÔNG viết
+`REFERENCES tenants (...)` ở đây"* — nhưng chỉ áp cho một bảng. Bảng kia nằm
+cùng danh sách, cùng lỗi, và không ai đọc lại.
+
 Điều nguy hiểm không phải hành vi — hành vi đang an toàn, và an toàn theo đúng
 hướng ta muốn — mà là **người đọc lược đồ sản xuất sẽ thấy `CASCADE`** và tin
 rằng xoá tenant tự dọn phần cấp phát. Nó không.
 
-Cách xử lý sau này: một migration có phiên bản để gỡ ràng buộc dư
-`project_allocations_tenant_id_fkey`, giữ `fk_project_allocations_tenant`. Là
-câu một chiều nên phải đi kèm một phiên bản lược đồ.
+Cách xử lý sau này: một migration có phiên bản để gỡ hai ràng buộc dư
+`project_allocations_tenant_id_fkey` và `memberships_tenant_id_fkey`, giữ hai
+khoá `fk_*_tenant`. Là câu một chiều nên phải đi kèm một phiên bản lược đồ. Với
+`memberships` còn phải bỏ `REFERENCES` nội tuyến trong `CREATE TABLE`, nếu không
+lần cài mới kế tiếp dựng lại đúng ràng buộc vừa gỡ.
 
-**Chưa sửa**, và không sửa trong luồng ERD/PDM. Trên PDM hai ràng buộc mang
-**một** Relationship Name và **hai** Code (`..._RESTRICT`, `..._CASCADE`) —
-không bịa hai ngữ nghĩa nghiệp vụ chỉ để hợp thức hoá hai ràng buộc vật lý.
+Đáng làm cùng lúc: một phép kiểm chặn *cả lớp* lỗi này — khẳng định không cột nào
+mang hai khoá ngoại cùng trỏ tới một bảng cha. Câu truy vấn đã có sẵn trong
+`docs/02-data/db/pdm_tools/fk.sql`; thứ còn thiếu là ai đó chạy nó định kỳ.
+
+**Chưa sửa**, và không sửa trong luồng ERD/PDM. Trên PDM mỗi cặp mang **một**
+Relationship Name và **hai** Code (`..._RESTRICT`, `..._CASCADE`) — không bịa
+hai ngữ nghĩa nghiệp vụ chỉ để hợp thức hoá hai ràng buộc vật lý, nhưng Code
+phải duy nhất vì PowerDesigner dùng Code làm định danh. `gen_relationships.py`
+in `distinct Code` mỗi lần chạy và thoát khác 0 nếu có Code trùng.
 
 ---
 
@@ -1571,3 +1659,32 @@ Một điểm nữa cần thể hiện trên giao diện dù quyết định th�
 `project_allocations.allocated = NULL` nghĩa là **KHÔNG GIỚI HẠN**, không phải
 "chưa điền". Đọc ngược chỗ này sẽ khiến người vận hành tưởng mình chưa cấp phát
 gì trong khi thực tế là đã cấp không giới hạn.
+
+---
+
+## Bí mật ký webhook lưu ở dạng dùng được ngay (26/08/2026)
+
+**Hạn chế đã biết, không phải lỗi.** Phát hiện khi lập Data Dictionary nhóm H.
+
+`webhook_endpoints.secret` lưu nguyên văn (`whsec_` + 32 byte ngẫu nhiên), tức
+**không băm và không mã hoá khi nằm yên**. Đây là cột DUY NHẤT trong 660 cột có
+cơ chế ấy — mọi bí mật khác đều băm (`*_hash`) hoặc mã hoá (`user_totp.secret_enc`).
+
+Lý do kỹ thuật là chính đáng: chữ ký `HMAC-SHA256` cần **chính** bí mật ở mỗi
+lượt giao, nên băm một chiều thì không ký được, và tự mã hoá thì khoá giải lại
+phải nằm đâu đó cho tiến trình giao đọc.
+
+Giảm nhẹ đang có: API liệt kê endpoint **không bao giờ** trả cột này; nó chỉ
+hiện đúng một lần lúc tạo. Điều đó thu hẹp bề mặt lộ ở tầng ứng dụng, nhưng
+**không bảo vệ trước một bản sao lưu hoặc một cơ sở dữ liệu bị chiếm**. Kẻ đọc
+được bảng có thể giả mạo chữ ký của mọi sự kiện gửi tới endpoint ấy.
+
+Hướng gia cố về sau (chưa làm, không gấp — hiện có 0 endpoint trên sản xuất):
+
+* mã hoá cột bằng khoá ngoài cơ sở dữ liệu, giống `user_totp.secret_enc` — đổi
+  bài toán từ "đọc được bảng là đủ" thành "phải có cả khoá";
+* hoặc chuyển sang khoá bất đối xứng: hệ ký bằng khoá riêng, endpoint kiểm bằng
+  khoá công khai, và cơ sở dữ liệu không còn giữ thứ gì ký được.
+
+Ghi vào Data Dictionary ở dạng mô tả trung thực (`VERIFIED`), không hạ trạng
+thái: cơ chế đã được xác minh, cái thiếu là một lớp gia cố chưa có.
