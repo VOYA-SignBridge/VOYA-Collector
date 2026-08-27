@@ -211,72 +211,142 @@
     "D": {
       "nodes": {
         "collection_sessions": {
-          "x": 460,
-          "y": 60,
-          "w": 268
+          "x": 340,
+          "y": 40,
+          "w": 210,
+          "columns": [
+            "collection_session_id",
+            "tenant_id",
+            "opened_by_user_id",
+            "session_code",
+            "source_type",
+            "started_at",
+            "ended_at"
+          ]
         },
         "capture_sessions": {
-          "x": 460,
-          "y": 340,
-          "w": 268
+          "x": 340,
+          "y": 250,
+          "w": 210,
+          "columns": [
+            "capture_session_id",
+            "tenant_id",
+            "class_uid",
+            "collection_session_id",
+            "signer_id",
+            "auth_user_id",
+            "source_type",
+            "started_at",
+            "ended_at"
+          ]
         },
         "samples": {
-          "x": 460,
-          "y": 680,
-          "w": 268
+          "x": 340,
+          "y": 500,
+          "w": 210,
+          "columns": [
+            "sample_uid",
+            "tenant_id",
+            "class_uid",
+            "capture_session_id",
+            "signer_id",
+            "auth_user_id",
+            "language",
+            "dialect",
+            "reviewed_by",
+            "review_status",
+            "checksum"
+          ]
         },
         "signers": {
-          "x": 100,
-          "y": 680,
-          "w": 268
+          "x": 60,
+          "y": 250,
+          "w": 210,
+          "columns": [
+            "signer_id",
+            "tenant_id",
+            "external_user_id",
+            "display_name",
+            "is_active"
+          ]
         },
         "signer_aliases": {
-          "x": 100,
-          "y": 960,
-          "w": 268
+          "x": 60,
+          "y": 420,
+          "w": 210,
+          "columns": [
+            "tenant_id",
+            "old_signer_id",
+            "new_signer_id",
+            "merged_by",
+            "merged_at",
+            "reason"
+          ]
         },
         "raw_uploads": {
-          "x": 880,
-          "y": 340,
-          "w": 268
+          "x": 900,
+          "y": 40,
+          "w": 210,
+          "columns": [
+            "upload_uid",
+            "tenant_id",
+            "class_uid",
+            "language",
+            "dialect",
+            "auth_user_id",
+            "original_filename",
+            "storage_key",
+            "status"
+          ]
         },
         "classes": {
-          "x": 880,
-          "y": 900,
-          "w": 268,
+          "x": 620,
+          "y": 40,
+          "w": 210,
           "context": true
         },
         "dialects": {
-          "x": 1200,
-          "y": 900,
-          "w": 268,
+          "x": 620,
+          "y": 150,
+          "w": 210,
           "context": true
         },
         "languages": {
-          "x": 1200,
-          "y": 1280,
-          "w": 268,
+          "x": 620,
+          "y": 260,
+          "w": 210,
           "context": true
         },
         "tenants": {
-          "x": 100,
-          "y": 1250,
-          "w": 268,
+          "x": 620,
+          "y": 350,
+          "w": 210,
           "context": true
         },
         "users": {
-          "x": 880,
-          "y": 1460,
-          "w": 268,
+          "x": 620,
+          "y": 440,
+          "w": 210,
           "context": true
         }
       },
       "_ghi_chu": [
-        "Trục thu thập chạy DỌC ở cột giữa: collection -> capture -> sample.",
-        "`raw_uploads` cố ý LỆCH sang phải và lên cao, ngang tầm capture_sessions:",
-        "đặt nó tiếp sau `samples` trên cùng một trục sẽ khiến mắt tự dựng ra một",
-        "quan hệ samples -> raw_uploads mà catalog KHÔNG có.",
-        "Người ký vào từ bên trái; các chiều phân loại và bối cảnh nằm vòng dưới."
+        "QUY CHUẨN BỐ CỤC XUẤT BẢN (chốt 27/08/2026) — bảy nhóm còn lại theo mẫu này.",
+        "In A4 NGANG. Khổ dọc cho chữ 5 pt, không dùng.",
+        "",
+        "Cột 1 (x=60)  : người ký, vào trục từ bên trái.",
+        "Cột 2 (x=340) : TRỤC THU THẬP dọc — collection -> capture -> sample.",
+        "Cột 3 (x=620) : bối cảnh, dồn thành một cột hẹp.",
+        "Cột 4 (x=900) : raw_uploads.",
+        "",
+        "`raw_uploads` KHÔNG đặt dưới `samples`: mắt sẽ tự dựng ra một quan hệ",
+        "samples -> raw_uploads mà catalog không có. Nó cũng không đặt giữa trục và",
+        "bối cảnh — ở đó nó chắn hành lang và sáu cạnh phải vòng qua. Nó không có",
+        "quan hệ nào với trục; cả sáu cạnh của nó đi tới bối cảnh, nên đứng cạnh",
+        "bối cảnh là đúng chỗ.",
+        "",
+        "Khung 1050 x 710 px -> A4 ngang: tiêu đề 8.6 pt, tên cột 7.2 pt. Chỉ vượt",
+        "sàn 0.2 pt, nên KHÔNG nới khung thêm. Chú giải và caption để NGOÀI canvas."
       ]
     },
     "E": {

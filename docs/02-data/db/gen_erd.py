@@ -893,14 +893,35 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str,
     row_id: Dict[Tuple[str, str], str] = {}
     table_id: Dict[str, str] = {}
 
+    # Cột KHOÁ NGOẠI mà trang này thực sự dùng, theo từng bảng CHA. Dùng cho
+    # phép chiếu bảng bối cảnh: chúng có mặt để quan hệ không bị treo, nên chỉ
+    # cần khoá chính CỘNG các cột được trỏ tới trên chính trang này. Suy được
+    # hoàn toàn từ bằng chứng — KHÔNG phải lựa chọn của người.
+    khoa_duoc_tro = {}
+    for _f in schema.fks:
+        if own is None or _f["table"] in own:
+            khoa_duoc_tro.setdefault(_f["ref_table"], set()).update(_f["ref_columns"])
+
     def cols_for(t: str):
         if mode == "none":
             return []
+        chieu = None
+        if layout and isinstance(layout.get(t), dict) and layout[t].get("columns"):
+            # Phép chiếu do NGƯỜI chốt, giữ nguyên THỨ TỰ đã khai.
+            chieu = list(layout[t]["columns"])
+        elif layout and anchors and t in anchors:
+            pk = list(schema.pk.get(t, []))
+            them = sorted(khoa_duoc_tro.get(t, set()) - set(pk))
+            chieu = pk + them
         fkc = schema.fk_columns(t)
         pkc = set(schema.pk.get(t, []))
         uqc = {c for u in schema.unique.get(t, []) for c in u}
         res = []
-        for col, typ, notnull in schema.columns.get(t, []):
+        nguon = schema.columns.get(t, [])
+        if chieu is not None:
+            theo_ten = {c[0]: c for c in nguon}
+            nguon = [theo_ten[c] for c in chieu if c in theo_ten]
+        for col, typ, notnull in nguon:
             # HAI vai trò khác nhau, cố ý tách rời:
             #
             #   `role`  quyết định cột có được HIỆN ở chế độ rút gọn không
@@ -1326,6 +1347,41 @@ def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
                              than):
             hang[m.group(1)] = (go_tien_to(m.group(3)), m.group(2))
 
+        # ---- HÌNH HỌC THẬT, đọc từ chính XML vừa ghi ----------------------
+        #
+        # Hai câu hỏi TÁCH RỜI, cố ý:
+        #   HÌNH HỌC HÀNG  — hộp có đủ cao cho những gì THẬT SỰ được vẽ không?
+        #   CHỒNG LẤN      — các hộp thật sự được vẽ có đè nhau không?
+        #
+        # Không hỏi manifest, không tính lại phép chiếu. Nếu đầu ra nói
+        # `samples` cao 250 px thì kiểm đúng 250 px.
+        hinh = {}
+        for m in re.finditer(
+                r'<mxCell id="t_([a-z_]+)" value="[^"]*"[^>]*>\s*'
+                r'<mxGeometry x="([-\d.]+)" y="([-\d.]+)" '
+                r'width="([\d.]+)" height="([\d.]+)"', than):
+            if m.group(1) in ten_bang:
+                hinh[m.group(1)] = tuple(float(v) for v in m.groups()[1:])
+
+        so_hang = {}
+        for rid, (t, _col) in hang.items():
+            if not rid.endswith("__k"):
+                so_hang[t] = so_hang.get(t, 0) + 1
+
+        for t, (x, y, w, h) in hinh.items():
+            can = TITLE_H + ROW_H * max(1, so_hang.get(t, 0))
+            if abs(h - can) > 0.5:
+                loi.append(f"trang {nhom}: `{t}` cao {h:.0f} px nhưng vẽ "
+                           f"{so_hang.get(t, 0)} hàng (cần {can} px)")
+
+        ds = sorted(hinh.items())
+        for i in range(len(ds)):
+            for j in range(i + 1, len(ds)):
+                t1, (x1, y1, w1, h1) = ds[i]
+                t2, (x2, y2, w2, h2) = ds[j]
+                if x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + h2 and y2 < y1 + h1:
+                    loi.append(f"trang {nhom}: `{t1}` chồng lên `{t2}`")
+
         hop_le_ten = set(_TEN_QUAN_HE.values())
         for m in re.finditer(r'<mxCell id="[^"]*" value="([^"]*)" style="([^"]*)" '
                              r'edge="1" source="([^"]+)" target="([^"]+)"', than):
@@ -1339,6 +1395,11 @@ def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
                 loi.append(f"trang {nhom}: nhãn `{dau}` không phải tên quan hệ đã duyệt")
             tong_canh += 1
             con, cot = hang.get(nguon, (go_tien_to(nguon), "(bảng)"))
+            if cot == "(bảng)":
+                # Cạnh mất điểm neo: cột khoá ngoại đã bị phép chiếu cắt mất,
+                # nên đường nối rơi vào giữa hộp thay vì vào đúng hàng.
+                loi.append(f"trang {nhom}: cạnh từ `{con}` không neo vào hàng cột "
+                           f"— phép chiếu đã cắt mất cột khoá ngoại")
             cha = go_tien_to(dich)
             khoa = (con, cot, cha)
             if khoa not in neo:
@@ -1364,20 +1425,9 @@ def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
 
 
 
-def _cao_cua_bang(schema: "Schema"):
-    """Cùng công thức chiều cao mà `build_ie` dùng ở chế độ 'all'.
-
-    Trả về một hàm để cổng bố cục tính lại hình học THẬT thay vì tin một con số
-    khai trong manifest — manifest cố ý không giữ `h`.
-    """
-    def f(t: str) -> int:
-        n = len(schema.columns.get(t, []))
-        return TITLE_H + ROW_H * max(1, n)
-    return f
 
 
-def _kiem_bo_cuc(man: Dict[str, Any], schema: "Schema",
-                 cao_cua) -> List[str]:
+def _kiem_bo_cuc(man: Dict[str, Any], schema: "Schema") -> List[str]:
     """Cổng cho TẦNG BỐ CỤC, độc lập với cổng ngữ nghĩa.
 
     Sau bài học `_tu_kiem` từng tự kiểm bằng chính hàm đã sinh ra bản vẽ, các
@@ -1423,19 +1473,24 @@ def _kiem_bo_cuc(man: Dict[str, Any], schema: "Schema",
             except (KeyError, TypeError, ValueError):
                 loi.append(f"nhóm {nhom}: `{t}` thiếu hoặc sai x/y/w")
                 continue
-            h = cao_cua(t)
-            if w <= 0 or h <= 0:
-                loi.append(f"nhóm {nhom}: `{t}` hộp kích thước 0")
+            co_that = {c for c, _t, _n in schema.columns.get(t, [])}
+            for c in (n.get("columns") or []):
+                if c not in co_that:
+                    loi.append(f"nhóm {nhom}: `{t}` không có cột `{c}`")
+            if w <= 0:
+                loi.append(f"nhóm {nhom}: `{t}` bề ngang 0")
             if x < 0 or y < 0:
                 loi.append(f"nhóm {nhom}: `{t}` nằm ngoài khung (x={x}, y={y})")
-            hop.append((t, x, y, w, h))
+            hop.append((t, x, y, w))
 
-        for i in range(len(hop)):
-            for j in range(i + 1, len(hop)):
-                t1, x1, y1, w1, h1 = hop[i]
-                t2, x2, y2, w2, h2 = hop[j]
-                if x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + h2 and y2 < y1 + h1:
-                    loi.append(f"nhóm {nhom}: `{t1}` chồng lên `{t2}`")
+        # CHỒNG LẤN KHÔNG kiểm ở đây. Cổng này chỉ thấy manifest, nên muốn biết
+        # hộp cao bao nhiêu nó phải TỰ TÍNH LẠI phép chiếu cột — và bản trước
+        # tính sai HAI LẦN cùng một kiểu: một lần đếm đủ 46 cột của `samples`
+        # khi trang chỉ hiện 11, một lần đếm đủ 20 cột của `tenants` khi hộp bối
+        # cảnh chỉ có 1 hàng. Cả hai lần cổng kiểm bằng hình học không tồn tại.
+        #
+        # Nguồn đúng là hình học ĐÃ GHI RA `.drawio`. Phép chồng lấn vì thế
+        # chuyển sang `_tu_kiem`, nơi đọc chính đầu ra.
 
     sot = ten_bang - da_dat
     if sot:
@@ -1570,7 +1625,7 @@ def main() -> int:
     duong_man = here / "erd_layout_v8.json"
     if not args.auto_layout and duong_man.is_file():
         man = json.loads(duong_man.read_text(encoding="utf-8"))
-        sai_bc = _kiem_bo_cuc(man, schema, _cao_cua_bang(schema))
+        sai_bc = _kiem_bo_cuc(man, schema)
         if sai_bc:
             print(f"[LỖI] cổng bố cục: {len(sai_bc)} vấn đề", file=sys.stderr)
             for _s in sai_bc:
