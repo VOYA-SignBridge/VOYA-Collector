@@ -1,0 +1,7 @@
+table_name,trigger_name,timing,events,level,function_name
+legal_document_events,trg_legal_events_append_only,BEFORE,DELETE UPDATE,ROW,legal_events_append_only
+legal_documents,trg_legal_documents_freeze,BEFORE,UPDATE,ROW,legal_documents_freeze
+memberships,ct_memberships_chain,BEFORE,INSERT UPDATE,ROW,authz_check_membership_chain
+role_assignments,ct_role_assignments_scope,BEFORE,INSERT UPDATE,ROW,authz_check_role_assignment
+role_permissions,ct_role_permissions_dominance,BEFORE,INSERT UPDATE,ROW,authz_check_role_permission_dominance
+roles,ct_roles_tenant_type,BEFORE,INSERT UPDATE,ROW,authz_check_role_tenant_type

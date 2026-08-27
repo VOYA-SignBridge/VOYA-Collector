@@ -2,12 +2,13 @@
 
 Ba tài liệu PDM ở thư mục cha **không được sửa tay**. Chúng sinh từ catalog của
 cơ sở dữ liệu sản xuất, và toàn bộ số liệu trong đó — 62 bảng, 660 cột, 131 khoá
-ngoại, 68 CHECK, 108 khoá duy nhất — là thứ hệ thống nói, không phải thứ ai gõ.
+ngoại, 68 CHECK, 108 khoá duy nhất, 6 trigger — là thứ hệ thống nói, không phải
+thứ ai gõ.
 
 ## Cái gì sinh ra cái gì
 
 ```
-5 câu truy vấn catalog          ->  evidence/pdm_v8_*.csv
+6 câu truy vấn catalog          ->  evidence/pdm_v8_*.csv
         + groups.txt                (phân 62 bảng vào 8 nhóm A–H)
         + evidence/pdm_v8_descriptions.csv   (mô tả do NGƯỜI viết)
                                 ->  PDM_V8_TABLES.md
@@ -22,6 +23,7 @@ ngoại, 68 CHECK, 108 khoá duy nhất — là thứ hệ thống nói, không 
 | `fk.sql` | 131 khoá ngoại kèm **cardinality suy từ catalog** và `ON DELETE` |
 | `chk.sql` | 68 CHECK, đánh dấu cái nào phủ nhiều cột |
 | `uq.sql` | 108 khoá duy nhất, phân biệt constraint với **chỉ mục một phần** |
+| `trg.sql` | 6 trigger người dùng — nguồn bằng chứng THỨ SÁU, thêm 27/08/2026 |
 | `groups.txt` | 62 bảng -> 8 nhóm A–H |
 | `gen_tables.py` | dựng `PDM_V8_TABLES.md` |
 | `gen_relationships.py` | dựng `PDM_V8_RELATIONSHIPS.md`; giữ **tên quan hệ do người chốt** |
@@ -29,17 +31,58 @@ ngoại, 68 CHECK, 108 khoá duy nhất — là thứ hệ thống nói, không 
 
 ## Chạy lại
 
+Tên tệp CSV đích **không** trùng tên câu truy vấn, nên vòng lặp phải mang theo
+bảng ánh xạ. Bản trước viết `> ../evidence/pdm_v8_$q.csv` và sinh ra
+`pdm_v8_tbl.csv`, `pdm_v8_trg.csv`… — những tên mà không generator nào đọc. Khối
+dưới đây đã được chạy thử và dựng lại đúng sáu tệp bằng chứng, byte y hệt:
+
 ```bash
 cd <thư mục này>
-for q in tbl cols fk chk uq; do
-  docker exec -i voya_postgres psql -U admin -d signdb -f - < $q.sql \
-    > ../evidence/pdm_v8_$q.csv
+for pair in tbl:tables cols:columns fk:foreign_keys chk:checks uq:uniques trg:triggers; do
+  q="${pair%%:*}"; out="${pair##*:}"
+  docker exec -i voya_postgres psql -U admin -d signdb -f - < "$q.sql" \
+    | sed '/^Output format is csv\.$/d' | sed 's/\r$//' > "../evidence/pdm_v8_$out.csv"
 done
 python gen_tables.py && python gen_relationships.py && python gen_dictionary.py
 ```
 
-Tên tệp CSV đích không trùng tên câu truy vấn (`tbl.sql` -> `pdm_v8_tables.csv`,
-`fk.sql` -> `pdm_v8_foreign_keys.csv`); ba generator đọc tên đầy đủ.
+Câu `sed` gỡ dòng `Output format is csv.` mà `\pset format csv` in ra trước dữ
+liệu; để nguyên thì dòng đầu tệp không phải tiêu đề cột và `csv.DictReader` đọc
+lệch toàn bộ.
+
+Câu `sed 's/\r$//'` là bảo hiểm, không phải bản vá cho một lỗi đã quan sát: đo
+trên máy Windows này, `psql` qua `docker exec` rồi chuyển hướng ra tệp cho LF thuần
+(CR=0). Giữ nó để chuỗi lệnh cho cùng một chuỗi byte bất kể nền tảng hay phiên bản
+`psql`, vì `.gitattributes` chỉ chuẩn hoá lúc `git add` — nếu tệp trong cây làm việc
+khác nhau tuỳ máy thì phép so byte không còn phát hiện được gì.
+
+**Không dùng `tr -d '\r'`.** Nó xoá MỌI byte CR ở bất kỳ đâu, kể cả một CR nằm
+bên trong giá trị của một trường — tức lặng lẽ sửa nội dung catalog trong chính
+đường ống lấy byte làm bằng chứng. `sed 's/\r$//'` chỉ chạm CR ở cuối dòng.
+
+Góc hẹp còn lại, nói cho rõ: một CRLF nằm bên TRONG một trường có dấu nháy cũng
+đứng cuối một dòng vật lý, nên `sed` vẫn chạm tới nó. Đo hiện tại: **0/8 tệp có
+trường nào chứa CR**, nên góc ấy chưa xảy ra. Nếu về sau một biểu thức CHECK hay
+một mô tả mang xuống dòng thật, phải thay bước này bằng một lượt đọc–ghi qua
+`csv` thay vì lọc theo dòng.
+
+Hai generator sau in **cổng máy** và thoát khác 0 khi lệch, nên `&&` ở trên dừng
+đúng chỗ thay vì đi tiếp trên một bộ số sai.
+
+## Vì sao có nguồn bằng chứng thứ sáu
+
+Năm câu truy vấn đầu (bảng, cột, khoá ngoại, CHECK, khoá duy nhất) **không thu
+trigger**, và lỗ ấy để `trg_legal_documents_freeze` đi qua bốn nhóm QA mà không
+cổng nào thấy. Nó cưỡng chế tính bất biến của `legal_documents.content_hash` ở
+tầng cơ sở dữ liệu — nhưng nó không nằm trong `pg_constraint`, nên mọi phép kiểm
+CHECK đều báo "sạch" cho một bảng đang có ràng buộc mạnh nhất lược đồ.
+
+Cùng lượt rà lôi ra bốn trigger nữa trên nhóm A, trong đó
+`ct_role_permissions_dominance` là một rào chắn **leo thang quyền** ở tầng CSDL.
+
+`gen_dictionary.py` vì thế hỏng (thoát 1) nếu sản xuất có một trigger mà không
+mô tả nào dẫn tên nó. Bài học tổng quát: **ràng buộc của một lược đồ không chỉ
+nằm trong `pg_constraint`.**
 
 ## Ba ranh giới bộ này giữ, và vì sao
 

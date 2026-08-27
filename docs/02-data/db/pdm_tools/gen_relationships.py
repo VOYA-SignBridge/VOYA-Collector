@@ -18,17 +18,23 @@ import pathlib
 import re
 
 
+HERE = pathlib.Path(__file__).resolve().parent
+# Doc tu ban da COMMIT trong evidence/, khong tu ban nhap trong thu muc lam
+# viec: tai lieu sinh ra phai dung lai duoc tu repo, khong phu thuoc mot may.
+EVIDENCE = HERE.parent / "evidence"
+
+
 def doc(t):
     return list(csv.DictReader(io.StringIO(pathlib.Path(t).read_text(encoding="utf-8"))))
 
 
-fks = doc("fk.csv")
+fks = doc(EVIDENCE / "pdm_v8_foreign_keys.csv")
 TEN = {"A": "Tenant & Access Management", "B": "Authentication & User Security",
        "C": "VSL Vocabulary & Registry", "D": "VSL Collection & Dataset",
        "E": "Legal, Consent & Governance", "F": "Training & Evaluation",
        "G": "Plan, Billing & Storage", "H": "Integration & Operations"}
 NHOM = {}
-for d in pathlib.Path("nhom.txt").read_text().split("\n"):
+for d in (HERE / "groups.txt").read_text(encoding="utf-8").split("\n"):
     p = d.split()
     if p:
         for t in p[1:]:
@@ -47,10 +53,16 @@ LOAI_A = {
 }
 
 # Ghi de theo TEN RANG BUOC. Can thiet khi hai khoa ngoai trung ca (cha, con,
-# cot) — `project_allocations.tenant_id` co DUNG hai FK nhu vay, va chung khac
-# nhau o ON DELETE. Cung mot Relationship Name, hai Code: khong bia hai ngu
-# nghia chi de hop thuc hoa hai rang buoc vat ly.
+# cot). Toan luoc do co DUNG HAI cap nhu vay — `memberships.tenant_id` va
+# `project_allocations.tenant_id` — moi cap mot RESTRICT mot CASCADE. Cung mot
+# Relationship Name, hai Code: khong bia hai ngu nghia chi de hop thuc hoa hai
+# rang buoc vat ly, nhung Code phai duy nhat vi PowerDesigner dung Code lam
+# dinh danh. Kiem lai bang gen_relationships.py --gate.
 THEO_CONSTRAINT = {
+    "fk_memberships_tenant":
+        ("Tenant scopes Membership", "TENANT_SCOPES_MEMBERSHIP_RESTRICT", "scope"),
+    "memberships_tenant_id_fkey":
+        ("Tenant scopes Membership", "TENANT_SCOPES_MEMBERSHIP_CASCADE", "scope"),
     "fk_project_allocations_tenant":
         ("Tenant scopes Project Allocation", "TENANT_SCOPES_PROJECT_ALLOCATION_RESTRICT", "scope"),
     "project_allocations_tenant_id_fkey":
@@ -431,10 +443,18 @@ w("| **C** | Quan hệ miền qua khoá GHÉP `(tenant_id, …)` | **không** |"
 w("")
 w("Bản trước xếp `tenant_id` → *owns* và `auth_user_id` → *operates* vào loại A.")
 w("Sai: hai cột đó không chứa động từ nào; đó là suy diễn ngữ nghĩa của công cụ.")
-w("Loại B và C chỉ có tên khi người duyệt đã chốt — cột **Đã chốt** đánh dấu.\n")
 dem = collections.Counter(x["loai"] for x in ra)
-n_chot = sum(1 for x in ra if x["da_chot"])
 n_co_ten = sum(1 for x in ra if x["ten"])
+# Cau nay tung nhac mot cot "Da chot" da bi go khoi bang tu ban truoc —
+# dau vet cua generator cu. Viet lai theo SO DEM DUOC, de no khong the noi
+# sai khi con quan he chua dat ten.
+w("Loại B và C chỉ có tên sau khi người duyệt đã chốt.")
+if n_co_ten == len(ra):
+    w("Trong bản này, toàn bộ %d quan hệ đã được đặt tên và duyệt ngữ nghĩa.\n"
+      % len(ra))
+else:
+    w("Trong bản này %d/%d quan hệ đã được đặt tên; %d còn phải đặt tay.\n"
+      % (n_co_ten, len(ra), len(ra) - n_co_ten))
 w("| | số |")
 w("|---|---:|")
 w("| tổng quan hệ | %d |" % len(ra))
@@ -462,9 +482,15 @@ for k in "ABCDEFGH":
             x["on_delete"], x.get("nhan") or "—", x["loai"]))
     w("")
 
-pathlib.Path("PDM_V8_RELATIONSHIPS.md").write_text("\n".join(o), encoding="utf-8")
-with open("rel.csv", "w", newline="", encoding="utf-8") as f:
-    wr = csv.writer(f)
+# newline="\n" TUONG MINH: mac dinh cua write_text la newline=None,
+# tuc dich xuong dong thanh os.linesep — CRLF tren Windows. Cung mot bo sinh
+# se cho hai chuoi byte khac nhau tuy he dieu hanh, va phep so byte chung
+# minh tinh tai lap se sai o dung cho no can dung.
+(HERE.parent / "PDM_V8_RELATIONSHIPS.md").write_text("\n".join(o), encoding="utf-8", newline="\n")
+with open(EVIDENCE / "pdm_v8_relationships.csv", "w", newline="", encoding="utf-8") as f:
+    # lineterminator mac dinh cua module csv la CRLF — doi sang LF de khop
+    # hop dong eol=lf trong .gitattributes.
+    wr = csv.writer(f, lineterminator="\n")
     wr.writerow(["group", "entity1_parent", "entity2_child", "relationship_name", "code", "label",
                  "child_cols", "parent_cols", "is_composite", "parent_card", "child_card",
                  "on_delete", "verb1", "verb2", "name_class", "human_confirmed",
@@ -486,3 +512,25 @@ d = [x for x in ra if x["nhom"] == "D" and not x["ten"]]
 print("nhom D con thieu ten: %d" % len(d))
 for x in d:
     print("   %s -> %s (%s)" % (x["parent_table"], x["child_table"], x["child_cols"]))
+
+
+# ---------------------------------------------------------------- cong may
+# Bon bat bien kiem lai duoc, in ra moi lan chay. Khong in "dat/khong dat"
+# chung chung — in con so, va thoat 1 neu lech.
+_gate = [
+    ("relationship rows", len(ra), len(fks)),
+    ("named relationships", sum(1 for x in ra if x["ten"]), len(fks)),
+    ("composite FK", sum(1 for x in ra if x["ghep"]), 27),
+    ("distinct Code", len({x["ma"] for x in ra}), len(fks)),
+]
+print()
+print("--- cong may (gen_relationships) ---")
+_le = 0
+for _n, _co, _can in _gate:
+    _le += 0 if _co == _can else 1
+    print("%-24s %6d%s" % (_n, _co, "" if _co == _can else "   <-- LECH, can %d" % _can))
+if _le:
+    for _m, _k in collections.Counter(x["ma"] for x in ra).items():
+        if _k > 1:
+            print("   Code trung: %s x%d" % (_m, _k))
+    raise SystemExit(1)

@@ -7,13 +7,17 @@ TEN_NHOM = {
  "E": "Legal, Consent & Governance","F": "Training & Evaluation",
  "G": "Plan, Billing & Storage",    "H": "Integration & Operations",
 }
-for dong in pathlib.Path("nhom.txt").read_text().split("\n"):
+HERE = pathlib.Path(__file__).resolve().parent
+# Doc tu ban da COMMIT trong evidence/, khong tu ban nhap trong thu muc lam
+# viec: tai lieu sinh ra phai dung lai duoc tu repo, khong phu thuoc mot may.
+EVIDENCE = HERE.parent / "evidence"
+for dong in (HERE / "groups.txt").read_text(encoding="utf-8").split("\n"):
     p = dong.split()
     if not p: continue
     for t in p[1:]: NHOM[t] = p[0]
 
-tbl = list(csv.DictReader(io.StringIO(pathlib.Path("tbl.csv").read_text())))
-fk  = list(csv.DictReader(io.StringIO(pathlib.Path("fk.csv").read_text())))
+tbl = list(csv.DictReader(io.StringIO((EVIDENCE / "pdm_v8_tables.csv").read_text(encoding="utf-8"))))
+fk  = list(csv.DictReader(io.StringIO((EVIDENCE / "pdm_v8_foreign_keys.csv").read_text(encoding="utf-8"))))
 theo = {r["tbl"]: r for r in tbl}
 
 out = []
@@ -69,5 +73,9 @@ for t, n in dem.most_common(12):
     w(f"| `{t}` | {n} |")
 w("")
 
-pathlib.Path("PDM_V8_TABLES.md").write_text("\n".join(out), encoding="utf-8")
+# newline="\n" TUONG MINH: mac dinh cua write_text la newline=None,
+# tuc dich xuong dong thanh os.linesep — CRLF tren Windows. Cung mot bo sinh
+# se cho hai chuoi byte khac nhau tuy he dieu hanh, va phep so byte chung
+# minh tinh tai lap se sai o dung cho no can dung.
+(HERE.parent / "PDM_V8_TABLES.md").write_text("\n".join(out), encoding="utf-8", newline="\n")
 print("da sinh:", len(out), "dong")

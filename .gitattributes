@@ -6,3 +6,18 @@
 # Other Linux-container assets that are line-ending sensitive.
 Dockerfile text eol=lf
 *.Dockerfile text eol=lf
+
+# Bằng chứng PDM v8 và các câu truy vấn dựng ra nó. Chúng được sinh bởi psql
+# trong container Linux (LF) rồi so BYTE với bản đã cam kết — đó là cách Phụ lục
+# C chứng minh mình dựng lại được. Với core.autocrlf=true trên Windows, một bản
+# clone mới sẽ nhận CRLF và phép so byte ấy hỏng cho mọi người trừ máy đã sinh ra
+# chúng. Ghim LF để lượt tái lập cho cùng kết quả ở mọi nơi.
+docs/02-data/db/evidence/*.csv text eol=lf
+docs/02-data/db/pdm_tools/*.sql text eol=lf
+docs/02-data/db/pdm_tools/groups.txt text eol=lf
+# Ba tai lieu do generator sinh ra. Ghim luon dau RA, khong chi dau VAO: mot
+# clone Windows checkout chung thanh CRLF thi lan sinh lai ke tiep tao diff gia,
+# va menh de 'byte y het' chi con dung tren may da sinh ra chung.
+docs/02-data/db/PDM_V8_TABLES.md text eol=lf
+docs/02-data/db/PDM_V8_RELATIONSHIPS.md text eol=lf
+docs/02-data/db/PDM_V8_DATA_DICTIONARY.md text eol=lf

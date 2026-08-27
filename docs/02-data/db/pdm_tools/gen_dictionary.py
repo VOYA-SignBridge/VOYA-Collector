@@ -1,27 +1,44 @@
 import csv, io, pathlib, collections
 
+HERE = pathlib.Path(__file__).resolve().parent
+# Doc tu ban da COMMIT trong evidence/, khong tu ban nhap trong thu muc lam
+# viec: tai lieu sinh ra phai dung lai duoc tu repo, khong phu thuoc mot may.
+EVIDENCE = HERE.parent / "evidence"
+
 def doc(t):
     return list(csv.DictReader(io.StringIO(pathlib.Path(t).read_text(encoding="utf-8"))))
 
-cols, fks, chks, uqs = doc("cols.csv"), doc("fk.csv"), doc("chk.csv"), doc("uq.csv")
+cols = doc(EVIDENCE / "pdm_v8_columns.csv")
+fks = doc(EVIDENCE / "pdm_v8_foreign_keys.csv")
+chks = doc(EVIDENCE / "pdm_v8_checks.csv")
+uqs = doc(EVIDENCE / "pdm_v8_uniques.csv")
+# Nguon bang chung THU SAU. Them sau khi `trg_legal_documents_freeze` di qua bon
+# nhom QA ma khong cong nao thay: no cuong che tinh bat bien o tang CSDL nhung
+# khong nam trong pg_constraint. Cong may duoi cung se HONG neu mot trigger cua
+# san xuat khong duoc mo ta nao dan ten.
+trgs = doc(EVIDENCE / "pdm_v8_triggers.csv")
 
 # Lớp phủ mô tả nghiệp vụ. Nó KHÔNG đến từ catalog — không có COMMENT nào trong
 # CSDL — mà từ `pdm_v8_descriptions.csv`, một tệp người viết và người duyệt.
 # Giữ hai nguồn tách bạch là chủ ý: dòng nào của hệ thống, dòng nào của tác giả,
 # phải phân biệt được. `semantic_status` in kèm chính vì thế.
+# KHONG boc trong try/except FileNotFoundError. Ban dau co, va no bien mot tep
+# mo ta bi mat thanh mot phu luc sinh ra binh thuong nhung TRONG RONG mo ta —
+# hong im lang, dung kieu tai lieu nay ton tai de tranh.
 mota = {}
-try:
-    for d in doc("desc.csv"):
-        mota[(d["table_name"], d["column_name"])] = d
-except FileNotFoundError:
-    pass
+_trung = 0
+for d in doc(EVIDENCE / "pdm_v8_descriptions.csv"):
+    _k = (d["table_name"], d["column_name"])
+    if _k in mota:
+        _trung += 1
+    mota[_k] = d
 
 TEN = {"A":"Tenant & Access Management","B":"Authentication & User Security",
        "C":"VSL Vocabulary & Registry","D":"VSL Collection & Dataset",
        "E":"Legal, Consent & Governance","F":"Training & Evaluation",
        "G":"Plan, Billing & Storage","H":"Integration & Operations"}
 NHOM = {}
-for d in pathlib.Path("nhom.txt").read_text().split("\n"):
+for d in (HERE / "groups.txt").read_text(encoding="utf-8").split("\n"):
     p = d.split()
     if p:
         for t in p[1:]: NHOM[t] = p[0]
@@ -68,13 +85,34 @@ w(f"| đối tượng duy nhất (PK/UNIQUE/chỉ mục) | {len(uqs)} |")
 w(f"| cột có DEFAULT | {sum(1 for c in cols if c['column_default'])} |")
 w("")
 w("## Ba điều phải đọc trước khi dùng bảng này\n")
-w(f"**Mô tả nghiệp vụ đang phủ {len(mota)}/{len(cols)} cột — nhóm A, C, D và E — bốn miền lõi.** Phần")
-w("còn lại trống, và đó là chủ ý. Cơ sở dữ liệu có **0**")
-w("`COMMENT ON COLUMN` và **0** `COMMENT ON TABLE`, nên catalog không có nguồn mô")
-w("tả nào. Suy mô tả từ tên cột là bịa: người đọc luận văn không phân biệt được")
-w("một dòng lấy từ hệ thống với một dòng đoán ra. Mô tả nghiệp vụ phải viết tay")
-w("cho các bảng quan trọng, và khi ấy nó là tri thức của tác giả chứ không phải")
-w("số liệu của hệ thống.\n")
+import collections as _cl
+_pb = _cl.Counter(x["semantic_status"] for x in mota.values())
+w(f"**Mô tả nghiệp vụ phủ {len(mota)}/{len(cols)} cột — toàn bộ tám nhóm A–H.**")
+w("")
+w("| trạng thái | số cột |")
+w("|---|---:|")
+for _k in ("VERIFIED", "NEEDS_REVIEW", "LEGACY", "DERIVED"):
+    w(f"| `{_k}` | {_pb.get(_k, 0)} |")
+w("")
+w("Mô tả KHÔNG đến từ catalog: cơ sở dữ liệu có **0** `COMMENT ON COLUMN` và")
+w("**0** `COMMENT ON TABLE`. Suy mô tả từ tên cột là bịa — người đọc không phân")
+w("biệt được một dòng lấy từ hệ thống với một dòng đoán ra. Vì vậy mô tả sống ở")
+w("`evidence/pdm_v8_descriptions.csv`, tách khỏi catalog, mỗi dòng mang nhãn:")
+w("")
+w("* *(không nhãn)* — **VERIFIED**: có bằng chứng từ mã hoặc từ dữ liệu đã đo")
+w("* `LEGACY` — dấu vết lịch sử, KHÔNG phải nguồn chuẩn")
+w("* `DERIVED` — do pipeline tính ra, không do người nhập")
+w("* **`CẦN DUYỆT`** — cấu trúc vật lý đã xác thực từ catalog, nhưng **ý định")
+w("  nghiệp vụ** chưa đủ bằng chứng để khẳng định mạnh hơn")
+w("")
+w("**`CẦN DUYỆT` KHÔNG có nghĩa là dữ liệu sai.** Kiểu, ràng buộc, khoá và")
+w("cardinality của những cột ấy lấy từ catalog như mọi cột khác; thứ còn thiếu")
+w("là một đường mã hoặc một quyết định thiết kế nói cột ấy DÙNG để làm gì. Mỗi")
+w("dòng như vậy đều ghi rõ thiếu bằng chứng nào — không dòng nào để trống lý do.")
+w("")
+w("Chưa chạy `COMMENT ON` nào trên sản xuất: đó sẽ là DDL mới và kéo theo câu")
+w("hỏi phiên bản migration chỉ để phục vụ tài liệu.")
+w("")
 w("**Cột `Tham chiếu` ưu tiên khoá GHÉP.** Nhiều cặp bảng có CẢ khoá một cột (di")
 w("sản) lẫn khoá ghép `(tenant_id, …)`; cả hai đều liệt kê, ghép đứng trước, vì")
 w("ghép mới là thứ khiến việc trỏ sang tổ chức khác không biểu diễn được.\n")
@@ -142,5 +180,69 @@ w("phụ lục im lặng về một đối tượng mà mã ứng dụng có đ�
 w("chính là thứ khiến mọi truy vấn qua view chịu đúng chính sách RLS của người")
 w("gọi. Gỡ thuộc tính ấy là mở toang view.\n")
 
-pathlib.Path("PDM_V8_DATA_DICTIONARY.md").write_text("\n".join(o), encoding="utf-8")
+# newline="\n" TUONG MINH: mac dinh cua write_text la newline=None,
+# tuc dich xuong dong thanh os.linesep — CRLF tren Windows. Cung mot bo sinh
+# se cho hai chuoi byte khac nhau tuy he dieu hanh, va phep so byte chung
+# minh tinh tai lap se sai o dung cho no can dung.
+(HERE.parent / "PDM_V8_DATA_DICTIONARY.md").write_text("\n".join(o), encoding="utf-8", newline="\n")
 print("da sinh", len(o), "dong")
+
+
+# ---------------------------------------------------------------- cong may
+# Bat bien cua Phu luc C.8. In moi lan chay, thoat 1 neu lech — de mot ban
+# sinh lech khong the di qua ma khong ai thay.
+HOP_LE = {"VERIFIED", "NEEDS_REVIEW", "LEGACY", "DERIVED"}
+_ten_cot = {(c["table_name"], c["column_name"]) for c in cols}
+_ten_mota = set(mota)
+_pb = collections.Counter(x["semantic_status"] for x in mota.values())
+_thieu_note = [k for k, v in mota.items()
+               if v["semantic_status"] == "NEEDS_REVIEW" and not (v.get("note") or "").strip()]
+_sai_tt = [k for k, v in mota.items() if v["semantic_status"] not in HOP_LE]
+
+_g = [("catalog columns", len(_ten_cot), 660),
+      ("description rows", len(_ten_mota), 660),
+      ("dictionary rows", len(_ten_cot & _ten_mota), 660),
+      (None, None, None),
+      ("duplicate descriptions", _trung, 0),
+      ("missing descriptions", len(_ten_cot - _ten_mota), 0),
+      ("extra descriptions", len(_ten_mota - _ten_cot), 0),
+      (None, None, None)]
+_g += [(k, _pb.get(k, 0), None) for k in ("VERIFIED", "NEEDS_REVIEW", "LEGACY", "DERIVED")]
+_g += [(None, None, None),
+       ("description status total", sum(_pb.values()), 660),
+       ("NEEDS_REVIEW without note", len(_thieu_note), 0),
+       ("invalid semantic_status", len(_sai_tt), 0)]
+
+print()
+print("--- cong may (Phu luc C.8) ---")
+_le = 0
+for _n, _co, _can in _g:
+    if _n is None:
+        print()
+        continue
+    if _can is not None and _co != _can:
+        _le += 1
+        print("%-26s %6d   <-- LECH, can %d" % (_n, _co, _can))
+    else:
+        print("%-26s %6d" % (_n, _co))
+if _thieu_note:
+    print("   thieu note:", ", ".join("%s.%s" % k for k in _thieu_note[:10]))
+if _sai_tt:
+    print("   trang thai la:", ", ".join("%s.%s" % k for k in _sai_tt[:10]))
+# --- nguon bang chung thu sau: trigger ---
+_mota_text = " ".join((v.get("description") or "") + " " + (v.get("note") or "")
+                      for v in mota.values())
+_trg_thieu = [t["trigger_name"] for t in trgs if t["trigger_name"] not in _mota_text]
+print()
+print("%-26s %6d" % ("database triggers", len(trgs)))
+print("%-26s %6d" % ("trigger claims documented", len(trgs) - len(_trg_thieu)))
+if _trg_thieu:
+    _le += 1
+    print("%-26s %6d   <-- LECH, can 0" % ("undocumented triggers", len(_trg_thieu)))
+    for _t in _trg_thieu:
+        print("   khong mo ta nao dan:", _t)
+else:
+    print("%-26s %6d" % ("undocumented triggers", 0))
+
+if _le:
+    raise SystemExit(1)
