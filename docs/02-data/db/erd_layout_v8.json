@@ -1,0 +1,495 @@
+{
+  "_doc": [
+    "Bố cục XUẤT BẢN của tám trang PDM. CHỈ hình học — không ngữ nghĩa.",
+    "Python giữ ngữ nghĩa (khoá ngoại, lực lượng, ON DELETE, hợp nhất);",
+    "tệp này giữ vị trí. Không trộn hai thứ.",
+    "",
+    "`h` CỐ Ý không có: chiều cao là hàm của số cột hiển thị. Ghim nó ở đây",
+    "thì mỗi lần bảng thêm cột manifest sẽ nói dối về hình học, và cổng",
+    "chống chồng lấn kiểm bằng con số sai — tức một chốt giả.",
+    "",
+    "`context: true` = bảng thuộc nhóm khác, có mặt để quan hệ không bị",
+    "treo. Bộ sinh tự xác định lại điều này từ khoá ngoại; cờ ở đây chỉ để",
+    "người soạn đọc.",
+    "",
+    "Bản đầu là ảnh chụp của bố cục tự động, để manifest phủ 62/62 ngay."
+  ],
+  "_version": "v8",
+  "groups": {
+    "A": {
+      "nodes": {
+        "api_keys": {
+          "x": 1724,
+          "y": 666,
+          "w": 268
+        },
+        "community_versions": {
+          "x": 48,
+          "y": 1424,
+          "w": 268,
+          "context": true
+        },
+        "memberships": {
+          "x": 48,
+          "y": 666,
+          "w": 268
+        },
+        "permissions": {
+          "x": 680,
+          "y": 666,
+          "w": 268
+        },
+        "plans": {
+          "x": 364,
+          "y": 1424,
+          "w": 268,
+          "context": true
+        },
+        "project_allocations": {
+          "x": 996,
+          "y": 78,
+          "w": 268
+        },
+        "projects": {
+          "x": 680,
+          "y": 78,
+          "w": 268
+        },
+        "role_assignments": {
+          "x": 48,
+          "y": 1016,
+          "w": 268
+        },
+        "role_permissions": {
+          "x": 996,
+          "y": 666,
+          "w": 268
+        },
+        "roles": {
+          "x": 364,
+          "y": 666,
+          "w": 268
+        },
+        "tenant_invitations": {
+          "x": 364,
+          "y": 1016,
+          "w": 268
+        },
+        "tenants": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        },
+        "users": {
+          "x": 1408,
+          "y": 666,
+          "w": 268
+        },
+        "workspaces": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        }
+      }
+    },
+    "B": {
+      "nodes": {
+        "password_reset_tokens": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        },
+        "refresh_tokens": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        },
+        "user_action_passcodes": {
+          "x": 364,
+          "y": 368,
+          "w": 268
+        },
+        "user_recovery_codes": {
+          "x": 48,
+          "y": 368,
+          "w": 268
+        },
+        "user_totp": {
+          "x": 996,
+          "y": 78,
+          "w": 268
+        },
+        "users": {
+          "x": 1408,
+          "y": 78,
+          "w": 268,
+          "context": true
+        },
+        "verification_codes": {
+          "x": 680,
+          "y": 78,
+          "w": 268
+        }
+      }
+    },
+    "C": {
+      "nodes": {
+        "classes": {
+          "x": 1092,
+          "y": 756,
+          "w": 268
+        },
+        "community_dialects": {
+          "x": 48,
+          "y": 756,
+          "w": 268
+        },
+        "community_profiles": {
+          "x": 364,
+          "y": 756,
+          "w": 268
+        },
+        "community_versions": {
+          "x": 680,
+          "y": 756,
+          "w": 268
+        },
+        "dialect_aliases": {
+          "x": 1092,
+          "y": 78,
+          "w": 268
+        },
+        "dialects": {
+          "x": 776,
+          "y": 78,
+          "w": 268
+        },
+        "languages": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        },
+        "recognition_profiles": {
+          "x": 1408,
+          "y": 78,
+          "w": 268
+        },
+        "regions": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        },
+        "registry_versions": {
+          "x": 1092,
+          "y": 428,
+          "w": 268
+        },
+        "tenants": {
+          "x": 1504,
+          "y": 756,
+          "w": 268,
+          "context": true
+        },
+        "users": {
+          "x": 1820,
+          "y": 756,
+          "w": 268,
+          "context": true
+        },
+        "vocabulary_groups": {
+          "x": 1724,
+          "y": 78,
+          "w": 268
+        },
+        "vocabulary_registry_meta": {
+          "x": 776,
+          "y": 428,
+          "w": 268
+        }
+      }
+    },
+    "D": {
+      "nodes": {
+        "collection_sessions": {
+          "x": 460,
+          "y": 60,
+          "w": 268
+        },
+        "capture_sessions": {
+          "x": 460,
+          "y": 340,
+          "w": 268
+        },
+        "samples": {
+          "x": 460,
+          "y": 680,
+          "w": 268
+        },
+        "signers": {
+          "x": 100,
+          "y": 680,
+          "w": 268
+        },
+        "signer_aliases": {
+          "x": 100,
+          "y": 960,
+          "w": 268
+        },
+        "raw_uploads": {
+          "x": 880,
+          "y": 340,
+          "w": 268
+        },
+        "classes": {
+          "x": 880,
+          "y": 900,
+          "w": 268,
+          "context": true
+        },
+        "dialects": {
+          "x": 1200,
+          "y": 900,
+          "w": 268,
+          "context": true
+        },
+        "languages": {
+          "x": 1200,
+          "y": 1280,
+          "w": 268,
+          "context": true
+        },
+        "tenants": {
+          "x": 100,
+          "y": 1250,
+          "w": 268,
+          "context": true
+        },
+        "users": {
+          "x": 880,
+          "y": 1460,
+          "w": 268,
+          "context": true
+        }
+      },
+      "_ghi_chu": [
+        "Trục thu thập chạy DỌC ở cột giữa: collection -> capture -> sample.",
+        "`raw_uploads` cố ý LỆCH sang phải và lên cao, ngang tầm capture_sessions:",
+        "đặt nó tiếp sau `samples` trên cùng một trục sẽ khiến mắt tự dựng ra một",
+        "quan hệ samples -> raw_uploads mà catalog KHÔNG có.",
+        "Người ký vào từ bên trái; các chiều phân loại và bối cảnh nằm vòng dưới."
+      ]
+    },
+    "E": {
+      "nodes": {
+        "audit_log": {
+          "x": 364,
+          "y": 568,
+          "w": 268
+        },
+        "legal_document_drafts": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        },
+        "legal_document_events": {
+          "x": 680,
+          "y": 78,
+          "w": 268
+        },
+        "legal_documents": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        },
+        "signer_consents": {
+          "x": 48,
+          "y": 568,
+          "w": 268
+        },
+        "signers": {
+          "x": 48,
+          "y": 976,
+          "w": 268,
+          "context": true
+        },
+        "sot_authorized_keys": {
+          "x": 2040,
+          "y": 78,
+          "w": 268
+        },
+        "tenant_exports": {
+          "x": 1408,
+          "y": 78,
+          "w": 268
+        },
+        "tenant_purges": {
+          "x": 1724,
+          "y": 78,
+          "w": 268
+        },
+        "tenants": {
+          "x": 364,
+          "y": 976,
+          "w": 268,
+          "context": true
+        },
+        "user_consents": {
+          "x": 996,
+          "y": 78,
+          "w": 268
+        },
+        "users": {
+          "x": 680,
+          "y": 976,
+          "w": 268,
+          "context": true
+        }
+      }
+    },
+    "F": {
+      "nodes": {
+        "classes": {
+          "x": 1092,
+          "y": 78,
+          "w": 268,
+          "context": true
+        },
+        "registry_versions": {
+          "x": 1408,
+          "y": 78,
+          "w": 268,
+          "context": true
+        },
+        "tenants": {
+          "x": 1724,
+          "y": 78,
+          "w": 268,
+          "context": true
+        },
+        "training_job_classes": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        },
+        "training_jobs": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        },
+        "training_metrics": {
+          "x": 680,
+          "y": 78,
+          "w": 268
+        },
+        "users": {
+          "x": 2040,
+          "y": 78,
+          "w": 268,
+          "context": true
+        }
+      }
+    },
+    "G": {
+      "nodes": {
+        "plans": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        },
+        "storage_reservations": {
+          "x": 48,
+          "y": 648,
+          "w": 268
+        },
+        "tenant_storage": {
+          "x": 996,
+          "y": 78,
+          "w": 268
+        },
+        "tenant_subscriptions": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        },
+        "tenant_usage_daily": {
+          "x": 680,
+          "y": 78,
+          "w": 268
+        },
+        "tenants": {
+          "x": 1408,
+          "y": 78,
+          "w": 268,
+          "context": true
+        },
+        "users": {
+          "x": 1724,
+          "y": 78,
+          "w": 268,
+          "context": true
+        }
+      }
+    },
+    "H": {
+      "nodes": {
+        "event_outbox": {
+          "x": 680,
+          "y": 78,
+          "w": 268
+        },
+        "google_sheets_sync_status": {
+          "x": 680,
+          "y": 546,
+          "w": 268
+        },
+        "notifications": {
+          "x": 996,
+          "y": 78,
+          "w": 268
+        },
+        "platform_settings": {
+          "x": 48,
+          "y": 546,
+          "w": 268
+        },
+        "schema_migrations": {
+          "x": 364,
+          "y": 546,
+          "w": 268
+        },
+        "support_messages": {
+          "x": 1724,
+          "y": 78,
+          "w": 268
+        },
+        "support_tickets": {
+          "x": 1408,
+          "y": 78,
+          "w": 268
+        },
+        "tenants": {
+          "x": 1092,
+          "y": 546,
+          "w": 268,
+          "context": true
+        },
+        "users": {
+          "x": 1408,
+          "y": 546,
+          "w": 268,
+          "context": true
+        },
+        "webhook_deliveries": {
+          "x": 364,
+          "y": 78,
+          "w": 268
+        },
+        "webhook_endpoints": {
+          "x": 48,
+          "y": 78,
+          "w": 268
+        }
+      }
+    }
+  }
+}

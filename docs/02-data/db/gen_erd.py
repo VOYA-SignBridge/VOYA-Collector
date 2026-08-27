@@ -388,9 +388,42 @@ RELATION_VERBS: Dict[str, str] = {
 }
 
 
+#: Tên quan hệ ĐÃ DUYỆT, nạp từ `evidence/pdm_v8_relationships.csv`.
+_TEN_QUAN_HE: Dict[Tuple[str, str, str], str] = {}
+
+
+def nap_ten_quan_he(evidence: Path) -> None:
+    """Nạp 131 tên quan hệ mà người duyệt đã chốt ở Phụ lục C."""
+    p = evidence / "pdm_v8_relationships.csv"
+    if not p.is_file():
+        return
+    with io.open(p, encoding="utf-8", newline="") as fh:
+        for r in csv.DictReader(fh):
+            _TEN_QUAN_HE[(r["entity2_child"], r["child_cols"],
+                          r["entity1_parent"])] = r["relationship_name"]
+
+
 def relation_name(fk: Dict[str, Any]) -> str:
-    """Tên quan hệ, đọc theo chiều con → cha."""
-    return RELATION_VERBS.get(fk["anchor"], "references")
+    """Tên quan hệ. Lấy từ bảng ĐÃ DUYỆT, không sinh từ tên cột.
+
+    `RELATION_VERBS` là bản đồ tên-cột → động từ, tức đúng cách sinh tên mà lượt
+    soát Phụ lục C đã bác bỏ: nó không phân biệt được hai quan hệ cùng neo một
+    cột. Cụ thể `signer_id` cho ra "performed by" ở CẢ HAI chỗ, trong khi bảng
+    đã duyệt phân biệt:
+
+        samples.signer_id           -> "Signer performs Sample"
+        capture_sessions.signer_id  -> "Capture Session references summarized Signer"
+
+    Vế thứ hai được đặt như vậy CÓ CHỦ Ý: cột ấy là LEGACY và dữ liệu bác bỏ giả
+    định một phiên một người ký (10/253 phiên mang từ hai nhãn trở lên). Dùng
+    bản đồ động từ ở đây là hình vẽ khẳng định lại đúng điều lượt QA đã gỡ.
+
+    Dùng NGUYÊN tên đã duyệt, không cắt cụm động từ. Bản thử tách cụm bằng tiền
+    tố/hậu tố chung hỏng trên 10/131 quan hệ — `capture_sessions` có hai quan hệ
+    cùng cha nên tiền tố chung nuốt luôn động từ.
+    """
+    ten = _TEN_QUAN_HE.get((fk["table"], "+".join(fk["columns"]), fk["ref_table"]))
+    return ten or RELATION_VERBS.get(fk["anchor"], "references")
 
 
 # =========================================================================== mặt phẳng
@@ -828,7 +861,8 @@ KEY_W = 38
 def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str,
              anchors: Optional[Set[str]] = None,
              own: Optional[Set[str]] = None,
-             stats: Optional[Dict[str, Any]] = None) -> str:
+             stats: Optional[Dict[str, Any]] = None,
+             layout: Optional[Dict[str, Dict[str, Any]]] = None) -> str:
     """Trang ký pháp chân chim (IE).
 
     `mode` quyết định hiện bao nhiêu thuộc tính:
@@ -891,123 +925,125 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str,
             res.append((col, typ, notnull, mark))
         return res
 
-    cursor_x, cursor_y, band_h = PAD, PAD, 0
-    per_row_max = 4 if planes else 5
+    def cao_cua(t: str) -> int:
+        """Chiều cao hộp = hàm của SỐ CỘT hiển thị, không phải con số khai tay.
 
-    for key, plane in plane_list:
-        members = [t for t in plane["tables"] if t in visible]
-        if not members:
-            continue
+        Manifest bố cục cố ý KHÔNG giữ `h`. Ghim chiều cao vào JSON nghĩa là mỗi
+        lần bảng thêm một cột thì manifest nói dối về hình học — và cổng chống
+        chồng lấn sẽ kiểm bằng con số sai, tức một chốt giả.
+        """
+        return (TITLE_H + 12) if mode == "none" else TITLE_H + ROW_H * max(1, len(cols_for(t)))
 
-        per_row = min(per_row_max, max(1, len(members)))
-        boxes = [(t, (TITLE_H + 12) if mode == "none"
-                 else TITLE_H + ROW_H * max(1, len(cols_for(t))))
-                 for t in members]
-        rows_needed = (len(boxes) + per_row - 1) // per_row
-        heights = [max(h for _t, h in boxes[r * per_row:(r + 1) * per_row])
-                   for r in range(rows_needed)]
-        gw = per_row * COL_W + (per_row - 1) * GAP_X + 2 * PAD
-        gh = sum(heights) + (len(heights) - 1) * GAP_Y + TITLE_H + 2 * PAD
-
-        if cursor_x > PAD and cursor_x + gw > 2500:
-            cursor_x, cursor_y, band_h = PAD, cursor_y + band_h + GAP_Y * 2, 0
-
-        gid = f"g_{key}"
+    def phat_hop(t: str, cha: str, x: float, y: float, w: float,
+                 mau: str, nen: str) -> None:
+        """Phát một hộp thực thể kèm các hàng cột. Dùng chung cho CẢ HAI đường
+        đặt: xếp khối tự động và toạ độ từ manifest — nếu hai đường tự vẽ hộp
+        riêng thì có ngày chúng vẽ khác nhau và không ai biết."""
+        tid = f"t_{t}"
+        table_id[t] = tid
+        h = cao_cua(t)
+        kind = schema.entity_kind(t)
+        if kind in ("weak", "associative"):
+            out.append(_cell(
+                f"{tid}_outer", "",
+                f'rounded=1;arcSize=6;html=1;fillColor=none;'
+                f'strokeColor={mau};strokeWidth=1.2;',
+                cha, x - 6, y - 6, w + 12, h + 12))
+        mark = " 🔒" if schema.tables[t]["rls"] else ""
+        if kind == "associative":
+            mark += "  ⋈"
+        title = (f'{t}{mark}  ·  {len(schema.columns.get(t, []))} cột'
+                 if mode == "none" else f"{t}{mark}")
         out.append(_cell(
-            gid, f'{plane["label"]}  ({len(members)})',
-            f'rounded=1;arcSize=3;html=1;fillColor=none;strokeColor={plane["color"]};'
-            f'dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=10;'
-            f'spacingTop=4;fontSize=13;fontStyle=1;fontColor={plane["color"]};strokeWidth=2;',
-            "1", cursor_x, cursor_y, gw, gh))
+            tid, title,
+            f'swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;'
+            f'align=center;verticalAlign=middle;'
+            f'startSize={TITLE_H};horizontalStack=0;resizeParent=1;'
+            f'resizeParentMax=0;html=1;collapsible=0;marginBottom=0;'
+            f'swimlaneFillColor={nen};strokeColor={mau};'
+            f'fillColor={mau};fontColor=#FFFFFF;fontSize=12;'
+            f'rounded=1;arcSize=6;',
+            cha, x, y, w, h))
+        so_hang = len(cols_for(t))
+        if so_hang:
+            out.append(_cell(
+                f"{tid}_kegach", "",
+                f'line;direction=north;strokeColor={mau};strokeWidth=1;html=1;',
+                cha, x + KEY_W, y + TITLE_H, 1, so_hang * ROW_H))
+        cy = TITLE_H
+        for col, typ, notnull, tag in cols_for(t):
+            out.append(_cell(
+                f"r_{t}__{col}__k", tag,
+                f'text;strokeColor=none;fillColor=none;align=center;'
+                f'verticalAlign=middle;overflow=hidden;rotatable=0;'
+                f'html=1;fontSize=9;fontStyle=1;fontColor=#1A1A1A;',
+                tid, 0, cy, KEY_W, ROW_H))
+            rid = f"r_{t}__{col}"
+            row_id[(t, col)] = rid
+            out.append(_cell(
+                rid, col,
+                f'text;strokeColor=none;fillColor=none;align=left;'
+                f'verticalAlign=middle;spacingLeft=8;spacingRight=6;'
+                f'overflow=hidden;points=[[0,0.5],[1,0.5]];'
+                f'portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;'
+                f'fontSize=10;fontColor=#1A1A1A;'
+                f'{"fontStyle=1;" if tag else ""}',
+                tid, KEY_W, cy, COL_W - KEY_W, ROW_H))
+            cy += ROW_H
 
-        ty = TITLE_H + PAD
-        for r in range(rows_needed):
-            chunk = boxes[r * per_row:(r + 1) * per_row]
-            for idx, (t, h) in enumerate(chunk):
-                tid = f"t_{t}"
-                table_id[t] = tid
-                tx = PAD + idx * (COL_W + GAP_X)
-                kind = schema.entity_kind(t)
+    if layout:
+        # ĐƯỜNG MANIFEST. Hộp đặt thẳng lên trang theo toạ độ tuyệt đối; không
+        # vẽ khung mặt phẳng, vì người soạn bố cục đã tự nhóm bằng vị trí.
+        #
+        # Bảng BỐI CẢNH giữ màu xám và viền đứt để mắt phân biệt ngay: chúng có
+        # mặt chỉ để quan hệ không bị treo, không phải chủ thể của trang.
+        CTX_MAU, CTX_NEN = "#7A828C", "#F2F3F5"
+        for t in sorted(visible):
+            spec = layout.get(t)
+            if spec is None:
+                continue
+            la_ctx = t in anchors
+            mau_t, nen_t = ((CTX_MAU, CTX_NEN) if la_ctx else color_of(t))
+            phat_hop(t, "1", float(spec["x"]), float(spec["y"]),
+                     float(spec.get("w", COL_W)), mau_t, nen_t)
+    else:
+        cursor_x, cursor_y, band_h = PAD, PAD, 0
+        per_row_max = 4 if planes else 5
 
-                # Thực thể yếu / kết hợp: viền đôi, cùng quy ước với trang Chen.
-                if kind in ("weak", "associative"):
-                    out.append(_cell(
-                        f"{tid}_outer", "",
-                        f'rounded=1;arcSize=6;html=1;fillColor=none;'
-                        f'strokeColor={plane["color"]};strokeWidth=1.2;',
-                        gid, tx - 6, ty - 6, COL_W + 12, h + 12))
+        for key, plane in plane_list:
+            members = [t for t in plane["tables"] if t in visible]
+            if not members:
+                continue
 
-                mark = " 🔒" if schema.tables[t]["rls"] else ""
-                if kind == "associative":
-                    mark += "  ⋈"
-                # Trên bản đồ, số hàng thay cho danh sách thuộc tính: đó là thứ
-                # duy nhất phân biệt được thực thể đang dùng thật với thực thể
-                # mới tạo mà chưa ai ghi vào — câu hỏi hay được hỏi nhất khi
-                # nhìn một lược đồ 44 bảng lần đầu.
-                # Số CỘT, không phải số HÀNG. Số hàng là dữ liệu SỐNG: in nó lên
-                # một hình dựng từ bằng chứng đã đóng băng là để hình tự sai theo
-                # thời gian, và cùng ký hiệu `·` khi ấy mang hai nghĩa tuỳ nguồn
-                # dựng. Số cột là thuộc tính của LƯỢC ĐỒ nên đúng ở cả hai nguồn.
-                title = (f'{t}{mark}  ·  {len(schema.columns.get(t, []))} cột'
-                         if mode == "none" else f"{t}{mark}")
-                out.append(_cell(
-                    tid, title,
-                    f'swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;'
-                    f'align=center;verticalAlign=middle;'
-                    f'startSize={TITLE_H};horizontalStack=0;resizeParent=1;'
-                    f'resizeParentMax=0;html=1;collapsible=0;marginBottom=0;'
-                    f'swimlaneFillColor={plane["fill"]};strokeColor={plane["color"]};'
-                    f'fillColor={plane["color"]};fontColor=#FFFFFF;fontSize=12;'
-                    f'rounded=1;arcSize=6;',
-                    gid, tx, ty, COL_W, h))
+            per_row = min(per_row_max, max(1, len(members)))
+            boxes = [(t, cao_cua(t)) for t in members]
+            rows_needed = (len(boxes) + per_row - 1) // per_row
+            heights = [max(h for _t, h in boxes[r * per_row:(r + 1) * per_row])
+                       for r in range(rows_needed)]
+            gw = per_row * COL_W + (per_row - 1) * GAP_X + 2 * PAD
+            gh = sum(heights) + (len(heights) - 1) * GAP_Y + TITLE_H + 2 * PAD
 
-                # Đường kẻ dọc tách máng khoá khỏi tên thuộc tính. Vẽ MỘT lần
-                # cho cả hộp chứ không kẻ từng hàng: một đường liền chạy hết
-                # thân bảng đọc ra là một cột, còn 46 đoạn kẻ rời thì không.
-                #
-                # Nằm ngoài `childLayout=stackLayout` (cha là nhóm, không phải
-                # bảng) vì stackLayout sẽ xếp nó thành một hàng nữa.
-                so_hang = len(cols_for(t))
-                if so_hang:
-                    out.append(_cell(
-                        f"{tid}_kegach", "",
-                        f'line;direction=north;strokeColor={plane["color"]};'
-                        f'strokeWidth=1;html=1;',
-                        gid, tx + KEY_W, ty + TITLE_H, 1, so_hang * ROW_H))
+            if cursor_x > PAD and cursor_x + gw > 2500:
+                cursor_x, cursor_y, band_h = PAD, cursor_y + band_h + GAP_Y * 2, 0
 
-                cy = TITLE_H
-                for col, typ, notnull, tag in cols_for(t):
-                    # HAI ô cho một hàng: máng khoá bên trái, tên bên phải.
-                    #
-                    # Kiểu dữ liệu KHÔNG in ra. Ký pháp bảng này đọc theo chiều
-                    # dọc — mắt lướt một cột tên; chèn `· text` sau mỗi tên biến
-                    # cột ấy thành văn xuôi và mất luôn cái lợi đó. Kiểu đầy đủ
-                    # nằm ở `SCHEMA_TABLES.md`, nơi nó là thứ người ta đến tìm.
-                    out.append(_cell(
-                        f"r_{t}__{col}__k", tag,
-                        f'text;strokeColor=none;fillColor=none;align=center;'
-                        f'verticalAlign=middle;overflow=hidden;rotatable=0;'
-                        f'html=1;fontSize=9;fontStyle=1;fontColor=#1A1A1A;',
-                        tid, 0, cy, KEY_W, ROW_H))
+            gid = f"g_{key}"
+            out.append(_cell(
+                gid, f'{plane["label"]}  ({len(members)})',
+                f'rounded=1;arcSize=3;html=1;fillColor=none;strokeColor={plane["color"]};'
+                f'dashed=1;dashPattern=6 4;verticalAlign=top;align=left;spacingLeft=10;'
+                f'spacingTop=4;fontSize=13;fontStyle=1;fontColor={plane["color"]};strokeWidth=2;',
+                "1", cursor_x, cursor_y, gw, gh))
 
-                    # Ô TÊN mới là đầu neo của đường nối — `row_id` trỏ vào nó.
-                    # Neo vào ô máng sẽ làm đường nối đâm vào giữa hộp.
-                    rid = f"r_{t}__{col}"
-                    row_id[(t, col)] = rid
-                    out.append(_cell(
-                        rid, col,
-                        f'text;strokeColor=none;fillColor=none;align=left;'
-                        f'verticalAlign=middle;spacingLeft=8;spacingRight=6;'
-                        f'overflow=hidden;points=[[0,0.5],[1,0.5]];'
-                        f'portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;'
-                        f'fontSize=10;fontColor=#1A1A1A;'
-                        f'{"fontStyle=1;" if tag else ""}',
-                        tid, KEY_W, cy, COL_W - KEY_W, ROW_H))
-                    cy += ROW_H
-            ty += max(h for _t, h in chunk) + GAP_Y
+            ty = TITLE_H + PAD
+            for r in range(rows_needed):
+                chunk = boxes[r * per_row:(r + 1) * per_row]
+                for idx, (t, h) in enumerate(chunk):
+                    phat_hop(t, gid, PAD + idx * (COL_W + GAP_X), ty, COL_W,
+                             plane["color"], plane["fill"])
+                ty += max(h for _t, h in chunk) + GAP_Y
 
-        cursor_x += gw + GAP_X * 2
-        band_h = max(band_h, gh)
+            cursor_x += gw + GAP_X * 2
+            band_h = max(band_h, gh)
 
     # Khi hai khoá ngoại cùng neo vào một cột và cùng trỏ tới một bảng cha,
     # chỉ MỘT được vẽ. Chọn cái nào không được để thứ tự tệp quyết định:
@@ -1290,9 +1326,17 @@ def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
                              than):
             hang[m.group(1)] = (go_tien_to(m.group(3)), m.group(2))
 
-        for m in re.finditer(r'<mxCell id="[^"]*" value="[^"]*" style="([^"]*)" '
+        hop_le_ten = set(_TEN_QUAN_HE.values())
+        for m in re.finditer(r'<mxCell id="[^"]*" value="([^"]*)" style="([^"]*)" '
                              r'edge="1" source="([^"]+)" target="([^"]+)"', than):
-            kieu, nguon, dich = m.groups()
+            nhan, kieu, nguon, dich = m.groups()
+            # Nhãn PHẢI là tên quan hệ đã duyệt. Bản trước sinh nhãn từ bản đồ
+            # tên-cột -> động từ, và nó gán "performed by" cho CẢ HAI quan hệ
+            # neo `signer_id` — trong khi bảng đã duyệt cố ý phân biệt, vì một
+            # trong hai là cột LEGACY mà dữ liệu đã bác bỏ.
+            dau = nhan.split("&lt;br&gt;")[0].split("&#10;")[0]
+            if hop_le_ten and dau not in hop_le_ten:
+                loi.append(f"trang {nhom}: nhãn `{dau}` không phải tên quan hệ đã duyệt")
             tong_canh += 1
             con, cot = hang.get(nguon, (go_tien_to(nguon), "(bảng)"))
             cha = go_tien_to(dich)
@@ -1316,6 +1360,86 @@ def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
     mong = len({(f["table"], f["anchor"], f["ref_table"]) for f in schema.fks})
     if tong_canh != mong:
         loi.append(f"tổng cạnh tám trang {tong_canh} != {mong} liên kết logic")
+    return loi
+
+
+
+def _cao_cua_bang(schema: "Schema"):
+    """Cùng công thức chiều cao mà `build_ie` dùng ở chế độ 'all'.
+
+    Trả về một hàm để cổng bố cục tính lại hình học THẬT thay vì tin một con số
+    khai trong manifest — manifest cố ý không giữ `h`.
+    """
+    def f(t: str) -> int:
+        n = len(schema.columns.get(t, []))
+        return TITLE_H + ROW_H * max(1, n)
+    return f
+
+
+def _kiem_bo_cuc(man: Dict[str, Any], schema: "Schema",
+                 cao_cua) -> List[str]:
+    """Cổng cho TẦNG BỐ CỤC, độc lập với cổng ngữ nghĩa.
+
+    Sau bài học `_tu_kiem` từng tự kiểm bằng chính hàm đã sinh ra bản vẽ, các
+    phép ở đây không hỏi manifest xem nó có đúng không — chúng đối chiếu manifest
+    với CATALOG và với hình học tính lại được.
+
+    Chiều cao KHÔNG lấy từ manifest (manifest cố ý không giữ `h`); nó tính lại
+    từ số cột, nên phép kiểm chồng lấn dùng đúng hình học sẽ vẽ ra.
+    """
+    loi: List[str] = []
+    ten_bang = set(schema.tables)
+    nhom_cua = {t: PLANES[PLANE_OF[t]]["module"] for t in PLANE_OF}
+
+    da_dat: Set[str] = set()
+    for nhom in MODULES:
+        spec = man.get("groups", {}).get(nhom)
+        if spec is None:
+            loi.append(f"nhóm {nhom}: manifest không có mục")
+            continue
+        nodes = spec.get("nodes", {})
+
+        chinh = {t for t in ten_bang if nhom_cua.get(t) == nhom}
+        can_ctx = {f["ref_table"] for f in schema.fks
+                   if nhom_cua.get(f["table"]) == nhom
+                   and nhom_cua.get(f["ref_table"]) != nhom}
+
+        thieu = (chinh | can_ctx) - set(nodes)
+        if thieu:
+            loi.append(f"nhóm {nhom}: thiếu vị trí cho {sorted(thieu)}")
+        thua = set(nodes) - (chinh | can_ctx)
+        if thua:
+            loi.append(f"nhóm {nhom}: có vị trí cho bảng KHÔNG thuộc trang {sorted(thua)}")
+        da_dat |= (set(nodes) & chinh)
+
+        hop = []
+        for t, n in nodes.items():
+            if t not in ten_bang:
+                loi.append(f"nhóm {nhom}: `{t}` không phải bảng có thật")
+                continue
+            try:
+                x, y = float(n["x"]), float(n["y"])
+                w = float(n.get("w", COL_W))
+            except (KeyError, TypeError, ValueError):
+                loi.append(f"nhóm {nhom}: `{t}` thiếu hoặc sai x/y/w")
+                continue
+            h = cao_cua(t)
+            if w <= 0 or h <= 0:
+                loi.append(f"nhóm {nhom}: `{t}` hộp kích thước 0")
+            if x < 0 or y < 0:
+                loi.append(f"nhóm {nhom}: `{t}` nằm ngoài khung (x={x}, y={y})")
+            hop.append((t, x, y, w, h))
+
+        for i in range(len(hop)):
+            for j in range(i + 1, len(hop)):
+                t1, x1, y1, w1, h1 = hop[i]
+                t2, x2, y2, w2, h2 = hop[j]
+                if x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + h2 and y2 < y1 + h1:
+                    loi.append(f"nhóm {nhom}: `{t1}` chồng lên `{t2}`")
+
+    sot = ten_bang - da_dat
+    if sot:
+        loi.append(f"{len(sot)} bảng chính chưa có vị trí ở nhóm của nó: {sorted(sot)}")
     return loi
 
 
@@ -1346,6 +1470,8 @@ def main() -> int:
     ap.add_argument("--sql", metavar="PATH", nargs="?",
                     const=str(here / "schema_erd.sql"))
     ap.add_argument("--stats", action="store_true")
+    ap.add_argument("--auto-layout", action="store_true",
+                    help="bỏ qua manifest, dùng bố cục xếp khối tự động")
     ap.add_argument("--live", action="store_true",
                     help="đọc CSDL đang chạy thay vì evidence/ đã đóng băng")
     args = ap.parse_args()
@@ -1361,6 +1487,7 @@ def main() -> int:
               "băng — chỉ dùng để đối chiếu.", file=sys.stderr)
     else:
         schema = Schema(*_tu_evidence(here / "evidence"))
+    nap_ten_quan_he(here / "evidence")
 
     # DỪNG HẲN, không cảnh báo. Bản trước chỉ cảnh báo, và hậu quả là ba bảng
     # (`collection_sessions`, `tenant_storage`, `storage_reservations`) biến mất
@@ -1436,6 +1563,23 @@ def main() -> int:
     #                 này là tám nhóm của Phụ lục C, không phải bốn mô-đun cũ:
     #                 chữ cái từng va nghĩa (mô-đun B là Từ vựng, nhóm B của
     #                 phụ lục là Xác thực) nên tra chéo hai chỗ dẫn sai.
+    # Manifest bố cục: CHỈ hình học. Không đọc được thì dựng bằng bố cục tự
+    # động và nói rõ, chứ không âm thầm — hình khi ấy vẫn đúng ngữ nghĩa nhưng
+    # KHÔNG phải bản xuất bản.
+    man: Dict[str, Any] = {}
+    duong_man = here / "erd_layout_v8.json"
+    if not args.auto_layout and duong_man.is_file():
+        man = json.loads(duong_man.read_text(encoding="utf-8"))
+        sai_bc = _kiem_bo_cuc(man, schema, _cao_cua_bang(schema))
+        if sai_bc:
+            print(f"[LỖI] cổng bố cục: {len(sai_bc)} vấn đề", file=sys.stderr)
+            for _s in sai_bc:
+                print("    " + _s, file=sys.stderr)
+            return 6
+    elif not args.auto_layout:
+        print("[LƯU Ý] không thấy erd_layout_v8.json — dùng bố cục tự động, "
+              "KHÔNG phải bản xuất bản.", file=sys.stderr)
+
     pages = [
         build_chen(schema),
         build_ie(schema, "2 · Relationship Map — entities and links only",
@@ -1450,13 +1594,28 @@ def main() -> int:
                    if fk["table"] in own and fk["ref_table"] not in own}
         st: Dict[str, Any] = {}
         page_stats[mod] = (own, anchors, st)
+        bc = (man.get("groups", {}).get(mod) or {}).get("nodes")
         pages.append(build_ie(schema, f"{idx} · PDM {title}",
                               planes_of_module(mod), "all",
-                              anchors=anchors, own=own, stats=st))
+                              anchors=anchors, own=own, stats=st, layout=bc))
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
            f'<mxfile host="app.diagrams.net" type="device">{"".join(pages)}</mxfile>')
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(xml)
+
+    # TÁM TỆP RIÊNG, sinh từ CÙNG `pages` vừa dựng — không dựng lại, không chép
+    # tay. Bản tách tay trước đây (`erd_group_D.drawio`) là một nguồn thứ hai và
+    # sẽ lệch âm thầm khỏi bản tổng; ở đây hai đằng không thể lệch vì cùng một
+    # chuỗi ký tự.
+    thumuc = here / "erd_groups"
+    thumuc.mkdir(exist_ok=True)
+    for idx, mod in enumerate(MODULES, start=4):
+        than = pages[idx - 1]
+        (thumuc / f"PDM_{mod}.drawio").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<mxfile host="app.diagrams.net" type="device">{than}</mxfile>',
+            encoding="utf-8", newline=chr(10))
+    print(f"  · {len(MODULES)} tệp riêng: {_show(str(thumuc))}/PDM_[A-H].drawio")
 
     sai = _tu_kiem(xml, schema, here / "evidence")
     if sai:
