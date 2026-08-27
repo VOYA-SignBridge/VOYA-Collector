@@ -34,9 +34,9 @@ E,users,legal_document_drafts,User updates Legal Document Draft,USER_UPDATES_LEG
 E,users,legal_documents,User publishes Legal Document,USER_PUBLISHES_LEGAL_DOCUMENT,actor/action,published_by,id,N,0..1,0..N,SET NULL,,,B,Y,legal_documents_published_by_fkey
 A,memberships,memberships,Membership is parent of Membership for Same User,MEMBERSHIP_IS_PARENT_OF_MEMBERSHIP_FOR_SAME_USER,hierarchy,parent_membership_id+user_id,membership_id+user_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_memberships_parent
 A,projects,memberships,Project scopes Membership,PROJECT_SCOPES_MEMBERSHIP,scope,tenant_id+workspace_id+project_id,tenant_id+workspace_id+project_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_memberships_project
-A,tenants,memberships,Tenant scopes Membership,TENANT_SCOPES_MEMBERSHIP,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_memberships_tenant
+A,tenants,memberships,Tenant scopes Membership,TENANT_SCOPES_MEMBERSHIP_RESTRICT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_memberships_tenant
 A,workspaces,memberships,Workspace scopes Membership,WORKSPACE_SCOPES_MEMBERSHIP,scope,tenant_id+workspace_id,tenant_id+workspace_id,Y,0..1,0..N,CASCADE,,,C,Y,fk_memberships_workspace
-A,tenants,memberships,Tenant scopes Membership,TENANT_SCOPES_MEMBERSHIP,,tenant_id,tenant_id,N,1,0..N,CASCADE,,,B,Y,memberships_tenant_id_fkey
+A,tenants,memberships,Tenant scopes Membership,TENANT_SCOPES_MEMBERSHIP_CASCADE,scope,tenant_id,tenant_id,N,1,0..N,CASCADE,,,B,Y,memberships_tenant_id_fkey
 A,users,memberships,User holds Membership,USER_HOLDS_MEMBERSHIP,,user_id,id,N,1,0..N,CASCADE,,,B,Y,memberships_user_id_fkey
 H,tenants,notifications,Tenant scopes Notification,TENANT_SCOPES_NOTIFICATION,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_notifications_tenant
 H,users,notifications,User receives Notification,USER_RECEIVES_NOTIFICATION,recipient,user_id,id,N,1,0..N,CASCADE,,,B,Y,notifications_user_id_fkey

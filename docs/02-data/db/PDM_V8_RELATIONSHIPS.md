@@ -14,7 +14,8 @@ cardinality, ON DELETE là dữ liệu hệ thống.** Tên quan hệ thì khôn
 
 Bản trước xếp `tenant_id` → *owns* và `auth_user_id` → *operates* vào loại A.
 Sai: hai cột đó không chứa động từ nào; đó là suy diễn ngữ nghĩa của công cụ.
-Loại B và C chỉ có tên khi người duyệt đã chốt — cột **Đã chốt** đánh dấu.
+Loại B và C chỉ có tên sau khi người duyệt đã chốt.
+Trong bản này, toàn bộ 131 quan hệ đã được đặt tên và duyệt ngữ nghĩa.
 
 | | số |
 |---|---:|
@@ -34,9 +35,9 @@ Loại B và C chỉ có tên khi người duyệt đã chốt — cột **Đã 
 | `tenants` | `api_keys` | Tenant scopes API Key | `TENANT_SCOPES_API_KEY` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | scope | B |
 | `memberships` | `memberships` | Membership is parent of Membership for Same User | `MEMBERSHIP_IS_PARENT_OF_MEMBERSHIP_FOR_SAME_USER` | `parent_membership_id, user_id` → `membership_id, user_id` | ✓ | 0..1 — 0..N | CASCADE | hierarchy | C |
 | `projects` | `memberships` | Project scopes Membership | `PROJECT_SCOPES_MEMBERSHIP` | `tenant_id, workspace_id, project_id` → `tenant_id, workspace_id, project_id` | ✓ | 0..1 — 0..N | CASCADE | scope | C |
-| `tenants` | `memberships` | Tenant scopes Membership | `TENANT_SCOPES_MEMBERSHIP` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | — | B |
+| `tenants` | `memberships` | Tenant scopes Membership | `TENANT_SCOPES_MEMBERSHIP_RESTRICT` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | scope | B |
 | `workspaces` | `memberships` | Workspace scopes Membership | `WORKSPACE_SCOPES_MEMBERSHIP` | `tenant_id, workspace_id` → `tenant_id, workspace_id` | ✓ | 0..1 — 0..N | CASCADE | scope | C |
-| `tenants` | `memberships` | Tenant scopes Membership | `TENANT_SCOPES_MEMBERSHIP` | `tenant_id` → `tenant_id` | — | 1 — 0..N | CASCADE | — | B |
+| `tenants` | `memberships` | Tenant scopes Membership | `TENANT_SCOPES_MEMBERSHIP_CASCADE` | `tenant_id` → `tenant_id` | — | 1 — 0..N | CASCADE | scope | B |
 | `users` | `memberships` | User holds Membership | `USER_HOLDS_MEMBERSHIP` | `user_id` → `id` | — | 1 — 0..N | CASCADE | — | B |
 | `projects` | `project_allocations` | Project has Project Allocation | `PROJECT_HAS_PROJECT_ALLOCATION` | `tenant_id, project_id` → `tenant_id, project_id` | ✓ | 1 — 0..N | CASCADE | allocation | C |
 | `tenants` | `project_allocations` | Tenant scopes Project Allocation | `TENANT_SCOPES_PROJECT_ALLOCATION_RESTRICT` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | scope | B |
