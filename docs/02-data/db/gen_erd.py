@@ -24,6 +24,47 @@ Nên mô hình khái niệm ở đây được VIẾT TAY (xem `CONCEPTUAL_*`), 
 sinh DỪNG với lỗi nếu khoá đó không tồn tại trong CSDL. Một mô hình khái niệm vẽ
 tay thường sai lặng lẽ khi lược đồ đổi; cái này không sai lặng lẽ được.
 
+131 khoá ngoại, 126 cạnh — và vì sao con số ấy đúng
+-----------------------------------------------------
+    131 khoá ngoại VẬT LÝ
+    126 cạnh LOGIC được vẽ
+      5 cặp trùng/di-sản đã gộp
+
+Gộp theo (bảng con, CỘT NEO, bảng cha) — KHÔNG theo cặp bảng. Phân biệt này
+quan trọng: `samples` có hai khoá ngoại tới `users` và chúng KHÔNG gộp, vì neo
+vào hai cột khác nhau (`auth_user_id` là người thu, `reviewed_by` là người
+duyệt) — hai liên kết thật sự khác nhau. Năm lượt gộp là:
+
+    memberships.tenant_id          -> tenants           (nợ: hai FK trùng cột)
+    project_allocations.tenant_id  -> tenants           (nợ: hai FK trùng cột)
+    samples.capture_session_id     -> capture_sessions  (đơn di sản + ghép)
+    samples.class_uid              -> classes           (đơn di sản + ghép)
+    training_metrics.job_id        -> training_jobs     (đơn di sản + ghép)
+
+Khi gộp, khoá GHÉP thắng — nó mới là ràng buộc chặn tham chiếu chéo tổ chức —
+và nhãn cạnh ghi thêm "+ N FK đơn (di sản)". Để thứ tự tệp quyết định thì hai
+tình huống giống hệt nhau vẽ ra hai kiểu: `samples->classes` gặp khoá ghép
+trước nên hiện đủ cột, còn `samples->capture_sessions` gặp khoá đơn trước nên
+cạnh GIẤU MẤT khoá ghép tenant-aware.
+
+`--live` chỉ để ĐỐI CHIẾU, không bao giờ là nguồn chuẩn
+--------------------------------------------------------
+Nguồn chuẩn là `evidence/` đã đóng băng. Lý do không phải sở thích: đường
+`--live` đọc ràng buộc từ `pg_constraint`, mà `pg_constraint` KHÔNG chứa chỉ
+mục duy nhất không-điều-kiện tạo bằng `CREATE UNIQUE INDEX`. Lược đồ này có
+năm cái như vậy — `uq_users_tenant_email`, `uq_users_tenant_username`,
+`uq_classes_tenant_class_uid`, `uq_signers_tenant_signer_id`,
+`uq_legal_effective`.
+
+Lực lượng phía con phụ thuộc đúng vào chúng: một khoá ngoại có chỉ mục duy
+nhất không-điều-kiện phủ lên là `0..1`, không có thì `0..N`. Đọc thiếu chúng
+nghĩa là có ngày vẽ `0..N` cho một quan hệ một-một. Hiện hai nguồn cho lực
+lượng GIỐNG HỆT (187 `ERmandOne` / 358 `ERzeroToMany` / 195 `ERzeroToOne`),
+nhưng đó là may, không phải bảo đảm.
+
+Cùng họ với lỗ trigger đã gặp khi soát Phụ lục C: **ràng buộc của một lược đồ
+không chỉ nằm trong `pg_constraint`.**
+
 Những gì mức khái niệm CỐ Ý bỏ, và vì sao
 -------------------------------------------
 13 thực thể trên tổng số 44 bảng. Bị bỏ:
@@ -55,12 +96,15 @@ Cách chạy
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
+import re
 import subprocess
 import sys
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from xml.sax.saxutils import escape
 
 # =========================================================================== SQL
@@ -120,6 +164,46 @@ def _psycopg(sql: str, dsn: str) -> List[List[str]]:
     with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute(sql)
         return [["" if v is None else str(v) for v in r] for r in cur.fetchall()]
+
+
+def _tu_evidence(evidence: Path):
+    """Ba danh sách hàng mà `Schema` cần, dựng từ SÁU CSV bằng chứng đã đóng băng.
+
+    Vì sao không đọc thẳng CSDL nữa: hình vẽ và Phụ lục C phải nói cùng một điều.
+    Đọc CSDL lúc chạy thì ERD trôi theo trạng thái máy, và một lần trôi sẽ không
+    cổng nào bắt — đúng cách ba bảng v6/v8 từng biến mất khỏi mọi trang.
+
+    Số hàng dữ liệu KHÔNG có trong bằng chứng, và đó là chủ ý: nó là số liệu
+    SỐNG, in nó lên một hình đóng băng là để nó tự sai theo thời gian. Chỗ ấy
+    dùng số CỘT, vốn là thuộc tính của lược đồ.
+    """
+    def doc(ten):
+        with io.open(evidence / ten, encoding="utf-8", newline="") as fh:
+            return list(csv.DictReader(fh))
+
+    rows_tables = [[r["tbl"], r["rls"], r["n_cols"]] for r in doc("pdm_v8_tables.csv")]
+    rows_columns = [[r["table_name"], r["column_name"], r["data_type"],
+                     "f" if r["nullable"] == "YES" else "t"]
+                    for r in doc("pdm_v8_columns.csv")]
+
+    rows_cons = []
+    for r in doc("pdm_v8_uniques.csv"):
+        cols = ", ".join(r["columns"].split("+"))
+        if r["kind"] == "PRIMARY KEY":
+            rows_cons.append([r["table_name"], "p", f"PRIMARY KEY ({cols})"])
+        elif not r["predicate"].strip():
+            # Chỉ mục MỘT PHẦN CỐ Ý bị bỏ: nó không bảo đảm tính duy nhất trên
+            # toàn bảng, nên dùng nó để suy lực lượng 1–1 là bịa. Đây đúng là
+            # luật đã chốt khi soát Phụ lục C.
+            rows_cons.append([r["table_name"], "u", f"UNIQUE ({cols})"])
+    for r in doc("pdm_v8_foreign_keys.csv"):
+        cc = ", ".join(r["child_cols"].split("+"))
+        pc = ", ".join(r["parent_cols"].split("+"))
+        d = f'FOREIGN KEY ({cc}) REFERENCES {r["parent_table"]}({pc})'
+        if r["on_delete"] and r["on_delete"] != "NO ACTION":
+            d += f' ON DELETE {r["on_delete"]}'
+        rows_cons.append([r["child_table"], "f", d])
+    return rows_tables, rows_columns, rows_cons
 
 
 def _truthy(v: str) -> bool:
@@ -205,11 +289,25 @@ class Schema:
         return set(fk["columns"]) <= set(self.pk.get(fk["table"], []))
 
     def is_unique(self, table: str, cols: Sequence[str]) -> bool:
-        """Bộ cột này có bị một ràng buộc duy nhất phủ không → quan hệ 1:1."""
-        want = tuple(cols)
-        if tuple(self.pk.get(table, [])) == want:
+        """Bộ cột này có bị một ràng buộc duy nhất phủ không → quan hệ 1:1.
+
+        BAO HÀM TẬP CON, không phải so khớp chính xác. Nếu một khoá duy nhất là
+        TẬP CON của bộ cột khoá ngoại thì bộ cột ấy cũng duy nhất — thêm cột vào
+        một khoá đã duy nhất không làm nó bớt duy nhất.
+
+        Bản đầu so khớp chính xác và vì thế BÁO THIẾU quan hệ một-một:
+        `vocabulary_registry_meta` có khoá chính `(tenant_id)` còn khoá ngoại là
+        `(tenant_id, version)`, nên quan hệ tới `registry_versions` là 0..1—0..1;
+        so khớp chính xác không thấy và vẽ 0..N. Đây đúng là luật `<@` mà
+        `pdm_tools/fk.sql` dùng, và bảng quan hệ đã đóng băng theo luật đó.
+
+        Chỉ mục MỘT PHẦN đã bị loại từ tầng nạp (`_tu_evidence` chỉ lấy khoá có
+        `predicate` rỗng), nên chỗ này không thể vô tình biến 1-N thành 1-1.
+        """
+        want = set(cols)
+        if self.pk.get(table) and set(self.pk[table]) <= want:
             return True
-        return any(u == want for u in self.unique.get(table, []))
+        return any(set(u) <= want for u in self.unique.get(table, []))
 
     def entity_kind(self, table: str) -> str:
         """'strong' · 'weak' · 'associative'."""
@@ -298,7 +396,7 @@ def relation_name(fk: Dict[str, Any]) -> str:
 # =========================================================================== mặt phẳng
 
 PLANES: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
-    # ---- MODULE A — Tenant and Authorization (18 bảng) ----------------------
+    # ---- NHÓM A — Tenant & Access Management (12 bảng) ----------------------
     ("tenancy", {"label": "CORE — Tenant, Workspace, Project",
                  "color": "#0B4DA2", "fill": "#E7EEF9", "module": "A",
                  "tables": ["tenants", "workspaces", "projects",
@@ -308,19 +406,26 @@ PLANES: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
                "tables": ["memberships", "roles", "permissions",
                           "role_permissions", "role_assignments",
                           "tenant_invitations"]}),
-    ("identity", {"label": "IDENTITY AND ACCESS", "color": "#6B4FA8",
-                  "fill": "#EFEAF8", "module": "A",
-                  "tables": ["users", "refresh_tokens", "password_reset_tokens",
-                             "verification_codes", "user_totp",
-                             "user_recovery_codes", "user_action_passcodes",
-                             "api_keys"]}),
+    ("account", {"label": "ACCOUNT AND API ACCESS", "color": "#6B4FA8",
+                 "fill": "#EFEAF8", "module": "A",
+                 "tables": ["users", "api_keys"]}),
 
-    # ---- MODULE B — Vocabulary and Registry (11 bảng) -----------------------
+    # ---- NHÓM B — Authentication & User Security (6 bảng) -------------------
+    # Tách khỏi mặt phẳng `identity` cũ: bốn cơ chế mật mã khác nhau sống ở đây
+    # (SHA-256 trần, HMAC+pepper, băm mật khẩu, mã hoá Fernet) và chúng thuộc
+    # mặt phẳng DANH TÍNH, không thuộc mặt phẳng tenant.
+    ("credentials", {"label": "AUTHENTICATION CREDENTIALS", "color": "#7A3E9D",
+                     "fill": "#F0E8F7", "module": "B",
+                     "tables": ["refresh_tokens", "password_reset_tokens",
+                                "verification_codes", "user_totp",
+                                "user_recovery_codes", "user_action_passcodes"]}),
+
+    # ---- NHÓM C — VSL Vocabulary & Registry (12 bảng) ----------------------
     ("catalogue", {"label": "PLATFORM CATALOGUE", "color": "#2F6E5A",
-                   "fill": "#E6F1EC", "module": "B",
+                   "fill": "#E6F1EC", "module": "C",
                    "tables": ["languages", "regions"]}),
     ("vocab", {"label": "VOCABULARY AND REGISTRY (tenant-scoped)", "color": "#0E6E7A",
-               "fill": "#E2F1F3", "module": "B",
+               "fill": "#E2F1F3", "module": "C",
                "tables": ["dialects", "dialect_aliases", "recognition_profiles",
                           "vocabulary_groups", "vocabulary_registry_meta",
                           "registry_versions"]}),
@@ -328,46 +433,75 @@ PLANES: "OrderedDict[str, Dict[str, Any]]" = OrderedDict([
     # đồng. Cộng đồng là một HÀNG của `tenants` (`tenant_type='COMMUNITY'`).
     # Nhãn ở đây phải nói đúng điều đó, vì tên bảng là di sản và gây hiểu nhầm.
     ("syscat", {"label": "SYSTEM CATALOGUE (community_* table names are legacy)",
-                "color": "#7A6410", "fill": "#F5F0DC", "module": "B",
+                "color": "#7A6410", "fill": "#F5F0DC", "module": "C",
                 "tables": ["community_dialects", "community_profiles",
                            "community_versions"]}),
+    ("classdef", {"label": "SIGN CLASS", "color": "#1B6E4A",
+                  "fill": "#E4F1EA", "module": "C",
+                  "tables": ["classes"]}),
 
-    # ---- MODULE C — Collection and Sample (9 bảng) --------------------------
-    ("corpus", {"label": "CORPUS — Collected data", "color": "#1B6E4A",
-                "fill": "#E4F1EA", "module": "C",
-                "tables": ["samples", "classes", "raw_uploads",
-                           "capture_sessions", "signers", "signer_aliases"]}),
-    ("training", {"label": "TRAINING (downstream)", "color": "#8A4B12",
-                  "fill": "#F7EBE0", "module": "C",
-                  "tables": ["training_jobs", "training_job_classes",
-                             "training_metrics"]}),
+    # ---- NHÓM D — VSL Collection & Dataset (6 bảng) ------------------------
+    # Thứ tự trong danh sách QUYẾT ĐỊNH thứ tự đọc: bố cục xếp 4 hộp mỗi hàng.
+    # Trục chính của nhóm D là buổi thu -> phiên thu -> mẫu, nên ba bảng ấy
+    # phải đứng đầu và cùng một hàng; người ký đi hàng dưới.
+    ("corpus", {"label": "CORPUS — Collection session -> capture session -> sample",
+                "color": "#1B6E4A", "fill": "#E4F1EA", "module": "D",
+                "tables": ["collection_sessions", "capture_sessions", "samples",
+                           "raw_uploads", "signers", "signer_aliases"]}),
 
-    # ---- MODULE D — Governance and Platform (21 bảng) -----------------------
+    # ---- NHÓM E — Legal, Consent & Governance (9 bảng) ---------------------
     ("legal", {"label": "LEGAL, CONSENT AND AUDIT", "color": "#8E1F5E",
-               "fill": "#F7E5EF", "module": "D",
+               "fill": "#F7E5EF", "module": "E",
                "tables": ["legal_documents", "legal_document_drafts",
                           "legal_document_events", "user_consents",
                           "signer_consents", "audit_log"]}),
-    ("commerce", {"label": "TENANT SERVICES AND INTEGRATION", "color": "#A3311F",
-                  "fill": "#F8E7E3", "module": "D",
-                  "tables": ["plans", "tenant_subscriptions", "tenant_usage_daily",
-                             "tenant_exports", "tenant_purges",
-                             "webhook_endpoints", "webhook_deliveries",
-                             "support_tickets", "support_messages",
-                             "notifications", "event_outbox"]}),
+    ("lifecycle", {"label": "TENANT LIFECYCLE AND SOT AUTHORITY", "color": "#A3311F",
+                   "fill": "#F8E7E3", "module": "E",
+                   "tables": ["tenant_exports", "tenant_purges",
+                              "sot_authorized_keys"]}),
+
+    # ---- NHÓM F — Training & Evaluation (3 bảng) ---------------------------
+    ("training", {"label": "TRAINING (downstream)", "color": "#8A4B12",
+                  "fill": "#F7EBE0", "module": "F",
+                  "tables": ["training_jobs", "training_job_classes",
+                             "training_metrics"]}),
+
+    # ---- NHÓM G — Plan, Billing & Storage (5 bảng) -------------------------
+    # `tenant_storage` và `storage_reservations` KHÔNG có trong bản ERD trước:
+    # chúng ra đời ở Billing v8 và không mặt phẳng nào nhận, nên biến mất khỏi
+    # mọi trang trong khi dòng tổng kết vẫn in "62 thực thể".
+    ("billing", {"label": "PLAN, SUBSCRIPTION AND STORAGE QUOTA", "color": "#B0761A",
+                 "fill": "#FAF0DE", "module": "G",
+                 "tables": ["plans", "tenant_subscriptions", "tenant_usage_daily",
+                            "tenant_storage", "storage_reservations"]}),
+
+    # ---- NHÓM H — Integration & Operations (9 bảng) ------------------------
+    ("integration", {"label": "OUTBOUND INTEGRATION", "color": "#A3311F",
+                     "fill": "#F8E7E3", "module": "H",
+                     "tables": ["webhook_endpoints", "webhook_deliveries",
+                                "event_outbox", "notifications"]}),
+    ("support", {"label": "SUPPORT CHANNEL", "color": "#8C4A2F",
+                 "fill": "#F6EAE4", "module": "H",
+                 "tables": ["support_tickets", "support_messages"]}),
     ("platform", {"label": "PLATFORM AND INFRASTRUCTURE", "color": "#4A5560",
-                  "fill": "#ECEEF1", "module": "D",
-                  "tables": ["platform_settings", "sot_authorized_keys",
-                             "schema_migrations", "google_sheets_sync_status"]}),
+                  "fill": "#ECEEF1", "module": "H",
+                  "tables": ["platform_settings", "schema_migrations",
+                             "google_sheets_sync_status"]}),
 ])
 
-#: Bốn mô-đun của Chương 3 §3.4.2, mỗi mô-đun một trang PDM (Figure 3.15–3.18).
-#: Thứ tự khoá trong PLANES quyết định thứ tự khối trên trang.
+#: Tám nhóm của Phụ lục C, mỗi nhóm một trang PDM. Chữ cái ở đây PHẢI trùng
+#: nghĩa với `pdm_tools/groups.txt` — bản trước dùng bốn mô-đun A–D với nghĩa
+#: KHÁC (mô-đun B là Từ vựng, còn nhóm B của phụ lục là Xác thực), nên người
+#: đọc tra chéo hai chỗ bị dẫn sai.
 MODULES: "OrderedDict[str, str]" = OrderedDict([
-    ("A", "Module A: Tenant and Authorization"),
-    ("B", "Module B: Vocabulary and Registry"),
-    ("C", "Module C: Collection and Sample"),
-    ("D", "Module D: Governance and Platform"),
+    ("A", "Group A: Tenant and Access Management"),
+    ("B", "Group B: Authentication and User Security"),
+    ("C", "Group C: VSL Vocabulary and Registry"),
+    ("D", "Group D: VSL Collection and Dataset"),
+    ("E", "Group E: Legal, Consent and Governance"),
+    ("F", "Group F: Training and Evaluation"),
+    ("G", "Group G: Plan, Billing and Storage"),
+    ("H", "Group H: Integration and Operations"),
 ])
 
 
@@ -691,7 +825,10 @@ ROW_H, TITLE_H, COL_W, GAP_X, GAP_Y, PAD = 20, 30, 268, 48, 40, 24
 KEY_W = 38
 
 
-def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) -> str:
+def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str,
+             anchors: Optional[Set[str]] = None,
+             own: Optional[Set[str]] = None,
+             stats: Optional[Dict[str, Any]] = None) -> str:
     """Trang ký pháp chân chim (IE).
 
     `mode` quyết định hiện bao nhiêu thuộc tính:
@@ -705,6 +842,17 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
     """
     keys = planes or list(PLANES)
     visible = {t for k in keys for t in PLANES[k]["tables"] if t in schema.tables}
+    # Bảng cha nằm ở NHÓM KHÁC, kéo vào làm bối cảnh. Không có chúng thì trang
+    # nhóm B vẽ được ĐÚNG 0 quan hệ (cả sáu đều trỏ tới `users` ở nhóm A) và
+    # trang nhóm D chỉ vẽ 5/27 — sáu hộp rời rạc không phải một ERD.
+    anchors = {t for t in (anchors or ()) if t in schema.tables} - visible
+    visible |= anchors
+    plane_list = [(k, PLANES[k]) for k in keys]
+    if anchors:
+        plane_list.append(("ctx", {
+            "label": "CONTEXT — bảng thuộc nhóm khác, vẽ để quan hệ không bị treo",
+            "color": "#7A828C", "fill": "#F2F3F5", "module": "",
+            "tables": sorted(anchors)}))
 
     out: List[str] = []
     edges: List[str] = []
@@ -746,8 +894,7 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
     cursor_x, cursor_y, band_h = PAD, PAD, 0
     per_row_max = 4 if planes else 5
 
-    for key in keys:
-        plane = PLANES[key]
+    for key, plane in plane_list:
         members = [t for t in plane["tables"] if t in visible]
         if not members:
             continue
@@ -797,8 +944,12 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
                 # duy nhất phân biệt được thực thể đang dùng thật với thực thể
                 # mới tạo mà chưa ai ghi vào — câu hỏi hay được hỏi nhất khi
                 # nhìn một lược đồ 44 bảng lần đầu.
-                title = (f'{t}{mark}  ·  {schema.tables[t]["rows"]}' if mode == "none"
-                         else f"{t}{mark}")
+                # Số CỘT, không phải số HÀNG. Số hàng là dữ liệu SỐNG: in nó lên
+                # một hình dựng từ bằng chứng đã đóng băng là để hình tự sai theo
+                # thời gian, và cùng ký hiệu `·` khi ấy mang hai nghĩa tuỳ nguồn
+                # dựng. Số cột là thuộc tính của LƯỢC ĐỒ nên đúng ở cả hai nguồn.
+                title = (f'{t}{mark}  ·  {len(schema.columns.get(t, []))} cột'
+                         if mode == "none" else f"{t}{mark}")
                 out.append(_cell(
                     tid, title,
                     f'swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;'
@@ -858,22 +1009,82 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str) 
         cursor_x += gw + GAP_X * 2
         band_h = max(band_h, gh)
 
+    # Khi hai khoá ngoại cùng neo vào một cột và cùng trỏ tới một bảng cha,
+    # chỉ MỘT được vẽ. Chọn cái nào không được để thứ tự tệp quyết định:
+    # `samples->classes` may mắn gặp khoá GHÉP trước nên nhãn hiện đủ cột, còn
+    # `samples->capture_sessions` gặp khoá ĐƠN di sản trước nên cạnh vẽ ra GIẤU
+    # MẤT khoá ghép tenant-aware. Hai tình huống giống hệt nhau, vẽ ra hai kiểu,
+    # và cái sai thắng chỉ vì xếp chữ cái.
+    #
+    # Luật: khoá GHÉP thắng, vì nó mới là ràng buộc chặn tham chiếu chéo tổ
+    # chức; khoá đơn cùng chỗ là di sản và được ghi vào nhãn.
+    uu: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    for _f in schema.fks:
+        _k = (_f["table"], _f["anchor"], _f["ref_table"])
+        _cu = uu.get(_k)
+        if _cu is None or (_f["composite"] and not _cu["composite"]):
+            uu[_k] = _f
+
     seen = set()
     for n, fk in enumerate(schema.fks):
         child, parent = fk["table"], fk["ref_table"]
+        # Mỗi quan hệ chỉ thuộc về ĐÚNG MỘT trang: trang của bảng CON. Quy tắc
+        # này tái tạo chính xác cách PDM_V8_RELATIONSHIPS.md chia 131 quan hệ
+        # thành tám nhóm (33/6/23/27/14/9/6/13), nên tổng tám trang = 131 và
+        # không quan hệ nào bị vẽ hai lần hay bỏ sót.
+        if own is not None and child not in own:
+            continue
         if child not in visible or parent not in visible:
             continue
         src = row_id.get((child, fk["anchor"])) or table_id.get(child)
         dst = table_id.get(parent)
-        if not src or not dst or (src, dst) in seen:
+        if not src or not dst:
+            continue
+        if uu.get((child, fk["anchor"], parent)) is not fk:
+            if stats is not None:
+                stats.setdefault("gop", []).append(
+                    child + "." + fk["anchor"] + "->" + parent)
+            continue
+        if (src, dst) in seen:
+            # HAI khoá ngoại cùng neo vào một cột và cùng trỏ tới một bảng cha
+            # = MỘT liên kết logic. Vẽ hai đường song song giữa cùng hai ô là
+            # nhiễu, không nói thêm gì. Nhưng số cạnh khi đó KHÁC số khoá
+            # ngoại, nên phải ghi lại để dòng tổng kết không im lặng về chênh
+            # lệch — chính kiểu im lặng đó đã giấu ba bảng mất tích.
+            if stats is not None:
+                stats.setdefault('gop', []).append(
+                    f"{child}.{fk['anchor']}->{parent}")
             continue
         seen.add((src, dst))
+        if stats is not None:
+            stats['canh'] = stats.get('canh', 0) + 1
 
         child_end, parent_end = schema.cardinality(fk)
         color, _ = color_of(parent)
         label = relation_name(fk)
         if fk["composite"]:
             label += f'\n({", ".join(fk["columns"])})'
+        khac = [o for o in schema.fks
+                if o is not fk and o["table"] == child
+                and o["ref_table"] == parent and o["anchor"] == fk["anchor"]]
+        if khac:
+            # Người đọc phải thấy đây là MỘT liên kết logic do HAI khoá ngoại
+            # vật lý tạo nên — không phải bộ sinh đánh rơi một ràng buộc.
+            #
+            # Và nếu hai khoá ngoại có ON DELETE KHÁC NHAU thì gộp mà chỉ hiện
+            # một hành vi là nói SAI về lược đồ, dù kế toán 33->31 vẫn đúng.
+            # `memberships.tenant_id` và `project_allocations.tenant_id` đúng là
+            # trường hợp ấy: một RESTRICT, một CASCADE. Không được chọn theo thứ
+            # tự tệp — phải giữ CẢ HAI trên nhãn.
+            hanh_vi = sorted({(o["on_delete"] or "NO ACTION")
+                              for o in [fk] + khac})
+            if len(hanh_vi) > 1:
+                if stats is not None:
+                    stats.setdefault("xung_dot", []).append(
+                        (child + "." + fk["anchor"] + "->" + parent, hanh_vi))
+                label += f'\n⚠ {len(khac) + 1} FK · ON DELETE ' + " / ".join(hanh_vi)
+            else:
+                label += f'\n+ {len(khac)} FK đơn (di sản)'
 
         # Nét LIỀN cho quan hệ định danh (khoá ngoại nằm trong khoá chính của
         # con), nét ĐỨT cho quan hệ không định danh. Đây là quy ước IE, không
@@ -1002,6 +1213,112 @@ def _show(path: str) -> str:
         return str(path)
 
 
+def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
+    """Đọc LẠI chính XML vừa xuất và đối chiếu với catalog. Trả danh sách lỗi.
+
+    Vì sao đọc lại đầu ra thay vì tin vòng vẽ: cổng dựa trên biến nội bộ chỉ
+    chứng minh ý định, không chứng minh thứ đã ghi ra tệp. Lượt rà tám trang làm
+    tay đã bắt được một lỗi lực lượng thật theo đúng cách này, nên nó thành chốt
+    thường trực thay vì kiến thức của một phiên.
+
+    HAI BẪY PHÂN TÍCH, cả hai từng cho kết quả sai trong lượt rà tay và vì thế
+    được khoá lại ở đây:
+
+    * `id[2:]` chứ KHÔNG `replace("t_", "")` — `t_support_tickets` gặp
+      `replace` sẽ thành `supportickets`, vì `t_` còn xuất hiện GIỮA tên bảng.
+      Một cạnh có thật khi đó bị chấm là "bịa".
+    * ô phụ trợ `t_<bảng>_outer` và `t_<bảng>_kegach` KHÔNG phải thực thể. Đếm
+      chúng làm bảng khiến số bối cảnh phình từ 2 lên 18.
+
+    Cả hai được khẳng định ngay dưới đây, để phép kiểm không tự hỏng lặng lẽ.
+    """
+    loi: List[str] = []
+    ten_bang = set(schema.tables)
+
+    def go_tien_to(cid: str) -> str:
+        return cid[2:]
+
+    # Khẳng định về chính bộ phân tích, không về dữ liệu.
+    if "support_tickets" in ten_bang and go_tien_to("t_support_tickets") != "support_tickets":
+        loi.append("bộ phân tích cắt sai tiền tố id (bẫy support_tickets)")
+    for xau in ("t_samples_kegach", "t_samples_outer"):
+        if go_tien_to(xau) in ten_bang:
+            loi.append(f"ô phụ trợ {xau} bị nhận nhầm là thực thể")
+
+    neo = {}
+    for f in schema.fks:
+        neo.setdefault((f["table"], f["anchor"], f["ref_table"]), []).append(f)
+    tra = {"ERmandOne": "1", "ERzeroToOne": "0..1", "ERzeroToMany": "0..N"}
+
+    # Lực lượng đối chiếu lấy từ BẰNG CHỨNG, không từ `schema.cardinality()`.
+    #
+    # Bản đầu dùng `schema.cardinality()` và phép kiểm thành VÒNG TRÒN: nó so
+    # bản vẽ với chính hàm suy luận đã sinh ra bản vẽ, nên khi luật tập con
+    # trong `is_unique` bị hỏng, cả hai cùng sai và cổng vẫn xanh — thử thật:
+    # thoát 0 trong khi hình vẽ 0..N cho một quan hệ một-một.
+    #
+    # `evidence/pdm_v8_foreign_keys.csv` tính lực lượng bằng SQL (`fk.sql`, luật
+    # `<@` trên `pg_index`), độc lập hoàn toàn với mã Python ở đây. Đó mới là
+    # đối chứng.
+    card_bc = {}
+    try:
+        with io.open(evidence / "pdm_v8_foreign_keys.csv", encoding="utf-8",
+                     newline="") as fh:
+            for r in csv.DictReader(fh):
+                cols = r["child_cols"].split("+")
+                a_ = next((c for c in cols if c != "tenant_id"), cols[0])
+                card_bc.setdefault((r["child_table"], a_, r["parent_table"]),
+                                   (r["parent_card"], r["child_card"]))
+    except FileNotFoundError:
+        loi.append("thiếu evidence/pdm_v8_foreign_keys.csv — không đối chiếu được lực lượng")
+
+    trang = re.findall(r'<diagram[^>]*name="\d+ · PDM Group ([A-H])[^"]*"(.*?)</diagram>',
+                       xml, re.S)
+    tong_canh = 0
+    for nhom, than in trang:
+        thuoc = {t for k in planes_of_module(nhom) for t in PLANES[k]["tables"]
+                 if t in ten_bang}
+        hop = {go_tien_to(i) for i, _v in
+               re.findall(r'<mxCell id="(t_[a-z_]+)" value="([^"]*)"', than)}
+        hop &= ten_bang
+        thieu = thuoc - hop
+        if thieu:
+            loi.append(f"trang {nhom}: thiếu bảng {sorted(thieu)}")
+
+        hang = {}
+        for m in re.finditer(r'<mxCell id="(r_[^"]+)" value="([^"]*)"[^>]*parent="(t_[a-z_]+)"',
+                             than):
+            hang[m.group(1)] = (go_tien_to(m.group(3)), m.group(2))
+
+        for m in re.finditer(r'<mxCell id="[^"]*" value="[^"]*" style="([^"]*)" '
+                             r'edge="1" source="([^"]+)" target="([^"]+)"', than):
+            kieu, nguon, dich = m.groups()
+            tong_canh += 1
+            con, cot = hang.get(nguon, (go_tien_to(nguon), "(bảng)"))
+            cha = go_tien_to(dich)
+            khoa = (con, cot, cha)
+            if khoa not in neo:
+                loi.append(f"trang {nhom}: cạnh KHÔNG có khoá ngoại {con}.{cot}->{cha}")
+                continue
+            if PLANE_OF.get(con) and PLANES[PLANE_OF[con]]["module"] != nhom:
+                loi.append(f"trang {nhom}: quan hệ của nhóm khác {khoa}")
+            f = neo[khoa][0]
+            dc = re.search(r"startArrow=(\w+)", kieu)
+            dp = re.search(r"endArrow=(\w+)", kieu)
+            ve = (tra.get(dp.group(1) if dp else "", "?"),
+                  tra.get(dc.group(1) if dc else "", "?"))
+            can = card_bc.get(khoa)
+            if can is None:
+                continue
+            if ve != can:
+                loi.append(f"trang {nhom}: lệch lực lượng {khoa} vẽ={ve} catalog={can}")
+
+    mong = len({(f["table"], f["anchor"], f["ref_table"]) for f in schema.fks})
+    if tong_canh != mong:
+        loi.append(f"tổng cạnh tám trang {tong_canh} != {mong} liên kết logic")
+    return loi
+
+
 def main() -> int:
     # Console Windows mặc định cp1252 và mọi thông điệp ở đây đều có dấu. Không
     # có dòng này thì script GHI XONG tệp rồi chết ở câu `print` cuối với mã
@@ -1029,16 +1346,56 @@ def main() -> int:
     ap.add_argument("--sql", metavar="PATH", nargs="?",
                     const=str(here / "schema_erd.sql"))
     ap.add_argument("--stats", action="store_true")
+    ap.add_argument("--live", action="store_true",
+                    help="đọc CSDL đang chạy thay vì evidence/ đã đóng băng")
     args = ap.parse_args()
 
-    run = ((lambda q: _psycopg(q, args.dsn)) if args.dsn else
-           (lambda q: _psql(q, args.container, args.user, args.db)))
-    schema = Schema(run(Q_TABLES), run(Q_COLUMNS), run(Q_CONSTRAINTS))
+    # MẶC ĐỊNH đọc bằng chứng đã đóng băng, không đọc CSDL đang chạy. `--live`
+    # để đối chiếu khi nghi bằng chứng đã cũ; nó KHÔNG phải đường dựng hình
+    # chính thức, vì hình phải nói cùng một điều với Phụ lục C.
+    if args.live:
+        run = ((lambda q: _psycopg(q, args.dsn)) if args.dsn else
+               (lambda q: _psql(q, args.container, args.user, args.db)))
+        schema = Schema(run(Q_TABLES), run(Q_COLUMNS), run(Q_CONSTRAINTS))
+        print("[LƯU Ý] dựng từ CSDL ĐANG CHẠY, không từ bằng chứng đã đóng "
+              "băng — chỉ dùng để đối chiếu.", file=sys.stderr)
+    else:
+        schema = Schema(*_tu_evidence(here / "evidence"))
 
+    # DỪNG HẲN, không cảnh báo. Bản trước chỉ cảnh báo, và hậu quả là ba bảng
+    # (`collection_sessions`, `tenant_storage`, `storage_reservations`) biến mất
+    # khỏi MỌI trang trong khi dòng tổng kết vẫn in "62 thực thể" — một con số
+    # nói dối, và không ai đọc cảnh báo trên stderr giữa một lượt sinh thành
+    # công. Một bảng thiếu trên ERD là một quan hệ người đọc không bao giờ thấy.
     orphans = sorted(set(schema.tables) - set(PLANE_OF))
     if orphans:
-        print(f"[CẢNH BÁO] {len(orphans)} bảng chưa gán mặt phẳng, KHÔNG lên hình: "
+        print(f"[LỖI] {len(orphans)} bảng chưa gán mặt phẳng: "
               f"{', '.join(orphans)}", file=sys.stderr)
+        return 3
+    thua = sorted(set(PLANE_OF) - set(schema.tables))
+    if thua:
+        print(f"[LỖI] {len(thua)} bảng trong PLANES không có trong lược đồ: "
+              f"{', '.join(thua)}", file=sys.stderr)
+        return 3
+
+    # Nhóm A–H ở đây phải trùng NGHĨA với `pdm_tools/groups.txt`, nguồn của
+    # Phụ lục C. Hai tài liệu chia bảng khác nhau thì mọi lượt tra chéo đều sai.
+    groups_txt = here / "pdm_tools" / "groups.txt"
+    if groups_txt.is_file():
+        chuan: Dict[str, str] = {}
+        for dong in groups_txt.read_text(encoding="utf-8").splitlines():
+            phan = dong.split()
+            for t in phan[1:]:
+                chuan[t] = phan[0]
+        lech = sorted((t, PLANES[PLANE_OF[t]]["module"], chuan[t])
+                      for t in chuan if t in PLANE_OF
+                      and PLANES[PLANE_OF[t]]["module"] != chuan[t])
+        if lech:
+            print(f"[LỖI] {len(lech)} bảng lệch nhóm so với groups.txt:",
+                  file=sys.stderr)
+            for t, erd, phuluc in lech:
+                print(f"    {t}: ERD={erd} nhưng Phụ lục C={phuluc}", file=sys.stderr)
+            return 3
 
     # Mô hình khái niệm là diễn giải viết tay; đây là chỗ nó bị đối chiếu với
     # sự thật. Dừng hẳn chứ không cảnh báo: một ERD khái niệm nói sai về khoá
@@ -1075,20 +1432,38 @@ def main() -> int:
     #   trang 1     — tham chiếu cho Figure 3.13 (CDM), vẽ tay ở PowerDesigner
     #   trang 2     — tham chiếu cho Figure 3.14 (LDM Overview)
     #   trang 3     — LDM đủ khoá, dùng để đối chiếu
-    #   trang 4–7   — Figure 3.15–3.18, mỗi mô-đun một trang PDM
+    #   trang 4–11  — Figure 3.24–3.31, mỗi NHÓM A–H một trang PDM. Tám nhóm
+    #                 này là tám nhóm của Phụ lục C, không phải bốn mô-đun cũ:
+    #                 chữ cái từng va nghĩa (mô-đun B là Từ vựng, nhóm B của
+    #                 phụ lục là Xác thực) nên tra chéo hai chỗ dẫn sai.
     pages = [
         build_chen(schema),
         build_ie(schema, "2 · Relationship Map — entities and links only",
                  None, "none"),
         build_ie(schema, "3 · Logical Data Model — crow's foot with keys", None, "keys"),
     ]
+    page_stats: Dict[str, Any] = {}
     for idx, (mod, title) in enumerate(MODULES.items(), start=4):
+        own = {t for k in planes_of_module(mod) for t in PLANES[k]["tables"]
+               if t in schema.tables}
+        anchors = {fk["ref_table"] for fk in schema.fks
+                   if fk["table"] in own and fk["ref_table"] not in own}
+        st: Dict[str, Any] = {}
+        page_stats[mod] = (own, anchors, st)
         pages.append(build_ie(schema, f"{idx} · PDM {title}",
-                              planes_of_module(mod), "all"))
+                              planes_of_module(mod), "all",
+                              anchors=anchors, own=own, stats=st))
     xml = ('<?xml version="1.0" encoding="UTF-8"?>'
            f'<mxfile host="app.diagrams.net" type="device">{"".join(pages)}</mxfile>')
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(xml)
+
+    sai = _tu_kiem(xml, schema, here / "evidence")
+    if sai:
+        print(f"[LỖI] tự kiểm đầu ra: {len(sai)} vấn đề", file=sys.stderr)
+        for _s in sai:
+            print("    " + _s, file=sys.stderr)
+        return 5
 
     print(f"Đã ghi {_show(args.out)}")
     print(f"  · trang 1 (Chen):      {len(CONCEPTUAL_ENTITIES)} thực thể, "
@@ -1097,10 +1472,45 @@ def main() -> int:
     print(f"  · trang 3 (LDM):       {len(schema.tables)} thực thể "
           f"({kinds['strong']} mạnh / {kinds['weak']} yếu / "
           f"{kinds['associative']} kết hợp), {len(schema.fks)} quan hệ")
+    tong_canh = tong_qh = 0
     for idx, (mod, title) in enumerate(MODULES.items(), start=4):
-        n = sum(1 for k in planes_of_module(mod)
-                for t in PLANES[k]["tables"] if t in schema.tables)
-        print(f"  · trang {idx} (PDM {mod}):     {n} bảng — {title}")
+        own, anchors, st = page_stats[mod]
+        qh = sum(1 for f in schema.fks if f["table"] in own)
+        canh = st.get("canh", 0)
+        gop = st.get("gop", [])
+        tong_canh += canh
+        tong_qh += qh
+        them = f" + {len(anchors)} bối cảnh" if anchors else ""
+        note = f"  [{len(gop)} gộp: {", ".join(gop)}]" if gop else ""
+        print(f"  · trang {idx:>2} (PDM {mod}): {len(own):>2} bảng{them:<16}"
+              f"{qh:>3} quan hệ, {canh:>3} cạnh{note}")
+    print(f"  · tổng tám trang:  {tong_qh} quan hệ = {len(schema.fks)} khoá ngoại"
+          f" · {tong_canh} cạnh ({tong_qh - tong_canh} liên kết logic trùng đã gộp)")
+
+    # CHỐT: gộp cạnh KHÔNG được làm mất ngữ nghĩa ON DELETE. Kế toán đúng
+    # (33 quan hệ -> 31 cạnh) mà nhãn chỉ hiện một hành vi thì hình nói SAI về
+    # lược đồ — và sai đúng ở hai khoản nợ đã biết, nơi một khoá RESTRICT còn
+    # một khoá CASCADE. Dựng lại danh sách xung đột từ ĐẦU RA rồi đối chiếu
+    # với catalog, chứ không tin vào ý định của vòng vẽ.
+    can_giu = {}
+    for f in schema.fks:
+        k = (f["table"], f["anchor"], f["ref_table"])
+        can_giu.setdefault(k, set()).add(f["on_delete"] or "NO ACTION")
+    xung_dot_catalog = {k for k, v in can_giu.items() if len(v) > 1}
+    da_ghi = {tuple(x[0].replace("->", ".").split("."))
+              for _o, _a, st in page_stats.values()
+              for x in st.get("xung_dot", [])}
+    thieu = sorted(k for k in xung_dot_catalog if k not in da_ghi)
+    if xung_dot_catalog:
+        print(f"  · gộp có XUNG ĐỘT ON DELETE: {len(xung_dot_catalog)} — "
+              "nhãn cạnh phải ghi cả hai hành vi")
+        for k in sorted(xung_dot_catalog):
+            print(f"        {k[0]}.{k[1]} -> {k[2]}: "
+                  + " / ".join(sorted(can_giu[k])))
+    if thieu:
+        print(f"[LỖI] {len(thieu)} lượt gộp làm MẤT ngữ nghĩa ON DELETE: {thieu}",
+              file=sys.stderr)
+        return 4
 
     if args.sql:
         with open(args.sql, "w", encoding="utf-8") as fh:
