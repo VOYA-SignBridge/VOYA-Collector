@@ -910,9 +910,22 @@ def build_ie(schema: Schema, name: str, planes: Optional[List[str]], mode: str,
             # Phép chiếu do NGƯỜI chốt, giữ nguyên THỨ TỰ đã khai.
             chieu = list(layout[t]["columns"])
         elif layout and anchors and t in anchors:
+            # BỐI CẢNH: khoá chính + khoá được trỏ tới trên trang này.
             pk = list(schema.pk.get(t, []))
             them = sorted(khoa_duoc_tro.get(t, set()) - set(pk))
             chieu = pk + them
+        elif layout:
+            # BẢNG CHÍNH, chưa có phép chiếu do người chốt: dùng phép chiếu TỐI
+            # THIỂU — khoá chính cộng mọi cột tham gia khoá ngoại của chính bảng
+            # đó. Suy hoàn toàn từ bằng chứng, không phải lựa chọn của người.
+            #
+            # Đây là đáy: cắt thêm nữa là cắt vào cột neo của cạnh, và cổng
+            # "cạnh phải neo vào hàng" sẽ bắt. Muốn hình dễ hiểu hơn thì THÊM
+            # thuộc tính nghiệp vụ vào manifest, không bớt.
+            pk = list(schema.pk.get(t, []))
+            fkc = [c for c in schema.fk_columns(t) if c not in pk]
+            thu_tu = [c for c, _t, _n in schema.columns.get(t, [])]
+            chieu = pk + sorted(set(fkc), key=thu_tu.index)
         fkc = schema.fk_columns(t)
         pkc = set(schema.pk.get(t, []))
         uqc = {c for u in schema.unique.get(t, []) for c in u}
@@ -1427,6 +1440,62 @@ def _tu_kiem(xml: str, schema: "Schema", evidence: Path) -> List[str]:
 
 
 
+#: Vùng in được của A4 NGANG, tính bằng px ở 96 DPI (draw.io xuất ở mật độ này).
+#: 297 x 210 mm trừ lề 15 mm mỗi bên.
+A4N_RONG_PX = 267 / 25.4 * 96
+A4N_CAO_PX = 180 / 25.4 * 96
+
+#: Sàn đọc được khi in. Hai ngưỡng đòi TỈ LỆ KHÁC NHAU, và cái chặt hơn mới là
+#: thứ chặn:
+#:      tiêu đề >= 8 pt  ->  tỉ lệ >= 0.889
+#:      tên cột >= 7 pt  ->  tỉ lệ >= 0.9333   <-- ngưỡng thật
+#: Bản báo cáo đầu tiên tính theo ngưỡng tiêu đề và vì thế chấm nhóm A là ĐẠT
+#: với 8.4 pt trong khi tên cột chỉ 6.99 pt — hụt 0.01 pt, và phần "cần giảm
+#: bao nhiêu" còn báo ngược dấu.
+SAN_TIEU_DE_PT = 8.0
+SAN_TEN_COT_PT = 7.0
+
+
+def _kiem_kho_in(xml: str, schema: "Schema") -> List[str]:
+    """Trang có đọc được khi in A4 NGANG không.
+
+    Cổng chứ không phải báo cáo: khả năng đọc là thuộc tính của bản xuất bản,
+    và để nó phụ thuộc vào việc ai đó nhớ chạy một script ngoài thì có ngày một
+    trang 6.99 pt đi thẳng vào luận văn.
+
+    A4 DỌC cố ý không kiểm — khổ dọc cho khoảng 5 pt và đã bị loại.
+    """
+    loi: List[str] = []
+    ten_bang = set(schema.tables)
+    for nhom, than in re.findall(
+            r'<diagram[^>]*name="\d+ · PDM Group ([A-H])[^"]*"(.*?)</diagram>',
+            xml, re.S):
+        hop = []
+        for m in re.finditer(
+                r'<mxCell id="t_([a-z_]+)" value="[^"]*"[^>]*>\s*'
+                r'<mxGeometry x="([-\d.]+)" y="([-\d.]+)" '
+                r'width="([\d.]+)" height="([\d.]+)"', than):
+            if m.group(1) in ten_bang:
+                hop.append(tuple(float(v) for v in m.groups()[1:]))
+        if not hop:
+            continue
+        x0 = min(h[0] for h in hop)
+        y0 = min(h[1] for h in hop)
+        w = max(h[0] + h[2] for h in hop) - x0
+        h_ = max(h[1] + h[3] for h in hop) - y0
+        ty_le = min(A4N_RONG_PX / w, A4N_CAO_PX / h_)
+        tieu_de = 12 * ty_le * 0.75
+        ten_cot = 10 * ty_le * 0.75
+        if tieu_de < SAN_TIEU_DE_PT or ten_cot < SAN_TEN_COT_PT:
+            chan = "WIDTH" if A4N_RONG_PX / w < A4N_CAO_PX / h_ else "HEIGHT"
+            loi.append(
+                f"trang {nhom}: A4 landscape readability failed — "
+                f"tiêu đề {tieu_de:.2f} pt (sàn {SAN_TIEU_DE_PT:.2f}), "
+                f"tên cột {ten_cot:.2f} pt (sàn {SAN_TEN_COT_PT:.2f}); "
+                f"khung {w:.0f} x {h_:.0f} px, chặn bởi {chan}")
+    return loi
+
+
 def _kiem_bo_cuc(man: Dict[str, Any], schema: "Schema") -> List[str]:
     """Cổng cho TẦNG BỐ CỤC, độc lập với cổng ngữ nghĩa.
 
@@ -1671,6 +1740,16 @@ def main() -> int:
             f'<mxfile host="app.diagrams.net" type="device">{than}</mxfile>',
             encoding="utf-8", newline=chr(10))
     print(f"  · {len(MODULES)} tệp riêng: {_show(str(thumuc))}/PDM_[A-H].drawio")
+
+    if man:
+        # Chỉ áp khi dựng theo manifest: `--auto-layout` cho bố cục xếp khối
+        # thưa và đương nhiên không in vừa — nó không phải bản xuất bản.
+        sai_in = _kiem_kho_in(xml, schema)
+        if sai_in:
+            print(f"[LỖI] cổng khổ in: {len(sai_in)} trang", file=sys.stderr)
+            for _s in sai_in:
+                print("    " + _s, file=sys.stderr)
+            return 6
 
     sai = _tu_kiem(xml, schema, here / "evidence")
     if sai:
