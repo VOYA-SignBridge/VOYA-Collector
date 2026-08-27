@@ -1,83 +1,83 @@
 table_name,column_name,description,semantic_status,note
 collection_sessions,collection_session_id,Định danh buổi thu.,VERIFIED,
 collection_sessions,tenant_id,Tổ chức sở hữu bản ghi; là phạm vi áp dụng cách ly tenant.,VERIFIED,
-collection_sessions,session_code,"Mã buổi thu do client sinh, duy nhất trong phạm vi một tổ chức.",VERIFIED,"UNIQUE (tenant_id, session_code)"
+collection_sessions,session_code,"Mã buổi thu do client sinh, duy nhất trong phạm vi một tổ chức.",VERIFIED,"UNIQUE (tenant_id, session_code). CHECK collection_sessions_code_not_blank cấm chuỗi rỗng"
 collection_sessions,opened_by_user_id,Tài khoản đã mở buổi thu.,VERIFIED,"Là người VẬN HÀNH, không phải người ký"
 collection_sessions,source_type,Kênh thu: camera trực tiếp hay tải video lên.,VERIFIED,
 collection_sessions,started_at,Thời điểm buổi thu bắt đầu.,VERIFIED,
-collection_sessions,ended_at,Thời điểm buổi thu kết thúc; NULL khi chưa đóng.,VERIFIED,CHECK ended_at >= started_at
-collection_sessions,note,Ghi chú tự do của người vận hành.,NEEDS_REVIEW,
+collection_sessions,ended_at,Thời điểm buổi thu kết thúc; NULL khi chưa đóng.,VERIFIED,CHECK collection_sessions_ends_after_start là BẤT BIẾN NHIỀU CỘT có điều kiện: (ended_at IS NULL) OR (started_at IS NULL) OR (ended_at >= started_at) — buổi thu chưa đóng hoặc chưa rõ giờ mở vẫn hợp lệ
+collection_sessions,note,Ghi chú tự do của người vận hành.,NEEDS_REVIEW,Không đường mã nào đọc cột này; ai ghi và ghi gì vào đó chưa xác nhận.
 collection_sessions,created_at,Thời điểm tạo bản ghi.,VERIFIED,
 capture_sessions,capture_session_id,Định danh phiên thu một lớp ký hiệu.,VERIFIED,
 capture_sessions,tenant_id,Tổ chức sở hữu bản ghi.,VERIFIED,
 capture_sessions,class_uid,Lớp ký hiệu được thu trong phiên này.,VERIFIED,
-capture_sessions,session_id,"Mã phiên do client gửi; duy nhất theo (tổ chức, lớp), KHÔNG duy nhất một mình.",VERIFIED,"Đo: 61 giá trị khác nhau, một mã trải nhiều lớp"
-capture_sessions,signer_id,"Người ký TÓM TẮT của phiên, giữ lại từ thiết kế cũ.",LEGACY,Dữ liệu bác bỏ giả định một phiên một người: 10/253 phiên mang từ 2 nhãn người ký trở lên. KHÔNG dùng làm chân lý
+capture_sessions,session_id,"Mã phiên do client gửi; duy nhất theo (tổ chức, lớp), KHÔNG duy nhất một mình.",VERIFIED,"Đo: 61 giá trị khác nhau, một mã trải nhiều lớp. CHECK capture_sessions_session_id_not_blank cấm chuỗi rỗng"
+capture_sessions,signer_id,"Người ký TÓM TẮT của phiên, giữ lại từ thiết kế cũ.",LEGACY,"Dữ liệu bác bỏ giả định một phiên một người: 10/253 phiên mang từ 2 nhãn người ký trở lên. KHÔNG dùng làm chân lý. Khoá ngoại ghép tenant-aware VẪN còn hiệu lực — LEGACY ở đây nghĩa là cột không còn là nguồn danh tính chuẩn, KHÔNG có nghĩa là nó mất toàn vẹn tham chiếu"
 capture_sessions,auth_user_id,Tài khoản đã thực hiện phiên thu.,VERIFIED,Khác danh tính người ký
 capture_sessions,source_type,Kênh thu của phiên.,VERIFIED,
 capture_sessions,started_at,Thời điểm phiên bắt đầu.,VERIFIED,
-capture_sessions,ended_at,Thời điểm phiên kết thúc.,VERIFIED,
-capture_sessions,note,Ghi chú tự do.,NEEDS_REVIEW,
+capture_sessions,ended_at,Thời điểm phiên kết thúc.,VERIFIED,CHECK capture_sessions_ends_after_start là BẤT BIẾN NHIỀU CỘT có điều kiện: (ended_at IS NULL) OR (started_at IS NULL) OR (ended_at >= started_at)
+capture_sessions,note,Ghi chú tự do.,NEEDS_REVIEW,Không đường mã nào đọc cột này; ai ghi và ghi gì vào đó chưa xác nhận.
 capture_sessions,created_at,Thời điểm tạo bản ghi.,VERIFIED,
 capture_sessions,collection_session_id,Buổi thu chứa phiên này; NULL với dữ liệu có trước khi có phân cấp.,VERIFIED,ON DELETE SET NULL
-signers,signer_id,"Định danh chuẩn hoá của người ký, trong phạm vi một tổ chức.",VERIFIED,
+signers,signer_id,Định danh chuẩn hoá của người ký; là KHOÁ CHÍNH toàn bảng.,VERIFIED,"Cặp (tenant_id, signer_id) có chỉ mục duy nhất riêng (uq_signers_tenant_signer_id) để làm ĐÍCH cho các khoá ngoại tenant-aware từ samples và capture_sessions"
 signers,display_name,Tên hiển thị của người ký.,VERIFIED,
 signers,regional_group,Nhóm vùng miền của người ký.,NEEDS_REVIEW,Quan hệ với bảng regions cần xác nhận
 signers,external_user_id,"Tài khoản hệ thống tương ứng, nếu người ký cũng là người dùng.",VERIFIED,NULL khi người ký không có tài khoản
 signers,is_active,Người ký còn tham gia thu hay không.,VERIFIED,
 signers,created_at,Thời điểm đăng ký người ký.,VERIFIED,
 signers,tenant_id,Tổ chức quản lý hồ sơ người ký.,VERIFIED,
-signers,note,Ghi chú tự do.,NEEDS_REVIEW,
+signers,note,Ghi chú tự do.,NEEDS_REVIEW,Không đường mã nào đọc cột này; ai ghi và ghi gì vào đó chưa xác nhận.
 signers,display_order,Thứ tự hiển thị do người vận hành sắp.,VERIFIED,
 signer_aliases,tenant_id,Tổ chức sở hữu bản ghi gộp.,VERIFIED,
-signer_aliases,old_signer_id,Định danh người ký đã bị gộp đi.,VERIFIED,
+signer_aliases,old_signer_id,Định danh người ký đã bị gộp đi.,VERIFIED,CHECK signer_aliases_not_self (old_signer_id <> new_signer_id) cấm tự gộp vào chính mình
 signer_aliases,new_signer_id,Định danh người ký còn lại sau khi gộp.,VERIFIED,
 signer_aliases,reason,Lý do gộp.,VERIFIED,
 signer_aliases,merged_at,Thời điểm gộp.,VERIFIED,
 signer_aliases,merged_by,Người thực hiện gộp.,VERIFIED,
-samples,sample_uid,Định danh mẫu.,VERIFIED,10 ký tự hex
+samples,sample_uid,Định danh mẫu.,VERIFIED,CHECK samples_uid_is_hex10 buộc ĐÚNG 10 ký tự hex THƯỜNG: `^[0-9a-f]{10}$`
 samples,class_uid,Lớp ký hiệu mà mẫu này mang nhãn.,VERIFIED,
 samples,slug,Bản sao slug của lớp tại thời điểm ghi.,NEEDS_REVIEW,Phi chuẩn hoá; nguồn chuẩn là classes
 samples,label_original,Bản sao nhãn gốc của lớp tại thời điểm ghi.,NEEDS_REVIEW,Phi chuẩn hoá
 samples,language,Ngôn ngữ ký hiệu của mẫu.,VERIFIED,
 samples,dialect,Phương ngữ của mẫu.,VERIFIED,
 samples,source_type,Kênh thu: camera hay video tải lên.,VERIFIED,
-samples,user_id,"Nhãn người ký dạng văn bản tự do, giữ lại làm bằng chứng nguồn gốc.",LEGACY,KHÔNG phải định danh tài khoản. Là nguồn DUY NHẤT cho thấy 10/253 phiên có nhiều người ký
+samples,user_id,"Nhãn người ký/tài khoản dạng văn bản, theo hợp đồng dữ liệu cũ; đường ghi hiện hành vẫn điền cột này. KHÔNG phải khoá ngoại tới users.",VERIFIED,"Thuộc account_rename.STATE_COPIES: giá trị đã lưu ĐƯỢC CẬP NHẬT khi tài khoản đổi tên, nên đây KHÔNG phải ảnh chụp lịch sử bất biến — khác hẳn audit_log.actor_label vốn nằm trong FROZEN_COPIES. Vẫn ghi ở mọi hàng mới (có trong _SAMPLE_DB_KEYS; 3.864/3.864 dòng có giá trị, kể cả 08/2026), và hiện vẫn là trường cho thấy 10/253 phiên chứa nhiều nhãn người ký. Danh tính chuẩn hoá ở signer_id, nhưng cột đó mới điền 43% và đang đóng băng"
 samples,auth_user_id,Tài khoản đã thực hiện thao tác thu/tải mẫu này.,VERIFIED,Khác hẳn danh tính người ký. 166/3.864 dòng còn trống
 samples,session_id,Mã phiên do client gửi tại thời điểm thu.,VERIFIED,"Đo: 2.867/3.864 dòng có giá trị, 61 giá trị khác nhau"
 samples,fps_original,Tốc độ khung hình của nguồn gốc.,NEEDS_REVIEW,Kiểu text chứ không phải số — cần xác nhận vì sao
 samples,fps_processed,Tốc độ khung hình sau xử lý.,NEEDS_REVIEW,Kiểu text chứ không phải số
 samples,seq_len,Độ dài chuỗi sau khi đệm về độ dài đích.,VERIFIED,
 samples,augment_id,Chỉ số bản tăng cường; 0 là bản gốc.,VERIFIED,
-samples,completeness,Tỷ lệ khung hình có bàn tay hợp lệ.,DERIVED,Tính lại được từ tệp npz
-samples,file_path,"Đường dẫn tệp đặc trưng, tương đối so với gốc dataset.",VERIFIED,
+samples,completeness,Tỷ lệ khung hình có bàn tay hợp lệ.,DERIVED,"TÁI TÍNH ĐƯỢC từ npz đã lưu. Bằng hand_presence() trên chuỗi đã chuẩn hoá: completeness = both_hands_ratio khi lớp cần 2 tay, ngược lại là tỷ lệ có BẤT KỲ tay nào"
+samples,file_path,"Đường dẫn tệp đặc trưng, tương đối so với gốc dataset.",VERIFIED,"CHECK samples_file_path_is_local chỉ cấm giá trị bắt đầu bằng `http` — CSDL không cưỡng chế gì thêm. Việc đường dẫn phải tương đối so với gốc dataset là hợp đồng của ỨNG DỤNG, không phải của lược đồ"
 samples,storage_url,Đường dẫn hoặc URL nơi tệp đang nằm.,VERIFIED,Được cập nhật sau khi đẩy lên Drive
 samples,checksum,Tổng kiểm của tệp đặc trưng.,NEEDS_REVIEW,Thuật toán băm cần xác nhận
 samples,created_at,Thời điểm ghi mẫu.,VERIFIED,
 samples,sheets_synced,Đã đồng bộ sang Google Sheets chưa.,VERIFIED,
 samples,gdrive_synced,Đã đồng bộ lên Google Drive chưa.,VERIFIED,"Bẫy đã biết: CREATE TABLE mặc định FALSE còn ALTER mặc định TRUE, nên máy cài mới và máy cũ khác nhau"
-samples,status,Không còn được cập nhật.,LEGACY,Đo: giá trị duy nhất PENDING trên cả 3.864 dòng. Trạng thái kiểm duyệt sống ở review_status
-samples,error_log,"Thông báo lỗi của lượt xử lý, nếu có.",NEEDS_REVIEW,
+samples,status,Không còn được cập nhật.,LEGACY,KHÔNG đường ghi hiện hành nào cập nhật cột này: `status` không có trong _SAMPLE_DB_KEYS nên lượt upsert bỏ qua nó hoàn toàn; giá trị đến từ DEFAULT 'PENDING' của câu ALTER. Trạng thái kiểm duyệt sống ở review_status. Đo: PENDING trên cả 3.864 dòng
+samples,error_log,"Thông báo lỗi của lượt xử lý, nếu có.",NEEDS_REVIEW,Mặc định chuỗi rỗng. Đường ghi và tập thông báo chưa xác nhận; không rõ nó ghi lỗi của lượt xử lý nào.
 samples,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
 samples,storage_key,"Khoá tệp trên kho lưu trữ, tương đối so với gốc dataset.",VERIFIED,
 samples,session_uid,"Mã phiên thứ hai, khác session_id.",NEEDS_REVIEW,"Đo: 991 dòng có giá trị, 109 giá trị khác nhau. Quan hệ với session_id chưa rõ"
-samples,username,Bản sao tên tài khoản tại thời điểm ghi.,LEGACY,Phi chuẩn hoá; đổi tên tài khoản KHÔNG cập nhật ngược về đây
+samples,username,"Bản sao tên tài khoản, chỉ còn trên dữ liệu cũ.",LEGACY,"Nghỉ hưu theo ĐƯỜNG GHI, không phải cột bỏ hoang: không câu INSERT/upsert nào còn điền nó (`username` vắng trong _SAMPLE_DB_KEYS), nhưng giá trị cũ VẪN thuộc account_rename.STATE_COPIES và được cập nhật khi tài khoản đổi tên. Đo theo tháng: 05/2026 764/1244, 06/2026 400/440, 07/2026 5/2176, 08/2026 0/4"
 samples,deleted_at,Thời điểm xoá mềm; tệp VẪN nằm trên đĩa cho tới khi dọn Thùng rác.,VERIFIED,Vì vậy xoá mềm không trả lại dung lượng
-samples,left_hand_ratio,Tỷ lệ khung hình phát hiện được tay trái.,DERIVED,
-samples,right_hand_ratio,Tỷ lệ khung hình phát hiện được tay phải.,DERIVED,
-samples,both_hands_ratio,Tỷ lệ khung hình phát hiện được cả hai tay.,DERIVED,
-samples,jitter,"Độ rung của chuỗi landmark, phân vị 95.",DERIVED,"KHÔNG tính lại được từ dữ liệu đã lưu, khác với completeness"
-samples,quality_flags,Các cờ cảnh báo chất lượng của lượt thu.,DERIVED,
+samples,left_hand_ratio,Tỷ lệ khung hình phát hiện được tay trái.,DERIVED,"TÁI TÍNH ĐƯỢC từ npz đã lưu: hand_presence() chỉ hỏi khối tay có khác 0 không, và normalize_single_hand trả nguyên khối rỗng (`if not np.any(h): return h`), nên chuẩn hoá không đổi câu trả lời"
+samples,right_hand_ratio,Tỷ lệ khung hình phát hiện được tay phải.,DERIVED,TÁI TÍNH ĐƯỢC từ npz đã lưu — cùng cơ chế với left_hand_ratio
+samples,both_hands_ratio,Tỷ lệ khung hình phát hiện được cả hai tay.,DERIVED,TÁI TÍNH ĐƯỢC từ npz đã lưu — cùng cơ chế với left_hand_ratio
+samples,jitter,"Độ rung của chuỗi landmark, phân vị 95.",DERIVED,"KHÔNG tái tính được từ npz ĐÃ CHUẨN HOÁ: chỉ số đo ĐỘ DỜI toạ độ và phải tính TRƯỚC normalize_hands_vector_126, khi toạ độ còn ở thang ảnh MediaPipe 0..1. NHƯNG kho raw giữ đúng mảng ấy — `landmarks_raw` [T_original, 126], trước khi căn cổ tay và co giãn — nên với mẫu CÓ kho raw thì tính lại được. Đo: 1.678/3.864 mẫu có raw (raw_landmarks_available), 2.186 mẫu KHÔNG có và với chúng chỉ số này là không khôi phục được"
+samples,quality_flags,Các cờ cảnh báo chất lượng của lượt thu.,DERIVED,"KHÔNG tái tính được chỉ từ hàng samples và npz đã chuẩn hoá. Cần THÊM hai thứ mà hàng samples không bảo đảm: (1) mảng trước chuẩn hoá để có jitter_p95 — chỉ có ở 1.678/3.864 mẫu qua `landmarks_raw`; (2) đúng bộ ngưỡng qc_* tại thời điểm thu, vốn không lưu cạnh mẫu mà chỉ nằm trong nhật ký JSONL của lượt thu. Điều kiện (2) chưa mẫu nào thoả từ dữ liệu đã lưu"
 samples,signer_id,"Danh tính người ký đã chuẩn hoá, khi đã phân định được.",VERIFIED,"2.186/3.864 dòng còn trống, ĐANG ĐÓNG BĂNG chờ duyệt 266 khối thời gian"
-samples,collection_campaign,Đợt thu thập mà mẫu thuộc về.,NEEDS_REVIEW,
-samples,raw_landmarks_available,Có bản landmark thô trong kho raw hay không.,VERIFIED,Kho raw là nửa KHÔNG tái tạo được của một mẫu
+samples,collection_campaign,Đợt thu thập mà mẫu thuộc về.,NEEDS_REVIEW,"Lấy từ cấu hình `collection_campaign` lúc thu, nhưng quy tắc đặt tên đợt và ai quyết định nó chưa được ghi ở đâu."
+samples,raw_landmarks_available,Có bản landmark thô trong kho raw hay không.,VERIFIED,"Kho raw là nửa KHÔNG tái tạo được của một mẫu: `sequence` dựng lại được từ raw bằng cách chạy lại bộ chuẩn hoá, còn raw thì không dựng lại được từ đâu. Cột này vì thế quyết định mẫu nào còn tính lại được jitter. Đo: 1.678/3.864 mẫu có raw"
 samples,normalization_version,Phiên bản thuật toán chuẩn hoá đã áp cho mẫu.,VERIFIED,Cho phép chạy lại chuẩn hoá mà vẫn biết mẫu nào đã dùng phiên bản nào
 samples,preprocess_contract_version,Phiên bản hợp đồng tiền xử lý.,VERIFIED,
 samples,sequence_length_original,Số khung hình trước khi đệm hoặc cắt.,VERIFIED,
-samples,quality_status,Kết luận chất lượng: đạt hay bị gắn cờ.,DERIVED,
-samples,tenant_id,Tổ chức sở hữu mẫu; là phạm vi áp dụng cách ly tenant.,VERIFIED,Tham gia 5 khoá ngoại ghép cùng lúc — trụ neo tenant của bảng này
+samples,quality_status,Kết luận chất lượng: đạt hay bị gắn cờ.,DERIVED,"KHÔNG tái tính được chỉ từ hàng samples và npz đã chuẩn hoá — cùng hai điều kiện như quality_flags, vì cả hai là đầu ra của evaluate_quality(metrics, cfg)"
+samples,tenant_id,Tổ chức sở hữu mẫu; là phạm vi áp dụng cách ly tenant.,VERIFIED,"Tham gia 4 khoá ngoại GHÉP — tới Capture Session, Class, Signer và Dialect — đồng thời có khoá ngoại ĐƠN fk_samples_tenant tới Tenant. Là trụ neo tenant của bảng"
 samples,capture_session_id,Phiên thu chứa mẫu này.,VERIFIED,"997/3.864 dòng còn trống — dữ liệu có trước khi đường ghi nối phân cấp. Chỉ có trong CSDL, không có trong samples.csv"
-samples,review_status,Trạng thái kiểm duyệt của mẫu.,VERIFIED,"Giá trị đang có: pending, approved"
+samples,review_status,Trạng thái kiểm duyệt của mẫu.,VERIFIED,"MIỀN CHO PHÉP do ck_samples_review_status quy định: pending, approved, rejected. QUAN SÁT trên sản xuất: approved 3.862, pending 2, rejected 0 — miền rộng hơn dữ liệu đang có"
 samples,reviewed_by,Tài khoản đã kiểm duyệt mẫu.,VERIFIED,
 samples,reviewed_at,Thời điểm kiểm duyệt.,VERIFIED,
 samples,review_note,Ghi chú của người kiểm duyệt.,VERIFIED,
@@ -87,8 +87,8 @@ raw_uploads,slug,Bản sao slug của lớp.,NEEDS_REVIEW,Phi chuẩn hoá
 raw_uploads,label_original,Bản sao nhãn gốc của lớp.,NEEDS_REVIEW,Phi chuẩn hoá
 raw_uploads,language,Ngôn ngữ ký hiệu.,VERIFIED,
 raw_uploads,dialect,Phương ngữ.,VERIFIED,
-raw_uploads,source_type,Luôn là video ở bảng này.,VERIFIED,
-raw_uploads,user_id,Nhãn người ký dạng văn bản tự do.,LEGACY,KHÔNG phải định danh tài khoản
+raw_uploads,source_type,Loại nguồn của lượt tải lên; đường ghi hiện hành gán giá trị `video`.,VERIFIED,"Đường TẠO upload hiện hành (routers/upload.py) gán cứng `video`. CSDL KHÔNG cưỡng chế — không có CHECK nào — và đường gương/nhập CSV→DB chép nguyên giá trị từ tệp, nên không đường nào bảo đảm cột này luôn là `video`. Sản xuất hiện có 1 hàng, giá trị `video`"
+raw_uploads,user_id,"Nhãn người ký/tài khoản dạng văn bản, theo hợp đồng dữ liệu cũ; đường ghi hiện hành vẫn điền cột này. KHÔNG phải khoá ngoại tới users.",VERIFIED,"Thuộc account_rename.STATE_COPIES: giá trị đã lưu ĐƯỢC CẬP NHẬT khi tài khoản đổi tên, nên không phải ảnh chụp lịch sử bất biến. Vẫn ghi ở hàng mới (có trong _RAW_UPLOAD_DB_KEYS)"
 raw_uploads,auth_user_id,Tài khoản đã tải video lên.,VERIFIED,
 raw_uploads,session_id,Mã phiên tại thời điểm tải lên.,VERIFIED,
 raw_uploads,original_filename,"Tên tệp do người dùng gửi lên, đã làm sạch.",VERIFIED,
@@ -100,18 +100,18 @@ raw_uploads,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
 raw_uploads,deleted_at,Thời điểm xoá mềm; tệp vẫn nằm trên đĩa.,VERIFIED,
 raw_uploads,status,Trạng thái xử lý của lượt tải lên.,NEEDS_REVIEW,Cần xác nhận tập giá trị hợp lệ
 raw_uploads,session_uid,Mã phiên thứ hai.,NEEDS_REVIEW,Cùng câu hỏi như samples.session_uid
-raw_uploads,username,Bản sao tên tài khoản tại thời điểm tải lên.,LEGACY,Phi chuẩn hoá
+raw_uploads,username,"Bản sao tên tài khoản, chỉ còn trên dữ liệu cũ.",LEGACY,"Nghỉ hưu theo ĐƯỜNG GHI, không phải cột bỏ hoang: `username` vắng trong _RAW_UPLOAD_DB_KEYS nên hàng mới không có giá trị, nhưng giá trị cũ vẫn thuộc account_rename.STATE_COPIES và được cập nhật khi đổi tên. Hàng duy nhất trên sản xuất để trống cột này"
 raw_uploads,tenant_id,Tổ chức sở hữu video.,VERIFIED,
 tenants,tenant_id,Định danh tổ chức; là giá trị mọi chính sách cách ly tenant so khớp.,VERIFIED,
 tenants,display_name,Tên tổ chức hiển thị cho người dùng.,VERIFIED,
-tenants,slug,Dạng rút gọn của tên tổ chức dùng trong đường dẫn.,NEEDS_REVIEW,Chưa xác nhận nơi tiêu thụ
+tenants,slug,Slug — dạng rút gọn của tên tổ chức.,NEEDS_REVIEW,"Có ràng buộc duy nhất (tenants_slug_key, không phải chỉ mục một phần); chưa xác nhận consumer hiện hành, và chưa xác nhận cột có thực sự tham gia URL/route hay không"
 tenants,is_active,Tổ chức còn hoạt động hay không.,VERIFIED,
 tenants,created_at,Thời điểm tạo tổ chức.,VERIFIED,
 tenants,deleted_at,Thời điểm xoá mềm tổ chức.,VERIFIED,
 tenants,cloned_from_community_version,Phiên bản danh mục Community mà tổ chức được nhân bản từ đó lúc tạo.,VERIFIED,"Kế thừa xảy ra lúc TẠO, không phải một đường vọng lại lúc chạy"
 tenants,cloned_at,Thời điểm nhân bản danh mục.,VERIFIED,
 tenants,plan_code,Gói dịch vụ hiện hành; là nguồn ĐỌC của mọi phép cưỡng chế hạn mức.,VERIFIED,Lịch sử đổi gói nằm ở tenant_subscriptions
-tenants,billing_status,Trạng thái thanh toán; quyết định tổ chức còn ghi được dữ liệu hay không.,VERIFIED,
+tenants,billing_status,Trạng thái billing/dịch vụ của tổ chức; được dùng để quyết định tổ chức còn ghi được dữ liệu hay không.,VERIFIED,
 tenants,trial_ends_at,Thời điểm hết hạn dùng thử.,VERIFIED,
 tenants,current_period_start,Đầu kỳ hạn hiện tại của đăng ký.,VERIFIED,
 tenants,current_period_end,Cuối kỳ hạn hiện tại; mốc để nhắc hạn và mở kỳ mới.,VERIFIED,
@@ -121,7 +121,7 @@ tenants,suspended_at,Thời điểm tạm ngưng dịch vụ.,VERIFIED,
 tenants,suspended_reason,Lý do tạm ngưng.,VERIFIED,
 tenants,tenant_type,Loại tổ chức: COMMUNITY hay ORGANIZATION.,VERIFIED,"Community là một tenant DỰ TRỮ, không phải một mặt phẳng riêng"
 tenants,is_system_reserved,"Tổ chức do nền tảng giữ chỗ, không được xoá.",VERIFIED,
-tenants,billing_exempt,Miễn trừ hạn mức thương mại.,VERIFIED,Nghĩa là KHÔNG dùng trần để chặn — mức dùng vẫn được đo
+tenants,billing_exempt,Miễn trừ hạn mức thương mại.,VERIFIED,Không dùng các TRẦN THƯƠNG MẠI tương ứng để chặn; mức sử dụng vẫn được đo
 users,id,Định danh tài khoản.,VERIFIED,
 users,username,Tên đăng nhập.,VERIFIED,Được chép sang nhiều bảng dữ liệu làm dấu vết lịch sử
 users,email,Địa chỉ thư điện tử; cũng dùng được để đăng nhập.,VERIFIED,
@@ -140,11 +140,11 @@ users,sessions_invalid_before,Mốc thu hồi phiên: token phát trước thờ
 users,active_tenant_id,Tổ chức người dùng đang CHỌN làm ngữ cảnh làm việc.,VERIFIED,"Khác `tenant_id`: cái kia là mặc định/dự phòng, cái này là lựa chọn hiện tại"
 memberships,membership_id,Định danh tư cách thành viên.,VERIFIED,
 memberships,user_id,Tài khoản giữ tư cách thành viên này.,VERIFIED,
-memberships,scope_level,"Mức phạm vi: TENANT, WORKSPACE hoặc PROJECT.",VERIFIED,Quyết định hai cột dưới phải NULL hay NOT NULL — xem ck_memberships_shape
-memberships,tenant_id,Tổ chức xác định phạm vi của tư cách thành viên.,VERIFIED,
+memberships,scope_level,"Mức phạm vi: TENANT, WORKSPACE hoặc PROJECT.",VERIFIED,Quyết định hai cột workspace_id/project_id phải NULL hay NOT NULL — xem ck_memberships_shape. Ràng buộc CÂY thì ở nơi khác: ct_memberships_chain (xem parent_membership_id) mới là thứ kiểm quan hệ cha-con giữa các tầng
+memberships,tenant_id,Tổ chức xác định phạm vi của tư cách thành viên.,VERIFIED,"Cột chịu HAI khoá ngoại vật lý cùng trỏ tenants.tenant_id, một RESTRICT một CASCADE. Khác project_allocations, cặp này được tái tạo cả trên bản CÀI MỚI — xem docs/10-issues/KNOWN_ISSUES.md"
 memberships,workspace_id,Workspace của tư cách thành viên. NULL khi scope_level = TENANT; NOT NULL với WORKSPACE và PROJECT.,VERIFIED,ck_memberships_shape ràng ba cột thành đúng ba hình dạng hợp lệ
 memberships,project_id,Project của tư cách thành viên. NOT NULL chỉ khi scope_level = PROJECT.,VERIFIED,"Khoá ngoại ghép BA cột (tenant, workspace, project) nên không trỏ được sang project của workspace hay tổ chức khác"
-memberships,parent_membership_id,"Tư cách thành viên cấp trên trong cây phạm vi, của CÙNG một người.",VERIFIED,"Khoá ngoại là (parent_membership_id, user_id) nên cây bị ràng phải cùng một tài khoản"
+memberships,parent_membership_id,"Tư cách thành viên cấp trên trong cây phạm vi, của CÙNG một người.",VERIFIED,"Khoá ngoại ghép (parent_membership_id, user_id) bảo đảm cha thuộc CÙNG tài khoản. Constraint trigger ct_memberships_chain còn cưỡng chế bốn điều mà khoá ngoại không nói: (1) membership TENANT không được có cha, WORKSPACE/PROJECT bắt buộc có; (2) cha của WORKSPACE phải là TENANT, cha của PROJECT phải là WORKSPACE — đúng tầng liền trên; (3) với PROJECT, workspace_id của cha phải TRÙNG workspace_id của con — cùng NHÁNH, không chỉ cùng tổ chức; (4) một membership ACTIVE không được treo dưới cha đã thôi ACTIVE"
 memberships,legacy_role,"Vai trò tương thích cũ, chỉ dùng được ở membership cấp tenant.",LEGACY,CHECK giới hạn còn admin|editor và chỉ cho phép khi scope_level = TENANT
 memberships,status,"Trạng thái: ACTIVE, INVITED, SUSPENDED hoặc REMOVED.",VERIFIED,
 memberships,joined_at,Thời điểm gia nhập.,VERIFIED,
@@ -161,14 +161,14 @@ roles,is_builtin,Vai trò do nền tảng dựng sẵn hay do tổ chức tự t
 roles,is_active,Vai trò còn dùng được hay đã nghỉ hưu.,VERIFIED,"Vai rác được nhận nuôi bằng cách tắt cờ này, không xoá"
 roles,created_at,Thời điểm tạo vai trò.,VERIFIED,
 roles,role_name,Tên vai trò hiển thị.,NEEDS_REVIEW,Tồn tại song song với role_code sau một lượt di trú; quan hệ giữa hai cột cần xác nhận
-roles,tenant_type_constraint,Giới hạn vai trò chỉ áp cho một loại tổ chức (COMMUNITY hoặc ORGANIZATION).,VERIFIED,NULL nghĩa là không giới hạn theo loại tổ chức
+roles,tenant_type_constraint,Giới hạn vai trò chỉ áp cho một loại tổ chức (COMMUNITY hoặc ORGANIZATION); NULL nghĩa là không giới hạn.,VERIFIED,"Constraint trigger ct_roles_tenant_type kiểm loại tổ chức SỞ HỮU vai phải khớp giá trị này. Đây là bảo đảm giữa các hàng mà CHECK không làm được — CHECK chỉ ràng được miền giá trị. Trigger thứ hai, ct_role_assignments_scope, chặn tiếp ở lúc GÁN"
 roles,created_by_user_id,Tài khoản đã tạo vai trò tuỳ chỉnh.,VERIFIED,
 roles,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
 role_assignments,assignment_id,Định danh lượt gán vai.,VERIFIED,
 role_assignments,user_id,Tài khoản NHẬN lượt gán vai — chủ thể của quyền.,VERIFIED,"NOT NULL, ON DELETE CASCADE: xoá người thì xoá luôn phép gán"
-role_assignments,role_id,Vai trò được gán.,VERIFIED,
-role_assignments,membership_id,Tư cách thành viên mà lượt gán này gắn vào.,VERIFIED,"Khoá ngoại ghép (membership_id, user_id) bảo đảm vai được gán cho đúng người của membership. NULL với phép gán cấp SYSTEM"
-role_assignments,assigned_by_user_id,Tài khoản THỰC HIỆN việc cấp vai — tác nhân.,VERIFIED,"NOT NULL, ON DELETE RESTRICT: hệ thống TỪ CHỐI xoá người từng cấp vai, tức coi dấu vết uỷ quyền là bằng chứng phải giữ"
+role_assignments,role_id,Vai trò được gán.,VERIFIED,Constraint trigger ct_role_assignments_scope TỪ CHỐI gán một vai đã tắt (`roles.is_active = false`): một dòng gán 'đang hiệu lực' cho vai đã tắt sẽ khiến giao diện nói người này có vai còn Casbin nói không
+role_assignments,membership_id,Tư cách thành viên mà lượt gán này gắn vào.,VERIFIED,"Khoá ngoại ghép (membership_id, user_id) bảo đảm vai được gán cho đúng người của membership. ct_role_assignments_scope còn cưỡng chế: (1) phạm vi SYSTEM KHI VÀ CHỈ KHI membership_id IS NULL — hai chiều; (2) phạm vi của vai phải BẰNG phạm vi của membership, không phải quan hệ thống trị; (3) vai thuộc một tổ chức chỉ gán được TRONG tổ chức đó — khoá ngoại không phản đối vì cả hai định danh đều có thật; (4) vai giới hạn theo loại tổ chức chỉ gán được trong tổ chức đúng loại"
+role_assignments,assigned_by_user_id,Tài khoản THỰC HIỆN việc cấp vai — tác nhân.,VERIFIED,"NOT NULL, ON DELETE RESTRICT: CSDL từ chối xoá một tài khoản khi vẫn còn Role Assignment tham chiếu tài khoản đó ở vai trò người cấp. Giữ được dấu vết tác nhân chừng nào bản ghi cấp vai còn tồn tại"
 role_assignments,assigned_at,Thời điểm cấp vai.,VERIFIED,
 role_assignments,revoked_by_user_id,Tài khoản THỰC HIỆN việc thu hồi vai — tác nhân thu hồi.,VERIFIED,NULL cho tới khi vai bị thu hồi
 role_assignments,revoked_at,Thời điểm thu hồi vai.,VERIFIED,
@@ -183,14 +183,14 @@ permissions,is_active,Quyền còn hiệu lực hay đã nghỉ hưu.,VERIFIED,
 permissions,created_at,Thời điểm khai báo quyền.,VERIFIED,
 permissions,is_custom_role_allowed,Quyền có được đưa vào vai trò tuỳ chỉnh của tổ chức hay không.,VERIFIED,CHECK cấm quyền phạm vi SYSTEM lọt vào vai tuỳ chỉnh
 role_permissions,role_id,Vai trò được cấp quyền.,VERIFIED,
-role_permissions,permission_code,Quyền được cấp cho vai trò.,VERIFIED,
+role_permissions,permission_code,Quyền được cấp cho vai trò.,VERIFIED,"Constraint trigger ct_role_permissions_dominance ngăn vai ở phạm vi HẸP chứa quyền có phạm vi RỘNG hơn (authz_scope_rank(role) < authz_scope_rank(permission) thì từ chối) — rào chắn leo thang quyền ở tầng CSDL. Chiều ngược lại được phép và cần thiết: vai TENANT chứa quyền PROJECT chính là cơ chế thống trị phạm vi. Cùng trigger còn chặn vai TUỲ CHỈNH chứa quyền có is_custom_role_allowed = false ở BẤT KỲ phạm vi nào — nửa còn lại của ck_permissions_system_not_custom_role, vốn chỉ chặn quyền SYSTEM"
 role_permissions,granted_at,Thời điểm gắn quyền vào vai trò.,VERIFIED,
 workspaces,workspace_id,Định danh workspace.,VERIFIED,
 workspaces,tenant_id,Tổ chức chứa workspace này.,VERIFIED,
-workspaces,name,"Tên workspace, duy nhất trong phạm vi tổ chức.",VERIFIED,
+workspaces,name,"Tên workspace, duy nhất trong phạm vi tổ chức đối với workspace chưa xoá mềm.",VERIFIED,"Chỉ mục duy nhất MỘT PHẦN uq_workspaces_tenant_name, predicate `deleted_at IS NULL`"
 workspaces,description,Mô tả workspace.,VERIFIED,
 workspaces,status,Trạng thái workspace.,VERIFIED,
-workspaces,is_default,Workspace mặc định của tổ chức.,VERIFIED,
+workspaces,is_default,Workspace mặc định của tổ chức.,VERIFIED,"Chỉ mục duy nhất MỘT PHẦN uq_workspaces_default_active: mỗi tổ chức có tối đa MỘT workspace vừa is_default = true, vừa status = 'ACTIVE', vừa chưa xoá mềm"
 workspaces,created_at,Thời điểm tạo.,VERIFIED,
 workspaces,archived_at,Thời điểm lưu trữ.,VERIFIED,
 workspaces,deleted_at,Thời điểm xoá mềm.,VERIFIED,
@@ -200,14 +200,14 @@ projects,workspace_id,Workspace chứa project này.,VERIFIED,"Khoá ngoại gh�
 projects,name,"Tên project, duy nhất trong phạm vi workspace.",VERIFIED,Chỉ mục duy nhất MỘT PHẦN: chỉ áp cho hàng chưa xoá mềm
 projects,description,Mô tả project.,VERIFIED,
 projects,status,Trạng thái project.,VERIFIED,
-projects,is_default,Project mặc định của workspace.,VERIFIED,Chỉ mục duy nhất một phần bảo đảm mỗi workspace chỉ có một project mặc định ĐANG HOẠT ĐỘNG
+projects,is_default,Project mặc định của workspace.,VERIFIED,"Chỉ mục duy nhất MỘT PHẦN uq_projects_default_active: mỗi workspace có tối đa MỘT project vừa is_default = true, vừa status = 'ACTIVE', vừa chưa xoá mềm"
 projects,created_at,Thời điểm tạo.,VERIFIED,
 projects,archived_at,Thời điểm lưu trữ.,VERIFIED,
 projects,deleted_at,Thời điểm xoá mềm.,VERIFIED,
 project_allocations,tenant_id,Tổ chức xác định phạm vi của khoản cấp phát.,VERIFIED,Cột này đang chịu HAI khoá ngoại trùng nhau với hành vi xoá mâu thuẫn (RESTRICT và CASCADE) — xem docs/10-issues/KNOWN_ISSUES.md
 project_allocations,project_id,Project được cấp phát.,VERIFIED,
-project_allocations,metric,"Chỉ tiêu được chia: `samples`, `storage_mb` hoặc `training_jobs_per_month`.",VERIFIED,Ánh xạ sang cột gói qua workspace_admin.ALLOCATABLE_METRICS. CẢNH BÁO: từ v8 chỉ `storage_mb` còn được cưỡng chế ở cấp tổ chức; hai chỉ tiêu kia chia một ngân sách nền tảng không còn kiểm
-project_allocations,allocated,"Phần chỉ tiêu dành cho project này. NULL nghĩa là KHÔNG GIỚI HẠN, không phải chưa điền.",VERIFIED,Tổng phần cấp cho các project không được vượt trần của gói; CHECK cấm giá trị âm
+project_allocations,metric,"Chỉ tiêu được chia: `samples`, `storage_mb` hoặc `training_jobs_per_month`.",VERIFIED,"Ánh xạ sang cột gói qua workspace_admin.ALLOCATABLE_METRICS. Từ v8, chỉ `storage_mb` còn được cưỡng chế đối với MỨC SỬ DỤNG THỰC TẾ; `samples` và `training_jobs_per_month` vẫn phân bổ được theo trần khai báo của gói, nhưng mức sử dụng thực tế không còn bị hai trần ấy chặn"
+project_allocations,allocated,"Phần chỉ tiêu dành cho project này. NULL nghĩa là KHÔNG GIỚI HẠN, không phải chưa điền.",VERIFIED,"Đường quản trị cấp phát (workspace_admin.set_project_allocation) kiểm tổng phần cấp cho các project không vượt trần khai báo tương ứng của gói, từ chối 409 nếu vượt; CHECK ở CSDL chỉ cấm giá trị âm"
 project_allocations,note,Ghi chú của người vận hành về khoản cấp phát.,VERIFIED,
 project_allocations,updated_by,Tài khoản chỉnh khoản cấp phát gần nhất.,VERIFIED,
 project_allocations,updated_at,Thời điểm chỉnh gần nhất.,VERIFIED,
@@ -235,15 +235,15 @@ api_keys,expires_at,Thời điểm khoá hết hạn.,VERIFIED,
 api_keys,revoked_at,Thời điểm thu hồi khoá.,VERIFIED,Hạn mức số khoá chỉ đếm khoá CHƯA thu hồi
 api_keys,revoked_by,Tài khoản đã thu hồi khoá.,VERIFIED,
 legal_documents,doc_id,Định danh bản văn bản pháp lý đã công bố.,VERIFIED,
-legal_documents,kind,"Loại văn bản: `terms`, `privacy`, `data_contribution` hoặc `guardian`.",VERIFIED,Cùng với `version` tạo thành khoá tự nhiên mà mọi chấp thuận neo vào
+legal_documents,kind,"Loại văn bản: `terms`, `privacy`, `data_contribution` hoặc `guardian`.",VERIFIED,MIỀN CHO PHÉP do legal_documents_kind_valid quy định. Cùng với `version` tạo thành khoá tự nhiên mà mọi chấp thuận neo vào
 legal_documents,version,Phiên bản văn bản.,VERIFIED,"`(kind, version)` là đích của khoá ngoại từ user_consents và signer_consents"
-legal_documents,effective_from,Thời điểm văn bản bắt đầu có hiệu lực.,VERIFIED,
-legal_documents,content_hash,Băm nội dung; là thứ chữ ký chấp thuận trỏ vào.,VERIFIED,Bất biến sau khi công bố — sửa nội dung sẽ làm mọi chấp thuận đã ghi không còn khớp
+legal_documents,effective_from,Thời điểm văn bản bắt đầu có hiệu lực.,VERIFIED,trg_legal_documents_freeze cấm đổi cột này MỘT KHI bản đã có hiệu lực (OLD.effective_from <= now()) — đổi nó là viết lại câu trả lời cho 'hôm đó bản nào đang áp dụng'. Bản chưa tới hiệu lực thì vẫn sửa được
+legal_documents,content_hash,Băm nội dung tại thời điểm công bố; là thứ chữ ký chấp thuận trỏ vào.,VERIFIED,"Bất biến được CSDL cưỡng chế, nhưng KHÔNG bằng CHECK — bằng trigger trg_legal_documents_freeze (BEFORE UPDATE) ném restrict_violation nếu kind/version/body/content_hash đổi. Muốn đổi nội dung thì phải công bố phiên bản mới. Vì là trigger nên nó không hiện ra trong danh sách CHECK của bảng"
 legal_documents,url,Đường dẫn công khai tới văn bản.,VERIFIED,
 legal_documents,title,Tiêu đề văn bản.,VERIFIED,
 legal_documents,requires_reconsent,Bản này buộc người đã chấp thuận bản cũ phải chấp thuận lại.,VERIFIED,Phân biệt sửa lỗi chính tả với thay đổi thực chất về quyền và nghĩa vụ
-legal_documents,body,Thân văn bản lưu thẳng trong cơ sở dữ liệu.,VERIFIED,
-legal_documents,body_format,"Dạng thân văn bản: `markdown`, `text` hoặc `file`.",VERIFIED,Máy CÀI MỚI thiếu giá trị `file` do một lỗi thứ tự câu lệnh — xem docs/10-issues/KNOWN_ISSUES.md
+legal_documents,body,Thân văn bản lưu thẳng trong cơ sở dữ liệu.,VERIFIED,Cùng trigger trg_legal_documents_freeze bảo vệ: sửa `body` của bản đã công bố bị từ chối ở tầng CSDL
+legal_documents,body_format,"Dạng thân văn bản: `markdown`, `text` hoặc `file`.",VERIFIED,"MIỀN CHO PHÉP do ck_legal_documents_body_format quy định: markdown, text, file. Máy CÀI MỚI thiếu giá trị `file` do một lỗi thứ tự câu lệnh — xem docs/10-issues/KNOWN_ISSUES.md"
 legal_documents,language,Ngôn ngữ của bản văn bản.,VERIFIED,
 legal_documents,change_summary,Tóm tắt thay đổi so với bản trước.,VERIFIED,
 legal_documents,published_at,Thời điểm công bố.,VERIFIED,
@@ -251,12 +251,12 @@ legal_documents,published_by,Tài khoản đã công bố văn bản.,VERIFIED,
 legal_documents,storage_backend,Nơi lưu thân văn bản khi không nằm trong cột `body`.,VERIFIED,
 legal_documents,storage_key,Khoá tra thân văn bản trong kho định-địa-chỉ-bằng-nội-dung.,VERIFIED,
 legal_documents,byte_size,Kích thước thân văn bản.,VERIFIED,
-legal_documents,file_key,Khoá tra tệp đính kèm khi `body_format = 'file'`.,VERIFIED,CHECK buộc cột này có giá trị KHI VÀ CHỈ KHI body_format = 'file'
+legal_documents,file_key,Khoá tra tệp đính kèm khi `body_format = 'file'`.,VERIFIED,"CHECK ck_legal_documents_file_pair là BẤT BIẾN NHIỀU CỘT dạng tương đương: (body_format = 'file') = (file_key IS NOT NULL) — buộc cột này có giá trị KHI VÀ CHỈ KHI body_format = 'file', và cấm cả chiều ngược lại"
 legal_documents,file_name,Tên tệp gốc của bản văn bản dạng tệp.,VERIFIED,
 legal_documents,file_mime,Kiểu MIME của tệp đính kèm.,VERIFIED,
 legal_documents,file_size,Kích thước tệp đính kèm.,VERIFIED,
 legal_document_drafts,draft_id,Định danh bản thảo văn bản.,VERIFIED,
-legal_document_drafts,kind,Loại văn bản mà bản thảo này nhắm tới.,VERIFIED,
+legal_document_drafts,kind,Loại văn bản mà bản thảo này nhắm tới.,VERIFIED,"MIỀN CHO PHÉP do ck_legal_drafts_kind quy định: terms, privacy, data_contribution, guardian — cùng bộ với legal_documents.kind"
 legal_document_drafts,title,Tiêu đề dự kiến.,VERIFIED,
 legal_document_drafts,language,Ngôn ngữ bản thảo.,VERIFIED,
 legal_document_drafts,body,Thân bản thảo.,VERIFIED,
@@ -265,8 +265,8 @@ legal_document_drafts,change_summary,Tóm tắt thay đổi dự kiến.,VERIFIE
 legal_document_drafts,target_version,Số hiệu phiên bản dự kiến đặt khi công bố.,VERIFIED,
 legal_document_drafts,requires_reconsent,Bản công bố từ bản thảo này sẽ buộc chấp thuận lại.,VERIFIED,
 legal_document_drafts,effective_from,Thời điểm hiệu lực dự kiến.,VERIFIED,
-legal_document_drafts,status,"Trạng thái: `draft`, `in_review`, `approved`, `published` hoặc `discarded`.",VERIFIED,Chỉ mục duy nhất MỘT PHẦN cho phép tối đa một bản thảo đang mở cho mỗi loại văn bản
-legal_document_drafts,revision,"Số lần sửa bản thảo, bắt đầu từ 1.",VERIFIED,
+legal_document_drafts,status,"Trạng thái: `draft`, `in_review`, `approved`, `published` hoặc `discarded`.",VERIFIED,"MIỀN CHO PHÉP do ck_legal_drafts_status quy định: draft, in_review, approved, published, discarded. Chỉ mục duy nhất MỘT PHẦN uq_legal_draft_open cho phép tối đa MỘT bản thảo ở một trong BA trạng thái draft, in_review, approved cho mỗi `kind`"
+legal_document_drafts,revision,"Số lần sửa bản thảo, bắt đầu từ 1.",VERIFIED,CHECK ck_legal_drafts_revision buộc revision >= 1: không có bản sửa số 0
 legal_document_drafts,based_on_version,Phiên bản đã công bố mà bản thảo dựa trên.,VERIFIED,
 legal_document_drafts,published_version,Phiên bản thực tế được công bố từ bản thảo này.,VERIFIED,
 legal_document_drafts,storage_key,Khoá tra thân bản thảo trong kho.,VERIFIED,
@@ -276,11 +276,11 @@ legal_document_drafts,created_by,Tài khoản đã tạo bản thảo.,VERIFIED,
 legal_document_drafts,updated_by,Tài khoản sửa bản thảo gần nhất.,VERIFIED,
 legal_document_drafts,created_at,Thời điểm tạo bản thảo.,VERIFIED,
 legal_document_drafts,updated_at,Thời điểm sửa gần nhất.,VERIFIED,
-legal_document_events,event_id,Số thứ tự sự kiện trong sổ.,VERIFIED,
+legal_document_events,event_id,Số thứ tự sự kiện trong sổ.,VERIFIED,Sổ CHỈ-THÊM được cưỡng chế bằng trigger trg_legal_events_append_only (BEFORE UPDATE OR DELETE): mọi lượt sửa hoặc xoá đều bị từ chối. Đính chính bằng cách ghi một dòng sự kiện mới
 legal_document_events,occurred_at,Thời điểm sự kiện xảy ra.,VERIFIED,
 legal_document_events,actor_user_id,"Tài khoản thực hiện. Giữ như dấu vết, KHÔNG có khoá ngoại.",VERIFIED,"Cố ý: một sổ đăng bạ không được cản chính hành động nó ghi lại. Bản trước có khoá ngoại và nó chặn lượt xoá tài khoản theo yêu cầu quyền riêng tư, để lại 9 hàng users mồ côi"
-legal_document_events,actor_label,"Nhãn người thực hiện, điền ngay lúc ghi.",VERIFIED,Là danh tính còn lại sau khi tài khoản bị xoá; KHÔNG cập nhật khi người dùng đổi tên
-legal_document_events,action,Hành động được ghi lại.,VERIFIED,
+legal_document_events,actor_label,"Nhãn người thực hiện, điền ngay lúc ghi.",VERIFIED,Thuộc account_rename.FROZEN_COPIES: đổi tên tài khoản KHÔNG cập nhật cột này. Là danh tính còn lại sau khi tài khoản bị xoá
+legal_document_events,action,Hành động được ghi lại.,VERIFIED,CHECK ck_legal_events_action_not_blank cấm chuỗi rỗng — cùng ràng buộc với audit_log.action
 legal_document_events,kind,"Loại văn bản liên quan. Dấu vết, không phải liên kết.",VERIFIED,
 legal_document_events,version,"Phiên bản văn bản liên quan. Dấu vết, không phải liên kết.",VERIFIED,
 legal_document_events,draft_id,"Bản thảo liên quan. Dấu vết, không phải liên kết.",VERIFIED,
@@ -293,38 +293,38 @@ user_consents,user_id,Tài khoản LÀ CHỦ THỂ của chấp thuận.,VERIFIE
 user_consents,kind,Loại văn bản được chấp thuận.,VERIFIED,
 user_consents,version,Phiên bản văn bản được chấp thuận.,VERIFIED,"Khoá ngoại ghép `(kind, version)` neo chấp thuận vào ĐÚNG MỘT bản; RESTRICT nên không xoá được bản còn người đã chấp thuận"
 user_consents,accepted_at,Thời điểm chấp thuận.,VERIFIED,
-user_consents,ip_hash,Băm địa chỉ IP lúc chấp thuận.,VERIFIED,"Băm chứ không lưu thẳng: đủ để đối chiếu, không đủ để theo dõi"
+user_consents,ip_hash,Băm địa chỉ IP tại thời điểm chấp thuận; cột KHÔNG lưu địa chỉ IP trực tiếp.,VERIFIED,"Cơ chế: SHA-256 KHÔNG khoá trên `ip|user_id` (routers/auth.py). Muối theo người dùng nên hai tài khoản cùng IP cho hai bản băm khác nhau — cố ý, vì bằng chứng chấp thuận là của TỪNG người. Nhưng muối ấy nằm ngay trong cùng hàng, nên KHÔNG suy ra được rằng cột này chống truy vết: xem ghi chú ở audit_log.ip_hash và docs/10-issues/KNOWN_ISSUES.md"
 user_consents,user_agent,Chuỗi user-agent lúc chấp thuận.,VERIFIED,
 user_consents,withdrawn_at,Thời điểm rút chấp thuận.,VERIFIED,"Rút là rút: bản ghi không bị xoá, nhưng hiệu lực chấm dứt từ mốc này"
-user_consents,source,"Nguồn bản ghi: `user`, `backfill` hoặc `import`.",VERIFIED,Đo trên sản xuất: hiện có `user` và `backfill`. Đây là lý do tên quan hệ dùng 'anchors' chứ không 'signs'
+user_consents,source,"Nguồn bản ghi: `user`, `backfill` hoặc `import`.",VERIFIED,"MIỀN CHO PHÉP do ck_user_consents_source quy định: user, backfill, import. QUAN SÁT trên sản xuất: hiện chỉ có `user` và `backfill`. Đây là lý do tên quan hệ dùng 'anchors' chứ không 'signs'"
 user_consents,note,Ghi chú kèm bản ghi chấp thuận.,VERIFIED,
 user_consents,recorded_by,Tài khoản đã GHI bản ghi này.,VERIFIED,NULL khi chính người dùng tự chấp thuận qua giao diện
 signer_consents,consent_id,Định danh bản ghi chấp thuận của người ký.,VERIFIED,
 signer_consents,tenant_id,Tổ chức xác định phạm vi của bản ghi.,VERIFIED,
 signer_consents,signer_id,Người ký LÀ CHỦ THỂ của chấp thuận.,VERIFIED,"Khoá ngoại ghép `(tenant_id, signer_id)`"
-signer_consents,scope,"Mức cho phép sử dụng dữ liệu: `internal_training`, `research_release` hoặc `public_library`.",VERIFIED,"Thang ba mức, rộng dần. `tenant_exports.export_purpose` dùng CÙNG bộ từ vựng — đó là chỗ nối chấp thuận vào phép phát hành"
+signer_consents,scope,"Mức cho phép sử dụng dữ liệu: `internal_training`, `research_release` hoặc `public_library`.",VERIFIED,"MIỀN CHO PHÉP do signer_consents_scope_valid quy định. Thang ba mức, rộng dần. `tenant_exports.export_purpose` dùng CÙNG bộ từ vựng — đó là chỗ nối chấp thuận vào phép phát hành"
 signer_consents,kind,Loại văn bản được chấp thuận.,VERIFIED,
 signer_consents,version,Phiên bản văn bản được chấp thuận.,VERIFIED,"Cùng cơ chế neo `(kind, version)` như user_consents"
 signer_consents,granted_at,Thời điểm cho phép.,VERIFIED,
-signer_consents,withdrawn_at,Thời điểm rút cho phép.,VERIFIED,CHECK buộc mốc rút không sớm hơn mốc cho phép
+signer_consents,withdrawn_at,Thời điểm rút cho phép.,VERIFIED,CHECK signer_consents_withdraw_after_grant là BẤT BIẾN NHIỀU CỘT có điều kiện: (withdrawn_at IS NULL) OR (withdrawn_at >= granted_at) — chưa rút thì vẫn hợp lệ
 signer_consents,guardian_name,Tên người giám hộ khi người ký chưa đủ tuổi tự quyết.,VERIFIED,
 signer_consents,evidence,Mô tả bằng chứng của lượt cho phép.,VERIFIED,
 signer_consents,recorded_by,Tài khoản đã ghi bản ghi này.,VERIFIED,
 audit_log,audit_id,Số thứ tự dòng kiểm toán.,VERIFIED,
 audit_log,tenant_id,Tổ chức của hành động. NULL với hành động cấp NỀN TẢNG.,VERIFIED,Là bảng duy nhất trong nhóm có tenant_id cho phép NULL — không phải mọi dòng đều thuộc một tổ chức
 audit_log,actor_user_id,Tài khoản thực hiện hành động.,VERIFIED,
-audit_log,actor_label,"Nhãn người thực hiện, chụp lại tại thời điểm ghi.",VERIFIED,"Là bằng chứng lịch sử: KHÔNG cập nhật khi tài khoản đổi tên, và còn lại sau khi tài khoản bị xoá"
-audit_log,action,Hành động được ghi lại; CHECK cấm chuỗi rỗng.,VERIFIED,
+audit_log,actor_label,"Nhãn người thực hiện, chụp lại tại thời điểm ghi.",VERIFIED,"Thuộc account_rename.FROZEN_COPIES: đổi tên tài khoản KHÔNG cập nhật cột này — đây là ảnh chụp lịch sử, đối lập với các STATE_COPIES (samples.user_id, samples.username, raw_uploads.*) vốn được đồng bộ theo tên hiện hành. Còn lại sau khi tài khoản bị xoá"
+audit_log,action,Hành động được ghi lại.,VERIFIED,CHECK audit_log_action_not_blank cấm chuỗi rỗng
 audit_log,target_type,Loại đối tượng bị tác động.,VERIFIED,
 audit_log,target_id,Định danh đối tượng bị tác động.,VERIFIED,
 audit_log,detail,"Dữ liệu bổ sung, dạng JSON.",VERIFIED,
-audit_log,ip_hash,Băm địa chỉ IP của lượt thao tác.,VERIFIED,
+audit_log,ip_hash,Băm địa chỉ IP của lượt thao tác; cột KHÔNG lưu địa chỉ IP trực tiếp.,VERIFIED,"Cơ chế KHÁC user_consents.ip_hash: HMAC-SHA256 với pepper NGOÀI cơ sở dữ liệu, tách miền bằng tiền tố `audit-ip`. Cố ý KHÔNG muối theo người thực hiện, để trả lời được 'có phải cùng một nơi vừa thử ba tài khoản quản trị không'. Không có pepper thì hàm trả None thay vì ghi một bản băm đảo ngược được"
 audit_log,created_at,Thời điểm ghi dòng kiểm toán.,VERIFIED,
 tenant_exports,export_id,Định danh lượt xuất dữ liệu.,VERIFIED,
 tenant_exports,tenant_id,Tổ chức yêu cầu xuất.,VERIFIED,
 tenant_exports,requested_by,Tài khoản đã yêu cầu.,VERIFIED,
-tenant_exports,status,"Trạng thái: `pending`, `running`, `ready`, `failed` hoặc `expired`.",VERIFIED,
-tenant_exports,scope,Phạm vi dữ liệu xuất: `metadata` hoặc `full`.,VERIFIED,
+tenant_exports,status,"Trạng thái: `pending`, `running`, `ready`, `failed` hoặc `expired`.",VERIFIED,"MIỀN CHO PHÉP do ck_tenant_exports_status quy định: pending, running, ready, failed, expired"
+tenant_exports,scope,Phạm vi dữ liệu xuất: `metadata` hoặc `full`.,VERIFIED,"MIỀN CHO PHÉP do ck_tenant_exports_scope quy định: metadata, full"
 tenant_exports,file_path,Đường dẫn tệp kết quả.,VERIFIED,Tệp xuất CỐ Ý không tính vào hạn mức dung lượng: nó là bản sao của byte đã tính
 tenant_exports,size_bytes,Kích thước tệp kết quả.,VERIFIED,
 tenant_exports,row_counts,"Số hàng đã xuất theo từng bảng, dạng JSON.",VERIFIED,
@@ -332,7 +332,7 @@ tenant_exports,error,Thông báo lỗi khi lượt xuất thất bại.,VERIFIED
 tenant_exports,created_at,Thời điểm yêu cầu.,VERIFIED,
 tenant_exports,completed_at,Thời điểm hoàn tất.,VERIFIED,
 tenant_exports,expires_at,Thời điểm tệp xuất hết hạn và bị dọn.,VERIFIED,
-tenant_exports,export_purpose,"Mục đích phát hành: `tenant_portability`, `internal_training`, `research_release` hoặc `public_library`.",VERIFIED,Ba giá trị sau TRÙNG bộ từ vựng của signer_consents.scope — đó là chỗ mức chấp thuận quyết định mẫu nào được phép ra khỏi hệ thống
+tenant_exports,export_purpose,"Mục đích phát hành: `tenant_portability`, `internal_training`, `research_release` hoặc `public_library`.",VERIFIED,MIỀN CHO PHÉP do ck_tenant_exports_purpose quy định. Ba giá trị sau TRÙNG bộ từ vựng của signer_consents.scope — đó là chỗ mức chấp thuận quyết định mẫu nào được phép ra khỏi hệ thống
 tenant_purges,purge_id,Định danh lượt xoá tổ chức.,VERIFIED,
 tenant_purges,tenant_id,"Định danh tổ chức đã bị xoá. Là CHỮ, là dấu vết, không phải liên kết.",VERIFIED,Cố ý không có khoá ngoại tới tenants: một khoá ngoại sẽ khiến chính hành động bảng này ghi lại trở nên bất khả thi. Cũng vì thế bảng không nằm trong TENANT_SCOPED_TABLES và không có RLS
 tenant_purges,display_name,Tên tổ chức tại thời điểm xoá.,VERIFIED,
@@ -340,7 +340,7 @@ tenant_purges,requested_by,"Tài khoản đã yêu cầu xoá. Dấu vết, khô
 tenant_purges,row_counts,"Số hàng đã xoá theo từng bảng, dạng JSON.",VERIFIED,
 tenant_purges,files_removed,Số tệp đã gỡ khỏi kho.,VERIFIED,
 tenant_purges,bytes_removed,Số byte đã giải phóng.,VERIFIED,
-tenant_purges,export_id,"Lượt xuất dữ liệu thực hiện trước khi xoá, nếu có.",VERIFIED,Dấu vết cho thấy tổ chức đã được trao dữ liệu trước khi bị xoá
+tenant_purges,export_id,"Lượt xuất dữ liệu thực hiện trước khi xoá, nếu có.",VERIFIED,"Dấu vết định danh lượt xuất thực hiện trước khi xoá, KHÔNG phải liên kết tham chiếu: bảng tenant_purges không có khoá ngoại nào cả. Cho thấy tổ chức đã được trao dữ liệu trước khi bị xoá"
 tenant_purges,reason,Lý do xoá.,VERIFIED,
 tenant_purges,created_at,Thời điểm xoá.,VERIFIED,
 sot_authorized_keys,public_key,Khoá công khai của máy được phép ghi SOT.,VERIFIED,Khoá công khai không phải bí mật; khoá riêng không bao giờ rời máy ghi
@@ -365,7 +365,7 @@ dialects,dialect_id,"Định danh phương ngữ, duy nhất trong phạm vi t�
 dialects,display_name,Tên phương ngữ dạng người đọc.,VERIFIED,
 dialects,language,Ngôn ngữ ký hiệu chứa phương ngữ này.,VERIFIED,
 dialects,is_alphabet,Phương ngữ này là bộ chữ cái ngón tay.,VERIFIED,
-dialects,is_active,Phương ngữ còn được chọn trong các ô chọn hay không.,VERIFIED,"TRỤC KHÁC với `status`. Đo được: `testdatase` có status=approved nhưng is_active=false, nên nó không hiện ở đâu cả"
+dialects,is_active,Phương ngữ còn được chọn trong các ô chọn hay không.,VERIFIED,TRỤC KHÁC với `status`. Đo được: `testdatase` có status=approved nhưng is_active=false; vì vậy một mục ĐÃ ĐƯỢC DUYỆT vẫn có thể bị loại khỏi các danh sách lựa chọn đang hoạt động
 dialects,status,"Trạng thái vòng đời của ĐỀ NGHỊ thêm phương ngữ: `pending`, `approved` hoặc `rejected`.",VERIFIED,"TRỤC KHÁC với `is_active`. `pending` = người tạo dùng được ngay, người khác chưa thấy"
 dialects,merged_into,Phương ngữ đích khi mục này bị gộp đi.,VERIFIED,"Từ chối một đề nghị là GỘP, không phải xoá — nếu không, mẫu đã thu dưới phương ngữ ấy sẽ bị bỏ rơi"
 dialects,created_by,Tài khoản đã đề nghị thêm phương ngữ.,VERIFIED,
@@ -411,10 +411,10 @@ classes,semantic_label,Nhãn ngữ nghĩa chuẩn hoá của lớp.,VERIFIED,
 classes,vocabulary_scope,Phạm vi vốn từ mà lớp thuộc về.,VERIFIED,Đo trên sản xuất hiện chỉ có `profile_specific`
 classes,recognition_profile,Chiều phân loại: hồ sơ nhận dạng của lớp.,VERIFIED,"Khoá ngoại ghép `(tenant_id, recognition_profile)`"
 classes,vocabulary_group,Chiều phân loại: nhóm từ vựng của lớp.,VERIFIED,"Khoá ngoại ghép `(tenant_id, vocabulary_group)`"
-classes,collection_campaign,Đợt thu thập mà lớp được tạo ra trong đó.,NEEDS_REVIEW,
+classes,collection_campaign,Đợt thu thập mà lớp được tạo ra trong đó.,NEEDS_REVIEW,Cùng câu hỏi như `samples.collection_campaign`: quy tắc đặt tên đợt chưa xác nhận.
 classes,motion_type,Lớp là ký hiệu tĩnh hay động.,VERIFIED,Đo được: `static` và `dynamic`
 classes,tenant_id,Tổ chức xác định phạm vi của lớp.,VERIFIED,
-classes,region,Chiều phân loại: vùng miền của lớp — LÀ MỘT PHẦN CỦA ĐỊNH DANH LỚP.,VERIFIED,"Chỉ mục duy nhất gồm NĂM cột (tenant, slug, language, dialect, region), nên hai lớp cùng nhãn khác vùng là hai lớp khác nhau. Mặc định `unclassified`"
+classes,region,Chiều phân loại vùng miền của lớp; tham gia khoá duy nhất TỰ NHIÊN của lớp chưa xoá mềm.,VERIFIED,"Chỉ mục duy nhất MỘT PHẦN uq_classes_tenant_slug_lang_dialect_region gồm (tenant_id, slug, language, dialect, region) với predicate `deleted_at IS NULL`; vì vậy vùng miền tham gia phân biệt các lớp trùng mọi chiều còn lại. Khoá chính vẫn là `class_uid`. Mặc định `unclassified`"
 registry_versions,tenant_id,Tổ chức sở hữu phiên bản registry này.,VERIFIED,
 registry_versions,version,Số hiệu phiên bản registry TRONG PHẠM VI một tổ chức.,VERIFIED,"KHÁC `community_versions.version`, vốn đánh số cho khuôn nền tảng"
 registry_versions,content_hash,Băm nội dung của bản chụp.,VERIFIED,"Cho phép biết danh mục hiện tại đã khác bản công bố gần nhất chưa, mà không cần so ngày"
@@ -422,8 +422,8 @@ registry_versions,snapshot,Bản chụp bất biến toàn bộ danh mục của
 registry_versions,note,Ghi chú kèm lượt công bố.,VERIFIED,
 registry_versions,created_by,Tài khoản đã công bố.,VERIFIED,
 registry_versions,created_at,Thời điểm công bố.,VERIFIED,
-vocabulary_registry_meta,tenant_id,Tổ chức mà con trỏ này thuộc về.,VERIFIED,"Đồng thời là khoá chính, nên mỗi tổ chức có nhiều nhất MỘT dòng — quan hệ 1–1"
-vocabulary_registry_meta,version,CON TRỎ tới phiên bản registry đang công bố của tổ chức. NULL = chưa công bố phiên bản nào.,VERIFIED,"Không phải một phiên bản riêng: nó chỉ trỏ vào registry_versions. Trước v7 chỗ này dùng số 0 làm mốc 'chưa có gì', mà 0 là phiên bản KHÔNG BAO GIỜ tồn tại — nên nó làm hỏng lượt tạo tổ chức khi khoá ngoại ghép ra đời"
+vocabulary_registry_meta,tenant_id,Tổ chức mà con trỏ này thuộc về.,VERIFIED,"Đồng thời là khoá chính (vocabulary_registry_meta_pkey), nên mỗi tổ chức có nhiều nhất MỘT dòng metadata; cardinality là 1 — 0..1, KHÔNG phải 1–1 bắt buộc: một tổ chức có thể chưa có dòng nào"
+vocabulary_registry_meta,version,CON TRỎ tới phiên bản registry đang công bố của tổ chức. NULL = chưa công bố phiên bản nào.,VERIFIED,"Không phải một phiên bản riêng: nó chỉ trỏ vào registry_versions. Trước v7 chỗ này dùng số 0 làm sentinel 'chưa công bố', nhưng KHÔNG có hàng (tenant, 0) tương ứng trong registry_versions; khi khoá ngoại ghép được áp, sentinel ấy thành tham chiếu không hợp lệ và làm hỏng đường tạo tổ chức. Catalog hiện KHÔNG có CHECK nào cấm version = 0"
 vocabulary_registry_meta,updated_at,Thời điểm con trỏ được cập nhật gần nhất.,VERIFIED,
 community_dialects,dialect_id,Định danh phương ngữ trong KHUÔN nền tảng.,VERIFIED,"Khuôn là thứ mọi tổ chức MỚI được nhân bản từ đó. Đây là cấu hình cấp nền tảng, KHÔNG phải dữ liệu của tenant Community dự trữ"
 community_dialects,display_name,Tên phương ngữ trong khuôn.,VERIFIED,
@@ -434,7 +434,7 @@ community_dialects,is_active,Mục có được nhân bản ở trạng thái đ
 community_dialects,note,Ghi chú của quản trị viên hệ thống.,VERIFIED,
 community_dialects,updated_by,Tài khoản sửa khuôn gần nhất.,VERIFIED,
 community_dialects,updated_at,Thời điểm sửa khuôn gần nhất.,VERIFIED,
-community_profiles,profile_id,Định danh hồ sơ nhận dạng trong KHUÔN nền tảng.,VERIFIED,
+community_profiles,profile_id,Định danh hồ sơ nhận dạng trong KHUÔN nền tảng.,VERIFIED,Thuộc KHUÔN cấu hình cấp nền tảng — thứ mọi tổ chức mới được nhân bản từ đó. KHÔNG phải hồ sơ nhận dạng lưu trong tenant Community dự trữ
 community_profiles,display_name,Tên hồ sơ trong khuôn.,VERIFIED,
 community_profiles,is_trainable,Cờ được nhân bản sang recognition_profiles của tổ chức mới.,NEEDS_REVIEW,Cùng câu hỏi như recognition_profiles.is_trainable: không cổng huấn luyện nào đọc
 community_profiles,display_order,Thứ tự hiển thị trong khuôn.,VERIFIED,
@@ -442,9 +442,220 @@ community_profiles,is_active,Hồ sơ có được nhân bản hay không.,VERIF
 community_profiles,note,Ghi chú của quản trị viên hệ thống.,VERIFIED,
 community_profiles,updated_by,Tài khoản sửa khuôn gần nhất.,VERIFIED,
 community_profiles,updated_at,Thời điểm sửa khuôn gần nhất.,VERIFIED,
-community_versions,version,Số hiệu phiên bản của KHUÔN nền tảng.,VERIFIED,"KHÁC `registry_versions.version` (phiên bản registry của một tổ chức) và khác `vocabulary_registry_meta.version` (con trỏ). Ba khái niệm, cùng một chữ"
+community_versions,version,Số hiệu phiên bản của KHUÔN nền tảng.,VERIFIED,"KHÁC `registry_versions.version` (phiên bản registry của một tổ chức) và khác `vocabulary_registry_meta.version` (con trỏ). Ba khái niệm, cùng một chữ. Đây là phiên bản của KHUÔN nền tảng, không phải phiên bản dữ liệu của tenant Community dự trữ"
 community_versions,content_hash,Băm nội dung khuôn tại thời điểm đóng băng.,VERIFIED,Công bố là luỹ đẳng theo NỘI DUNG: khuôn không đổi thì trả về bản đã có chứ không đúc bản trùng
 community_versions,snapshot,Bản chụp bất biến của khuôn tại thời điểm công bố.,VERIFIED,
 community_versions,note,Ghi chú kèm lượt công bố khuôn.,VERIFIED,
 community_versions,created_by,Tài khoản đã công bố khuôn.,VERIFIED,
 community_versions,created_at,Thời điểm công bố khuôn.,VERIFIED,`tenants.cloned_from_community_version` trỏ vào đây để ghi lại tổ chức được tạo từ bản khuôn nào
+training_job_classes,job_id,Lượt huấn luyện mà ánh xạ lớp này thuộc về.,VERIFIED,
+training_job_classes,class_idx,Chỉ số lớp trong không gian nhãn CỦA RIÊNG lượt huấn luyện này.,VERIFIED,"Là hợp đồng đầu ra của job, đọc lại theo đúng thứ tự chỉ số. Không phải `classes.class_idx` của danh mục. Cùng `job_id` tạo thành KHOÁ CHÍNH (training_job_classes_pkey), nên mỗi job không có hai dòng cùng chỉ số"
+training_job_classes,class_uid,"Lớp VSL nguồn tương ứng, nếu ánh xạ còn gắn được với lớp hiện hành.",VERIFIED,"Tra ngược từ `label` TẠI THỜI ĐIỂM GHI và để NULL nếu không khớp. Đây là đường dẫn tiện lợi về danh mục, được phép mất khi lớp bị xoá — `label` mới là hợp đồng"
+training_job_classes,label,"Nhãn lớp, chụp lại tại thời điểm huấn luyện. Đây LÀ hợp đồng đầu ra.",VERIFIED,Một nhãn không tra được về danh mục vẫn phải lưu; vì thế nó NOT NULL còn class_uid thì không
+training_job_classes,tenant_id,Tổ chức xác định phạm vi của ánh xạ lớp huấn luyện.,VERIFIED,
+training_jobs,job_id,Định danh lượt huấn luyện.,VERIFIED,
+training_jobs,status,"Trạng thái vòng đời: `queued`, `running`, `completed`, `failed` hoặc `cancelled`.",VERIFIED,"Không có CHECK nào ràng tập này; nó đến từ mã. Trên sản xuất hiện có completed, failed, cancelled — hai giá trị kia là trạng thái tạm"
+training_jobs,model_type,Kiến trúc mô hình của lượt huấn luyện.,VERIFIED,Đối chiếu với `model.get_model_name()` lúc nạp lại điểm lưu; mặc định TCN khi điểm lưu không khai
+training_jobs,config,"Cấu hình huấn luyện đã dùng, dạng JSON.",VERIFIED,"Đọc lại bằng `TrainingConfig(**config_raw)`, nên hình dạng do lớp ấy quy định chứ không tự do"
+training_jobs,auth_user_id,Tài khoản được ghi nhận là tác nhân của lượt huấn luyện.,VERIFIED,"Có thể NULL. Catalog không chứng minh hành động cụ thể (khởi chạy, yêu cầu…), nên mô tả dừng ở 'tác nhân'"
+training_jobs,created_at,Thời điểm tạo lượt huấn luyện.,VERIFIED,
+training_jobs,started_at,Thời điểm bắt đầu thực thi; NULL khi chưa chạy.,VERIFIED,
+training_jobs,completed_at,Thời điểm kết thúc thực thi; NULL khi chưa xong.,VERIFIED,
+training_jobs,current_epoch,"Epoch đang chạy, đếm từ 1.",VERIFIED,"Vòng lặp huấn luyện là `range(1, cfg.epochs + 1)` — MỘT-based, không phải zero-based"
+training_jobs,total_epochs,Tổng số epoch dự kiến.,VERIFIED,
+training_jobs,checkpoint_path,Đường dẫn tệp điểm lưu mô hình sau khi huấn luyện.,VERIFIED,"Là đường dẫn tệp, không phải khoá kho đối tượng: `load_checkpoint()` mở trực tiếp. Có đường dự phòng khi bộ chạy không trả về đường dẫn"
+training_jobs,test_acc,"Độ chính xác trên tập kiểm tra, thang **0..1**.",VERIFIED,"Tính bằng số dự đoán đúng chia tổng mẫu, không nhân 100. Đọc từ điểm lưu ở cấp job"
+training_jobs,test_f1,"F1 **macro** trên tập kiểm tra, thang 0..1.",VERIFIED,"`macro_f1` tính F1 từng lớp rồi lấy trung bình KHÔNG trọng số, nên lớp hiếm có trọng lượng ngang lớp phổ biến"
+training_jobs,error_message,Lý do lượt huấn luyện thất bại hoặc bị huỷ.,VERIFIED,
+training_jobs,promoted_at,Thời điểm quản trị viên đưa mô hình này lên phục vụ nhận dạng thời gian thực.,VERIFIED,
+training_jobs,superseded_at,Thời điểm một lượt thăng hạng SAU cho cùng phương ngữ chiếm chỗ phục vụ.,VERIFIED,"Mỗi phương ngữ chỉ có MỘT chỗ phục vụ, nên 'đang phục vụ' = promoted_at có giá trị VÀ superseded_at còn trống. Riêng promoted_at không trả lời được câu hỏi ấy"
+training_jobs,evaluation,"Kết quả đánh giá bổ sung, dạng JSON.",VERIFIED,NULL với các job chạy trước khi tính năng đánh giá được thêm; giao diện phải chịu được điều đó
+training_jobs,tenant_id,Tổ chức xác định phạm vi của lượt huấn luyện.,VERIFIED,
+training_jobs,registry_version,"Phiên bản registry của chính tổ chức, neo vào lượt huấn luyện để lưu nguồn gốc không gian từ vựng tại thời điểm chạy.",VERIFIED,"NULL khi lượt huấn luyện không gắn phiên bản. Khoá ngoại ghép `(tenant_id, registry_version)` nên phiên bản phải thuộc đúng tổ chức ấy — cho biết ảnh chụp từ vựng NÀO gắn với lượt chạy, thay vì chỉ biết chạy lúc nào"
+training_metrics,job_id,Lượt huấn luyện mà bản ghi chỉ số thuộc về.,VERIFIED,"Có HAI khoá ngoại tới training_jobs: khoá một cột (di sản) và khoá ghép `(tenant_id, job_id)` tenant-aware. Cả hai đều CASCADE"
+training_metrics,epoch,"Epoch mà bộ chỉ số này được ghi, đếm từ 1.",VERIFIED,"Cùng gốc đếm với `training_jobs.current_epoch`. `(job_id, epoch)` là KHOÁ CHÍNH của bảng (training_metrics_pkey), không phải một chỉ mục duy nhất riêng; ghi lại cùng epoch thì bỏ qua"
+training_metrics,train_loss,Loss trên dữ liệu huấn luyện tại epoch.,VERIFIED,Hàm loss là entropy chéo (`nn.CrossEntropyLoss`)
+training_metrics,train_acc,"Độ chính xác trên dữ liệu huấn luyện tại epoch, thang **0..1**.",VERIFIED,
+training_metrics,val_loss,Loss trên dữ liệu kiểm định tại epoch.,VERIFIED,Cùng hàm entropy chéo
+training_metrics,val_acc,"Độ chính xác trên dữ liệu kiểm định tại epoch, thang **0..1**.",VERIFIED,
+training_metrics,val_f1,"F1 **macro** trên dữ liệu kiểm định tại epoch, thang 0..1.",VERIFIED,Cùng `macro_f1` với test_f1: trung bình không trọng số trên các lớp
+training_metrics,created_at,Thời điểm ghi bản ghi chỉ số.,VERIFIED,
+training_metrics,tenant_id,Tổ chức xác định phạm vi của chỉ số.,VERIFIED,"SUY RA từ hàng job cha ngay trong câu INSERT, không nhận từ người gọi: thẩm quyền của đầu ra phải là hàng job đã lưu, không phải điều lượt gọi tuyên bố. Job không tồn tại thì lượt ghi lặng lẽ không làm gì, thay vì tạo chỉ số mồ côi"
+password_reset_tokens,token_hash,Băm SHA-256 của mã đặt lại mật khẩu. Bảng KHÔNG lưu mã gốc.,VERIFIED,Mã được sinh với entropy CAO nên không cần slow hash kiểu mật khẩu; CSDL chỉ giữ SHA-256 của mã. Cùng cách với refresh token
+password_reset_tokens,user_id,Tài khoản mà mã đặt lại này thuộc về.,VERIFIED,
+password_reset_tokens,expires_at,Thời điểm mã hết hiệu lực.,VERIFIED,
+password_reset_tokens,used_at,Thời điểm mã đã được dùng; NULL khi chưa dùng.,VERIFIED,"Dùng một lần: khác `expires_at` ở chỗ mã có thể chết vì đã tiêu, không chỉ vì hết giờ"
+password_reset_tokens,created_at,Thời điểm phát mã.,VERIFIED,
+refresh_tokens,token_hash,Băm SHA-256 của refresh token. Bảng KHÔNG lưu token gốc.,VERIFIED,"Token sinh với entropy CAO nên không cần slow hash kiểu mật khẩu; CSDL chỉ giữ SHA-256. Khác `verification_codes.code_hash` (mã entropy thấp, phải HMAC + pepper)"
+refresh_tokens,user_id,Tài khoản giữ token này.,VERIFIED,
+refresh_tokens,expires_at,Thời điểm token hết hạn.,VERIFIED,
+refresh_tokens,revoked_at,Thời điểm token bị thu hồi.,VERIFIED,"Ghi bằng `COALESCE(revoked_at, NOW())` nên KHÔNG ghi đè mốc cũ: ghi đè sẽ làm cửa sổ ân hạn trượt theo mỗi lần gọi, và một token bị trộm sống mãi bằng cách gọi lại đều đặn"
+refresh_tokens,created_at,Thời điểm phát token.,VERIFIED,
+refresh_tokens,family_id,Định danh HỌ token: cả chuỗi xoay bắt nguồn từ một lần đăng nhập.,VERIFIED,NULL với token cấp trước khi cơ chế này ra đời — những token ấy chỉ đốt được chính mình
+refresh_tokens,replaced_by,Tham chiếu logic tới refresh token đã thay thế token này trong chuỗi xoay; lưu bằng băm của token kế nhiệm.,VERIFIED,"KHÔNG có khoá ngoại: trỏ tới `token_hash` nhưng CSDL không cưỡng chế, nên một hàng đã dọn để lại tham chiếu treo. Hàng đã hết hạn được giữ thêm 7 ngày trước khi dọn (auth.purge_expired_refresh_tokens, mặc định retain_days=7, chạy hằng ngày qua saas_tasks.cleanup_refresh_tokens) để chuỗi `replaced_by` còn dựng lại được đường xoay khi điều tra. Đây là chính sách lưu giữ của HÀNG trong mã ứng dụng, không phải ràng buộc CSDL và không phải TTL của giá trị cột"
+refresh_tokens,reuse_detected_at,Thời điểm phát hiện một refresh token đã bị thay thế được dùng lại NGOÀI cửa sổ ân hạn — coi như bị đánh cắp.,VERIFIED,"Cột là BẰNG CHỨNG trạng thái, không phải tác nhân: CSDL không có trigger nào ở đây. Khi workflow phát hiện tái sử dụng (auth._burn_token_family) ghi mốc này, chính nó thu hồi mọi token cùng `family_id` và chặn các access token liên quan qua Redis; cố ý KHÔNG thu hồi toàn tài khoản, vì kẻ trộm theo cấu trúc đang giữ token MỚI NHẤT của họ"
+user_action_passcodes,user_id,"Tài khoản sở hữu mã hành động. Vừa là khoá chính vừa là khoá ngoại, nên mỗi tài khoản có tối đa MỘT cấu hình.",VERIFIED,
+user_action_passcodes,passcode_hash,"Băm mã hành động, dùng CÙNG bộ băm mật khẩu với `auth.py`.",VERIFIED,"Cố ý không tự chọn thuật toán riêng: hai bộ băm cho hai loại bí mật nghĩa là hai lịch nâng cấp tham số, và cái ít được để ý sẽ tụt lại"
+user_action_passcodes,status,"Trạng thái: `ACTIVE`, `LOCKED` hoặc `REVOKED`.",VERIFIED,"CSDL CÓ ràng tập này: ck_user_action_passcodes_status CHECK (status = ANY (ARRAY['ACTIVE','LOCKED','REVOKED'])). app/authorization/passcode.py ghi đúng ba giá trị ấy — hai lớp cùng nói một điều, nên thêm trạng thái mới phải sửa CẢ HAI"
+user_action_passcodes,failed_count,Số lần nhập sai tích luỹ.,VERIFIED,"CHỈ về 0 khi nhập ĐÚNG, không tự về 0 theo thời gian: một mã sáu ký tự với đồng hồ tự tha thứ là một mã dò được, chỉ chậm hơn. ck_user_action_passcodes_failed_count cấm giá trị âm"
+user_action_passcodes,created_at,Thời điểm đặt mã.,VERIFIED,
+user_action_passcodes,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+user_action_passcodes,locked_until,Thời điểm hết khoá sau khi nhập sai; NULL khi không bị khoá.,VERIFIED,Thời gian khoá TĂNG DẦN theo ngưỡng số lần sai
+user_action_passcodes,revoked_at,Thời điểm mã bị thu hồi.,VERIFIED,
+user_recovery_codes,code_hash,Băm HMAC-SHA256 của một mã khôi phục. Bảng KHÔNG lưu mã gốc.,VERIFIED,"Mã khôi phục được BĂM chứ không mã hoá, vì chỉ cần trả lời đúng/sai — khác `user_totp.secret_enc` vốn cần chính bí mật để tính lại mã"
+user_recovery_codes,user_id,Tài khoản sở hữu bộ mã khôi phục.,VERIFIED,
+user_recovery_codes,used_at,Thời điểm mã đã được dùng; NULL khi chưa dùng.,VERIFIED,Mỗi mã dùng ĐÚNG MỘT LẦN: lượt xác minh đòi `used_at IS NULL`
+user_recovery_codes,created_at,Thời điểm cấp mã.,VERIFIED,
+user_totp,user_id,"Tài khoản sở hữu cấu hình TOTP. Vừa là khoá chính vừa là khoá ngoại, nên mỗi tài khoản có tối đa MỘT cấu hình.",VERIFIED,
+user_totp,secret_enc,Bí mật TOTP đã **MÃ HOÁ** (Fernet) — KHÔNG phải băm.,VERIFIED,"Trong các cột lưu VẬT LIỆU XÁC THỰC của nhóm B, đây là trường duy nhất phải giữ ở dạng KHÔI PHỤC ĐƯỢC; các credential còn lại dùng cơ chế một chiều hợp với loại bí mật của chúng. TOTP cần chính bí mật để tính lại mã nên băm một chiều là vô dụng"
+user_totp,confirmed_at,Thời điểm người dùng xác nhận và 2FA bật; NULL khi bí mật đã ghi nhưng chưa bật.,VERIFIED,Bật 2FA là HAI bước có chủ ý: gộp làm một sẽ khoá người dùng ra khỏi tài khoản khi ứng dụng xác thực quét hỏng hoặc đồng hồ lệch
+user_totp,last_used_step,Bước thời gian TOTP đã dùng gần nhất — chống phát lại.,VERIFIED,"Một mã TOTP sống 30 giây; không ghi lại bước đã dùng thì người nhìn trộm màn hình gõ lại đúng mã đó vẫn vào được, và đó chính là kịch bản 2FA sinh ra để chặn"
+user_totp,created_at,Thời điểm bắt đầu đăng ký TOTP.,VERIFIED,Đặt lại khi người dùng đăng ký lại: lượt ghi đè cũng xoá `confirmed_at` và `last_used_step`
+verification_codes,challenge_id,Định danh một thử thách xác minh.,VERIFIED,
+verification_codes,user_id,"Tài khoản liên quan tới thử thách, nếu đã tồn tại; có thể NULL với thử thách tạo TRƯỚC khi đăng ký hoàn tất.",VERIFIED,Đây là lý do quan hệ mang tên 'is associated with' chứ không 'has'
+verification_codes,purpose,"Mục đích: `verify_email`, `verify_phone` hoặc `reset_password`.",VERIFIED,verification_codes_purpose_valid ràng đúng ba giá trị này. Trên sản xuất hiện chỉ quan sát thấy verify_email và reset_password
+verification_codes,channel,Kênh gửi mã: `email` hoặc `sms`.,VERIFIED,verification_codes_channel_valid ràng đúng hai giá trị này. Trên sản xuất hiện chỉ quan sát thấy email
+verification_codes,destination,Địa chỉ hoặc số điện thoại mà mã được gửi tới.,VERIFIED,"Cùng với `purpose`, được buộc vào thông điệp băm để TÁCH MIỀN: một mã phát để xác minh số điện thoại không được đồng thời hợp lệ như mã đặt lại mật khẩu, và cùng một mã gửi tới hai địa chỉ khác nhau không được va nhau"
+verification_codes,code_hash,"Băm HMAC-SHA256 của mã, khoá bằng pepper NGOÀI cơ sở dữ liệu.",VERIFIED,"Không dùng SHA-256 trần như token: mã sáu chữ số chỉ có một triệu khả năng, băm trần là duyệt cạn trong một giây. Pepper nằm ngoài CSDL nên một bản sao lưu bị lộ vẫn không đủ để dò"
+verification_codes,attempts,Số lần đã thử nhập mã.,VERIFIED,Chịu BẤT BIẾN NHIỀU CỘT verification_codes_attempts_bounded: attempts >= 0 AND attempts <= max_attempts. CSDL không cho phép một thử thách ghi nhận nhiều lần thử hơn mức trần của chính nó
+verification_codes,max_attempts,Số lần thử tối đa trước khi thử thách chết; mặc định 5.,VERIFIED,"Mặc định 5 ở cấp cột. Cùng `attempts` chịu verification_codes_attempts_bounded, nên hạ trần xuống dưới số lần đã thử sẽ bị CSDL từ chối"
+verification_codes,created_at,Thời điểm phát thử thách.,VERIFIED,
+verification_codes,expires_at,Thời điểm thử thách hết giờ.,VERIFIED,
+verification_codes,consumed_at,Thời điểm mã đã được tiêu; NULL khi chưa dùng.,VERIFIED,"Khác `expires_at`: một thử thách chết vì ĐÃ DÙNG, vì HẾT GIỜ, hoặc vì cạn `max_attempts` — ba đường khác nhau"
+plans,plan_code,"Mã gói, ổn định và là thứ mọi phép cưỡng chế tra theo.",VERIFIED,Không sửa được lúc chạy: nó là khoá chính và có khoá ngoại từ `tenants` lẫn `tenant_subscriptions` trỏ tới
+plans,display_name,Tên gói hiển thị cho người dùng.,VERIFIED,
+plans,description,Mô tả gói cho bảng giá.,VERIFIED,
+plans,max_storage_mb,"Trần dung lượng dữ liệu của tổ chức, tính bằng MB. **Đang được cưỡng chế**.",VERIFIED,Hạn mức DỮ LIỆU duy nhất từ v8. Cưỡng chế đồng bộ ở mọi đường ghi qua `app/storage_quota.py`; NULL nghĩa là không giới hạn
+plans,max_api_keys,Trần số khoá API còn hiệu lực. **Đang được cưỡng chế**.,VERIFIED,`plans.check_quota` đếm khoá chưa thu hồi trên bảng nguồn
+plans,max_webhook_endpoints,Trần số webhook đang bật. **Đang được cưỡng chế**.,VERIFIED,`plans.check_quota` đếm trên bảng nguồn
+plans,max_concurrent_training_jobs,"Số lượt huấn luyện được chạy đồng thời. **Đang được cưỡng chế**, nhưng là kiểm soát AN TOÀN VẬN HÀNH cho bộ chạy GPU, không phải hạn mức thương mại.",VERIFIED,Job vượt mức vào hàng đợi chứ không bị từ chối. Đừng đem lên bảng giá
+plans,max_queued_training_jobs,"Số lượt huấn luyện được xếp hàng. **Đang được cưỡng chế**, cũng là kiểm soát an toàn vận hành.",VERIFIED,
+plans,max_seats,Giá trị số thành viên khai trong cấu hình gói.,VERIFIED,"Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. CHECK ck_plans_limits_non_negative cấm giá trị âm cho nhóm trần gốc. Gỡ khỏi `USAGE_METRICS` ở v8: số thành viên thuộc mặt phẳng phân quyền, ở đó vì lý do bảo mật chứ không vì lý do thương mại"
+plans,max_samples,Giá trị số mẫu khai trong cấu hình gói.,VERIFIED,Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. Gỡ ở v8 vì `samples` và `classes` là hai cách nói về cùng một tài nguyên. VẪN được `workspace_admin.ALLOCATABLE_METRICS` đọc để chia cho từng project — xem mục OPEN trong docs/10-issues/KNOWN_ISSUES.md
+plans,max_classes,Giá trị số lớp khai trong cấu hình gói.,VERIFIED,Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. Gỡ ở v8 cùng lý do với `max_samples`
+plans,max_training_jobs_per_month,Giá trị số lượt huấn luyện mỗi tháng khai trong cấu hình gói.,VERIFIED,"Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. Gỡ ở v8: chặn theo SỐ LẦN phạt người chạy nhiều job nhỏ và tha người chạy ít job nặng, trong khi thứ tốn kém là compute. Vẫn được màn hình cấp phát project đọc"
+plans,max_workspaces,Giá trị số workspace khai trong cấu hình gói.,VERIFIED,"Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. CHECK ck_plans_v6_limits_non_negative cấm giá trị âm cho nhóm trần v6 (max_workspaces, max_projects và các trần cùng đợt)"
+plans,max_projects,Giá trị số project khai trong cấu hình gói.,VERIFIED,Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết.
+plans,included_training_credits,Lượng tín dụng huấn luyện được KÈM THEO gói.,VERIFIED,"Là một khoản ĐƯỢC CẤP, không phải một trần — nên không mô tả bằng chữ 'tối đa'. Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết."
+plans,audit_retention_days,Số ngày giữ nhật ký kiểm toán khai trong cấu hình gói.,VERIFIED,Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. Chưa có cơ chế dọn nào đọc giá trị này
+plans,price_cents,"Giá NIÊM YẾT của gói, theo đơn vị nhỏ nhất của `currency`.",VERIFIED,"Hệ thống KHÔNG có bộ xử lý thanh toán: không hoá đơn, không cổng thanh toán, không ghi nhận giao dịch. Đây là cấu hình bảng giá, không phải số tiền đã hoặc sẽ thu. NULL nghĩa là CHƯA CÔNG BỐ, khác 0 là miễn phí"
+plans,currency,Đơn vị tiền của giá niêm yết; mặc định VND.,VERIFIED,"VND không có đơn vị lẻ, nên `price_cents` với tiền Việt thực chất là số đồng"
+plans,billing_period,Chu kỳ tính phí khai cho gói; mặc định `monthly`.,VERIFIED,MIỀN CHO PHÉP do ck_plans_billing_period quy định. Là cấu hình thương mại. Chu kỳ được `subscription_lifecycle` dùng để đặt kỳ hạn và nhắc hạn — KHÔNG để thu tiền
+plans,is_self_serve,Gói này có cho tổ chức tự đăng ký hay không.,VERIFIED,Đường tự đăng ký đòi cờ này bật; `tenant_admin` từ chối nếu không
+plans,is_listed,Gói có hiện trên bảng giá công khai hay không.,VERIFIED,Gói của tenant nền tảng không lộ ra nhờ cờ này
+plans,trial_days,Số ngày dùng thử khi mở kỳ hạn đầu tiên.,VERIFIED,
+plans,sort_order,Thứ tự hiển thị trên bảng giá.,VERIFIED,
+plans,created_at,Thời điểm tạo gói.,VERIFIED,
+plans,updated_at,Thời điểm sửa gói gần nhất.,VERIFIED,Gói sửa được lúc chạy qua `PATCH /billing/plans/{code}`; seed dùng ON CONFLICT DO NOTHING nên một lượt triển khai lại không ghi đè chỉnh tay
+tenant_subscriptions,subscription_id,Định danh một dòng lịch sử đăng ký.,VERIFIED,
+tenant_subscriptions,tenant_id,Tổ chức mà dòng lịch sử này thuộc về.,VERIFIED,
+tenant_subscriptions,plan_code,Gói được chọn tại dòng lịch sử này.,VERIFIED,KHÔNG phải gói hiện hành: nguồn đọc của mọi phép cưỡng chế là `tenants.plan_code`. Bảng này ghi CHUỖI thay đổi
+tenant_subscriptions,status,Trạng thái của dòng đăng ký.,VERIFIED,"Dòng cũ chuyển sang `superseded` khi đổi gói. LƯU Ý: ràng buộc 'mỗi tổ chức tối đa một dòng đang mở' nằm ở `ended_at`, KHÔNG ở cột này — uq_tenant_subscriptions_open có predicate `ended_at IS NULL` và không đọc `status`"
+tenant_subscriptions,started_at,Thời điểm dòng đăng ký này bắt đầu.,VERIFIED,
+tenant_subscriptions,ended_at,Thời điểm dòng đăng ký này kết thúc; NULL khi đang mở.,VERIFIED,"Là cột QUYẾT ĐỊNH dòng nào còn mở: chỉ mục duy nhất MỘT PHẦN uq_tenant_subscriptions_open trên `tenant_id` có predicate `ended_at IS NULL`, nên mỗi tổ chức có tối đa MỘT dòng chưa kết thúc. Predicate KHÔNG nhìn `status`"
+tenant_subscriptions,changed_by,Tài khoản thực hiện lượt đổi gói.,VERIFIED,
+tenant_subscriptions,note,Ghi chú kèm lượt đổi gói.,VERIFIED,
+tenant_subscriptions,created_at,Thời điểm ghi dòng.,VERIFIED,
+tenant_subscriptions,current_period_start,Đầu kỳ hạn hiện tại.,VERIFIED,
+tenant_subscriptions,current_period_end,"Cuối kỳ hạn hiện tại; là mốc để nhắc hạn, mở kỳ mới và tính ân hạn.",VERIFIED,
+tenant_subscriptions,auto_renew,Kỳ hạn có tự mở lại khi hết hạn hay không.,VERIFIED,
+tenant_subscriptions,grace_until,Thời điểm hết ân hạn sau khi kỳ hạn kết thúc; NULL khi chưa vào ân hạn.,VERIFIED,Đặt lại về NULL mỗi khi mở kỳ hạn mới
+tenant_subscriptions,trial_ends_at,Thời điểm hết dùng thử.,VERIFIED,
+tenant_subscriptions,last_reminder_days,"MỐC NHẮC ĐÃ GỬI, tính bằng số ngày còn lại tại lần nhắc đó.",VERIFIED,"KHÔNG phải số ngày còn lại hiện tại. Các mốc là (7, 3, 1) ngày; cột giữ mốc gần nhất đã gửi để không nhắc trùng, và về NULL khi mở kỳ hạn mới"
+tenant_storage,tenant_id,"Tổ chức sở hữu bộ đếm. Vừa là khoá chính vừa là khoá ngoại, nên mỗi tổ chức có tối đa MỘT dòng.",VERIFIED,
+tenant_storage,bytes_used,Số byte ĐÃ nằm trên đĩa theo bộ đếm — phần đã quyết toán.,VERIFIED,"CHECK ck_tenant_storage_not_negative cấm giá trị âm — bộ đếm không tụt xuống dưới 0 dù lượt gỡ có trừ quá tay. Khác `storage_reservations.bytes` (đang giữ chỗ, chưa chạm đĩa). Là bản gần đúng cho tốc độ: sự thật là lượt đi bộ đĩa, và `reconcile()` ghi đè theo đĩa khi lệch"
+tenant_storage,reconciled_at,Lần gần nhất bộ đếm được dựng lại từ lượt đi bộ đĩa thật.,VERIFIED,"Lượt đối chiếu đếm ba nguồn tính phí: cây `features/`, kho `raw/`, và video thô quy chủ theo hàng `raw_uploads`"
+tenant_storage,updated_at,Thời điểm bộ đếm thay đổi gần nhất.,VERIFIED,
+storage_reservations,reservation_id,Định danh một khoản giữ chỗ đang bay.,VERIFIED,"Có định danh chứ không phải một cột đếm, và đó là điểm mấu chốt: một tiến trình chết giữa chừng để lại khoản treo phân biệt được với lượt tải đang chạy thật"
+storage_reservations,tenant_id,Tổ chức mà khoản giữ chỗ thuộc về.,VERIFIED,
+storage_reservations,bytes,Số byte tạm giữ cho một lượt ghi CHƯA hoàn tất.,VERIFIED,"CHECK ck_storage_reservations_not_negative cấm giá trị âm. Phép nhận việc hỏi `đã dùng + đang giữ chỗ + sắp tới <= trần`, nên tổng các khoản này tham gia quyết định hạn mức dù chưa byte nào chạm đĩa. Đây là cách chống đua khi nhiều lượt tải cùng lúc"
+storage_reservations,created_at,Thời điểm giữ chỗ.,VERIFIED,
+storage_reservations,expires_at,Thời điểm khoản giữ chỗ hết hiệu lực.,VERIFIED,"Khoản quá hạn KHÔNG còn tính vào tổng đang giữ, kể cả trước khi lượt quét dọn nó — nếu không, một tiến trình chết sẽ giam chỗ của tổ chức tới hôm sau"
+tenant_usage_daily,tenant_id,Tổ chức của số đo.,VERIFIED,
+tenant_usage_daily,usage_date,"Ngày của số đo, theo **UTC**.",VERIFIED,Lượt gộp lấy ngày hôm qua theo `datetime.now(timezone.utc)`
+tenant_usage_daily,metric,"Tên chỉ số: `samples_created`, `raw_uploads_created`, `training_jobs_started`, `training_seconds`, `storage_mb`, `active_users`.",VERIFIED,"Đo trên sản xuất, khớp `usage._ROLLUPS`"
+tenant_usage_daily,value,Giá trị chỉ số của ngày đó.,VERIFIED,"Bảng này phục vụ BÁO CÁO, không phải cưỡng chế: `plans.check_quota` đếm thẳng trên bảng nguồn chứ không đọc ở đây. `storage_mb` là số đo TẠI THỜI ĐIỂM, nên cộng dồn nhiều ngày lại là vô nghĩa — `usage_totals` lấy giá trị cuối"
+tenant_usage_daily,computed_at,Thời điểm số đo được tính.,VERIFIED,"Mọi câu gộp là `INSERT ... ON CONFLICT DO UPDATE`, nên chạy lại cùng một ngày cho ra đúng một kết quả"
+event_outbox,event_id,Định danh một sự kiện trong sổ phát.,VERIFIED,
+event_outbox,tenant_id,Tổ chức phát sinh sự kiện; NULL với sự kiện cấp nền tảng.,VERIFIED,
+event_outbox,event_type_code,Mã loại sự kiện.,VERIFIED,"CHECK ck_event_outbox_type_not_blank cấm chuỗi rỗng. Thuộc KHÔNG GIAN TÊN sự kiện NỘI BỘ, không đồng nhất với `webhook_deliveries.event_type` (không gian nghiệp vụ, khai ở `webhooks.EVENT_TYPES`). Hiện chỉ có `authorization.policy.changed`, dùng để vô hiệu hoá bộ nhớ đệm quyền giữa các tiến trình API. Đường webhook KHÔNG đọc bảng này: `deliver_webhooks` chỉ quét `webhook_deliveries`"
+event_outbox,payload,"Dữ liệu kèm sự kiện, dạng JSON.",VERIFIED,
+event_outbox,occurred_at,Thời điểm sự kiện XẢY RA — mốc mà mỗi tiến trình đọc dùng để biết mình đã nạp tới đâu.,VERIFIED,"Đây là cột thực sự điều khiển cơ chế hiện tại, không phải `dispatch_status`"
+event_outbox,created_at,Thời điểm ghi dòng.,VERIFIED,
+event_outbox,dispatch_status,"Trạng thái phát, mặc định `PENDING`.",NEEDS_REVIEW,"MIỀN CHO PHÉP do ck_event_outbox_status quy định: PENDING, IN_FLIGHT, DONE, FAILED. Miền thì biết, NGƯỜI GHI thì không: không đường mã hiện hành nào đặt cột này. Vòng đời dự kiến — ai chuyển sang IN_FLIGHT/DONE/FAILED — cần tác giả xác nhận"
+event_outbox,attempts,Số lần thử phát.,NEEDS_REVIEW,CHECK ck_event_outbox_attempts cấm giá trị âm. Không đường mã hiện hành nào TĂNG cột này; `policy_invalidator` không đếm số lần thử
+event_outbox,available_at,Thời điểm sớm nhất được thử phát lại.,NEEDS_REVIEW,Chưa có đường đọc lẫn đường ghi hiện hành. Ngữ nghĩa xếp lịch — cột này chặn lượt thử lại theo cách nào — chưa xác nhận
+event_outbox,processed_at,Thời điểm sự kiện được xử lý xong.,NEEDS_REVIEW,"Bộ đọc hiện hành CỐ Ý không đánh dấu cột này, và lý do nằm trong mã: sự kiện được PHÁT TOẢ cho nhiều tiến trình API, nên tiến trình đầu tiên đánh dấu sẽ 'tiêu thụ' mất sự kiện và các tiến trình còn lại không bao giờ thấy nó. Ngữ nghĩa 'một người tiêu thụ đã xong' trong thiết kế outbox đầy đủ chưa được triển khai và chưa xác nhận"
+event_outbox,last_error,Lỗi của lần phát gần nhất.,NEEDS_REVIEW,Không đường mã hiện hành nào ghi cột này. Nguồn lỗi và thời điểm ghi chưa xác nhận
+google_sheets_sync_status,id,Định danh dòng trạng thái đồng bộ.,LEGACY,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`.
+google_sheets_sync_status,table_name,Bảng nguồn mà con trỏ này theo dõi.,LEGACY,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`.
+google_sheets_sync_status,current_spreadsheet_id,Định danh **bảng tính Google** đang được ghi vào — không phải thư mục Drive.,LEGACY,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`.
+google_sheets_sync_status,current_sheet_index,"Chỉ số trang tính hiện tại, đếm từ 1.",LEGACY,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`. Mặc định 1; quy ước đánh số của cơ chế cũ chưa xác nhận được độc lập — không caller nào còn lại để chứng minh
+google_sheets_sync_status,current_data_rows,Số dòng dữ liệu đã ghi trong trang tính hiện tại.,LEGACY,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`.
+google_sheets_sync_status,max_rows_per_sheet,Ngưỡng dòng mỗi trang tính trước khi chuyển trang; mặc định 500.000.,NEEDS_REVIEW,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`. Chưa xác nhận đây là ngưỡng an toàn nội bộ hay giới hạn của Google Sheets
+google_sheets_sync_status,updated_at,Thời điểm con trỏ được cập nhật gần nhất.,LEGACY,Con trỏ của cơ chế đồng bộ CŨ. `get_sync_status`/`upsert_sync_status` không còn đường gọi nào; quan sát tại lượt rà 26/08/2026: hàng duy nhất (`samples`) đứng yên từ 11/07/2026 trong khi lượt export vẫn chạy và theo dõi vị trí bằng tệp mốc `.samples_sheet.synced`.
+notifications,notification_id,Định danh thông báo.,VERIFIED,
+notifications,tenant_id,Ngữ cảnh tổ chức của thông báo.,VERIFIED,"Bất biến NGHIỆP VỤ 'người nhận thuộc tổ chức này' KHÔNG được khoá ngoại cưỡng chế: hai khoá ngoại tới `tenants` và `users` là riêng rẽ, không có khoá ghép nối chúng. Và `notifications.notify()` cũng không kiểm tư cách thành viên — người gọi cung cấp cả hai giá trị. Hậu quả dưới RLS là mất im lặng chứ không phải rò rỉ: một dòng gắn nhầm tổ chức sẽ VÔ HÌNH với chính người nhận. Một khoá ngoại ghép sang `users` cũng không giải được, vì một người có thể thuộc nhiều tổ chức — thẩm quyền nằm ở Membership"
+notifications,user_id,Tài khoản NHẬN thông báo.,VERIFIED,
+notifications,kind,Loại thông báo.,VERIFIED,"Đo trên sản xuất: `security`, `support`"
+notifications,title,Tiêu đề thông báo.,VERIFIED,
+notifications,body,Nội dung thông báo.,VERIFIED,
+notifications,link,Đường dẫn trong ứng dụng để người nhận mở thứ liên quan.,VERIFIED,
+notifications,severity,"Mức độ nghiêm trọng: `info`, `success`, `warning` hoặc `critical`.",VERIFIED,MIỀN CHO PHÉP do notifications_severity_valid quy định. QUAN SÁT trên sản xuất: hiện chỉ có `info` và `critical`
+notifications,read_at,Thời điểm người nhận đã đọc; NULL khi chưa đọc.,VERIFIED,
+notifications,created_at,Thời điểm phát thông báo.,VERIFIED,
+platform_settings,key,Khoá cấu hình cấp nền tảng.,VERIFIED,"Danh sách trắng ở `platform_settings.EDITABLE`, không phải bảng tự do: mỗi khoá khai kiểu, khoảng giá trị và nhãn"
+platform_settings,value,"Giá trị cấu hình, lưu dưới dạng VĂN BẢN.",VERIFIED,Kiểu thật do `EDITABLE[key]['type']` quy định và được kiểm khoảng khi ghi; cột chỉ là nơi chứa
+platform_settings,updated_by,Tài khoản sửa cấu hình gần nhất.,VERIFIED,
+platform_settings,updated_at,Thời điểm sửa gần nhất.,VERIFIED,
+schema_migrations,version,Phiên bản lược đồ mà lượt áp này đưa cơ sở dữ liệu tới.,VERIFIED,"Cùng với `applied_at` tạo thành khoá chính, nên MỘT phiên bản có NHIỀU dòng: mỗi lượt chạy migration đóng một dấu mới. Bảng là LỊCH SỬ ÁP, không phải trạng thái hiện tại"
+schema_migrations,applied_at,Thời điểm lượt áp.,VERIFIED,
+schema_migrations,applied_by,Vai cơ sở dữ liệu đã chạy lượt áp.,VERIFIED,"Lấy bằng `SELECT current_user`, nên là danh tính CSDL chứ không phải tài khoản ứng dụng"
+schema_migrations,applied_on,Danh tính MÁY đã chạy lệnh.,VERIFIED,"Danh tính máy chạy lượt áp, lấy từ biến môi trường của môi trường triển khai; dùng làm xuất xứ của lượt áp. Khi một lượt migration chạy từ chỗ không ai ngờ, cột này là thứ nói ra điều đó"
+schema_migrations,note,Ghi chú người vận hành kèm lượt áp.,VERIFIED,
+schema_migrations,migration_checksum,Băm SHA-256 của payload migration theo chiều NÂNG CẤP (forward/up) của phiên bản ấy.,VERIFIED,"Sinh ra để phát hiện việc SỬA một migration ĐÃ ÁP. `storage.schema_version.assert_startup_compatible` (gọi từ `app/db.py` lúc khởi động) ném khi checksum LỆCH, nên backend từ chối khởi động — fail-closed. Checksum THIẾU thì chỉ cảnh báo, vì chính lượt triển khai mang cột này lên sẽ tự làm sập sản xuất nếu chặn; đường chặn cho trường hợp ấy nằm ở `app.cli.migrate`, chạy TRƯỚC khi stack lên. Giá trị NULL KHÔNG được tự điền — 'nếu NULL thì ghi giá trị hiện tại' sẽ khiến một migration đã bị sửa tự hợp thức hoá; xác nhận một lần bằng `--adopt-checksum`"
+support_tickets,ticket_id,Định danh phiếu hỗ trợ.,VERIFIED,
+support_tickets,tenant_id,Tổ chức giữ phiếu.,VERIFIED,Nội dung phiếu là dữ liệu của tenant; thư báo chỉ gửi cho quản trị viên của CHÍNH tổ chức ấy
+support_tickets,user_id,Tài khoản đã MỞ phiếu.,VERIFIED,Khác người viết từng tin nhắn trong phiếu
+support_tickets,subject,Tiêu đề phiếu.,VERIFIED,
+support_tickets,category,"Phân loại phiếu: `account`, `billing`, `data`, `bug` hoặc `other`.",VERIFIED,MIỀN CHO PHÉP do support_tickets_category_valid quy định. SỬA LẠI phát biểu cũ: CSDL CÓ ràng tập này
+support_tickets,status,"Trạng thái phiếu: `open`, `pending`, `resolved` hoặc `closed`.",VERIFIED,"MIỀN CHO PHÉP do support_tickets_status_valid quy định — BỐN giá trị, kể cả `closed`. QUAN SÁT trên sản xuất mới chỉ thấy ba giá trị đầu"
+support_tickets,priority,"Mức ưu tiên phiếu: `low`, `normal`, `high` hoặc `urgent`.",VERIFIED,MIỀN CHO PHÉP do support_tickets_priority_valid quy định. SỬA LẠI phát biểu cũ: CSDL CÓ ràng tập này
+support_tickets,created_at,Thời điểm mở phiếu.,VERIFIED,
+support_tickets,updated_at,Thời điểm cập nhật gần nhất.,VERIFIED,
+support_tickets,resolved_at,Mốc thời gian liên quan tới việc hoàn tất xử lý phiếu.,NEEDS_REVIEW,"CSDL KHÔNG ràng cột này với `status = 'resolved'` cũng không với `'closed'` — mà miền cho phép cả hai là hai trạng thái riêng. Đường ghi nào đặt cột này, và nó ứng với trạng thái nào, cần xác nhận"
+support_messages,message_id,Định danh tin nhắn trong phiếu.,VERIFIED,
+support_messages,tenant_id,Tổ chức giữ tin nhắn.,VERIFIED,Không dư thừa dù suy được qua phiếu: đây là phạm vi TRỰC TIẾP mà RLS bám vào
+support_messages,ticket_id,Phiếu chứa tin nhắn này.,VERIFIED,
+support_messages,author_id,Tài khoản viết tin nhắn; NULL khi tác giả không phải người.,VERIFIED,
+support_messages,author_label,"Nhãn tác giả, chụp lại TẠI THỜI ĐIỂM GỬI.",VERIFIED,"Không chạy theo tên hiện tại: một cuộc trao đổi hỗ trợ là bằng chứng lịch sử, và đọc lại phiếu cũ theo tên mới sẽ thấy những cái tên chưa từng tồn tại vào lúc đó"
+support_messages,is_staff,Người GỬI có phải nhân viên hỗ trợ tại thời điểm gửi hay không.,VERIFIED,"Đóng băng theo vai lúc GỬI, không lúc đọc: một người từng là quản trị viên rồi thôi vai không làm câu trả lời cũ của họ thành câu của người dùng thường. KHÔNG phải cột nghỉ hưu — vẫn được ghi ở mọi tin nhắn mới. CHECK ck_support_author_kind_matches là BẤT BIẾN HAI CỘT dạng tương đương: (author_kind = 'staff') = is_staff, nên hai cột không thể bất đồng và `bot` bắt buộc có is_staff = false"
+support_messages,author_kind,"Loại tác giả: `user`, `staff` hoặc `bot`.",VERIFIED,"MIỀN CHO PHÉP do ck_support_author_kind quy định: user, staff, bot. Thêm sau `is_staff` và được lấp ngược từ cột ấy cho dòng cũ. Diễn đạt được thứ `is_staff` không diễn đạt nổi — `bot` — nên nó là nguồn chuẩn khi cần phân biệt ba loại; `admin_attention` dùng nó để bỏ qua tin của bot. CSDL còn buộc hai cột KHÔNG được bất đồng: xem ck_support_author_kind_matches ở `is_staff`"
+support_messages,body,Nội dung tin nhắn.,VERIFIED,
+support_messages,created_at,Thời điểm gửi tin nhắn.,VERIFIED,
+webhook_deliveries,delivery_id,Định danh một lượt giao.,VERIFIED,
+webhook_deliveries,tenant_id,Tổ chức sở hữu lượt giao.,VERIFIED,
+webhook_deliveries,endpoint_id,Endpoint đích của lượt giao.,VERIFIED,Xoá endpoint thì lịch sử giao của nó đi theo (CASCADE)
+webhook_deliveries,event_type,Loại sự kiện nghiệp vụ được giao.,VERIFIED,"Tập riêng ở `webhooks.EVENT_TYPES` (sample.created, training.completed, …). KHÁC `event_outbox.event_type_code`, vốn là tín hiệu nội bộ"
+webhook_deliveries,payload,"Thân yêu cầu sẽ gửi tới endpoint, dạng JSON.",VERIFIED,
+webhook_deliveries,status,"Trạng thái giao: `pending`, `delivered`, `failed` hoặc `dropped`.",VERIFIED,"MIỀN CHO PHÉP do ck_webhook_deliveries_status quy định — BỐN giá trị, kể cả `dropped` mà mô tả cũ bỏ sót. `failed` chỉ đặt khi đã CẠN số lần thử; trước đó lượt giao vẫn là `pending`"
+webhook_deliveries,attempts,Số lần đã thử giao. 0 nghĩa là CHƯA gửi lần nào.,VERIFIED,
+webhook_deliveries,last_status_code,Mã HTTP của lần thử gần nhất; NULL khi lỗi mạng hoặc hết giờ.,VERIFIED,
+webhook_deliveries,last_error,"Mô tả lỗi của lần thử gần nhất, cắt còn 500 ký tự.",VERIFIED,
+webhook_deliveries,next_attempt_at,Thời điểm sớm nhất được thử lại.,VERIFIED,"Lịch chờ CỐ ĐỊNH tính bằng phút, `webhooks.RETRY_SCHEDULE_MINUTES = (1, 5, 25, 125)`, và `MAX_ATTEMPTS = len(...) + 1 = 5`. Không có jitter. Đây là chính sách RUNTIME, lược đồ không cưỡng chế gì"
+webhook_deliveries,delivered_at,Thời điểm giao thành công; NULL khi chưa thành công.,VERIFIED,
+webhook_deliveries,created_at,Thời điểm xếp lượt giao vào hàng.,VERIFIED,"Lượt giao được XẾP HÀNG trong request (chỉ một câu INSERT), còn việc gửi chạy ở tác vụ nền `saas_tasks.deliver_webhooks`, lịch beat mỗi phút. Nên độ trễ của endpoint khách hàng KHÔNG cộng vào thời gian chờ của thao tác nghiệp vụ đã xếp hàng — nó chiếm thời gian của worker giao. Khoảng cách created_at → lần thử đầu vì thế tối đa khoảng một phút"
+webhook_endpoints,endpoint_id,Định danh endpoint.,VERIFIED,
+webhook_endpoints,tenant_id,Tổ chức sở hữu endpoint.,VERIFIED,
+webhook_endpoints,url,Địa chỉ HTTP nhận sự kiện.,VERIFIED,
+webhook_endpoints,secret,"Bí mật ký webhook, lưu ở dạng KHÔNG mã hoá (`whsec_` + 32 byte ngẫu nhiên).",VERIFIED,"HMAC-SHA256 cần khoá KHÔI PHỤC ĐƯỢC nên không thể chỉ lưu băm một chiều — nhưng điều đó KHÔNG đòi lưu thô: `user_totp.secret_enc` cũng khôi phục được mà vẫn mã hoá bằng Fernet. Điểm riêng của cột này là bí mật đối xứng lưu KHÔNG mã hoá, và đó là vấn đề gia cố được ghi riêng ở docs/10-issues/KNOWN_ISSUES.md, không phải yêu cầu của HMAC. Đường đọc đã kiểm: `webhooks.create_endpoint` trả bí mật đúng MỘT lần lúc tạo; `webhooks.list_endpoints` loại cột này ngay ở câu SELECT nên nó không rời khỏi CSDL"
+webhook_endpoints,event_types,Các loại sự kiện endpoint này đăng ký nhận.,NEEDS_REVIEW,Cách biểu diễn nhiều loại và ý nghĩa của ký tự đại diện chưa xác nhận
+webhook_endpoints,is_active,Endpoint còn nhận sự kiện hay không.,VERIFIED,Lượt quét giao chỉ lấy lượt chờ của endpoint đang bật
+webhook_endpoints,description,Mô tả endpoint do người vận hành đặt.,VERIFIED,
+webhook_endpoints,created_by,Tài khoản đã tạo endpoint.,VERIFIED,
+webhook_endpoints,created_at,Thời điểm tạo endpoint.,VERIFIED,
+webhook_endpoints,last_success_at,Lần giao thành công gần nhất.,VERIFIED,
+webhook_endpoints,last_failure_at,Lần giao thất bại gần nhất.,VERIFIED,
+webhook_endpoints,failure_streak,Số lần hỏng LIÊN TIẾP; về 0 ngay khi có một lượt giao thành công.,VERIFIED,
+webhook_endpoints,disabled_at,Thời điểm endpoint bị tắt.,VERIFIED,"Tự tắt khi `failure_streak` chạm `webhooks.FAILURE_STREAK_LIMIT = 20` — ngắt mạch để một endpoint chết không kéo hàng đợi mãi. Chính sách runtime, không phải ràng buộc lược đồ"
+webhook_endpoints,disabled_reason,Lý do endpoint bị tắt.,VERIFIED,
