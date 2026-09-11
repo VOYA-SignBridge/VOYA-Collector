@@ -146,6 +146,12 @@ tốt không đổi; đường mới phải tự chứng minh trước.
 Đo 11/09/2026 trên `signdb_test` dựng mới: **2763 đạt, 7 hỏng, 1 lỗi, 1 bỏ qua**
 (19 phút 57 giây). Frontend: **469/469 đạt**, i18n phủ 100%, dựng thành công.
 
+Lượt đo lại cùng ngày, **sau khi chạy `scripts/provision_test_db_roles.sh`**:
+**2764 đạt, 6 hỏng, 1 lỗi** (18 phút 24). Tổng số test không đổi (2770) và đúng
+MỘT test lật từ đỏ sang xanh — `test_vai_ung_dung_khong_cham_duoc_bang_dieu_khien`.
+Đó là bằng chứng trực tiếp cho mục 3 bên trên: cái đỏ ấy là chuyện cấp vai, không
+phải chuyện mã. CI dùng `provision_db_roles` nên không dính nó.
+
 Bảy cái đỏ không cùng một loại — đừng gộp chúng thành một con số:
 
 | Test | Loại | Ghi chú |
