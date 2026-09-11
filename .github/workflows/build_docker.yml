@@ -1,67 +1,138 @@
-# Dựng và đẩy ảnh backend. CHỈ chạy sau khi đã vào `main`.
+# Dựng và đẩy ảnh của cả stack, gắn tag truy được về đúng một commit.
 #
-# Hai thay đổi so với bản trước, cả hai đều là lỗi vận hành chứ không phải sở
-# thích:
+# Lịch sử của tệp này, vì mỗi thay đổi đều là một lỗi vận hành có thật
+# ---------------------------------------------------------------------
+# Bản đầu (vẫn đang sống trên `main`) chạy trên **mỗi pull request** và đẩy
+# thẳng `voya_backend:latest`. Nghĩa là một PR bất kỳ — chưa ai duyệt, từ bất
+# kỳ ai mở được PR — ghi đè đúng cái ảnh máy sản xuất dùng. Nó còn liệt kê
+# `:latest` HAI LẦN trong khối `tags`, gần như chắc chắn là dấu vết của một
+# dòng `sha-…` từng có rồi bị thay nhầm. Hệ quả: không có cách nào biết một ảnh
+# sinh ra từ commit nào — chính là gốc rễ của triệu chứng "container healthy
+# nhưng đang chạy mã cũ" đã tốn nhiều lượt chẩn đoán.
 #
-# 1. **Kích hoạt là `push` vào `main`, không phải `pull_request`.** Bản trước
-#    chạy trên mỗi PR và đẩy thẳng tag `latest`. Nghĩa là một pull request bất
-#    kỳ — chưa ai duyệt, đến từ bất kỳ ai mở được PR — ghi đè đúng cái ảnh mà
-#    máy sản xuất đang kéo về. Kiểm mã thì thuộc về `ci.yml`; đẩy ảnh thì phải
-#    đợi mã được nhận vào.
+# Ba thay đổi ở bản này
+# ----------------------
+# 1. **Đủ ba ảnh, không chỉ backend.** Compose dựng ba ảnh riêng
+#    (`voya_backend`, `voya_frontend`, `voya_realtime_service`). Chỉ đẩy
+#    backend thì không ai triển khai được từ registry — phải dựng tại chỗ, và
+#    "dựng tại chỗ" là lúc mã chạy tách khỏi mã đã qua cổng kiểm.
 #
-# 2. **Gắn tag theo commit.** Bản trước liệt kê `:latest` HAI LẦN trong khối
-#    `tags` — gần như chắc chắn là dấu vết của một dòng `sha-<short>` từng có
-#    rồi bị thay nhầm. Hệ quả: không có cách nào biết một ảnh sinh ra từ commit
-#    nào, và đó chính là gốc rễ của triệu chứng "container healthy nhưng đang
-#    chạy mã cũ" — thứ đã tốn nhiều lượt chẩn đoán. `sha-<short>` cho phép ghim
-#    một lần triển khai vào đúng một commit, và lùi lại được khi hỏng.
+# 2. **`latest` chỉ di chuyển từ `main`.** Nhánh `deploy_ctu_**` vẫn được dựng
+#    ảnh, nhưng chỉ nhận tag `sha-…` và `branch-…`. Một commit trên nhánh phát
+#    hành vì thế triển khai được (ghim theo sha) mà không bao giờ tự động đổi
+#    thứ mà máy sản xuất kéo về.
+#
+# 3. **Tag là sha NGẮN.** Bản trước dùng `${{ github.sha }}` — 40 ký tự — trong
+#    khi chú thích của chính nó nói `sha-<short>`. Không sai về mặt kỹ thuật,
+#    nhưng không ai gõ lại được bằng tay, và một tag không gõ lại được thì
+#    không phải là đường lùi.
+#
+# Ảnh này dùng ở đâu
+# -------------------
+# `docker-compose.registry.yml` + `scripts/deploy_pinned.sh`. Đường triển khai
+# mặc định (`scripts/deploy.sh`) vẫn dựng tại chỗ và KHÔNG đụng tới registry —
+# đó là chủ ý: đường đang chạy tốt thì không đổi, đường mới phải tự chứng minh
+# trước.
 
-name: Build & push backend image
+name: Build & push images
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'deploy_ctu_**'
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - '.github/workflows/build_docker.yml'
-  # Cho phép dựng lại bằng tay khi cần phát hành lại cùng một commit.
+  # Cho phép phát hành lại đúng một commit mà không cần commit rỗng.
   workflow_dispatch:
 
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-push:
+  build:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      # Một job hỏng không nên giấu kết quả của hai job kia: nếu frontend hỏng
+      # ta vẫn muốn biết backend có dựng được không. (`fail-fast` là khoá của
+      # `strategy`, không phải của job — đặt sai tầng thì nó bị bỏ qua lặng lẽ.)
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            image: voya_backend
+          - name: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            image: voya_frontend
+          - name: realtime_service
+            context: ./backend/realtime_service
+            dockerfile: ./backend/realtime_service/Dockerfile
+            image: voya_realtime_service
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3.8.0
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3.3.0
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push backend Docker image
-        uses: docker/build-push-action@v6.12.0
+      # `latest` chỉ theo `main`. Trên nhánh phát hành, ảnh vẫn được đẩy nhưng
+      # không có tag nào tự di chuyển — muốn dùng thì phải ghim sha một cách
+      # tường minh, và sự tường minh đó chính là thứ ta muốn.
+      - name: Tính tag
+        id: tags
+        run: |
+          short=$(git rev-parse --short HEAD)
+          ns='${{ secrets.DOCKER_USERNAME }}'
+          img="$ns/${{ matrix.image }}"
+          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          tags="$img:sha-$short
+          $img:branch-$branch"
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            tags="$tags
+          $img:latest"
+          fi
+          {
+            echo "short=$short"
+            echo "list<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dựng và đẩy
+        uses: docker/build-push-action@v6
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
-          # `latest` để đường triển khai hiện tại không phải đổi, và
-          # `sha-<short>` để mỗi ảnh truy được về đúng một commit. Hai tag trỏ
-          # cùng một ảnh; cái thứ hai mới là cái ghim được.
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/voya_backend:latest
-            ${{ secrets.DOCKER_USERNAME }}/voya_backend:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.tags.outputs.list }}
+          # Cache dùng chung theo tên ảnh, không theo nhánh — ba nhánh dựng
+          # cùng một backend thì không có lý do gì dựng lại từ đầu ba lần.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
       - name: Ghi lại ảnh vừa đẩy
         run: |
-          echo "### Ảnh đã đẩy" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`voya_backend:latest\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- \`voya_backend:sha-${GITHUB_SHA}\` ← ghim vào đây khi triển khai" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### ${{ matrix.image }}"
+            echo ""
+            echo '```'
+            echo "${{ steps.tags.outputs.list }}"
+            echo '```'
+            echo ""
+            echo "Triển khai đúng ảnh này trên máy deploy:"
+            echo ""
+            echo '```bash'
+            echo "VOYA_IMAGE_TAG=sha-${{ steps.tags.outputs.short }} bash scripts/deploy_pinned.sh"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

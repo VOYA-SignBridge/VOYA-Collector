@@ -1,0 +1,66 @@
+# Lớp phủ: chạy ẢNH ĐÃ DỰNG SẴN từ registry thay vì dựng tại chỗ.
+#
+# Vì sao lớp phủ này tồn tại
+# ---------------------------
+# Tới 11/09/2026, workflow `build_docker.yml` đẩy ảnh lên Docker Hub và **không
+# ai kéo về**: cả ba tệp compose đều khai `build:` cùng với một tag CỤC BỘ
+# (`voya_backend:latest`, không có namespace), nên mọi lượt triển khai đều dựng
+# lại từ mã nguồn trên chính máy đó. Ảnh trên registry là một hiện vật không có
+# người đọc — tốn thời gian dựng, và tạo ấn tượng sai rằng đã có đường phát
+# hành.
+#
+# Đây là đầu đọc còn thiếu. Kèm lớp phủ này thì thứ chạy trên máy triển khai
+# đúng bằng BYTE với thứ đã đi qua cổng kiểm, chứ không phải "cùng commit, dựng
+# lại lần nữa" — hai điều đó khác nhau mỗi khi một phụ thuộc nổi (base image,
+# gói pip không ghim, apt mirror) đổi giữa hai lượt dựng.
+#
+# Vì sao vẫn giữ `build:` ở tệp gốc
+# ----------------------------------
+# Không gỡ. Đường dựng-tại-chỗ là đường đã chạy tốt hàng chục lượt; đường mới
+# phải tự chứng minh trước khi thay thế. Compose sẽ ưu tiên dựng nếu được phép,
+# nên `scripts/deploy.sh --image-tag=…` truyền `--no-build` và `pull` tường
+# minh — chính điều đó buộc lớp phủ này phải đủ, không được dựa vào việc trên
+# máy tình cờ đã có ảnh cũ cùng tên.
+#
+# Hai biến, cả hai BẮT BUỘC (không có giá trị lui):
+#
+#   VOYA_REGISTRY_NS   namespace Docker Hub, ví dụ `yukichi`
+#   VOYA_IMAGE_TAG     tag ghim, ví dụ `sha-6be6843`
+#
+# Cố ý không đặt mặc định `:latest`. Một mặc định ở đây nghĩa là gõ sai tên biến
+# thì lặng lẽ triển khai `latest` — đúng cái mơ hồ "đang chạy mã nào" mà tag
+# theo sha sinh ra để chấm dứt. Thiếu biến thì compose dừng, và dừng là đúng.
+
+services:
+  frontend:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_frontend:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always
+
+  realtime_service:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_realtime_service:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always
+
+  # Năm service dưới đây dùng CHUNG một ảnh backend. Danh sách này đã từng bị
+  # quên đúng một mục (`celery-beat`) ở một chỗ khác trong kho, nên nó được
+  # liệt kê đủ và có chú thích: bỏ sót một dòng ở đây không gây lỗi, nó chỉ để
+  # lại một container chạy ảnh cũ giữa một stack đã cập nhật — dạng lệch tệ
+  # nhất vì mọi thứ vẫn "healthy".
+  sot-init:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_backend:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always
+
+  backend:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_backend:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always
+
+  worker:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_backend:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always
+
+  trainer:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_backend:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always
+
+  celery-beat:
+    image: ${VOYA_REGISTRY_NS:?can VOYA_REGISTRY_NS}/voya_backend:${VOYA_IMAGE_TAG:?can VOYA_IMAGE_TAG}
+    pull_policy: always

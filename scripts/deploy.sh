@@ -11,6 +11,11 @@
 #   ./scripts/deploy.sh --no-build   # up -d
 #   ./scripts/deploy.sh --cpu        # force CPU even where a GPU exists
 #
+#   ./scripts/deploy.sh --image-tag=sha-6be6843
+#       Chay ANH DA DUNG SAN tu registry thay vi dung tai cho. Xem khoi
+#       "--image-tag" ben duoi ve ly do no la mot CHE DO cua script nay chu
+#       khong phai mot script rieng.
+#
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -18,6 +23,7 @@ FILES=(-f docker-compose.yml -f docker-compose.prod.yml)
 BUILD=(--build)
 FORCE_CPU=0
 SAVE_ONLY=0
+IMAGE_TAG=""
 
 for arg in "$@"; do
   case "$arg" in
@@ -29,9 +35,50 @@ for arg in "$@"; do
     # trong bài kiểm — hai nửa của một hợp đồng mà mỗi nửa tự kiểm bằng định
     # nghĩa riêng thì cả hai cùng xanh trong khi hợp đồng đã gãy.
     --save-rollback-only) SAVE_ONLY=1; BUILD=() ;;
+    # ---------------------------------------------------------------------
+    # --image-tag=<tag>: trien khai anh da dung san, khong dung lai.
+    #
+    # Vi sao la mot CHE DO cua script nay, khong phai `deploy_pinned.sh` rieng
+    # ---------------------------------------------------------------------
+    # Moi thu dat gia trong tep nay nam O NGOAI lenh `up`: pre-flight bay loi
+    # cau hinh truoc khi ton 15 phut dung anh, phep do GPU that, viec ghi
+    # COMPOSE_FILE vao .env, buoc DUNG ung dung truoc migration, cong kiem
+    # luoc do hai lan (truoc va SAU khi ung dung len). Mot script thu hai se
+    # phai chep lai tat ca, va ban chep se troi khoi ban goc — lan dau co ai
+    # sua mot cai guard o day ma quen cai kia.
+    #
+    # Doi cho la anh den TU DAU. Do la mot dong trong danh sach FILES va mot
+    # lenh `pull`. Nen no la mot co, khong phai mot tep.
+    --image-tag=*) IMAGE_TAG="${arg#*=}"; BUILD=() ;;
+    --image-tag)
+      echo "--image-tag can dang --image-tag=<tag>, vi du --image-tag=sha-6be6843" >&2
+      exit 2 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
+
+# ---------------------------------------------------------------------------
+# Che do ghim anh. Dat NGAY SAU vong parse, truoc moi thu khac, vi FILES phai
+# day du truoc khi phep do GPU va viec ghi COMPOSE_FILE dung toi no.
+# ---------------------------------------------------------------------------
+if [ -n "$IMAGE_TAG" ]; then
+  # Namespace doc tu moi truong hoac tu .env. Khong co mac dinh: mot mac dinh
+  # o day nghia la go sai ten bien thi lang le keo anh cua nguoi khac.
+  if [ -z "${VOYA_REGISTRY_NS:-}" ] && [ -f .env ]; then
+    VOYA_REGISTRY_NS=$(sed -n 's/^VOYA_REGISTRY_NS=//p' .env | tail -1 | tr -d '
+')
+  fi
+  if [ -z "${VOYA_REGISTRY_NS:-}" ]; then
+    echo "    [FAIL] --image-tag can VOYA_REGISTRY_NS (namespace Docker Hub)." >&2
+    echo "           Dat trong .env:  VOYA_REGISTRY_NS=<ten-tai-khoan-docker-hub>" >&2
+    echo "           Do la cung gia tri ma CI dung lam secrets.DOCKER_USERNAME." >&2
+    exit 2
+  fi
+  export VOYA_REGISTRY_NS
+  export VOYA_IMAGE_TAG="$IMAGE_TAG"
+  FILES+=(-f docker-compose.registry.yml)
+  echo "==> Che do ghim anh: ${VOYA_REGISTRY_NS}/voya_*:${VOYA_IMAGE_TAG} (khong dung lai)"
+fi
 
 gpu_usable() {
   [ "$FORCE_CPU" -eq 1 ] && return 1
@@ -279,6 +326,23 @@ upsert_env COMPOSE_FILE "$compose_file_value"
 echo "==> .env: COMPOSE_FILE=$compose_file_value"
 echo "    (a bare \`docker compose up -d\` in this folder now keeps the same overlays)"
 
+# Ghi CA hai bien anh vao .env, va day khong phai tien ich — no la dieu kien
+# de dong tren kia con dung.
+#
+# `docker-compose.registry.yml` dung cu phap BAT BUOC `${VOYA_IMAGE_TAG:?...}`.
+# Vua ghi lop phu ay vao COMPOSE_FILE xong ma khong ghi hai bien, thi moi lenh
+# `docker compose` tran trong thu muc nay — ke ca `ps`, ke ca `logs` — se chet
+# vi thieu bien. Tuc la buoc "giu overlay cho lenh tran" se tu tay pha lenh
+# tran, dung o thoi diem nguoi ta can no nhat: ngay sau mot lan trien khai.
+#
+# Tac dung phu co ich: `.env` tro thanh noi ghi lai MAY NAY DANG CHAY TAG NAO,
+# doc duoc bang mot lenh grep, khong phai suy ra tu id anh.
+if [ -n "$IMAGE_TAG" ]; then
+  upsert_env VOYA_REGISTRY_NS "$VOYA_REGISTRY_NS"
+  upsert_env VOYA_IMAGE_TAG   "$VOYA_IMAGE_TAG"
+  echo "==> .env: VOYA_IMAGE_TAG=$VOYA_IMAGE_TAG"
+fi
+
 fi  # kết thúc nhánh "không phải --save-rollback-only"
 
 # ---------------------------------------------------------------------------
@@ -445,6 +509,47 @@ fi
 if [ ${#BUILD[@]} -gt 0 ]; then
   echo "==> docker compose ${FILES[*]} build"
   docker compose "${FILES[@]}" build
+fi
+
+# ---------------------------------------------------------------------------
+# Che do ghim: keo anh TRUOC khi dung ung dung.
+#
+# Thu tu quan trong. Buoc migration ben duoi chay `compose run backend` de hoi
+# APP_SCHEMA_VERSION — neu anh chua co tren may, lenh do se keo anh giua chung
+# lan trien khai, sau khi ung dung da bi dung. Mot lan keo hong vi mang khi ay
+# de lai stack DA TAT ma chua co gi thay the.
+#
+# Keo o day thi mot tag go sai, mot lan dang nhap het han, hay mang chet deu
+# lam lenh dung lai trong khi he thong CU VAN DANG CHAY. Do la trang thai hong
+# dung: khong ai mat dich vu vi mot loi go phim.
+#
+# Vi sao KHONG cat duong lui .tar o che do nay
+# ---------------------------------------------
+# Khoi `save_rollback` ben tren chi chay khi co dung anh, nen che do nay bo qua
+# no — co y. Duong lui cua mot lan trien khai ghim chinh la tag truoc do: no
+# nam tren registry, bat bien, va khong bi `docker_gc.sh` cham toi (day dung la
+# ly do khoi kia phai ghi .tar ra ngoai kho anh — mot tag CUC BO thi GC xoa
+# duoc, va da xoa that hom 15/08).
+#
+# Tag dang chay truoc lan nay duoc in ra ngay duoi day, vi mot duong lui ma
+# phai di tim moi biet ten thi khong phai duong lui.
+# ---------------------------------------------------------------------------
+if [ -n "$IMAGE_TAG" ]; then
+  truoc=$(sed -n 's/^VOYA_IMAGE_TAG=//p' .env 2>/dev/null | tail -1 | tr -d '
+')
+  if [ -n "$truoc" ] && [ "$truoc" != "$IMAGE_TAG" ]; then
+    echo "==> Tag dang chay truoc lan nay: $truoc"
+    echo "    Lui ve:  bash scripts/deploy.sh --image-tag=$truoc"
+  fi
+
+  echo "==> docker compose pull (truoc khi dung bat ky thu gi)"
+  if ! docker compose "${FILES[@]}" pull; then
+    echo >&2
+    echo "    [FAIL] khong keo duoc anh ${VOYA_REGISTRY_NS}/voya_*:${IMAGE_TAG}." >&2
+    echo "           KHONG co gi bi dung — he thong cu van dang chay." >&2
+    echo "           Kiem: tag co ton tai khong, da \`docker login\` chua." >&2
+    exit 3
+  fi
 fi
 
 # ---------------------------------------------------------------------------
