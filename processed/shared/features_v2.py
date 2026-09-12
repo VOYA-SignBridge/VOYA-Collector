@@ -228,22 +228,46 @@ def build_sequence_from_normalized(sequence, version):
                      for t in range(arr.shape[0])])
 
 
-def append_geometry(seq126):
+#: Bộ mô tả hình học của từng phiên bản. KHÔNG phải cùng một bộ, và đó là chủ ý.
+#:
+#: `geometric_features` (23/tay) tính PHÁP TUYẾN LÒNG BÀN TAY 3-D, thứ chỉ có
+#: nghĩa khi trục z cùng đơn vị với x và y — tức là chỉ với v2, dựng lại từ
+#: `landmarks_raw`. `geometric_features_planar` (28/tay) cố ý tránh độ lớn của
+#: độ sâu và chỉ dùng THỨ TỰ trước-sau qua `z_rel`, vì v1z quy chiếu z theo
+#: chính nó nên độ lớn của nó không so được với x/y.
+#:
+#: Áp nhầm bộ này cho phiên bản kia không sai cú pháp và không nổ ở đây — nó
+#: chỉ ra sai số cột, rồi `train_tcn` từ chối lô đầu tiên với một thông báo nói
+#: về shape chứ không nói về chuyện chọn nhầm bộ mô tả.
+_GEOMETRY_BY_VERSION = {
+    "v1g": geometric_features_planar,
+    "v2g": geometric_features,
+}
+
+
+def append_geometry(seq126, version="v1g"):
     """Append the per-hand descriptors to an already-built (T, 126) block.
 
     Kept separate from the base build so it can run AFTER augmentation. Mirroring
     or jittering the landmarks changes the geometry, so descriptors derived before
     augmentation would contradict the coordinates the model actually sees.
+
+    `version` chọn bộ mô tả. Bản trước không có tham số này và luôn dùng bộ
+    planar, nên `v2g` cho ra 126 + 2*28 = 182 cột trong khi `feature_dim("v2g")`
+    khai 126 + GEOM_DIM = 172 — mọi lượt chạy v2g dừng ở phép kiểm lô đầu của
+    `train_tcn`. Mặc định giữ nguyên `v1g` để mọi lời gọi cũ không đổi hành vi.
     """
+    fn = _GEOMETRY_BY_VERSION.get(version)
+    if fn is None:
+        raise ValueError(
+            "append_geometry: %r không phải phiên bản có hình học (chờ %s)"
+            % (version, " hoặc ".join(sorted(_GEOMETRY_BY_VERSION)))
+        )
     arr = np.asarray(seq126, dtype=np.float32)
     rows = []
     for t in range(arr.shape[0]):
         hands = arr[t].reshape(2, 21, 3)
-        rows.append(np.concatenate([
-            arr[t],
-            geometric_features_planar(hands[0]),
-            geometric_features_planar(hands[1]),
-        ]))
+        rows.append(np.concatenate([arr[t], fn(hands[0]), fn(hands[1])]))
     return np.stack(rows).astype(np.float32)
 
 

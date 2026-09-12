@@ -570,7 +570,25 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
                 )
 
         if self.feature_version != "v1" and _fv2.has_geometry(self.feature_version):
-            x = _fv2.append_geometry(x)
+            x = _fv2.append_geometry(x, self.feature_version)
+
+        # Chiều rộng CUỐI CÙNG, sau khi hình học đã nối thêm.
+        #
+        # `self.expected_feature_dim` từng LÀ phép kiểm shape ở `__getitem__`.
+        # Khi hình học được chuyển ra sau augmentation, hai phép kiểm ấy phải
+        # đổi sang hằng 126 (lúc đó mảng chưa nối hình học) — và thuộc tính này
+        # thành mã chết: được tính ra, không ai đọc. Nghĩa là không còn gì đối
+        # chiếu chiều rộng SAU cùng với phiên bản đặc trưng đã khai.
+        #
+        # `train_tcn` có kiểm ở dòng ~1709, nhưng chỉ trên lô đầu tiên và chỉ
+        # khi đi qua trainer. Loader còn được dùng ở chỗ khác — suy luận,
+        # `compute_pooled_confusion.py` — và ở đó không có gì cả.
+        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, self.expected_feature_dim):
+            raise ValueError(
+                f"feature_version={self.feature_version} phải cho "
+                f"({_EXPECTED_SEQ_LEN}, {self.expected_feature_dim}) "
+                f"nhưng nhận {tuple(x.shape)} từ {path}"
+            )
 
         x = np.ascontiguousarray( x, dtype=np.float32 )
 
