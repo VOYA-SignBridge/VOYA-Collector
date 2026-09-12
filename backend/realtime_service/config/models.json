@@ -4,7 +4,7 @@
     {
       "id": "bang-chu-cai",
       "name": "Bảng Chữ Cái",
-      "checkpoint_path": "checkpoints/tcn_dialect-bang-chu-cai_20260607_130922.pt",
+      "checkpoint_path": "checkpoints/bigru_attention_alphabet_20260809_162654.pt",
       "language": "vn",
       "dialect": "bang-chu-cai",
       "seq_len": 60,
@@ -33,7 +33,7 @@
     {
       "id": "hoa-de",
       "name": "Hòa đê",
-      "checkpoint_path": "checkpoints/tcn_dialect-hoa-de_20260721_160609.pt",
+      "checkpoint_path": "checkpoints/handgcn_hoa_de_20260813_132804.pt",
       "language": "vn",
       "dialect": "hoa-de",
       "seq_len": 60,
