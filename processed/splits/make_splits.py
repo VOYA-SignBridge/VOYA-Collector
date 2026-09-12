@@ -1312,7 +1312,22 @@ def run_manifest_mode(args) -> None:
     global RANDOM_SEED
     RANDOM_SEED = args.seed
     manifest_rows, fieldnames = _load_manifest_rows(args.dataset_manifest)
-    for col in ('sample_id', 'class_idx', 'label_key', 'label_slug'):
+    # `target_idx` nằm trong danh sách này vì `split_from_manifest` GẮN nó vào
+    # từng hàng (xem chỗ `r['target_idx'] = ...`). Thiếu tên ở đây thì
+    # `csv.DictWriter` ném ngay lúc ghi:
+    #
+    #     ValueError: dict contains fields not in fieldnames: 'target_idx'
+    #
+    # và cả chế độ manifest không sinh nổi một split nào. Đường vận hành ở
+    # `main()` đã có phép bảo vệ tương đương (`if 'target_idx' not in
+    # fieldnames`), nhưng đường này thì không — nên trường mới được thêm vào
+    # một nửa hệ thống.
+    #
+    # Hậu quả đo được: `processed/splits/versions/hoa_de_sample_v1` chưa bao
+    # giờ dựng được, nên `test_profile_training_prep.py` bỏ qua vĩnh viễn —
+    # và chính thông báo bỏ qua bảo người đọc "chạy make_splits trước", một
+    # lệnh không chạy được. Bộ kiểm nói đúng triệu chứng và chỉ sai chỗ sửa.
+    for col in ('sample_id', 'class_idx', 'label_key', 'label_slug', 'target_idx'):
         if col not in fieldnames:
             fieldnames.append(col)
 
