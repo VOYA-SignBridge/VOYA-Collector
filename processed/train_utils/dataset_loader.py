@@ -36,6 +36,8 @@ try:
 except Exception:  # pragma: no cover - v1 runs must not depend on this
     _fv2 = None  # type: ignore
 
+from . import signer_identity as _signer_identity
+
 _DEFAULT_FEATURE_VERSION = os.environ.get("VOYA_FEATURE_VERSION", "v1").strip() or "v1"
 
 
@@ -150,14 +152,12 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # mục không đổi trong một lần chạy nên nhớ luôn kết quả theo chỉ số dòng.
         self._path_cache: Dict[int, Path] = {}
 
-        self._legacy_signer_map: Dict[str, str] = {}
-        try:
-            mapping_path = Path(__file__).resolve().parents[2] / 'config' / 'legacy_signer_mapping.json'
-            raw_map = json.loads(mapping_path.read_text(encoding='utf-8'))
-            self._legacy_signer_map = dict(raw_map.get('legacy_name_to_signer_id') or {})
-        except Exception:
-            # Không có bảng gộp thì giữ nguyên tên thô — hành vi như trước.
-            self._legacy_signer_map = {}
+        # Bảng gộp nạp qua `signer_identity`, KHÔNG đọc lại tệp ở đây.
+        # `routers/training` hỏi cùng câu hỏi "ai ký hàng này" để nói cho người
+        # dùng biết con số họ sắp đọc đo trên ai; hai bản cài đặt của cùng một
+        # định nghĩa thì trôi lệch được, và khi lệch thì giao diện nói một đằng
+        # còn mô hình học một nẻo mà không có gì đỏ.
+        self._legacy_signer_map: Dict[str, str] = _signer_identity.load_legacy_signer_map()
         self.feature_key_priority = feature_key_priority or [
             'sequence',
             'features', 'x', 'data', 'arr_0'
@@ -473,10 +473,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         `user_id` ghi tên người ký thật, còn biến thể chính tả thì đã có bảng gộp
         được chủ dữ liệu xác nhận (xem scripts/apply_signer_merges.py).
         """
-        raw = (row.get('user_id') or '').strip()
-        if raw:
-            return self._legacy_signer_map.get(raw, raw)
-        return (row.get('signer_id') or '').strip()
+        return _signer_identity.canonical_signer(row, self._legacy_signer_map)
 
     def _feature_path_for(self, idx: int, row: Dict[str, str]) -> Path:
         """_resolve_feature_path có nhớ kết quả — tránh stat() lại mỗi epoch."""

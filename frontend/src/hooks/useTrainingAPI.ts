@@ -7,6 +7,31 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
 import axiosClient, { getAuthToken, getApiBaseURL } from '../api/axiosClient';
 
+/**
+ * Tập dữ liệu ĐANG được chia thế nào — sự thật, không phải thanh trượt.
+ *
+ * Máy chủ đọc nó từ chính hiện vật mà lượt huấn luyện sẽ đọc (qua
+ * `_resolve_for_run`), nên những con số ở đây là con số sẽ được huấn luyện,
+ * chứ không phải một tỉ lệ do giao diện tự nghĩ ra.
+ */
+export interface SplitProvenance {
+  split_id?: string | null;
+  purpose?: string | null;
+  owner_state?: string | null;
+  /** Cột mang danh tính người ký: `user_id`, `signer_id`, hoặc null. */
+  identity_column?: string | null;
+  /**
+   * Không người ký nào vừa ở tập học vừa ở tập đánh giá.
+   *
+   * `false` KHÔNG có nghĩa "đã đo và thấy rò rỉ" — nó cũng là câu trả lời khi
+   * không kiểm được. Đọc kèm `warning` để phân biệt hai trường hợp.
+   */
+  signer_disjoint: boolean;
+  signers: Record<string, string[]>;
+  counts: Record<string, number>;
+  warning?: string | null;
+}
+
 export interface DatasetInfo {
   total_samples: number;
   total_classes: number;
@@ -18,6 +43,7 @@ export interface DatasetInfo {
   split_info?: { train: number; val: number; test: number };
   // Optional mapping from class uid/slug -> human label
   label_map?: Record<string, string>;
+  split_provenance?: SplitProvenance | null;
 }
 
 export type ModelType = 'tcn' | 'cnn' | 'lstm' | 'bigru_attention' | 'hdgcn';

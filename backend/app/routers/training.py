@@ -257,6 +257,50 @@ REALTIME_CONTAINER_CHECKPOINTS = "/app/realtime_service/config/checkpoints"
 # Pydantic Models
 # ============================================================================
 
+class SplitProvenance(BaseModel):
+    """Tập dữ liệu ĐANG được chia thế nào — đọc từ chính hiện vật lượt chạy sẽ đọc.
+
+    Vì sao model này tồn tại
+    ------------------------
+    Bước 3 của giao diện huấn luyện hiện ba thanh trượt tỉ lệ train/val/test.
+    Chúng là state cục bộ: không có gì gửi chúng lên máy chủ, và máy chủ cũng
+    không có tham số nào để nhận — huấn luyện luôn chạy trên split đã được sinh
+    sẵn trên đĩa. Cái điều khiển ấy gợi ý một lựa chọn KHÔNG tồn tại, và trong
+    khi làm vậy nó che mất đúng một sự thật quyết định cách đọc con số cuối
+    cùng: cùng một người có xuất hiện ở cả tập học lẫn tập đánh giá hay không.
+    Trên tập này khác biệt ấy đáng 0.129 độ chính xác, nên một màn hình im lặng
+    về nó là im lặng theo chiều làm kết quả đẹp lên.
+
+    Vì sao đọc qua `_resolve_for_run` chứ không tự mở tệp
+    ----------------------------------------------------
+    Một bản trước của ý tưởng này (trên nhánh experiment/feature-v2) đọc thẳng
+    `processed/splits/{train,val,test}.csv` ở thư mục GỐC. Trong thế giới của
+    nhánh đó thì đúng; ở đây thì không: ba tệp gốc là hiện vật nghiên cứu ĐÓNG
+    BĂNG, còn đường vận hành đã chuyển sang `operational/<split_id>/` và đường
+    nghiên cứu sang `versions/<split_version>/`. Đọc thư mục gốc nghĩa là báo
+    cáo về những tệp mà lượt chạy KHÔNG đọc — đúng loại lệch mà cả
+    `_resolve_for_run` sinh ra để chấm dứt.
+
+    Nên nguồn ở đây là chính cửa ấy. Cái được hiển thị và cái được huấn luyện
+    là cùng một hiện vật, theo định nghĩa chứ không nhờ trùng hợp.
+    """
+
+    #: Hiện vật nào. Rỗng nghĩa là lượt chạy rơi về mặc định của trainer.
+    split_id: Optional[str] = None
+    #: `research` | `operational`.
+    purpose: Optional[str] = None
+    #: Hiện vật thuộc về ai, theo `read_owner`. `unknown` KHÔNG phải `owned`.
+    owner_state: Optional[str] = None
+    #: Cột mang danh tính người ký: `user_id`, `signer_id`, hoặc None.
+    identity_column: Optional[str] = None
+    #: Không người ký nào vừa ở train vừa ở val/test. False khi KHÔNG kiểm được.
+    signer_disjoint: bool = False
+    signers: Dict[str, List[str]] = {}
+    counts: Dict[str, int] = {}
+    #: Câu nói thẳng cho người dùng. Rỗng nghĩa là không có gì bất thường.
+    warning: Optional[str] = None
+
+
 class DatasetInfo(BaseModel):
     """Thông tin dataset"""
     total_samples: int
@@ -266,6 +310,112 @@ class DatasetInfo(BaseModel):
     class_distribution: Dict[str, int]  # class_name -> count
     samples_by_dialect: Dict[str, int] = {}  # dialect -> sample count (for split viz)
     split_info: Optional[Dict[str, int]] = None  # train, val, test counts
+    #: Tập dữ liệu đang được chia THẾ NÀO. Thay cho ba thanh trượt tỉ lệ ở bước
+    #: 3, vốn không gửi đi đâu và không có tham số nào ở máy chủ để nhận.
+    split_provenance: Optional[SplitProvenance] = None
+
+
+def _split_provenance(*, tenant_id: str,
+                      split_id: Optional[str] = None,
+                      run_purpose: Optional[str] = None) -> SplitProvenance:
+    """Dựng `SplitProvenance` cho đúng hiện vật mà một lượt chạy SẼ đọc.
+
+    Tham số phản chiếu `TrainingConfig`, và được đưa qua `_resolve_for_run` —
+    cùng hàm mà worker gọi — nên không có cách nào để màn hình và trainer nói
+    về hai tệp khác nhau.
+
+    Không bao giờ ném: đây là đường HIỂN THỊ. Một hiện vật không phân giải được
+    là một điều cần NÓI RA cho người dùng, không phải một lỗi 500 che mất cả
+    trang. Phần chặn thật nằm ở chỗ phái job, và nó vẫn chặn.
+    """
+    import csv as _csv
+
+    prov = SplitProvenance()
+    try:
+        # CẢ HAI import nằm trong `try`, không chỉ lời gọi.
+        #
+        # `processed.train_utils` sống ngoài gói `app`; nó có mặt nhờ bố cục thư
+        # mục của container chứ không nhờ một phụ thuộc đã khai. Một import
+        # đứng ngoài `try` ở đây sẽ ném ImportError và biến hàm "không bao giờ
+        # ném" thành nguồn của một trang 500 — đúng thứ docstring nói là không
+        # được xảy ra.
+        from processed.train_utils import signer_identity as _si
+        from app.training_tasks import _resolve_for_run
+        art = _resolve_for_run(
+            {"operational_split_id": split_id or "", "run_purpose": run_purpose or ""},
+            tenant_id=tenant_id)
+    except Exception as exc:  # noqa: BLE001 — xem docstring
+        prov.warning = (
+            f"Không xác định được tập dữ liệu lượt chạy sẽ dùng ({exc}). "
+            "Kết quả huấn luyện sẽ không nói được nó đo trên tập nào.")
+        return prov
+
+    if art is None:
+        # `_resolve_for_run` trả None ở nhánh nghiên cứu ghim `split_version`
+        # và ở nhánh legacy không xác minh được. Cả hai đều nghĩa là trainer đi
+        # theo mặc định của chính nó, và ta KHÔNG được đoán hộ.
+        prov.warning = (
+            "Lượt chạy sẽ dùng mặc định của trainer, không phải một hiện vật đã "
+            "ghim. Không kiểm được người ký có bị lẫn giữa học và đánh giá hay "
+            "không.")
+        return prov
+
+    prov.split_id = getattr(art, "split_id", None) or None
+    prov.purpose = getattr(art, "purpose", None) or None
+    prov.owner_state = getattr(art, "owner_state", None) or None
+
+    legacy_map = _si.load_legacy_signer_map()
+    theo_phan: Dict[str, set] = {}
+    for ten, duong_dan in (("train", art.train_csv),
+                           ("val", art.val_csv),
+                           ("test", art.test_csv)):
+        try:
+            with open(duong_dan, newline="", encoding="utf-8") as fh:
+                reader = _csv.DictReader(fh)
+                prov.identity_column = prov.identity_column or _si.identity_column(
+                    reader.fieldnames)
+                nguoi_ky, n = set(), 0
+                for row in reader:
+                    n += 1
+                    ai = _si.canonical_signer(row, legacy_map)
+                    if ai:
+                        nguoi_ky.add(ai)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[SPLIT_PROV] không đọc được %s: %s", duong_dan, exc)
+            continue
+        theo_phan[ten] = nguoi_ky
+        prov.counts[ten] = n
+        prov.signers[ten] = sorted(nguoi_ky)
+
+    train = theo_phan.get("train", set())
+    val = theo_phan.get("val", set())
+    test = theo_phan.get("test", set())
+    lan = sorted((train & test) | (train & val))
+
+    # `signer_disjoint` chỉ True khi ĐO ĐƯỢC là tách. Không có cột định danh,
+    # hoặc một trong hai phía rỗng, đều cho False — "không kiểm được" phải đọc
+    # ra là "chưa bảo đảm", không phải "đã đảm bảo".
+    prov.signer_disjoint = bool(train and test) and not lan
+
+    if prov.identity_column is None and (prov.counts or train or test):
+        prov.warning = (
+            "Tập dữ liệu đang dùng không có cột định danh người ký (`user_id` "
+            "hoặc `signer_id`), nên KHÔNG kiểm được người ký có bị lẫn giữa tập "
+            "huấn luyện và tập đánh giá hay không.")
+    elif lan:
+        them = "…" if len(lan) > 5 else ""
+        prov.warning = (
+            f"{len(lan)} người ký xuất hiện ở cả tập huấn luyện lẫn tập đánh giá "
+            f"({', '.join(lan[:5])}{them}). Con số sẽ lạc quan hơn thực tế: mô "
+            "hình đã thấy chính người đó lúc học, nên nó KHÔNG phản ánh độ chính "
+            "xác trên người ký mới.")
+    elif not train or not test:
+        prov.warning = "Tập huấn luyện hoặc tập đánh giá rỗng."
+    elif prov.owner_state and prov.owner_state != "owned":
+        prov.warning = (
+            f"Hiện vật này chưa xác định được chủ sở hữu ({prov.owner_state}). "
+            "Nó vẫn dùng được, nhưng nguồn gốc chưa truy được về một tổ chức.")
+    return prov
 
 
 class TrainingConfig(BaseModel):
@@ -1128,6 +1278,15 @@ async def get_dataset_info(
             if d:
                 samples_by_dialect[d] = samples_by_dialect.get(d, 0) + 1
 
+        # Nguồn gốc của split, đọc qua ĐÚNG cửa mà lượt chạy sẽ đi.
+        #
+        # Chạy trong threadpool: nó mở ba tệp CSV và đi hết từng dòng để đếm
+        # người ký. Trên split lớn nhất hiện nay là vài nghìn dòng — không lâu,
+        # nhưng đây là handler `async`, nên một lượt đọc tệp đồng bộ sẽ chặn cả
+        # vòng lặp sự kiện chứ không chỉ request này.
+        prov = await run_in_threadpool(
+            lambda: _split_provenance(tenant_id=tenant_of(current_user)))
+
         return DatasetInfo(
             total_samples=len(samples),
             total_classes=len(class_counts),
@@ -1135,6 +1294,7 @@ async def get_dataset_info(
             dialects=dialects_map,
             class_distribution=class_counts,
             samples_by_dialect=samples_by_dialect,
+            split_provenance=prov,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
