@@ -270,6 +270,17 @@ class TestTheAggregateTasksStayPlatformWide:
         # được truyền vào, nên nó phải đọc `users` NGOÀI phạm vi của người phái
         # — người phái là người dùng vừa mở phiếu, không phải quản trị viên.
         "app.saas_tasks.send_support_ticket_emails",
+        # Đối chiếu hạn mức dung lượng. Nó đi bộ TOÀN BỘ cây tệp của mọi tenant
+        # rồi so với bộ đếm, nên phạm vi của nó đúng bằng cả nền tảng; và nó do
+        # celery-beat phái mỗi 86400 giây (`reconcile-storage-quota-daily`),
+        # nơi không có người dùng nào để lấy ngữ cảnh.
+        #
+        # Đây là KIỂM TOÁN chứ không phải đường ghi: nó không tạo, không xoá
+        # hiện vật, không đổi gói ai. Bị giới hạn theo tenant thì nó sẽ đối
+        # chiếu đúng một tổ chức, báo "khớp", và mọi lệch của các tổ chức còn
+        # lại nằm ngoài tầm nhìn vĩnh viễn — hỏng đúng theo cái kiểu mà chính
+        # nó sinh ra để phát hiện.
+        "app.saas_tasks.reconcile_storage_quota",
     }
 
     def test_exactly_these_tasks_are_platform_wide(self):

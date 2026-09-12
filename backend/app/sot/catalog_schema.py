@@ -52,6 +52,15 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         # cả kho biến mất trong im lặng — máy khôi phục sẽ tin rằng chưa ai
         # duyệt gì. Xem docs/01-architecture/COMMUNITY_MODERATION.md §2.3.
         "review_status",
+        # Phiên thu. `_SAMPLE_DB_KEYS` GHI cột này nhưng danh sách ở đây từng
+        # không kể tên nó, nên một bên đọc thiếu cột vẫn QUA được bước xác minh
+        # rồi hỏng giữa chừng lúc nhập — đúng kiểu hỏng mà danh sách này sinh ra
+        # để chặn.
+        #
+        # Cột do migration tạo (`ALTER TABLE samples ADD COLUMN IF NOT EXISTS
+        # capture_session_id UUID`), nên mọi bên đọc áp đủ lược đồ đều có; đòi
+        # nó ở đây chỉ biến một lỗi giữa chừng thành một lỗi ở cổng.
+        "capture_session_id",
     ],
     "raw_uploads": [
         "upload_uid", "class_uid", "slug", "label_original", "language", "dialect",

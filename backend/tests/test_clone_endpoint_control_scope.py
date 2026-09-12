@@ -81,15 +81,41 @@ def tenant_dich():
     # rác ấy không có đăng ký nào. Một fixture dọn dở làm đỏ một bài kiểm ở tệp
     # khác, về một bất biến chẳng liên quan.
     #
-    # `finally` từng bảng: một lần xoá hỏng không được ngăn các lần sau chạy.
+    # THỨ TỰ: con trước, cha sau — và `registry_versions` KHÔNG phải con đầu tiên.
+    #
+    # Bản trước xoá `registry_versions` NGAY ĐẦU, trước `vocabulary_registry_meta`.
+    # Nhưng `fk_vocabulary_registry_meta_version` trỏ từ
+    # `vocabulary_registry_meta(tenant_id, version)` VÀO `registry_versions`, nên
+    # lúc ấy câu xoá vướng khoá ngoại, `except: pass` nuốt mất, và hàng ở lại.
+    # Vòng sau xoá `vocabulary_registry_meta` thành công — nên soi cơ sở dữ liệu
+    # SAU teardown thấy `vocabulary_registry_meta = 0` và tưởng nó vô can. Chính
+    # cái nhìn sau-sự-việc ấy làm lỗi này sống sót qua một lần chẩn đoán.
+    #
+    # `training_jobs(tenant_id, registry_version)` cũng trỏ vào `registry_versions`
+    # nên phải đi trước nó, kể cả khi bài kiểm này chưa sinh job nào: một bảng
+    # phải-nhớ là một bảng sẽ quên.
+    #
+    # Không nuốt lỗi nữa. `except: pass` biến một lỗi thứ tự thành im lặng, rồi
+    # nó hiện ra ở TEARDOWN của tệp này và ở một bài kiểm KHÁC hẳn
+    # (`test_every_live_tenant_has_exactly_one_open_subscription` đỏ vì tenant
+    # rác không có đăng ký). Gom lại rồi nêu ra: dọn dẹp vẫn phải chạy hết, nhưng
+    # phải nói ra nó hỏng ở đâu.
+    that_bai = []
     with system_scope("test cleanup"):
-        for bang in ("registry_versions", "dialects", "recognition_profiles",
-                     "vocabulary_registry_meta", "tenant_subscriptions"):
+        for bang in ("training_jobs", "vocabulary_registry_meta", "registry_versions",
+                     "dialects", "recognition_profiles", "tenant_subscriptions"):
             try:
                 _execute(f"DELETE FROM {bang} WHERE tenant_id = %s", (tid,))
-            except Exception:  # noqa: BLE001 — dọn dẹp, không được che ca chính
-                pass
-        _execute("DELETE FROM tenants WHERE tenant_id = %s", (tid,))
+            except Exception as exc:  # noqa: BLE001 — gom lại, nêu ở cuối
+                that_bai.append(f"{bang}: {type(exc).__name__}: {exc}")
+        try:
+            _execute("DELETE FROM tenants WHERE tenant_id = %s", (tid,))
+        except Exception as exc:  # noqa: BLE001
+            that_bai.append(f"tenants: {type(exc).__name__}: {exc}")
+
+    assert not that_bai, (
+        "fixture dọn dở, tenant rác ở lại CSDL test và sẽ làm đỏ một bài kiểm "
+        "khác ở lượt full suite sau:\n  - " + "\n  - ".join(that_bai))
 
 
 def _client(*, la_admin: bool):
