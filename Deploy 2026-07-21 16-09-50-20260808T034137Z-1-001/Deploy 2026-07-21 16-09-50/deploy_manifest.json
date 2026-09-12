@@ -1,0 +1,81 @@
+{
+  "manifest_version": "1.0",
+  "model_id": "hoa-de",
+  "display_name": "Hòa đê",
+  "dialect": "hoa-de",
+  "language": "vn",
+  "job_id": "563f307e",
+  "promoted_at": "2026-07-21T16:09:50.690404",
+  "trained_at": "20260721_160609",
+  "git_commit": "0475b78cabc9c35b3ab9345097a774f8b78818be",
+  "framework": "pytorch",
+  "model_type": "TCN",
+  "checkpoint": {
+    "filename": "tcn_dialect-hoa-de_20260721_160609.pt",
+    "sha256": "25c2971e17d7d31c61bd731f6ac5c81bd6fe19a3ae343ad64739b4885c75e0f8",
+    "size_bytes": 545787,
+    "state_dict_key": "model_state_dict"
+  },
+  "input": {
+    "seq_len": 60,
+    "feature_dim": 126,
+    "shape": [
+      60,
+      126
+    ],
+    "dtype": "float32",
+    "normalization_version": "hands126_v1",
+    "preprocess_contract": {
+      "landmark_order": "MP_Left(63)+MP_Right(63)",
+      "missing_hands": "zero_filled",
+      "coordinate_space": "hands126_v1_wrist_centered_scale_normalized",
+      "coordinate_order": "xyz",
+      "normalization": {
+        "origin": "each_present_hand_own_wrist_xy",
+        "scale": "per_hand_max_xy_span_excluding_wrist",
+        "z": "unchanged",
+        "missing_landmarks": "preserve_zero"
+      },
+      "frontend_mirroring": "must_match_training_capture",
+      "expects_strict_shape": [
+        60,
+        126
+      ]
+    }
+  },
+  "output": {
+    "num_classes": 7,
+    "labels": [
+      "vn/hoa-de/rang-muoi",
+      "vn/hoa-de/tom",
+      "vn/hoa-de/lot-da-ca",
+      "vn/hoa-de/lot-vo-tom",
+      "vn/hoa-de/cat-ky",
+      "vn/hoa-de/danh-vay-ca",
+      "vn/hoa-de/cat-dau-ca"
+    ],
+    "activation": "softmax"
+  },
+  "model_config": {
+    "channels": 64,
+    "levels": 3,
+    "kernel_size": 5,
+    "dropout": 0.3,
+    "temporal_pool": "attention"
+  },
+  "metrics": {
+    "test_acc": 0.8620689655172413,
+    "test_f1": 0.8523191094619664,
+    "handedness": {
+      "left_only_acc": 0.0,
+      "left_only_n": 0,
+      "right_only_acc": 0.0,
+      "right_only_n": 0,
+      "both_acc": 0.8620689655172413,
+      "both_n": 29
+    }
+  },
+  "vocabulary_schema_version": "v1_legacy",
+  "dataset_version": "unversioned",
+  "split_version": "unversioned"
+}

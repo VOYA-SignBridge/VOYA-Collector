@@ -230,9 +230,12 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         candidates: List[Path] = []
         if dialect:
             candidates.append(self.root / language / dialect / folder_name / file_name)
+            candidates.append(self.root / dialect / folder_name / file_name)
         else:
             # dialect missing: try language/common
             candidates.append(self.root / language / 'common' / folder_name / file_name)
+
+        candidates.append(self.root / folder_name / file_name)
 
         for cand in candidates:
             if cand.exists():

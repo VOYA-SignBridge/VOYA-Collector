@@ -17,6 +17,10 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import tensorflow as tf
 import keras
+try:
+    from .preprocess_hands126 import normalize_hands_vector_126
+except ImportError:  # direct script execution
+    from preprocess_hands126 import normalize_hands_vector_126
 
 try:
     import cv2
@@ -291,7 +295,13 @@ def build_model_from_ckpt(ckpt_path: Path, meta: dict, device: str) -> ModelBund
             f'or that processed/analysis/index_to_label.json is present.'
         )
 
-    num_classes = len(label_map)  # canonical source of truth
+    model_output_classes = int(model.output_shape[-1])
+    if len(label_map) != model_output_classes or any(not label for label in label_map):
+        raise RuntimeError(
+            f'Label/model mismatch: model outputs {model_output_classes} classes '
+            f'but {len(label_map)} complete labels were resolved.'
+        )
+    num_classes = model_output_classes
 
     return ModelBundle(
         model=model,
@@ -523,7 +533,7 @@ class SignPredictor:
         X = np.stack(list(self.buffer), axis=0)
         X_pad = np.zeros((1, self.window, self.bundle.in_dim), dtype=np.float32)
         t = min(self.window, X.shape[0])
-        X_pad[0, -t:] = X[-t:]
+        X_pad[0, :t] = X[-t:]
         
         X_tf = tf.convert_to_tensor(X_pad, dtype=tf.float32)
         lengths_tf = tf.convert_to_tensor([min(X.shape[0], self.window)], dtype=tf.int32)
@@ -717,7 +727,8 @@ def main() -> None:
                 draw_landmarks_cv2(frame, feat)
                 vis = cv2.flip(frame, 1)
 
-                pred_label, pred_conf, has_pred = predictor.push_frame(feat, has_hand)
+                model_feat = normalize_hands_vector_126(feat) if has_hand else feat
+                pred_label, pred_conf, has_pred = predictor.push_frame(model_feat, has_hand)
                 disp_label, disp_conf = stability_tracker.update(pred_label, pred_conf, has_pred)
 
                 # Build stability state dict for stats display

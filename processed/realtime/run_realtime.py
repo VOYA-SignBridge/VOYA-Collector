@@ -27,6 +27,10 @@ except Exception as e:  # pragma: no cover
 import torch
 import torch.nn as nn
 try:
+    from .preprocess_hands126 import normalize_hands_vector_126
+except ImportError:  # direct script execution
+    from preprocess_hands126 import normalize_hands_vector_126
+try:
     from train_model.dataset_versioning import get_analysis_dir
 except Exception:
     get_analysis_dir = None  # type: ignore
@@ -118,6 +122,7 @@ class TCNClassifier(nn.Module):
         levels: int = 3,
         kernel_size: int = 5,
         dropout: float = 0.3,
+        temporal_pool: str = "gap",
     ):
         super().__init__()
         self.proj = nn.Conv1d(in_dim, channels, kernel_size=1)
@@ -126,6 +131,13 @@ class TCNClassifier(nn.Module):
             dilation = 2 ** i
             blocks.append(TemporalBlock(channels, channels, kernel_size, dilation, dropout))
         self.network = nn.Sequential(*blocks)
+        self.temporal_pool = str(temporal_pool or "gap").lower()
+        if self.temporal_pool == "attention":
+            self.attn = nn.Sequential(
+                nn.Linear(channels, max(1, channels // 2)),
+                nn.Tanh(),
+                nn.Linear(max(1, channels // 2), 1),
+            )
         self.classifier = nn.Linear(channels, num_classes)
 
     def forward(self, x_btd: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
@@ -133,13 +145,20 @@ class TCNClassifier(nn.Module):
         x = x_btd.transpose(1, 2)
         x = self.proj(x)
         x = self.network(x)
-        # masked GAP
+        # Masked temporal pooling. Older checkpoints use GAP; deploy bundles
+        # may explicitly store attention-pooling weights.
         b, c, t = x.shape
         mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        mask = mask.unsqueeze(1)
-        x = x.masked_fill(~mask, 0.0)
-        denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)
-        pooled = x.sum(dim=2) / denom
+        if self.temporal_pool == "attention":
+            x_btc = x.transpose(1, 2)
+            scores = self.attn(x_btc).squeeze(-1)
+            scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
+            weights = torch.softmax(scores, dim=1).unsqueeze(-1)
+            pooled = (x_btc * weights).sum(dim=1)
+        else:
+            x = x.masked_fill(~mask.unsqueeze(1), 0.0)
+            denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)
+            pooled = x.sum(dim=2) / denom
         logits = self.classifier(pooled)
         return logits
 
@@ -204,6 +223,32 @@ def _load_label_map_from_index_to_label(i2l_path: Path, *, num_classes: int) -> 
     return label_map
 
 
+def _embedded_label_map(obj: dict, *, num_classes: int) -> Optional[List[str]]:
+    """Resolve labels stored inside a checkpoint without consulting global maps."""
+
+    idx_to_label = obj.get('idx_to_label')
+    if isinstance(idx_to_label, dict):
+        labels = [str(idx_to_label.get(i, idx_to_label.get(str(i), ''))) for i in range(num_classes)]
+        if all(labels):
+            return labels
+
+    for field in ('label_to_idx', 'label_map'):
+        label_to_idx = obj.get(field)
+        if not isinstance(label_to_idx, dict):
+            continue
+        labels = [''] * num_classes
+        for label, raw_idx in label_to_idx.items():
+            try:
+                idx = int(raw_idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= idx < num_classes:
+                labels[idx] = str(label)
+        if all(labels):
+            return labels
+    return None
+
+
 def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
     # Workaround for Python 3.13 checkpoint loaded in Python 3.12
     import sys
@@ -214,14 +259,15 @@ def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
     # FIX for PyTorch 2.6+ (weights_only=True became default)
     obj = torch.load(ckpt_path, map_location=device, weights_only=False)
 
-    in_dim = int(obj.get('in_dim'))
+    in_dim = int(obj.get('in_dim', obj.get('feature_dim', 126)))
     num_classes = int(obj.get('num_classes'))
 
-    cfg = obj.get('config') or {}
+    cfg = obj.get('model_config') or obj.get('config') or obj.get('training_config') or {}
     channels = int(cfg.get('channels', 64)) if isinstance(cfg, dict) else 64
     levels = int(cfg.get('levels', 3)) if isinstance(cfg, dict) else 3
     kernel_size = int(cfg.get('kernel_size', 5)) if isinstance(cfg, dict) else 5
     dropout = float(cfg.get('dropout', 0.3)) if isinstance(cfg, dict) else 0.3
+    temporal_pool = str(cfg.get('temporal_pool', 'gap')) if isinstance(cfg, dict) else 'gap'
 
     model = TCNClassifier(
         in_dim=in_dim,
@@ -230,34 +276,49 @@ def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
         levels=levels,
         kernel_size=kernel_size,
         dropout=dropout,
+        temporal_pool=temporal_pool,
     )
-    model.load_state_dict(obj['model_state'])
+    state = obj.get('model_state') or obj.get('model_state_dict')
+    if not isinstance(state, dict):
+        raise RuntimeError("Checkpoint has neither 'model_state' nor 'model_state_dict'.")
+    model.load_state_dict(state)
     model.to(device).eval()
 
-    # label map: prefer per-checkpoint subset mapping if present.
+    # Labels embedded in the checkpoint are authoritative.  A dialect model
+    # must never be decoded with the repository-wide label map.
+    embedded_labels = _embedded_label_map(obj, num_classes=num_classes)
     label_map: List[str]
+    if embedded_labels is not None:
+        label_map = embedded_labels
+    else:
+        label_map = []
     l2i = obj.get('label_to_index_json')
-    if l2i:
+    if not label_map and l2i:
         try:
             i2l_path = Path(str(l2i)).with_name('index_to_label.json')
             if i2l_path.exists():
                 label_map = _load_label_map_from_index_to_label(i2l_path, num_classes=num_classes)
             else:
                 raise FileNotFoundError
-        except Exception:
-            if get_analysis_dir:
-                i2l = get_analysis_dir() / 'index_to_label.json'
-            else:
-                root = Path(__file__).resolve().parents[2]
-                i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-            label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
-    else:
+        except Exception as exc:
+            if obj.get('subset'):
+                raise RuntimeError(
+                    'Subset checkpoint has no usable embedded/local label map; '
+                    'refusing to decode it with the global vocabulary.'
+                ) from exc
+    if not label_map:
         if get_analysis_dir:
             i2l = get_analysis_dir() / 'index_to_label.json'
         else:
             root = Path(__file__).resolve().parents[2]
             i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
         label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
+
+    if len(label_map) != num_classes or any(not label for label in label_map):
+        raise RuntimeError(
+            f'Invalid label map: model outputs {num_classes} classes but '
+            f'{len(label_map)} complete labels were resolved.'
+        )
 
     return ModelBundle(
         model=model,
@@ -468,7 +529,11 @@ def main() -> None:
             elif feat.shape[0] > in_dim:
                 feat = feat[:in_dim]
 
-            buf.append(feat.astype(np.float32))
+            # Training camera samples use hands126_v1 (wrist-centered and
+            # scale-normalized), so raw MediaPipe coordinates must never enter
+            # the model directly.
+            feat = normalize_hands_vector_126(feat)
+            buf.append(feat)
 
             pred_label = ""
             pred_conf = 0.0
@@ -482,7 +547,9 @@ def main() -> None:
                 lengths = torch.tensor([X.shape[0]], dtype=torch.long, device=bundle.device)
                 X_pad = np.zeros((1, args.window, in_dim), dtype=np.float32)
                 t = min(args.window, X.shape[0])
-                X_pad[0, -t:] = X[-t:]
+                # The model mask treats the first `lengths` steps as valid, so
+                # sequences must be right-padded, not left-padded.
+                X_pad[0, :t] = X[-t:]
 
                 with torch.no_grad():
                     logits = bundle.model(torch.from_numpy(X_pad).to(bundle.device), lengths)

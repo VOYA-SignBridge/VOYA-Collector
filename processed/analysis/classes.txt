@@ -39,5 +39,8 @@ vn/can-tho/chao-co
 vn/can-tho/phuc-vu
 vn/can-tho/vao-lop
 vn/spa/nan-mun
-vn/spa/nan-mun
 vn/spa/up-mong
+vn/nam/dia-chi
+vn/bac/dia-chi
+vn/testdata/gio-tay
+vn/testdata/testlive3

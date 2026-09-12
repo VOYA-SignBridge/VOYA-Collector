@@ -42,6 +42,10 @@ except ImportError:
 import torch
 import torch.nn as nn
 try:
+    from .preprocess_hands126 import normalize_hands_vector_126
+except ImportError:  # direct script execution
+    from preprocess_hands126 import normalize_hands_vector_126
+try:
     from train_model.dataset_versioning import get_analysis_dir
 except Exception:
     get_analysis_dir = None  # type: ignore
@@ -299,7 +303,8 @@ class TCNClassifier(nn.Module):
         channels: int = 64, 
         levels: int = 3, 
         kernel_size: int = 5, 
-        dropout: float = 0.3
+        dropout: float = 0.3,
+        temporal_pool: str = "gap",
     ):
         super().__init__()
         self.proj = nn.Conv1d(in_dim, channels, kernel_size=1)
@@ -309,7 +314,13 @@ class TCNClassifier(nn.Module):
             dilation = 2 ** i
             blocks.append(TemporalBlock(channels, channels, kernel_size, dilation, dropout))
         self.network = nn.Sequential(*blocks)
-        
+        self.temporal_pool = str(temporal_pool or "gap").lower()
+        if self.temporal_pool == "attention":
+            self.attn = nn.Sequential(
+                nn.Linear(channels, max(1, channels // 2)),
+                nn.Tanh(),
+                nn.Linear(max(1, channels // 2), 1),
+            )
         self.classifier = nn.Linear(channels, num_classes)
 
     def forward(self, x_btd: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
@@ -326,14 +337,19 @@ class TCNClassifier(nn.Module):
         x = self.proj(x)
         x = self.network(x)
         
-        # Masked Global Average Pooling
+        # Masked temporal pooling
         b, c, t = x.shape
         mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        mask = mask.unsqueeze(1)
-        x = x.masked_fill(~mask, 0.0)
-        
-        denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)
-        pooled = x.sum(dim=2) / denom
+        if self.temporal_pool == "attention":
+            x_btc = x.transpose(1, 2)
+            scores = self.attn(x_btc).squeeze(-1)
+            scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
+            weights = torch.softmax(scores, dim=1).unsqueeze(-1)
+            pooled = (x_btc * weights).sum(dim=1)
+        else:
+            x = x.masked_fill(~mask.unsqueeze(1), 0.0)
+            denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)
+            pooled = x.sum(dim=2) / denom
         
         logits = self.classifier(pooled)
         return logits
@@ -390,18 +406,47 @@ def load_checkpoint(checkpoint_path: Path, device: str, logger: logging.Logger) 
         logger.error(f"Failed to load checkpoint: {e}")
         raise
     
-    in_dim = int(obj.get('in_dim', 126))
+    in_dim = int(obj.get('in_dim', obj.get('feature_dim', 126)))
     num_classes = int(obj.get('num_classes'))
-    
+
+    cfg = obj.get('model_config') or obj.get('config') or obj.get('training_config') or {}
+    channels = int(cfg.get('channels', 64)) if isinstance(cfg, dict) else 64
+    levels = int(cfg.get('levels', 3)) if isinstance(cfg, dict) else 3
+    kernel_size = int(cfg.get('kernel_size', 5)) if isinstance(cfg, dict) else 5
+    dropout = float(cfg.get('dropout', 0.3)) if isinstance(cfg, dict) else 0.3
+    temporal_pool = str(cfg.get('temporal_pool', 'gap')) if isinstance(cfg, dict) else 'gap'
+
     # Build model
-    model = TCNClassifier(in_dim=in_dim, num_classes=num_classes)
-    model.load_state_dict(obj['model_state'])
+    model = TCNClassifier(
+        in_dim=in_dim,
+        num_classes=num_classes,
+        channels=channels,
+        levels=levels,
+        kernel_size=kernel_size,
+        dropout=dropout,
+        temporal_pool=temporal_pool,
+    )
+    state = obj.get('model_state') or obj.get('model_state_dict')
+    if not isinstance(state, dict):
+        raise RuntimeError("Checkpoint has neither 'model_state' nor 'model_state_dict'.")
+    model.load_state_dict(state)
     model.to(device).eval()
     
     logger.info(f"Model loaded: in_dim={in_dim}, num_classes={num_classes}, device={device}")
     
-    # Load label map
-    label_map = _load_label_map(num_classes, logger)
+    # Checkpoint-local labels are authoritative for subset/dialect models.
+    label_map = _load_embedded_label_map(obj, num_classes)
+    if label_map is None:
+        if obj.get('subset'):
+            raise RuntimeError(
+                'Subset checkpoint has no embedded label map; refusing to use '
+                'the repository-wide vocabulary.'
+            )
+        label_map = _load_label_map(num_classes, logger)
+    if len(label_map) != num_classes or any(not label for label in label_map):
+        raise RuntimeError(
+            f'Invalid label map for {num_classes} model outputs: {label_map}'
+        )
     
     return ModelBundle(
         model=model,
@@ -410,6 +455,30 @@ def load_checkpoint(checkpoint_path: Path, device: str, logger: logging.Logger) 
         label_map=label_map,
         device=device,
     )
+
+
+def _load_embedded_label_map(obj: dict, num_classes: int) -> Optional[List[str]]:
+    idx_to_label = obj.get('idx_to_label')
+    if isinstance(idx_to_label, dict):
+        labels = [str(idx_to_label.get(i, idx_to_label.get(str(i), ''))) for i in range(num_classes)]
+        if all(labels):
+            return labels
+
+    for field in ('label_to_idx', 'label_map'):
+        mapping = obj.get(field)
+        if not isinstance(mapping, dict):
+            continue
+        labels = [''] * num_classes
+        for label, raw_idx in mapping.items():
+            try:
+                idx = int(raw_idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= idx < num_classes:
+                labels[idx] = str(label)
+        if all(labels):
+            return labels
+    return None
 
 
 def _load_label_map(num_classes: int, logger: logging.Logger) -> List[str]:
@@ -856,7 +925,7 @@ class SignLanguageRecognizer:
         elif features.shape[0] > in_dim:
             features = features[:in_dim]
         
-        return features.astype(np.float32)
+        return normalize_hands_vector_126(features)
     
     def _run_inference(self) -> Tuple[str, float, float]:
         """
@@ -877,7 +946,7 @@ class SignLanguageRecognizer:
         X_pad = np.zeros((1, self.config.inference.window_size, self.model_bundle.in_dim), 
                         dtype=np.float32)
         t = min(self.config.inference.window_size, X.shape[0])
-        X_pad[0, -t:] = X[-t:]
+        X_pad[0, :t] = X[-t:]
         
         # Run inference
         start_time = time.time()

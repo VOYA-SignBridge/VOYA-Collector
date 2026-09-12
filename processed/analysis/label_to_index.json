@@ -40,5 +40,9 @@
   "vn/can-tho/phuc-vu": 38,
   "vn/can-tho/vao-lop": 39,
   "vn/spa/nan-mun": 40,
-  "vn/spa/up-mong": 41
+  "vn/spa/up-mong": 41,
+  "vn/nam/dia-chi": 42,
+  "vn/bac/dia-chi": 43,
+  "vn/testdata/gio-tay": 44,
+  "vn/testdata/testlive3": 45
 }

@@ -39,6 +39,16 @@ except Exception:  # pragma: no cover
 
 EXPECTED_FEATURE_DIM = 126
 
+HANDS126_PREPROCESS_CONTRACT = {
+    "version": "hands126_v1",
+    "landmark_order": "MP_Left(63)+MP_Right(63)",
+    "coordinate_space": "wrist_centered_scale_normalized",
+    "origin": "each_present_hand_own_wrist_xy",
+    "scale": "per_hand_max_xy_span_excluding_wrist",
+    "z": "unchanged",
+    "missing_landmarks": "preserve_zero",
+}
+
 
 def set_seed(seed: int) -> None:
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
@@ -875,6 +885,8 @@ def main() -> None:
         "feature_dim": in_dim,
         "num_classes": num_classes,
         "label_map": label_map,
+        "normalization_version": "hands126_v1",
+        "preprocess_contract": HANDS126_PREPROCESS_CONTRACT,
         "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
         "label_to_index_json": str(label_to_index_json) if label_to_index_json else None,
         "metrics": {"test_acc": te_acc, "test_f1": te_f1, "test_scs": te_scs},
@@ -892,6 +904,9 @@ def main() -> None:
         "in_dim": in_dim,
         "feature_dim": in_dim,
         "num_classes": num_classes,
+        "label_map": label_map,
+        "normalization_version": "hands126_v1",
+        "preprocess_contract": HANDS126_PREPROCESS_CONTRACT,
         "val_best_f1": best_val_f1,
         "test": {"loss": te_loss, "acc": te_acc, "f1": te_f1, "scs": te_scs},
         "checkpoint": str(out_ckpt),

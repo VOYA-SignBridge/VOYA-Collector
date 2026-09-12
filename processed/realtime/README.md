@@ -2,6 +2,17 @@
 
 This demo loads the latest TCN checkpoint and runs realtime recognition from a webcam (or a video file) using MediaPipe Hands to extract features compatible with training (126 dims: left 21x3 + right 21x3).
 
+Before inference, raw MediaPipe landmarks are transformed with `hands126_v1`:
+
+- preserve `Left(63) + Right(63)` ordering;
+- normalize each present hand independently around its own wrist;
+- divide x/y by that hand's maximum non-wrist x/y span;
+- leave z unchanged and preserve missing landmark triples as exact zeros.
+
+Do not send raw MediaPipe `[0,1]` coordinates directly to the model. A client
+must also decode logits using the model-local label list and assert that the
+number of labels equals the output tensor size.
+
 ## Install
 
 Activate your venv, then install deps:

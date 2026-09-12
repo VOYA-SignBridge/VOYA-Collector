@@ -2,6 +2,7 @@
 # Python & Virtual Environments
 # ==================================
 venv/
+.venv-train
 .venv/
 env/
 __pycache__/

@@ -128,12 +128,19 @@ def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.nd
 
 
 def normalize_hands_vector_126(vec: np.ndarray) -> np.ndarray:
-    """Center+scale normalize a single 126-dim hand vector.
+    """Apply the ``hands126_v1`` transform to one MediaPipe hand frame.
 
-    Matches the behavior used in the video pipeline.
-    - Reshapes to (2,21,3)
-    - Uses wrist of first present hand as reference, otherwise mean of non-zero points
-    - Translates and scales by max span of non-zero points
+    The contract is intentionally simple enough to reproduce on mobile:
+
+    - input/output order is ``Left(21x3) + Right(21x3)``;
+    - normalize each present hand independently around its own wrist;
+    - divide x/y by that hand's largest non-wrist x/y span;
+    - leave z unchanged;
+    - keep missing landmark triples exactly zero.
+
+    Missing points must remain zero because zero is also the model's missing-hand
+    sentinel.  Translating zero-filled points would turn an absent hand into a
+    convincing, synthetic hand and is a severe train/inference parity bug.
     """
     if vec is None:
         return vec
@@ -145,34 +152,33 @@ def normalize_hands_vector_126(vec: np.ndarray) -> np.ndarray:
     except Exception:
         return v
 
-    coords = arr.reshape(-1, 3)
-    mask = (coords.sum(axis=1) != 0)
-    if not mask.any():
-        return v
+    out = np.zeros_like(arr)
+    for hand_idx in range(2):
+        hand = arr[hand_idx]
+        present = np.any(hand != 0.0, axis=1)
+        if not bool(np.any(present)):
+            continue
 
-    coords_nonzero = coords[mask][:, :2]
+        wrist = hand[0, :2].copy()
+        centered_xy = hand[present, :2] - wrist
 
-    wrist = None
-    for h in range(2):
-        w = arr[h, 0, :2]
-        if not np.allclose(w, 0.0):
-            wrist = w
-            break
-    if wrist is None:
-        wrist = coords_nonzero.mean(axis=0)
-
-    coords[:, :2] = coords[:, :2] - wrist
-
-    xs = coords_nonzero[:, 0] - wrist[0]
-    ys = coords_nonzero[:, 1] - wrist[1]
-    span_x = xs.max() - xs.min() if xs.size else 0.0
-    span_y = ys.max() - ys.min() if ys.size else 0.0
-    scale = max(span_x, span_y)
-    if scale <= 1e-6:
+        # Historical hands126_v1 excludes the wrist (which becomes [0,0])
+        # when estimating the hand span.
+        non_wrist = np.linalg.norm(centered_xy, axis=1) > 1e-6
         scale = 1.0
-    coords[:, :2] = coords[:, :2] / float(scale)
+        if bool(np.any(non_wrist)):
+            points = centered_xy[non_wrist]
+            span_x = float(points[:, 0].max() - points[:, 0].min())
+            span_y = float(points[:, 1].max() - points[:, 1].min())
+            candidate = max(span_x, span_y)
+            if candidate > 1e-6:
+                scale = candidate
 
-    return coords.reshape(-1).astype(np.float32)
+        out[hand_idx, present] = hand[present]
+        out[hand_idx, present, :2] = centered_xy / scale
+        out[hand_idx, ~present] = 0.0
+
+    return out.reshape(-1).astype(np.float32)
 
 
 def canonicalize_vector_126(vec: np.ndarray) -> np.ndarray:

@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # Preprocessing policy flags
     # When enabled, per-frame vectors are wrist-centered and scale-normalized before canonicalization.
     # This makes mirroring robust even if upstream uses pixel coordinates.
-    normalize_keypoints: bool = bool(int(os.getenv("NORMALIZE_KEYPOINTS", "0")))
+    normalize_keypoints: bool = bool(int(os.getenv("NORMALIZE_KEYPOINTS", "1")))
     # Handedness/mirror canonicalization (recommended ON for left/right invariance)
     canonicalize_hands: bool = bool(int(os.getenv("CANONICALIZE_HANDS", "1")))
     canonicalize_mirror: bool = bool(int(os.getenv("CANONICALIZE_MIRROR", "1")))

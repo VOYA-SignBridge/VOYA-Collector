@@ -1,0 +1,92 @@
+{
+  "timestamp": "20260721_160609",
+  "vocabulary_schema_version": "v1_legacy",
+  "recognition_profile": "",
+  "dataset_version": "unversioned",
+  "split_version": "unversioned",
+  "git_commit": "0475b78cabc9c35b3ab9345097a774f8b78818be",
+  "augmentation": {
+    "profile": "full",
+    "enabled": true,
+    "augmentation_contract_version": "v2_wrist_centered_mirror",
+    "p": 0.9,
+    "noise_std": 0.008,
+    "scale_range": [
+      0.97,
+      1.03
+    ],
+    "translation_std": 0.01,
+    "mirror_prob": 0.5,
+    "dropout_prob": 0.015,
+    "temporal_mask_prob": 0.0,
+    "temporal_jitter_prob": 0.25,
+    "max_temporal_shift": 2
+  },
+  "dataset_manifest_checksum": "",
+  "subset": {
+    "languages": [],
+    "dialects": [
+      "hoa-de"
+    ],
+    "language_default": "vn",
+    "tag": "dialect-hoa-de"
+  },
+  "config": {
+    "train_csv": "/workspace/processed/train_utils/outputs/subset_dialect-hoa-de_20260721_160248/train.csv",
+    "val_csv": "/workspace/processed/train_utils/outputs/subset_dialect-hoa-de_20260721_160248/val.csv",
+    "test_csv": "/workspace/processed/train_utils/outputs/subset_dialect-hoa-de_20260721_160248/test.csv",
+    "batch_size": 32,
+    "epochs": 80,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "dropout": 0.3,
+    "channels": 64,
+    "levels": 3,
+    "kernel_size": 5,
+    "seed": 42,
+    "device": "cuda",
+    "num_workers": 0,
+    "out_dir": "/workspace/processed/train_utils/outputs"
+  },
+  "in_dim": 126,
+  "feature_dim": 126,
+  "num_classes": 7,
+  "normalization_version": "hands126_v1",
+  "preprocess_contract": {
+    "landmark_order": "MP_Left(63)+MP_Right(63)",
+    "coordinate_space": "hands126_v1_wrist_centered_scale_normalized",
+    "origin": "each_present_hand_own_wrist_xy",
+    "scale": "per_hand_max_xy_span_excluding_wrist",
+    "z": "unchanged",
+    "missing_landmarks": "preserve_zero",
+    "sequence_shape": [
+      60,
+      126
+    ]
+  },
+  "label_map": {
+    "vn/hoa-de/rang-muoi": 0,
+    "vn/hoa-de/tom": 1,
+    "vn/hoa-de/lot-da-ca": 2,
+    "vn/hoa-de/lot-vo-tom": 3,
+    "vn/hoa-de/cat-ky": 4,
+    "vn/hoa-de/danh-vay-ca": 5,
+    "vn/hoa-de/cat-dau-ca": 6
+  },
+  "val_best_f1": 1.0,
+  "test": {
+    "loss": 0.34076884388923645,
+    "acc": 0.8620689655172413,
+    "f1": 0.8523191094619664,
+    "scs": null,
+    "handedness": {
+      "left_only_acc": 0.0,
+      "left_only_n": 0,
+      "right_only_acc": 0.0,
+      "right_only_n": 0,
+      "both_acc": 0.8620689655172413,
+      "both_n": 29
+    }
+  },
+  "checkpoint": "/workspace/processed/train_utils/outputs/tcn_dialect-hoa-de_20260721_160609.pt"
+}

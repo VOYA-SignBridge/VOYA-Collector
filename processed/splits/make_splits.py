@@ -332,7 +332,27 @@ def summarize(rows, label):
 
 
 def main():
+    global SAMPLES_CSV, LABELS_CSV, OUT_DIR, RANDOM_SEED
+
     parser = argparse.ArgumentParser(description='Make dataset splits')
+    parser.add_argument(
+        '--samples_csv',
+        type=Path,
+        default=SAMPLES_CSV,
+        help=f'Input samples CSV (default: {SAMPLES_CSV})',
+    )
+    parser.add_argument(
+        '--labels_csv',
+        type=Path,
+        default=LABELS_CSV,
+        help=f'Input labels CSV (default: {LABELS_CSV})',
+    )
+    parser.add_argument(
+        '--out_dir',
+        type=Path,
+        default=OUT_DIR,
+        help=f'Directory for train/val/test CSV files (default: {OUT_DIR})',
+    )
     parser.add_argument('--user_disjoint', action='store_true', help='Ensure no group appears in multiple splits')
     parser.add_argument('--group_col', type=str, default='user', help='Grouping column to keep disjoint (e.g., user, dialect)')
     parser.add_argument('--by_language', action='store_true', help='Write separate split CSVs per language under splits/<language>/')
@@ -340,7 +360,16 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
 
-    global RANDOM_SEED
+    SAMPLES_CSV = args.samples_csv.resolve()
+    LABELS_CSV = args.labels_csv.resolve()
+    OUT_DIR = args.out_dir.resolve()
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not SAMPLES_CSV.is_file():
+        raise SystemExit(f'samples CSV not found: {SAMPLES_CSV}')
+    if not LABELS_CSV.is_file():
+        raise SystemExit(f'labels CSV not found: {LABELS_CSV}')
+
     RANDOM_SEED = args.seed
     rows, fieldnames = read_samples()
     # enrich rows with label info

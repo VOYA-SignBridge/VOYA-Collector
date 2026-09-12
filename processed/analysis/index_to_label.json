@@ -418,5 +418,45 @@
     "class_uid": "d8d5a551-b869-42e7-9250-37668f0c6b92",
     "folder_name": "class_up-mong_d8d5a551",
     "label_key": "vn/spa/up-mong"
+  },
+  "42": {
+    "slug": "dia-chi",
+    "label_original": "Địa chỉ",
+    "language": "vn",
+    "dialect": "nam",
+    "class_idx": 43,
+    "class_uid": "df77087d-4fab-4de8-a074-8c3f619a1919",
+    "folder_name": "class_dia-chi_df77087d",
+    "label_key": "vn/nam/dia-chi"
+  },
+  "43": {
+    "slug": "dia-chi",
+    "label_original": "Địa chỉ",
+    "language": "vn",
+    "dialect": "bac",
+    "class_idx": 44,
+    "class_uid": "dc06f29f-3965-425c-8845-afdf6a2d9916",
+    "folder_name": "class_dia-chi_dc06f29f",
+    "label_key": "vn/bac/dia-chi"
+  },
+  "44": {
+    "slug": "gio-tay",
+    "label_original": "Giơ Tay",
+    "language": "vn",
+    "dialect": "testdata",
+    "class_idx": 45,
+    "class_uid": "4cbd34ef-914b-42c7-9fe4-fbbea5182dd2",
+    "folder_name": "class_gio-tay_4cbd34ef",
+    "label_key": "vn/testdata/gio-tay"
+  },
+  "45": {
+    "slug": "testlive3",
+    "label_original": "TestLive3",
+    "language": "vn",
+    "dialect": "testdata",
+    "class_idx": 46,
+    "class_uid": "d51e247c-ced6-4e76-ad70-7e527d2675e7",
+    "folder_name": "class_testlive3_d51e247c",
+    "label_key": "vn/testdata/testlive3"
   }
 }

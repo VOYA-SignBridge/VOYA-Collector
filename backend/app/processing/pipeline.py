@@ -6,7 +6,7 @@ from app.config import settings
 from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
-from app.processing.utils import canonicalize_sequence_126
+from app.processing.utils import canonicalize_sequence_126, normalize_hands_vector_126
 from app.dataset_manager import get_or_register_class
 from app.dataset_samples import save_sequence_npz, count_samples_for_class
 
@@ -137,6 +137,11 @@ def process_video_job(video_path: str, user: str, user_id: str, label: str, sess
                         # Stop at the start of outro (no hands) to avoid generating windows
                         # dominated by trailing idle frames.
                         break
+
+                if has_hand:
+                    # Camera uploads are stored with hands126_v1.  Apply the same
+                    # wrist-centering/scale transform to video-derived samples.
+                    vec = normalize_hands_vector_126(vec)
 
                 if start_idx is None:
                     start_idx = idx

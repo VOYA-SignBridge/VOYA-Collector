@@ -47,6 +47,16 @@ except Exception:  # pragma: no cover
 
 EXPECTED_FEATURE_DIM = 126
 
+HANDS126_PREPROCESS_CONTRACT = {
+    "version": "hands126_v1",
+    "landmark_order": "MP_Left(63)+MP_Right(63)",
+    "coordinate_space": "wrist_centered_scale_normalized",
+    "origin": "each_present_hand_own_wrist_xy",
+    "scale": "per_hand_max_xy_span_excluding_wrist",
+    "z": "unchanged",
+    "missing_landmarks": "preserve_zero",
+}
+
 
 import keras
 
@@ -96,7 +106,22 @@ def build_tcn_model(
     
     x = inputs
     if use_proj and in_dim != proj_dim:
-        x = layers.Conv1D(filters=proj_dim, kernel_size=1, padding='same', name="proj")(x)
+        # Match torch.nn.Conv1d's default initialization used by train_tcn.py.
+        proj_limit = 1.0 / math.sqrt(in_dim)
+        x = layers.Conv1D(
+            filters=proj_dim,
+            kernel_size=1,
+            padding="same",
+            kernel_initializer=tf.keras.initializers.RandomUniform(
+                minval=-proj_limit,
+                maxval=proj_limit,
+            ),
+            bias_initializer=tf.keras.initializers.RandomUniform(
+                minval=-proj_limit,
+                maxval=proj_limit,
+            ),
+            name="proj",
+        )(x)
         
     current_in = proj_dim if (use_proj and in_dim != proj_dim) else in_dim
     
@@ -128,11 +153,16 @@ def build_tcn_model(
         
         # Downsample
         if current_in != channels:
+            # PyTorch uses kaiming_normal_(..., nonlinearity="linear") here.
             res = layers.Conv1D(
                 filters=channels,
                 kernel_size=1,
                 padding='same',
-                kernel_initializer='he_normal',
+                kernel_initializer=tf.keras.initializers.RandomNormal(
+                    mean=0.0,
+                    stddev=math.sqrt(1.0 / current_in),
+                ),
+                bias_initializer="zeros",
                 name=f"tblock_{i}_downsample"
             )(x)
         else:
@@ -145,8 +175,19 @@ def build_tcn_model(
     # Masked Global Average Pooling
     pooled = layers.Lambda(compute_masked_pooling, name="masked_pool")([x, lengths])
     
-    # Force float32 for mixed precision stability
-    logits = layers.Dense(num_classes, name="classifier", dtype=tf.float32)(pooled)
+    # Match nn.init.kaiming_uniform_(a=sqrt(5)) from train_tcn.py. Keep the
+    # output in float32 for numerically stable loss computation under FP16.
+    classifier_limit = 1.0 / math.sqrt(channels)
+    logits = layers.Dense(
+        num_classes,
+        kernel_initializer=tf.keras.initializers.RandomUniform(
+            minval=-classifier_limit,
+            maxval=classifier_limit,
+        ),
+        bias_initializer="zeros",
+        name="classifier",
+        dtype=tf.float32,
+    )(pooled)
     
     model = tf.keras.Model(inputs=[inputs, lengths], outputs=logits, name="tcn_classifier")
     return model
@@ -166,7 +207,7 @@ class TrainConfig:
     levels: int = 3
     kernel_size: int = 5
     seed: int = 42
-    device: str = "gpu" if len(tf.config.list_physical_devices('GPU')) > 0 else "cpu"
+    device: str = "auto"
     num_workers: int = 0
     out_dir: Path = Path(__file__).resolve().parents[1] / "train_utils" / "outputs"
     
@@ -460,6 +501,7 @@ def _row_feature_path_candidates(row: Dict[str, str], *, features_root: Path, de
         _, inferred_dialect = _infer_language_dialect_from_label_key(lk, default_language=language)
         dialect = (inferred_dialect or "").strip()
     if dialect:
+        candidates.append(features_root / dialect / folder_name / file_name)
         candidates.append(features_root / language / dialect / folder_name / file_name)
     return candidates
 
@@ -503,7 +545,24 @@ def apply_temporal_mask(x: tf.Tensor, mask_prob: float = 0.15) -> tf.Tensor:
     return x * tf.expand_dims(mask, -1)
 
 
-def train_one_epoch(model: tf.keras.Model, loader: DataLoader, opt: tf.keras.optimizers.Optimizer, loss_fn, num_classes: int, temporal_mask_prob: float) -> Tuple[float, float]:
+def _classification_loss(loss_fn, y: tf.Tensor, logits: tf.Tensor, num_classes: int, label_smoothing: float) -> tf.Tensor:
+    if label_smoothing > 0.0:
+        targets = tf.one_hot(y, depth=num_classes, dtype=logits.dtype)
+        return loss_fn(targets, logits)
+    return loss_fn(y, logits)
+
+
+def train_one_epoch(
+    model: tf.keras.Model,
+    loader: DataLoader,
+    opt: tf.keras.optimizers.Optimizer,
+    loss_fn,
+    num_classes: int,
+    temporal_mask_prob: float,
+    label_smoothing: float,
+    weight_decay: float,
+    mixed_precision: bool,
+) -> Tuple[float, float]:
     total_loss = 0.0
     total_acc = 0.0
     n = 0
@@ -517,24 +576,52 @@ def train_one_epoch(model: tf.keras.Model, loader: DataLoader, opt: tf.keras.opt
 
         with tf.GradientTape() as tape:
             logits = model([X_tf, lengths_tf], training=True)
-            loss = loss_fn(y_tf, logits)  # SparseCategorical: integer labels
+            data_loss = _classification_loss(
+                loss_fn, y_tf, logits, num_classes, label_smoothing
+            )
 
-        grads = tape.gradient(loss, model.trainable_variables)
-        # Clip gradients (same as PyTorch clip_grad_norm_ max_norm=1.0)
-        grads, _ = tf.clip_by_global_norm(grads, 1.0)
-        opt.apply_gradients(zip(grads, model.trainable_variables))
+            # torch.optim.Adam applies coupled L2 decay by adding lambda * w
+            # to every parameter gradient. Adding 0.5 * lambda * ||w||^2 to
+            # the optimized loss has the same gradient semantics.
+            optimization_loss = data_loss
+            if weight_decay > 0.0:
+                l2_penalty = tf.add_n([
+                    tf.reduce_sum(tf.square(tf.cast(v, tf.float32)))
+                    for v in model.trainable_variables
+                ])
+                optimization_loss = optimization_loss + 0.5 * weight_decay * l2_penalty
+
+            loss_for_gradient = (
+                opt.scale_loss(optimization_loss)
+                if mixed_precision
+                else optimization_loss
+            )
+
+        grads = tape.gradient(loss_for_gradient, model.trainable_variables)
+        grad_var_pairs = [
+            (grad, var)
+            for grad, var in zip(grads, model.trainable_variables)
+            if grad is not None
+        ]
+        opt.apply_gradients(grad_var_pairs)
 
         preds = tf.argmax(logits, axis=1)
         acc = tf.reduce_sum(tf.cast(preds == y_tf, tf.float32))
 
         bs = int(tf.shape(y_tf)[0].numpy())
-        total_loss += loss.numpy() * bs
+        total_loss += data_loss.numpy() * bs
         total_acc += acc.numpy()
         n += bs
     return total_loss / n, total_acc / n
 
 
-def evaluate(model: tf.keras.Model, loader: DataLoader, num_classes: int, loss_fn) -> Tuple[float, float, float]:
+def evaluate(
+    model: tf.keras.Model,
+    loader: DataLoader,
+    num_classes: int,
+    loss_fn,
+    label_smoothing: float,
+) -> Tuple[float, float, float]:
     total_loss = 0.0
     total_acc = 0.0
     n = 0
@@ -546,7 +633,9 @@ def evaluate(model: tf.keras.Model, loader: DataLoader, num_classes: int, loss_f
         lengths_tf = tf.convert_to_tensor(lengths.numpy(), dtype=tf.int32)
 
         logits = model([X_tf, lengths_tf], training=False)
-        loss = loss_fn(y_tf, logits)  # SparseCategorical: integer labels
+        loss = _classification_loss(
+            loss_fn, y_tf, logits, num_classes, label_smoothing
+        )
 
         bs = int(tf.shape(y_tf)[0].numpy())
         total_loss += loss.numpy() * bs
@@ -619,7 +708,13 @@ def main() -> None:
     parser.add_argument("--levels", type=int, default=3)
     parser.add_argument("--kernel_size", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="gpu")
+    parser.add_argument(
+        "--device",
+        type=str,
+        choices=("auto", "cpu", "gpu", "cuda"),
+        default="auto",
+        help="TensorFlow device selection (default: auto).",
+    )
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
     
@@ -647,6 +742,7 @@ def main() -> None:
         levels=args.levels,
         kernel_size=args.kernel_size,
         seed=args.seed,
+        device=args.device,
         num_workers=args.num_workers,
         out_dir=args.out_dir,
         label_smoothing=args.label_smoothing,
@@ -654,6 +750,37 @@ def main() -> None:
         warmup_ratio=args.warmup_ratio,
         temporal_mask_prob=args.temporal_mask_prob,
     )
+
+    if not 0.0 <= cfg.label_smoothing < 1.0:
+        raise SystemExit("label_smoothing must be in [0, 1).")
+    if not 0.0 <= cfg.temporal_mask_prob < 1.0:
+        raise SystemExit("temporal_mask_prob must be in [0, 1).")
+    if not 0.0 <= cfg.warmup_ratio < 1.0:
+        raise SystemExit("warmup_ratio must be in [0, 1).")
+    if cfg.weight_decay < 0.0:
+        raise SystemExit("weight_decay must be non-negative.")
+
+    requested_device = cfg.device.lower()
+    physical_gpus = tf.config.list_physical_devices("GPU")
+    if requested_device == "cpu":
+        try:
+            tf.config.set_visible_devices([], "GPU")
+        except RuntimeError as exc:
+            raise SystemExit(
+                "Cannot switch to CPU after TensorFlow devices were initialized."
+            ) from exc
+        cfg.device = "cpu"
+    elif requested_device in {"gpu", "cuda"}:
+        if physical_gpus:
+            cfg.device = "gpu"
+        else:
+            print("[WARN] GPU requested but unavailable; falling back to CPU.")
+            cfg.device = "cpu"
+    else:
+        cfg.device = "gpu" if physical_gpus else "cpu"
+
+    if cfg.mixed_precision and cfg.device != "gpu":
+        print("[WARN] Mixed precision is enabled on CPU and may be slower than float32.")
 
     if cfg.mixed_precision:
         policy = tf.keras.mixed_precision.Policy('mixed_float16')
@@ -837,9 +964,26 @@ def main() -> None:
         seed=cfg.seed,
     )
 
-    # AdamW with weight_decay (matches PyTorch Adam + weight_decay)
-    opt = tf.keras.optimizers.AdamW(learning_rate=cfg.lr, weight_decay=cfg.weight_decay)
-    loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+    # PyTorch Adam defaults to epsilon=1e-8 and uses coupled L2 decay. The L2
+    # term is added to the optimized loss in train_one_epoch. global_clipnorm
+    # is handled by the optimizer so clipping occurs after FP16 unscaling.
+    base_opt = tf.keras.optimizers.Adam(
+        learning_rate=cfg.lr,
+        epsilon=1e-8,
+        global_clipnorm=1.0,
+    )
+    opt = (
+        tf.keras.mixed_precision.LossScaleOptimizer(base_opt)
+        if cfg.mixed_precision
+        else base_opt
+    )
+    if cfg.label_smoothing > 0.0:
+        loss_fn = tf.keras.losses.CategoricalCrossentropy(
+            from_logits=True,
+            label_smoothing=cfg.label_smoothing,
+        )
+    else:
+        loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
     best_val_f1 = -1.0
     best_weights = None
@@ -858,13 +1002,29 @@ def main() -> None:
                 lr = cfg.lr * 0.5 * (1 + math.cos(math.pi * progress))
         else:
             # Pure cosine decay (matches CosineAnnealingLR T_max=epochs)
-            progress = (epoch - 1) / max(cfg.epochs - 1, 1)
+            progress = (epoch - 1) / max(cfg.epochs, 1)
             lr = cfg.lr * 0.5 * (1 + math.cos(math.pi * progress))
 
         opt.learning_rate.assign(lr)
 
-        tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, loss_fn, num_classes, cfg.temporal_mask_prob)
-        va_loss, va_acc, va_f1 = evaluate(model, val_loader, num_classes, loss_fn)
+        tr_loss, tr_acc = train_one_epoch(
+            model,
+            train_loader,
+            opt,
+            loss_fn,
+            num_classes,
+            cfg.temporal_mask_prob,
+            cfg.label_smoothing,
+            cfg.weight_decay,
+            cfg.mixed_precision,
+        )
+        va_loss, va_acc, va_f1 = evaluate(
+            model,
+            val_loader,
+            num_classes,
+            loss_fn,
+            cfg.label_smoothing,
+        )
         
         improved = va_f1 > best_val_f1
         if improved:
@@ -884,7 +1044,13 @@ def main() -> None:
     if best_weights is not None:
         model.set_weights(best_weights)
 
-    te_loss, te_acc, te_f1 = evaluate(model, test_loader, num_classes, loss_fn)
+    te_loss, te_acc, te_f1 = evaluate(
+        model,
+        test_loader,
+        num_classes,
+        loss_fn,
+        cfg.label_smoothing,
+    )
     te_scs = None
     print(f"test loss {te_loss:.4f} acc {te_acc:.4f} f1 {te_f1:.4f}")
 
@@ -911,6 +1077,8 @@ def main() -> None:
         "feature_dim": in_dim,
         "num_classes": num_classes,
         "label_map": label_map,
+        "normalization_version": "hands126_v1",
+        "preprocess_contract": HANDS126_PREPROCESS_CONTRACT,
         "val_best_f1": best_val_f1,
         "test": {"loss": te_loss, "acc": te_acc, "f1": te_f1, "scs": te_scs},
         "checkpoint": str(out_ckpt),
