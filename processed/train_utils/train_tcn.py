@@ -21,13 +21,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 try:
-    # local metrics (accuracy, SCS, macro-f1) for future use
-    from .metrics import sequence_consistency_score  # type: ignore
+    # local metrics (accuracy, SCS, macro-f1, and the beyond-accuracy/F1 set:
+    # balanced accuracy, MCC, top-k accuracy, macro ROC-AUC)
+    from .metrics import (  # type: ignore
+        sequence_consistency_score,
+        balanced_accuracy,
+        matthews_corrcoef,
+        top_k_accuracy,
+        roc_auc_macro_ovr,
+        macro_f1 as macro_f1_np,
+        temporal_accuracy,
+    )
 except Exception:  # pragma: no cover
     import sys as _sys
     from pathlib import Path as _P
     _sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from processed.train_utils.metrics import sequence_consistency_score  # type: ignore
+    from processed.train_utils.metrics import (  # type: ignore
+        sequence_consistency_score,
+        balanced_accuracy,
+        matthews_corrcoef,
+        top_k_accuracy,
+        roc_auc_macro_ovr,
+        macro_f1 as macro_f1_np,
+        temporal_accuracy,
+    )
 
 try:
     from .handedness_analysis import HandednessAnalyzer, detect_hand_presence  # type: ignore
@@ -839,16 +856,27 @@ def compute_test_evaluation(
     num_classes: int,
     label_map: Dict[str, int],
 ) -> Dict[str, object]:
-    """Confusion matrix + per-class precision/recall/F1 on a loader.
+    """Confusion matrix + per-class precision/recall/F1, plus an "overall"
+    block that goes beyond accuracy/F1: balanced accuracy and MCC stay
+    informative under class imbalance (accuracy/F1 alone can look fine while
+    the model ignores rare classes), and top-k / ROC-AUC read the full
+    probability output instead of collapsing it to a single argmax.
 
     Returned structure is JSON-serializable and goes into the metrics-file
     "final" record so the trainer can persist it for the Step 7 UI.
     """
     model.eval()
     cm = [[0] * num_classes for _ in range(num_classes)]
+    all_probs: List[np.ndarray] = []
+    all_preds: List[int] = []
+    all_targets: List[int] = []
     for X, y, _ in loader:
         X = X.to(device)
-        preds = model(X).argmax(1).cpu().tolist()
+        probs = torch.softmax(model(X), dim=1).cpu().numpy()
+        preds = probs.argmax(1).tolist()
+        all_probs.append(probs)
+        all_preds.extend(preds)
+        all_targets.extend(y.tolist())
         for t, p in zip(y.tolist(), preds):
             if 0 <= t < num_classes and 0 <= p < num_classes:
                 cm[t][p] += 1
@@ -872,7 +900,91 @@ def compute_test_evaluation(
         })
 
     labels = [idx_to_label.get(c, f"class_{c}") for c in range(num_classes)]
-    return {"labels": labels, "confusion_matrix": cm, "per_class": per_class}
+
+    probs_arr = np.concatenate(all_probs, axis=0) if all_probs else np.zeros((0, num_classes))
+    overall: Dict[str, object] = {
+        "accuracy": round(temporal_accuracy(all_preds, all_targets), 4),
+        "macro_f1": round(macro_f1_np(all_preds, all_targets, num_classes), 4),
+        "balanced_accuracy": round(balanced_accuracy(all_preds, all_targets, num_classes), 4),
+        "matthews_corrcoef": round(matthews_corrcoef(all_preds, all_targets, num_classes), 4),
+        "roc_auc_macro_ovr": (
+            round(roc_auc_macro_ovr(probs_arr, all_targets, num_classes), 4)
+            if probs_arr.shape[0] else 0.0
+        ),
+    }
+    if num_classes > 3:
+        overall["top3_accuracy"] = round(top_k_accuracy(probs_arr, all_targets, 3), 4)
+
+    return {"labels": labels, "confusion_matrix": cm, "per_class": per_class, "overall": overall}
+
+
+def measure_model_efficiency(
+    model: nn.Module,
+    input_dim: int,
+    *,
+    seq_len: int = 60,
+    n_runs: int = 30,
+    warmup: int = 10,
+) -> Dict[str, object]:
+    """Param count, checkpoint size, and inference latency on CPU.
+
+    Always measured on CPU regardless of the training device: the training
+    GPU says nothing about whether an architecture is light enough for a
+    phone, which is the question a "lightweight for mobile" claim needs to
+    answer. Runs on a detached copy so it never disturbs the model object the
+    rest of the run still uses (device placement, BN/dropout mode, grads).
+    """
+    import copy
+    import time as _time
+
+    cpu_model = copy.deepcopy(model).to("cpu").eval()
+    param_count = sum(p.numel() for p in cpu_model.parameters())
+    trainable_count = sum(p.numel() for p in cpu_model.parameters() if p.requires_grad)
+    size_bytes = sum(p.numel() * p.element_size() for p in cpu_model.parameters())
+    size_bytes += sum(b.numel() * b.element_size() for b in cpu_model.buffers())
+
+    x = torch.randn(1, seq_len, input_dim)
+    times_ms: List[float] = []
+    with torch.no_grad():
+        for _ in range(warmup):
+            cpu_model(x)
+        for _ in range(n_runs):
+            t0 = _time.perf_counter()
+            cpu_model(x)
+            times_ms.append((_time.perf_counter() - t0) * 1000.0)
+    times = np.asarray(times_ms)
+
+    return {
+        "param_count": int(param_count),
+        "trainable_param_count": int(trainable_count),
+        "checkpoint_size_mb": round(float(size_bytes / (1024 ** 2)), 4),
+        "cpu_inference_latency_ms": {
+            "mean": round(float(times.mean()), 4),
+            "p50": round(float(np.percentile(times, 50)), 4),
+            "p95": round(float(np.percentile(times, 95)), 4),
+            "std": round(float(times.std()), 4),
+            "batch_size": 1,
+            "seq_len": seq_len,
+            "n_runs": n_runs,
+        },
+    }
+
+
+def normalization_version_for(feature_version: str, in_dim: int) -> str:
+    """The normalization identity a checkpoint must declare.
+
+    This exists because the realtime service admits a checkpoint by comparing
+    THIS string (and feature_dim) against its registry entry, then feeds the
+    model whatever `shared/normalization.normalize_hands_vector_126` produces —
+    which is the v1 transform. A model trained under VOYA_FEATURE_VERSION=v1z
+    has the same 126 dims as v1 but different semantics (depth re-referenced),
+    so stamping it "hands126_v1" would pass every check and then serve silently
+    wrong predictions: the one failure mode with no error anywhere. Encoding the
+    feature version here turns that into a loud refusal at load time, which is
+    what it should be until realtime's own preprocessing is switched to match.
+    """
+    fv = (feature_version or "v1").strip() or "v1"
+    return f"hands{int(in_dim)}_{fv}"
 
 
 def build_checkpoint(
@@ -886,6 +998,7 @@ def build_checkpoint(
     te_f1=None,
     te_hand_metrics=None,
     stamp="",
+    feature_version: str = "v1",
     contract_extra: Optional[Dict[str, object]] = None,
     idx_to_label_rich: Optional[Dict[int, Dict[str, object]]] = None,
 ):
@@ -899,16 +1012,24 @@ def build_checkpoint(
 
         "model_type": "TCN",
 
-        "model_config": {
-            "channels": cfg.channels,
-            "levels": cfg.levels,
-            "kernel_size": cfg.kernel_size,
-            "dropout": cfg.dropout,
-            # Persist the temporal pooling so realtime rebuilds the exact head.
-            "temporal_pool": getattr(model, "temporal_pool", "gap"),
-        },
+        # model.get_config() is each architecture's own mirror of its
+        # from_config() — the realtime service rebuilds the model by calling
+        # model_class.from_config(config=ckpt["model_config"]), so this MUST
+        # be the config of the model actually trained. A hand-picked TCN-shaped
+        # dict here (channels/levels/kernel_size) used to be written for every
+        # architecture; for BiGRU/LSTM/HandGCN it carried none of their real
+        # keys (hidden_size, num_layers, gcn_channels, ...), which only stayed
+        # silent because no CLI flag could vary those away from from_config()'s
+        # own defaults. Now that they're tunable (see --hidden_size etc.), a
+        # wrong model_config here would fail to load: the rebuilt module's
+        # layer shapes would no longer match the saved state_dict.
+        "model_config": model.get_config(),
 
-        "feature_dim": EXPECTED_FEATURE_DIM,
+        # The dimension actually fed to the model. `in_dim` was already a
+        # parameter of this function but the body ignored it and wrote the
+        # 126 constant, so a 182-dim v1g checkpoint used to describe itself as
+        # 126-dim — a contract the loader would then fail to satisfy.
+        "feature_dim": int(in_dim),
 
         "seq_len": 60,
 
@@ -929,7 +1050,11 @@ def build_checkpoint(
 
         "label_to_idx": label_map,
 
-        "normalization_version": "hands126_v1",
+        # "hands126_v1" for the default path, so every existing checkpoint and
+        # registry entry keeps matching exactly as before.
+        "normalization_version": normalization_version_for(feature_version, in_dim),
+
+        "feature_version": str(feature_version or "v1"),
 
         "preprocess_contract": {
             "landmark_order": "MP_Left(63)+MP_Right(63)",
@@ -937,7 +1062,7 @@ def build_checkpoint(
             "coordinate_space": "mediapipe_normalized",
             "coordinate_order": "xyz",
             "frontend_mirroring": "visual_only",
-            "expects_strict_shape": [60, 126],
+            "expects_strict_shape": [60, int(in_dim)],
         },
 
         "metrics": {
@@ -1059,9 +1184,24 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.3)
-    parser.add_argument("--channels", type=int, default=64)
-    parser.add_argument("--levels", type=int, default=3)
-    parser.add_argument("--kernel_size", type=int, default=5)
+    parser.add_argument("--channels", type=int, default=64,
+                        help="TCN/CNN: conv channel width.")
+    parser.add_argument("--levels", type=int, default=3,
+                        help="TCN: number of temporal blocks (dilation 2**i each).")
+    parser.add_argument("--kernel_size", type=int, default=5,
+                        help="TCN/CNN: convolution kernel size.")
+    parser.add_argument("--num_conv_layers", type=int, default=3,
+                        help="CNN: number of conv blocks (1-4).")
+    parser.add_argument("--hidden_size", type=int, default=64,
+                        help="LSTM/BiGRU+Attention: recurrent hidden width.")
+    parser.add_argument("--num_layers", type=int, default=2,
+                        help="LSTM/BiGRU+Attention: number of recurrent layers (1-4).")
+    parser.add_argument("--gcn_channels", type=int, default=64,
+                        help="HandGCN: graph-conv channel width.")
+    parser.add_argument("--num_gcn_layers", type=int, default=2,
+                        help="HandGCN: number of fine-level graph-conv layers.")
+    parser.add_argument("--temporal_channels", type=int, default=128,
+                        help="HandGCN: channel width of the temporal-conv stage.")
     parser.add_argument(
         "--temporal_pool", type=str, default="attention",
         choices=["gap", "attention", "mean_max"],
@@ -1454,12 +1594,23 @@ def main() -> None:
 
     try:
         model_class = get_model_class(args.model_type)
+        # A single superset dict for every architecture: each model's
+        # from_config() only reads the keys it knows via config.get(key,
+        # default) and silently ignores the rest, so passing all of them
+        # here (instead of hand-picking per model_type) is what lets one CLI
+        # tune any of the five registered architectures.
         config = {
-            "channels": cfg.channels,
-            "levels": cfg.levels,
-            "kernel_size": cfg.kernel_size,
-            "dropout": cfg.dropout,
-            "temporal_pool": args.temporal_pool,  # TCN only; others ignore it
+            "channels": cfg.channels,                    # TCN, CNN
+            "levels": cfg.levels,                         # TCN
+            "kernel_size": cfg.kernel_size,                # TCN, CNN
+            "num_conv_layers": args.num_conv_layers,       # CNN
+            "dropout": cfg.dropout,                        # all
+            "temporal_pool": args.temporal_pool,           # TCN
+            "hidden_size": args.hidden_size,                # LSTM, BiGRU+Attention
+            "num_layers": args.num_layers,                  # LSTM, BiGRU+Attention
+            "gcn_channels": args.gcn_channels,              # HandGCN
+            "num_gcn_layers": args.num_gcn_layers,          # HandGCN
+            "temporal_channels": args.temporal_channels,    # HandGCN
         }
         model = model_class.from_config(
             input_dim=in_dim,
@@ -1691,6 +1842,17 @@ def main() -> None:
         test_evaluation = compute_test_evaluation(model, test_loader, cfg.device, num_classes, label_map)
     except Exception as _ee:
         print(f"[EVAL] confusion matrix computation failed (non-fatal): {_ee}")
+
+    try:
+        efficiency = measure_model_efficiency(model, in_dim)
+        print(f"[EFFICIENCY] params={efficiency['param_count']:,} "
+              f"size={efficiency['checkpoint_size_mb']:.2f}MB "
+              f"cpu_latency_p50={efficiency['cpu_inference_latency_ms']['p50']:.2f}ms")
+        if test_evaluation is None:
+            test_evaluation = {}
+        test_evaluation["efficiency"] = efficiency
+    except Exception as _ee:
+        print(f"[EVAL] model efficiency measurement failed (non-fatal): {_ee}")
     # Note: SCS (Sequence Consistency Score) pertains to stability across consecutive window predictions.
     # This trainer produces one prediction per sequence, not per sliding window, so SCS is not applicable here.
     # We include it as None in the summary for compatibility with realtime/windowed evaluation.
@@ -1754,6 +1916,7 @@ def main() -> None:
         te_f1=te_f1,
         te_hand_metrics=te_hand_metrics,
         stamp=stamp,
+        feature_version=_fv,
         contract_extra=contract_extra,
     )
     # Use actual model name instead of hardcoded "tcn"

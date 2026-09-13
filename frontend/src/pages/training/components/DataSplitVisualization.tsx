@@ -14,7 +14,7 @@
 import React from 'react';
 import type { DatasetInfo, SplitProvenance } from '../../../hooks/useTrainingAPI';
 import DIALECT_LABELS from '../../../config/dialectLabels';
-import { AlertTriangleIcon, CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
+import { CheckCircleIcon, GraduationCapIcon, SearchIcon } from '../../../components/ui/Icons';
 
 interface Props {
   datasetInfo: DatasetInfo | null;
@@ -86,46 +86,23 @@ const DataSplitVisualization: React.FC<Props> = ({ datasetInfo, selectedDialects
   }
 
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
-  const disjoint = prov.signer_disjoint;
 
   return (
     <div className="space-y-6">
       {/* Cách chia này do hệ thống quyết định, không phải người dùng.
           Hai khung cũ ở trên (lối tắt "Chuẩn bị dữ liệu" và hộp cảnh báo người
           ký) đã bỏ: bước Chuẩn Bị Dữ Liệu giờ là bước 2 ngay trước đây nên lối
-          tắt thành thừa, còn tình trạng trùng người ký rút thành một chip ngay
-          cạnh cách chia — vẫn đọc được mà không chiếm nguyên một khung. */}
+          tắt thành thừa. Danh sách người ký của từng tập vẫn nằm trong các thẻ
+          bên dưới cho ai cần đối chiếu. */}
       <div className="rounded-xl border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold uppercase tracking-wider text-slate-900">
               Cách chia đang áp dụng
             </p>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <p className="text-lg font-bold text-ctu-navy">
-                {prov.split_mode ? MODE_LABELS[prov.split_mode] ?? prov.split_mode : 'Không xác định'}
-              </p>
-              <span
-                title={
-                  prov.warning ??
-                  (disjoint
-                    ? 'Không người ký nào xuất hiện ở cả tập huấn luyện và tập đánh giá.'
-                    : 'Có người ký xuất hiện ở cả hai tập.')
-                }
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                  disjoint
-                    ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200'
-                    : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
-                }`}
-              >
-                {disjoint ? (
-                  <CheckCircleIcon className="h-3.5 w-3.5" />
-                ) : (
-                  <AlertTriangleIcon className="h-3.5 w-3.5" />
-                )}
-                {disjoint ? 'Người ký tách riêng' : 'Người ký bị trùng'}
-              </span>
-            </div>
+            <p className="mt-1 text-lg font-bold text-ctu-navy">
+              {prov.split_mode ? MODE_LABELS[prov.split_mode] ?? prov.split_mode : 'Không xác định'}
+            </p>
           </div>
           <div className="text-right text-xs text-slate-500">
             <p>{total.toLocaleString()} mẫu</p>

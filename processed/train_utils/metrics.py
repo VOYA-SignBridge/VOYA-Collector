@@ -14,6 +14,7 @@ Provides:
 - batch_sequence_metrics(batch_preds, batch_targets, num_classes)
 """
 
+import math
 from typing import Dict, Iterable, List, Sequence
 
 import numpy as np
@@ -64,6 +65,97 @@ def macro_f1(preds: Sequence[int], targets: Sequence[int], num_classes: int) -> 
 def macro_f1_from_preds(preds: Sequence[int], targets: Sequence[int], num_classes: int) -> float:
     """Backward-compatible alias for macro_f1."""
     return macro_f1(preds, targets, num_classes)
+
+
+def balanced_accuracy(preds: Sequence[int], targets: Sequence[int], num_classes: int) -> float:
+    """Mean per-class recall. Unlike plain accuracy, a model that only learns
+    the majority classes cannot hide behind a high score here."""
+    p = np.asarray(preds).astype(int).ravel()
+    t = np.asarray(targets).astype(int).ravel()
+    if p.size == 0 or p.shape != t.shape:
+        return 0.0
+    recalls: List[float] = []
+    for c in range(int(num_classes)):
+        mask = t == c
+        support = int(mask.sum())
+        if support == 0:
+            continue
+        recalls.append(float((p[mask] == c).mean()))
+    return float(np.mean(recalls)) if recalls else 0.0
+
+
+def matthews_corrcoef(preds: Sequence[int], targets: Sequence[int], num_classes: int) -> float:
+    """Multiclass Matthews correlation coefficient (Gorodkin, 2004), computed
+    from the confusion matrix. Ranges [-1, 1]; 0 is chance level. Unlike
+    accuracy/F1 it is symmetric in precision/recall and stays informative
+    under class imbalance."""
+    p = np.asarray(preds).astype(int).ravel()
+    t = np.asarray(targets).astype(int).ravel()
+    if p.size == 0 or p.shape != t.shape:
+        return 0.0
+    nc = int(num_classes)
+    C = np.zeros((nc, nc), dtype=np.float64)
+    for ti, pi in zip(t, p):
+        if 0 <= ti < nc and 0 <= pi < nc:
+            C[ti, pi] += 1
+    t_sum = C.sum(axis=1)
+    p_sum = C.sum(axis=0)
+    n = C.sum()
+    c = np.trace(C)
+    cov_tp = c * n - float(np.dot(t_sum, p_sum))
+    cov_tt = n ** 2 - float(np.dot(t_sum, t_sum))
+    cov_pp = n ** 2 - float(np.dot(p_sum, p_sum))
+    denom = math.sqrt(cov_tt * cov_pp) if cov_tt > 0 and cov_pp > 0 else 0.0
+    return float(cov_tp / denom) if denom > 0 else 0.0
+
+
+def top_k_accuracy(scores: "np.ndarray", targets: Sequence[int], k: int) -> float:
+    """Fraction of samples whose true class is among the top-k scored
+    classes. `scores` is [N, C] (logits or probabilities — ranking-only, so
+    either works). Meaningful mainly when num_classes > k."""
+    pr = np.asarray(scores, dtype=np.float64)
+    t = np.asarray(targets).astype(int).ravel()
+    if pr.ndim != 2 or pr.shape[0] == 0 or pr.shape[0] != t.shape[0]:
+        return 0.0
+    k = max(1, min(int(k), pr.shape[1]))
+    topk = np.argpartition(-pr, kth=k - 1, axis=1)[:, :k]
+    hits = np.any(topk == t[:, None], axis=1)
+    return float(hits.mean())
+
+
+def roc_auc_macro_ovr(scores: "np.ndarray", targets: Sequence[int], num_classes: int) -> float:
+    """Macro-averaged one-vs-rest ROC-AUC via the Mann-Whitney U / rank-sum
+    identity (no sklearn dependency, ties handled by average rank). Classes
+    with zero positive or zero negative samples in this split have an
+    undefined AUC and are skipped rather than counted as 0."""
+    pr = np.asarray(scores, dtype=np.float64)
+    t = np.asarray(targets).astype(int).ravel()
+    if pr.ndim != 2 or pr.shape[0] == 0 or pr.shape[0] != t.shape[0]:
+        return 0.0
+    n = pr.shape[0]
+    aucs: List[float] = []
+    for c in range(int(num_classes)):
+        y = (t == c)
+        pos = int(y.sum())
+        neg = n - pos
+        if pos == 0 or neg == 0:
+            continue
+        col = pr[:, c]
+        order = np.argsort(col, kind="mergesort")
+        sorted_scores = col[order]
+        ranks = np.empty(n, dtype=np.float64)
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and sorted_scores[j + 1] == sorted_scores[i]:
+                j += 1
+            avg_rank = (i + 1 + j + 1) / 2.0  # 1-indexed average rank over the tie block
+            ranks[order[i:j + 1]] = avg_rank
+            i = j + 1
+        sum_ranks_pos = float(ranks[y].sum())
+        auc = (sum_ranks_pos - pos * (pos + 1) / 2.0) / (pos * neg)
+        aucs.append(float(auc))
+    return float(np.mean(aucs)) if aucs else 0.0
 
 
 def batch_scs(batch_preds: Iterable[Sequence[int]]) -> float:

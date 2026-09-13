@@ -18,7 +18,6 @@ import {
 } from '../../../components/ui/Icons';
 import { useAuth } from '../../../hooks/useAuth';
 import { jobStatusBadge } from '../jobStatus';
-import SplitProtocolBanner from './SplitProtocolBanner';
 import Collapsible from '../../../components/ui/Collapsible';
 import { formatDuration, jobDurationSeconds } from '../jobTiming';
 
@@ -178,8 +177,6 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
   const hasCheckpoint = !!job?.checkpoint_path;
   const canPromote = isAdmin && !!onPromote && job?.status === 'completed' && !job?.promoted_at;
   const weakClasses = evaluation?.per_class?.filter((c) => c.f1 < 0.5).length ?? 0;
-  // null = job không ghi lại cách chia, khác hẳn với "đã chia nhưng bị trùng".
-  const signerDisjoint = job?.split_provenance ? job.split_provenance.signer_disjoint : null;
   const durationSeconds = jobDurationSeconds(job);
 
   return (
@@ -205,43 +202,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
             </p>
           </div>
         </div>
-
       </div>
-
-      {/* Giao thức đánh giá: gập lại vì đa số người xem chỉ cần con số, nhưng
-          badge trên đầu vẫn nói ngay con số đó đo trên người mới hay người quen
-          — thứ quyết định cách đọc kết quả thì không được giấu sau một cú bấm. */}
-      <Collapsible
-        title="Con số này đo trên ai?"
-        description="Cách chia dữ liệu đã tạo ra kết quả bên trên"
-        badge={
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-              signerDisjoint === null
-                ? 'bg-amber-50 text-amber-800'
-                : signerDisjoint
-                ? 'bg-emerald-50 text-emerald-800'
-                : 'bg-red-50 text-red-700'
-            }`}
-          >
-            {signerDisjoint ? (
-              <CheckCircleIcon className="h-3.5 w-3.5" />
-            ) : (
-              <AlertTriangleIcon className="h-3.5 w-3.5" />
-            )}
-            {signerDisjoint === null
-              ? 'Không rõ cách chia'
-              : signerDisjoint
-              ? 'Đo trên người mới'
-              : 'Đo trên người đã học'}
-          </span>
-        }
-      >
-        <SplitProtocolBanner
-          provenance={job?.split_provenance}
-          splitVersion={job?.config?.split_version}
-        />
-      </Collapsible>
 
       {/* Vài chỉ số đi kèm */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -458,6 +419,75 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
         </Collapsible>
       )}
 
+      {(evaluation?.overall || evaluation?.efficiency) && (
+        <Collapsible
+          title="Chỉ số mở rộng & khả năng đưa lên mobile"
+          description="Ngoài đoán đúng và F1 — độ tin cậy khi lệch lớp, và mô hình có đủ nhẹ để chạy trên điện thoại"
+        >
+          {evaluation.overall && (
+            <div className="mb-5">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Độ chính xác khi lớp không đều
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <StatTile
+                  label="Balanced Accuracy"
+                  value={evaluation.overall.balanced_accuracy.toFixed(3)}
+                  description="Trung bình độ đúng của TỪNG nhãn — không bị nhãn nhiều mẫu che lấp nhãn ít mẫu"
+                />
+                <StatTile
+                  label="Matthews (MCC)"
+                  value={evaluation.overall.matthews_corrcoef.toFixed(3)}
+                  description="Từ -1 đến 1; 0 là đoán ngẫu nhiên. Vẫn đáng tin cậy khi số mẫu giữa các nhãn lệch nhau"
+                />
+                {evaluation.overall.top3_accuracy !== undefined && (
+                  <StatTile
+                    label="Top-3 Accuracy"
+                    value={(evaluation.overall.top3_accuracy * 100).toFixed(1) + '%'}
+                    description="Đáp án đúng nằm trong 3 dự đoán khả năng cao nhất"
+                  />
+                )}
+                <StatTile
+                  label="ROC-AUC (macro)"
+                  value={evaluation.overall.roc_auc_macro_ovr.toFixed(3)}
+                  description="Mô hình phân biệt đúng/sai tốt đến đâu, không phụ thuộc ngưỡng quyết định"
+                />
+              </div>
+            </div>
+          )}
+
+          {evaluation.efficiency && (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Kích thước & tốc độ suy luận (đo trên CPU — điều kiện gần với điện thoại)
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <StatTile
+                  label="Số tham số"
+                  value={evaluation.efficiency.param_count.toLocaleString('vi-VN')}
+                  description="Càng ít tham số, mô hình càng nhẹ để đóng gói"
+                />
+                <StatTile
+                  label="Dung lượng"
+                  value={`${evaluation.efficiency.checkpoint_size_mb.toFixed(2)} MB`}
+                  description="Kích thước file trọng số cần tải xuống thiết bị"
+                />
+                <StatTile
+                  label="Độ trễ (trung vị)"
+                  value={`${evaluation.efficiency.cpu_inference_latency_ms.p50.toFixed(1)} ms`}
+                  description={`1 chuỗi/lần, đo ${evaluation.efficiency.cpu_inference_latency_ms.n_runs} lần trên CPU`}
+                />
+                <StatTile
+                  label="Độ trễ (p95)"
+                  value={`${evaluation.efficiency.cpu_inference_latency_ms.p95.toFixed(1)} ms`}
+                  description="Trường hợp chậm nhất trong số các lần đo — ước lượng đáng tin hơn cho trải nghiệm thực tế"
+                />
+              </div>
+            </div>
+          )}
+        </Collapsible>
+      )}
+
       {provenance?.available && (
         <Collapsible
           title="Nguồn gốc & khả năng tái lập"
@@ -631,6 +661,20 @@ function MetricCard({
         <span className={`text-sm font-semibold ${valueClasses[color]}`}>{unit}</span>
       </div>
       <p className="text-xs text-slate-600 mt-2">{description}</p>
+    </div>
+  );
+}
+
+/** Small labeled stat card for the extended-metrics/efficiency section —
+ *  denser than MetricCard since this section can show up to four at once
+ *  in two rows and doesn't need the color coding MetricCard uses for the
+ *  headline numbers. */
+function StatTile({ label, value, description }: { label: string; value: string; description: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs text-slate-600">{label}</p>
+      <div className="mt-1 text-xl font-bold text-slate-900">{value}</div>
+      <p className="mt-2 text-xs text-slate-500">{description}</p>
     </div>
   );
 }
