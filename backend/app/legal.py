@@ -204,10 +204,28 @@ def list_documents(kind: Optional[str] = None) -> List[Dict[str, Any]]:
         raise ConsentError(f"loại văn bản không hợp lệ: {kind!r}",
                            code="unknown_kind", status_code=404)
 
+    # `status` — ba trạng thái, tính bằng ĐÚNG quy tắc của `read_document`
+    # (bản hiện hành = `effective_from` lớn nhất trong các bản đã tới giờ), để
+    # giao diện không phải tự đặt ra một quy tắc thứ hai (LEG-02, 13/09/2026):
+    #
+    #     current     đang được phục vụ ở /legal/{kind}/content
+    #     superseded  đã tới giờ nhưng có bản mới hơn thay thế
+    #     scheduled   chưa tới giờ hiệu lực
+    #
+    # `is_effective` giữ lại cho tương thích; bản trước chỉ có nó, và giao diện
+    # dịch `effective_from <= now()` thành "đang áp dụng" cho MỌI bản quá khứ.
     sql = f"""
         SELECT {_columns("d")},
                length(d.body)            AS body_length,
                d.effective_from <= now() AS is_effective,
+               CASE
+                 WHEN d.effective_from > now() THEN 'scheduled'
+                 WHEN d.effective_from = (
+                        SELECT max(x.effective_from) FROM legal_documents x
+                         WHERE x.kind = d.kind AND x.effective_from <= now())
+                      THEN 'current'
+                 ELSE 'superseded'
+               END AS status,
                (SELECT count(*) FROM user_consents c
                  WHERE c.kind = d.kind AND c.version = d.version
                    AND c.withdrawn_at IS NULL) AS consent_count

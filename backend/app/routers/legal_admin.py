@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import (
-    APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status,
+    APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status,
 )
 from pydantic import BaseModel, Field
 
@@ -156,6 +156,34 @@ def read_any_version(
         raise HTTPException(status_code=404,
                             detail=f"Không có bản {version!r} của {kind!r}.")
     return doc
+
+
+@router.get("/documents/{kind}/{version}/file")
+def read_any_version_file(
+    kind: str,
+    version: str,
+    download: bool = Query(False),
+    current_user: Dict[str, Any] = Depends(require_admin),
+):
+    """Tệp gốc của một bản BẤT KỲ, kể cả bản đã lên lịch.
+
+    Đường công khai `/legal/{kind}/file` chỉ trả bản đã hiệu lực, nên trước
+    13/09/2026 một bản PDF hẹn giờ không có cách nào xem trước: nút "Xem" ở
+    trang quản trị dựng `body` — vốn rỗng với tệp — và hiện một khung trắng
+    (LEG-01). Cùng quy tắc quyền với `read_any_version` ngay trên.
+    """
+    from app.routers.legal import file_response
+
+    try:
+        doc = legal.admin_read_document(kind, version)
+    except legal.ConsentError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    if doc is None or not doc.get("file_key"):
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "no_file",
+                    "message": f"Bản {version!r} của {kind!r} không có tệp đính kèm."})
+    return file_response(doc, kind=kind, download=download)
 
 
 @router.post("/documents", status_code=status.HTTP_201_CREATED)

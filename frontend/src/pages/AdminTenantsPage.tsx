@@ -84,6 +84,19 @@ export default function AdminTenantsPage() {
   const [invites, setInvites] = useState<TenantInvitation[]>([]);
   const [exports, setExports] = useState<TenantExport[]>([]);
   const [preview, setPreview] = useState<PurgePreview | null>(null);
+  // Chi tiết đang hiện THUỘC tổ chức nào, và từng khối có lỗi gì (TEN-03).
+  //
+  // Bản trước để nguyên thành viên của A trên màn hình trong lúc tải B, và
+  // đổi mọi lỗi request thành mảng rỗng — "mất mạng" đọc lên y hệt "chưa có
+  // thành viên". Với một trang có nút "Xoá vĩnh viễn", hai điều đó không dừng
+  // ở thẩm mỹ. Nay: đổi lựa chọn là xoá sạch, khối nào lỗi thì khối đó nói,
+  // và mọi thao tác bị khoá cho tới khi chi tiết khớp tổ chức đang chọn.
+  type DetailErrors = Partial<Record<"members" | "invites" | "exports" | "preview", string>>;
+  const [detail, setDetail] = useState<{
+    tenantId: string | null;
+    loading: boolean;
+    errors: DetailErrors;
+  }>({ tenantId: null, loading: false, errors: {} });
   const [busy, setBusy] = useState<string | null>(null);
   // Liên kết mời chỉ về MỘT lần. Giữ trong state cho tới khi người dùng tự
   // đóng — đóng hộ họ là làm mất hẳn giá trị đó.
@@ -115,6 +128,8 @@ export default function AdminTenantsPage() {
     }
   }, [includeDeleted, toast]);
 
+  const current = tenants.find((t) => t.tenant_id === selected) || null;
+
   // Số thứ tự của lượt tải chi tiết gần nhất. Xem `loadDetail`.
   const detailRun = useRef(0);
 
@@ -132,6 +147,11 @@ export default function AdminTenantsPage() {
     // Cách chặn: đánh số mỗi lượt và chỉ cho lượt MỚI NHẤT ghi vào state. Rẻ
     // hơn AbortController và không phụ thuộc việc axios có huỷ được hay không.
     const run = ++detailRun.current;
+    setDetail({ tenantId, loading: true, errors: {} });
+    setMembers([]);
+    setInvites([]);
+    setExports([]);
+    setPreview(null);
 
     const [m, i, x, p] = await Promise.allSettled([
       fetchMembers(tenantId),
@@ -146,7 +166,36 @@ export default function AdminTenantsPage() {
     setInvites(i.status === "fulfilled" ? i.value : []);
     setExports(x.status === "fulfilled" ? x.value : []);
     setPreview(p.status === "fulfilled" ? p.value : null);
-  }, []);
+
+    const errors: DetailErrors = {};
+    if (m.status === "rejected") errors.members = friendlyError(m.reason, t("Không tải được danh sách thành viên"));
+    if (i.status === "rejected") errors.invites = friendlyError(i.reason, t("Không tải được lời mời"));
+    if (x.status === "rejected") errors.exports = friendlyError(x.reason, t("Không tải được bản xuất"));
+    // `purge-preview` bị 403 với quản trị viên tenant là DỰ KIẾN — không phải
+    // lỗi; khối đó tự nói "dành cho quản trị viên nền tảng". Lỗi khác thì báo.
+    if (p.status === "rejected" && (p.reason as { response?: { status?: number } })?.response?.status !== 403) {
+      errors.preview = friendlyError(p.reason, t("Không tải được bản xem trước xoá"));
+    }
+    setDetail({ tenantId, loading: false, errors });
+  }, [t]);
+
+  /** Chi tiết trên màn hình đúng là của tổ chức đang chọn, và đã tải xong. */
+  const detailReady = !!current && detail.tenantId === current.tenant_id && !detail.loading;
+
+  const BlockError = ({ text }: { text: string }) => (
+    <p role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-red-700">
+      <span>{text}</span>
+      {current && (
+        <button
+          type="button"
+          onClick={() => void loadDetail(current.tenant_id)}
+          className="rounded border border-red-200 px-2 py-0.5 text-xs font-medium hover:bg-red-50"
+        >
+          {t("Thử lại")}
+        </button>
+      )}
+    </p>
+  );
 
   useEffect(() => { loadTenants(); }, [loadTenants]);
   useEffect(() => {
@@ -180,7 +229,6 @@ export default function AdminTenantsPage() {
     }
   };
 
-  const current = tenants.find((t) => t.tenant_id === selected) || null;
 
   return (
     <div className="p-6 space-y-5">
@@ -286,13 +334,20 @@ export default function AdminTenantsPage() {
       </section>
 
       {current && (
-        <>
+        <fieldset disabled={!detailReady} className="contents" data-testid="tenant-detail" data-ready={detailReady ? "1" : "0"}>
+          {detail.loading && (
+            <p role="status" className="text-sm text-slate-500">
+              {t("Đang tải chi tiết của {ten}…", { ten: current.display_name || current.tenant_id })}
+            </p>
+          )}
           {/* Thành viên */}
           <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <h2 className="font-semibold text-slate-700 mb-3">
               {t("Thành viên —")} <span className="font-mono text-slate-500">{current.tenant_id}</span>
             </h2>
-            {members.length === 0 ? (
+            {detail.errors.members ? (
+              <BlockError text={detail.errors.members} />
+            ) : detail.loading ? null : members.length === 0 ? (
               <p className="text-sm text-slate-400 mb-3">{t("Chưa có thành viên nào.")}</p>
             ) : (
               <div className="space-y-1.5 mb-4">
@@ -441,7 +496,9 @@ export default function AdminTenantsPage() {
               </div>
             )}
 
-            {invites.length === 0 ? (
+            {detail.errors.invites ? (
+              <BlockError text={detail.errors.invites} />
+            ) : detail.loading ? null : invites.length === 0 ? (
               <p className="text-sm text-slate-400 mb-3">{t("Không có lời mời đang mở.")}</p>
             ) : (
               <div className="space-y-1.5 mb-4">
@@ -521,7 +578,9 @@ export default function AdminTenantsPage() {
                 ))}
               </div>
             </div>
-            {exports.length === 0 ? (
+            {detail.errors.exports ? (
+              <BlockError text={detail.errors.exports} />
+            ) : detail.loading ? null : exports.length === 0 ? (
               <p className="text-sm text-slate-400">{t("Chưa có bản xuất nào.")}</p>
             ) : (
               <div className="space-y-1.5">
@@ -592,7 +651,9 @@ export default function AdminTenantsPage() {
               )}
             </div>
 
-            {!preview ? (
+            {detail.errors.preview ? (
+              <BlockError text={detail.errors.preview} />
+            ) : !preview ? (
               <p className="text-xs text-slate-400">
                 {t("Không đọc được bản xem trước xoá vĩnh viễn — thao tác này dành cho quản trị viên nền tảng.")}
               </p>
@@ -651,7 +712,7 @@ export default function AdminTenantsPage() {
               </>
             )}
           </section>
-        </>
+        </fieldset>
       )}
     </div>
   );

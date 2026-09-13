@@ -81,11 +81,36 @@ export function documentFileUrl(
   return `${base}${PUBLIC_PREFIX}/${kind}/file${qs ? `?${qs}` : ""}`;
 }
 
+/**
+ * Tệp gốc của một bản BẤT KỲ — kể cả bản đã lên lịch — cho màn hình quản trị.
+ *
+ * Đường công khai ở trên chỉ thấy bản đã hiệu lực (`effective_from <= now()`),
+ * nên trước 13/09/2026 một bản PDF hẹn giờ không có cách nào xem trước
+ * (LEG-01). Cùng quy tắc quyền với `fetchAnyVersion`.
+ */
+export function adminDocumentFileUrl(
+  kind: LegalKind,
+  version: string,
+  opts: { download?: boolean } = {},
+): string {
+  const params = new URLSearchParams();
+  if (opts.download) params.set("download", "true");
+  const qs = params.toString();
+  const base = getApiBaseURL().replace(/\/+$/, "").replace(/\/api$/, "");
+  return `${base}${ADMIN_PREFIX}/documents/${kind}/${encodeURIComponent(version)}/file${qs ? `?${qs}` : ""}`;
+}
+
 /** Một dòng ở màn hình quản trị: mọi bản, kể cả bản chưa tới ngày hiệu lực. */
 export interface LegalDocumentRow extends LegalDocument {
   doc_id: string;
   body_length: number;
   is_effective: boolean;
+  /**
+   * Ba trạng thái, tính ở máy chủ bằng đúng quy tắc phục vụ văn bản. Giao diện
+   * KHÔNG tự suy từ `effective_from`: bản trước làm thế và gắn "đang áp dụng"
+   * cho mọi bản quá khứ (LEG-02).
+   */
+  status: "current" | "superseded" | "scheduled";
   consent_count: number;
   published_at: string;
   published_by: string | null;

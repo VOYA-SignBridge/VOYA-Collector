@@ -22,11 +22,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import Markdown from "../components/Markdown";
+import DocumentViewer from "../components/legal/DocumentViewer";
 import DraftEditor from "../components/legal/DraftEditor";
 import {
   DRAFT_STATUS_LABEL,
   LEGAL_KIND_LABEL,
+  adminDocumentFileUrl,
   createDraft,
   fetchAdminOverview,
   fetchAnyVersion,
@@ -34,6 +35,7 @@ import {
   fetchDrafts,
   fetchEvents,
   type LegalAdminOverview,
+  type LegalDocumentContent,
   type LegalDocumentRow,
   type LegalDraft,
   type LegalEvent,
@@ -64,7 +66,7 @@ export default function AdminLegalPage() {
   const [events, setEvents] = useState<LegalEvent[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [preview, setPreview] = useState<{ title: string; body: string } | null>(null);
+  const [preview, setPreview] = useState<{ title: string; doc: LegalDocumentContent } | null>(null);
   const [newDraftKind, setNewDraftKind] = useState<LegalKind>("terms");
 
   const load = useCallback(async () => {
@@ -138,7 +140,10 @@ export default function AdminLegalPage() {
   const openPreview = async (row: LegalDocumentRow) => {
     try {
       const doc = await fetchAnyVersion(row.kind, row.version);
-      setPreview({ title: t("{p1} — bản {version}", { p1: t(LEGAL_KIND_LABEL[row.kind]), version: row.version }), body: doc.body });
+      // Giữ NGUYÊN document, không rút riêng `body`: với tệp tải lên `body`
+      // rỗng và bản trước hiện một khung trắng (LEG-01). Viewer chọn cách dựng
+      // theo `body_format`, và dùng đường quản trị để thấy cả bản đã lên lịch.
+      setPreview({ title: t("{p1} — bản {version}", { p1: t(LEGAL_KIND_LABEL[row.kind]), version: row.version }), doc });
     } catch (err) {
       setError(errorMessage(err, t("Không đọc được bản văn.")));
     }
@@ -173,7 +178,7 @@ export default function AdminLegalPage() {
           ký và đóng dấu về dưới dạng .pdf. Trình soạn markdown ở dưới vẫn còn
           cho những bản viết ngay trong hệ thống. */}
       <div className="mt-6">
-        <UploadDocumentForm onDone={() => void load()} />
+        <UploadDocumentForm onDone={() => void load()} ensureSudo={ensureSudo} />
       </div>
       {notice && (
         <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
@@ -325,12 +330,20 @@ export default function AdminLegalPage() {
                         <tr key={row.doc_id} className="border-b border-slate-100">
                           <td className="px-3 py-1.5 font-mono text-xs">{row.version}</td>
                           <td className="px-3 py-1.5">
-                            {row.is_effective ? (
-                              <span className="rounded bg-sky-100 px-2 py-0.5 text-xs text-sky-800">
+                            {/* Ba trạng thái từ máy chủ, không suy ở đây. Màu KHÔNG
+                                là kênh duy nhất: chữ khác nhau ở cả ba. */}
+                            {row.status === "current" && (
+                              <span className="rounded bg-ctu-blue/10 px-2 py-0.5 text-xs font-medium text-ctu-blue">
                                 {t("đang áp dụng")}
                               </span>
-                            ) : (
-                              <span className="rounded bg-sky-100 px-2 py-0.5 text-xs text-sky-800">
+                            )}
+                            {row.status === "superseded" && (
+                              <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                                {t("đã thay thế")}
+                              </span>
+                            )}
+                            {row.status === "scheduled" && (
+                              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
                                 {t("đã lên lịch")}
                               </span>
                             )}
@@ -428,7 +441,10 @@ export default function AdminLegalPage() {
                 {t("Đóng")}
               </button>
             </div>
-            <Markdown text={preview.body} />
+            <DocumentViewer
+              doc={preview.doc}
+              fileUrl={(d, o) => adminDocumentFileUrl(d.kind, d.version, o)}
+            />
           </div>
         </div>
       )}

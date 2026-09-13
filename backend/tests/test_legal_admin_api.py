@@ -460,3 +460,112 @@ class TestTheOverviewAnswersTheOperationalQuestion:
         assert set(coverage) == {"terms", "privacy"}
         for row in coverage.values():
             assert row["accepted_by_user"] <= row["accepted"]
+
+
+# ===========================================================================
+# LEG-01 / LEG-02 / LEG-04 (13/09/2026): tệp bản đã lên lịch, trạng thái ba mức,
+# giờ hiệu lực có offset
+# ===========================================================================
+
+_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n"
+        b"\x00\x01\x02\xff\xfe\n%%EOF\n")
+
+
+@pytest.fixture
+def blob_store(tmp_path, monkeypatch):
+    """Kho blob riêng — KHÔNG ghi vào `dataset/legal/` thật."""
+    monkeypatch.setenv("LEGAL_STORE_ROOT", str(tmp_path / "legal"))
+
+
+class TestScheduledFileIsPreviewable:
+    def _upload(self, client, cleanup_versions, *, effective_from):
+        version = _version()
+        response = client.post(
+            "/api/v1/admin/legal/documents/upload",
+            data={"kind": "guardian", "version": version, "title": "Bản hẹn giờ",
+                  "effective_from": effective_from},
+            files={"file": ("ban.pdf", _PDF, "application/pdf")},
+        )
+        assert response.status_code == 201, response.text
+        cleanup_versions.append(("guardian", version))
+        return version
+
+    def test_publicFileRoute_hidesTheScheduledVersion(self, client, with_sudo, blob_store, cleanup_versions):
+        """Tiền đề: đường công khai KHÔNG thấy bản tương lai. Đó là lý do đường
+        quản trị phải tồn tại — không phải vì đường công khai sai."""
+        from datetime import datetime, timedelta, timezone
+        version = self._upload(client, cleanup_versions,
+                               effective_from=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat())
+
+        public = client.get(f"/api/v1/legal/guardian/file", params={"version": version})
+        assert public.status_code == 404
+
+    def test_adminFileRoute_servesTheScheduledVersion(self, client, with_sudo, blob_store, cleanup_versions):
+        """LEG-01: trước 13/09 nút "Xem" của một bản PDF hẹn giờ mở khung trắng,
+        vì `body` rỗng với tệp và đường tệp công khai từ chối bản tương lai."""
+        from datetime import datetime, timedelta, timezone
+        version = self._upload(client, cleanup_versions,
+                               effective_from=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat())
+
+        response = client.get(f"/api/v1/admin/legal/documents/guardian/{version}/file")
+
+        assert response.status_code == 200, response.text
+        assert response.content == _PDF
+        assert response.headers["content-type"].startswith("application/pdf")
+        assert 'filename="ban.pdf"' in response.headers["content-disposition"]
+
+    def test_adminFileRoute_404sForMarkdownVersions(self, client, with_sudo, cleanup_versions):
+        payload = _payload()
+        client.post("/api/v1/admin/legal/documents", json=payload)
+        cleanup_versions.append((payload["kind"], payload["version"]))
+
+        response = client.get(f"/api/v1/admin/legal/documents/{payload['kind']}/{payload['version']}/file")
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "no_file"
+
+
+class TestThreeWayStatus:
+    def test_onlyTheNewestPastVersionIsCurrent(self, client, with_sudo, cleanup_versions):
+        """LEG-02: `is_effective` là `effective_from <= now()`, đúng với MỌI bản
+        quá khứ — nên giao diện từng gắn "đang áp dụng" cho cả bản đã bị thay
+        thế. `status` phải tách ba: current / superseded / scheduled."""
+        from datetime import datetime, timedelta, timezone
+        old, new, future = _version(), _version(), _version()
+        now = datetime.now(timezone.utc)
+        for version, when in ((old, now - timedelta(days=30)), (new, now - timedelta(minutes=5)),
+                              (future, now + timedelta(days=30))):
+            body = _payload(kind="guardian", version=version, effective_from=when.isoformat())
+            r = client.post("/api/v1/admin/legal/documents", json=body)
+            assert r.status_code == 201, r.text
+            cleanup_versions.append(("guardian", version))
+
+        rows = {r["version"]: r for r in client.get("/api/v1/admin/legal/documents").json()["documents"]
+                if r["kind"] == "guardian"}
+
+        assert rows[old]["is_effective"] is True and rows[old]["status"] == "superseded"
+        assert rows[new]["is_effective"] is True and rows[new]["status"] == "current"
+        assert rows[future]["is_effective"] is False and rows[future]["status"] == "scheduled"
+        assert sum(1 for r in rows.values() if r["status"] == "current") == 1
+
+
+class TestEffectiveFromKeepsItsOffset:
+    def test_uploadRoute_honoursTheBrowserOffset(self, client, with_sudo, blob_store, cleanup_versions):
+        """LEG-04: giao diện giờ gửi `2026-08-20T09:00:00+07:00`. Máy chủ (UTC)
+        phải lưu đúng 02:00Z, không phải 09:00Z."""
+        from datetime import datetime, timezone
+        version = _version()
+        response = client.post(
+            "/api/v1/admin/legal/documents/upload",
+            data={"kind": "guardian", "version": version, "title": "Giờ Việt Nam",
+                  "effective_from": "2030-08-20T09:00:00+07:00"},
+            files={"file": ("ban.pdf", _PDF, "application/pdf")},
+        )
+        assert response.status_code == 201, response.text
+        cleanup_versions.append(("guardian", version))
+
+        doc = legal.admin_read_document("guardian", version)
+        stored = doc["effective_from"]
+        if isinstance(stored, str):
+            stored = datetime.fromisoformat(stored.replace("Z", "+00:00"))
+        assert stored.astimezone(timezone.utc) == datetime(2030, 8, 20, 2, 0, tzinfo=timezone.utc)

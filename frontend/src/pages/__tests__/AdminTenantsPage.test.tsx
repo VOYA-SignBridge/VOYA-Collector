@@ -303,3 +303,47 @@ describe('Lời mời', () => {
     expect(row).not.toHaveTextContent(/\badmin\b/);
   });
 });
+
+describe('Chi tiết tổ chức — TEN-03', () => {
+  it('thành viên tải LỖI thì nói lỗi + "Thử lại", KHÔNG nói "chưa có thành viên"', async () => {
+    (fetchMembers as any).mockRejectedValueOnce(new Error('network down'));
+    render(<AdminTenantsPage />);
+    await openTenant();
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('Chưa có thành viên nào.')).not.toBeInTheDocument();
+
+    // Thử lại đúng khối, đúng tổ chức.
+    (fetchMembers as any).mockResolvedValueOnce([MEMBER]);
+    fireEvent.click(screen.getByRole('button', { name: 'Thử lại' }));
+    expect(await screen.findByText('giaovien')).toBeInTheDocument();
+    expect(fetchMembers).toHaveBeenLastCalledWith('truong-b');
+  });
+
+  it('đổi tổ chức thì thành viên cũ BIẾN MẤT ngay và thao tác bị khoá cho tới khi chi tiết mới về', async () => {
+    const TENANT_C = { ...TENANT, tenant_id: 'truong-c', display_name: 'Trường C', slug: 'truong-c' };
+    (fetchTenants as any).mockResolvedValue([TENANT, TENANT_C]);
+    let releaseC: (v: unknown) => void = () => undefined;
+    (fetchMembers as any).mockImplementation((id: string) =>
+      id === 'truong-b'
+        ? Promise.resolve([MEMBER])
+        : new Promise((res) => { releaseC = res; }),
+    );
+
+    render(<AdminTenantsPage />);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Quản lý' }))[0]);
+    expect(await screen.findByText('giaovien')).toBeInTheDocument();
+
+    // Mở C trong khi request của C còn treo. (Nút của B giờ là "Đóng", nên
+    // nút "Quản lý" còn lại duy nhất là của C.)
+    fireEvent.click(screen.getByRole('button', { name: 'Quản lý' }));
+    await waitFor(() => expect(screen.getByTestId('tenant-detail')).toHaveAttribute('data-ready', '0'));
+    expect(screen.queryByText('giaovien')).not.toBeInTheDocument();
+    expect(screen.getByTestId('tenant-detail')).toBeDisabled();
+
+    releaseC([{ ...MEMBER, tenant_id: 'truong-c', user_id: 'u-9', username: 'hieutruong-c' }]);
+    expect(await screen.findByText('hieutruong-c')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('tenant-detail')).toHaveAttribute('data-ready', '1'));
+    expect(screen.getByTestId('tenant-detail')).not.toBeDisabled();
+  });
+});

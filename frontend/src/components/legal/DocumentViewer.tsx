@@ -39,7 +39,26 @@ function formatBytes(n: number | null): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function DocumentViewer({ doc }: { doc: LegalDocumentContent }) {
+/** Nguồn URL tệp: mặc định là đường công khai (chỉ bản đã hiệu lực). */
+export type FileUrlSource = (
+  doc: LegalDocumentContent,
+  opts: { download?: boolean },
+) => string;
+
+const publicFileUrl: FileUrlSource = (doc, opts) =>
+  documentFileUrl(doc.kind, { version: doc.version, ...opts });
+
+export default function DocumentViewer({
+  doc,
+  fileUrl = publicFileUrl,
+}: {
+  doc: LegalDocumentContent;
+  /**
+   * Màn hình quản trị truyền đường quản trị vào đây để xem được bản đã lên
+   * lịch; mọi nơi khác dùng mặc định. Viewer không tự đoán mình đang ở đâu.
+   */
+  fileUrl?: FileUrlSource;
+}) {
   const { t } = useI18n();
 
   if (doc.body_format !== "file") {
@@ -50,11 +69,8 @@ export default function DocumentViewer({ doc }: { doc: LegalDocumentContent }) {
     );
   }
 
-  const viewUrl = documentFileUrl(doc.kind, { version: doc.version });
-  const downloadUrl = documentFileUrl(doc.kind, {
-    version: doc.version,
-    download: true,
-  });
+  const viewUrl = fileUrl(doc, {});
+  const downloadUrl = fileUrl(doc, { download: true });
   const isPdf = (doc.file_mime || "").includes("pdf");
 
   const downloadButton = (

@@ -5,6 +5,8 @@ import {
 import Button from "../ui/Button";
 import { AlertTriangleIcon, CheckCircleIcon, UploadIcon } from "../ui/Icons";
 import { useI18n } from "../../i18n";
+import { describeEffectiveFrom, localInputToOffsetIso } from "../../utils/effectiveFrom";
+import { isSudoRequired } from "../../hooks/useSudo";
 
 /**
  * Tải một bản văn pháp lý lên và công bố nó.
@@ -23,14 +25,25 @@ import { useI18n } from "../../i18n";
  * 3. **Ngày hiệu lực ở tương lai là lên lịch**, không phải nháp: bản nằm sẵn
  *    trong bảng và tự thay bản cũ đúng giờ, không ai phải chạy lệnh gì.
  * 4. **Cần nâng quyền.** Máy chủ trả 403 `sudo_required` nếu chưa nhập lại mật
- *    khẩu trong 5 phút gần đây — biểu mẫu chuyển nguyên văn câu đó thay vì
- *    hiện "có lỗi xảy ra".
+ *    khẩu trong 5 phút gần đây. Bản trước chỉ hiện câu đó rồi dừng: người vận
+ *    hành mắc kẹt ở một thông báo bảo nhập lại mật khẩu mà không có chỗ nào để
+ *    nhập (LEG-05). Nay biểu mẫu nhận `ensureSudo` từ trang cha — hỏi mật khẩu
+ *    ngay tại chỗ, rồi tự gửi lại với ĐÚNG tệp và siêu dữ liệu đang có, như
+ *    "sudo mode" của GitHub. Không có `ensureSudo` (trang cha không nối) thì
+ *    vẫn hiện nguyên văn như cũ.
  */
 
 const ACCEPT = ".pdf,.docx,.doc,.odt,.md,.txt";
 const KINDS: LegalKind[] = ["terms", "privacy", "data_contribution", "guardian"];
 
-export default function UploadDocumentForm({ onDone }: { onDone?: () => void }) {
+export default function UploadDocumentForm({
+  onDone,
+  ensureSudo,
+}: {
+  onDone?: () => void;
+  /** Hỏi nâng quyền khi máy chủ đòi; trả `true` nếu đã nâng xong. */
+  ensureSudo?: () => Promise<boolean>;
+}) {
   const { t } = useI18n();
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -64,20 +77,34 @@ export default function UploadDocumentForm({ onDone }: { onDone?: () => void }) 
     setBusy(true);
     setError("");
     setDone("");
+    const payload = {
+      kind,
+      version: version.trim(),
+      file,
+      title: title.trim(),
+      language,
+      change_summary: summary.trim(),
+      requires_reconsent: reconsent,
+      // `datetime-local` cho ra "2026-08-20T09:00" — không có múi giờ. Bản
+      // trước gửi nguyên chuỗi ấy và máy chủ (chạy UTC) hiểu là 09:00 UTC:
+      // văn bản có hiệu lực lúc 16:00 giờ Việt Nam, lệch 7 giờ trên một mốc
+      // pháp lý (LEG-04). Nay gắn offset của trình duyệt vào trước khi gửi.
+      effective_from: localInputToOffsetIso(effectiveFrom),
+    };
     try {
-      const res = await uploadDocument({
-        kind,
-        version: version.trim(),
-        file,
-        title: title.trim(),
-        language,
-        change_summary: summary.trim(),
-        requires_reconsent: reconsent,
-        // `datetime-local` cho ra "2026-08-20T09:00" — không có múi giờ. Gửi
-        // nguyên như vậy; máy chủ đọc bằng `fromisoformat` và diễn giải theo
-        // múi giờ của nó, đúng nơi quyết định hiệu lực pháp lý được đưa ra.
-        effective_from: effectiveFrom || null,
-      });
+      let res;
+      try {
+        res = await uploadDocument(payload);
+      } catch (err) {
+        // Hỏi KHI bị từ chối, không hỏi trước — xem `hooks/useSudo`. Gửi lại
+        // đúng `payload` đang có; người dùng không phải chọn lại tệp.
+        if (!ensureSudo || !isSudoRequired(err)) throw err;
+        if (!(await ensureSudo())) {
+          setError(t("Chưa xác thực lại được, văn bản chưa công bố. Tệp và thông tin đã nhập vẫn còn."));
+          return;
+        }
+        res = await uploadDocument(payload);
+      }
       const v = res.published?.version || version.trim();
       setDone(
         res.current?.version === v
@@ -193,9 +220,20 @@ export default function UploadDocumentForm({ onDone }: { onDone?: () => void }) 
             onChange={(e) => setEffectiveFrom(e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue"
           />
-          <span className="mt-1 block text-xs text-slate-500">
-            {t("Bỏ trống = hiệu lực ngay. Đặt tương lai = lên lịch.")}
-          </span>
+          {/* Xem trước có múi giờ: người công bố đọc lại ĐÚNG thời điểm sẽ được
+              lưu, như Google Calendar hay Stripe luôn ghi múi giờ cạnh giờ hẹn. */}
+          {describeEffectiveFrom(effectiveFrom) ? (
+            <span
+              className="mt-1 block text-xs font-medium text-slate-700"
+              data-testid="effective-from-preview"
+            >
+              {t("Có hiệu lực lúc {when}", { when: describeEffectiveFrom(effectiveFrom) ?? "" })}
+            </span>
+          ) : (
+            <span className="mt-1 block text-xs text-slate-500">
+              {t("Bỏ trống = hiệu lực ngay. Đặt tương lai = lên lịch.")}
+            </span>
+          )}
         </label>
 
         <label className="block">

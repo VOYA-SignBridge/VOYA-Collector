@@ -86,6 +86,31 @@ describe("UploadDocumentForm", () => {
     expect(sent.requires_reconsent).toBe(false);
   });
 
+  it("ngày hiệu lực đi kèm OFFSET múi giờ và có dòng xem trước — LEG-04", async () => {
+    // Máy chủ chạy UTC. Bản trước gửi "2026-08-20T09:00" trần, nên 09:00 người
+    // dùng gõ ở Việt Nam thành 16:00 giờ Việt Nam khi có hiệu lực — lệch 7 giờ
+    // trên một mốc pháp lý. Chuỗi gửi đi PHẢI mang offset.
+    show();
+    fireEvent.change(screen.getByPlaceholderText("2026-08-10"), {
+      target: { value: "2026-08-20" },
+    });
+    const dt = document.querySelector('input[type="datetime-local"]') as HTMLInputElement;
+    fireEvent.change(dt, { target: { value: "2026-08-20T09:00" } });
+
+    const preview = screen.getByTestId("effective-from-preview");
+    expect(preview.textContent).toContain("09:00");
+    expect(preview.textContent).toContain("UTC");
+
+    fireEvent.change(fileBox(), { target: { files: [pdf()] } });
+    fireEvent.click(publishButton());
+
+    await waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(1));
+    const sent = uploadDocument.mock.calls[0][0];
+    expect(sent.effective_from).toMatch(/^2026-08-20T09:00:00[+-]\d{2}:\d{2}$/);
+    expect(new Date(sent.effective_from).getTime())
+      .toBe(new Date("2026-08-20T09:00").getTime());
+  });
+
   it("ô 'yêu cầu đồng ý lại' đi đúng xuống API", async () => {
     show();
     fireEvent.change(screen.getByPlaceholderText("2026-08-10"), {
@@ -131,5 +156,57 @@ describe("UploadDocumentForm", () => {
     expect(
       await screen.findByText("Thao tác này cần xác thực lại mật khẩu."),
     ).toBeInTheDocument();
+  });
+
+  // Hình dạng THẬT của máy chủ (`legal_admin._require_sudo`), không phải chuỗi.
+  const SUDO_403 = {
+    response: {
+      status: 403,
+      data: { detail: { code: "sudo_required", message: "Công bố văn bản pháp lý cần xác thực lại bằng mật khẩu.", ttl_seconds: 300 } },
+    },
+  };
+
+  it("bị đòi nâng quyền → hỏi mật khẩu → GỬI LẠI cùng tệp, không bắt chọn lại — LEG-05", async () => {
+    uploadDocument
+      .mockRejectedValueOnce(SUDO_403)
+      .mockResolvedValueOnce({ published: { version: "6.0" }, current: { version: "6.0" } });
+    const ensureSudo = vi.fn().mockResolvedValue(true);
+
+    window.localStorage.setItem("voya.lang", "vi");
+    render(
+      <I18nProvider>
+        <UploadDocumentForm ensureSudo={ensureSudo} />
+      </I18nProvider>,
+    );
+    fireEvent.change(screen.getByPlaceholderText("2026-08-10"), { target: { value: "6.0" } });
+    fireEvent.change(fileBox(), { target: { files: [pdf()] } });
+    fireEvent.click(publishButton());
+
+    await waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(2));
+    expect(ensureSudo).toHaveBeenCalledTimes(1);
+    // Lần hai gửi ĐÚNG những gì lần một gửi.
+    expect(uploadDocument.mock.calls[1][0]).toEqual(uploadDocument.mock.calls[0][0]);
+    expect(await screen.findByText(/Đã công bố bản 6.0/)).toBeInTheDocument();
+  });
+
+  it("huỷ hoặc sai mật khẩu → KHÔNG gửi lại, biểu mẫu giữ nguyên tệp", async () => {
+    uploadDocument.mockRejectedValueOnce(SUDO_403);
+    const ensureSudo = vi.fn().mockResolvedValue(false);
+
+    window.localStorage.setItem("voya.lang", "vi");
+    render(
+      <I18nProvider>
+        <UploadDocumentForm ensureSudo={ensureSudo} />
+      </I18nProvider>,
+    );
+    fireEvent.change(screen.getByPlaceholderText("2026-08-10"), { target: { value: "6.0" } });
+    fireEvent.change(fileBox(), { target: { files: [pdf()] } });
+    fireEvent.click(publishButton());
+
+    expect(await screen.findByText(/Chưa xác thực lại được/)).toBeInTheDocument();
+    expect(uploadDocument).toHaveBeenCalledTimes(1);
+    // Tệp và số hiệu còn nguyên: bấm lại là gửi được, không phải làm lại từ đầu.
+    expect((screen.getByPlaceholderText("2026-08-10") as HTMLInputElement).value).toBe("6.0");
+    expect(publishButton()).not.toBeDisabled();
   });
 });

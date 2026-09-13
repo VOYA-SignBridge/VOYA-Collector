@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { Link, MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 /**
@@ -96,7 +96,7 @@ describe('LegalDocumentPage', () => {
   });
 
   it('nói rõ "chưa công bố" thay vì để trang trắng', async () => {
-    vi.mocked(fetchContent).mockRejectedValue(new Error('404'));
+    vi.mocked(fetchContent).mockRejectedValue({ response: { status: 404 } });
 
     renderAt('/legal/privacy');
 
@@ -104,11 +104,56 @@ describe('LegalDocumentPage', () => {
   });
 
   it('nói rõ bản nào không tìm thấy khi hỏi một số hiệu cụ thể', async () => {
-    vi.mocked(fetchContent).mockRejectedValue(new Error('404'));
+    vi.mocked(fetchContent).mockRejectedValue({ response: { status: 404 } });
 
     renderAt('/legal/terms?version=khong-co');
 
     expect(await screen.findByText(/Không tìm thấy bản khong-co/)).toBeInTheDocument();
+  });
+
+  it('mất mạng thì nói "không kết nối được", KHÔNG nói "chưa công bố" — LEG-03', async () => {
+    // Lỗi không có phản hồi HTTP (axios Network Error) ≠ máy chủ trả 404.
+    vi.mocked(fetchContent).mockRejectedValue(new Error('Network Error'));
+
+    renderAt('/legal/privacy');
+
+    expect(await screen.findByText(/Không kết nối được với máy chủ/)).toBeInTheDocument();
+    expect(screen.queryByText(/chưa công bố/)).not.toBeInTheDocument();
+  });
+
+  it('không có quyền thì nói đúng như vậy', async () => {
+    vi.mocked(fetchContent).mockRejectedValue({ response: { status: 403 } });
+    renderAt('/legal/terms?version=2026-12-01');
+    expect(await screen.findByText(/không có quyền xem bản này/)).toBeInTheDocument();
+  });
+
+  it('đổi sang bản lỗi thì KHÔNG còn thân của bản trước dưới tiêu đề mới — LEG-03', async () => {
+    vi.mocked(fetchContent)
+      .mockResolvedValueOnce(DOC)
+      .mockRejectedValueOnce({ response: { status: 404 } });
+
+    render(
+      <MemoryRouter initialEntries={['/legal/terms']}>
+        <Routes>
+          <Route
+            element={
+              <>
+                <Link to="/legal/terms?version=khong-co">mo ban khac</Link>
+                <Outlet />
+              </>
+            }
+          >
+            <Route path="/legal/:kind" element={<LegalDocumentPage />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/Mục một nói về tài khoản/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('mo ban khac'));
+
+    expect(await screen.findByText(/Không tìm thấy bản khong-co/)).toBeInTheDocument();
+    expect(screen.queryByText(/Mục một nói về tài khoản/)).not.toBeInTheDocument();
   });
 
   it('từ chối một loại văn bản không tồn tại mà không gọi API', async () => {

@@ -34,12 +34,14 @@ vi.mock('../../api/legal', async () => {
 
 vi.mock('../../api/axiosClient', () => ({
   default: { post: vi.fn(), get: vi.fn() },
+  getApiBaseURL: () => '/api',
 }));
 
 import AdminLegalPage from '../AdminLegalPage';
 import {
   createDraft,
   fetchAdminOverview,
+  fetchAnyVersion,
   fetchDraft,
   fetchDrafts,
   fetchEvents,
@@ -63,6 +65,7 @@ function row(over: Partial<LegalDocumentRow> = {}): LegalDocumentRow {
     requires_reconsent: false,
     body_length: 4200,
     is_effective: true,
+    status: 'current' as const,
     consent_count: 3,
     published_at: '2026-08-08T00:00:00Z',
     published_by: null,
@@ -151,13 +154,53 @@ describe('AdminLegalPage', () => {
   it('gắn nhãn "đã lên lịch" cho bản chưa tới ngày hiệu lực', async () => {
     vi.mocked(fetchAdminOverview).mockResolvedValue({
       ...OVERVIEW,
-      documents: [row({ is_effective: false, version: '2026-12-01' })],
+      documents: [row({ is_effective: false, status: 'scheduled', version: '2026-12-01' })],
     });
 
     render(<AdminLegalPage />);
 
     expect(await screen.findByText('đã lên lịch')).toBeInTheDocument();
     expect(screen.queryByText('đang áp dụng')).not.toBeInTheDocument();
+  });
+
+  it('bản quá khứ đã bị thay thế KHÔNG được gắn "đang áp dụng" — LEG-02', async () => {
+    // Bản trước suy trạng thái từ `effective_from <= now()`, nên hai bản quá
+    // khứ cùng hiện "đang áp dụng" — người quản trị không biết bản nào đang
+    // được phục vụ. Trạng thái do máy chủ tính bằng đúng quy tắc phục vụ.
+    vi.mocked(fetchAdminOverview).mockResolvedValue({
+      ...OVERVIEW,
+      documents: [
+        row({ status: 'current', version: '2026-08-08' }),
+        row({ doc_id: 'd-old', status: 'superseded', version: '2026-01-01' }),
+      ],
+    });
+
+    render(<AdminLegalPage />);
+
+    expect(await screen.findByText('đang áp dụng')).toBeInTheDocument();
+    expect(screen.getAllByText('đang áp dụng')).toHaveLength(1);
+    expect(screen.getByText('đã thay thế')).toBeInTheDocument();
+  });
+
+  it('nút "Xem" của bản TỆP dựng trình đọc tệp, không phải markdown trống — LEG-01', async () => {
+    vi.mocked(fetchAdminOverview).mockResolvedValue({
+      ...OVERVIEW,
+      documents: [row({ has_file: true, file_name: 'dieu-khoan.pdf', file_mime: 'application/pdf', file_size: 1234 })],
+    });
+    vi.mocked(fetchAnyVersion).mockResolvedValue({
+      ...row({ has_file: true, file_name: 'dieu-khoan.pdf', file_mime: 'application/pdf', file_size: 1234 }),
+      body: '',
+      body_format: 'file',
+    } as any);
+
+    render(<AdminLegalPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Xem/ }));
+
+    // Trình đọc tệp: tên tệp + nút tải bản gốc, và đường tải là đường QUẢN TRỊ
+    // (bản đã lên lịch cũng mở được), không phải đường công khai.
+    expect(await screen.findByText('dieu-khoan.pdf')).toBeInTheDocument();
+    const link = screen.getAllByRole('link', { name: /Tải bản gốc/ })[0];
+    expect(link.getAttribute('href')).toContain('/admin/legal/documents/terms/2026-08-08/file');
   });
 
   it('không có nút sửa bản đã công bố', async () => {

@@ -234,8 +234,6 @@ def download_file(
     * **`Content-Disposition` luôn có `filename`**, và tên đó được làm sạch.
       Một tên tệp mang dấu ngoặc kép hoặc xuống dòng là một header bị tách.
     """
-    from fastapi.responses import Response
-
     _reject_unknown_kind(kind)
     doc = legal.read_document(kind, version)
     if doc is None or not doc.get("file_key"):
@@ -249,6 +247,18 @@ def download_file(
                             f"bản này lưu dưới dạng văn bản, xem /{kind}/content."),
             },
         )
+    return file_response(doc, kind=kind, download=download)
+
+
+def file_response(doc: Dict[str, Any], *, kind: str, download: bool):
+    """Dựng response tệp gốc từ một hàng `legal_documents` đã có `file_key`.
+
+    Dùng chung cho đường CÔNG KHAI (chỉ bản đã hiệu lực) và đường QUẢN TRỊ
+    (bản bất kỳ, kể cả bản đã lên lịch — LEG-01, 13/09/2026). Hai đường khác
+    nhau ở câu hỏi "hàng nào", không khác ở cách trả tệp; tách ra để hai bên
+    không trôi khỏi nhau ở `Content-Type`, `Content-Disposition` hay cache.
+    """
+    from fastapi.responses import Response
 
     key = str(doc["file_key"])
     try:

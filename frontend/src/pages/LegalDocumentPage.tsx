@@ -48,17 +48,30 @@ export default function LegalDocumentPage() {
     let cancelled = false;
     setLoading(true);
     setError("");
+    // Xoá bản đang hiện TRƯỚC khi tải bản mới. Bản trước chỉ ghi `doc` khi
+    // thành công, nên đọc A rồi mở B lỗi thì thân của A nằm dưới tiêu đề B —
+    // với một văn bản người ta sắp ký, đó là hướng hỏng tệ nhất (LEG-03).
+    setDoc(null);
     fetchContent(kind, version)
       .then((data) => {
         if (!cancelled) setDoc(data);
       })
-      .catch(() => {
-        if (!cancelled) {
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Ba nguyên nhân, ba câu: "chưa có" (404), "bạn không được xem"
+        // (401/403) và "không kết nối được" (không có phản hồi). Gộp làm một
+        // thì người mất mạng tưởng hệ thống chưa công bố gì.
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404) {
           setError(
             version
               ? t("Không tìm thấy bản {version} của văn bản này.", { version })
               : t("Hệ thống chưa công bố văn bản này."),
           );
+        } else if (status === 401 || status === 403) {
+          setError(t("Bạn không có quyền xem bản này."));
+        } else {
+          setError(t("Không kết nối được với máy chủ. Kiểm tra mạng rồi tải lại trang."));
         }
       })
       .finally(() => {

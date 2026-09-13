@@ -1,4 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
+import PrivateKeyModal from "../components/sot/PrivateKeyModal";
+import { sotConclusion } from "../utils/sotStatus";
 import { useToast } from "../hooks/useToast";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import PageHeader from "../components/ui/PageHeader";
@@ -57,6 +59,10 @@ export default function SotAdminPage() {
   const [remoteLoading, setRemoteLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<SotVerifyResult | null>(null);
+  /** Thời điểm lượt kiểm tra gần nhất KẾT THÚC — người đọc cần biết kết luận cũ bao nhiêu. */
+  const [verifiedAt, setVerifiedAt] = useState<Date | null>(null);
+  /** Lỗi tải tổng quan GIỮ TRÊN TRANG. Toast trôi đi rồi, trang vẫn phải nói được vì sao trống (SOT-02). */
+  const [overviewError, setOverviewError] = useState<string | null>(null);
 
   // register form
   const [mode, setMode] = useState<"public_key" | "generate">("public_key");
@@ -69,9 +75,10 @@ export default function SotAdminPage() {
   const loadOverview = async () => {
     try {
       setLoading(true);
+      setOverviewError(null);
       setOverview(await getSotOverview());
     } catch (e: any) {
-      toast.error(friendlyError(e, t("Không tải được thông tin SOT")));
+      setOverviewError(friendlyError(e, t("Không tải được thông tin SOT")));
     } finally {
       setLoading(false);
     }
@@ -99,10 +106,12 @@ export default function SotAdminPage() {
       setVerifying(true);
       const res = await runSotVerify();
       setVerifyResult(res);
-      if (res.ok) toast.success(`Verify OK — ${res.version ?? res.status}`);
-      else toast.error(t("Verify thất bại"));
+      setVerifiedAt(new Date());
+      if (res.ok) toast.success(t("Kiểm tra đạt — bản {v}", { v: res.version ?? res.status ?? "" }));
+      else toast.error(t("Kiểm tra không đạt"));
     } catch (e: any) {
-      toast.error(friendlyError(e, t("Verify lỗi")));
+      setVerifyResult({ ok: false, error: friendlyError(e, t("Không chạy được kiểm tra")) });
+      setVerifiedAt(new Date());
     } finally {
       setVerifying(false);
     }
@@ -161,12 +170,20 @@ export default function SotAdminPage() {
   }
 
   const dbc = overview?.db_counts ?? {};
+  const conclusion = sotConclusion({ remote, remoteLoading, verify: verifyResult, verifying });
+  const TONE = {
+    neutral: "border-slate-200 bg-slate-50 text-slate-800",
+    ok: "border-ctu-blue/30 bg-ctu-blue/5 text-slate-900",
+    warn: "border-amber-200 bg-amber-50 text-amber-900",
+    bad: "border-red-200 bg-red-50 text-red-900",
+  } as const;
+  const TONE_ICON = { neutral: "…", ok: "✓", warn: "!", bad: "✕" } as const;
 
   return (
     <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6 animate-fade-in">
       <PageHeader
-        title={t("Quản lý SOT & thiết bị")}
-        subtitle={t("Source of Truth: máy được cấp quyền, dữ liệu đã publish, schema.")}
+        title={t("Dữ liệu chuẩn & đồng bộ")}
+        subtitle={t("Quản lý bản dữ liệu chuẩn và các máy được phép công bố bản đó.")}
         actions={
           <>
             <button
@@ -180,27 +197,64 @@ export default function SotAdminPage() {
               disabled={verifying}
               className="px-3 py-2 rounded-lg bg-ctu-blue text-white text-sm font-medium hover:bg-ctu-blue/90 disabled:opacity-50 transition-colors"
             >
-              {verifying ? t("Đang verify…") : "Verify SOT"}
+              {verifying ? t("Đang kiểm tra…") : t("Kiểm tra bản dữ liệu chuẩn")}
             </button>
           </>
         }
       />
 
-      {verifyResult && (
-        <div className={`rounded-lg border p-3 text-sm ${verifyResult.ok ? "bg-sky-50 border-sky-200 text-sky-800" : "bg-red-50 border-red-200 text-red-700"}`}>
-          {verifyResult.ok
-            ? `Verify OK — version=${verifyResult.version ?? verifyResult.status}, signed_by=${verifyResult.signed_by ?? "?"}`
-            : t("Không xác minh được: {error}", { error: verifyResult.error })}
+      {overviewError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <span>{t("Không tải được thông tin máy và dữ liệu: {error}", { error: overviewError })}</span>
+          <button
+            type="button"
+            onClick={() => void loadOverview()}
+            className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium hover:bg-red-100"
+          >
+            {t("Thử lại")}
+          </button>
         </div>
       )}
 
+      {/* Kết luận một câu — trả lời "dữ liệu chuẩn đang thế nào?" trước mọi con số.
+          Chữ + biểu tượng + thời điểm; màu chỉ là kênh phụ. */}
+      <section
+        role="status"
+        aria-live="polite"
+        data-testid="sot-conclusion"
+        data-kind={conclusion.kind}
+        className={`rounded-xl border p-4 ${TONE[conclusion.tone]}`}
+      >
+        <p className="flex items-start gap-3 text-base font-semibold">
+          <span aria-hidden="true" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-current text-sm">
+            {TONE_ICON[conclusion.tone]}
+          </span>
+          <span>{t(conclusion.headline)}</span>
+        </p>
+        <p className="mt-1 pl-9 text-xs opacity-80">
+          {verifiedAt
+            ? t("Kiểm tra lúc {when}", { when: verifiedAt.toLocaleString("vi-VN") })
+            : t("Chưa chạy kiểm tra toàn vẹn trong phiên này")}
+          {remote?.published && remote.version ? ` · ${t("Bản {v}", { v: remote.version })}` : ""}
+          {remote?.published && remote.signed_by ? ` · ${t("Nguồn: {m}", { m: remote.signed_by })}` : ""}
+        </p>
+        {conclusion.nextStep && (
+          <p className="mt-2 pl-9 text-sm">
+            <span className="font-medium">{t("Việc cần làm:")}</span> {t(conclusion.nextStep)}
+          </p>
+        )}
+        {verifyResult && !verifyResult.ok && verifyResult.error && (
+          <p className="mt-2 pl-9 font-mono text-xs opacity-80">{verifyResult.error}</p>
+        )}
+      </section>
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card title={t("Version đã publish")}>
+        <Card title={t("Bản dữ liệu đã công bố")}>
           {remoteLoading ? (
             <span className="text-slate-400">…</span>
           ) : remote?.available === false ? (
-            <Badge tone="red">{t("Drive lỗi")}</Badge>
+            <Badge tone="red">{t("Không kết nối được kho")}</Badge>
           ) : remote?.published ? (
             <div>
               <div className="text-lg font-bold text-slate-900">{remote.version}</div>
@@ -209,7 +263,7 @@ export default function SotAdminPage() {
               </div>
             </div>
           ) : (
-            <Badge tone="gray">{t("Chưa publish")}</Badge>
+            <Badge tone="gray">{t("Chưa công bố")}</Badge>
           )}
         </Card>
         <Card title={t("Máy này")}>
@@ -399,34 +453,14 @@ export default function SotAdminPage() {
         )}
       </Card>
 
-      {/* Generated private key modal */}
+      {/* Khoá riêng hiện một lần — xem components/sot/PrivateKeyModal (SOT-01). */}
       {generatedKey && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setGeneratedKey(null)}>
-          <div className="bg-white rounded-xl p-6 max-w-lg w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-slate-900">Khóa riêng của "{generatedKey.name}"</h3>
-            <p className="text-sm text-amber-600 mt-1">
-              {generatedKey.hint || t("Lưu ngay — chỉ hiển thị một lần. Server không lưu khóa riêng.")}
-            </p>
-            <textarea
-              readOnly
-              value={generatedKey.private_key}
-              rows={3}
-              className="mt-3 w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs text-slate-800 font-mono"
-              onFocus={(e) => e.target.select()}
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                onClick={() => { navigator.clipboard?.writeText(generatedKey.private_key); toast.success(t("Đã copy")); }}
-                className="px-3 py-2 rounded-lg bg-ctu-blue text-white text-sm font-medium hover:bg-ctu-blue/90 transition-colors"
-              >
-                Copy
-              </button>
-              <button onClick={() => setGeneratedKey(null)} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 font-medium hover:bg-slate-50 transition-colors">
-                {t("Đã lưu, đóng")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PrivateKeyModal
+          name={generatedKey.name}
+          privateKey={generatedKey.private_key}
+          hint={generatedKey.hint}
+          onClose={() => setGeneratedKey(null)}
+        />
       )}
     </div>
   );
