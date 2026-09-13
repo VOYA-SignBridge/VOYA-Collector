@@ -4324,6 +4324,15 @@ _RE_CREATE_INDEX = re.compile(
     r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?"
     r"(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_.\"]*)", re.IGNORECASE)
 
+#: Quan hệ mà một câu `CREATE INDEX` nhắm tới: `… ON [ONLY] <quan hệ> (…)`.
+_RE_CREATE_INDEX_ON = re.compile(
+    r"\bON\s+(?:ONLY\s+)?([A-Za-z_][A-Za-z0-9_.\"]*)\s*\(", re.IGNORECASE)
+
+#: `CREATE [OR REPLACE] VIEW <tên>` — quan hệ mà lược đồ hiện hành dựng là VIEW.
+_RE_CREATE_VIEW = re.compile(
+    r"^\s*CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+([A-Za-z_][A-Za-z0-9_.\"]*)",
+    re.IGNORECASE)
+
 
 def _all_schema_statements() -> list[str]:
     """Mọi câu DDL của lược đồ, gộp từ ba danh sách. Chỉ để SOI, không chạy."""
@@ -4407,7 +4416,43 @@ def creates_retired_object(stmt: str) -> str | None:
     if not m:
         return None
     ten = m.group(1).strip('"').lower()
-    return ten if ten in retired_indexes() else None
+    if ten in retired_indexes():
+        return ten
+    # Chỉ mục trên một quan hệ mà lược đồ hiện hành dựng là VIEW.
+    #
+    # Sự cố 13/09/2026: gói `Ver5_06082026` mang
+    #
+    #     CREATE INDEX IF NOT EXISTS idx_tenant_members_user ON tenant_members(user_id)
+    #
+    # từ thời `tenant_members` còn là bảng. Từ PDM v5 nó là VIEW trên
+    # `memberships`, và Postgres không đánh chỉ mục được view — câu ấy thất bại
+    # ở MỖI lượt sync và kéo trạng thái xuống `applied_degraded`, trên một lược
+    # đồ hoàn toàn đúng.
+    #
+    # Nó không nằm trong `retired_indexes()` vì chưa từng có câu `DROP INDEX`
+    # nào gọi tên nó: chỉ mục biến mất NGẦM cùng bảng nền. Thêm một câu DROP
+    # no-op chỉ để đặt tên cho nó thì phạm kỷ luật versioning (một câu một
+    # chiều mới ⇒ một phiên bản migration mới — xem `migration_history`).
+    # Nên suy ra từ chính DDL, như mọi thứ khác ở đây: đối tượng nền đã thành
+    # view thì mọi chỉ mục trên nó đã retire theo định nghĩa — hậu điều kiện
+    # không bao giờ thoả được.
+    on = _RE_CREATE_INDEX_ON.search(stmt)
+    if on and on.group(1).strip('"').lower() in view_relations():
+        return ten
+    return None
+
+
+def view_relations() -> frozenset[str]:
+    """Quan hệ mà lược đồ hiện hành dựng bằng `CREATE [OR REPLACE] VIEW`.
+
+    Suy từ DDL, không liệt kê tay — cùng lý do với `retired_indexes()`.
+    """
+    ra = set()
+    for s in _all_schema_statements():
+        m = _RE_CREATE_VIEW.match(s)
+        if m:
+            ra.add(m.group(1).strip('"').lower())
+    return frozenset(ra)
 
 
 def retired_still_present(cur) -> list[str]:

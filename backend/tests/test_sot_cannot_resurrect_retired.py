@@ -60,6 +60,13 @@ DDL_CU = (
 CHI_MUC_THU = "idx_sot_guard_probe"
 DDL_VO_HAI = f"CREATE INDEX IF NOT EXISTS {CHI_MUC_THU} ON classes(created_at)"
 
+#: Chép nguyên văn câu thứ HAI trong gói `Ver5_06082026` gây `applied_degraded`
+#: ở mỗi lượt sync từ khi `tenant_members` thành VIEW (sự cố 13/09/2026).
+CHI_MUC_TREN_VIEW = "idx_tenant_members_user"
+DDL_TREN_VIEW = (
+    f"CREATE INDEX IF NOT EXISTS {CHI_MUC_TREN_VIEW} ON tenant_members(user_id)"
+)
+
 
 class TestNhanDienDoiTuongDaRetire:
     """Tầng đầu: nhận diện đúng đối tượng mà một câu định TẠO."""
@@ -88,6 +95,32 @@ class TestNhanDienDoiTuongDaRetire:
         """
         assert CHI_MUC_CU in db.retired_indexes()
         assert db.creates_retired_object(DDL_CU) in db.retired_indexes()
+
+    def test_tenant_members_la_VIEW_theo_luoc_do_hien_hanh(self):
+        """Tiền đề của ca dưới: nếu ai đưa `tenant_members` về lại bảng, ca này
+        đỏ trước và nói đúng chỗ, thay vì ca dưới đỏ với lý do khó hiểu."""
+        assert "tenant_members" in db.view_relations()
+
+    def test_bat_duoc_chi_muc_tren_quan_he_da_thanh_VIEW(self):
+        """Chỉ mục biến mất NGẦM cùng bảng nền, không qua câu `DROP INDEX` nào.
+
+        Nên `retired_indexes()` không biết nó — và câu trong gói cũ thất bại ở
+        mỗi lượt sync, kéo trạng thái xuống `applied_degraded` trên một lược đồ
+        hoàn toàn đúng. Retire phải suy được từ DDL: nền là view thì hậu điều
+        kiện của `CREATE INDEX` không bao giờ thoả.
+        """
+        assert db.creates_retired_object(DDL_TREN_VIEW) == CHI_MUC_TREN_VIEW
+
+    def test_khong_bat_nham_chi_muc_co_ten_chua_chu_ON(self):
+        """`\\b` trong regex không phải trang trí: `ix_session` kết thúc bằng
+        `on`, và không có biên từ thì `on ` trong tên bị đọc thành từ khoá."""
+        cau = "CREATE INDEX IF NOT EXISTS ix_session ON classes(created_at)"
+        assert db.creates_retired_object(cau) is None
+
+    def test_khong_bat_nham_quan_he_KHONG_phai_view(self):
+        for cau in (DDL_VO_HAI,
+                    "CREATE INDEX IF NOT EXISTS ix_m ON memberships(user_id)"):
+            assert db.creates_retired_object(cau) is None, cau
 
 
 @pytest.mark.integration
@@ -155,6 +188,21 @@ class TestPhatLaiKhongDungLaiDuocChiMuc:
         assert bao_cao.skipped_retired == []
         assert len(bao_cao.failed) == 1
         assert "bang_khong_ton_tai" in bao_cao.failed[0]
+
+    def test_chi_muc_tren_view_bi_BO_theo_chinh_sach_chu_khong_HONG(self):
+        """Đúng câu gói `Ver5_06082026` mang, chạy lên lược đồ thật.
+
+        Trước bản sửa: `failed == [câu]`, sync về `applied_degraded`, và
+        `sot-init` in cảnh báo "lược đồ có thể KHÔNG đầy đủ" ở MỌI lần khởi
+        động — trên một lược đồ đúng. Sau: bỏ theo chính sách, sạch.
+        """
+        from app.sot.reader_sync import _apply_schema_sql
+
+        bao_cao = _apply_schema_sql(DDL_TREN_VIEW + ";")
+
+        assert bao_cao.failed == [], bao_cao.failed
+        assert bao_cao.skipped_retired == [CHI_MUC_TREN_VIEW]
+        assert bao_cao.applied == 0
 
 
 @pytest.mark.integration
