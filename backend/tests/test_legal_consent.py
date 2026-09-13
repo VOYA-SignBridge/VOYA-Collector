@@ -36,6 +36,15 @@ _CONSENT_COLUMNS = (
     "consent_id", "user_id", "kind", "version", "accepted_at", "ip_hash",
     "user_agent", "withdrawn_at", "source", "note", "recorded_by",
 )
+#: Chấp thuận của NGƯỜI KÝ (không phải tài khoản) — bảng thứ hai trỏ vào
+#: `legal_documents` bằng `(kind, version) ON DELETE RESTRICT`. Bỏ sót nó thì
+#: `DELETE FROM legal_documents` bị chính khoá ngoại chặn, và cả 32 ca của tệp
+#: này đỏ ở lúc DỌN chứ không phải lúc đo — trên một bản sao sản xuất có ít
+#: nhất một chấp thuận người ký (từ 22/08/2026 là có).
+_SIGNER_CONSENT_COLUMNS = (
+    "consent_id", "tenant_id", "signer_id", "scope", "kind", "version",
+    "granted_at", "withdrawn_at", "guardian_name", "evidence", "recorded_by",
+)
 
 
 def _snapshot(table: str, columns: tuple) -> list:
@@ -76,9 +85,11 @@ def _preserve_published_documents(_ensure_schema):
     """
     documents = _snapshot("legal_documents", _DOC_COLUMNS)
     consents = _snapshot("user_consents", _CONSENT_COLUMNS)
+    signer_consents = _snapshot("signer_consents", _SIGNER_CONSENT_COLUMNS)
     yield
     _restore("legal_documents", _DOC_COLUMNS, documents)
     _restore("user_consents", _CONSENT_COLUMNS, consents)
+    _restore("signer_consents", _SIGNER_CONSENT_COLUMNS, signer_consents)
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +102,7 @@ def _clean_documents(_preserve_published_documents):
     def _wipe():
         with system_scope("test cleanup"):
             db._execute("DELETE FROM user_consents")
+            db._execute("DELETE FROM signer_consents")
             db._execute("DELETE FROM legal_documents")
 
     _wipe()
