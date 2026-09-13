@@ -279,16 +279,6 @@
     "folder_name": "class_cat-dau-ca_ec69ab15",
     "label_key": "vn/hoa-de/cat-dau-ca"
   },
-  "31": {
-    "slug": "mien-dien",
-    "label_original": "Miến Điện",
-    "language": "vn",
-    "dialect": "trung",
-    "class_idx": 31,
-    "class_uid": "e5af6504-e181-4805-92fd-00bb80d1999e",
-    "folder_name": "class_mien-dien_e5af6504",
-    "label_key": "vn/trung/mien-dien"
-  },
   "32": {
     "slug": "z",
     "label_original": "Z",
@@ -529,26 +519,6 @@
     "folder_name": "class_cam-on_cb7be8bf",
     "label_key": "vn/common/cam-on"
   },
-  "54": {
-    "slug": "dia-chi",
-    "label_original": "Địa chỉ",
-    "language": "vn",
-    "dialect": "bac",
-    "class_idx": 54,
-    "class_uid": "dc06f29f-3965-425c-8845-afdf6a2d9916",
-    "folder_name": "class_dia-chi_dc06f29f",
-    "label_key": "vn/bac/dia-chi"
-  },
-  "55": {
-    "slug": "dia-chi",
-    "label_original": "Địa chỉ",
-    "language": "vn",
-    "dialect": "nam",
-    "class_idx": 55,
-    "class_uid": "df77087d-4fab-4de8-a074-8c3f619a1919",
-    "folder_name": "class_dia-chi_df77087d",
-    "label_key": "vn/nam/dia-chi"
-  },
   "56": {
     "slug": "xin-loi",
     "label_original": "xin lỗi",
@@ -628,5 +598,35 @@
     "class_uid": "1db59b4c-a443-4ee8-bd0d-41d043c09dce",
     "folder_name": "class_dap-bot_1db59b4c",
     "label_key": "vn/spa/dap-bot"
+  },
+  "64": {
+    "slug": "xin-chao",
+    "label_original": "xin chào",
+    "language": "vn",
+    "dialect": "can-tho",
+    "class_idx": 64,
+    "class_uid": "d90efc3c-53d8-4b4a-8a4c-2cb0e9358cbc",
+    "folder_name": "class_xin-chao_d90efc3c",
+    "label_key": "vn/can-tho/xin-chao"
+  },
+  "65": {
+    "slug": "xin-chao",
+    "label_original": "Xin chào",
+    "language": "vn",
+    "dialect": "test",
+    "class_idx": 65,
+    "class_uid": "46854bea-5d7c-4ef7-8481-06ac1db150ab",
+    "folder_name": "class_xin-chao_46854bea",
+    "label_key": "vn/test/xin-chao"
+  },
+  "66": {
+    "slug": "test2",
+    "label_original": "test2",
+    "language": "vn",
+    "dialect": "test",
+    "class_idx": 66,
+    "class_uid": "3daa02d2-5171-4615-8e6d-62d2bc45fe95",
+    "folder_name": "class_test2_3daa02d2",
+    "label_key": "vn/test/test2"
   }
 }

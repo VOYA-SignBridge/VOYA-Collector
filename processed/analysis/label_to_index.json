@@ -27,7 +27,6 @@
   "vn/bang-chu-cai/x": 28,
   "vn/bang-chu-cai/y": 29,
   "vn/hoa-de/cat-dau-ca": 30,
-  "vn/trung/mien-dien": 31,
   "vn/bang-chu-cai/z": 32,
   "vn/can-tho/nhan-vien": 33,
   "vn/can-tho/may-khoan": 34,
@@ -52,8 +51,6 @@
   "vn/hoa-de/lay-chi-tom": 5,
   "vn/can-tho/vo-tay": 52,
   "vn/common/cam-on": 53,
-  "vn/bac/dia-chi": 54,
-  "vn/nam/dia-chi": 55,
   "vn/common/xin-loi": 56,
   "vn/spa/cat-da": 57,
   "vn/spa/lam-mat-meo": 58,
@@ -61,5 +58,8 @@
   "vn/spa/son-mong": 60,
   "vn/spa/ho-gel": 61,
   "vn/spa/tay-mong": 62,
-  "vn/spa/dap-bot": 63
+  "vn/spa/dap-bot": 63,
+  "vn/can-tho/xin-chao": 64,
+  "vn/test/xin-chao": 65,
+  "vn/test/test2": 66
 }
