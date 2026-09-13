@@ -20,11 +20,11 @@ vi.mock('../../api/legal', async () => {
   const actual = await vi.importActual<typeof import('../../api/legal')>(
     '../../api/legal',
   );
-  return { ...actual, fetchContent: vi.fn() };
+  return { ...actual, fetchContent: vi.fn(), fetchDocumentOrNull: vi.fn() };
 });
 
 import LegalDocumentPage from '../LegalDocumentPage';
-import { fetchContent, type LegalDocumentContent } from '../../api/legal';
+import { fetchContent, fetchDocumentOrNull, type LegalDocumentContent } from '../../api/legal';
 
 const DOC: LegalDocumentContent = {
   kind: 'terms',
@@ -51,7 +51,10 @@ function renderAt(path: string) {
 }
 
 describe('LegalDocumentPage', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(fetchDocumentOrNull).mockResolvedValue(DOC);
+  });
 
   it('dựng thân văn bản đã tải về', async () => {
     vi.mocked(fetchContent).mockResolvedValue(DOC);
@@ -66,7 +69,40 @@ describe('LegalDocumentPage', () => {
 
     renderAt('/legal/terms');
 
-    expect(await screen.findByText('2026-08-08')).toBeInTheDocument();
+    expect(await screen.findByText(/Bản 2026-08-08/)).toBeInTheDocument();
+  });
+
+  it('bản đang đọc trùng bản đang áp dụng → nhãn "Đang áp dụng"', async () => {
+    vi.mocked(fetchContent).mockResolvedValue(DOC);
+    renderAt('/legal/terms');
+    expect(await screen.findByText('Đang áp dụng')).toBeInTheDocument();
+    expect(screen.queryByText('Bản cũ')).not.toBeInTheDocument();
+  });
+
+  it('mở một bản cũ → nói rõ là bản cũ và dẫn tới bản đang áp dụng', async () => {
+    vi.mocked(fetchContent).mockResolvedValue({ ...DOC, version: '2026-01-01' });
+    renderAt('/legal/terms?version=2026-01-01');
+    expect(await screen.findByText('Bản cũ')).toBeInTheDocument();
+    expect(screen.getByText(/Bản đang áp dụng là bản 2026-08-08/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Mở bản đang áp dụng' })).toHaveAttribute('href', '/legal/terms');
+  });
+
+  it('mục lục dựng từ tiêu đề markdown và trỏ đúng id', async () => {
+    vi.mocked(fetchContent).mockResolvedValue({
+      ...DOC,
+      body: ["# Điều khoản", "", "## Phạm vi áp dụng", "", "Một.", "", "## Trách nhiệm của bạn", "", "Hai."].join(String.fromCharCode(10)),
+    });
+    renderAt('/legal/terms');
+    await screen.findByText('Một.');
+    const links = screen.getAllByRole('link', { name: 'Phạm vi áp dụng' });
+    expect(links[0]).toHaveAttribute('href', '#pham-vi-ap-dung');
+    expect(document.getElementById('pham-vi-ap-dung')?.tagName).toBe('H2');
+  });
+
+  it('một câu giải thích văn bản này nói về điều gì, bằng chữ thường', async () => {
+    vi.mocked(fetchContent).mockResolvedValue(DOC);
+    renderAt('/legal/privacy');
+    expect(await screen.findByText(/thu thập những dữ liệu nào của bạn/)).toBeInTheDocument();
   });
 
   it('KHÔNG hiện mã băm trên trang văn bản', async () => {

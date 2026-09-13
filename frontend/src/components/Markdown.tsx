@@ -22,6 +22,8 @@
 
 import { Fragment, type ReactNode } from "react";
 
+import { extractHeadings } from "../utils/markdownOutline";
+
 /** Cú pháp trong DÒNG: `**đậm**`, `*nghiêng*`, `` `mã` ``, `[chữ](đường-dẫn)`. */
 const INLINE = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
 
@@ -111,6 +113,10 @@ const HEADING_CLASS: Record<number, string> = {
 export default function Markdown({ text }: { text: string }) {
   const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
+  // `id` cho tiêu đề, cùng hàm và cùng thứ tự với mục lục ở trang đọc văn bản
+  // pháp lý (`utils/markdownOutline`). Lấy sẵn cả danh sách rồi rút dần.
+  const outline = extractHeadings(text || "");
+  let headingIndex = 0;
 
   let i = 0;
   let key = 0;
@@ -135,7 +141,8 @@ export default function Markdown({ text }: { text: string }) {
     if (heading) {
       const level = Math.min(heading[1].length, 3);
       const Tag = (`h${level}` as "h1" | "h2" | "h3");
-      push(<Tag className={HEADING_CLASS[level]}>{inline(heading[2], `h${key}`)}</Tag>);
+      const id = outline[headingIndex++]?.id;
+      push(<Tag id={id} className={`${HEADING_CLASS[level]} scroll-mt-24`}>{inline(heading[2], `h${key}`)}</Tag>);
       i += 1;
       continue;
     }

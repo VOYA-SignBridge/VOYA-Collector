@@ -364,6 +364,16 @@ export function DownloadIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function PrinterIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M7 9V4.5h10V9" />
+      <rect x="4" y="9" width="16" height="8" rx="1.5" />
+      <path d="M7 14h10v5.5H7z" />
+    </Icon>
+  );
+}
+
 export function MailIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Icon {...props}>
