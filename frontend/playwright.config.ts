@@ -24,6 +24,11 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || "http://localhost:8080",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // The UI picks its language from navigator.language when nothing is
+    // saved (src/i18n/index.tsx). Playwright's default context is en-US,
+    // which since the i18n rollout rendered every label in English and made
+    // all five Vietnamese selectors below time out on the login page.
+    locale: "vi-VN",
   },
   projects: [
     {

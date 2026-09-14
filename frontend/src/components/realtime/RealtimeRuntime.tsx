@@ -44,6 +44,7 @@ import { fetchTTSAudio, prewarmTTS } from "../../api/tts";
 import PageHeader from "../ui/PageHeader";
 import Button from "../ui/Button";
 import { useI18n } from "../../i18n";
+import { languageName } from "../../config/languageLabels";
 
 type Props = {
   /** Visual-only mirror for preview. Never affects payload semantics. */
@@ -949,7 +950,7 @@ export default function RealtimeRuntime({
                 <option value="">{t("-- Chọn ngôn ngữ --")}</option>
                 {languages.map((lang) => (
                   <option key={lang} value={lang}>
-                    {lang}
+                    {t(languageName(lang))}
                   </option>
                 ))}
               </select>

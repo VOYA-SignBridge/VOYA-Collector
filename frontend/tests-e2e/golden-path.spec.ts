@@ -33,18 +33,22 @@ async function login(page: Page) {
   await page.getByLabel("Mật khẩu").fill(ADMIN_PASSWORD!);
   await page.getByRole("button", { name: "Đăng nhập" }).click();
   // LoginPage swaps to a full-screen LoadingScreen, then the router lands on
-  // the destination route. The authenticated header badge is the concrete,
+  // the destination route. The header's "Đăng xuất" button only renders for an
+  // authenticated session (guests get "Đăng nhập"), so it is the concrete,
   // page-independent signal that the token round-trip actually succeeded.
-  await expect(page.getByRole("banner").getByText("Đã đăng nhập")).toBeVisible({ timeout: 15_000 });
+  // (The old "Đã đăng nhập" badge was replaced by the working-context chip in
+  // the 09/2026 UX pass.)
+  await expect(page.getByRole("banner").getByRole("button", { name: "Đăng xuất" })).toBeVisible({ timeout: 15_000 });
 }
 
 test.describe("Golden-path browser E2E", () => {
   test("1. login redirects into an authenticated workspace", async ({ page }) => {
     await login(page);
 
-    // The sidebar starts collapsed on every load (Layout.tsx keeps no memory
-    // of open/closed between page loads), even at desktop width.
-    await page.getByRole("button", { name: "Mở/đóng thanh điều hướng" }).click();
+    // The sidebar is collapsed off-canvas on load (translated out of view, so
+    // Playwright still reports its links "visible" but cannot click them).
+    // Open it through the header toggle, then follow the real link.
+    await page.getByRole("button", { name: "Mở hoặc đóng thanh điều hướng" }).click();
     await page.getByRole("link", { name: "Huấn luyện model" }).click();
     await expect(page.getByRole("heading", { name: "Huấn Luyện Mô Hình", exact: true })).toBeVisible();
     // Confirms the session is real (backend accepted the token), not just a
@@ -58,22 +62,27 @@ test.describe("Golden-path browser E2E", () => {
 
     await page.getByRole("button", { name: "Bắt đầu huấn luyện mới" }).click();
 
-    // Step 1 — Chọn Phương Ngữ. Hòa Đê already has a published deployment
-    // split, so step 2 reports ready immediately (no new prep run needed).
-    await expect(page.getByRole("heading", { name: "Chọn Phương Ngữ", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /Hòa Đê/ }).first().click();
+    // The wizard on this branch runs 1 Dữ Liệu → 2 Chọn Dialect → 3 Chia Tập
+    // → 4 Tăng Cường → 5 Cấu Hình → 6 Huấn Luyện → 7 Kết Quả (the upstream
+    // feature-v2 suite assumed a dialect-first order with a separate
+    // "Chuẩn Bị Dữ Liệu" step that was never merged here).
+
+    // Step 1 — Dữ Liệu: dataset stats, informational.
+    await expect(page.getByRole("heading", { name: "Dữ Liệu", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Tiếp theo →" }).click();
 
-    // Step 2 — Chuẩn Bị Dữ Liệu (auto-ready via alreadyPrepared).
-    await expect(page.getByRole("heading", { name: "Chuẩn Bị Dữ Liệu", exact: true })).toBeVisible();
+    // Step 2 — Chọn Dialect. Hòa Đê already has a published deployment split.
+    await expect(page.getByRole("heading", { name: "Chọn Dialect", exact: true })).toBeVisible();
+    // Dialect cards are named by slug (what samples.csv and the model_id use).
+    await page.getByRole("button", { name: "hoa-de", exact: true }).click();
+    await page.getByRole("button", { name: "Tiếp theo →" }).click();
+
+    // Step 3 — Chia Tập (informational).
+    await expect(page.getByRole("heading", { name: "Chia Tập", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Tiếp theo →" })).toBeEnabled({ timeout: 20_000 });
     await page.getByRole("button", { name: "Tiếp theo →" }).click();
 
-    // Step 3 — Chia Tập (informational only).
-    await expect(page.getByRole("heading", { name: "Chia Tập", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Tiếp theo →" }).click();
-
-    // Step 4 — Tăng Cường (informational only).
+    // Step 4 — Tăng Cường (informational).
     await expect(page.getByRole("heading", { name: "Tăng Cường", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Tiếp theo →" }).click();
 
@@ -88,7 +97,8 @@ test.describe("Golden-path browser E2E", () => {
     await expect(page.getByRole("heading", { name: "Huấn Luyện", exact: true })).toBeVisible({
       timeout: 20_000,
     });
-    const cancelButton = page.getByRole("button", { name: /Hủy huấn luyện/ });
+    // "Huỷ" (u + combining hook) in the UI — match either Unicode form.
+    const cancelButton = page.getByRole("button", { name: /Hu(ỷ|ủy) huấn luyện/ });
     await expect(cancelButton).toBeVisible({ timeout: 15_000 });
 
     // Clean up: cancel immediately rather than occupying the single GPU
@@ -106,7 +116,7 @@ test.describe("Golden-path browser E2E", () => {
 
     // A completed job opens straight to Step 7 — Kết Quả.
     await expect(page.getByRole("heading", { name: "Kết Quả", exact: true })).toBeVisible();
-    await expect(page.getByText(/Huấn luyện xong/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Huấn luyện hoàn tất" })).toBeVisible();
     // The F1 tile is real evaluation data returned by
     // GET /training/jobs/{id}/evaluation, not a placeholder.
     await expect(page.getByText("Điểm F1", { exact: true })).toBeVisible();
@@ -120,7 +130,7 @@ test.describe("Golden-path browser E2E", () => {
     await expect(completedRow).toBeVisible({ timeout: 15_000 });
     await completedRow.click();
 
-    await page.getByRole("button", { name: /Thử bằng camera/ }).click();
+    await page.getByRole("button", { name: /Kiểm tra model \(Realtime\)/ }).click();
 
     // The fake camera feeds a real recorded sign-language clip (see
     // playwright.config.ts), so MediaPipe should detect a hand and the
@@ -138,7 +148,16 @@ test.describe("Golden-path browser E2E", () => {
     // coded in RealtimeRuntime.tsx. Picking a model flips autoStart on.
     const selects = page.locator("select");
     await selects.nth(0).selectOption({ label: "Tiếng Việt" });
-    await selects.nth(1).selectOption({ label: "Hòa đê (Hòa Đê)" });
+    // Picking the language may auto-select the first model and start the
+    // camera at once, which disables both selects while frames are in
+    // flight; only pick a model explicitly when the select is still open.
+    const modelSelect = selects.nth(1);
+    try {
+      await modelSelect.selectOption({ label: "Hòa đê (hoa-de)" }, { timeout: 10_000 });
+    } catch {
+      // Already running with a model picked — the assertion below is what matters.
+      await expect(page.getByRole("button", { name: "Dừng nhận diện" })).toBeVisible();
+    }
 
     await expect(page.getByText("Độ tin cậy:")).toBeVisible({ timeout: 90_000 });
   });
