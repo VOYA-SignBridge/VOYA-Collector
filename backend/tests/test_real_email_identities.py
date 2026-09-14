@@ -339,3 +339,56 @@ class TestKhongLoDanhSach:
             "mã trạng thái khác nhau giữa địa chỉ có và không có đăng ký"
         )
         assert a.json() == b.json(), "nội dung phản hồi làm lộ địa chỉ nào tồn tại"
+
+
+# ------------------------------------------------- một HỘP THƯ = một tài khoản
+
+class TestMotHopThuMotTaiKhoan:
+    """`minh.huy@gmail.com`, `minhhuy+1@gmail.com`, `MinhHuy@googlemail.com` là
+    MỘT hộp thư. UNIQUE trên `email` không thấy điều đó (14/09/2026)."""
+
+    @pytest.mark.parametrize("a,b", [
+        ("minh.huy@gmail.com", "minhhuy@gmail.com"),
+        ("minhhuy+1@gmail.com", "minhhuy@gmail.com"),
+        ("MinhHuy@googlemail.com", "minhhuy@gmail.com"),
+        ("ai.do+x@outlook.com", "ai.do@outlook.com"),
+    ])
+    def test_canonical_email_gop_bi_danh(self, a, b):
+        from app.auth import canonical_email
+        assert canonical_email(a) == canonical_email(b)
+
+    def test_dau_cham_KHONG_bi_bo_ngoai_gmail(self):
+        from app.auth import canonical_email
+        assert canonical_email("ai.do@ctu.edu.vn") != canonical_email("aido@ctu.edu.vn")
+
+    def test_dang_ky_lan_hai_bang_bi_danh_bi_tu_choi_409(self):
+        refuse_to_touch_production()
+        from fastapi import HTTPException
+        from app.auth import create_user
+
+        tag = uuid.uuid4().hex[:8]
+        base = f"hopthu{tag}@gmail.com"
+        first = create_user(username=f"hopthu{tag}", email=base, password=PASSWORD)
+        try:
+            for alias in (f"hop.thu{tag}@gmail.com", f"hopthu{tag}+khac@gmail.com",
+                          f"HopThu{tag}@googlemail.com"):
+                with pytest.raises(HTTPException) as exc:
+                    create_user(username=f"khac{uuid.uuid4().hex[:6]}", email=alias, password=PASSWORD)
+                assert exc.value.status_code == 409, alias
+        finally:
+            _xoa_tai_khoan(first["id"])
+
+    def test_dang_nhap_va_khoi_phuc_bang_bi_danh_van_ra_dung_tai_khoan(self):
+        """Gõ `hop.thu@gmail.com` khi đăng ký bằng `hopthu@gmail.com` — cùng hộp
+        thư, phải tìm ra tài khoản (đây là lỗi 'khôi phục mật khẩu' ngày 14/09)."""
+        refuse_to_touch_production()
+        from app.auth import _fetch_user_by_login, create_user
+
+        tag = uuid.uuid4().hex[:8]
+        first = create_user(username=f"hopthu{tag}", email=f"hopthu{tag}@gmail.com", password=PASSWORD)
+        try:
+            found = _fetch_user_by_login(f"hop.thu{tag}+abc@GMAIL.com")
+            assert found is not None and str(found["id"]) == str(first["id"])
+            assert _fetch_user_by_login(f"khonglienquan{tag}@gmail.com") is None
+        finally:
+            _xoa_tai_khoan(first["id"])

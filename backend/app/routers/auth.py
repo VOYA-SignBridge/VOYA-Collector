@@ -1047,6 +1047,11 @@ def change_email_start(
         if cur.fetchone():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail="Địa chỉ này đã có tài khoản khác dùng.")
+    # Và cùng HỘP THƯ viết bằng bí danh — cùng quy tắc với đăng ký.
+    from app.auth import find_user_with_same_mailbox
+    if find_user_with_same_mailbox(new_email, exclude_user_id=str(current_user["id"])):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Hộp thư này đã có tài khoản khác dùng (địa chỉ viết khác nhưng cùng hộp thư).")
 
     try:
         challenge_id, code = otp.issue(

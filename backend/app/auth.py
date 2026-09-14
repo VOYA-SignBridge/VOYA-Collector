@@ -82,6 +82,67 @@ def _normalize_login(identifier: str) -> str:
     return (identifier or "").strip().lower()
 
 
+#: Nhà cung cấp gộp `a.b.c@` với `abc@` thành MỘT hộp thư. Chỉ Gmail làm vậy;
+#: với các nhà khác dấu chấm là một phần của địa chỉ.
+_DOT_INSENSITIVE_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+
+
+def canonical_email(email: str) -> str:
+    """Địa chỉ CHÍNH TẮC — hai chuỗi cùng trỏ tới một hộp thư thì ra cùng một giá trị.
+
+    Sự cố 14/09/2026: cùng một người đăng ký được nhiều tài khoản bằng
+    `minh.huy@gmail.com`, `minhhuy+1@gmail.com`, `MinhHuy@gmail.com`. CSDL có
+    UNIQUE trên `email` và ép chữ thường, nhưng chữ thường không đủ: Gmail bỏ
+    qua dấu chấm và mọi nhà cung cấp lớn bỏ qua phần `+tag` (sub-addressing,
+    RFC 5233). Ba chuỗi khác nhau → ba hàng → một hộp thư nhận ba bộ mã OTP.
+
+    Quy tắc:
+      * chữ thường, cắt khoảng trắng;
+      * bỏ `+tag` ở phần cục bộ với MỌI domain (Gmail, Outlook, iCloud,
+        Fastmail đều hỗ trợ; nhà nào không hỗ trợ thì `+` cũng không phải địa
+        chỉ hợp lệ trong thực tế);
+      * với Gmail: bỏ dấu chấm và gộp `googlemail.com` về `gmail.com`.
+
+    Giá trị này KHÔNG được lưu thay `email` — người dùng thấy đúng địa chỉ họ
+    gõ. Nó chỉ dùng để so trùng.
+    """
+    e = _normalize_login(email)
+    if "@" not in e:
+        return e
+    local, domain = e.rsplit("@", 1)
+    local = local.split("+", 1)[0]
+    if domain == "googlemail.com":
+        domain = "gmail.com"
+    if domain in _DOT_INSENSITIVE_DOMAINS:
+        local = local.replace(".", "")
+    return f"{local}@{domain}"
+
+
+def find_user_with_same_mailbox(email: str, *, exclude_user_id: Optional[str] = None) -> Optional[str]:
+    """`email` của tài khoản đang dùng CÙNG hộp thư với `email` truyền vào, hoặc None.
+
+    Quét theo domain rồi so `canonical_email` trong Python: số tài khoản cùng
+    domain là nhỏ, và làm ở đây tránh phải thêm một cột/chỉ mục mới vào lược
+    đồ v8 đã đóng băng chỉ để chống bí danh.
+    """
+    target = canonical_email(email)
+    if "@" not in target:
+        return None
+    domain = target.rsplit("@", 1)[1]
+    domains = [domain] + (["googlemail.com"] if domain == "gmail.com" else [])
+    with _identity_cursor() as cur:
+        cur.execute(
+            "SELECT id, email FROM users WHERE split_part(lower(email), '@', 2) = ANY(%s)",
+            (domains,),
+        )
+        for row in cur.fetchall():
+            if exclude_user_id and str(row["id"]) == str(exclude_user_id):
+                continue
+            if canonical_email(row["email"]) == target:
+                return str(row["email"])
+    return None
+
+
 def _row_to_user(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not row:
         return None
@@ -290,7 +351,15 @@ def _fetch_user_by_login(identifier: str) -> Optional[Dict[str, Any]]:
             (login, login),
         )
         row = cur.fetchone()
-        return _row_to_user(row)
+    if row is None and "@" in login:
+        # Bí danh của cùng hộp thư (`minh.huy@`, `minhhuy+1@`) phải đăng nhập và
+        # khôi phục được như địa chỉ đã đăng ký. 14/09/2026: hai lượt "khôi
+        # phục mật khẩu" trả "không có tài khoản" chỉ vì người dùng gõ địa chỉ
+        # có dấu chấm — đúng hộp thư, sai chuỗi. Xem `canonical_email`.
+        that = find_user_with_same_mailbox(login)
+        if that and _normalize_login(that) != login:
+            return _fetch_user_by_login(that)
+    return _row_to_user(row)
 
 
 def create_user(
@@ -332,6 +401,13 @@ def create_user(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username or email already exists",
+        )
+    # Một hộp thư = một tài khoản, kể cả khi viết bằng bí danh (`+tag`, dấu chấm
+    # Gmail). Xem `canonical_email`.
+    if find_user_with_same_mailbox(email_norm):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Hộp thư này đã có tài khoản. Mỗi địa chỉ email chỉ đăng ký được một tài khoản.",
         )
 
     user_id = str(uuid.uuid4())
