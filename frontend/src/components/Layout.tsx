@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthToken } from "../api/axiosClient";
 import { logout as apiLogout, isTenantAdmin } from "../api/auth";
 import NotificationBell from "./NotificationBell";
+import WorkingContextChip from "./WorkingContextChip";
 import LanguageSwitcher from "./LanguageSwitcher";
 import { useAuth, hasSessionHint } from "../contexts/AuthContext";
 import { usePresence } from "../hooks/usePresence";
@@ -420,10 +421,16 @@ export default function Layout({ children }: { children: ReactNode }) {
               không phải lỗi khung. Chỗ chật trên máy hẹp đã được lo bằng
               `hidden md:flex` và các mục tự ẩn theo breakpoint. */}
           <div className="hidden md:flex items-center gap-2 sm:gap-3 w-auto min-w-0 justify-end flex-nowrap">
-            <div className="hidden sm:flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-sky-400 animate-pulse" : "bg-slate-300"}`} />
-              <span className="text-sm text-slate-600">{hasToken ? t("Đã đăng nhập") : t("Chế độ khách")}</span>
-            </div>
+            {/* "Tôi đang ở đâu?" — tổ chức mà máy chủ đang lấy phạm vi, thay cho
+                chấm "Đã đăng nhập" vốn không nói được gì. Khách vẫn thấy "Chế độ khách". */}
+            {hasToken ? (
+              <WorkingContextChip className="hidden sm:flex" />
+            ) : (
+              <div className="hidden sm:flex items-center space-x-2">
+                <div className="w-2 h-2 rounded-full bg-slate-300" />
+                <span className="text-sm text-slate-600">{t("Chế độ khách")}</span>
+              </div>
+            )}
 
             {/* Cả khách lẫn người đã đăng nhập: người đọc tiếng Anh gặp trang
                 đăng nhập trước tiên, nên giấu nút này sau cổng đăng nhập là
