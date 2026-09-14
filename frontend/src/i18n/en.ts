@@ -111,6 +111,8 @@ export const EN: Record<string, string> = {
   "Ký hiệu này có cách thể hiện khác nhau theo miền. Cả ba đều đúng — hãy xem miền của bạn.": "This sign is made differently by region. All are correct — watch your own region.",
   "Liên kết này thuộc {a}, nhưng bạn đang làm việc tại {b}": "This link belongs to {a}, but you are working in {b}",
   "Lưu ngay — chỉ hiển thị một lần. Máy chủ không giữ khoá riêng, đóng hộp này là mất.": "Save it now — shown only once. The server does not keep the private key; closing this box loses it.",
+  "Lần quay của bạn: đổi nhãn hoặc xóa trong Chi tiết": "Your recordings: relabel or delete them in Details",
+  "Lần quay gắn \"của bạn\" là do tài khoản bạn thu — bạn có thể đổi nhãn hoặc xóa. Lần quay của người khác chỉ xem được.": "Recordings tagged \"yours\" were captured by your account — you can relabel or delete them. Other people's recordings are view-only.",
   "Lịch sử thu": "Recording history",
   "Lọc theo miền": "Filter by region",
   "Lựa chọn của bạn": "Your choices",
@@ -669,7 +671,6 @@ export const EN: Record<string, string> = {
     "Only turn this on when the change widens how data is processed. Turning it on for a typo teaches people to click Agree without reading.",
   "Chỉ cần 4 bước đơn giản để bắt đầu đóng góp cho cộng đồng người khiếm thính Việt Nam.":
     "Just four steps to start contributing to Vietnam's deaf community.",
-  "Chỉ quản trị viên có thể chỉnh sửa": "Only administrators can edit this",
   "Chọn cách bạn muốn cấu hình các thông số huấn luyện":
     "Choose how you want to configure the training parameters",
   "Chọn một hoặc nhiều phương ngữ để bao gồm trong quá trình huấn luyện":

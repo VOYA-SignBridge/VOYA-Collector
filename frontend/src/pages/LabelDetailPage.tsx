@@ -28,6 +28,7 @@ import {
 } from "../api/labelDetail";
 import { stabilizeSequence, type FramesData } from "../components/viewer/handData";
 import { dialectLabel } from "../config/dialectLabels";
+import { useAuth } from "../hooks/useAuth";
 import { usePlayback } from "../components/viewer/usePlayback";
 import { useRenderTier, type TierChoice } from "../components/viewer/useRenderTier";
 import Skeleton2DPlayer from "../components/viewer/Skeleton2DPlayer";
@@ -63,6 +64,7 @@ type PreviewState = "checking" | "rendering" | "ready" | "error";
 export default function LabelDetailPage() {
   const { t } = useI18n();
   const { id: classUid = "" } = useParams();
+  const { isAdmin } = useAuth();
 
   const [info, setInfo] = useState<LabelSessionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -269,6 +271,13 @@ export default function LabelDetailPage() {
           <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
             {t("Các lần quay (Sessions)")}
           </h2>
+          {/* Quyền tính theo TÀI KHOẢN đã thu (auth_user_id), không theo tên
+              người ký — nên nói rõ vì sao có lần quay hiện nút, có lần không. */}
+          {!isAdmin && info.sessions.length > 0 && (
+            <p className="text-xs text-slate-500" data-testid="session-permission-hint">
+              {t("Lần quay gắn \"của bạn\" là do tài khoản bạn thu — bạn có thể đổi nhãn hoặc xóa. Lần quay của người khác chỉ xem được.")}
+            </p>
+          )}
 
           {info.sessions.length === 0 && (
             <EmptyState

@@ -191,6 +191,40 @@ describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
     expect(screen.queryByText("Tải .npz")).not.toBeInTheDocument();
   });
 
+  it("người thường thấy dòng giải thích quyền; quản trị thì không", async () => {
+    // Quyền tính theo tài khoản đã thu: người đóng góp cần biết vì sao có lần
+    // quay hiện nút Đổi nhãn/Xóa, có lần không. Quản trị quản lý được tất cả
+    // nên không cần câu này.
+    const { unmount } = render(<LabelDetailPage />);
+    await screen.findAllByText("Xin chào");
+    expect(screen.queryByTestId("session-permission-hint")).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(useAuthHook.useAuth).mockReturnValue({
+      loading: false,
+      isAdmin: false,
+      user: { id: "2", username: "member" },
+      login: vi.fn(),
+      logout: vi.fn(),
+      checkStatus: vi.fn(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    vi.mocked(api.getLabelSessions).mockResolvedValue({
+      ...SESSIONS,
+      sessions: [
+        SESSIONS.sessions[0],
+        { ...SESSIONS.sessions[1], is_owner: false, can_manage: false },
+      ],
+    });
+    render(<LabelDetailPage />);
+    await screen.findAllByText("Xin chào");
+    expect(screen.getByTestId("session-permission-hint")).toBeInTheDocument();
+    // Lần quay của mình vẫn có đủ nút; lần của người khác thì không.
+    expect(screen.getAllByText("Xóa").length).toBe(1);
+    expect(screen.getAllByText("Đổi nhãn").length).toBe(1);
+    expect(screen.getAllByText("của bạn").length).toBe(1);
+  });
+
   it("nhãn không có lần quay nào → hiện trạng thái rỗng", async () => {
     vi.mocked(api.getLabelSessions).mockResolvedValue({ ...SESSIONS, count: 0, sessions: [] });
     render(<LabelDetailPage />);

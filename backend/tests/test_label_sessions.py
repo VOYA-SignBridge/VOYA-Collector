@@ -382,3 +382,103 @@ class TestRendererBoundaries:
         out = tmp_path / "wide.mp4"
         render_sequence_to_mp4(seq, out, fps=15)
         assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# Quyền trên LẦN QUAY (không phải nhãn): chủ sở hữu theo auth_user_id, hoặc admin
+# ---------------------------------------------------------------------------
+#
+# Người đóng góp phải đổi nhãn/xoá được lần quay CỦA MÌNH dù không phải quản trị,
+# và không đụng được lần quay của người khác. "Của mình" tính theo tài khoản đã
+# thu (auth_user_id trong Postgres), không theo tên người ký trong samples.csv —
+# hai người có thể trùng tên. Trước 14/09/2026 ba nhánh này không có test nào.
+
+OWNER = {"id": "u-owner", "username": "chu", "is_admin": False}
+OTHER = {"id": "u-other", "username": "khach", "is_admin": False}
+ADMIN = {"id": "u-admin", "username": "qtv", "is_admin": True}
+
+
+@pytest.fixture
+def owned_dataset(dataset, monkeypatch):
+    """`dataset` + chủ sở hữu của mẫu gốc `abc` là OWNER; ghi đè hai seam ghi
+    để không đụng CSV/Drive thật, chỉ đếm số dòng đã được chuyển."""
+    import app.routers.label_sessions as ls  # noqa: F401  (router đã import)
+    import app.storage.metadata_db as mdb
+    import app.catalog_sync as cs
+
+    monkeypatch.setattr(mdb, "get_sample_owner", lambda uid: "u-owner" if uid == "abc" else None)
+    monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {u: "u-owner" for u in uids if u == "abc"})
+    # Cổng access_gate đòi người gọi có MỘT grant tenant nào đó (community_member
+    # được gắn lúc đăng ký). Người giả trong test không có dòng nào trong DB,
+    # nên cho họ qua cổng ở đây — thứ đang được kiểm là phép kiểm CHỦ SỞ HỮU ở
+    # tầng router, không phải cổng.
+    import app.access_gate as gate
+
+    monkeypatch.setattr(gate, "_has_any_tenant_grant", lambda user: True)
+    calls = {"deleted": [], "moved": []}
+    monkeypatch.setattr(cs, "sync_soft_delete_sample", lambda uid, tenant_id: calls["deleted"].append((uid, tenant_id)))
+    monkeypatch.setattr(cs, "sync_reassign_sample", lambda uid, ref, tenant_id: calls["moved"].append((uid, ref, tenant_id)))
+    return calls
+
+
+def _as(user):
+    app.dependency_overrides[get_current_user] = lambda: user
+
+
+class TestSessionOwnershipPermissions:
+    def test_list_marks_only_owner_session_manageable(self, owned_dataset):
+        _as(OWNER)
+        sessions = {s["session_id"]: s for s in client.get("/classes/cls123/sessions").json()["sessions"]}
+        assert sessions["sess-1"]["is_owner"] is True and sessions["sess-1"]["can_manage"] is True
+        # Dòng legacy (không session_id → khoá `single-<uid>`) không có chủ →
+        # không sửa được, và cũng không được gán nhầm cho người gọi.
+        assert sessions["single-legacy"]["is_owner"] is False
+        assert sessions["single-legacy"]["can_manage"] is False
+
+        _as(OTHER)
+        sessions = {s["session_id"]: s for s in client.get("/classes/cls123/sessions").json()["sessions"]}
+        assert sessions["sess-1"]["can_manage"] is False
+
+        _as(ADMIN)
+        sessions = {s["session_id"]: s for s in client.get("/classes/cls123/sessions").json()["sessions"]}
+        assert sessions["sess-1"]["is_owner"] is False and sessions["sess-1"]["can_manage"] is True
+
+    def test_owner_can_delete_whole_session(self, owned_dataset):
+        _as(OWNER)
+        r = client.delete("/classes/cls123/sessions/sess-1")
+        assert r.status_code == 200, r.text
+        assert r.json()["deleted_count"] == 2  # mẫu gốc + 1 bản tăng cường cùng session
+        assert sorted(u for u, _ in owned_dataset["deleted"]) == ["abc", "abc-aug"]
+
+    def test_other_user_cannot_delete(self, owned_dataset):
+        _as(OTHER)
+        r = client.delete("/classes/cls123/sessions/sess-1")
+        assert r.status_code == 403
+        assert owned_dataset["deleted"] == []
+
+    def test_admin_can_delete_anyone(self, owned_dataset):
+        _as(ADMIN)
+        assert client.delete("/classes/cls123/sessions/sess-1").status_code == 200
+        assert len(owned_dataset["deleted"]) == 2
+
+    def test_owner_can_relabel_other_cannot(self, owned_dataset):
+        _as(OTHER)
+        r = client.post("/classes/cls123/sessions/sess-1/reassign", json={"target_class_ref": "cls999"})
+        assert r.status_code == 403
+        assert owned_dataset["moved"] == []
+
+        _as(OWNER)
+        r = client.post("/classes/cls123/sessions/sess-1/reassign", json={"target_class_ref": "cls999"})
+        assert r.status_code == 200, r.text
+        assert r.json()["moved_count"] == 2
+        assert {ref for _, ref, _ in owned_dataset["moved"]} == {"cls999"}
+
+    def test_ownerless_legacy_row_is_not_claimable(self, owned_dataset):
+        # get_sample_owner trả None (không có auth_user_id) → người thường bị
+        # 403 dù tên người ký trên dòng là gì; admin vẫn xoá được.
+        _as(OWNER)
+        assert client.delete("/classes/cls123/sessions/single-legacy").status_code == 403
+        assert owned_dataset["deleted"] == []
+        _as(ADMIN)
+        assert client.delete("/classes/cls123/sessions/single-legacy").status_code == 200
+        assert [u for u, _ in owned_dataset["deleted"]] == ["legacy"]

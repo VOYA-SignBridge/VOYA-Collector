@@ -814,8 +814,12 @@ export default function LabelsPage() {
                       >
                         {t("Chi tiết")}
                       </Button>
+                      {/* Sửa/xoá NHÃN là việc của quản trị; nhưng lần quay do
+                          chính mình thu thì người đóng góp tự đổi nhãn/xoá được
+                          trong trang Chi tiết — câu cũ "chỉ quản trị viên..." làm
+                          họ tưởng không sửa được gì cả. */}
                       <div className="mt-1 text-xs text-gray-500 italic text-center">
-                        {t("Chỉ quản trị viên có thể chỉnh sửa")}
+                        {t("Lần quay của bạn: đổi nhãn hoặc xóa trong Chi tiết")}
                       </div>
                     </div>
                   )}

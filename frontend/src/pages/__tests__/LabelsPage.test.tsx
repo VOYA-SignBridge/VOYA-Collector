@@ -116,7 +116,7 @@ describe('LabelsPage - Comprehensive Automation Tests (Edge Cases & Errors)', ()
       // Nút "Tạo nhãn mới" không được tồn tại trong DOM
       expect(screen.queryByText('Tạo nhãn mới')).not.toBeInTheDocument();
       // Phải có dòng text thông báo quyền
-      expect(screen.getAllByText('Chỉ quản trị viên có thể chỉnh sửa').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Lần quay của bạn: đổi nhãn hoặc xóa trong Chi tiết').length).toBeGreaterThan(0);
     });
   });
 
