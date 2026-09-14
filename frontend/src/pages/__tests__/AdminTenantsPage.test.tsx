@@ -395,3 +395,20 @@ describe('Bố cục Đợt 2 — đơn giản cho người mới', () => {
     expect(screen.queryByText('giaovien')).not.toBeInTheDocument();
   });
 });
+
+describe('Vai nói bằng hệ quả', () => {
+  it('dưới ô chọn vai có câu "vai này cho phép làm gì", đổi theo lựa chọn', async () => {
+    render(<AdminTenantsPage />);
+    await openTenant();
+    await openTab(/Lời mời/);
+
+    const hint = await screen.findByTestId('role-hint-invite');
+    expect(hint).toHaveTextContent(/Là thành viên/);
+
+    fireEvent.change(screen.getByLabelText('Vai khi mời'), { target: { value: 'admin' } });
+    expect(hint).toHaveTextContent(/mời\/gỡ thành viên/);
+
+    fireEvent.change(screen.getByLabelText('Vai khi mời'), { target: { value: 'editor' } });
+    expect(hint).toHaveTextContent(/Không quản lý được thành viên/);
+  });
+});

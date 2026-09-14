@@ -52,6 +52,7 @@ import {
   NO_ROLE_OPTION,
   ROLES,
   parseRole,
+  roleDescription,
   roleLabel,
   setHomeTenant,
   updateMemberRole,
@@ -488,6 +489,9 @@ export default function AdminTenantsPage() {
               >
                 {t("Chuyển tổ chức nhà về đây")}
               </button>
+              <p className="mt-2 w-full text-xs text-slate-600" data-testid="role-hint-add">
+                {roleDescription(addForm.role)}
+              </p>
             </div>
             <p className="text-xs text-slate-400 mt-2">
               {t("Gắn thẳng theo ID là thao tác của quản trị viên nền tảng. Cách đưa người vào dành cho quản trị viên tổ chức là")} <strong>{t("lời mời")}</strong> {t("bên dưới — nó đòi hỏi chính người được mời phải hành động.")}
@@ -610,6 +614,9 @@ export default function AdminTenantsPage() {
               >
                 {t("Mời")}
               </button>
+              <p className="mt-2 w-full text-xs text-slate-600" data-testid="role-hint-invite">
+                {roleDescription(inviteForm.role)}
+              </p>
             </div>
           </section>
 

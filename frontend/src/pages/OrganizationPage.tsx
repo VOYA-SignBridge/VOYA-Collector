@@ -53,6 +53,7 @@ import {
   NO_ROLE_OPTION,
   ROLES,
   parseRole,
+  roleDescription,
   roleLabel,
   createInvitation,
   exportDownloadUrl,
@@ -893,6 +894,10 @@ function InvitationsSection({
           <MailIcon className="mr-1.5 h-4 w-4" aria-hidden="true" />
           {t("Gửi lời mời")}
         </Button>
+        {/* Vai này cho phép làm gì — người mời đọc HỆ QUẢ trước khi bấm gửi. */}
+        <p className="w-full text-xs text-slate-600" data-testid="role-hint-invite">
+          {roleDescription(role)}
+        </p>
       </div>
 
       {invitations.length === 0 ? (

@@ -82,6 +82,27 @@ export const ROLE_LABEL: Record<MemberRole, string> = {
 export const NO_ROLE_LABEL = "Chưa có vai";  // khoá từ điển; dịch ở `roleLabel()`
 
 /**
+ * Vai này CHO PHÉP LÀM GÌ — nói bằng hệ quả, không phải bằng tên vai.
+ *
+ * Kế hoạch UX 13/09/2026 §4: "nêu rõ quyền truy cập dữ liệu, không chỉ tên
+ * vai". Nội dung đối chiếu với cổng máy chủ: `require_tenant_editor` gác
+ * `classes`, `signers_admin`, `integrations`, `processing_admin`;
+ * `require_tenant_admin` gác `tenants` (thành viên, lời mời, gói) và
+ * `workspaces`. Đổi cổng thì phải đổi câu ở đây — đây là lời hứa với người
+ * đang cấp quyền. Khoá từ điển; dịch bằng `roleDescription()`.
+ */
+export const ROLE_DESCRIPTION: Record<MemberRole, string> = {
+  admin: "Làm được mọi việc của Biên tập viên, và thêm: mời/gỡ thành viên, đổi vai, quản lý nhóm & lớp, gói dịch vụ và xuất dữ liệu của tổ chức.",
+  editor: "Tạo và sửa nhãn, quản lý danh sách người ký, khoá API và webhook, yêu cầu xử lý lại dữ liệu. Không quản lý được thành viên hay gói dịch vụ.",
+};
+export const NO_ROLE_DESCRIPTION =
+  "Là thành viên: đóng góp dữ liệu và dùng nhận dạng trong tổ chức này. Không sửa được nhãn, không quản lý gì.";
+
+export function roleDescription(role: MemberRoleOrNone | undefined): string {
+  return role ? tr(ROLE_DESCRIPTION[role]) : tr(NO_ROLE_DESCRIPTION);
+}
+
+/**
  * Nhãn của một vai có thể vắng. Dùng ở mọi chỗ hiển thị vai đọc từ máy chủ.
  *
  * `ROLE_LABEL[r]` trực tiếp thì `null` cho ra `undefined` và React vẽ ra một
