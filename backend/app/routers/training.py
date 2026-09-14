@@ -1371,6 +1371,110 @@ async def get_dataset_info(
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
 
 
+# ---------------------------------------------------------------------------
+# Chuẩn bị dữ liệu từ giao diện (port từ feature-v2, chỉnh cho hiện vật có chủ)
+# ---------------------------------------------------------------------------
+
+def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
+    """Phương ngữ đã chọn → các recognition_profile chuẩn bị được (đọc từ
+    labels.csv, không gắn cứng). Trả (profiles, phương ngữ không có profile)."""
+    _, labels = _load_samples_and_labels()
+    wanted = {str(d).strip() for d in dialects if str(d).strip()}
+    by_dialect: Dict[str, set] = {}
+    rows = labels.values() if isinstance(labels, dict) else labels
+    for label in rows:
+        dialect = str(label.get("dialect") or "").strip()
+        profile = str(label.get("recognition_profile") or "").strip()
+        if dialect in wanted and profile:
+            by_dialect.setdefault(dialect, set()).add(profile)
+    profiles: List[str] = []
+    unsupported: List[str] = []
+    for dialect in sorted(wanted):
+        found = {p for p in by_dialect.get(dialect, set()) if p != "legacy_unassigned"}
+        if found:
+            profiles.extend(found)
+        else:
+            unsupported.append(dialect)
+    return sorted(set(profiles)), unsupported
+
+
+class DatasetPrepareRequest(BaseModel):
+    """Người bấm chỉ chọn phương ngữ; phần còn lại suy ra ở máy chủ."""
+    dialects: List[str]
+    min_samples_per_class: Optional[int] = None
+    seed: int = 42
+    with_research: bool = False
+
+
+@router.post("/dataset/prepare")
+async def start_dataset_preparation(
+    body: DatasetPrepareRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Dựng hiện vật vận hành (mỗi phương ngữ một cái, có chủ tổ chức, có sàn
+    mẫu) — và tuỳ chọn split nghiên cứu — bằng một lần bấm.
+
+    Trước 15/09/2026 việc này chỉ làm được bằng terminal trong container
+    trainer; người thu dữ liệu qua nền tảng không tự biến dữ liệu mới thành
+    thứ huấn luyện được. Ai có quyền bắt đầu huấn luyện thì cũng được chuẩn bị
+    dữ liệu: cùng một câu hỏi thẩm quyền (`assert_can_use_dialect`).
+    """
+    from app.config import settings as _cfg
+    from app.dataset_prep_tasks import create_pending_report, prepare_dataset
+
+    dialects = [str(d).strip() for d in (body.dialects or []) if str(d).strip()]
+    if not dialects:
+        raise HTTPException(status_code=400, detail="Chưa chọn phương ngữ nào để chuẩn bị.")
+    for d in dialects:
+        try:
+            assert_can_use_dialect(d, str(current_user.get("id") or ""))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc))
+
+    floor = int(body.min_samples_per_class or _cfg.min_samples_per_class_for_training or 0)
+    tenant_id = tenant_of(current_user)
+    profiles: List[str] = []
+    if body.with_research:
+        profiles, unsupported = await asyncio.to_thread(_profiles_for_dialects, dialects)
+        if not profiles:
+            raise HTTPException(
+                status_code=400,
+                detail=("Phương ngữ đã chọn chưa được gán nhóm nhận dạng "
+                        f"({', '.join(unsupported) or 'không rõ'}), nên chưa dựng được split "
+                        "nghiên cứu. Bỏ tuỳ chọn nghiên cứu, hoặc gán recognition_profile cho "
+                        "các nhãn trước."))
+
+    run_id = uuid.uuid4().hex[:12]
+    await asyncio.to_thread(
+        create_pending_report, run_id, tenant_id=tenant_id, dialects=dialects, floor=floor,
+        seed=body.seed, with_research=body.with_research,
+        requested_by=str(current_user.get("username") or ""))
+    # Hàng đợi mặc định (worker), KHÔNG phải "training".
+    prepare_dataset.delay(run_id=run_id, tenant_id=tenant_id, dialects=dialects,
+                          min_samples_per_class=floor, seed=body.seed,
+                          with_research=body.with_research, profiles=profiles,
+                          requested_by=str(current_user.get("username") or ""))
+    logger.info("[PREP] %s bắt đầu run=%s dialects=%s floor=%s research=%s",
+                current_user.get("username"), run_id, dialects, floor, body.with_research)
+    return {"run_id": run_id, "dialects": dialects, "min_samples_per_class": floor,
+            "with_research": body.with_research, "status": "queued"}
+
+
+@router.get("/dataset/prepare/{run_id}")
+async def get_dataset_preparation(
+    run_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Tiến độ và kết quả của một lần chuẩn bị. Chỉ tổ chức đã bấm mới đọc được."""
+    from app.dataset_prep_tasks import read_report
+
+    report = await asyncio.to_thread(read_report, run_id)
+    if report is None or str(report.get("tenant_id") or "") != tenant_of(current_user):
+        # Cùng một câu trả lời cho "không có" và "của tổ chức khác".
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy lần chuẩn bị {run_id}")
+    return report
+
+
 @router.post("/start", response_model=TrainingJob, dependencies=[Depends(limit_training)])
 async def start_training(
     config: TrainingConfig,

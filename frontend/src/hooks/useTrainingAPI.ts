@@ -86,6 +86,28 @@ export interface OperationalSplit {
   counts: { train: number; val: number; test: number };
 }
 
+// POST /training/dataset/prepare → GET /training/dataset/prepare/{run_id}
+export interface PreparationStep {
+  step: string;
+  ok?: boolean;
+  returncode?: number | null;
+  stderr_tail?: string;
+  stdout_tail?: string;
+}
+
+export interface PreparationReport {
+  run_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | string;
+  dialects: string[];
+  min_samples_per_class: number;
+  current_step: string | null;
+  steps: PreparationStep[];
+  operational_splits: Array<{ split_id: string; dialect: string; ok: boolean; num_classes?: number; error?: string }>;
+  research_splits: Array<{ split_version: string; profile: string; ok: boolean; error?: string }>;
+  warnings: string[];
+  error?: string;
+}
+
 export interface ResearchSplit {
   split_version: string;
   dataset_version: string;
@@ -376,6 +398,33 @@ export function useTrainingAPI() {
     }
   }, []);
 
+  // Chuẩn bị dữ liệu: dựng hiện vật vận hành cho các phương ngữ đã chọn.
+  const prepareDataset = useCallback(
+    async (dialects: string[], opts: { with_research?: boolean } = {}): Promise<{ run_id: string } | null> => {
+      try {
+        const response = await axiosClient.post(`${API_PREFIX}/dataset/prepare`, {
+          dialects,
+          with_research: !!opts.with_research,
+        });
+        return response.data;
+      } catch (err) {
+        setError(friendlyError(err));
+        return null;
+      }
+    },
+    [],
+  );
+
+  const getPreparation = useCallback(async (runId: string): Promise<PreparationReport | null> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/dataset/prepare/${encodeURIComponent(runId)}`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
   // Xuất xứ của một lần chạy: code + data + model + các kiểm tra tính tái lập.
   const getJobProvenance = useCallback(async (jobId: string): Promise<JobProvenance | null> => {
     try {
@@ -414,6 +463,8 @@ export function useTrainingAPI() {
     getJobEvaluation,
     getResearchSplits,
     getOperationalSplits,
+    prepareDataset,
+    getPreparation,
     getJobProvenance,
     deleteJob,
     useWebSocketProgress,

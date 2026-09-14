@@ -82,7 +82,7 @@ const TrainingPipeline: React.FC = () => {
   });
 
   const api = useTrainingAPI();
-  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs, getOperationalSplits } = api;
+  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs, getOperationalSplits, prepareDataset, getPreparation } = api;
   const { isAdmin } = useAuth();
 
   useEffect(() => {
@@ -149,6 +149,14 @@ const TrainingPipeline: React.FC = () => {
   );
 
   // Bước Chia Tập: tải danh sách hiện vật vận hành một lần mỗi lượt vào bước.
+  const reloadOperationalSplits = useCallback(async () => {
+    setOperationalSplitsLoading(true);
+    const rows = await getOperationalSplits();
+    setOperationalSplits(rows);
+    setOperationalSplitsLoading(false);
+    return rows;
+  }, [getOperationalSplits]);
+
   useEffect(() => {
     if (currentStep !== 3) return;
     let cancelled = false;
@@ -162,6 +170,15 @@ const TrainingPipeline: React.FC = () => {
       cancelled = true;
     };
   }, [currentStep, getOperationalSplits]);
+
+  // Dựng xong → tải lại danh sách và chọn sẵn tập vừa dựng.
+  const handlePrepared = useCallback(
+    async (newIds: string[]) => {
+      await reloadOperationalSplits();
+      if (newIds[0]) setOperationalSplitId(newIds[0]);
+    },
+    [reloadOperationalSplits],
+  );
 
   // Dispatch a run with an explicit config and reset the progress view.
   const startWith = async (config: TrainingConfig) => {
@@ -362,6 +379,9 @@ const TrainingPipeline: React.FC = () => {
                     selectedDialects={selectedDialects}
                     value={operationalSplitId}
                     onChange={setOperationalSplitId}
+                    onPrepare={(dialects) => prepareDataset(dialects)}
+                    getPreparation={getPreparation}
+                    onPrepared={handlePrepared}
                   />
                 )}
                 <DataSplitVisualization datasetInfo={datasetInfo} selectedDialects={selectedDialects} />

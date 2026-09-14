@@ -93,3 +93,52 @@ describe("OperationalSplitPicker — ghim tập chia vận hành ở bước Chi
     expect(screen.getByText(/make_splits\.py .*--dialects pn-c/)).toBeInTheDocument();
   });
 });
+
+describe("OperationalSplitPicker — nút Dựng tập chia mới", () => {
+  it("bấm dựng → hỏi tiến độ → xong thì báo lên với id vừa dựng", async () => {
+    vi.useFakeTimers();
+    const onPrepare = vi.fn(async () => ({ run_id: "abc123" }));
+    const reports = [
+      { status: "running", current_step: "operational_split:pn-c", steps: [{ step: "operational_split:pn-c" }], operational_splits: [], research_splits: [], warnings: [] },
+      { status: "completed", current_step: null, steps: [{ step: "operational_split:pn-c", ok: true }],
+        operational_splits: [{ split_id: "pn-c-20260915-abc123-floor25", dialect: "pn-c", ok: true }], research_splits: [], warnings: [] },
+    ];
+    let i = 0;
+    const getPreparation = vi.fn(async () => ({ run_id: "abc123", dialects: ["pn-c"], min_samples_per_class: 25, ...reports[Math.min(i++, 1)] }));
+    const onPrepared = vi.fn();
+    render(
+      <OperationalSplitPicker
+        splits={[]} loading={false} selectedDialects={["pn-c"]} value={null} onChange={() => {}}
+        onPrepare={onPrepare} getPreparation={getPreparation} onPrepared={onPrepared}
+      />,
+    );
+    // Chưa có tập → gợi ý bấm nút thay vì in lệnh terminal.
+    expect(screen.queryByText(/make_splits\.py/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dựng tập chia mới" }));
+    await vi.waitFor(() => expect(onPrepare).toHaveBeenCalledWith(["pn-c"]));
+    await vi.waitFor(() => expect(screen.getByTestId("operational-split-progress").textContent).toContain("Đang chia tập cho phương ngữ pn-c"));
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(onPrepared).toHaveBeenCalledWith(["pn-c-20260915-abc123-floor25"]));
+    await vi.waitFor(() => expect(screen.getByTestId("operational-split-progress").textContent).toContain("Đã dựng xong 1 tập chia"));
+    vi.useRealTimers();
+  });
+
+  it("dựng thất bại → hiện lý do của từng phương ngữ", async () => {
+    const onPrepare = vi.fn(async () => ({ run_id: "abc123" }));
+    const getPreparation = vi.fn(async () => ({
+      run_id: "abc123", dialects: ["pn-c"], min_samples_per_class: 25, status: "failed", current_step: null,
+      error: "không dựng được hiện vật vận hành nào", steps: [],
+      operational_splits: [{ split_id: "x", dialect: "pn-c", ok: false, error: "[floor] còn 1 lớp" }],
+      research_splits: [], warnings: [],
+    }));
+    render(
+      <OperationalSplitPicker
+        splits={[]} loading={false} selectedDialects={["pn-c"]} value={null} onChange={() => {}}
+        onPrepare={onPrepare} getPreparation={getPreparation}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dựng tập chia mới" }));
+    await vi.waitFor(() => expect(screen.getByTestId("operational-split-failures").textContent).toContain("pn-c: [floor] còn 1 lớp"));
+    expect(screen.getByRole("button", { name: "Dựng tập chia mới" })).toBeEnabled();
+  });
+});

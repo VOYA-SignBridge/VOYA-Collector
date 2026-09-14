@@ -299,3 +299,4 @@ from app import training_tasks  # noqa: F401, E402
 from app import sync_tasks  # noqa: F401, E402
 from app import preview_tasks  # noqa: F401, E402
 from app import saas_tasks  # noqa: F401, E402
+from app import dataset_prep_tasks  # noqa: F401, E402
