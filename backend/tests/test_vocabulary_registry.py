@@ -129,6 +129,14 @@ _ALLOWED = {
     "vocabulary_registry.py",   # the registry itself
     "dataset_manager.py",       # _INPUT_ALIASES: spellings, not identities
     "test_vocabulary_registry.py",
+    # Trang "Học ký hiệu" (14/09/2026): 'bac'/'nam'/'trung' ở đây là VÙNG của
+    # từ điển QIPEDC (trục `region`), không phải phương ngữ — trùng chữ với ba
+    # id phương ngữ cũ nên máy quét bắt nhầm. Danh mục học đọc từ
+    # data/qipedc_catalog.json, không phải một bản sao của sổ phương ngữ.
+    "learn_catalog.py",
+    "learn.ts",
+    "LearnPage.tsx",
+    "Learn.test.tsx",
 }
 # Derived, never hand-listed. The hand-written tuple that used to sit here knew
 # only the canonical ids, so a seventh copy of the list in DialectSelector.tsx

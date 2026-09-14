@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import re
 import subprocess
 import time
@@ -245,6 +246,14 @@ def _resolve_for_run(config: Dict[str, Any], *, tenant_id: str):
     lệch nhau được mà không ai biết, và khi lệch thì cổng đồng thuận soi tệp A
     trong khi trainer đọc tệp B — mỗi tầng vẫn "đúng" mà cả hệ thống sai.
     """
+    # `processed` là gói ở /workspace (bind-mount), KHÔNG nằm trong ảnh
+    # /app. Worker Celery không có /workspace trên sys.path, nên import thẳng
+    # ném "No module named 'processed'" và mọi lượt vận hành/nghiên cứu thất
+    # bại ngay câu đầu (đo 15/09/2026: job 9eb6fa0b). Cùng cách như
+    # routers/training.py::_import_models_registry.
+    workspace = str(WORKSPACE_ROOT)
+    if workspace not in sys.path:
+        sys.path.insert(0, workspace)
     from processed.train_utils.split_artifact import (
         PURPOSE_OPERATIONAL, PURPOSE_RESEARCH, SplitArtifactError,
         resolve_split_artifact,

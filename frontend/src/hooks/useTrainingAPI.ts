@@ -6,6 +6,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getClassesList } from '../api/dataset';
 import axiosClient, { getAuthToken, getApiBaseURL } from '../api/axiosClient';
+// Lỗi 4xx mang `detail` do máy chủ soạn (vd. "Tập chia còn 1 lớp chưa đủ 25
+// mẫu..."); axios chỉ đưa "Request failed with status code 400" — người
+// huấn luyện không biết vì sao. friendlyError trả đúng câu của máy chủ.
+import { friendlyError } from '../lib/errors';
 
 /**
  * Tập dữ liệu ĐANG được chia thế nào — sự thật, không phải thanh trượt.
@@ -63,8 +67,23 @@ export interface TrainingConfig {
    *  versioned để kết quả trích dẫn được. */
   run_purpose?: 'smoke_test' | 'research';
   split_version?: string | null;
+  /** Hiện vật vận hành được ghim (processed/splits/operational/<id>). Có nó thì
+   *  server coi lượt chạy là 'operational' và soi đúng hiện vật này thay vì ba
+   *  tệp nghiên cứu đóng băng. */
+  operational_split_id?: string | null;
   /** Server ghi đè từ split đã chọn khi chạy chế độ research. */
   recognition_profile?: string | null;
+}
+
+// GET /training/splits/operational — hiện vật vận hành tổ chức mình sở hữu.
+export interface OperationalSplit {
+  split_id: string;
+  dialects: string[];
+  num_classes: number;
+  min_samples_per_class: number | null;
+  generated_at: string | null;
+  split_mode: string | null;
+  counts: { train: number; val: number; test: number };
 }
 
 export interface ResearchSplit {
@@ -248,7 +267,7 @@ export function useTrainingAPI() {
         setDatasetInfo(data);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -262,7 +281,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.post(`${API_PREFIX}/start`, config);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return null;
     } finally {
       setLoading(false);
@@ -275,7 +294,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return null;
     }
   }, []);
@@ -286,7 +305,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/metrics`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return [];
     }
   }, []);
@@ -297,7 +316,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.get(`${API_PREFIX}/jobs`, { params: { limit } });
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return [];
     }
   }, []);
@@ -308,7 +327,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/cancel`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return null;
     }
   }, []);
@@ -319,7 +338,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/promote`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return null;
     }
   }, []);
@@ -330,7 +349,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/evaluation`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return null;
     }
   }, []);
@@ -341,7 +360,18 @@ export function useTrainingAPI() {
       const response = await axiosClient.get(`${API_PREFIX}/splits`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
+      return [];
+    }
+  }, []);
+
+  // Hiện vật vận hành có thể ghim — bước Chia Tập chọn sẵn cái mới nhất.
+  const getOperationalSplits = useCallback(async (): Promise<OperationalSplit[]> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/splits/operational`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
       return [];
     }
   }, []);
@@ -352,7 +382,7 @@ export function useTrainingAPI() {
       const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/provenance`);
       return response.data;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return null;
     }
   }, []);
@@ -363,7 +393,7 @@ export function useTrainingAPI() {
       await axiosClient.delete(`${API_PREFIX}/jobs/${jobId}`);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(friendlyError(err));
       return false;
     }
   }, []);
@@ -383,6 +413,7 @@ export function useTrainingAPI() {
     promoteJob,
     getJobEvaluation,
     getResearchSplits,
+    getOperationalSplits,
     getJobProvenance,
     deleteJob,
     useWebSocketProgress,

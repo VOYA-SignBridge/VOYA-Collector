@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTrainingAPI, useWebSocketProgress } from '../../hooks/useTrainingAPI';
-import type { TrainingJob, TrainingConfig, TrainingJobListItem, TrainingMetrics } from '../../hooks/useTrainingAPI';
+import type { TrainingJob, TrainingConfig, TrainingJobListItem, TrainingMetrics, OperationalSplit } from '../../hooks/useTrainingAPI';
 import { useAuth } from '../../hooks/useAuth';
 import TrainingHistory from './components/TrainingHistory';
 import PageHeader from '../../components/ui/PageHeader';
@@ -24,6 +24,7 @@ import {
 } from '../../components/ui/Icons';
 import DatasetInfo from './components/DatasetInfo';
 import DataSplitVisualization from './components/DataSplitVisualization';
+import OperationalSplitPicker from './components/OperationalSplitPicker';
 import AugmentationPreview from './components/AugmentationPreview';
 import DialectSelector from './components/DialectSelector';
 import TrainingSettings from './components/TrainingSettings';
@@ -62,6 +63,11 @@ const TrainingPipeline: React.FC = () => {
   const [job, setJob] = useState<TrainingJob | null>(null);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
   const [selectedDialects, setSelectedDialects] = useState<string[]>([]);
+  // Hiện vật vận hành ghim cho lượt này (bước Chia Tập). Null = không có hiện
+  // vật khớp → server sẽ từ chối với lý do rõ ràng thay vì học trên tệp đóng băng.
+  const [operationalSplits, setOperationalSplits] = useState<OperationalSplit[]>([]);
+  const [operationalSplitsLoading, setOperationalSplitsLoading] = useState(false);
+  const [operationalSplitId, setOperationalSplitId] = useState<string | null>(null);
   const [trainingConfig, setTrainingConfig] = useState<TrainingConfig>({
     model_type: 'tcn',
     dialects: [],
@@ -76,7 +82,7 @@ const TrainingPipeline: React.FC = () => {
   });
 
   const api = useTrainingAPI();
-  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs } = api;
+  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs, getOperationalSplits } = api;
   const { isAdmin } = useAuth();
 
   useEffect(() => {
@@ -142,6 +148,21 @@ const TrainingPipeline: React.FC = () => {
     (msg) => console.error('[WS_ERROR]', msg)
   );
 
+  // Bước Chia Tập: tải danh sách hiện vật vận hành một lần mỗi lượt vào bước.
+  useEffect(() => {
+    if (currentStep !== 3) return;
+    let cancelled = false;
+    setOperationalSplitsLoading(true);
+    getOperationalSplits().then((rows) => {
+      if (cancelled) return;
+      setOperationalSplits(rows);
+      setOperationalSplitsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep, getOperationalSplits]);
+
   // Dispatch a run with an explicit config and reset the progress view.
   const startWith = async (config: TrainingConfig) => {
     const newJob = await startTraining(config);
@@ -153,7 +174,12 @@ const TrainingPipeline: React.FC = () => {
   };
 
   const handleStartTraining = () =>
-    startWith({ ...trainingConfig, dialects: selectedDialects });
+    startWith({
+      ...trainingConfig,
+      dialects: selectedDialects,
+      // Chế độ nghiên cứu ghim split versioned riêng; ngoài ra ghim hiện vật vận hành.
+      operational_split_id: trainingConfig.run_purpose === 'research' ? null : operationalSplitId,
+    });
 
   // Retry a failed run with the SAME config it used (works even when the job was
   // opened from history and the wizard state is empty).
@@ -170,8 +196,8 @@ const TrainingPipeline: React.FC = () => {
         return !!datasetInfo;
       case 2: // Dialect Selector - must select at least one (moved before split)
         return selectedDialects.length > 0;
-      case 3: // Data Split - always valid
-        return true;
+      case 3: // Data Split — cần một hiện vật vận hành để ghim (trừ chế độ nghiên cứu)
+        return trainingConfig.run_purpose === 'research' || operationalSplitId !== null;
       case 4: // Augmentation Preview - always valid
         return true;
       case 5: // Training Settings - always valid
@@ -191,6 +217,8 @@ const TrainingPipeline: React.FC = () => {
         // Dialect is step 2 now, so the "pick a dialect first" hint moves with it.
         case 2:
           return 'Chọn phương ngữ trước';
+        case 3:
+          return 'Chưa có tập chia để ghim';
         default:
           return 'Hoàn thành bước này';
       }
@@ -326,7 +354,18 @@ const TrainingPipeline: React.FC = () => {
               />
             )}
             {currentStep === 3 && (
-              <DataSplitVisualization datasetInfo={datasetInfo} selectedDialects={selectedDialects} />
+              <div className="space-y-4">
+                {trainingConfig.run_purpose !== 'research' && (
+                  <OperationalSplitPicker
+                    splits={operationalSplits}
+                    loading={operationalSplitsLoading}
+                    selectedDialects={selectedDialects}
+                    value={operationalSplitId}
+                    onChange={setOperationalSplitId}
+                  />
+                )}
+                <DataSplitVisualization datasetInfo={datasetInfo} selectedDialects={selectedDialects} />
+              </div>
             )}
             {currentStep === 4 && <AugmentationPreview />}
             {currentStep === 5 && (

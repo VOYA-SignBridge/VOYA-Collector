@@ -1081,6 +1081,65 @@ async def list_research_splits(
     return await asyncio.to_thread(_research_splits)
 
 
+def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
+    """Hiện vật vận hành mà TỔ CHỨC NÀY sở hữu và phân giải được.
+
+    Vì sao lọc qua chính `resolve_operational` chứ không chỉ đọc JSON: hai hiện
+    vật 15/08 (`*-20260815-floor25`) vẫn nằm trên đĩa, có đủ ba tệp và bản khai,
+    nhưng không khai chủ — bộ phân giải từ chối chúng. Liệt kê ra để người dùng
+    chọn rồi mới báo lỗi lúc bấm "Bắt đầu" là bắt họ đoán lần nữa.
+    """
+    workspace = str(WORKSPACE_ROOT)
+    if workspace not in sys.path:
+        sys.path.insert(0, workspace)
+    from processed.train_utils.split_artifact import (
+        SplitArtifactError, operational_root, resolve_operational,
+    )
+
+    root = operational_root(SPLITS_DIR)
+    out: List[Dict[str, Any]] = []
+    if not root.is_dir():
+        return out
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        try:
+            art = resolve_operational(SPLITS_DIR, d.name, tenant_id=tenant_id)
+        except SplitArtifactError:
+            continue  # không tồn tại / tổ chức khác / không rõ chủ: cùng một câu trả lời
+        meta = art.metadata or {}
+        classes = meta.get("classes") or []
+        dialects = sorted({str(c.get("dialect") or "") for c in classes if c.get("dialect")})
+        counts: Dict[str, int] = {}
+        for part in ("train", "val", "test"):
+            try:
+                with open(getattr(art, f"{part}_csv"), encoding="utf-8") as fh:
+                    counts[part] = max(sum(1 for _ in fh) - 1, 0)
+            except OSError:
+                counts[part] = 0
+        out.append({
+            "split_id": art.split_id,
+            "dialects": dialects,
+            "num_classes": int(meta.get("num_classes") or len(classes)),
+            "min_samples_per_class": (meta.get("policy") or {}).get("min_samples_per_class"),
+            "generated_at": meta.get("generated_at"),
+            "split_mode": meta.get("split_mode"),
+            "counts": counts,
+        })
+    # Mới nhất lên đầu — giao diện chọn sẵn phần tử đầu.
+    out.sort(key=lambda r: str(r.get("generated_at") or ""), reverse=True)
+    return out
+
+
+@router.get("/splits/operational")
+async def list_operational_splits(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    """Hiện vật vận hành tổ chức của người gọi có thể ghim cho một lượt chạy."""
+    tenant_id = tenant_of(current_user)
+    return await asyncio.to_thread(_operational_splits, tenant_id)
+
+
 def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optional[Path] = None) -> Optional[str]:
     """Copy checkpoint (+ JSON sidecar) sang thư mục deployment."""
     try:
@@ -1385,6 +1444,12 @@ async def start_training(
                             "processed/splits/make_splits.py "
                             "--operational_split_id=<ID>."),
                 )
+            # /workspace (bind-mount) không có sẵn trên sys.path của tiến trình
+            # web; thiếu dòng này thì mọi lượt vận hành 500 "No module named
+            # 'processed'" (15/09/2026).
+            workspace = str(WORKSPACE_ROOT)
+            if workspace not in sys.path:
+                sys.path.insert(0, workspace)
             from processed.train_utils.split_artifact import (
                 PURPOSE_OPERATIONAL, SplitArtifactError, resolve_split_artifact,
             )

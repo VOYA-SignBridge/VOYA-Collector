@@ -153,6 +153,11 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                       <button
                         key={dialect}
                         onClick={() => toggleDialect(dialect)}
+                        // Tên và trạng thái tường minh: nút chỉ chứa <h5>/<p> nên
+                        // Chromium tính ra tên rỗng — trình đọc màn hình đọc "nút",
+                        // và không kịch bản nào bấm được theo tên phương ngữ.
+                        aria-label={display}
+                        aria-pressed={isSelected}
                         className={`rounded-lg border-2 p-3 text-left transition-all ${
                           isSelected
                             ? 'border-ctu-blue/40 bg-ctu-blue/5 shadow-sm'
@@ -221,6 +226,11 @@ const DialectSelector: React.FC<Props> = ({ dialects, selected, onChange }) => {
                       <button
                         key={dialect}
                         onClick={() => toggleDialect(dialect)}
+                        // Tên và trạng thái tường minh: nút chỉ chứa <h5>/<p> nên
+                        // Chromium tính ra tên rỗng — trình đọc màn hình đọc "nút",
+                        // và không kịch bản nào bấm được theo tên phương ngữ.
+                        aria-label={display}
+                        aria-pressed={isSelected}
                         className={`rounded-lg border-2 p-3 text-left transition-all ${
                           isSelected
                             ? 'border-ctu-blue/40 bg-ctu-blue/5 shadow-sm'
