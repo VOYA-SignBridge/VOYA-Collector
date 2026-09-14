@@ -296,6 +296,83 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
         </div>
       )}
 
+      {/* Chỉ số ngoài accuracy/F1 + độ nhẹ của mô hình (26ae408). Thu gọn mặc
+          định: người mới chỉ cần hai con số ở trên; ai làm nghiên cứu mở ra. */}
+      {(evaluation?.overall || evaluation?.efficiency) && (
+        <details className="rounded-2xl border border-slate-200 bg-white" data-testid="results-extended-metrics">
+          <summary className="cursor-pointer select-none px-6 py-4">
+            <span className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
+              {t("Chỉ số mở rộng & khả năng đưa lên điện thoại")}
+            </span>
+            <span className="mt-1 block text-xs text-slate-500">
+              {t("Ngoài đoán đúng và F1 — độ tin cậy khi các lớp lệch nhau, và mô hình có đủ nhẹ để chạy trên điện thoại")}
+            </span>
+          </summary>
+          <div className="border-t border-slate-100 px-6 py-5 space-y-5">
+            {evaluation.overall && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("Độ chính xác khi lớp không đều")}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <StatTile
+                    label="Balanced Accuracy"
+                    value={evaluation.overall.balanced_accuracy.toFixed(3)}
+                    description={t("Trung bình độ đúng của TỪNG nhãn — nhãn nhiều mẫu không che được nhãn ít mẫu")}
+                  />
+                  <StatTile
+                    label="Matthews (MCC)"
+                    value={evaluation.overall.matthews_corrcoef.toFixed(3)}
+                    description={t("Từ -1 đến 1; 0 là đoán ngẫu nhiên. Vẫn đáng tin khi số mẫu giữa các nhãn lệch nhau")}
+                  />
+                  {evaluation.overall.top3_accuracy !== undefined && (
+                    <StatTile
+                      label="Top-3 Accuracy"
+                      value={(evaluation.overall.top3_accuracy * 100).toFixed(1) + '%'}
+                      description={t("Đáp án đúng nằm trong 3 dự đoán khả năng cao nhất")}
+                    />
+                  )}
+                  <StatTile
+                    label="ROC-AUC (macro)"
+                    value={evaluation.overall.roc_auc_macro_ovr.toFixed(3)}
+                    description={t("Mô hình phân biệt đúng/sai tốt đến đâu, không phụ thuộc ngưỡng quyết định")}
+                  />
+                </div>
+              </div>
+            )}
+            {evaluation.efficiency && (
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  {t("Kích thước & tốc độ suy luận (đo trên CPU — gần với điều kiện điện thoại)")}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <StatTile
+                    label={t("Số tham số")}
+                    value={evaluation.efficiency.param_count.toLocaleString('vi-VN')}
+                    description={t("Càng ít tham số, mô hình càng nhẹ để đóng gói")}
+                  />
+                  <StatTile
+                    label={t("Dung lượng")}
+                    value={`${evaluation.efficiency.checkpoint_size_mb.toFixed(2)} MB`}
+                    description={t("Kích thước tệp trọng số cần tải xuống thiết bị")}
+                  />
+                  <StatTile
+                    label={t("Độ trễ (trung vị)")}
+                    value={`${evaluation.efficiency.cpu_inference_latency_ms.p50.toFixed(1)} ms`}
+                    description={t("1 chuỗi/lần, đo {n} lần trên CPU", { n: evaluation.efficiency.cpu_inference_latency_ms.n_runs })}
+                  />
+                  <StatTile
+                    label={t("Độ trễ (p95)")}
+                    value={`${evaluation.efficiency.cpu_inference_latency_ms.p95.toFixed(1)} ms`}
+                    description={t("Trường hợp chậm nhất trong các lần đo — sát trải nghiệm thực tế hơn")}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+
       {/* Recommendations */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider">
@@ -518,6 +595,18 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
     </div>
   );
 };
+
+/** Ô số nhỏ cho mục chỉ số mở rộng — dày hơn MetricCard vì có thể hiện
+ *  bốn ô một hàng và không cần tô màu như các con số chính. */
+function StatTile({ label, value, description }: { label: string; value: string; description: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs text-slate-600">{label}</p>
+      <div className="mt-1 text-xl font-bold text-slate-900">{value}</div>
+      <p className="mt-2 text-xs text-slate-500">{description}</p>
+    </div>
+  );
+}
 
 function MetricCard({
   label,

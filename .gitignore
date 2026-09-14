@@ -59,7 +59,13 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
+_tmp/
 *.tmp
+
+# Database dumps (contain real user data — never commit)
+backup.sql
+merge_data.sql
+*.sql.bak
 
 # Video and model files
 # ...but keep the directory itself tracked. Docker creates a missing bind-mount

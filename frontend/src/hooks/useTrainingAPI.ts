@@ -158,12 +158,43 @@ export interface JobEvaluationClass {
   support: number;
 }
 
+// Metrics beyond accuracy/F1 — informative under class imbalance
+// (balanced_accuracy, matthews_corrcoef) and over the full probability
+// output rather than a single argmax (top3_accuracy, roc_auc_macro_ovr).
+export interface JobEvaluationOverall {
+  accuracy: number;
+  macro_f1: number;
+  balanced_accuracy: number;
+  matthews_corrcoef: number;
+  roc_auc_macro_ovr: number;
+  top3_accuracy?: number;
+}
+
+// Param count, checkpoint size, and CPU inference latency — always measured
+// on CPU since that is what a "light enough for mobile" claim needs.
+export interface JobEvaluationEfficiency {
+  param_count: number;
+  trainable_param_count: number;
+  checkpoint_size_mb: number;
+  cpu_inference_latency_ms: {
+    mean: number;
+    p50: number;
+    p95: number;
+    std: number;
+    batch_size: number;
+    seq_len: number;
+    n_runs: number;
+  };
+}
+
 export interface JobEvaluation {
   available: boolean;
   job_id?: string;
   per_class?: JobEvaluationClass[];
   confusion_matrix?: number[][];
   labels?: string[];
+  overall?: JobEvaluationOverall;
+  efficiency?: JobEvaluationEfficiency;
 }
 
 // POST /training/jobs/{id}/promote
