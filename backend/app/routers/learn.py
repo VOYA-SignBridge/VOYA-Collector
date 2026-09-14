@@ -47,19 +47,20 @@ def _own_classes_by_slug() -> Dict[str, List[Dict[str, Any]]]:
         if uid:
             per_class[uid] = per_class.get(uid, 0) + 1
 
+    # `list_classes` trả `ClassMetadata` (dataclass), không phải dict — lớp đã
+    # xoá mềm không có mặt trong danh sách này.
     out: Dict[str, List[Dict[str, Any]]] = {}
     for c in list_classes(tenant_id=tenant):
-        if c.get("deleted_at"):
-            continue
-        slug = (c.get("slug") or "").strip()
+        slug = (getattr(c, "slug", "") or "").strip()
         if not slug:
             continue
+        uid = str(getattr(c, "class_uid", "") or "")
         out.setdefault(slug, []).append({
-            "class_uid": c.get("class_uid"),
-            "label": c.get("label_original") or slug,
-            "region": c.get("region") or "",
-            "dialect": c.get("dialect") or "",
-            "sample_count": per_class.get(str(c.get("class_uid")), 0),
+            "class_uid": uid,
+            "label": getattr(c, "label_original", "") or slug,
+            "region": getattr(c, "region", "") or "",
+            "dialect": getattr(c, "dialect", "") or "",
+            "sample_count": per_class.get(uid, 0),
         })
     return out
 

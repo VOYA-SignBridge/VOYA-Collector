@@ -65,3 +65,26 @@ class TestApiCongKhai:
     def test_vung_la_bi_tu_choi(self, client):
         r = client.get("/api/v1/learn/signs", params={"region": "tay"})
         assert r.status_code == 422
+
+    def test_noi_duoc_voi_lop_cua_minh_qua_slug(self, client, monkeypatch):
+        """`list_classes` trả dataclass `ClassMetadata`, không phải dict — bản
+        đầu gọi `.get` và 500 trên sản xuất trong khi test vẫn xanh: container
+        test không gắn `/dataset`, nên `labels.csv` rỗng và nhánh ấy chưa từng
+        chạy. Ép nó chạy bằng một lớp giả đúng kiểu."""
+        from app.dataset_manager import ClassMetadata
+        import app.routers.learn as learn
+
+        fake = ClassMetadata(class_uid="uid-1", slug="chao-co", label_original="chào cờ",
+                             language="vn", dialect="can-tho", is_common_global=False,
+                             is_common_language=False)
+        monkeypatch.setattr(learn, "_own_classes_by_slug", learn._own_classes_by_slug)  # giữ nguyên
+        monkeypatch.setattr("app.dataset_manager.list_classes", lambda tenant_id=None: [fake])
+        monkeypatch.setattr("app.dataset_samples.list_samples",
+                            lambda tenant_id=None: [{"class_uid": "uid-1", "review_status": "approved",
+                                                     "deleted_at": "", "sample_uid": "s1"}])
+
+        r = client.get("/api/v1/learn/sign", params={"slug": "chao-co"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["own"] and body["own"][0]["class_uid"] == "uid-1"
+        assert set(body["own"][0]) >= {"class_uid", "label", "region", "dialect", "sample_count"}
