@@ -1,7 +1,8 @@
 # Dependencies
 node_modules/
 .venv/
-
+venv/
+.venv.broken-20260914/
 # Build artifacts
 dist/
 .cache/
