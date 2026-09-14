@@ -95,6 +95,11 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset({
     # Số hiệu phiên bản đi qua tham số TRUY VẤN (`?version=1.0`) chứ không phải
     # một đoạn đường, chính vì ràng buộc đường-nguyên-văn ở đây: `/legal/terms/
     # content` khai báo được, `/legal/terms/versions/1.0` thì không.
+    # --- Học ký hiệu: danh mục QIPEDC + "đã có mẫu chưa", cho người KHÔNG có
+    # tài khoản (học sinh, phụ huynh). Chỉ đọc; query string chứ không tham số
+    # đường dẫn, vì danh sách này khớp nguyên văn. ---
+    ("GET", "/learn/signs"),
+    ("GET", "/learn/sign"),
     ("GET", "/legal/documents"),
     ("GET", "/legal/terms"),
     ("GET", "/legal/privacy"),

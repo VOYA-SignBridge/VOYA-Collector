@@ -11,7 +11,7 @@ import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
-import { BuildingIcon, ChipIcon, ClipboardCheckIcon, GearIcon, HandIcon, HomeIcon, LifeBuoyIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
+import { BuildingIcon, ChipIcon, ClipboardCheckIcon, GearIcon, GraduationCapIcon, HandIcon, HomeIcon, LifeBuoyIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
 import { prefetchProps } from "../routes/prefetch";
 import { useI18n } from "../i18n";
@@ -86,6 +86,9 @@ export default function Layout({ children }: { children: ReactNode }) {
   const navIconClass = "h-5 w-5";
   const baseNavigation: AnyNavItem[] = [
     { name: "Trang chủ", href: "/", icon: <HomeIcon className={navIconClass} />, end: true },
+    // Học ký hiệu đứng NGAY sau Trang chủ và có cả với khách: học sinh, phụ
+    // huynh không có tài khoản là đối tượng chính của nó.
+    { name: "Học ký hiệu", href: "/learn", icon: <GraduationCapIcon className={navIconClass} /> },
     { name: "Đóng góp dữ liệu", href: "/upload", icon: <UploadIcon className={navIconClass} /> },
     { name: "Thư viện nhãn", href: "/labels", icon: <TagIcon className={navIconClass} /> },
     { name: "Nhận dạng realtime", href: "/realtime", icon: <HandIcon className={navIconClass} /> },

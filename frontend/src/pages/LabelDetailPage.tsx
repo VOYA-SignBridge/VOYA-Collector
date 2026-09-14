@@ -4,8 +4,9 @@
  * @i18n-key-table — `TIER_LABELS` là bảng KHOÁ, dịch tại chỗ dựng.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import PageHeader from "../components/ui/PageHeader";
+import { GraduationCapIcon } from "../components/ui/Icons";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import ErrorBanner from "../components/ErrorBanner";
@@ -250,6 +251,16 @@ export default function LabelDetailPage() {
         breadcrumb={[{ label: t("Thư viện nhãn"), href: "/labels" }, info.label_original]}
         title={info.label_original}
         subtitle={t("{p1} · {count} lần quay đã thu thập", { p1: dialectLabel(info.dialect), count: info.count })}
+        actions={
+          // Một nút nhỏ sang phần học — cùng ký hiệu, khác câu hỏi.
+          <Link
+            to={`/learn/${info.slug}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <GraduationCapIcon className="h-4 w-4 text-ctu-blue" aria-hidden="true" />
+            {t("Học cách ký")}
+          </Link>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-[340px_1fr]">

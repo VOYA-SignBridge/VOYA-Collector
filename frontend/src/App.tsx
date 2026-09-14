@@ -40,6 +40,8 @@ const AdminLegalPage = lazy(() => import("./pages/AdminLegalPage"));
 const AdminTenantsPage = lazy(() => import("./pages/AdminTenantsPage"));
 const AdminBillingPage = lazy(() => import("./pages/AdminBillingPage"));
 const LegalDocumentPage = lazy(() => import("./pages/LegalDocumentPage"));
+const LearnPage = lazy(() => import("./pages/learn/LearnPage"));
+const SignPage = lazy(() => import("./pages/learn/SignPage"));
 const AccountPage = lazy(() => import("./pages/AccountPage"));
 const ConsentsPage = lazy(() => import("./pages/settings/ConsentsPage"));
 const OrganizationPage = lazy(() => import("./pages/OrganizationPage"));
@@ -184,6 +186,10 @@ function App() {
               <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
 
               <Route path="/labels" element={<LabelsPage />} />
+
+              {/* Học ký hiệu — CÔNG KHAI, cho người không có tài khoản (14/09/2026). */}
+              <Route path="/learn" element={<LearnPage />} />
+              <Route path="/learn/:slug" element={<SignPage />} />
 
               {/* Label detail (session viewer) is open to any signed-in user:
                   the backend gates it with get_current_user (not admin), and a

@@ -32,6 +32,7 @@ from app.routers import (
     integrations,
     jobs,
     label_sessions,
+    learn as learn_router,
     legal as legal_router,
     legal_admin,
     notifications as notifications_router,
@@ -377,6 +378,8 @@ api_v1.include_router(vocabulary.router)
 api_v1.include_router(vocabulary.catalog_router)
 api_v1.include_router(trial.router)
 api_v1.include_router(legal_router.router)
+# Học ký hiệu — công khai, xem `access_gate.PUBLIC_ROUTES`.
+api_v1.include_router(learn_router.router)
 api_v1.include_router(legal_admin.router)
 api_v1.include_router(notifications_router.router)
 api_v1.include_router(support.router)
