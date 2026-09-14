@@ -22,6 +22,7 @@ from app.processing.utils import (
     normalize_hands_vector_126,
 )
 from app.processing.utils import normalize_sequence
+from app.processing.class_registry import AlphabetLabelError
 from app.processing.quality import (
     compute_quality_metrics,
     evaluate_quality,
@@ -257,9 +258,15 @@ async def upload_video(
     da_tieu_giu_cho = False
     try:
         # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
-        class_meta = await asyncio.to_thread(
-            get_or_register_class, label_original=label, language=language, dialect=dialect or ""
-        )
+        try:
+            class_meta = await asyncio.to_thread(
+                get_or_register_class, label_original=label, language=language, dialect=dialect or ""
+            )
+        except AlphabetLabelError as exc:
+            # Nhãn bảng chữ cái nhiều hơn một ký tự. Lỗi của NGƯỜI GỬI, phải
+            # về 422 kèm câu giải thích — trước đây rơi xuống 500 "Internal
+            # Server Error" (đo 15/09/2026), người thu không biết mình sai gì.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
         local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
@@ -485,7 +492,11 @@ async def upload_camera(
         pass
 
     # Ensure label exists
-    class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+    try:
+        class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+    except AlphabetLabelError as exc:
+        # Cùng lý do như ở /video: lỗi của người gửi thì trả 422 có lời, không 500.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     log = logging.getLogger("upload.camera")
 
