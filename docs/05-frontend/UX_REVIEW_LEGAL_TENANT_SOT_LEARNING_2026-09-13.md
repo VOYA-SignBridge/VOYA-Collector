@@ -61,6 +61,21 @@ Mục 8 (đăng nhập, ảnh màn hình, đa vai) chưa thực hiện: sáng 13
 
 Chưa làm trong Đợt 1 (thuộc Đợt 2–3): bố cục theo nhiệm vụ, wizard đăng ký máy, lịch sử kiểm tra, mobile, mục 8.
 
+### Đợt 2 — đã làm (14/09/2026), tiêu chí "đơn giản, tinh gọn, người mới thao tác được"
+
+| Màn hình | Thay đổi | Commit |
+|---|---|---|
+| Trang đọc văn bản (`/legal/:kind`) | Đọc như tài liệu: một câu "văn bản này nói về gì" mỗi loại; dòng trạng thái chữ thường (Đang áp dụng · Hiệu lực từ 8 tháng 8, 2026 · Tiếng Việt); bản cũ → nói rõ + link bản hiện hành; mục lục từ tiêu đề markdown (dính bên trái / gấp trên điện thoại); In, Tải bản gốc; khối "Lựa chọn của bạn" dẫn tới cài đặt đồng thuận và hỗ trợ. Không còn mã băm, `vi`, số hiệu kỹ thuật. | `8180110` |
+| SOT (`/admin/sot`) | Ba mục: Tình trạng (kết luận một câu + 3 con số chữ thường) / Máy được cấp quyền (danh sách + đăng ký gấp lại, giải thích khoá riêng ở đâu) / Chi tiết kỹ thuật (gấp mặc định). Thuật ngữ theo bảng §5. | `8180110` |
+| `Tabs` dùng chung | WAI-ARIA tabs, phím ←/→/Home/End, `?tab=` trên URL. | `52eb74d` |
+| Quản trị văn bản (`/admin/legal`) | Tổng quan (thẻ mỗi loại: đang áp dụng / lên lịch / nháp; đỏ khi loại bắt buộc chưa có; "Bắt đầu từ đâu?") · Soạn & duyệt (một luồng "tạo phiên bản mới", hai cách) · Phiên bản · Chấp thuận · Lịch sử. | `52eb74d` |
+| Tổ chức, vòng nền tảng (`/admin/tenants`) | Tìm theo tên không dấu; tên trước mã; "Mở tổ chức"; tạo tổ chức gấp lại; chi tiết theo tab Thành viên / Lời mời / Xuất dữ liệu / Cài đặt; **vùng xoá vĩnh viễn chỉ ở cuối Cài đặt**. | `52eb74d` |
+| Thanh đầu trang | Chip "Đang làm việc tại: Trường A · Đổi" trên mọi màn hình (đọc `/tenants/me`), thay chấm "Đã đăng nhập". | `0dd75b0` |
+| Ô chọn vai (3 biểu mẫu) | Câu "vai này cho phép làm gì" đối chiếu với cổng máy chủ; "Chưa có vai" cũng được giải thích. | `9059deb`, `65ab297` |
+| Tổng quan tổ chức (`/org/:id`) | Ba việc chính (Đóng góp / Nhận dạng thử / Thư viện nhãn) → Hướng dẫn bắt đầu 1-2-3 (đúng tổ chức? được làm gì? mở việc) → Gói & hạn mức ("Nhóm & lớp" thay Workspace/Project). | `28774d9` |
+
+Chưa làm: mời 3 bước dạng wizard (đã có mô tả vai dưới ô chọn — đủ cho MVP); lịch sử kiểm tra SOT (backend chưa lưu); trung tâm hướng dẫn (Đợt 4, cần nội dung do người duyệt); mục 8 chụp màn hình đa vai.
+
 Các lỗi modal/focus/nhãn đã nêu ở lượt trước cần được xử lý trong ba khu vực này. Nhận định trước về hook trong `try/catch` là lỗi quy tắc lint, chưa đủ chứng cứ để khẳng định chính hook đó đã gây crash; vòng tải lại TEN-02 là đường lỗi cụ thể hơn cần tái hiện.
 
 ## 3. Legal: giúp đọc hiểu và quyết định dễ hơn
