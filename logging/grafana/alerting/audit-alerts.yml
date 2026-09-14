@@ -22,6 +22,16 @@
 
 apiVersion: 1
 
+# "Nhật ký kiểm toán ngừng tăng" đã NGHỈ 15/09/2026. Nó đo tuổi dòng cuối của
+# `audit_log`, nhưng sổ bền chỉ ghi các hành động hiếm (xoá lớp, khoá API, 2FA,
+# đổi tổ chức...) — không ghi đăng nhập hay thu mẫu. Từ 22/08 tới 14/09 không ai
+# làm việc quản trị nào, chuông kêu suốt ba tuần, mỗi 4 giờ một thư: nó đo
+# "không ai quản trị", không đo "đường ghi biến mất". Hai chuông còn lại mới bắt
+# được hỏng thật: ghi thất bại (có ngoại lệ) và không đọc được bảng.
+deleteRules:
+  - orgId: 1
+    uid: audit-log-stopped-rule
+
 groups:
   - orgId: 1
     name: Audit Alerts
@@ -65,49 +75,6 @@ groups:
             phạm vi tenant, hoặc bảng `audit_log` mất quyền ghi.
         labels:
           severity: critical
-
-      - uid: audit-log-stopped-rule
-        title: Nhật ký kiểm toán ngừng tăng
-        condition: B
-        data:
-          - refId: A
-            relativeTimeRange: { from: 600, to: 0 }
-            datasourceUid: prometheus
-            model:
-              # `!= -1` KHÔNG phải phép so sánh cho ra đúng/sai — trong PromQL
-              # nó lọc bỏ chuỗi. Chỉ số trả -1 ở hai trạng thái "đừng suy luận
-              # gì từ tôi": sổ rỗng (bản vừa dựng) và không đọc được cơ sở dữ
-              # liệu. Lọc ở đây rồi thì `noDataState: OK` bên dưới lo phần còn
-              # lại, và chuông này không kêu vì một sự cố Postgres — sự cố đó
-              # đã có chuông riêng.
-              expr: voya_audit_log_age_seconds != -1
-              refId: A
-          - refId: B
-            datasourceUid: __expr__
-            model:
-              conditions:
-                # 6 giờ. Đây là bản triển khai của một trường: ban đêm không ai
-                # đăng nhập là chuyện bình thường, và một ngưỡng một giờ sẽ kêu
-                # mỗi đêm cho tới khi có người tắt nó đi.
-                - evaluator: { params: [21600], type: gt }
-                  operator: { type: and }
-                  query: { params: [A] }
-                  reducer: { params: [], type: last }
-                  type: query
-              datasource: { type: __expr__, uid: __expr__ }
-              refId: B
-              type: classic_conditions
-        noDataState: OK
-        execErrState: OK
-        for: 30m
-        annotations:
-          summary: Không có dòng kiểm toán mới nào trong hơn sáu giờ
-          description: >-
-            Không ngoại lệ nào được ném ra, nghĩa là đường ghi đã BIẾN MẤT chứ
-            không phải hỏng. Kiểm tra middleware HTTP còn đặt phạm vi tenant
-            không, và mở trang Nhật ký kiểm toán xem dòng cuối cùng là lúc nào.
-        labels:
-          severity: warning
 
       - uid: audit-metrics-unreadable-rule
         title: Không đọc được bảng nhật ký kiểm toán
