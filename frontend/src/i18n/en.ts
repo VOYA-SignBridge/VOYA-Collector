@@ -1948,6 +1948,10 @@ export const EN: Record<string, string> = {
   "Hệ thống thu thập những dữ liệu nào của bạn, dùng vào việc gì, giữ bao lâu và bạn có quyền gì.": "Which of your data the system collects, what it is used for, how long it is kept, and your rights.",
   "Khi bạn đóng góp video ký hiệu: dữ liệu đó được dùng ở đâu, ai xem được, và cách rút lại.": "When you contribute sign videos: where that data is used, who can see it, and how to withdraw.",
   "Dành cho người giám hộ đồng ý thay người dưới 18 tuổi hoặc người cần hỗ trợ quyết định.": "For guardians consenting on behalf of someone under 18 or someone who needs support to decide.",
+  // `api/tenants :: ROLE_DESCRIPTION` — vai cho phép làm gì, tra bằng `roleDescription()`.
+  "Làm được mọi việc của Biên tập viên, và thêm: mời/gỡ thành viên, đổi vai, quản lý nhóm & lớp, gói dịch vụ và xuất dữ liệu của tổ chức.": "Everything an Editor can do, plus: invite and remove members, change roles, manage groups & classes, the plan, and organization exports.",
+  "Tạo và sửa nhãn, quản lý danh sách người ký, khoá API và webhook, yêu cầu xử lý lại dữ liệu. Không quản lý được thành viên hay gói dịch vụ.": "Create and edit labels, manage the signer list, API keys and webhooks, request data re-processing. Cannot manage members or the plan.",
+  "Là thành viên: đóng góp dữ liệu và dùng nhận dạng trong tổ chức này. Không sửa được nhãn, không quản lý gì.": "A member: contributes data and uses recognition in this organization. Cannot edit labels, manages nothing.",
 
   // @i18n-dynamic:end
 
