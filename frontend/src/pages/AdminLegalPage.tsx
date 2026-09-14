@@ -23,6 +23,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import DocumentViewer from "../components/legal/DocumentViewer";
+import Badge from "../components/ui/Badge";
+import Tabs, { useUrlTab } from "../components/ui/Tabs";
 import DraftEditor from "../components/legal/DraftEditor";
 import {
   DRAFT_STATUS_LABEL,
@@ -68,6 +70,15 @@ export default function AdminLegalPage() {
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState<{ title: string; doc: LegalDocumentContent } | null>(null);
   const [newDraftKind, setNewDraftKind] = useState<LegalKind>("terms");
+
+  const tabs = useMemo(() => [
+    { id: "overview", label: t("Tổng quan") },
+    { id: "compose", label: t("Soạn & duyệt"), count: drafts.filter((d) => d.status !== "published").length },
+    { id: "versions", label: t("Phiên bản"), count: overview?.documents.length ?? 0 },
+    { id: "consents", label: t("Chấp thuận") },
+    { id: "events", label: t("Lịch sử") },
+  ] as const, [t, drafts, overview]);
+  const [tab, setTab] = useUrlTab("tab", tabs, "overview");
 
   const load = useCallback(async () => {
     try {
@@ -173,11 +184,74 @@ export default function AdminLegalPage() {
         </div>
       )}
 
+      <div className="mt-6">
+        <Tabs tabs={tabs} value={tab} onChange={setTab} label={t("Mục của trang văn bản pháp lý")}>
+      {tab === "overview" && (
+        <section className="space-y-6">
+          {/* Mỗi loại một thẻ: bản đang áp dụng, bản chờ, nháp đang mở. Người
+              quản trị nhìn một lượt biết "còn thiếu gì" mà không cần đọc bảng. */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {KINDS.map((k) => {
+              const rows = byKind.get(k) ?? [];
+              const current = rows.find((r) => r.status === "current");
+              const scheduled = rows.filter((r) => r.status === "scheduled");
+              const openDrafts = drafts.filter((d) => d.kind === k && d.status !== "published");
+              const required = overview?.required_at_registration.includes(k);
+              return (
+                <div key={k} className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-semibold text-slate-900">{t(LEGAL_KIND_LABEL[k])}</h3>
+                    {current ? (
+                      <Badge variant="success" size="sm">{t("đang áp dụng")}</Badge>
+                    ) : (
+                      <Badge variant={required ? "danger" : "neutral"} size="sm">{t("chưa công bố")}</Badge>
+                    )}
+                  </div>
+                  <dl className="mt-2 space-y-1 text-sm text-slate-600">
+                    <div className="flex justify-between gap-3">
+                      <dt>{t("Bản đang áp dụng")}</dt>
+                      <dd className="font-mono text-xs text-slate-800">{current?.version ?? "—"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt>{t("Đã lên lịch")}</dt>
+                      <dd className="text-slate-800">{scheduled.length ? scheduled.map((r) => r.version).join(", ") : "—"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt>{t("Nháp đang mở")}</dt>
+                      <dd className="text-slate-800 tabular-nums">{openDrafts.length || "—"}</dd>
+                    </div>
+                  </dl>
+                  {required && !current && (
+                    <p className="mt-2 text-xs text-red-700">
+                      {t("Bắt buộc lúc đăng ký. Chưa công bố thì không thu được chấp thuận nào.")}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+            <p className="font-medium text-slate-900">{t("Bắt đầu từ đâu?")}</p>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
+              <li>{t("Có văn bản mới hoặc bản sửa: mở mục “Soạn & duyệt”, tải tệp hoặc viết trong hệ thống.")}</li>
+              <li>{t("Muốn biết ai đã đồng ý bản nào: mở mục “Chấp thuận”.")}</li>
+              <li>{t("Cần đối chiếu ai đã làm gì: mở mục “Lịch sử”.")}</li>
+            </ul>
+          </div>
+        </section>
+      )}
+      {tab === "compose" && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">{t("Tạo phiên bản mới")}</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {t("Một trong hai cách: tải tệp đã ký (PDF/DOCX) — đường thường dùng, hoặc viết nội dung trong hệ thống rồi duyệt qua bản nháp. Cả hai đều ra một phiên bản có số hiệu, không sửa được sau khi công bố.")}
+          </p>
       {/* Tải tệp lên đứng TRƯỚC trình soạn markdown, vì với văn bản pháp lý
           thật thì đây là đường thường dùng: phòng pháp chế gửi .docx, bản đã
           ký và đóng dấu về dưới dạng .pdf. Trình soạn markdown ở dưới vẫn còn
           cho những bản viết ngay trong hệ thống. */}
-      <div className="mt-6">
+      <div className="mt-4">
         <UploadDocumentForm onDone={() => void load()} ensureSudo={ensureSudo} />
       </div>
       {notice && (
@@ -186,42 +260,10 @@ export default function AdminLegalPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------- độ phủ */}
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold text-slate-900">{t("Độ phủ chấp thuận")}</h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b-2 border-slate-300 text-left">
-                <th className="px-3 py-2">{t("Loại")}</th>
-                <th className="px-3 py-2">{t("Bản hiện hành")}</th>
-                <th className="px-3 py-2 text-right">{t("Tài khoản")}</th>
-                <th className="px-3 py-2 text-right">{t("Đã đồng ý")}</th>
-                <th className="px-3 py-2 text-right">{t("Người dùng tự bấm")}</th>
-                <th className="px-3 py-2 text-right">{t("Còn thiếu")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(overview?.coverage ?? []).map((row) => (
-                <tr key={row.kind} className="border-b border-slate-200">
-                  <td className="px-3 py-2">{t(LEGAL_KIND_LABEL[row.kind])}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{row.version ?? "—"}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{row.accounts}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{row.accepted}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{row.accepted_by_user}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{row.missing}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-xs text-slate-500">
-          {t("Chênh lệch giữa")} <em>{t("Đã đồng ý")}</em> {t("và")} <em>{t("Người dùng tự bấm")}</em> {t("là số dòng do người vận hành ghi hộ. Chúng không phải chữ ký.")}
-        </p>
-      </section>
 
+          <div className="mt-8 border-t border-slate-200 pt-6">
       {/* ------------------------------------------------------ bản nháp */}
-      <section className="mt-10">
+      <section>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold text-slate-900">{t("Bản nháp")}</h2>
           <div className="flex items-center gap-2">
@@ -300,8 +342,12 @@ export default function AdminLegalPage() {
         )}
       </section>
 
+          </div>
+        </section>
+      )}
+      {tab === "versions" && (<>
       {/* ---------------------------------------------------- lịch sử bản */}
-      <section className="mt-10">
+      <section>
         <h2 className="text-lg font-semibold text-slate-900">{t("Các bản đã công bố")}</h2>
         {KINDS.map((kind) => {
           const rows = byKind.get(kind) ?? [];
@@ -382,8 +428,46 @@ export default function AdminLegalPage() {
         })}
       </section>
 
+      </>)}
+      {tab === "consents" && (<>
+      {/* ------------------------------------------------------- độ phủ */}
+      <section>
+        <h2 className="text-lg font-semibold text-slate-900">{t("Độ phủ chấp thuận")}</h2>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b-2 border-slate-300 text-left">
+                <th className="px-3 py-2">{t("Loại")}</th>
+                <th className="px-3 py-2">{t("Bản hiện hành")}</th>
+                <th className="px-3 py-2 text-right">{t("Tài khoản")}</th>
+                <th className="px-3 py-2 text-right">{t("Đã đồng ý")}</th>
+                <th className="px-3 py-2 text-right">{t("Người dùng tự bấm")}</th>
+                <th className="px-3 py-2 text-right">{t("Còn thiếu")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(overview?.coverage ?? []).map((row) => (
+                <tr key={row.kind} className="border-b border-slate-200">
+                  <td className="px-3 py-2">{t(LEGAL_KIND_LABEL[row.kind])}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{row.version ?? "—"}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{row.accounts}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{row.accepted}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{row.accepted_by_user}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{row.missing}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          {t("Chênh lệch giữa")} <em>{t("Đã đồng ý")}</em> {t("và")} <em>{t("Người dùng tự bấm")}</em> {t("là số dòng do người vận hành ghi hộ. Chúng không phải chữ ký.")}
+        </p>
+      </section>
+
+      </>)}
+      {tab === "events" && (<>
       {/* ------------------------------------------------- sổ đăng bạ */}
-      <section className="mt-10">
+      <section>
         <h2 className="text-lg font-semibold text-slate-900">{t("Sổ đăng bạ")}</h2>
         <p className="mt-1 text-sm text-slate-500">
           <Trans
@@ -427,6 +511,9 @@ export default function AdminLegalPage() {
           </ol>
         )}
       </section>
+      </>)}
+        </Tabs>
+      </div>
 
       {preview && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">

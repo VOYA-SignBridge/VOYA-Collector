@@ -25,6 +25,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "../hooks/useToast";
+import Tabs from "../components/ui/Tabs";
+import { slugify } from "../utils/markdownOutline";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import Badge from "../components/ui/Badge";
 import { BuildingIcon, DownloadIcon, RefreshIcon, TrashIcon } from "../components/ui/Icons";
@@ -116,6 +118,9 @@ export default function AdminTenantsPage() {
     user_id: "", role: null,
   });
   const [purgeConfirm, setPurgeConfirm] = useState("");
+  const [detailTab, setDetailTab] = useState<"members" | "invites" | "exports" | "settings">("members");
+  /** Lọc danh sách theo tên hoặc mã — người mới tìm theo TÊN, không nhớ mã. */
+  const [query, setQuery] = useState("");
 
   const loadTenants = useCallback(async () => {
     setLoading(true);
@@ -129,6 +134,12 @@ export default function AdminTenantsPage() {
   }, [includeDeleted, toast]);
 
   const current = tenants.find((t) => t.tenant_id === selected) || null;
+  const visibleTenants = tenants.filter((row) => {
+    // Không phân biệt dấu và hoa/thường: "truong c" phải ra "Trường C".
+    const q = slugify(query);
+    if (!query.trim()) return true;
+    return slugify(row.display_name || "").includes(q) || slugify(row.tenant_id).includes(q);
+  });
 
   // Số thứ tự của lượt tải chi tiết gần nhất. Xem `loadDetail`.
   const detailRun = useRef(0);
@@ -250,9 +261,10 @@ export default function AdminTenantsPage() {
         </button>
       </header>
 
-      {/* Tạo tổ chức */}
-      <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-        <h2 className="font-semibold text-slate-700 mb-3">{t("Tạo tổ chức mới")}</h2>
+      {/* Tạo tổ chức — hiếm dùng, gấp lại để danh sách đứng đầu trang. */}
+      <details className="bg-white rounded-xl shadow-sm border border-slate-200">
+        <summary className="cursor-pointer px-5 py-4 font-semibold text-slate-700">{t("Tạo tổ chức mới")}</summary>
+        <div className="px-5 pb-5">
         <div className="flex flex-wrap gap-2">
           <input
             aria-label={t("Mã tổ chức")}
@@ -283,19 +295,35 @@ export default function AdminTenantsPage() {
         <p className="text-xs text-slate-400 mt-2">
           {t("Mã tổ chức là khoá dùng trong mọi bảng dữ liệu và")} <strong>{t("không đổi được")}</strong> {t("về sau.")}
         </p>
-      </section>
+        </div>
+      </details>
 
       {/* Danh sách */}
       <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("Tìm theo tên hoặc mã tổ chức")}
+            aria-label={t("Tìm tổ chức")}
+            className="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-ctu-blue focus:outline-none focus:ring-2 focus:ring-ctu-blue/30"
+          />
+          <span className="text-xs text-slate-500">
+            {t("{n} tổ chức", { n: visibleTenants.length })}
+          </span>
+        </div>
         {loading ? <LoadingSpinner /> : tenants.length === 0 ? (
           <p className="text-sm text-slate-400">{t("Chưa có tổ chức nào.")}</p>
+        ) : visibleTenants.length === 0 ? (
+          <p className="text-sm text-slate-400">{t("Không có tổ chức nào khớp với từ khoá.")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-slate-400 text-left text-xs">
                 <tr className="border-b border-slate-100">
-                  <th className="py-2 pr-3 font-medium">{t("Mã")}</th>
                   <th className="py-2 pr-3 font-medium">{t("Tên")}</th>
+                  <th className="py-2 pr-3 font-medium">{t("Mã")}</th>
                   <th className="py-2 pr-3 font-medium">{t("Thành viên")}</th>
                   <th className="py-2 pr-3 font-medium">{t("Trạng thái")}</th>
                   <th className="py-2 pr-3 font-medium">{t("Tạo lúc")}</th>
@@ -304,13 +332,13 @@ export default function AdminTenantsPage() {
               </thead>
               <tbody>
                 {/* `row` chứ không phải `t`: `t` là hàm dịch trong phạm vi này. */}
-                {tenants.map((row) => {
+                {visibleTenants.map((row) => {
                   const st = tenantStatus(row);
                   return (
                     <tr key={row.tenant_id}
                         className={`border-b border-slate-50 ${selected === row.tenant_id ? "bg-slate-50" : ""}`}>
-                      <td className="py-2 pr-3 font-mono text-slate-700">{row.tenant_id}</td>
-                      <td className="py-2 pr-3 text-slate-600">{row.display_name}</td>
+                      <td className="py-2 pr-3 font-medium text-slate-800">{row.display_name || row.tenant_id}</td>
+                      <td className="py-2 pr-3 font-mono text-xs text-slate-500">{row.tenant_id}</td>
                       <td className="py-2 pr-3 tabular-nums text-slate-600">{row.member_count}</td>
                       <td className="py-2 pr-3">
                         <Badge variant={st.tone} size="sm">{t(st.text)}</Badge>
@@ -321,7 +349,7 @@ export default function AdminTenantsPage() {
                           onClick={() => setSelected(selected === row.tenant_id ? null : row.tenant_id)}
                           className="px-2 py-1 rounded-md text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100"
                         >
-                          {selected === row.tenant_id ? t("Đóng") : t("Quản lý")}
+                          {selected === row.tenant_id ? t("Đóng") : t("Mở tổ chức")}
                         </button>
                       </td>
                     </tr>
@@ -340,6 +368,30 @@ export default function AdminTenantsPage() {
               {t("Đang tải chi tiết của {ten}…", { ten: current.display_name || current.tenant_id })}
             </p>
           )}
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-slate-900">
+                {current.display_name || current.tenant_id}
+                <span className="ml-2 font-mono text-xs font-normal text-slate-400">{current.tenant_id}</span>
+              </h2>
+              <button type="button" onClick={() => setSelected(null)}
+                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                {t("Đóng chi tiết")}
+              </button>
+            </div>
+            <Tabs
+              tabs={[
+                { id: "members", label: t("Thành viên"), count: members.length },
+                { id: "invites", label: t("Lời mời"), count: invites.length },
+                { id: "exports", label: t("Xuất dữ liệu") },
+                { id: "settings", label: t("Cài đặt") },
+              ]}
+              value={detailTab}
+              onChange={setDetailTab}
+              label={t("Mục của tổ chức đang mở")}
+            >
+              <div className="space-y-6">
+          {detailTab === "members" && (<>
           {/* Thành viên */}
           <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <h2 className="font-semibold text-slate-700 mb-3">
@@ -445,6 +497,8 @@ export default function AdminTenantsPage() {
             </p>
           </section>
 
+          </>)}
+          {detailTab === "invites" && (<>
           {/* Lời mời */}
           <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <h2 className="font-semibold text-slate-700 mb-3">{t("Lời mời")}</h2>
@@ -559,6 +613,8 @@ export default function AdminTenantsPage() {
             </div>
           </section>
 
+          </>)}
+          {detailTab === "exports" && (<>
           {/* Xuất dữ liệu */}
           <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -615,6 +671,11 @@ export default function AdminTenantsPage() {
             )}
           </section>
 
+          </>)}
+          {detailTab === "settings" && (<>
+            <p className="text-sm text-slate-600">
+              {t("Các thao tác ở đây hiếm khi cần và khó hoàn tác. Vùng xoá vĩnh viễn nằm ở cuối, tách khỏi việc thường ngày.")}
+            </p>
           {/* Vùng nguy hiểm */}
           <section className="bg-white rounded-xl shadow-sm border border-red-200 p-5">
             <h2 className="font-semibold text-red-700 mb-3">{t("Vùng nguy hiểm")}</h2>
@@ -712,6 +773,10 @@ export default function AdminTenantsPage() {
               </>
             )}
           </section>
+          </>)}
+              </div>
+            </Tabs>
+          </div>
         </fieldset>
       )}
     </div>

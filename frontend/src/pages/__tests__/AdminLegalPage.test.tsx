@@ -38,6 +38,16 @@ vi.mock('../../api/axiosClient', () => ({
 }));
 
 import AdminLegalPage from '../AdminLegalPage';
+import { MemoryRouter } from 'react-router-dom';
+
+/** Trang giờ chia mục theo `?tab=`; mỗi test mở thẳng mục nó cần. */
+function show(tab?: 'overview' | 'compose' | 'versions' | 'consents' | 'events') {
+  return render(
+    <MemoryRouter initialEntries={[tab ? `/admin/legal?tab=${tab}` : '/admin/legal']}>
+      <AdminLegalPage />
+    </MemoryRouter>,
+  );
+}
 import {
   createDraft,
   fetchAdminOverview,
@@ -134,15 +144,34 @@ describe('AdminLegalPage', () => {
     vi.mocked(fetchDraft).mockResolvedValue(draft());
   });
 
+  it('Tổng quan: mỗi loại một thẻ — đang áp dụng / chưa công bố, bắt buộc thì đỏ', async () => {
+    show();
+    // Điều khoản: có bản hiện hành.
+    const termsCard = (await screen.findByRole('heading', { name: 'Điều khoản sử dụng' })).closest('div')!.parentElement!;
+    expect(termsCard).toHaveTextContent('đang áp dụng');
+    expect(termsCard).toHaveTextContent('2026-08-08');
+    // Quyền riêng tư: bắt buộc mà chưa có → nói thẳng hậu quả.
+    const privacyCard = screen.getByRole('heading', { name: 'Chính sách quyền riêng tư' }).closest('div')!.parentElement!;
+    expect(privacyCard).toHaveTextContent('chưa công bố');
+    expect(privacyCard).toHaveTextContent(/Bắt buộc lúc đăng ký/);
+  });
+
+  it('năm mục là tab thật: có tablist, đổi mục bằng bấm', async () => {
+    show();
+    expect(await screen.findAllByRole('tab')).toHaveLength(5);
+    fireEvent.click(screen.getByRole('tab', { name: /Lịch sử/ }));
+    expect(await screen.findByText('Sổ đăng bạ')).toBeInTheDocument();
+  });
+
   it('cảnh báo rõ loại văn bản bắt buộc còn thiếu', async () => {
-    render(<AdminLegalPage />);
+    show('overview');
 
     expect(await screen.findByText(/Chưa công bố: Chính sách quyền riêng tư/)).toBeInTheDocument();
     expect(screen.getByText(/không thu chấp thuận nào/)).toBeInTheDocument();
   });
 
   it('tách "đã đồng ý" khỏi "người dùng tự bấm"', async () => {
-    render(<AdminLegalPage />);
+    show('consents');
 
     await screen.findByText('Độ phủ chấp thuận');
     const cells = screen.getAllByRole('cell').map((c) => c.textContent);
@@ -157,7 +186,7 @@ describe('AdminLegalPage', () => {
       documents: [row({ is_effective: false, status: 'scheduled', version: '2026-12-01' })],
     });
 
-    render(<AdminLegalPage />);
+    show('versions');
 
     expect(await screen.findByText('đã lên lịch')).toBeInTheDocument();
     expect(screen.queryByText('đang áp dụng')).not.toBeInTheDocument();
@@ -175,7 +204,7 @@ describe('AdminLegalPage', () => {
       ],
     });
 
-    render(<AdminLegalPage />);
+    show('versions');
 
     expect(await screen.findByText('đang áp dụng')).toBeInTheDocument();
     expect(screen.getAllByText('đang áp dụng')).toHaveLength(1);
@@ -193,7 +222,7 @@ describe('AdminLegalPage', () => {
       body_format: 'file',
     } as any);
 
-    render(<AdminLegalPage />);
+    show('versions');
     fireEvent.click(await screen.findByRole('button', { name: /Xem/ }));
 
     // Trình đọc tệp: tên tệp + nút tải bản gốc, và đường tải là đường QUẢN TRỊ
@@ -207,7 +236,7 @@ describe('AdminLegalPage', () => {
     // Sửa một bản đã công bố là viết lại bản văn nằm dưới những chữ ký đã thu;
     // cơ sở dữ liệu chặn việc đó. Một nút đi tới bức tường ấy chỉ để nhận lỗi
     // là thiết kế mời người ta thử.
-    render(<AdminLegalPage />);
+    show('versions');
     await screen.findByText('Các bản đã công bố');
 
     expect(screen.queryByRole('button', { name: /Sửa/ })).not.toBeInTheDocument();
@@ -216,7 +245,7 @@ describe('AdminLegalPage', () => {
   it('không còn đường công bố thẳng — chỉ soạn qua bản nháp', async () => {
     // Biểu mẫu dán-nội-dung-rồi-Công-bố đã bị gỡ: một bản văn pháp lý ra khỏi
     // tay một người mà không ai đọc lại là đúng thứ quy trình tồn tại để chặn.
-    render(<AdminLegalPage />);
+    show('compose');
     await screen.findByText('Bản nháp');
 
     expect(screen.queryByRole('button', { name: 'Công bố' })).not.toBeInTheDocument();
@@ -224,7 +253,7 @@ describe('AdminLegalPage', () => {
 
   it('mở bản nháp mới và hiển thị trình soạn thảo', async () => {
     vi.mocked(createDraft).mockResolvedValue(draft({ status: 'draft' }));
-    render(<AdminLegalPage />);
+    show('compose');
     await screen.findByText('Bản nháp');
 
     fireEvent.click(screen.getByRole('button', { name: 'Soạn bản mới' }));
@@ -236,7 +265,7 @@ describe('AdminLegalPage', () => {
   it('liệt kê bản nháp đang mở kèm trạng thái và số hiệu bản ghi', async () => {
     vi.mocked(fetchDrafts).mockResolvedValue([draft({ body: undefined, body_length: 19 })]);
 
-    render(<AdminLegalPage />);
+    show('compose');
 
     // Truy theo NÚT của bản nháp, không truy theo chữ rời: `#3` cũng xuất hiện
     // trong sổ đăng bạ bên dưới, và một phép tìm mơ hồ sẽ đỏ vì lý do không
@@ -247,7 +276,7 @@ describe('AdminLegalPage', () => {
   });
 
   it('dựng sổ đăng bạ với hành động và người thực hiện', async () => {
-    render(<AdminLegalPage />);
+    show('events');
 
     expect(await screen.findByText('draft.update')).toBeInTheDocument();
     expect(screen.getByText('quantri')).toBeInTheDocument();
@@ -260,7 +289,7 @@ describe('AdminLegalPage', () => {
       { ...EVENTS[0], detail: { fields: ['body'] } },
     ]);
 
-    render(<AdminLegalPage />);
+    show('events');
 
     await screen.findByText('draft.update');
     expect(screen.queryByText(/Đoạn\./)).not.toBeInTheDocument();

@@ -54,8 +54,12 @@ vi.mock('../../api/tenants', async (importOriginal) => ({
   inspectInvitation: vi.fn(),
 }));
 
+// `toast` phải là MỘT object ổn định, như hook thật (TEN-02). Bản mock cũ
+// dựng object mới mỗi lần gọi, nên mọi render lại kéo theo một lượt tải lại —
+// tệp test này tự tái tạo đúng lỗi mà hook thật đã sửa.
+const TOAST = { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() };
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }),
+  useToast: () => ({ toast: TOAST, toasts: [], removeToast: vi.fn() }),
 }));
 
 import AdminTenantsPage from '../AdminTenantsPage';
@@ -102,7 +106,12 @@ const PREVIEW_READY = {
 };
 
 const openTenant = async () => {
-  fireEvent.click(await screen.findByRole('button', { name: 'Quản lý' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Mở tổ chức' }));
+};
+
+/** Chi tiết tổ chức giờ chia tab; mở đúng tab mà test cần. */
+const openTab = async (name: RegExp) => {
+  fireEvent.click(await screen.findByRole('tab', { name }));
 };
 
 beforeEach(() => {
@@ -118,6 +127,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
   it('hiện số dòng sẽ mất trước khi hỏi xác nhận', async () => {
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Cài đặt/);
 
     expect(await screen.findByText(/3.933/)).toBeInTheDocument();
     expect(screen.getByText(/samples/)).toBeInTheDocument();
@@ -127,6 +137,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
   it('bỏ qua bảng có 0 dòng để không lấp con số thật', async () => {
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Cài đặt/);
 
     await screen.findByText(/samples/);
     expect(screen.queryByText(/webhook_deliveries/)).not.toBeInTheDocument();
@@ -135,6 +146,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
   it('nút xoá bị khoá cho tới khi gõ đúng mã tổ chức', async () => {
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Cài đặt/);
 
     const button = await screen.findByRole('button', { name: 'Xoá vĩnh viễn' });
     expect(button).toBeDisabled();
@@ -151,6 +163,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
     (purgeTenant as any).mockResolvedValue({});
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Cài đặt/);
 
     fireEvent.change(await screen.findByLabelText('Gõ lại mã tổ chức để xác nhận'),
                      { target: { value: 'truong-b' } });
@@ -168,6 +181,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
     });
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Cài đặt/);
 
     expect(await screen.findByText(/Tổ chức chưa bị xoá mềm/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Xoá vĩnh viễn' })).not.toBeInTheDocument();
@@ -177,6 +191,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
     (fetchPurgePreview as any).mockResolvedValue({ ...PREVIEW_READY, has_ready_export: false });
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Cài đặt/);
 
     expect(await screen.findByText(/nên xuất dữ liệu trước khi xoá/)).toBeInTheDocument();
   });
@@ -191,8 +206,11 @@ describe('Một phần bị từ chối không làm hỏng cả trang', () => {
     render(<AdminTenantsPage />);
     await openTenant();
 
+    // Thành viên vẫn còn (tab mặc định)…
     expect(await screen.findByText('giaovien')).toBeInTheDocument();
-    expect(screen.getByText(/dành cho quản trị\s+viên nền tảng/)).toBeInTheDocument();
+    // …và tab Cài đặt nói đúng vì sao không có bản xem trước.
+    await openTab(/Cài đặt/);
+    expect(await screen.findByText(/dành cho quản trị\s+viên nền tảng/)).toBeInTheDocument();
   });
 });
 
@@ -218,11 +236,11 @@ describe('Tranh chấp khi đổi tổ chức nhanh', () => {
     });
 
     render(<AdminTenantsPage />);
-    const buttons = await screen.findAllByRole('button', { name: 'Quản lý' });
+    const buttons = await screen.findAllByRole('button', { name: 'Mở tổ chức' });
 
     fireEvent.click(buttons[0]);                       // chọn A — treo
     fireEvent.click(await screen.findByRole('button', { name: 'Đóng' }));
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Quản lý' }))[1]); // chọn B
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Mở tổ chức' }))[1]); // chọn B
 
     expect(await screen.findByText('nguoi-cua-B')).toBeInTheDocument();
 
@@ -245,6 +263,7 @@ describe('Lời mời', () => {
     });
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Lời mời/);
     fireEvent.change(await screen.findByLabelText('Email được mời'),
                      { target: { value: 'moi@truongb.vn' } });
     fireEvent.click(screen.getByRole('button', { name: 'Mời' }));
@@ -294,6 +313,7 @@ describe('Lời mời', () => {
     }]);
     render(<AdminTenantsPage />);
     await openTenant();
+    await openTab(/Lời mời/);
 
     // Tìm trong đúng dòng lời mời: chuỗi "Quản trị viên" cũng nằm trong các ô
     // chọn vai, nên một phép tìm toàn trang sẽ đúng ngay cả khi dòng này vẫn
@@ -331,12 +351,12 @@ describe('Chi tiết tổ chức — TEN-03', () => {
     );
 
     render(<AdminTenantsPage />);
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Quản lý' }))[0]);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Mở tổ chức' }))[0]);
     expect(await screen.findByText('giaovien')).toBeInTheDocument();
 
     // Mở C trong khi request của C còn treo. (Nút của B giờ là "Đóng", nên
     // nút "Quản lý" còn lại duy nhất là của C.)
-    fireEvent.click(screen.getByRole('button', { name: 'Quản lý' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mở tổ chức' }));
     await waitFor(() => expect(screen.getByTestId('tenant-detail')).toHaveAttribute('data-ready', '0'));
     expect(screen.queryByText('giaovien')).not.toBeInTheDocument();
     expect(screen.getByTestId('tenant-detail')).toBeDisabled();
@@ -345,5 +365,33 @@ describe('Chi tiết tổ chức — TEN-03', () => {
     expect(await screen.findByText('hieutruong-c')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('tenant-detail')).toHaveAttribute('data-ready', '1'));
     expect(screen.getByTestId('tenant-detail')).not.toBeDisabled();
+  });
+});
+
+describe('Bố cục Đợt 2 — đơn giản cho người mới', () => {
+  it('tìm theo TÊN lọc được danh sách; không khớp thì nói rõ', async () => {
+    const TENANT_C = { ...TENANT, tenant_id: 'truong-c', display_name: 'Trường C', slug: 'truong-c' };
+    (fetchTenants as any).mockResolvedValue([TENANT, TENANT_C]);
+    render(<AdminTenantsPage />);
+    await waitFor(() => expect(fetchTenants).toHaveBeenCalled());
+    await screen.findByText('Trường C', {}, { timeout: 3000 });
+
+    fireEvent.change(screen.getByLabelText('Tìm tổ chức'), { target: { value: 'truong c' } });
+    expect(screen.queryByText('Trường B')).not.toBeInTheDocument();
+    expect(screen.getByText('Trường C')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Tìm tổ chức'), { target: { value: 'khong-co' } });
+    expect(screen.getByText(/Không có tổ chức nào khớp/)).toBeInTheDocument();
+  });
+
+  it('vùng xoá vĩnh viễn KHÔNG nằm cạnh việc thường ngày: chỉ ở tab Cài đặt', async () => {
+    render(<AdminTenantsPage />);
+    await openTenant();
+    expect(await screen.findByText('giaovien')).toBeInTheDocument();
+    expect(screen.queryByText('Vùng nguy hiểm')).not.toBeInTheDocument();
+
+    await openTab(/Cài đặt/);
+    expect(await screen.findByText('Vùng nguy hiểm')).toBeInTheDocument();
+    expect(screen.queryByText('giaovien')).not.toBeInTheDocument();
   });
 });
