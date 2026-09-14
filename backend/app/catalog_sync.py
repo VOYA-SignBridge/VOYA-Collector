@@ -39,11 +39,13 @@ from app.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
 from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
+    delete_capture_sessions_by_class as db_delete_capture_sessions_by_class,
+    count_training_jobs_using_class as db_count_training_jobs_using_class,
     delete_raw_upload as db_delete_raw_upload,
     delete_raw_uploads_by_class as db_delete_raw_uploads_by_class,
     delete_sample as db_delete_sample,
     delete_samples_by_class as db_delete_samples_by_class,
-    ensure_tables,
+    ensure_tables as _db_ensure_tables,
     upsert_class as db_upsert_class,
     upsert_raw_upload as db_upsert_raw_upload,
     upsert_sample as db_upsert_sample,
@@ -61,6 +63,30 @@ from app.storage.metadata_db import (
     list_deleted_samples as db_list_deleted_samples,
     get_deleted_sample as db_get_deleted_sample,
 )
+
+_SCHEMA_ENSURED = False
+
+
+def ensure_tables() -> None:
+    """Bảo đảm lược đồ MỘT LẦN mỗi tiến trình, không phải mỗi thao tác.
+
+    Mười bốn đường ghi/đọc của danh mục (xoá mềm, khôi phục, thùng rác, đổi
+    nhãn...) đều mở đầu bằng `ensure_tables()`. Bản gốc gọi thẳng
+    `metadata_db.ensure_tables()`, tức là chạy TOÀN BỘ DDL bổ khuyết + các bước
+    dữ liệu v5/v6 (~0,5 s, đo 15/09/2026) cho mỗi lời gọi — mở thùng rác là
+    hai lần, xoá một lần quay 12 mẫu là mười hai lần. Backend đã chạy đúng
+    việc này lúc khởi động; ở đây chỉ cần chắc rằng tiến trình hiện tại
+    (worker, trainer, test) đã làm nó một lần.
+
+    Bản trong `metadata_db` cố ý KHÔNG ghi nhớ: test thả bảng rồi gọi lại nó
+    để dựng lại. Nên nhớ ở lớp này, chỗ chỉ phục vụ đường yêu cầu.
+    """
+    global _SCHEMA_ENSURED
+    if _SCHEMA_ENSURED:
+        return
+    _db_ensure_tables()
+    _SCHEMA_ENSURED = True
+
 
 logger = logging.getLogger(__name__)
 slog = get_structured_logger("catalog.sync")
@@ -1212,6 +1238,16 @@ def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
         feature_dir = old_meta.hierarchy_path()
         raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
 
+        # Kiểm mọi ràng buộc TRƯỚC khi đụng tệp. Thứ tự cũ gỡ thư mục rồi mới
+        # DELETE ở DB; câu DELETE vướng khoá ngoại thì tệp đã mất mà dòng còn —
+        # lớp thành "ma": không hiện, không khôi phục, không xoá được.
+        n_jobs = db_count_training_jobs_using_class(class_uid)
+        if n_jobs:
+            raise CatalogSyncError(
+                f"Nhãn này đã dùng trong {n_jobs} lượt huấn luyện nên không xoá vĩnh viễn "
+                f"được (giữ để truy vết mô hình). Để nó trong thùng rác là đủ.",
+                status_code=409, error_code="CLASS_REFERENCED_BY_TRAINING")
+
         # If still in the active catalog, drop it from the CSVs too.
         if active_row is not None:
             _write_csv(MASTER_LABELS, LABEL_FIELDS, [r for r in rows if r.get("class_uid") != class_uid])
@@ -1226,6 +1262,7 @@ def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
 
         db_delete_samples_by_class(class_uid)
         db_delete_raw_uploads_by_class(class_uid)
+        db_delete_capture_sessions_by_class(class_uid)  # sau samples (samples trỏ tới phiên thu)
         db_delete_class(class_uid)
 
         _invalidate_tts_cache(old_meta.label_original)
@@ -1664,11 +1701,22 @@ def list_trash_samples_for_user(auth_user_id: str) -> List[Dict[str, Any]]:
 # ===========================================================================
 
 def _bulk(fn, ids: Sequence[str]) -> Dict[str, Any]:
+    """Áp `fn` lên từng id, gom kết quả; một id hỏng không chặn các id khác.
+
+    `tenant_id` lấy từ phạm vi của request — cùng phạm vi mà mọi `sync_*` một
+    mẫu đang dùng. Từ 16/08/2026 (khi các `sync_*` bắt buộc `tenant_id`) tới
+    15/09/2026 hàm này vẫn gọi `fn(i)` trần, nên MỌI thao tác thùng rác theo
+    lô — khôi phục, xoá vĩnh viễn, dọn thùng — đều ném TypeError, bị nuốt ở
+    `except` bên dưới, và trả về "Đã khôi phục 0 mẫu" với success=True.
+    """
+    from app.tenant_context import require_tenant
+
+    scope = require_tenant()
     ok: List[str] = []
     failed: List[Dict[str, str]] = []
     for i in ids or []:
         try:
-            fn(i)
+            fn(i, tenant_id=scope)
             ok.append(i)
         except Exception as exc:
             logger.warning("[CATALOG][BULK] %s(%s) failed: %s", getattr(fn, "__name__", fn), i, exc)

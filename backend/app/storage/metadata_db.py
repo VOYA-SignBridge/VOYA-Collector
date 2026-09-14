@@ -5725,6 +5725,26 @@ def delete_class(class_uid: str):
     _execute("DELETE FROM classes WHERE class_uid = %s", (class_uid,))
 
 
+def delete_capture_sessions_by_class(class_uid: str):
+    """Phiên thu của một lớp — xoá cùng lớp khi xoá vĩnh viễn.
+
+    `fk_capture_sessions_class` không có ON DELETE, nên `delete_class` bị chặn
+    chừng nào còn một phiên thu trỏ tới lớp; trước 15/09/2026 `sync_purge_class`
+    không xoá bảng này và MỌI lớp từng thu bằng camera đều không xoá vĩnh viễn
+    được (mà tệp thì đã bị gỡ trước khi tới câu DELETE)."""
+    _execute("DELETE FROM capture_sessions WHERE class_uid = %s", (class_uid,))
+
+
+def count_training_jobs_using_class(class_uid: str) -> int:
+    """Số lượt huấn luyện đã ghi lớp này vào `training_job_classes` (FK không
+    cascade — cố ý: lịch sử huấn luyện phải truy vết được về lớp)."""
+    rows = _fetch_all(
+        "SELECT count(DISTINCT job_id) AS n FROM training_job_classes WHERE class_uid = %s",
+        (class_uid,),
+    )
+    return int(rows[0]["n"]) if rows else 0
+
+
 # ---------------------------------------------------------------------------
 # Soft delete / restore (Trash) — sets deleted_at instead of removing the row.
 # Files and Drive content are kept; a purge (hard delete) removes them later.

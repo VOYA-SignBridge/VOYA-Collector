@@ -470,6 +470,19 @@ def update_class(
         }
 
 
+def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
+    """Lô mà KHÔNG mục nào thành công là một lỗi, không phải "đã xoá 0 nhãn".
+
+    Một tháng (16/08–15/09/2026) mọi lượt khôi phục/xoá vĩnh viễn từ thùng rác
+    đều thất bại vì TypeError bên trong, và giao diện vẫn hiện thông báo xanh
+    "Đã khôi phục 0 mẫu." — không ai biết có lỗi. Trả 400 kèm lý do của mục
+    đầu tiên; lô thành công một phần vẫn về 200 với danh sách `failed`.
+    """
+    if not result.get("ok") and result.get("failed"):
+        first = result["failed"][0]
+        raise HTTPException(status_code=400, detail=f"{first.get('id')}: {first.get('error')}")
+
+
 @router.get("/trash")
 def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
     """List soft-deleted classes (Trash). Admin only."""
@@ -488,6 +501,7 @@ def bulk_restore_classes_endpoint(
     """Restore several soft-deleted classes at once. Body: {class_uids: [...]}."""
     uids = payload.get("class_uids") or []
     result = bulk_restore_classes(uids)
+    _reject_if_nothing_done(result)
     return {"success": True, "message": f"\u0110\u00e3 kh\u00f4i ph\u1ee5c {result['ok_count']} nh\u00e3n.", **result}
 
 
@@ -503,6 +517,7 @@ def bulk_purge_classes_endpoint(
         result = empty_class_trash()
     else:
         result = bulk_purge_classes(payload.get("class_uids") or [])
+    _reject_if_nothing_done(result)
     audit.record("data.class.purge.bulk", actor=current_user, request=request,
                  target_type="class", detail={
                      "all": bool(payload.get("all")),

@@ -336,6 +336,14 @@ def get_sample_data(sample_id: str):
     return FileResponse(str(resolved[0]), media_type="application/octet-stream")
 
 
+def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
+    """Lô mà KHÔNG mục nào thành công là lỗi, không phải "đã khôi phục 0 mẫu".
+    Xem cùng tên ở routers/classes.py cho câu chuyện phía sau."""
+    if not result.get("ok") and result.get("failed"):
+        first = result["failed"][0]
+        raise HTTPException(status_code=400, detail=f"{first.get('id')}: {first.get('error')}")
+
+
 @router.get("/samples/trash")
 def list_sample_trash(current_user: Dict[str, Any] = Depends(get_current_user)):
     """List soft-deleted samples (whose class is still active). An admin sees the
@@ -360,6 +368,7 @@ def bulk_restore_samples_endpoint(
     `skipped` with a reason instead of vanishing from the count."""
     uids, skip_info = _actionable_uids(payload.get("sample_uids") or [], current_user)
     result = bulk_restore_samples(uids)
+    _reject_if_nothing_done(result)
     message = f"Đã khôi phục {result['ok_count']} mẫu." + _skip_note(skip_info)
     return {"success": True, "message": message, **result, **skip_info}
 
@@ -385,6 +394,7 @@ def bulk_purge_samples_endpoint(
     else:
         uids, skip_info = _actionable_uids(payload.get("sample_uids") or [], current_user)
         result = bulk_purge_samples(uids)
+    _reject_if_nothing_done(result)
     audit.record("data.sample.purge.bulk", actor=current_user, request=request,
                  target_type="sample", detail={
                      "all": bool(payload.get("all")),
