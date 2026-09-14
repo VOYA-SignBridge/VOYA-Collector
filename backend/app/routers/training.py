@@ -339,15 +339,27 @@ def _split_provenance(*, tenant_id: str,
         # đứng ngoài `try` ở đây sẽ ném ImportError và biến hàm "không bao giờ
         # ném" thành nguồn của một trang 500 — đúng thứ docstring nói là không
         # được xảy ra.
+        #
+        # `/workspace` KHÔNG nằm sẵn trên `sys.path` của tiến trình API (cwd là
+        # `/app`); `_import_models_registry` đã phải chèn nó cho cùng lý do.
+        # Thiếu dòng này thì import dưới ném "No module named 'processed'" ở
+        # MỌI lượt gọi, và câu đó từng chạy thẳng ra màn hình (14/09/2026).
+        workspace = str(WORKSPACE_ROOT)
+        if workspace not in sys.path:
+            sys.path.insert(0, workspace)
         from processed.train_utils import signer_identity as _si
         from app.training_tasks import _resolve_for_run
         art = _resolve_for_run(
             {"operational_split_id": split_id or "", "run_purpose": run_purpose or ""},
             tenant_id=tenant_id)
     except Exception as exc:  # noqa: BLE001 — xem docstring
+        # Người dùng đọc một câu tiếng Việt về hệ quả; chuỗi lỗi Python đi vào
+        # nhật ký máy chủ, nơi người vận hành tìm nó.
+        logger.warning("[TRAINING] split provenance khong doc duoc: %s", exc)
         prov.warning = (
-            f"Không xác định được tập dữ liệu lượt chạy sẽ dùng ({exc}). "
-            "Kết quả huấn luyện sẽ không nói được nó đo trên tập nào.")
+            "Chưa xác định được tập dữ liệu lượt chạy sẽ dùng. Kết quả huấn "
+            "luyện sẽ không nói được nó đo trên tập nào — hãy chọn hoặc tạo "
+            "một hiện vật chia tập trước khi chạy.")
         return prov
 
     if art is None:

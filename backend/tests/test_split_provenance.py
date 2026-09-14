@@ -235,7 +235,19 @@ def test_khong_phan_giai_duoc_thi_noi_ra_chu_khong_no(monkeypatch):
     monkeypatch.setattr(tt, "_resolve_for_run", _no)
     p = tr._split_provenance(tenant_id="default")
     assert p.split_id is None
-    assert p.warning and "Không xác định được tập dữ liệu" in p.warning
+    assert p.warning and "Chưa xác định được tập dữ liệu" in p.warning
+    # Chuỗi lỗi Python KHÔNG được ra màn hình (14/09: "No module named
+    # 'processed'" từng hiện nguyên văn trong cảnh báo của trang huấn luyện).
+    assert "hiện vật không xác minh được" not in p.warning
+    assert "RuntimeError" not in p.warning
+
+
+def test_thu_muc_workspace_duoc_dua_vao_sys_path_truoc_khi_import():
+    """`/workspace` không nằm sẵn trên sys.path của tiến trình API; thiếu bước
+    chèn thì import `processed.*` ném ở mọi lượt gọi."""
+    import inspect
+    src = inspect.getsource(tr._split_provenance)
+    assert "sys.path.insert(0, workspace)" in src
 
 
 def test_tra_None_thi_noi_la_mac_dinh_trainer(monkeypatch):
