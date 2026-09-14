@@ -80,6 +80,8 @@ export default function RegisterPage() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  /** `email_taken`: hiện thêm hai lối đi thay vì bắt người dùng đoán. */
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
   const [showPassword, setShowPassword] = useState(false);
   // Một nút cho CẢ HAI ô mật khẩu, và nằm ở cả hai: người mới thấy dấu chấm
   // ở ô đầu mà không có cách nào kiểm mình gõ gì (14/09/2026). Một trạng thái
@@ -189,6 +191,7 @@ export default function RegisterPage() {
     } catch (err: unknown) {
       const { message, code } = readableDetail(err);
       setError(message);
+      setErrorCode(code);
       if (code === "stale_version") {
         // Văn bản đã đổi trong lúc biểu mẫu đang mở. Nạp lại số hiệu mới và bỏ
         // tích: chữ ký vừa rồi là chữ ký cho một bản văn khác, nên giữ ô tích
@@ -330,8 +333,26 @@ export default function RegisterPage() {
         )}
 
         {error ? (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+            {errorCode === "email_taken" && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Link
+                  to="/login"
+                  state={{ identifier: form.email }}
+                  className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-ctu-blue ring-1 ring-ctu-blue/30 hover:bg-ctu-blue/5"
+                >
+                  {t("Đăng nhập bằng email này")}
+                </Link>
+                <Link
+                  to="/forgot-password"
+                  state={{ identifier: form.email }}
+                  className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-ctu-blue ring-1 ring-ctu-blue/30 hover:bg-ctu-blue/5"
+                >
+                  {t("Quên mật khẩu")}
+                </Link>
+              </div>
+            )}
           </div>
         ) : null}
 

@@ -392,3 +392,25 @@ class TestMotHopThuMotTaiKhoan:
             assert _fetch_user_by_login(f"khonglienquan{tag}@gmail.com") is None
         finally:
             _xoa_tai_khoan(first["id"])
+
+    def test_dang_ky_trung_email_noi_RO_la_email_va_lam_gi_tiep(self):
+        """14/09: câu "Username or email already exists" bắt người dùng tự đoán;
+        người quên mật khẩu đi đăng ký lại thay vì khôi phục."""
+        refuse_to_touch_production()
+        from fastapi import HTTPException
+        from app.auth import create_user
+
+        tag = uuid.uuid4().hex[:8]
+        first = create_user(username=f"trung{tag}", email=f"trung{tag}@example.test", password=PASSWORD)
+        try:
+            with pytest.raises(HTTPException) as e1:
+                create_user(username=f"khac{tag}", email=f"trung{tag}@example.test", password=PASSWORD)
+            assert e1.value.status_code == 409
+            assert e1.value.detail["code"] == "email_taken"
+            assert "Quên mật khẩu" in e1.value.detail["message"]
+
+            with pytest.raises(HTTPException) as e2:
+                create_user(username=f"trung{tag}", email=f"khac{tag}@example.test", password=PASSWORD)
+            assert e2.value.detail["code"] == "username_taken"
+        finally:
+            _xoa_tai_khoan(first["id"])

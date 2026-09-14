@@ -165,6 +165,7 @@ export const EN: Record<string, string> = {
   "Đóng chi tiết": "Close details",
   "Đăng ký máy": "Register machine",
   "Đăng ký qua giao diện": "Registered through this page",
+  "Đăng nhập bằng email này": "Sign in with this email",
   "Đăng xuất": "Sign out",
   "Đăng nhập": "Sign in",
   "Đăng ký": "Sign up",

@@ -114,6 +114,21 @@ describe('RegisterPage — khi hệ thống ĐÃ công bố văn bản', () => {
     expect(screen.getByRole('button', { name: /Tạo tài khoản/ })).toBeDisabled();
   });
 
+  it('email đã có tài khoản → nói rõ và mở hai lối: đăng nhập / quên mật khẩu', async () => {
+    vi.mocked(register).mockRejectedValue({
+      response: { status: 409, data: { detail: { code: 'email_taken', message: 'Địa chỉ email này đã có tài khoản. Hãy đăng nhập, hoặc dùng "Quên mật khẩu" nếu bạn không nhớ mật khẩu.' } } },
+    });
+    renderPage();
+    fillTheForm();
+    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /Tạo tài khoản/ }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/đã có tài khoản/);
+    expect(screen.getByRole('link', { name: /Đăng nhập bằng email này/ })).toHaveAttribute('href', '/login');
+    expect(screen.getByRole('link', { name: 'Quên mật khẩu' })).toHaveAttribute('href', '/forgot-password');
+  });
+
   it('mở khoá nút gửi sau khi tích', async () => {
     renderPage();
     const box = await screen.findByRole('checkbox');

@@ -396,18 +396,28 @@ def create_user(
             detail=f"Password must be at least {settings.min_password_length} characters",
         )
 
-    existing = _fetch_user_by_login(username_norm) or _fetch_user_by_login(email_norm)
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already exists",
-        )
+    # Nói RÕ cái gì trùng và làm gì tiếp (14/09/2026): "Username or email
+    # already exists" bắt người đăng ký tự đoán, và người quên mật khẩu thì đi
+    # đăng ký lại thay vì khôi phục. `code` để giao diện dựng hai lối đi
+    # (đăng nhập / quên mật khẩu); `message` là câu hiện ra khi giao diện cũ.
     # Một hộp thư = một tài khoản, kể cả khi viết bằng bí danh (`+tag`, dấu chấm
-    # Gmail). Xem `canonical_email`.
-    if find_user_with_same_mailbox(email_norm):
+    # Gmail) — xem `canonical_email`.
+    if _fetch_user_by_login(email_norm) or find_user_with_same_mailbox(email_norm):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Hộp thư này đã có tài khoản. Mỗi địa chỉ email chỉ đăng ký được một tài khoản.",
+            detail={
+                "code": "email_taken",
+                "message": "Địa chỉ email này đã có tài khoản. Hãy đăng nhập, hoặc dùng "
+                           "\"Quên mật khẩu\" nếu bạn không nhớ mật khẩu.",
+            },
+        )
+    if _fetch_user_by_login(username_norm):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "username_taken",
+                "message": "Tên đăng nhập này đã có người dùng. Hãy chọn tên khác.",
+            },
         )
 
     user_id = str(uuid.uuid4())
