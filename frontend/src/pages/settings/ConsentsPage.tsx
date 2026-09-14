@@ -192,6 +192,32 @@ function ConsentSection() {
         {consents?.map((c) => {
           const status = statusOf(c);
           const isBusy = busy === c.kind;
+          // Văn bản hỏi theo từng buổi (giám hộ) không có gì để ký ở đây, và chỉ
+          // liên quan tới người ghi hình cho người dưới 18 tuổi. Một thẻ đầy đủ
+          // đứng ngang hàng ba văn bản còn lại khiến mọi người tưởng mình còn
+          // thiếu gì đó (14/09/2026). Gấp lại: một dòng, bấm mới mở.
+          if (!c.self_signable) {
+            return (
+              <details key={c.kind} className="rounded-xl border border-slate-200 bg-slate-50/60" data-testid={`consent-collapsed-${c.kind}`}>
+                <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3">
+                  <span>
+                    <span className="font-semibold text-slate-900">{t(LEGAL_KIND_LABEL[c.kind])}</span>
+                    <span className="ml-2 text-xs text-slate-500">{t("chỉ liên quan nếu bạn ghi hình cho người dưới 18 tuổi")}</span>
+                  </span>
+                  <Badge variant={status.tone} size="sm">{t(status.label)}</Badge>
+                </summary>
+                <div className="px-4 pb-4 text-sm text-slate-600">
+                  <Trans
+                    k="Văn bản này được hỏi trong {khi}, không ký một lần ở đây. Bạn đọc trước được bằng liên kết bên trên."
+                    vars={{ khi: <strong>{t("từng buổi ghi hình")}</strong> }}
+                  />{" "}
+                  <Link to={`/legal/${c.kind}`} className="font-medium text-ctu-blue underline underline-offset-2">
+                    {t("Đọc văn bản")}
+                  </Link>
+                </div>
+              </details>
+            );
+          }
           return (
             <article
               key={c.kind}

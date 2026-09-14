@@ -79,7 +79,10 @@ export const ROLE_LABEL: Record<MemberRole, string> = {
  * người quản trị sẽ đi cấp một vai để "sửa" nó — tức là giao diện vừa thuyết
  * phục họ nới quyền cho một người mà không ai yêu cầu.
  */
-export const NO_ROLE_LABEL = "Chưa có vai";  // khoá từ điển; dịch ở `roleLabel()`
+// "Thành viên", không phải "Chưa có vai" (14/09/2026): trong Cộng đồng MỌI
+// người đều không có vai và đó là trạng thái bình thường — "chưa có" đọc như
+// một ô thiếu dữ liệu cần ai đó đi điền. "Thành viên" nói đúng điều đang có.
+export const NO_ROLE_LABEL = "Thành viên";  // khoá từ điển; dịch ở `roleLabel()`
 
 /**
  * Vai này CHO PHÉP LÀM GÌ — nói bằng hệ quả, không phải bằng tên vai.

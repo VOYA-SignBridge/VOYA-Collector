@@ -11,7 +11,7 @@ import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
-import { BuildingIcon, ChipIcon, ClipboardCheckIcon, ClockIcon, GearIcon, HandIcon, HomeIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
+import { BuildingIcon, ChipIcon, ClipboardCheckIcon, ClockIcon, GearIcon, HandIcon, HomeIcon, LifeBuoyIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
 import { prefetchProps } from "../routes/prefetch";
 import { useI18n } from "../i18n";
@@ -114,6 +114,16 @@ export default function Layout({ children }: { children: ReactNode }) {
     icon: <GearIcon className={navIconClass} />,
   };
 
+  // Hỗ trợ đứng RIÊNG trên thanh bên, không chỉ nằm sau Cài đặt: người mới gặp
+  // sự cố phải thấy ngay chỗ báo, không phải đoán nó nằm trong mục nào
+  // (kế hoạch UX 13/09/2026 §4, yêu cầu 14/09). Đích là trang phiếu hỗ trợ
+  // sẵn có trong Cài đặt — cùng một trang, thêm một cửa vào.
+  const supportItem: FlatNavItem = {
+    name: "Hỗ trợ",
+    href: "/settings/support",
+    icon: <LifeBuoyIcon className={navIconClass} />,
+  };
+
   // Người đóng góp thấy thùng rác của chính họ (bản ghi đã xoá mềm). Quản trị
   // viên có thùng rác toàn hệ thống trong console riêng — xem AdminShell.
   const userTrashItem: FlatNavItem = {
@@ -209,6 +219,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         ...(isTenantAdmin(user) ? [consoleItem] : [organizationItem]),
         userTrashItem,
         settingsItem,
+        supportItem,
       ]
     : baseNavigation;
 

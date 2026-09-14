@@ -74,6 +74,18 @@ export default function ForgotPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  // Cùng một nút ở CẢ HAI ô mật khẩu — xem RegisterPage.
+  const togglePassword = (
+    <button
+      type="button"
+      onClick={() => setShowPassword((v) => !v)}
+      aria-label={showPassword ? t("Ẩn mật khẩu") : t("Hiện mật khẩu")}
+      aria-pressed={showPassword}
+      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ctu-blue hover:bg-ctu-blue/10"
+    >
+      {showPassword ? t("Ẩn") : t("Hiện")}
+    </button>
+  );
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -323,6 +335,7 @@ export default function ForgotPasswordPage() {
             autoComplete="new-password"
             placeholder={t("Tối thiểu 8 ký tự")}
             error={passwordError}
+            trailing={togglePassword}
           />
 
           <AuthInput
@@ -334,15 +347,7 @@ export default function ForgotPasswordPage() {
             autoComplete="new-password"
             placeholder={t("Nhập lại mật khẩu mới")}
             error={confirmError}
-            trailing={
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ctu-blue hover:bg-ctu-blue/10"
-              >
-                {showPassword ? t("Ẩn") : t("Hiện")}
-              </button>
-            }
+            trailing={togglePassword}
           />
 
           {error ? <ErrorBox message={error} /> : null}
