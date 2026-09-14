@@ -7,6 +7,7 @@ export default function Footer() {
 
   const quickLinks = [
     { name: t("Trang chủ"), href: "/" },
+    { name: t("Học ký hiệu"), href: "/learn" },
     { name: t("Nhận dạng realtime"), href: "/realtime" },
     { name: t("Đăng nhập"), href: "/login" },
     { name: t("Đăng ký"), href: "/register" },
