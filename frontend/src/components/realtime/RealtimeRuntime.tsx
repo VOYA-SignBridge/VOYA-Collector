@@ -74,6 +74,24 @@ const TTS_VOICES = [
 ] as const;
 const TTS_DEFAULT_VOICE = "vi-VN-HoaiMyNeural";
 
+// Only surface a prediction to the UI once smoothed confidence clears this
+// bar. Below it, the label is left hidden (prediction cleared) rather than
+// shown — this is what stops the displayed letter from jumping between
+// low-confidence guesses while the model is still unsure.
+const DISPLAY_CONFIDENCE_THRESHOLD = 0.6;
+// Consecutive no-hand frames required before the ring buffer is reset. A
+// single missed-detection frame (common MediaPipe jitter, not the user
+// actually dropping their hand) used to wipe the whole in-progress buffer —
+// this tolerates brief flicker without restarting it.
+const NO_HAND_RESET_STREAK = 5;
+// Minimum real frames (out of the 60-frame window) before inference starts
+// firing at all. Lowered from 40 now that DISPLAY_CONFIDENCE_THRESHOLD hides
+// any prediction the model isn't confident about — so an early, mostly
+// zero-padded window can be tried without risking a wrong label being shown;
+// worst case it just stays hidden a bit longer. Tune this first if predictions
+// still feel slow to appear, or feel wrong/jumpy before settling.
+const MIN_READY_FRAMES = 15;
+
 // Speak once the smoothed confidence reaches this bar (user-chosen: 85%).
 const SPEAK_CONFIDENCE_THRESHOLD = 0.85;
 // Warm the TTS audio cache as soon as a label is this likely — well before it
@@ -113,6 +131,9 @@ export default function RealtimeRuntime({
   // does. Reset whenever a run starts so a new session never inherits stale
   // wrist positions from the previous one.
   const handAnchorsRef = useRef<HandAnchors>({});
+  // Consecutive frames with no detected hand. Reset whenever a hand is seen or
+  // a run starts; drives the tolerant ring-buffer reset (NO_HAND_RESET_STREAK).
+  const noHandStreakRef = useRef(0);
 
   // Safety: prevent post-unmount work.
   const disposedRef = useRef(false);
@@ -392,13 +413,11 @@ export default function RealtimeRuntime({
       video.srcObject = null;
     }
 
-    // Close MediaPipe Hands.
-    try {
-      handsRef.current?.close();
-    } catch {
-      // ignore
-    }
-    handsRef.current = null;
+    // MediaPipe Hands is intentionally NOT closed here — it is created once for
+    // the component's lifetime (see the mount effect below) and reused across
+    // Start/Stop toggles. Recreating it per toggle forced a fresh ~10MB
+    // WASM/model fetch and re-compile from the CDN on every Start click, which
+    // is what made "starting" feel slow after the first run.
 
     // Clear semantic buffers.
     ringRef.current?.clear();
@@ -425,6 +444,83 @@ export default function RealtimeRuntime({
       void stopAll();
     };
   }, [stopAll]);
+
+  // Create MediaPipe Hands ONCE per component lifetime, not per Start/Stop
+  // toggle. `hands.send()` lazily fetches ~10MB of WASM/model assets from the
+  // CDN and compiles them on its FIRST call after construction; recreating
+  // `Hands` on every Start (and closing it on every Stop, as before) paid that
+  // cost again on every toggle. It now survives Stop and is only torn down
+  // when the component actually unmounts. `onResults` reads everything it
+  // needs through refs, so it stays correct across multiple Start/Stop runs
+  // without being re-registered.
+  useEffect(() => {
+    const hands = new Hands({
+      locateFile: (file: string) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
+    });
+
+    // Shared contract — must stay identical to the capture modal. Realtime used
+    // to run modelComplexity 0 with 0.6/0.65, i.e. a different landmark network
+    // and stricter tracking than the one that produced the training corpus.
+    hands.setOptions({ ...HAND_TRACKING_OPTIONS });
+
+    hands.onResults((results: unknown) => {
+      if (disposedRef.current) return;
+
+      try {
+        const scratch = frameScratchRef.current;
+        const ring = ringRef.current;
+        const scheduler = schedulerRef.current;
+
+        if (!scratch || !ring) return;
+
+        const mpResults = results as MediaPipeHandsLikeResults;
+        const hasHands = mpResults?.multiHandLandmarks && mpResults.multiHandLandmarks.length > 0;
+
+        if (!hasHands) {
+          // No hands detected. A single missed frame is usually MediaPipe
+          // detection jitter, not the user actually dropping their hand — only
+          // reset the ring buffer once the miss has lasted NO_HAND_RESET_STREAK
+          // frames in a row. Anchors are left alone regardless — they expire on
+          // their own, so a hand lost for a frame or two still resolves back
+          // into the slot it came from.
+          noHandStreakRef.current += 1;
+          if (noHandStreakRef.current >= NO_HAND_RESET_STREAK) {
+            ring.clear();
+          }
+          return;
+        }
+        noHandStreakRef.current = 0;
+
+        // flatten applies the handedness swap, the cross-frame identity lock and
+        // the x mirror, so the vector matches how the corpus was recorded.
+        const vec = flattenRealtimeHands(mpResults, scratch, {
+          anchors: handAnchorsRef.current,
+        });
+        ring.append(vec);
+
+        // Scheduler itself gates on isReady() and inFlight.
+        scheduler?.trigger();
+      } catch (e) {
+        // Encoding/buffer errors should not crash the app.
+        // Keep last stable prediction; surface error text.
+        const msg = e instanceof Error ? e.message : String(e);
+        setError((prev) => (prev === msg ? prev : msg));
+      }
+    });
+
+    handsRef.current = hands;
+
+    return () => {
+      try {
+        hands.close();
+      } catch {
+        // ignore
+      }
+      if (handsRef.current === hands) handsRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch available models on mount (independent of webcam lifecycle)
   useEffect(() => {
@@ -508,63 +604,26 @@ export default function RealtimeRuntime({
     lastSpokenLabelRef.current = null;
 
     // Initialize utilities once per run.
-    // minReadyFrames: 40 allows inference to start after ~0.67s instead of 1s (60 frames)
-    // Ring buffer still stores full 60 frames with zero-padding for initial frames
-    ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126, minReadyFrames: 40 });
+    // Ring buffer still stores the full 60 frames, zero-padding whatever hasn't
+    // arrived yet — see MIN_READY_FRAMES for the trade-off this controls.
+    ringRef.current = new RealtimeRingBuffer({ capacity: 60, featureDim: 126, minReadyFrames: MIN_READY_FRAMES });
     smootherRef.current = new PredictionSmoother({ historySize: 2, emaAlpha: 0.7 });
     frameScratchRef.current = new Float32Array(126);
     handAnchorsRef.current = {};
 
-    // MediaPipe Hands
-    const hands = new Hands({
-      locateFile: (file: string) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@${MP_HANDS_VERSION}/${file}`,
-    });
+    noHandStreakRef.current = 0;
 
-    // Shared contract — must stay identical to the capture modal. Realtime used
-    // to run modelComplexity 0 with 0.6/0.65, i.e. a different landmark network
-    // and stricter tracking than the one that produced the training corpus.
-    hands.setOptions({ ...HAND_TRACKING_OPTIONS });
-
-    hands.onResults((results: unknown) => {
-      if (disposedRef.current) return;
-
-      try {
-        const scratch = frameScratchRef.current;
-        const ring = ringRef.current;
-        const scheduler = schedulerRef.current;
-
-        if (!scratch || !ring) return;
-
-        const mpResults = results as MediaPipeHandsLikeResults;
-        const hasHands = mpResults?.multiHandLandmarks && mpResults.multiHandLandmarks.length > 0;
-
-        if (!hasHands) {
-          // No hands detected: clear ring buffer to reset on next hand detection.
-          // Anchors are left alone — they expire on their own, so a hand lost for
-          // a frame or two still resolves back into the slot it came from.
-          ring.clear();
-          return;
-        }
-
-        // flatten applies the handedness swap, the cross-frame identity lock and
-        // the x mirror, so the vector matches how the corpus was recorded.
-        const vec = flattenRealtimeHands(mpResults, scratch, {
-          anchors: handAnchorsRef.current,
-        });
-        ring.append(vec);
-
-        // Scheduler itself gates on isReady() and inFlight.
-        scheduler?.trigger();
-      } catch (e) {
-        // Encoding/buffer errors should not crash the app.
-        // Keep last stable prediction; surface error text.
-        const msg = e instanceof Error ? e.message : String(e);
-        setError((prev) => (prev === msg ? prev : msg));
-      }
-    });
-
-    handsRef.current = hands;
+    // MediaPipe Hands is created once for the component's lifetime (see the
+    // dedicated mount effect above) and reused here — it must already exist by
+    // the time `running` first turns true, since that effect runs first.
+    if (!handsRef.current) {
+      // Defensive fallback only; should not happen in practice.
+      setError(t("Bộ theo dõi bàn tay chưa sẵn sàng. Hãy tải lại trang."));
+      setRunning(false);
+      startingRef.current = false;
+      setIsStarting(false);
+      return;
+    }
 
     // Inference scheduler
     const provider = {
@@ -610,24 +669,31 @@ export default function RealtimeRuntime({
 
         smoother.pushPrediction(pred.label, pred.confidence);
         const smoothed = smoother.getSmoothed();
-        if (smoothed) {
-          const next = {
-            label: smoothed.label,
-            confidence: smoothed.confidence,
-            samples: smoothed.samples,
-            labelKey: pred.label_key,
-          };
 
-          // Avoid spam/rerenders if nothing materially changed.
-          setPrediction((prev) => {
-            if (!prev) return next;
-            if (prev.label !== next.label) return next;
-            if (prev.labelKey !== next.labelKey) return next;
-            if (prev.samples !== next.samples) return next;
-            if (Math.abs(prev.confidence - next.confidence) >= 0.01) return next;
-            return prev;
-          });
+        if (!smoothed || smoothed.confidence < DISPLAY_CONFIDENCE_THRESHOLD) {
+          // Below the display bar: hide any prior guess instead of showing an
+          // uncertain one. This is what stops the label from visibly jumping
+          // between low-confidence candidates while the model is still unsure.
+          setPrediction((prev) => (prev === null ? prev : null));
+          return;
         }
+
+        const next = {
+          label: smoothed.label,
+          confidence: smoothed.confidence,
+          samples: smoothed.samples,
+          labelKey: pred.label_key,
+        };
+
+        // Avoid spam/rerenders if nothing materially changed.
+        setPrediction((prev) => {
+          if (!prev) return next;
+          if (prev.label !== next.label) return next;
+          if (prev.labelKey !== next.labelKey) return next;
+          if (prev.samples !== next.samples) return next;
+          if (Math.abs(prev.confidence - next.confidence) >= 0.01) return next;
+          return prev;
+        });
       },
       onError: (err) => {
         if (disposedRef.current) return;
@@ -645,7 +711,7 @@ export default function RealtimeRuntime({
       onFrame: async () => {
         if (disposedRef.current) return;
         try {
-          await hands.send({ image: video });
+          await handsRef.current?.send({ image: video });
         } catch (e) {
           // hands.send can throw if closed mid-loop
         }
@@ -785,15 +851,20 @@ export default function RealtimeRuntime({
     }
   };
 
-  // Map errors to user-friendly Vietnamese messages (memoized to prevent recomputation)
+  // Map errors to user-friendly messages (memoized to prevent recomputation).
+  // Quan trọng: PHẢI luôn trả về một câu. Trước đây nhánh cuối trả null, nên mọi
+  // lỗi không khớp mẫu (500, mất mạng, lỗi model...) bị nuốt sạch — màn hình đứng
+  // ở "Đang chờ..." mà không báo gì, trông y như hệ thống treo.
   const friendlyError = useMemo(() => {
     if (!error) return null;
-    if (error.includes("Camera")) return "Vui lòng cấp quyền sử dụng camera";
-    if (error.includes("timeout") || error.includes("504")) return "Phản hồi chậm, vui lòng thử lại";
-    if (error.includes("503") || error.includes("unavailable")) return "Không thể kết nối hệ thống nhận diện";
-    if (error.includes("404") || error.includes("not found")) return "Bộ nhận diện không tồn tại";
-    return null;
-  }, [error]);
+    if (error.includes("Camera") || error.includes("camera")) return t("Không truy cập được camera. Hãy cấp quyền camera cho trang này rồi bấm Bắt đầu lại.");
+    if (error.includes("timeout") || error.includes("504")) return t("Máy chủ phản hồi chậm, vui lòng thử lại.");
+    if (error.includes("503") || error.includes("unavailable")) return t("Không thể kết nối hệ thống nhận diện. Vui lòng thử lại sau ít phút.");
+    if (error.includes("404") || error.includes("not found")) return t("Bộ nhận diện không tồn tại. Hãy chọn bộ nhận diện khác.");
+    if (error.includes("Failed to fetch") || error.includes("Network")) return t("Mất kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.");
+    if (error.includes("401") || error.includes("403")) return t("Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.");
+    return t("Đã xảy ra lỗi khi nhận diện. Hãy dừng rồi bắt đầu lại.");
+  }, [error, t]);
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-2.5 sm:space-y-4 p-2.5 sm:p-4 lg:p-5">
