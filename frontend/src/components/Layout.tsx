@@ -11,7 +11,7 @@ import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
 import Button from "./ui/Button";
-import { BuildingIcon, ChipIcon, ClipboardCheckIcon, ClockIcon, GearIcon, HandIcon, HomeIcon, LifeBuoyIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
+import { BuildingIcon, ChipIcon, ClipboardCheckIcon, GearIcon, HandIcon, HomeIcon, LifeBuoyIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
 import { prefetchProps } from "../routes/prefetch";
 import { useI18n } from "../i18n";
@@ -88,7 +88,6 @@ export default function Layout({ children }: { children: ReactNode }) {
     { name: "Trang chủ", href: "/", icon: <HomeIcon className={navIconClass} />, end: true },
     { name: "Đóng góp dữ liệu", href: "/upload", icon: <UploadIcon className={navIconClass} /> },
     { name: "Thư viện nhãn", href: "/labels", icon: <TagIcon className={navIconClass} /> },
-    { name: "Lần thu", href: "/sessions", icon: <ClockIcon className={navIconClass} /> },
     { name: "Nhận dạng realtime", href: "/realtime", icon: <HandIcon className={navIconClass} /> },
     { name: "Huấn luyện model", href: "/training", icon: <ChipIcon className={navIconClass} /> },
   ];

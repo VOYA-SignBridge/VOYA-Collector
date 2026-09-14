@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import UploadVideoForm from "../components/UploadVideoForm";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
+import Tabs, { useUrlTab } from "../components/ui/Tabs";
+import CollectionSessionsPage from "./CollectionSessionsPage";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import LoadingScreen from "../components/LoadingScreen";
@@ -18,6 +20,11 @@ type Feedback = {
 
 export default function UploadPage() {
   const { t } = useI18n();
+  const UPLOAD_TABS = [
+    { id: "capture", label: t("Ghi hình & tải lên") },
+    { id: "history", label: t("Lịch sử thu") },
+  ] as const;
+  const [pageTab, setPageTab] = useUrlTab("tab", UPLOAD_TABS, "capture");
   const navigate = useNavigate();
   const { loading: authLoading, isAuthenticated } = useAuth();
   const [tab, setTab] = useState<"video" | "camera">("camera");
@@ -48,10 +55,16 @@ export default function UploadPage() {
     // máy ảnh cao, và khoảng cách 6 đẩy chính cái khung ấy xuống dưới mép màn
     // hình — tức đẩy thứ người ta vào đây để dùng ra khỏi tầm nhìn.
     <div className="space-y-4">
-      <PageHeader 
-        title={t("Trung tâm Thu thập Dữ liệu")}
-        subtitle={t("Quy trình gọn nhẹ để tạo bộ dữ liệu hiệu quả")}
+      <PageHeader
+        title={t("Đóng góp dữ liệu")}
+        subtitle={t("Ghi hình một ký hiệu hoặc tải video lên. Mỗi lần thu được ghi lại ở Lịch sử thu.")}
       />
+
+      <Tabs tabs={UPLOAD_TABS} value={pageTab} onChange={setPageTab} label={t("Mục của trang đóng góp")}>
+      {pageTab === "history" ? (
+        <CollectionSessionsPage embedded />
+      ) : (
+      <div className="space-y-4">
 
       {error && (
         <ErrorBanner 
@@ -210,6 +223,9 @@ export default function UploadPage() {
           )}
         </>
       )}
+      </div>
+      )}
+      </Tabs>
     </div>
   );
 }

@@ -48,7 +48,7 @@ import Button from "../../components/ui/Button";
 import { useI18n } from "../../i18n";
 import {
   ArrowLeftIcon, BuildingIcon, ChartBarIcon, ChipIcon, ClipboardCheckIcon,
-  ClockIcon, FolderIcon, HandIcon, TagIcon, UploadIcon, UsersIcon,
+  FolderIcon, HandIcon, TagIcon, UploadIcon, UsersIcon,
 } from "../../components/ui/Icons";
 
 type Item = { key: string; to: string; icon: ReactNode; end?: boolean };
@@ -68,7 +68,6 @@ const GROUPS: { title: string | null; items: Item[] }[] = [
     items: [
       { key: "Đóng góp dữ liệu", to: "upload", icon: <UploadIcon className={ICON} /> },
       { key: "Thư viện nhãn", to: "labels", icon: <TagIcon className={ICON} /> },
-      { key: "Lần thu", to: "sessions", icon: <ClockIcon className={ICON} /> },
       { key: "Nhận dạng realtime", to: "realtime", icon: <HandIcon className={ICON} /> },
       { key: "Huấn luyện model", to: "training", icon: <ChipIcon className={ICON} /> },
     ],

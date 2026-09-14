@@ -70,7 +70,7 @@ function duration(a: string | null, b: string | null, t: (k: string, v?: Record<
   return min > 0 ? t("{p} phút {g} giây", { p: String(min), g: String(sec) }) : t("{g} giây", { g: String(sec) });
 }
 
-export default function CollectionSessionsPage() {
+export default function CollectionSessionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useI18n();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -136,8 +136,24 @@ export default function CollectionSessionsPage() {
 
   return (
     <div className="space-y-4">
+      {/* Từ 14/09/2026 trang này là tab "Lịch sử thu" trong Đóng góp dữ liệu
+          (`embedded`): thanh bên bớt một mục người mới không hiểu, người thu
+          vẫn có đủ. Đường `/sessions` cũ chuyển hướng tới đó. */}
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-600">
+            {t("Mỗi lần ngồi trước máy quay cho một nhãn là một phiên: ai ký, ai thu, được bao nhiêu mẫu.")}
+          </p>
+          <button
+            onClick={load}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          >
+            {t("Làm mới")}
+          </button>
+        </div>
+      ) : (
       <PageHeader
-        title={t("Lần thu")}
+        title={t("Lịch sử thu")}
         subtitle={t("Mỗi lần ngồi trước máy quay cho một nhãn là một phiên: ai ký, ai thu, được bao nhiêu mẫu.")}
         actions={
           <button
@@ -148,6 +164,7 @@ export default function CollectionSessionsPage() {
           </button>
         }
       />
+      )}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label={t("Phiên thu")} value={data?.total ?? 0} icon={<CameraIcon className="h-5 w-5" />} />

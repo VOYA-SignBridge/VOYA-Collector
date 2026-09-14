@@ -19,7 +19,6 @@ import RouteErrorBoundary from "./components/RouteErrorBoundary";
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const LabelsPage = lazy(() => import("./pages/LabelsPage"));
 const LabelDetailPage = lazy(() => import("./pages/LabelDetailPage"));
-const CollectionSessionsPage = lazy(() => import("./pages/CollectionSessionsPage"));
 const UploadPage = lazy(() => import("./pages/UploadPage"));
 const RealtimeRecognitionPage = lazy(() => import("./pages/RealtimeRecognitionPage"));
 const TrainingPipeline = lazy(() => import("./pages/training/TrainingPipeline"));
@@ -52,8 +51,6 @@ const OrgUploadPage = lazy(() =>
   import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgUploadPage })));
 const OrgLabelsPage = lazy(() =>
   import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgLabelsPage })));
-const OrgSessionsPage = lazy(() =>
-  import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgSessionsPage })));
 const OrgRealtimePage = lazy(() =>
   import("./pages/org/OrgWorkPages").then((m) => ({ default: m.OrgRealtimePage })));
 const OrgTrainingPage = lazy(() =>
@@ -203,14 +200,8 @@ function App() {
               />
               <Route path="/admin/labels/:id" element={<RedirectToLabelDetail />} />
 
-              <Route
-                path="/sessions"
-                element={
-                  <ProtectedRoute>
-                    <CollectionSessionsPage />
-                  </ProtectedRoute>
-                }
-              />
+              {/* "Lần thu" giờ là tab Lịch sử thu trong Đóng góp dữ liệu (14/09/2026). */}
+              <Route path="/sessions" element={<Navigate to="/upload?tab=history" replace />} />
               <Route path="/realtime" element={<RealtimeRecognitionPage />} />
 
               {/* Thông báo và hỗ trợ: mọi thành viên đã đăng nhập, KHÔNG phải
@@ -348,7 +339,7 @@ function App() {
                 <Route index element={<ConsoleHomePage />} />
                 <Route path="upload" element={<OrgUploadPage />} />
                 <Route path="labels" element={<OrgLabelsPage />} />
-                <Route path="sessions" element={<OrgSessionsPage />} />
+                <Route path="sessions" element={<Navigate to="../upload?tab=history" replace />} />
                 <Route path="realtime" element={<OrgRealtimePage />} />
                 <Route path="training" element={<OrgTrainingPage />} />
                 <Route path="members" element={<OrganizationPage />} />
