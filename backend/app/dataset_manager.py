@@ -1007,6 +1007,25 @@ def register_class(
 
     # --- Post-lock work (safe to do outside lock) ---
 
+    # Mirror the new class into Postgres NOW, not at the next boot.
+    #
+    # labels.csv is the source of truth and `sync_missing_data_on_startup`
+    # heals the DB from it — but only at boot. Between a registration and the
+    # next restart the class did not exist in `classes`, so every row that
+    # references it failed its foreign key: `raw_uploads` for a video upload
+    # (swallowed at debug level), then every sample the worker extracted from
+    # that video (73 rows on 15/09/2026, visible in the CSV, absent from the
+    # DB — no owner lookup, no trash, no moderation). The camera path only
+    # worked by accident: it calls `set_class_hands_required`, which happens
+    # to upsert the class. Same best-effort contract as that function.
+    try:
+        from app.storage.metadata_db import upsert_class as _db_upsert_class
+
+        _db_upsert_class(meta.to_label_row())
+    except Exception as exc:
+        logger.warning("[CLASS] DB mirror of new class %s failed (CSV is authoritative; "
+                       "boot sync will retry): %s", meta.class_uid, exc)
+
     # Regenerate derived index files
     regenerate_label_indexes()
 

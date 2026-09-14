@@ -6,6 +6,7 @@
  */
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { uploadVideo } from "../api/upload";
+import { pollJobUntilDone } from "../api/jobs";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import SpeechInputButton from "./SpeechInputButton";
@@ -359,14 +360,45 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       const res = await uploadVideo(item.file, item.user, item.label, item.dialect, (pct) => {
         updateFile(item.id, { progress: pct });
       });
-      const result = res as { ok?: boolean; data?: { id?: string | number }; error?: string };
+      const result = res as {
+        ok?: boolean;
+        data?: { id?: string | number; job_id?: string | null };
+        error?: string;
+      };
       if (result.ok) {
-        updateFile(item.id, { 
-          status: 'done', 
+        // Tệp đã lưu; máy chủ đã xếp hàng trích xuất khung tay. Theo dõi tới
+        // khi xong để người tải biết video có thành mẫu hay không — trước đây
+        // "Thành công" chỉ nghĩa là tệp đã tới nơi, còn mẫu thì không ai làm.
+        const jobId = result.data?.job_id;
+        updateFile(item.id, {
+          status: 'uploading',
           progress: 100,
-          message: 'Thành công',
-          uploadedId: result.data?.id
+          message: jobId ? t('Đã tải lên, đang trích xuất mẫu…') : t('Đã tải lên'),
+          uploadedId: result.data?.id,
         });
+        if (jobId) {
+          const job = await pollJobUntilDone(jobId, { intervalMs: 3000 });
+          if (!job.ok) {
+            updateFile(item.id, { status: 'error', message: job.error });
+            return false;
+          }
+          if (job.data.status !== 'SUCCESS') {
+            updateFile(item.id, { status: 'error', message: job.data.error || t('Trích xuất mẫu thất bại') });
+            return false;
+          }
+          const inner = (job.data.result ?? {}) as { result?: { saved?: unknown[]; status?: string; message?: string } };
+          const saved = inner.result?.saved?.length ?? 0;
+          if (saved === 0) {
+            updateFile(item.id, {
+              status: 'error',
+              message: inner.result?.message || t('Không nhận diện được bàn tay trong video — hãy quay rõ tay, đủ sáng.'),
+            });
+            return false;
+          }
+          updateFile(item.id, { status: 'done', message: t('Đã tạo {n} mẫu', { n: saved }) });
+          return true;
+        }
+        updateFile(item.id, { status: 'done', message: t('Đã tải lên') });
         return true;
       } else {
         updateFile(item.id, { 
@@ -380,7 +412,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       updateFile(item.id, { status: 'error', message: msg });
       return false;
     }
-  }, [validateFile, updateFile]);
+  }, [validateFile, updateFile, t]);
   
   const uploadAll = useCallback(async () => {
     const pendingFiles = files.filter(f => f.status === 'pending');

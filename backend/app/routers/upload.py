@@ -329,8 +329,10 @@ async def upload_video(
 
         await asyncio.to_thread(insert_raw_upload, {**raw_upload_row, "auth_user_id": current_user["id"]})
     except Exception as e:
-        if getattr(settings, "debug_logging", False):
-            log.debug("[UPLOAD][video] raw upload DB metadata failed: %s", e)
+        # WARNING, not debug: this failing means the upload is invisible to
+        # every DB-backed view (owner lookup, trash, moderation). It hid a
+        # foreign-key failure for weeks (class not yet mirrored to Postgres).
+        log.warning("[UPLOAD][video] raw upload DB metadata failed for %s: %s", upload_uid, e)
 
     # Defer Google Drive mirror to Celery (same pattern as npz samples).
     # The user gets a response immediately after the local save; the worker
@@ -360,6 +362,12 @@ async def upload_video(
         gdrive_mirror,
         time.time() - start,
     )
+    # Start feature extraction right away. Until 15/09/2026 nothing did: the
+    # UI showed "Thành công" after the raw clip was stored and no client or
+    # server code ever called /upload/video/process, so uploaded videos never
+    # became samples unless someone hit that endpoint by hand.
+    processing = _enqueue_video_processing(raw_upload_row, triggered_by=str(current_user.get("id") or ""))
+
     return {
         "success": True,
         "id": upload_uid,
@@ -367,6 +375,8 @@ async def upload_video(
         "upload_uid": upload_uid,
         "storage_url": storage_url,
         "gdrive_mirror": gdrive_mirror,
+        "job_id": processing.get("job_id"),
+        "processing": processing.get("status"),
         "message": "raw video uploaded",
     }
 
