@@ -68,9 +68,17 @@ if not APPLY:
 
 from app import tenant_lifecycle as tl  # noqa: E402
 
+from app import tenant_admin as ta  # noqa: E402
+
 for t in tenants:
     if not t["is_self_serve"]:
         continue
+    # purge đòi tổ chức đã XOÁ MỀM trước (chốt chặn cố ý của lifecycle).
+    with system_scope("xoa tai khoan thu nghiem: xoa mem to chuc"):
+        da_mem = _fetch_all("SELECT deleted_at FROM tenants WHERE tenant_id = %s", (t["tenant_id"],))
+    if da_mem and not da_mem[0]["deleted_at"]:
+        ta.delete_tenant(t["tenant_id"])
+        print("đã xoá mềm", t["tenant_id"])
     r = tl.purge_tenant(t["tenant_id"], confirm_tenant_id=t["tenant_id"], requested_by=ADMIN_ID,
                         reason="don tai khoan thu nghiem 15/09/2026", skip_export_check=True)
     print("đã xoá tổ chức", t["tenant_id"], r.get("counts"))

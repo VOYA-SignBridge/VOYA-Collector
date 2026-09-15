@@ -17,8 +17,9 @@ sinh thứ mà lượt huấn luyện ở đây thật sự ghim được:
   2. (tuỳ chọn, `with_research=True`) SPLIT NGHIÊN CỨU cho các profile của
      phương ngữ đã chọn: đóng băng manifest có checksum → kiểm định → chia
      strict_signer_disjoint (fail-closed, người ký tách riêng). Chúng xuất hiện ở
-     "Chế độ nghiên cứu" của wizard. Fold LOSO KHÔNG có ở đây: nhánh này chưa có
-     `make_loso_folds.py`; thêm sau khi script đó được đưa sang.
+     "Chế độ nghiên cứu" của wizard, rồi fold LOSO (`make_loso_folds.py`, chép sang
+     15/09/2026) từ split strict — mỗi người ký một fold, thứ các bảng báo cáo
+     lấy trung bình. LOSO đọc THƯ MỤC split, không đọc manifest.
 
 Tiến độ ghi vào `processed/splits/prepare_runs/<run_id>.json` sau MỖI bước:
 giao diện hỏi mỗi vài giây, và worker sập giữa chừng vẫn để lại bằng chứng đã
@@ -279,6 +280,14 @@ def prepare_dataset(
 
     # 2. (tuỳ chọn) split nghiên cứu: manifest đóng băng → kiểm định → strict.
     if with_research:
+        # Ảnh chụp đồng thuận phải ≤7 ngày, nếu không create_dataset_manifest
+        # từ chối (rc=4, đo 15/09/2026: ảnh 24 ngày tuổi). Worker nối được
+        # Postgres nên làm mới ngay tại đây thay vì bắt người dùng chạy lệnh.
+        if not _run("consent_snapshot",
+                    ["python", "-m", "app.cli.consent_snapshot", "--tenant", tenant_id,
+                     "--out", str(WORKSPACE_ROOT / "dataset" / "consent_snapshot.json")],
+                    report, run_id):
+            report["warnings"].append("không làm mới được ảnh chụp đồng thuận — manifest có thể bị từ chối")
         version = next_manifest_version()
         manifest = f"dataset/manifests/dataset_manifest_{version}.csv"
         report["manifest_version"] = version
@@ -309,6 +318,24 @@ def prepare_dataset(
                     desc = _describe_research(strict)
                     desc["profile"] = profile
                     desc["ok"] = bool(ok and desc.get("exists"))
+                    if desc["ok"] and (WORKSPACE_ROOT / "processed" / "splits" / "make_loso_folds.py").exists():
+                        loso = f"{profile}_loso_{version.split('_')[-1]}"
+                        loso_ok = _run(
+                            f"loso_folds:{profile}",
+                            ["python", "processed/splits/make_loso_folds.py",
+                             "--source", f"processed/splits/versions/{strict}",
+                             "--output_version", loso, "--group_col", "signer_id", "--seed", str(seed)],
+                            report, run_id)
+                        loso_dir = VERSIONS_DIR / loso
+                        desc["loso"] = {
+                            "protocol": loso, "ok": loso_ok,
+                            "folds": sorted(p.name for p in loso_dir.iterdir()
+                                            if p.is_dir() and (p / "train.csv").exists()) if loso_dir.is_dir() else [],
+                        }
+                        if not loso_ok:
+                            last = report["steps"][-1]
+                            report["warnings"].append(f"{profile}: LOSO không dựng được — "
+                                                      f"{_last_lines(last.get('stderr_tail') or last.get('stdout_tail') or '')}")
                     if not desc["ok"]:
                         # make_splits tự từ chối split nó không bảo đảm được
                         # (cần ≥3 người ký mỗi lớp) — phương ngữ nhỏ thất bại ở

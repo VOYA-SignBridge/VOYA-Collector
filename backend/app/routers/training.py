@@ -1051,6 +1051,26 @@ def _research_splits() -> List[Dict[str, Any]]:
         checksum = str(meta.get("dataset_manifest_checksum") or "").strip()
         if not checksum:
             continue
+        # Manifest phải CÓ Ở ĐÂY và khớp mã băm. Một thư mục versions/ chép từ
+        # máy khác (15/09/2026: 46 split, 22 manifest vắng mặt, 428/1617 tệp
+        # npz không có) trông hợp lệ theo bản khai của nó, nhưng lượt chạy sẽ
+        # đổ ở C5 hoặc lúc đọc tệp. Liệt kê rồi để người dùng chọn và thất bại
+        # là vô ích — cùng lý do bỏ qua valid_for_research=false ở trên.
+        _mf = str(meta.get("dataset_manifest") or "").replace("\\", "/").lstrip("/")
+        _mp = WORKSPACE_ROOT / _mf if _mf else None
+        if _mp is None or not _mp.is_file():
+            continue
+        try:
+            import hashlib as _hl
+            _h = _hl.sha256()
+            with open(_mp, "rb") as _fh:
+                for _chunk in iter(lambda: _fh.read(1 << 20), b""):
+                    _h.update(_chunk)
+            if _h.hexdigest() != checksum:
+                logger.warning("[SPLITS] bỏ qua %s: manifest %s không khớp mã băm", d.name, _mf)
+                continue
+        except OSError:
+            continue
 
         # dataset_version suy ra từ tên manifest: .../dataset_manifest_isds2026_v5.csv
         manifest = str(meta.get("dataset_manifest") or "")
