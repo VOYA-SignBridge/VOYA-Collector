@@ -78,13 +78,17 @@ describe("LearnPage", () => {
 });
 
 describe("SignPage", () => {
-  it("mỗi miền một nút mở video ở trang chính thức, không nhúng", async () => {
+  it("video nhúng thẳng; nhiều miền thì một hàng nút đổi video, vẫn có liên kết gốc", async () => {
+    // Chủ dự án chốt nhúng 15/09/2026 (máy chủ QIPEDC hỗ trợ Range, không chặn Referer).
     show("/learn/dia-chi");
-    const bac = await screen.findByRole("link", { name: /Xem video — Bắc/ });
-    expect(bac).toHaveAttribute("href", "https://qipedc.moet.gov.vn/videos/D0001B.mp4");
-    expect(bac).toHaveAttribute("target", "_blank");
-    expect(screen.getByRole("link", { name: /Xem video — Nam/ })).toBeInTheDocument();
-    expect(document.querySelector("video")).toBeNull();
+    const video = await screen.findByTestId("sign-video");
+    expect(video).toHaveAttribute("src", "https://qipedc.moet.gov.vn/videos/D0001B.mp4");
+    expect(video).toHaveAttribute("controls");
+    expect(screen.getByRole("tab", { name: "Bắc" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Nam" }));
+    expect(screen.getByTestId("sign-video")).toHaveAttribute("src", expect.stringMatching(/videos\/.+\.mp4$/));
+    expect(screen.getByTestId("sign-video").getAttribute("src")).not.toBe("https://qipedc.moet.gov.vn/videos/D0001B.mp4");
+    expect(screen.getByRole("link", { name: /Mở video gốc/ })).toHaveAttribute("target", "_blank");
     expect(screen.getByText(/Cả ba đều đúng/)).toBeInTheDocument();
   });
 

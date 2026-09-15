@@ -16,7 +16,10 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false, // shares one login session / one GPU trainer slot
-  retries: 0,
+  // One retry: the two camera specs fetch MediaPipe's ~10 MB WASM from a CDN
+  // inside their 90 s budget and occasionally miss it on a slow link — a
+  // network flake, not a regression. Anything that fails twice is real.
+  retries: 1,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
     // nginx publishes on 8080 in this deployment (NGINX_HTTP_PORT in .env);

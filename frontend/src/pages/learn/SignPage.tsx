@@ -23,6 +23,8 @@ export default function SignPage() {
   const [sign, setSign] = useState<SignDetail | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  // Miền đang xem khi một ký hiệu có nhiều biến thể; mặc định biến thể đầu.
+  const [variantIdx, setVariantIdx] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,29 +77,65 @@ export default function SignPage() {
             </p>
           </header>
 
-          {/* 1. Xem mẫu — mỗi miền một nút, mở trang chính thức. */}
+          {/* 1. Xem mẫu — video nhúng thẳng (máy chủ QIPEDC hỗ trợ tải theo
+              đoạn nên tua được), chủ dự án chốt nhúng 15/09/2026. Nhiều miền
+              thì một hàng nút đổi video, không mở ba trang. Vẫn giữ liên kết
+              về trang gốc để người xem biết nguồn. */}
           <section className="rounded-xl border border-slate-200 bg-white p-5">
             <h2 className="text-base font-semibold text-slate-900">{t("Xem cách ký")}</h2>
             <p className="mt-1 text-sm text-slate-600">
               {sign.variants.length > 1
                 ? t("Ký hiệu này có cách thể hiện khác nhau theo miền. Cả ba đều đúng — hãy xem miền của bạn.")
-                : t("Video mẫu do người Điếc thể hiện, mở tại trang của Bộ Giáo dục và Đào tạo.")}
+                : t("Video mẫu do người Điếc thể hiện, từ từ điển của Bộ Giáo dục và Đào tạo.")}
             </p>
-            <ul className="mt-3 flex flex-wrap gap-2">
-              {sign.variants.map((v) => (
-                <li key={v.code}>
+            {sign.variants.length > 1 && (
+              <div className="mt-3 flex flex-wrap gap-2" role="tablist" aria-label={t("Chọn miền")}>
+                {sign.variants.map((v, i) => (
+                  <button
+                    key={v.code}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === variantIdx}
+                    onClick={() => setVariantIdx(i)}
+                    className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                      i === variantIdx
+                        ? "bg-ctu-blue text-white"
+                        : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {v.region_name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {(() => {
+              const v = sign.variants[Math.min(variantIdx, sign.variants.length - 1)];
+              if (!v) return null;
+              return (
+                <div className="mt-3">
+                  <video
+                    key={v.code}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    src={v.video_url}
+                    className="w-full max-w-2xl rounded-lg bg-black"
+                    data-testid="sign-video"
+                  >
+                    {t("Trình duyệt không phát được video này.")}
+                  </video>
                   <a
                     href={v.video_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg bg-ctu-blue px-4 py-2.5 text-sm font-semibold text-white hover:bg-ctu-navy focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue focus-visible:ring-offset-2"
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs text-ctu-blue hover:underline"
                   >
-                    <PlayCircleIcon className="h-5 w-5" aria-hidden="true" />
-                    {sign.variants.length > 1 ? t("Xem video — {mien}", { mien: v.region_name }) : t("Xem video mẫu")}
+                    <PlayCircleIcon className="h-4 w-4" aria-hidden="true" />
+                    {t("Mở video gốc tại qipedc.moet.gov.vn")}
                   </a>
-                </li>
-              ))}
-            </ul>
+                </div>
+              );
+            })()}
           </section>
 
           {/* 2. Nghĩa — có thì hiện, không thì nói không, không để trống. */}

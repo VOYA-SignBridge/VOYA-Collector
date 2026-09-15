@@ -10,6 +10,7 @@ import { GraduationCapIcon } from "../components/ui/Icons";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import ErrorBanner from "../components/ErrorBanner";
+import CommunitySwitchHint from "../components/CommunitySwitchHint";
 import LoadingScreen from "../components/LoadingScreen";
 import EmptyState from "../components/ui/EmptyState";
 import ProvenanceModal from "../components/ProvenanceModal";
@@ -69,6 +70,8 @@ export default function LabelDetailPage() {
   const [info, setInfo] = useState<LabelSessionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 404 = nhãn không có trong phạm vi tổ chức đang làm việc; gợi ý chuyển sang cộng đồng.
+  const [notFound, setNotFound] = useState(false);
 
   const [selectedId, setSelectedId] = useState<string>("");
   const [frames, setFrames] = useState<FramesData | null>(null);
@@ -104,12 +107,14 @@ export default function LabelDetailPage() {
   const loadSessions = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setNotFound(false);
     try {
       const data = await getLabelSessions(classUid);
       setInfo(data);
       setSelectedId((prev) => prev || data.sessions[0]?.session_id || "");
     } catch (err) {
-      const e = err as { userMessage?: string; message?: string };
+      const e = err as { userMessage?: string; message?: string; response?: { status?: number } };
+      setNotFound(e.response?.status === 404);
       setError(e.userMessage || e.message || t("Không tải được danh sách lần quay"));
     } finally {
       setLoading(false);
@@ -238,6 +243,7 @@ export default function LabelDetailPage() {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-4">
         <ErrorBanner message={error || t("Không tải được dữ liệu nhãn")} />
+        {notFound && <CommunitySwitchHint reason={t("Nhãn này không có trong tổ chức của bạn")} />}
         <button type="button" onClick={loadSessions} className="btn-secondary text-sm px-4 py-2 rounded-lg">
           {t("Thử lại")}
         </button>

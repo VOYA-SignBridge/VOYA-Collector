@@ -27,7 +27,8 @@ router = APIRouter(prefix="/learn", tags=["learn"])
 #: Nguồn ghi ở cuối mọi phản hồi, để giao diện hiện đúng câu.
 _ATTRIBUTION = (
     "Từ vựng và định nghĩa: Danh mục Ngôn ngữ ký hiệu tiếng Việt — dự án QIPEDC, "
-    "Bộ Giáo dục và Đào tạo (qipedc.moet.gov.vn). Video mẫu xem tại trang chính thức."
+    "Bộ Giáo dục và Đào tạo (qipedc.moet.gov.vn). Video mẫu phát trực tiếp từ máy chủ "
+    "của dự án, bản quyền thuộc về QIPEDC/Bộ GD&ĐT."
 )
 
 
