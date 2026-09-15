@@ -16,6 +16,8 @@ export interface CollectionSession {
   sample_count: number;
   is_open: boolean;
   is_mine: boolean;
+  /** 'private' (mặc định) hay 'tenant' — chủ phiên tự mở cho cả tổ chức xem. */
+  visibility: "private" | "tenant";
 }
 
 export interface SessionsResponse {
@@ -34,7 +36,7 @@ export const getSessions = (scope: "auto" | "mine" | "tenant" = "auto") =>
 
 export const updateSession = (
   captureSessionId: string,
-  body: { close?: boolean; note?: string },
+  body: { close?: boolean; note?: string; visibility?: "private" | "tenant" },
 ) =>
   apiClient
     .patch(`/api/v1/sessions/${encodeURIComponent(captureSessionId)}`, body)

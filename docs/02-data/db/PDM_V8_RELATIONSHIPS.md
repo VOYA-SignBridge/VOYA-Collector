@@ -1,6 +1,6 @@
 # Bảng vẽ ERD theo nhóm A–H
 
-Sinh từ catalog `signdb` v8 ngày 26/08/2026. **Entity, cột khoá ngoại,
+Sinh từ catalog `signdb` v8 ngày 15/09/2026. **Entity, cột khoá ngoại,
 cardinality, ON DELETE là dữ liệu hệ thống.** Tên quan hệ thì không —
 đặt tên là việc mô hình hoá.
 
@@ -15,15 +15,15 @@ cardinality, ON DELETE là dữ liệu hệ thống.** Tên quan hệ thì khôn
 Bản trước xếp `tenant_id` → *owns* và `auth_user_id` → *operates* vào loại A.
 Sai: hai cột đó không chứa động từ nào; đó là suy diễn ngữ nghĩa của công cụ.
 Loại B và C chỉ có tên sau khi người duyệt đã chốt.
-Trong bản này, toàn bộ 131 quan hệ đã được đặt tên và duyệt ngữ nghĩa.
+Trong bản này, toàn bộ 132 quan hệ đã được đặt tên và duyệt ngữ nghĩa.
 
 | | số |
 |---|---:|
-| tổng quan hệ | 131 |
+| tổng quan hệ | 132 |
 | loại A (tên cột có động từ) | 21 |
-| loại B (tham chiếu cấu trúc) | 83 |
+| loại B (tham chiếu cấu trúc) | 84 |
 | loại C (khoá ghép) | 27 |
-| **đã có tên** | **131** |
+| **đã có tên** | **132** |
 | **còn phải đặt tay** | **0** |
 
 ## A. Tenant & Access Management — 33 quan hệ, còn 0 phải đặt tay
@@ -103,7 +103,7 @@ Trong bản này, toàn bộ 131 quan hệ đã được đặt tên và duyệt
 | `tenants` | `vocabulary_registry_meta` | Tenant maintains Vocabulary Registry Metadata | `TENANT_MAINTAINS_VOCABULARY_REGISTRY_METADATA` | `tenant_id` → `tenant_id` | — | 1 — 0..1 | RESTRICT | — | B |
 | `registry_versions` | `vocabulary_registry_meta` | Registry Version is selected by Vocabulary Registry Metadata | `REGISTRY_VERSION_IS_SELECTED_BY_VOCABULARY_REGISTRY_METADATA` | `tenant_id, version` → `tenant_id, version` | ✓ | 0..1 — 0..1 | NO ACTION | — | C |
 
-## D. VSL Collection & Dataset — 27 quan hệ, còn 0 phải đặt tay
+## D. VSL Collection & Dataset — 26 quan hệ, còn 0 phải đặt tay
 
 | Entity 1 (cha) | Entity 2 (con) | Relationship Name | Code | Cột khoá ngoại | Ghép | Cardinality | ON DELETE | Nhãn | Loại |
 |---|---|---|---|---|:--:|---|---|---|:--:|
@@ -126,7 +126,6 @@ Trong bản này, toàn bộ 131 quan hệ đã được đặt tên và duyệt
 | `signers` | `samples` | Signer performs Sample | `SIGNER_PERFORMS_SAMPLE` | `tenant_id, signer_id` → `tenant_id, signer_id` | ✓ | 0..1 — 0..N | NO ACTION | — | C |
 | `tenants` | `samples` | Tenant owns Sample | `TENANT_OWNS_SAMPLE` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | — | B |
 | `users` | `samples` | User records Sample | `USER_RECORDS_SAMPLE` | `auth_user_id` → `id` | — | 0..1 — 0..N | SET NULL | — | B |
-| `classes` | `samples` | Class labels Sample (legacy key) | `CLASS_LABELS_SAMPLE_LEGACY_KEY` | `class_uid` → `class_uid` | — | 0..1 — 0..N | NO ACTION | — | B |
 | `dialects` | `samples` | Dialect categorizes Sample | `DIALECT_CATEGORIZES_SAMPLE` | `tenant_id, dialect` → `tenant_id, dialect_id` | ✓ | 0..1 — 0..N | NO ACTION | — | C |
 | `users` | `samples` | User reviews Sample | `USER_REVIEWS_SAMPLE` | `reviewed_by` → `id` | — | 0..1 — 0..N | SET NULL | — | A |
 | `signers` | `signer_aliases` | Signer is target of Signer Alias | `SIGNER_IS_TARGET_OF_SIGNER_ALIAS` | `tenant_id, new_signer_id` → `tenant_id, signer_id` | ✓ | 1 — 0..N | NO ACTION | — | C |
@@ -135,7 +134,7 @@ Trong bản này, toàn bộ 131 quan hệ đã được đặt tên và duyệt
 | `tenants` | `signers` | Tenant manages Signer | `TENANT_MANAGES_SIGNER` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | — | B |
 | `users` | `signers` | User Account corresponds to Signer | `USER_ACCOUNT_CORRESPONDS_TO_SIGNER` | `external_user_id` → `id` | — | 0..1 — 0..N | SET NULL | — | B |
 
-## E. Legal, Consent & Governance — 14 quan hệ, còn 0 phải đặt tay
+## E. Legal, Consent & Governance — 16 quan hệ, còn 0 phải đặt tay
 
 | Entity 1 (cha) | Entity 2 (con) | Relationship Name | Code | Cột khoá ngoại | Ghép | Cardinality | ON DELETE | Nhãn | Loại |
 |---|---|---|---|---|:--:|---|---|---|:--:|
@@ -144,6 +143,8 @@ Trong bản này, toàn bộ 131 quan hệ đã được đặt tên và duyệt
 | `users` | `legal_document_drafts` | User creates Legal Document Draft | `USER_CREATES_LEGAL_DOCUMENT_DRAFT` | `created_by` → `id` | — | 0..1 — 0..N | SET NULL | — | A |
 | `users` | `legal_document_drafts` | User updates Legal Document Draft | `USER_UPDATES_LEGAL_DOCUMENT_DRAFT` | `updated_by` → `id` | — | 0..1 — 0..N | SET NULL | — | A |
 | `users` | `legal_documents` | User publishes Legal Document | `USER_PUBLISHES_LEGAL_DOCUMENT` | `published_by` → `id` | — | 0..1 — 0..N | SET NULL | actor/action | B |
+| `tenants` | `personal_exports` | Tenant scopes Personal Export | `TENANT_SCOPES_PERSONAL_EXPORT` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | scope | B |
+| `users` | `personal_exports` | User owns Personal Export | `USER_OWNS_PERSONAL_EXPORT` | `user_id` → `id` | — | 1 — 0..N | CASCADE | owner | B |
 | `legal_documents` | `signer_consents` | Legal Document Version anchors Signer Consent | `LEGAL_DOCUMENT_VERSION_ANCHORS_SIGNER_CONSENT` | `kind, version` → `kind, version` | ✓ | 1 — 0..N | RESTRICT | legal evidence | C |
 | `signers` | `signer_consents` | Signer is subject of Signer Consent | `SIGNER_IS_SUBJECT_OF_SIGNER_CONSENT` | `tenant_id, signer_id` → `tenant_id, signer_id` | ✓ | 1 — 0..N | NO ACTION | consent subject | C |
 | `tenants` | `signer_consents` | Tenant scopes Signer Consent | `TENANT_SCOPES_SIGNER_CONSENT` | `tenant_id` → `tenant_id` | — | 1 — 0..N | RESTRICT | scope | B |

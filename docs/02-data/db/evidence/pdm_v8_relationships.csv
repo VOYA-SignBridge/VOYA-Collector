@@ -41,6 +41,8 @@ A,users,memberships,User holds Membership,USER_HOLDS_MEMBERSHIP,,user_id,id,N,1,
 H,tenants,notifications,Tenant scopes Notification,TENANT_SCOPES_NOTIFICATION,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_notifications_tenant
 H,users,notifications,User receives Notification,USER_RECEIVES_NOTIFICATION,recipient,user_id,id,N,1,0..N,CASCADE,,,B,Y,notifications_user_id_fkey
 B,users,password_reset_tokens,User has Password Reset Token,USER_HAS_PASSWORD_RESET_TOKEN,password recovery,user_id,id,N,1,0..N,CASCADE,,,B,Y,password_reset_tokens_user_id_fkey
+E,tenants,personal_exports,Tenant scopes Personal Export,TENANT_SCOPES_PERSONAL_EXPORT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_personal_exports_tenant
+E,users,personal_exports,User owns Personal Export,USER_OWNS_PERSONAL_EXPORT,owner,user_id,id,N,1,0..N,CASCADE,,,B,Y,personal_exports_user_id_fkey
 H,users,platform_settings,User updates Platform Setting,USER_UPDATES_PLATFORM_SETTING,,updated_by,id,N,0..1,0..N,SET NULL,updates,is updated by,A,Y,platform_settings_updated_by_fkey
 A,projects,project_allocations,Project has Project Allocation,PROJECT_HAS_PROJECT_ALLOCATION,allocation,tenant_id+project_id,tenant_id+project_id,Y,1,0..N,CASCADE,,,C,Y,fk_project_allocations_project
 A,tenants,project_allocations,Tenant scopes Project Allocation,TENANT_SCOPES_PROJECT_ALLOCATION_RESTRICT,scope,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_project_allocations_tenant
@@ -73,7 +75,6 @@ D,languages,samples,Language categorizes Sample,LANGUAGE_CATEGORIZES_SAMPLE,,lan
 D,signers,samples,Signer performs Sample,SIGNER_PERFORMS_SAMPLE,,tenant_id+signer_id,tenant_id+signer_id,Y,0..1,0..N,NO ACTION,,,C,Y,fk_samples_signer
 D,tenants,samples,Tenant owns Sample,TENANT_OWNS_SAMPLE,,tenant_id,tenant_id,N,1,0..N,RESTRICT,,,B,Y,fk_samples_tenant
 D,users,samples,User records Sample,USER_RECORDS_SAMPLE,,auth_user_id,id,N,0..1,0..N,SET NULL,,,B,Y,samples_auth_user_id_fkey
-D,classes,samples,Class labels Sample (legacy key),CLASS_LABELS_SAMPLE_LEGACY_KEY,,class_uid,class_uid,N,0..1,0..N,NO ACTION,,,B,Y,samples_class_uid_fkey
 D,dialects,samples,Dialect categorizes Sample,DIALECT_CATEGORIZES_SAMPLE,,tenant_id+dialect,tenant_id+dialect_id,Y,0..1,0..N,NO ACTION,,,C,Y,samples_dialect_fkey
 D,users,samples,User reviews Sample,USER_REVIEWS_SAMPLE,,reviewed_by,id,N,0..1,0..N,SET NULL,reviews,is reviewed by,A,Y,samples_reviewed_by_fkey
 D,signers,signer_aliases,Signer is target of Signer Alias,SIGNER_IS_TARGET_OF_SIGNER_ALIAS,,tenant_id+new_signer_id,tenant_id+signer_id,Y,1,0..N,NO ACTION,,,C,Y,fk_signer_aliases_new

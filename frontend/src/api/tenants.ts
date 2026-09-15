@@ -354,6 +354,27 @@ export async function fetchMembers(tenantId: string): Promise<TenantMember[]> {
   return res.data;
 }
 
+export interface AccountSearchResult {
+  id: string;
+  username: string | null;
+  email: string | null;
+  is_active: boolean;
+}
+
+/**
+ * Vòng NỀN TẢNG. Khớp MỘT PHẦN email hoặc tên đăng nhập — thay cho việc phải
+ * gõ tay ID (UUID) của tài khoản vào "Gắn tài khoản". Trần 2 ký tự khớp với
+ * trần phía máy chủ; gọi sớm hơn chỉ tốn round-trip cho một câu trả lời rỗng.
+ */
+export async function searchAccounts(query: string): Promise<AccountSearchResult[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const res = await axiosClient.get<AccountSearchResult[]>(`${API_PREFIX}/accounts/search`, {
+    params: { q },
+  });
+  return res.data;
+}
+
 /** Vòng NỀN TẢNG — xem chú thích đầu tệp về vì sao không phải vòng tenant. */
 export async function addMember(
   tenantId: string,
@@ -579,16 +600,29 @@ export async function fetchExports(tenantId: string): Promise<TenantExport[]> {
  *
  * Máy chủ trả 202 chứ không phải 201, và khác biệt đó có nghĩa: chưa có gì tải
  * được. Đừng hiện nút Tải về cho tới khi `status === "ready"`.
+ *
+ * `agree` bắt buộc — gói này chứa dữ liệu của NHIỀU người đóng góp, không chỉ
+ * của người bấm nút. Máy chủ từ chối 422 nếu thiếu hoặc `false`; giao diện
+ * phải hiện cam kết TRƯỚC khi cho phép gọi hàm này với `true`, xem
+ * `EXPORT_AGREEMENT_TEXT`.
  */
 export async function requestExport(
   tenantId: string,
   scope: "metadata" | "full" = "metadata",
+  agree: boolean = false,
 ): Promise<TenantExport> {
   const res = await axiosClient.post<TenantExport>(
-    `${API_PREFIX}/${tenantId}/exports`, null, { params: { scope } },
+    `${API_PREFIX}/${tenantId}/exports`, null, { params: { scope, agree } },
   );
   return res.data;
 }
+
+/** @i18n-key-table — dịch tại chỗ đọc bằng `t(EXPORT_AGREEMENT_TEXT)`. Phải
+ *  khớp nguyên văn với `EXPORT_AGREEMENT_TEXT` phía máy chủ
+ *  (`routers/tenants.py`) — giao diện chỉ HIỆN cam kết, máy chủ mới là nơi
+ *  quyết định nó có hiệu lực. */
+export const EXPORT_AGREEMENT_TEXT =
+  "Tôi cam kết chỉ dùng dữ liệu trong gói xuất này cho đúng mục đích đã chọn, không bán, không cấp phép lại, không tái phân phối nếu chưa có thoả thuận riêng, và sẽ xoá bản sao khi không còn cần thiết.";
 
 /** Đường tải trực tiếp; chỉ dùng khi bản xuất đã `ready`. */
 export function exportDownloadUrl(tenantId: string, exportId: string): string {

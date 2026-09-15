@@ -73,7 +73,7 @@ for f in fks: fk_b[f["child_table"]].append(f)
 
 o = []; w = o.append
 w("# Phụ lục C.8 — Data Dictionary (lược đồ v8)\n")
-w("Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 26/08/2026, lược đồ **v8**,")
+w("Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 15/09/2026, lược đồ **v8**,")
 w("checksum `fb5b9b90c553`. **Không ràng buộc nào được gõ tay.**\n")
 w("| | |")
 w("|---|---:|")
@@ -175,7 +175,7 @@ for f in fks:
 w("")
 w("## C.8.3 — View\n")
 w("`tenant_members` là VIEW `security_invoker` trên `memberships`, 7 cột. Nó KHÔNG")
-w("nằm trong 660 cột ở trên (đó là cột của bảng). Ghi ở đây vì bỏ nó đi sẽ khiến")
+w("nằm trong 672 cột ở trên (đó là cột của bảng). Ghi ở đây vì bỏ nó đi sẽ khiến")
 w("phụ lục im lặng về một đối tượng mà mã ứng dụng có đọc — và `security_invoker`")
 w("chính là thứ khiến mọi truy vấn qua view chịu đúng chính sách RLS của người")
 w("gọi. Gỡ thuộc tính ấy là mở toang view.\n")
@@ -199,9 +199,9 @@ _thieu_note = [k for k, v in mota.items()
                if v["semantic_status"] == "NEEDS_REVIEW" and not (v.get("note") or "").strip()]
 _sai_tt = [k for k, v in mota.items() if v["semantic_status"] not in HOP_LE]
 
-_g = [("catalog columns", len(_ten_cot), 660),
-      ("description rows", len(_ten_mota), 660),
-      ("dictionary rows", len(_ten_cot & _ten_mota), 660),
+_g = [("catalog columns", len(_ten_cot), 672),
+      ("description rows", len(_ten_mota), 672),
+      ("dictionary rows", len(_ten_cot & _ten_mota), 672),
       (None, None, None),
       ("duplicate descriptions", _trung, 0),
       ("missing descriptions", len(_ten_cot - _ten_mota), 0),
@@ -209,7 +209,7 @@ _g = [("catalog columns", len(_ten_cot), 660),
       (None, None, None)]
 _g += [(k, _pb.get(k, 0), None) for k in ("VERIFIED", "NEEDS_REVIEW", "LEGACY", "DERIVED")]
 _g += [(None, None, None),
-       ("description status total", sum(_pb.values()), 660),
+       ("description status total", sum(_pb.values()), 672),
        ("NEEDS_REVIEW without note", len(_thieu_note), 0),
        ("invalid semantic_status", len(_sai_tt), 0)]
 

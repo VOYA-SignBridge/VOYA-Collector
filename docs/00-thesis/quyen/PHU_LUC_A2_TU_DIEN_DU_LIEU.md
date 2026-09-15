@@ -5,7 +5,7 @@
 > phiên bản lược đồ **5**. Không dòng nào trong phụ lục này được suy đoán từ mã
 > nguồn hay từ trí nhớ.
 
-> **Phạm vi:** đủ **59 bảng** và **636 cột**, chia theo bảy nhóm mô-đun đã dùng ở
+> **Phạm vi:** đủ **60 bảng** và **649 cột**, chia theo bảy nhóm mô-đun đã dùng ở
 > Chương 3 §3.4.1. Mỗi bảng một mục riêng, trình bày đầy đủ, không rút gọn.
 
 ---
@@ -510,7 +510,7 @@ bị lệch.
 
 **Mô tả:** Phiên thu — một lượt ngồi trước camera sinh ra nhiều mẫu. Là thực thể có vòng đời, vì quyền sở hữu phiên đổi được.
 
-**Khoá chính:** `capture_session_id` · **Số trường:** 11 · **Bảo mật mức hàng:** ✔ có, kèm cưỡng chế với chủ sở hữu bảng · **Số bản ghi (18/08/2026):** 250
+**Khoá chính:** `capture_session_id` · **Số trường:** 13 · **Bảo mật mức hàng:** ✔ có, kèm cưỡng chế với chủ sở hữu bảng · **Số bản ghi (18/08/2026):** 250
 
 | STT | Tên trường | Kiểu dữ liệu | Ràng buộc | Diễn giải |
 |---:|---|---|---|---|
@@ -525,6 +525,8 @@ bị lệch.
 | 9 | `ended_at` | Timestamptz | — | Thời điểm kết thúc phiên thu. |
 | 10 | `note` | Text | — | Ghi chú tự do của người quản trị. |
 | 11 | `created_at` | Timestamptz | Bắt buộc · Mặc định: thời điểm hiện tại | Thời điểm bản ghi được tạo. |
+| 12 | `collection_session_id` | Uuid | Khoá ngoại → `collection_sessions` *(khoá ghép)* | Buổi thu chứa phiên này; để trống với dữ liệu có trước khi có phân cấp buổi thu → phiên thu. |
+| 13 | `visibility` | Text | Bắt buộc · Mặc định: `'private'` · Giá trị: `private`, `tenant` | Phạm vi xem do CHỦ phiên tự đặt: `private` chỉ chủ phiên và biên tập viên thấy; `tenant` mở cho thành viên thường cùng tổ chức. Biên tập viên thấy mọi phiên bất kể cờ — cờ chỉ nới cho thành viên thường, không thu hẹp ai. Miền giá trị do tầng API cưỡng chế, không có CHECK ở cơ sở dữ liệu. |
 
 ### Bảng `raw_uploads`
 
@@ -873,7 +875,7 @@ bị lệch.
 
 ## A-2.6 Nhóm M6 — Dịch vụ tổ chức & Tích hợp
 
-*Nhóm gồm 12 bảng.*
+*Nhóm gồm 13 bảng.*
 
 ### Bảng `plans`
 
@@ -977,9 +979,31 @@ bị lệch.
 | 12 | `expires_at` | Timestamptz | — | Thời điểm liên kết tải về hết hạn. Liên kết có giới hạn thời gian là một biện pháp bảo vệ, không phải một tiện ích. |
 | 13 | `export_purpose` | Text | Bắt buộc · Mặc định: `'tenant_portability'` · Giá trị: `tenant_portability`, `internal_training`, `research_release`, `public_library` | Mục đích xuất dữ liệu, ghi lại để phục vụ kiểm toán. |
 
+### Bảng `personal_exports`
+
+*Bảng A2-43: Từ điển dữ liệu bảng `personal_exports`*
+
+**Mô tả:** Yêu cầu xuất dữ liệu CÁ NHÂN — "cho tôi tệp của chính tôi". Khác `tenant_exports` ở phạm vi: gói chỉ chứa mẫu do chính người yêu cầu đóng góp (`samples.auth_user_id` khớp), mọi thành viên tự gọi được, và không có `export_purpose` vì gói không rời khỏi tay người đã tạo ra dữ liệu. Thêm 15/09/2026.
+
+**Khoá chính:** `export_id` · **Số trường:** 11 · **Bảo mật mức hàng:** ✔ có, kèm cưỡng chế với chủ sở hữu bảng · **Số bản ghi (15/09/2026):** 0
+
+| STT | Tên trường | Kiểu dữ liệu | Ràng buộc | Diễn giải |
+|---:|---|---|---|---|
+| 1 | `export_id` | Uuid | Khoá chính · Mặc định: sinh ngẫu nhiên | Định danh lượt xuất dữ liệu cá nhân. |
+| 2 | `tenant_id` | Text | Khoá ngoại → `tenants` · Bắt buộc | Tổ chức mà người yêu cầu đang đứng trong lúc xuất — luôn là phạm vi của chính phiên đăng nhập, không phải tham số đường dẫn như ở `tenant_exports`. |
+| 3 | `user_id` | Uuid | Khoá ngoại → `users` (xoá tài khoản thì xoá theo) · Bắt buộc | Tài khoản yêu cầu, đồng thời là CHỦ của mọi dòng trong gói. |
+| 4 | `status` | Text | Bắt buộc · Mặc định: `'pending'` · Giá trị: `pending`, `running`, `ready`, `failed`, `expired` | Trạng thái của lượt xuất. |
+| 5 | `file_path` | Text | — | Đường dẫn tệp zip kết quả trên máy chủ; trống sau khi hết hạn và bị dọn. |
+| 6 | `size_bytes` | Bigint | — | Kích thước tệp kết quả tính bằng byte. |
+| 7 | `sample_count` | Integer | — | Số dòng mẫu đã đưa vào `samples.csv` của gói. Đếm dòng, không đếm tệp — tệp có thể ít hơn nếu không còn trên đĩa. |
+| 8 | `error` | Text | — | Lý do thất bại nếu lượt xuất hỏng. |
+| 9 | `created_at` | Timestamptz | Bắt buộc · Mặc định: thời điểm hiện tại | Thời điểm yêu cầu. |
+| 10 | `completed_at` | Timestamptz | — | Thời điểm hoàn tất, thành công hay thất bại. |
+| 11 | `expires_at` | Timestamptz | Bắt buộc | Thời điểm tệp hết hạn và bị tác vụ dọn định kỳ xoá; cùng thời hạn với bản xuất tổ chức. |
+
 ### Bảng `tenant_purges`
 
-*Bảng A2-43: Từ điển dữ liệu bảng `tenant_purges`*
+*Bảng A2-44: Từ điển dữ liệu bảng `tenant_purges`*
 
 **Mô tả:** Yêu cầu dọn sạch dữ liệu tổ chức. Bản ghi này phải SỐNG SÓT qua chính thao tác dọn.
 
@@ -1000,7 +1024,7 @@ bị lệch.
 
 ### Bảng `webhook_endpoints`
 
-*Bảng A2-44: Từ điển dữ liệu bảng `webhook_endpoints`*
+*Bảng A2-45: Từ điển dữ liệu bảng `webhook_endpoints`*
 
 **Mô tả:** Điểm nhận sự kiện của hệ thống bên thứ ba.
 
@@ -1025,7 +1049,7 @@ bị lệch.
 
 ### Bảng `webhook_deliveries`
 
-*Bảng A2-45: Từ điển dữ liệu bảng `webhook_deliveries`*
+*Bảng A2-46: Từ điển dữ liệu bảng `webhook_deliveries`*
 
 **Mô tả:** Lịch sử từng lượt gửi sự kiện. Chỉ thêm.
 
@@ -1048,7 +1072,7 @@ bị lệch.
 
 ### Bảng `support_tickets`
 
-*Bảng A2-46: Từ điển dữ liệu bảng `support_tickets`*
+*Bảng A2-47: Từ điển dữ liệu bảng `support_tickets`*
 
 **Mô tả:** Phiếu hỗ trợ trong phạm vi một tổ chức.
 
@@ -1069,7 +1093,7 @@ bị lệch.
 
 ### Bảng `support_messages`
 
-*Bảng A2-47: Từ điển dữ liệu bảng `support_messages`*
+*Bảng A2-48: Từ điển dữ liệu bảng `support_messages`*
 
 **Mô tả:** Tin nhắn trong một phiếu hỗ trợ. Chỉ thêm.
 
@@ -1089,7 +1113,7 @@ bị lệch.
 
 ### Bảng `notifications`
 
-*Bảng A2-48: Từ điển dữ liệu bảng `notifications`*
+*Bảng A2-49: Từ điển dữ liệu bảng `notifications`*
 
 **Mô tả:** Thông báo trong ứng dụng gửi tới một tài khoản.
 
@@ -1110,7 +1134,7 @@ bị lệch.
 
 ### Bảng `event_outbox`
 
-*Bảng A2-49: Từ điển dữ liệu bảng `event_outbox`*
+*Bảng A2-50: Từ điển dữ liệu bảng `event_outbox`*
 
 **Mô tả:** Hộp thư đi cho sự kiện gửi ra ngoài, bảo đảm sự kiện không mất khi phía nhận hỏng.
 
@@ -1132,7 +1156,7 @@ bị lệch.
 
 ### Bảng `google_sheets_sync_status`
 
-*Bảng A2-50: Từ điển dữ liệu bảng `google_sheets_sync_status`*
+*Bảng A2-51: Từ điển dữ liệu bảng `google_sheets_sync_status`*
 
 **Mô tả:** Trạng thái phản chiếu dữ liệu sang bảng tính ngoài.
 
@@ -1156,7 +1180,7 @@ bị lệch.
 
 ### Bảng `legal_documents`
 
-*Bảng A2-51: Từ điển dữ liệu bảng `legal_documents`*
+*Bảng A2-52: Từ điển dữ liệu bảng `legal_documents`*
 
 **Mô tả:** Văn bản pháp lý ĐÃ CÔNG BỐ. Bất biến sau công bố, cưỡng chế bằng trigger ở tầng cơ sở dữ liệu.
 
@@ -1188,7 +1212,7 @@ bị lệch.
 
 ### Bảng `legal_document_drafts`
 
-*Bảng A2-52: Từ điển dữ liệu bảng `legal_document_drafts`*
+*Bảng A2-53: Từ điển dữ liệu bảng `legal_document_drafts`*
 
 **Mô tả:** Bản thảo văn bản pháp lý. Khác với bản đã công bố, bản thảo sửa được.
 
@@ -1220,7 +1244,7 @@ bị lệch.
 
 ### Bảng `legal_document_events`
 
-*Bảng A2-53: Từ điển dữ liệu bảng `legal_document_events`*
+*Bảng A2-54: Từ điển dữ liệu bảng `legal_document_events`*
 
 **Mô tả:** Lịch sử vòng đời văn bản pháp lý. Chỉ thêm, cưỡng chế bằng trigger.
 
@@ -1243,7 +1267,7 @@ bị lệch.
 
 ### Bảng `user_consents`
 
-*Bảng A2-54: Từ điển dữ liệu bảng `user_consents`*
+*Bảng A2-55: Từ điển dữ liệu bảng `user_consents`*
 
 **Mô tả:** Chấp thuận của TÀI KHOẢN với điều khoản dịch vụ. KHÔNG chi phối đường phát hành dữ liệu.
 
@@ -1265,7 +1289,7 @@ bị lệch.
 
 ### Bảng `signer_consents`
 
-*Bảng A2-55: Từ điển dữ liệu bảng `signer_consents`*
+*Bảng A2-56: Từ điển dữ liệu bảng `signer_consents`*
 
 **Mô tả:** Đồng thuận của NGƯỜI KÝ về việc sử dụng dữ liệu của mình. Đây mới là bảng chi phối đường phát hành dữ liệu.
 
@@ -1287,7 +1311,7 @@ bị lệch.
 
 ### Bảng `audit_log`
 
-*Bảng A2-56: Từ điển dữ liệu bảng `audit_log`*
+*Bảng A2-57: Từ điển dữ liệu bảng `audit_log`*
 
 **Mô tả:** Nhật ký kiểm toán bền vững. Đường ghi TỪ CHỐI ghi khi thiếu phạm vi.
 
@@ -1308,7 +1332,7 @@ bị lệch.
 
 ### Bảng `platform_settings`
 
-*Bảng A2-57: Từ điển dữ liệu bảng `platform_settings`*
+*Bảng A2-58: Từ điển dữ liệu bảng `platform_settings`*
 
 **Mô tả:** Tham số cấu hình nền tảng, áp được vào thể hiện đang chạy mà không cần khởi động lại.
 
@@ -1323,7 +1347,7 @@ bị lệch.
 
 ### Bảng `sot_authorized_keys`
 
-*Bảng A2-58: Từ điển dữ liệu bảng `sot_authorized_keys`*
+*Bảng A2-59: Từ điển dữ liệu bảng `sot_authorized_keys`*
 
 **Mô tả:** Khoá công khai của các máy được phép ghi nguồn sự thật.
 
@@ -1341,7 +1365,7 @@ bị lệch.
 
 ### Bảng `schema_migrations`
 
-*Bảng A2-59: Từ điển dữ liệu bảng `schema_migrations`*
+*Bảng A2-60: Từ điển dữ liệu bảng `schema_migrations`*
 
 **Mô tả:** Lịch sử các bước di trú lược đồ đã áp. Chỉ thêm.
 

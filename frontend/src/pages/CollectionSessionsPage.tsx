@@ -23,8 +23,6 @@ import PageHeader from "../components/ui/PageHeader";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import Badge from "../components/ui/Badge";
 import { useToast } from "../hooks/useToast";
-import { useAuth } from "../contexts/AuthContext";
-import { isTenantAdmin } from "../api/auth";
 import {
   getSessions,
   updateSession,
@@ -73,8 +71,6 @@ function duration(a: string | null, b: string | null, t: (k: string, v?: Record<
 export default function CollectionSessionsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { t } = useI18n();
   const { toast } = useToast();
-  const { user } = useAuth();
-  const canSeeTenant = isTenantAdmin(user);
 
   const [data, setData] = useState<SessionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +115,27 @@ export default function CollectionSessionsPage({ embedded = false }: { embedded?
       await load();
     } catch (e) {
       toast.error(friendlyError(e, t("Không đóng được phiên")));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  /** Chỉ chủ phiên đổi được — nút chỉ hiện ở dòng `is_mine`, nhưng máy chủ vẫn
+   *  là nơi kiểm quyền thật (`capture_sessions.py::update_session` từ chối nếu
+   *  người gọi không phải chủ phiên và không có vai biên tập). */
+  const toggleVisibility = async (s: CollectionSession) => {
+    const next = s.visibility === "tenant" ? "private" : "tenant";
+    try {
+      setBusy(s.capture_session_id);
+      await updateSession(s.capture_session_id, { visibility: next });
+      toast.success(
+        next === "tenant"
+          ? t("Đã mở phiên này cho cả tổ chức xem")
+          : t("Đã chuyển phiên này về riêng tư"),
+      );
+      await load();
+    } catch (e) {
+      toast.error(friendlyError(e, t("Không đổi được phạm vi xem")));
     } finally {
       setBusy("");
     }
@@ -192,23 +209,26 @@ export default function CollectionSessionsPage({ embedded = false }: { embedded?
               className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-ctu-blue/30"
             />
           </div>
-          {canSeeTenant && (
-            <div className="flex shrink-0 gap-1 rounded-lg border border-slate-200 p-1">
-              {(["mine", "tenant"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setWant(s)}
-                  className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
-                    (data?.scope ?? "mine") === s
-                      ? "bg-ctu-blue text-white"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  {s === "mine" ? t("Của tôi") : t("Cả tổ chức")}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Không còn ẩn với thành viên thường: máy chủ giờ trả một danh sách
+              "cả tổ chức" đã LỌC theo `visibility` cho họ (phiên của chính họ +
+              phiên người khác đã tự mở), khác với biên tập viên vốn thấy hết.
+              Thẻ "Phạm vi" bên trên vẫn phản ánh đúng thứ máy chủ ĐÃ trả, không
+              đổi gì ở nguyên tắc cũ của trang. */}
+          <div className="flex shrink-0 gap-1 rounded-lg border border-slate-200 p-1">
+            {(["mine", "tenant"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setWant(s)}
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  (data?.scope ?? "mine") === s
+                    ? "bg-ctu-blue text-white"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {s === "mine" ? t("Của tôi") : t("Cả tổ chức")}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -255,7 +275,22 @@ export default function CollectionSessionsPage({ embedded = false }: { embedded?
                     <td className="px-3 py-2.5 text-slate-700">
                       {s.contributor || <Unrecorded />}
                       {s.is_mine && (
-                        <span className="ml-1.5 text-xs font-medium text-ctu-blue">{t("— bạn")}</span>
+                        <>
+                          <span className="ml-1.5 text-xs font-medium text-ctu-blue">{t("— bạn")}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleVisibility(s)}
+                            disabled={busy === s.capture_session_id}
+                            title={
+                              s.visibility === "tenant"
+                                ? t("Cả tổ chức đang xem được phiên này — bấm để chuyển về riêng tư")
+                                : t("Đang riêng tư — bấm để mở cho cả tổ chức xem")
+                            }
+                            className="ml-1.5 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 disabled:opacity-50"
+                          >
+                            {s.visibility === "tenant" ? t("Cả tổ chức") : t("Riêng tư")}
+                          </button>
+                        </>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-slate-700">

@@ -1,24 +1,24 @@
 # Phụ lục C.8 — Data Dictionary (lược đồ v8)
 
-Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 26/08/2026, lược đồ **v8**,
+Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 15/09/2026, lược đồ **v8**,
 checksum `fb5b9b90c553`. **Không ràng buộc nào được gõ tay.**
 
 | | |
 |---|---:|
-| bảng | 62 |
-| cột | 660 |
-| khoá ngoại | 131 |
-| CHECK | 68 |
-| đối tượng duy nhất (PK/UNIQUE/chỉ mục) | 108 |
-| cột có DEFAULT | 220 |
+| bảng | 63 |
+| cột | 672 |
+| khoá ngoại | 132 |
+| CHECK | 69 |
+| đối tượng duy nhất (PK/UNIQUE/chỉ mục) | 109 |
+| cột có DEFAULT | 224 |
 
 ## Ba điều phải đọc trước khi dùng bảng này
 
-**Mô tả nghiệp vụ phủ 660/660 cột — toàn bộ tám nhóm A–H.**
+**Mô tả nghiệp vụ phủ 672/672 cột — toàn bộ tám nhóm A–H.**
 
 | trạng thái | số cột |
 |---|---:|
-| `VERIFIED` | 608 |
+| `VERIFIED` | 620 |
 | `NEEDS_REVIEW` | 33 |
 | `LEGACY` | 12 |
 | `DERIVED` | 7 |
@@ -211,7 +211,7 @@ thứ `pg_constraint` không hề thấy.
 | 17 | `suspended_reason` | `text` | ✓ | — | — | — | Lý do tạm ngưng. |
 | 18 | `tenant_type` | `text` | — | — | `'ORGANIZATION'::text` | — | Loại tổ chức: COMMUNITY hay ORGANIZATION.<br><sub>Community là một tenant DỰ TRỮ, không phải một mặt phẳng riêng</sub> |
 | 19 | `is_system_reserved` | `boolean` | — | — | `false` | — | Tổ chức do nền tảng giữ chỗ, không được xoá. |
-| 21 | `billing_exempt` | `boolean` | — | — | `false` | — | Miễn trừ hạn mức thương mại.<br><sub>Không dùng các TRẦN THƯƠNG MẠI tương ứng để chặn; mức sử dụng vẫn được đo</sub> |
+| 20 | `billing_exempt` | `boolean` | — | — | `false` | — | Miễn trừ hạn mức thương mại.<br><sub>Không dùng các TRẦN THƯƠNG MẠI tương ứng để chặn; mức sử dụng vẫn được đo</sub> |
 
 ### `users` — 16 cột
 
@@ -483,7 +483,7 @@ thứ `pg_constraint` không hề thấy.
 
 ## D. VSL Collection & Dataset
 
-### `capture_sessions` — 12 cột
+### `capture_sessions` — 13 cột
 
 | # | Cột | Kiểu | Null | Khoá | Mặc định | Tham chiếu | Mô tả |
 |--:|---|---|:--:|:--:|---|---|---|
@@ -499,6 +499,7 @@ thứ `pg_constraint` không hề thấy.
 | 10 | `note` | `text` | ✓ | — | — | — | Ghi chú tự do. **`CẦN DUYỆT`**<br><sub>Không đường mã nào đọc cột này; ai ghi và ghi gì vào đó chưa xác nhận.</sub> |
 | 11 | `created_at` | `timestamp with time zone` | — | — | `now()` | — | Thời điểm tạo bản ghi. |
 | 12 | `collection_session_id` | `uuid` | ✓ | FK | — | `(tenant_id, collection_session_id)` → `collection_sessions(tenant_id, collection_session_id)` | Buổi thu chứa phiên này; NULL với dữ liệu có trước khi có phân cấp.<br><sub>ON DELETE SET NULL</sub> |
+| 13 | `visibility` | `text` | — | — | `'private'::text` | — | Phạm vi xem: `private` (chỉ chủ phiên và biên tập viên) hoặc `tenant` (chủ phiên tự mở cho thành viên thường cùng tổ chức).<br><sub>Không có CHECK ở CSDL; miền do `routers/capture_sessions.py::SessionUpdate` (Literal) cưỡng chế ở tầng API. Biên tập viên thấy mọi phiên bất kể cờ — cờ chỉ nới cho thành viên thường. Thêm 15/09/2026.</sub> |
 
 ### `collection_sessions` — 9 cột
 
@@ -507,12 +508,12 @@ thứ `pg_constraint` không hề thấy.
 | 1 | `collection_session_id` | `uuid` | — | PK | — | — | Định danh buổi thu. |
 | 2 | `tenant_id` | `text` | — | FK | — | `tenants.tenant_id` | Tổ chức sở hữu bản ghi; là phạm vi áp dụng cách ly tenant. |
 | 3 | `session_code` | `text` | — | — | — | — | Mã buổi thu do client sinh, duy nhất trong phạm vi một tổ chức.<br><sub>UNIQUE (tenant_id, session_code). CHECK collection_sessions_code_not_blank cấm chuỗi rỗng</sub> |
-| 5 | `opened_by_user_id` | `uuid` | ✓ | FK | — | `users.id` | Tài khoản đã mở buổi thu.<br><sub>Là người VẬN HÀNH, không phải người ký</sub> |
-| 6 | `source_type` | `text` | ✓ | — | — | — | Kênh thu: camera trực tiếp hay tải video lên. |
-| 7 | `started_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm buổi thu bắt đầu. |
-| 8 | `ended_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm buổi thu kết thúc; NULL khi chưa đóng.<br><sub>CHECK collection_sessions_ends_after_start là BẤT BIẾN NHIỀU CỘT có điều kiện: (ended_at IS NULL) OR (started_at IS NULL) OR (ended_at >= started_at) — buổi thu chưa đóng hoặc chưa rõ giờ mở vẫn hợp lệ</sub> |
-| 9 | `note` | `text` | ✓ | — | — | — | Ghi chú tự do của người vận hành. **`CẦN DUYỆT`**<br><sub>Không đường mã nào đọc cột này; ai ghi và ghi gì vào đó chưa xác nhận.</sub> |
-| 10 | `created_at` | `timestamp with time zone` | — | — | `now()` | — | Thời điểm tạo bản ghi. |
+| 4 | `opened_by_user_id` | `uuid` | ✓ | FK | — | `users.id` | Tài khoản đã mở buổi thu.<br><sub>Là người VẬN HÀNH, không phải người ký</sub> |
+| 5 | `source_type` | `text` | ✓ | — | — | — | Kênh thu: camera trực tiếp hay tải video lên. |
+| 6 | `started_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm buổi thu bắt đầu. |
+| 7 | `ended_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm buổi thu kết thúc; NULL khi chưa đóng.<br><sub>CHECK collection_sessions_ends_after_start là BẤT BIẾN NHIỀU CỘT có điều kiện: (ended_at IS NULL) OR (started_at IS NULL) OR (ended_at >= started_at) — buổi thu chưa đóng hoặc chưa rõ giờ mở vẫn hợp lệ</sub> |
+| 8 | `note` | `text` | ✓ | — | — | — | Ghi chú tự do của người vận hành. **`CẦN DUYỆT`**<br><sub>Không đường mã nào đọc cột này; ai ghi và ghi gì vào đó chưa xác nhận.</sub> |
+| 9 | `created_at` | `timestamp with time zone` | — | — | `now()` | — | Thời điểm tạo bản ghi. |
 
 ### `raw_uploads` — 21 cột
 
@@ -545,7 +546,7 @@ thứ `pg_constraint` không hề thấy.
 | # | Cột | Kiểu | Null | Khoá | Mặc định | Tham chiếu | Mô tả |
 |--:|---|---|:--:|:--:|---|---|---|
 | 1 | `sample_uid` | `text` | — | PK | — | — | Định danh mẫu.<br><sub>CHECK samples_uid_is_hex10 buộc ĐÚNG 10 ký tự hex THƯỜNG: `^[0-9a-f]{10}$`</sub> |
-| 2 | `class_uid` | `text` | ✓ | FK | — | `(tenant_id, class_uid)` → `classes(tenant_id, class_uid)`<br>`classes.class_uid` | Lớp ký hiệu mà mẫu này mang nhãn. |
+| 2 | `class_uid` | `text` | ✓ | FK | — | `(tenant_id, class_uid)` → `classes(tenant_id, class_uid)` | Lớp ký hiệu mà mẫu này mang nhãn. |
 | 3 | `slug` | `text` | ✓ | — | — | — | Bản sao slug của lớp tại thời điểm ghi. **`CẦN DUYỆT`**<br><sub>Phi chuẩn hoá; nguồn chuẩn là classes</sub> |
 | 4 | `label_original` | `text` | ✓ | — | — | — | Bản sao nhãn gốc của lớp tại thời điểm ghi. **`CẦN DUYỆT`**<br><sub>Phi chuẩn hoá</sub> |
 | 5 | `language` | `text` | ✓ | FK | — | `languages.code` | Ngôn ngữ ký hiệu của mẫu. |
@@ -565,31 +566,31 @@ thứ `pg_constraint` không hề thấy.
 | 19 | `created_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm ghi mẫu. |
 | 20 | `sheets_synced` | `boolean` | ✓ | — | `false` | — | Đã đồng bộ sang Google Sheets chưa. |
 | 21 | `gdrive_synced` | `boolean` | ✓ | — | `true` | — | Đã đồng bộ lên Google Drive chưa.<br><sub>Bẫy đã biết: CREATE TABLE mặc định FALSE còn ALTER mặc định TRUE, nên máy cài mới và máy cũ khác nhau</sub> |
-| 23 | `status` | `character varying(20)` | ✓ | — | `'PENDING'::character varying` | — | Không còn được cập nhật. `LEGACY`<br><sub>KHÔNG đường ghi hiện hành nào cập nhật cột này: `status` không có trong _SAMPLE_DB_KEYS nên lượt upsert bỏ qua nó hoàn toàn; giá trị đến từ DEFAULT 'PENDING' của câu ALTER. Trạng thái kiểm duyệt sống ở review_status. Đo: PENDING trên cả 3.864 dòng</sub> |
-| 24 | `error_log` | `text` | ✓ | — | `''::text` | — | Thông báo lỗi của lượt xử lý, nếu có. **`CẦN DUYỆT`**<br><sub>Mặc định chuỗi rỗng. Đường ghi và tập thông báo chưa xác nhận; không rõ nó ghi lỗi của lượt xử lý nào.</sub> |
-| 25 | `updated_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm cập nhật gần nhất. |
-| 26 | `storage_key` | `text` | ✓ | — | `''::text` | — | Khoá tệp trên kho lưu trữ, tương đối so với gốc dataset. |
-| 27 | `session_uid` | `text` | ✓ | — | — | — | Mã phiên thứ hai, khác session_id. **`CẦN DUYỆT`**<br><sub>Đo: 991 dòng có giá trị, 109 giá trị khác nhau. Quan hệ với session_id chưa rõ</sub> |
-| 28 | `username` | `text` | ✓ | — | — | — | Bản sao tên tài khoản, chỉ còn trên dữ liệu cũ. `LEGACY`<br><sub>Nghỉ hưu theo ĐƯỜNG GHI, không phải cột bỏ hoang: không câu INSERT/upsert nào còn điền nó (`username` vắng trong _SAMPLE_DB_KEYS), nhưng giá trị cũ VẪN thuộc account_rename.STATE_COPIES và được cập nhật khi tài khoản đổi tên. Đo theo tháng: 05/2026 764/1244, 06/2026 400/440, 07/2026 5/2176, 08/2026 0/4</sub> |
-| 30 | `deleted_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm xoá mềm; tệp VẪN nằm trên đĩa cho tới khi dọn Thùng rác.<br><sub>Vì vậy xoá mềm không trả lại dung lượng</sub> |
-| 31 | `left_hand_ratio` | `real` | ✓ | — | — | — | Tỷ lệ khung hình phát hiện được tay trái. `DERIVED`<br><sub>TÁI TÍNH ĐƯỢC từ npz đã lưu: hand_presence() chỉ hỏi khối tay có khác 0 không, và normalize_single_hand trả nguyên khối rỗng (`if not np.any(h): return h`), nên chuẩn hoá không đổi câu trả lời</sub> |
-| 32 | `right_hand_ratio` | `real` | ✓ | — | — | — | Tỷ lệ khung hình phát hiện được tay phải. `DERIVED`<br><sub>TÁI TÍNH ĐƯỢC từ npz đã lưu — cùng cơ chế với left_hand_ratio</sub> |
-| 33 | `both_hands_ratio` | `real` | ✓ | — | — | — | Tỷ lệ khung hình phát hiện được cả hai tay. `DERIVED`<br><sub>TÁI TÍNH ĐƯỢC từ npz đã lưu — cùng cơ chế với left_hand_ratio</sub> |
-| 34 | `jitter` | `real` | ✓ | — | — | — | Độ rung của chuỗi landmark, phân vị 95. `DERIVED`<br><sub>KHÔNG tái tính được từ npz ĐÃ CHUẨN HOÁ: chỉ số đo ĐỘ DỜI toạ độ và phải tính TRƯỚC normalize_hands_vector_126, khi toạ độ còn ở thang ảnh MediaPipe 0..1. NHƯNG kho raw giữ đúng mảng ấy — `landmarks_raw` [T_original, 126], trước khi căn cổ tay và co giãn — nên với mẫu CÓ kho raw thì tính lại được. Đo: 1.678/3.864 mẫu có raw (raw_landmarks_available), 2.186 mẫu KHÔNG có và với chúng chỉ số này là không khôi phục được</sub> |
-| 35 | `quality_flags` | `text` | ✓ | — | — | — | Các cờ cảnh báo chất lượng của lượt thu. `DERIVED`<br><sub>KHÔNG tái tính được chỉ từ hàng samples và npz đã chuẩn hoá. Cần THÊM hai thứ mà hàng samples không bảo đảm: (1) mảng trước chuẩn hoá để có jitter_p95 — chỉ có ở 1.678/3.864 mẫu qua `landmarks_raw`; (2) đúng bộ ngưỡng qc_* tại thời điểm thu, vốn không lưu cạnh mẫu mà chỉ nằm trong nhật ký JSONL của lượt thu. Điều kiện (2) chưa mẫu nào thoả từ dữ liệu đã lưu</sub> |
-| 36 | `signer_id` | `text` | ✓ | FK | — | `(tenant_id, signer_id)` → `signers(tenant_id, signer_id)` | Danh tính người ký đã chuẩn hoá, khi đã phân định được.<br><sub>2.186/3.864 dòng còn trống, ĐANG ĐÓNG BĂNG chờ duyệt 266 khối thời gian</sub> |
-| 37 | `collection_campaign` | `text` | ✓ | — | — | — | Đợt thu thập mà mẫu thuộc về. **`CẦN DUYỆT`**<br><sub>Lấy từ cấu hình `collection_campaign` lúc thu, nhưng quy tắc đặt tên đợt và ai quyết định nó chưa được ghi ở đâu.</sub> |
-| 38 | `raw_landmarks_available` | `boolean` | ✓ | — | — | — | Có bản landmark thô trong kho raw hay không.<br><sub>Kho raw là nửa KHÔNG tái tạo được của một mẫu: `sequence` dựng lại được từ raw bằng cách chạy lại bộ chuẩn hoá, còn raw thì không dựng lại được từ đâu. Cột này vì thế quyết định mẫu nào còn tính lại được jitter. Đo: 1.678/3.864 mẫu có raw</sub> |
-| 39 | `normalization_version` | `text` | ✓ | — | — | — | Phiên bản thuật toán chuẩn hoá đã áp cho mẫu.<br><sub>Cho phép chạy lại chuẩn hoá mà vẫn biết mẫu nào đã dùng phiên bản nào</sub> |
-| 40 | `preprocess_contract_version` | `text` | ✓ | — | — | — | Phiên bản hợp đồng tiền xử lý. |
-| 41 | `sequence_length_original` | `integer` | ✓ | — | — | — | Số khung hình trước khi đệm hoặc cắt. |
-| 42 | `quality_status` | `text` | ✓ | — | — | — | Kết luận chất lượng: đạt hay bị gắn cờ. `DERIVED`<br><sub>KHÔNG tái tính được chỉ từ hàng samples và npz đã chuẩn hoá — cùng hai điều kiện như quality_flags, vì cả hai là đầu ra của evaluate_quality(metrics, cfg)</sub> |
-| 43 | `tenant_id` | `text` | — | FK | `'default'::text` | `(tenant_id, capture_session_id)` → `capture_sessions(tenant_id, capture_session_id)`<br>`(tenant_id, class_uid)` → `classes(tenant_id, class_uid)`<br>`(tenant_id, signer_id)` → `signers(tenant_id, signer_id)`<br>`(tenant_id, dialect)` → `dialects(tenant_id, dialect_id)`<br>`tenants.tenant_id` | Tổ chức sở hữu mẫu; là phạm vi áp dụng cách ly tenant.<br><sub>Tham gia 4 khoá ngoại GHÉP — tới Capture Session, Class, Signer và Dialect — đồng thời có khoá ngoại ĐƠN fk_samples_tenant tới Tenant. Là trụ neo tenant của bảng</sub> |
-| 44 | `capture_session_id` | `uuid` | ✓ | FK | — | `(tenant_id, capture_session_id)` → `capture_sessions(tenant_id, capture_session_id)`<br>`capture_sessions.capture_session_id` | Phiên thu chứa mẫu này.<br><sub>997/3.864 dòng còn trống — dữ liệu có trước khi đường ghi nối phân cấp. Chỉ có trong CSDL, không có trong samples.csv</sub> |
-| 45 | `review_status` | `text` | — | — | `'pending'::text` | — | Trạng thái kiểm duyệt của mẫu.<br><sub>MIỀN CHO PHÉP do ck_samples_review_status quy định: pending, approved, rejected. QUAN SÁT trên sản xuất: approved 3.862, pending 2, rejected 0 — miền rộng hơn dữ liệu đang có</sub> |
-| 46 | `reviewed_by` | `uuid` | ✓ | FK | — | `users.id` | Tài khoản đã kiểm duyệt mẫu. |
-| 47 | `reviewed_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm kiểm duyệt. |
-| 48 | `review_note` | `text` | ✓ | — | `''::text` | — | Ghi chú của người kiểm duyệt. |
+| 22 | `status` | `character varying(20)` | ✓ | — | `'PENDING'::character varying` | — | Không còn được cập nhật. `LEGACY`<br><sub>KHÔNG đường ghi hiện hành nào cập nhật cột này: `status` không có trong _SAMPLE_DB_KEYS nên lượt upsert bỏ qua nó hoàn toàn; giá trị đến từ DEFAULT 'PENDING' của câu ALTER. Trạng thái kiểm duyệt sống ở review_status. Đo: PENDING trên cả 3.864 dòng</sub> |
+| 23 | `error_log` | `text` | ✓ | — | `''::text` | — | Thông báo lỗi của lượt xử lý, nếu có. **`CẦN DUYỆT`**<br><sub>Mặc định chuỗi rỗng. Đường ghi và tập thông báo chưa xác nhận; không rõ nó ghi lỗi của lượt xử lý nào.</sub> |
+| 24 | `updated_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm cập nhật gần nhất. |
+| 25 | `storage_key` | `text` | ✓ | — | `''::text` | — | Khoá tệp trên kho lưu trữ, tương đối so với gốc dataset. |
+| 26 | `session_uid` | `text` | ✓ | — | — | — | Mã phiên thứ hai, khác session_id. **`CẦN DUYỆT`**<br><sub>Đo: 991 dòng có giá trị, 109 giá trị khác nhau. Quan hệ với session_id chưa rõ</sub> |
+| 27 | `username` | `text` | ✓ | — | — | — | Bản sao tên tài khoản, chỉ còn trên dữ liệu cũ. `LEGACY`<br><sub>Nghỉ hưu theo ĐƯỜNG GHI, không phải cột bỏ hoang: không câu INSERT/upsert nào còn điền nó (`username` vắng trong _SAMPLE_DB_KEYS), nhưng giá trị cũ VẪN thuộc account_rename.STATE_COPIES và được cập nhật khi tài khoản đổi tên. Đo theo tháng: 05/2026 764/1244, 06/2026 400/440, 07/2026 5/2176, 08/2026 0/4</sub> |
+| 28 | `deleted_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm xoá mềm; tệp VẪN nằm trên đĩa cho tới khi dọn Thùng rác.<br><sub>Vì vậy xoá mềm không trả lại dung lượng</sub> |
+| 29 | `left_hand_ratio` | `real` | ✓ | — | — | — | Tỷ lệ khung hình phát hiện được tay trái. `DERIVED`<br><sub>TÁI TÍNH ĐƯỢC từ npz đã lưu: hand_presence() chỉ hỏi khối tay có khác 0 không, và normalize_single_hand trả nguyên khối rỗng (`if not np.any(h): return h`), nên chuẩn hoá không đổi câu trả lời</sub> |
+| 30 | `right_hand_ratio` | `real` | ✓ | — | — | — | Tỷ lệ khung hình phát hiện được tay phải. `DERIVED`<br><sub>TÁI TÍNH ĐƯỢC từ npz đã lưu — cùng cơ chế với left_hand_ratio</sub> |
+| 31 | `both_hands_ratio` | `real` | ✓ | — | — | — | Tỷ lệ khung hình phát hiện được cả hai tay. `DERIVED`<br><sub>TÁI TÍNH ĐƯỢC từ npz đã lưu — cùng cơ chế với left_hand_ratio</sub> |
+| 32 | `jitter` | `real` | ✓ | — | — | — | Độ rung của chuỗi landmark, phân vị 95. `DERIVED`<br><sub>KHÔNG tái tính được từ npz ĐÃ CHUẨN HOÁ: chỉ số đo ĐỘ DỜI toạ độ và phải tính TRƯỚC normalize_hands_vector_126, khi toạ độ còn ở thang ảnh MediaPipe 0..1. NHƯNG kho raw giữ đúng mảng ấy — `landmarks_raw` [T_original, 126], trước khi căn cổ tay và co giãn — nên với mẫu CÓ kho raw thì tính lại được. Đo: 1.678/3.864 mẫu có raw (raw_landmarks_available), 2.186 mẫu KHÔNG có và với chúng chỉ số này là không khôi phục được</sub> |
+| 33 | `quality_flags` | `text` | ✓ | — | — | — | Các cờ cảnh báo chất lượng của lượt thu. `DERIVED`<br><sub>KHÔNG tái tính được chỉ từ hàng samples và npz đã chuẩn hoá. Cần THÊM hai thứ mà hàng samples không bảo đảm: (1) mảng trước chuẩn hoá để có jitter_p95 — chỉ có ở 1.678/3.864 mẫu qua `landmarks_raw`; (2) đúng bộ ngưỡng qc_* tại thời điểm thu, vốn không lưu cạnh mẫu mà chỉ nằm trong nhật ký JSONL của lượt thu. Điều kiện (2) chưa mẫu nào thoả từ dữ liệu đã lưu</sub> |
+| 34 | `signer_id` | `text` | ✓ | FK | — | `(tenant_id, signer_id)` → `signers(tenant_id, signer_id)` | Danh tính người ký đã chuẩn hoá, khi đã phân định được.<br><sub>2.186/3.864 dòng còn trống, ĐANG ĐÓNG BĂNG chờ duyệt 266 khối thời gian</sub> |
+| 35 | `collection_campaign` | `text` | ✓ | — | — | — | Đợt thu thập mà mẫu thuộc về. **`CẦN DUYỆT`**<br><sub>Lấy từ cấu hình `collection_campaign` lúc thu, nhưng quy tắc đặt tên đợt và ai quyết định nó chưa được ghi ở đâu.</sub> |
+| 36 | `raw_landmarks_available` | `boolean` | ✓ | — | — | — | Có bản landmark thô trong kho raw hay không.<br><sub>Kho raw là nửa KHÔNG tái tạo được của một mẫu: `sequence` dựng lại được từ raw bằng cách chạy lại bộ chuẩn hoá, còn raw thì không dựng lại được từ đâu. Cột này vì thế quyết định mẫu nào còn tính lại được jitter. Đo: 1.678/3.864 mẫu có raw</sub> |
+| 37 | `normalization_version` | `text` | ✓ | — | — | — | Phiên bản thuật toán chuẩn hoá đã áp cho mẫu.<br><sub>Cho phép chạy lại chuẩn hoá mà vẫn biết mẫu nào đã dùng phiên bản nào</sub> |
+| 38 | `preprocess_contract_version` | `text` | ✓ | — | — | — | Phiên bản hợp đồng tiền xử lý. |
+| 39 | `sequence_length_original` | `integer` | ✓ | — | — | — | Số khung hình trước khi đệm hoặc cắt. |
+| 40 | `quality_status` | `text` | ✓ | — | — | — | Kết luận chất lượng: đạt hay bị gắn cờ. `DERIVED`<br><sub>KHÔNG tái tính được chỉ từ hàng samples và npz đã chuẩn hoá — cùng hai điều kiện như quality_flags, vì cả hai là đầu ra của evaluate_quality(metrics, cfg)</sub> |
+| 41 | `tenant_id` | `text` | — | FK | `'default'::text` | `(tenant_id, capture_session_id)` → `capture_sessions(tenant_id, capture_session_id)`<br>`(tenant_id, class_uid)` → `classes(tenant_id, class_uid)`<br>`(tenant_id, signer_id)` → `signers(tenant_id, signer_id)`<br>`(tenant_id, dialect)` → `dialects(tenant_id, dialect_id)`<br>`tenants.tenant_id` | Tổ chức sở hữu mẫu; là phạm vi áp dụng cách ly tenant.<br><sub>Tham gia 4 khoá ngoại GHÉP — tới Capture Session, Class, Signer và Dialect — đồng thời có khoá ngoại ĐƠN fk_samples_tenant tới Tenant. Là trụ neo tenant của bảng</sub> |
+| 42 | `capture_session_id` | `uuid` | ✓ | FK | — | `(tenant_id, capture_session_id)` → `capture_sessions(tenant_id, capture_session_id)`<br>`capture_sessions.capture_session_id` | Phiên thu chứa mẫu này.<br><sub>997/3.864 dòng còn trống — dữ liệu có trước khi đường ghi nối phân cấp. Chỉ có trong CSDL, không có trong samples.csv</sub> |
+| 43 | `review_status` | `text` | — | — | `'pending'::text` | — | Trạng thái kiểm duyệt của mẫu.<br><sub>MIỀN CHO PHÉP do ck_samples_review_status quy định: pending, approved, rejected. QUAN SÁT trên sản xuất: approved 3.862, pending 2, rejected 0 — miền rộng hơn dữ liệu đang có</sub> |
+| 44 | `reviewed_by` | `uuid` | ✓ | FK | — | `users.id` | Tài khoản đã kiểm duyệt mẫu. |
+| 45 | `reviewed_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm kiểm duyệt. |
+| 46 | `review_note` | `text` | ✓ | — | `''::text` | — | Ghi chú của người kiểm duyệt. |
 
 ### `signer_aliases` — 6 cột
 
@@ -701,6 +702,22 @@ thứ `pg_constraint` không hề thấy.
 | 19 | `file_name` | `text` | ✓ | — | — | — | Tên tệp gốc của bản văn bản dạng tệp. |
 | 20 | `file_mime` | `text` | ✓ | — | — | — | Kiểu MIME của tệp đính kèm. |
 | 21 | `file_size` | `bigint` | ✓ | — | — | — | Kích thước tệp đính kèm. |
+
+### `personal_exports` — 11 cột
+
+| # | Cột | Kiểu | Null | Khoá | Mặc định | Tham chiếu | Mô tả |
+|--:|---|---|:--:|:--:|---|---|---|
+| 1 | `export_id` | `uuid` | — | PK | `gen_random_uuid()` | — | Định danh lượt xuất dữ liệu cá nhân. |
+| 2 | `tenant_id` | `text` | — | FK | — | `tenants.tenant_id` | Tổ chức mà người yêu cầu đang đứng trong lúc xuất.<br><sub>Luôn là kết quả `require_tenant()` của chính request, không phải tham số đường dẫn — khác `tenant_exports.tenant_id`.</sub> |
+| 3 | `user_id` | `uuid` | — | FK | — | `users.id` | Tài khoản yêu cầu, ĐỒNG THỜI là chủ của mọi dòng trong gói.<br><sub>Gói chỉ chứa mẫu có `samples.auth_user_id` = cột này (`personal_export._owned_rows`). ON DELETE CASCADE: xoá tài khoản là xoá sổ xuất của họ.</sub> |
+| 4 | `status` | `text` | — | — | `'pending'::text` | — | Trạng thái: `pending`, `running`, `ready`, `failed` hoặc `expired`.<br><sub>MIỀN CHO PHÉP do ck_personal_exports_status quy định: pending, running, ready, failed, expired</sub> |
+| 5 | `file_path` | `text` | ✓ | — | — | — | Đường dẫn tệp zip kết quả trên máy chủ.<br><sub>Dưới `<dataset_root>/_exports/personal/`; NULL sau khi hết hạn và bị dọn.</sub> |
+| 6 | `size_bytes` | `bigint` | ✓ | — | — | — | Kích thước tệp kết quả. |
+| 7 | `sample_count` | `integer` | ✓ | — | — | — | Số dòng mẫu đã đưa vào `samples.csv` của gói.<br><sub>Đếm dòng, không đếm tệp .npz — tệp có thể ít hơn nếu không còn trên đĩa.</sub> |
+| 8 | `error` | `text` | ✓ | — | — | — | Thông báo lỗi khi lượt xuất thất bại.<br><sub>Cắt còn 500 ký tự.</sub> |
+| 9 | `created_at` | `timestamp with time zone` | — | — | `now()` | — | Thời điểm yêu cầu. |
+| 10 | `completed_at` | `timestamp with time zone` | ✓ | — | — | — | Thời điểm hoàn tất, thành công hay thất bại. |
+| 11 | `expires_at` | `timestamp with time zone` | — | — | — | — | Thời điểm tệp hết hạn và bị `cleanup_saas_artifacts` dọn.<br><sub>Cùng TTL với bản xuất tổ chức (`tenant_export_ttl_days`).</sub> |
 
 ### `signer_consents` — 11 cột
 
@@ -856,10 +873,10 @@ thứ `pg_constraint` không hề thấy.
 | 19 | `sort_order` | `integer` | — | — | `0` | — | Thứ tự hiển thị trên bảng giá. |
 | 20 | `created_at` | `timestamp with time zone` | — | — | `now()` | — | Thời điểm tạo gói. |
 | 21 | `updated_at` | `timestamp with time zone` | — | — | `now()` | — | Thời điểm sửa gói gần nhất.<br><sub>Gói sửa được lúc chạy qua `PATCH /billing/plans/{code}`; seed dùng ON CONFLICT DO NOTHING nên một lượt triển khai lại không ghi đè chỉnh tay</sub> |
-| 26 | `max_workspaces` | `integer` | ✓ | — | — | — | Giá trị số workspace khai trong cấu hình gói.<br><sub>Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. CHECK ck_plans_v6_limits_non_negative cấm giá trị âm cho nhóm trần v6 (max_workspaces, max_projects và các trần cùng đợt)</sub> |
-| 27 | `max_projects` | `integer` | ✓ | — | — | — | Giá trị số project khai trong cấu hình gói.<br><sub>Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết.</sub> |
-| 28 | `included_training_credits` | `integer` | ✓ | — | — | — | Lượng tín dụng huấn luyện được KÈM THEO gói.<br><sub>Là một khoản ĐƯỢC CẤP, không phải một trần — nên không mô tả bằng chữ 'tối đa'. Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết.</sub> |
-| 29 | `audit_retention_days` | `integer` | ✓ | — | — | — | Số ngày giữ nhật ký kiểm toán khai trong cấu hình gói.<br><sub>Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. Chưa có cơ chế dọn nào đọc giá trị này</sub> |
+| 22 | `max_workspaces` | `integer` | ✓ | — | — | — | Giá trị số workspace khai trong cấu hình gói.<br><sub>Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. CHECK ck_plans_v6_limits_non_negative cấm giá trị âm cho nhóm trần v6 (max_workspaces, max_projects và các trần cùng đợt)</sub> |
+| 23 | `max_projects` | `integer` | ✓ | — | — | — | Giá trị số project khai trong cấu hình gói.<br><sub>Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết.</sub> |
+| 24 | `included_training_credits` | `integer` | ✓ | — | — | — | Lượng tín dụng huấn luyện được KÈM THEO gói.<br><sub>Là một khoản ĐƯỢC CẤP, không phải một trần — nên không mô tả bằng chữ 'tối đa'. Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết.</sub> |
+| 25 | `audit_retention_days` | `integer` | ✓ | — | — | — | Số ngày giữ nhật ký kiểm toán khai trong cấu hình gói.<br><sub>Giá trị được khai trong cấu hình gói; HIỆN CHƯA có cổng nào cưỡng chế. Xem `plans.PLAN_LIMIT_ENFORCEMENT` — API trả cờ này ra để giao diện không trình bày nó như một cam kết. Chưa có cơ chế dọn nào đọc giá trị này</sub> |
 
 ### `storage_reservations` — 5 cột
 
@@ -1046,7 +1063,7 @@ thứ `pg_constraint` không hề thấy.
 
 ## C.8.2.a — CHECK
 
-68 ràng buộc, trong đó **18** phủ nhiều cột.
+69 ràng buộc, trong đó **18** phủ nhiều cột.
 
 | Bảng | Ràng buộc | Cột | Phạm vi | Quy tắc |
 |---|---|---|---|---|
@@ -1077,6 +1094,7 @@ thứ `pg_constraint` không hề thấy.
 | `permissions` | `ck_permissions_scope` | `applicable_scope` | một cột | `CHECK ((applicable_scope = ANY (ARRAY['SYSTEM'::text, 'TENANT'::text, 'WORKSPACE'::text, 'PROJECT'::text])))` |
 | `permissions` | `ck_permissions_system_not_api_assignable` | `applicable_scope+is_api_assignable` | **nhiều cột** | `CHECK ((NOT ((applicable_scope = 'SYSTEM'::text) AND is_api_assignable)))` |
 | `permissions` | `ck_permissions_system_not_custom_role` | `applicable_scope+is_custom_role_allowed` | **nhiều cột** | `CHECK ((NOT ((applicable_scope = 'SYSTEM'::text) AND is_custom_role_allowed)))` |
+| `personal_exports` | `ck_personal_exports_status` | `status` | một cột | `CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'ready'::text, 'failed'::text, 'expired'::text])))` |
 | `plans` | `ck_plans_billing_period` | `billing_period` | một cột | `CHECK ((billing_period = ANY (ARRAY['monthly'::text, 'yearly'::text, 'none'::text])))` |
 | `plans` | `ck_plans_limits_non_negative` | `max_seats+max_samples+max_storage_mb+max_classes+max_training_jobs_per_month+max_concurrent_training_jobs+max_queued_training_jobs+max_api_keys+max_webhook_endpoints+price_cents+trial_days` | **nhiều cột** | `CHECK (((COALESCE(max_seats, 0) >= 0) AND (COALESCE(max_samples, 0) >= 0) AND (COALESCE(max_storage_mb, 0) >= 0) AND (COALESCE(max_classes, 0) >= 0) AND (COALESCE(max_training_jobs_per_month, 0) >= 0) AND (max_concurrent_training_jobs >= 0) AND (max_queued_training_jobs >= 0) AND (max_api_keys >= 0) AND (max_webhook_endpoints >= 0) AND (price_cents >= 0) AND (trial_days >= 0)))` |
 | `plans` | `ck_plans_v6_limits_non_negative` | `max_workspaces+max_projects+included_training_credits+audit_retention_days` | **nhiều cột** | `CHECK (((COALESCE(max_workspaces, 0) >= 0) AND (COALESCE(max_projects, 0) >= 0) AND (COALESCE(included_training_credits, 0) >= 0) AND (COALESCE(audit_retention_days, 0) >= 0)))` |
@@ -1163,6 +1181,7 @@ hoàn toàn — 22 trong số đó.
 | `notifications` | `notifications_pkey` | PRIMARY KEY | `notification_id` | — |
 | `password_reset_tokens` | `password_reset_tokens_pkey` | PRIMARY KEY | `token_hash` | — |
 | `permissions` | `permissions_pkey` | PRIMARY KEY | `permission_code` | — |
+| `personal_exports` | `personal_exports_pkey` | PRIMARY KEY | `export_id` | — |
 | `plans` | `plans_pkey` | PRIMARY KEY | `plan_code` | — |
 | `platform_settings` | `platform_settings_pkey` | PRIMARY KEY | `key` | — |
 | `project_allocations` | `project_allocations_pkey` | PRIMARY KEY | `tenant_id+project_id+metric` | — |
@@ -1238,7 +1257,7 @@ hoàn toàn — 22 trong số đó.
 
 ## C.8.2.c — Khoá ngoại
 
-131 khoá ngoại, trong đó **27** là khoá ghép.
+132 khoá ngoại, trong đó **27** là khoá ghép.
 
 | Con | Cột con | Cha | Cột cha | Cha | Con | ON DELETE | Ràng buộc |
 |---|---|---|---|:--:|:--:|---|---|
@@ -1284,6 +1303,8 @@ hoàn toàn — 22 trong số đó.
 | `notifications` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_notifications_tenant` |
 | `notifications` | `user_id` | `users` | `id` | 1 | 0..N | CASCADE | `notifications_user_id_fkey` |
 | `password_reset_tokens` | `user_id` | `users` | `id` | 1 | 0..N | CASCADE | `password_reset_tokens_user_id_fkey` |
+| `personal_exports` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_personal_exports_tenant` |
+| `personal_exports` | `user_id` | `users` | `id` | 1 | 0..N | CASCADE | `personal_exports_user_id_fkey` |
 | `platform_settings` | `updated_by` | `users` | `id` | 0..1 | 0..N | SET NULL | `platform_settings_updated_by_fkey` |
 | `project_allocations` | `tenant_id+project_id` | `projects` | `tenant_id+project_id` | 1 | 0..N | CASCADE | `fk_project_allocations_project` |
 | `project_allocations` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_project_allocations_tenant` |
@@ -1316,7 +1337,6 @@ hoàn toàn — 22 trong số đó.
 | `samples` | `tenant_id+signer_id` | `signers` | `tenant_id+signer_id` | 0..1 | 0..N | NO ACTION | `fk_samples_signer` |
 | `samples` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_samples_tenant` |
 | `samples` | `auth_user_id` | `users` | `id` | 0..1 | 0..N | SET NULL | `samples_auth_user_id_fkey` |
-| `samples` | `class_uid` | `classes` | `class_uid` | 0..1 | 0..N | NO ACTION | `samples_class_uid_fkey` |
 | `samples` | `tenant_id+dialect` | `dialects` | `tenant_id+dialect_id` | 0..1 | 0..N | NO ACTION | `samples_dialect_fkey` |
 | `samples` | `reviewed_by` | `users` | `id` | 0..1 | 0..N | SET NULL | `samples_reviewed_by_fkey` |
 | `signer_aliases` | `tenant_id+new_signer_id` | `signers` | `tenant_id+signer_id` | 1 | 0..N | NO ACTION | `fk_signer_aliases_new` |
@@ -1377,7 +1397,7 @@ hoàn toàn — 22 trong số đó.
 ## C.8.3 — View
 
 `tenant_members` là VIEW `security_invoker` trên `memberships`, 7 cột. Nó KHÔNG
-nằm trong 660 cột ở trên (đó là cột của bảng). Ghi ở đây vì bỏ nó đi sẽ khiến
+nằm trong 672 cột ở trên (đó là cột của bảng). Ghi ở đây vì bỏ nó đi sẽ khiến
 phụ lục im lặng về một đối tượng mà mã ứng dụng có đọc — và `security_invoker`
 chính là thứ khiến mọi truy vấn qua view chịu đúng chính sách RLS của người
 gọi. Gỡ thuộc tính ấy là mở toang view.

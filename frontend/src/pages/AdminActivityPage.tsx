@@ -71,6 +71,7 @@ const AUDIT_FILTERS: { label: string; prefix: string }[] = [
   { label: "An ninh", prefix: "security." },
   { label: "Dữ liệu", prefix: "data." },
   { label: "Tổ chức", prefix: "tenant." },
+  { label: "Xuất dữ liệu cá nhân", prefix: "personal_export." },
   { label: "Từ vựng", prefix: "vocabulary." },
   { label: "Pháp lý", prefix: "legal." },
   { label: "Tài khoản", prefix: "account." },
@@ -91,7 +92,10 @@ function auditLabel(action: string): { text: string; cls: string } {
   // Gộp phương ngữ đổi nhãn mẫu của người khác; gỡ thành viên cắt quyền xem
   // chính dữ liệu họ đóng góp. Cả hai không có nút hoàn tác, nên chúng đứng
   // cùng bậc với `purge` chứ không phải bậc "ghi chú".
-  if (action === "vocabulary.dialect.merged" || action === "tenant.member_removed")
+  // Cấp/gỡ quyền quản trị NỀN TẢNG — mạnh hơn mọi vai tenant cộng lại, đứng
+  // cùng bậc với purge dù tên hành động không kết thúc bằng ".purge".
+  if (action === "vocabulary.dialect.merged" || action === "tenant.member_removed"
+      || action === "account.platform_admin_role_changed")
     return { text: action, cls: "bg-red-100 text-red-700" };
   if (action.startsWith("tenant.") || action.startsWith("vocabulary."))
     return { text: action, cls: "bg-violet-100 text-violet-700" };

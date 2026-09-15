@@ -73,6 +73,24 @@ def run_tenant_export(self, export_id: str):
 
 
 @celery_app.task(bind=True, platform_wide=True)
+def run_personal_export(self, export_id: str):
+    """Dựng gói zip cho một yêu cầu xuất dữ liệu CÁ NHÂN.
+
+    `platform_wide` cùng lý do với `run_tenant_export` ngay trên: một worker
+    Celery là một tiến trình riêng, không thừa hưởng ngữ cảnh tenant của yêu
+    cầu HTTP đã phái nó — mọi câu đọc/ghi bên trong `run_export` tự bọc
+    `system_scope()` nên không dựa vào ngữ cảnh ấy.
+    """
+    from app.personal_export import run_export
+
+    try:
+        return run_export(str(export_id))
+    except Exception as exc:
+        logger.error("[SAAS] xuat ca nhan %s hong: %s", export_id, exc)
+        raise
+
+
+@celery_app.task(bind=True, platform_wide=True)
 def sweep_subscriptions(self):
     """Một lượt vòng đời đăng ký: nhắc → gia hạn → ân hạn → khoá mềm.
 
@@ -104,13 +122,18 @@ def cleanup_saas_artifacts(self, delivery_history_days: int = 30):
     thêm khả năng nào.
     """
     from app.tenant_lifecycle import cleanup_expired_exports
+    from app.personal_export import cleanup_expired_exports as cleanup_expired_personal_exports
     from app.webhooks import purge_old_deliveries
 
-    out = {"exports_removed": 0, "deliveries_purged": 0}
+    out = {"exports_removed": 0, "personal_exports_removed": 0, "deliveries_purged": 0}
     try:
         out["exports_removed"] = cleanup_expired_exports()
     except Exception as exc:
         logger.error("[SAAS] dọn bản xuất hỏng: %s", exc)
+    try:
+        out["personal_exports_removed"] = cleanup_expired_personal_exports()
+    except Exception as exc:
+        logger.error("[SAAS] dọn bản xuất cá nhân hỏng: %s", exc)
     try:
         purge_old_deliveries(days=int(delivery_history_days))
         out["deliveries_purged"] = 1

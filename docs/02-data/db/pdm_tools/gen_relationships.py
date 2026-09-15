@@ -213,6 +213,13 @@ NHOM_E = {
         ("User records Signer Consent", "USER_RECORDS_SIGNER_CONSENT", "recorder"),
     ("tenants", "tenant_exports", "tenant_id"):
         ("Tenant scopes Tenant Export", "TENANT_SCOPES_TENANT_EXPORT", "scope"),
+    # personal_exports, them 15/09/2026. "owns" chu khong "requests": nguoi yeu
+    # cau cung la CHU cua moi dong trong goi (loc theo samples.auth_user_id),
+    # va CASCADE — xoa tai khoan la xoa so xuat cua ho.
+    ("tenants", "personal_exports", "tenant_id"):
+        ("Tenant scopes Personal Export", "TENANT_SCOPES_PERSONAL_EXPORT", "scope"),
+    ("users", "personal_exports", "user_id"):
+        ("User owns Personal Export", "USER_OWNS_PERSONAL_EXPORT", "owner"),
     ("legal_documents", "user_consents", "kind+version"):
         ("Legal Document Version anchors User Consent",
          "LEGAL_DOCUMENT_VERSION_ANCHORS_USER_CONSENT", "legal evidence"),
@@ -431,7 +438,7 @@ for r in fks:
 o = []
 w = o.append
 w("# Bảng vẽ ERD theo nhóm A–H\n")
-w("Sinh từ catalog `signdb` v8 ngày 26/08/2026. **Entity, cột khoá ngoại,")
+w("Sinh từ catalog `signdb` v8 ngày 15/09/2026. **Entity, cột khoá ngoại,")
 w("cardinality, ON DELETE là dữ liệu hệ thống.** Tên quan hệ thì không —")
 w("đặt tên là việc mô hình hoá.\n")
 w("## Ba loại nguồn tên\n")

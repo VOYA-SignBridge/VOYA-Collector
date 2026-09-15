@@ -61,6 +61,7 @@ class SessionRow(BaseModel):
     sample_count: int = 0
     is_open: bool = False
     is_mine: bool = False
+    visibility: str = "private"
 
 
 class SessionsResponse(BaseModel):
@@ -77,6 +78,9 @@ class SessionUpdate(BaseModel):
     #: kết thúc là một dữ kiện của lịch sử thu, không phải một ô cấu hình.
     close: Optional[bool] = None
     note: Optional[str] = Field(None, max_length=500)
+    #: 'private' (mặc định — chỉ chủ phiên và biên tập viên thấy) hay 'tenant'
+    #: (chủ phiên tự mở cho thành viên thường khác cùng tổ chức xem).
+    visibility: Optional[Literal["private", "tenant"]] = None
 
 
 def _is_editor(user: Dict[str, Any]) -> bool:
@@ -105,25 +109,30 @@ def list_sessions(
     uid = str(current_user.get("id") or "")
     editor = _is_editor(current_user)
     want = scope if scope != "auto" else ("tenant" if editor else "mine")
-    if want == "tenant" and not editor:
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            detail="Chỉ người có quyền biên tập mới xem được phiên của cả tổ chức")
 
     # Thứ tự tham số phải khớp thứ tự dấu %s trong câu dưới, và câu ấy có tenant
     # ở HAI chỗ (một trong truy vấn con đếm mẫu, một ở mệnh đề WHERE ngoài).
     # Viết thẳng danh sách ra đây thay vì cộng dồn nhiều mảnh: một tham số lệch
     # chỗ trong truy vấn này không báo lỗi, nó chỉ trả về kết quả của tenant khác.
-    where_mine = ""
+    where_extra = ""
     params: List[Any] = [tenant, tenant]      # (1) truy vấn con, (2) WHERE ngoài
     if want == "mine":
-        where_mine = "AND cs.auth_user_id = %s"
-        params.append(uid)                    # (3) chỉ khi lọc theo người dùng
+        where_extra = "AND cs.auth_user_id = %s"
+        params.append(uid)
+    elif not editor:
+        # Thành viên thường xin xem "cả tổ chức": biên tập viên vẫn thấy MỌI
+        # phiên như trước (cờ `visibility` không đổi gì với họ — họ đã có toàn
+        # quyền qua vai biên tập, không qua cờ này). Thành viên thường chỉ thấy
+        # phiên của chính mình cộng phiên mà CHỦ phiên đã tự mở.
+        where_extra = "AND (cs.visibility = 'tenant' OR cs.auth_user_id = %s)"
+        params.append(uid)
     params.append(limit)                      # (4) LIMIT
 
     rows = _fetch_all(
         f"""
         SELECT cs.capture_session_id, cs.session_id, cs.class_uid, cs.signer_id,
                cs.auth_user_id, cs.source_type, cs.started_at, cs.ended_at, cs.note,
+               cs.visibility,
                c.label_original, c.dialect,
                u.username AS contributor,
                s.signer_name,
@@ -140,7 +149,7 @@ def list_sessions(
                  WHERE tenant_id = %s AND (deleted_at IS NULL)
                  GROUP BY class_uid, session_id
                ) n ON n.class_uid = cs.class_uid AND n.session_id = cs.session_id
-         WHERE cs.tenant_id = %s {where_mine}
+         WHERE cs.tenant_id = %s {where_extra}
          ORDER BY cs.started_at DESC NULLS LAST, cs.created_at DESC
          LIMIT %s
         """,
@@ -165,6 +174,7 @@ def list_sessions(
             sample_count=int(r.get("sample_count") or 0),
             is_open=r.get("ended_at") is None,
             is_mine=str(r.get("auth_user_id") or "") == uid,
+            visibility=r.get("visibility") or "private",
         ))
 
     return SessionsResponse(
@@ -213,6 +223,9 @@ def update_session(
     if body.note is not None:
         sets.append("note = %s")
         params.append(body.note.strip() or None)
+    if body.visibility is not None:
+        sets.append("visibility = %s")
+        params.append(body.visibility)
     if not sets:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Không có gì để sửa")
 
@@ -226,7 +239,8 @@ def update_session(
     activity.log_security_event(
         "collection_session.updated", actor=str(current_user.get("username", "")),
         target=capture_session_id,
-        extra={"closed": bool(body.close), "note_set": body.note is not None},
+        extra={"closed": bool(body.close), "note_set": body.note is not None,
+               "visibility": body.visibility},
         actor_user=current_user, request=request)
 
     return {"capture_session_id": capture_session_id, "closed": bool(body.close)}

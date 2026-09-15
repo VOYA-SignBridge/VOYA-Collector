@@ -1,12 +1,12 @@
 # Bảng cơ sở dữ liệu v8 — nguồn cho PDM
 
-Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 26/08/2026, lược đồ **v8**,
-checksum `fb5b9b90c553`. Không gõ tay dòng nào: 62 bảng, 131 khoá ngoại.
+Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 15/09/2026, lược đồ **v8**,
+checksum `fb5b9b90c553`. Không gõ tay dòng nào: 63 bảng, 132 khoá ngoại.
 
 Cách đọc cardinality: cột **Cha** là `1` khi mọi cột khoá ngoại đều NOT NULL,
 và `0..1` khi có cột cho phép NULL — tức là con **có thể chưa** nối cha.
 
-## 1. Sáu mươi hai bảng theo tám nhóm
+## 1. Sáu mươi ba bảng theo tám nhóm
 
 ### A. Tenant & Access Management — 12 bảng, 132 cột
 
@@ -21,8 +21,8 @@ và `0..1` khi có cột cho phép NULL — tức là con **có thể chưa** n�
 | `role_permissions` | `role_id+permission_code` | 3 | 2 | 0 | — | — |
 | `roles` | `role_id` | 12 | 2 | 3 | ✓ | ✓ |
 | `tenant_invitations` | `invitation_id` | 11 | 3 | 0 | ✓ | ✓ |
-| `tenants` | `tenant_id` | 20 | 3 | 39 | ✓ | ✓ |
-| `users` | `id` | 16 | 2 | 46 | ✓ | ✓ |
+| `tenants` | `tenant_id` | 20 | 3 | 40 | ✓ | ✓ |
+| `users` | `id` | 16 | 2 | 47 | ✓ | ✓ |
 | `workspaces` | `workspace_id` | 9 | 1 | 2 | ✓ | ✓ |
 
 ### B. Authentication & User Security — 6 bảng, 41 cột
@@ -40,7 +40,7 @@ và `0..1` khi có cột cho phép NULL — tức là con **có thể chưa** n�
 
 | Bảng | Khoá chính | Cột | FK ra | FK vào | RLS | Có `tenant_id` |
 |---|---|---:|---:|---:|:--:|:--:|
-| `classes` | `class_uid` | 23 | 6 | 5 | ✓ | ✓ |
+| `classes` | `class_uid` | 23 | 6 | 4 | ✓ | ✓ |
 | `community_dialects` | `dialect_id` | 9 | 1 | 0 | — | — |
 | `community_profiles` | `profile_id` | 8 | 1 | 0 | — | — |
 | `community_versions` | `version` | 6 | 1 | 1 | — | — |
@@ -53,18 +53,18 @@ và `0..1` khi có cột cho phép NULL — tức là con **có thể chưa** n�
 | `vocabulary_groups` | `tenant_id+group_id` | 6 | 1 | 1 | ✓ | ✓ |
 | `vocabulary_registry_meta` | `tenant_id` | 3 | 2 | 0 | ✓ | ✓ |
 
-### D. VSL Collection & Dataset — 6 bảng, 103 cột
+### D. VSL Collection & Dataset — 6 bảng, 104 cột
 
 | Bảng | Khoá chính | Cột | FK ra | FK vào | RLS | Có `tenant_id` |
 |---|---|---:|---:|---:|:--:|:--:|
-| `capture_sessions` | `capture_session_id` | 12 | 5 | 2 | ✓ | ✓ |
+| `capture_sessions` | `capture_session_id` | 13 | 5 | 2 | ✓ | ✓ |
 | `collection_sessions` | `collection_session_id` | 9 | 2 | 1 | ✓ | ✓ |
 | `raw_uploads` | `upload_uid` | 21 | 5 | 0 | ✓ | ✓ |
-| `samples` | `sample_uid` | 46 | 10 | 0 | ✓ | ✓ |
+| `samples` | `sample_uid` | 46 | 9 | 0 | ✓ | ✓ |
 | `signer_aliases` | `tenant_id+old_signer_id` | 6 | 3 | 0 | ✓ | ✓ |
 | `signers` | `signer_id` | 9 | 2 | 4 | ✓ | ✓ |
 
-### E. Legal, Consent & Governance — 9 bảng, 116 cột
+### E. Legal, Consent & Governance — 10 bảng, 127 cột
 
 | Bảng | Khoá chính | Cột | FK ra | FK vào | RLS | Có `tenant_id` |
 |---|---|---:|---:|---:|:--:|:--:|
@@ -72,6 +72,7 @@ và `0..1` khi có cột cho phép NULL — tức là con **có thể chưa** n�
 | `legal_document_drafts` | `draft_id` | 21 | 2 | 0 | — | — |
 | `legal_document_events` | `event_id` | 12 | 0 | 0 | — | — |
 | `legal_documents` | `doc_id` | 21 | 1 | 2 | — | — |
+| `personal_exports` | `export_id` | 11 | 2 | 0 | ✓ | ✓ |
 | `signer_consents` | `consent_id` | 11 | 4 | 0 | ✓ | ✓ |
 | `sot_authorized_keys` | `public_key` | 7 | 0 | 0 | — | — |
 | `tenant_exports` | `export_id` | 13 | 2 | 0 | ✓ | ✓ |
@@ -147,7 +148,7 @@ kiểu với khoá ngoại một cột.
 | `user_consents` | `kind+version` | `legal_documents` | `kind+version` | 1 | 0..N | RESTRICT |
 | `vocabulary_registry_meta` | `tenant_id+version` | `registry_versions` | `tenant_id+version` | 0..1 | 0..1 | NO ACTION |
 
-## 3. Toàn bộ 131 khoá ngoại
+## 3. Toàn bộ 132 khoá ngoại
 
 | Con | Cột con | Cha | Cột cha | Cha | Con | ON DELETE | Tên ràng buộc |
 |---|---|---|---|:--:|:--:|---|---|
@@ -193,6 +194,8 @@ kiểu với khoá ngoại một cột.
 | `notifications` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_notifications_tenant` |
 | `notifications` | `user_id` | `users` | `id` | 1 | 0..N | CASCADE | `notifications_user_id_fkey` |
 | `password_reset_tokens` | `user_id` | `users` | `id` | 1 | 0..N | CASCADE | `password_reset_tokens_user_id_fkey` |
+| `personal_exports` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_personal_exports_tenant` |
+| `personal_exports` | `user_id` | `users` | `id` | 1 | 0..N | CASCADE | `personal_exports_user_id_fkey` |
 | `platform_settings` | `updated_by` | `users` | `id` | 0..1 | 0..N | SET NULL | `platform_settings_updated_by_fkey` |
 | `project_allocations` | `tenant_id+project_id` | `projects` | `tenant_id+project_id` | 1 | 0..N | CASCADE | `fk_project_allocations_project` |
 | `project_allocations` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_project_allocations_tenant` |
@@ -225,7 +228,6 @@ kiểu với khoá ngoại một cột.
 | `samples` | `tenant_id+signer_id` | `signers` | `tenant_id+signer_id` | 0..1 | 0..N | NO ACTION | `fk_samples_signer` |
 | `samples` | `tenant_id` | `tenants` | `tenant_id` | 1 | 0..N | RESTRICT | `fk_samples_tenant` |
 | `samples` | `auth_user_id` | `users` | `id` | 0..1 | 0..N | SET NULL | `samples_auth_user_id_fkey` |
-| `samples` | `class_uid` | `classes` | `class_uid` | 0..1 | 0..N | NO ACTION | `samples_class_uid_fkey` |
 | `samples` | `tenant_id+dialect` | `dialects` | `tenant_id+dialect_id` | 0..1 | 0..N | NO ACTION | `samples_dialect_fkey` |
 | `samples` | `reviewed_by` | `users` | `id` | 0..1 | 0..N | SET NULL | `samples_reviewed_by_fkey` |
 | `signer_aliases` | `tenant_id+new_signer_id` | `signers` | `tenant_id+signer_id` | 1 | 0..N | NO ACTION | `fk_signer_aliases_new` |
@@ -290,10 +292,10 @@ thành mạng dây.
 
 | Bảng cha | Số khoá ngoại trỏ vào |
 |---|---:|
-| `users` | 46 |
-| `tenants` | 39 |
-| `classes` | 5 |
+| `users` | 47 |
+| `tenants` | 40 |
 | `dialects` | 5 |
+| `classes` | 4 |
 | `signers` | 4 |
 | `languages` | 4 |
 | `roles` | 3 |

@@ -24,8 +24,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useToast } from "../hooks/useToast";
-import Tabs from "../components/ui/Tabs";
+import Tabs, { useUrlTab, type TabItem } from "../components/ui/Tabs";
 import { slugify } from "../utils/markdownOutline";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
 import Badge from "../components/ui/Badge";
@@ -49,6 +50,7 @@ import {
   removeMember,
   requestExport,
   revokeInvitation,
+  searchAccounts,
   NO_ROLE_OPTION,
   ROLES,
   parseRole,
@@ -57,6 +59,8 @@ import {
   setHomeTenant,
   updateMemberRole,
   updateTenant,
+  EXPORT_AGREEMENT_TEXT,
+  type AccountSearchResult,
   type MemberRoleOrNone,
   type PurgePreview,
   type Tenant,
@@ -74,6 +78,17 @@ function tenantStatus(t: Tenant): { text: string; tone: StatusTone } {
   return { text: "đang hoạt động", tone: "success" };
 }
 
+/**
+ * Bốn tab chi tiết. Chỉ `id` được `useUrlTab` đọc để xác nhận tham số URL còn
+ * hợp lệ; nhãn thật (đã dịch, kèm số đếm) dựng riêng ở nơi gọi `<Tabs>`.
+ */
+const DETAIL_TAB_DEFS: readonly TabItem<"members" | "invites" | "exports" | "settings">[] = [
+  { id: "members", label: "members" },
+  { id: "invites", label: "invites" },
+  { id: "exports", label: "exports" },
+  { id: "settings", label: "settings" },
+];
+
 export default function AdminTenantsPage() {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -81,7 +96,19 @@ export default function AdminTenantsPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
+  // Tổ chức đang mở nằm ở URL (?org=…), không chỉ ở state: gửi được link
+  // thẳng tới "tổ chức X" cho đồng nghiệp, và bấm back/forward trình duyệt quay
+  // đúng chỗ vừa xem thay vì rơi về danh sách trống.
+  const [urlParams, setUrlParams] = useSearchParams();
+  const selected = urlParams.get("org");
+  const setSelected = useCallback((tenantId: string | null) => {
+    setUrlParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (tenantId) next.set("org", tenantId);
+      else { next.delete("org"); next.delete("tab"); }
+      return next;
+    });
+  }, [setUrlParams]);
 
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [invites, setInvites] = useState<TenantInvitation[]>([]);
@@ -118,8 +145,21 @@ export default function AdminTenantsPage() {
   const [addForm, setAddForm] = useState<{ user_id: string; role: MemberRoleOrNone }>({
     user_id: "", role: null,
   });
+  // Tìm tài khoản để "Gắn" bằng email/tên đăng nhập thay vì ID thô — người
+  // quản trị nhớ được cái trước, không nhớ được UUID. `accountPicked` giữ mục
+  // đã chọn để hiện tên thay vì lại hiện một chuỗi mã.
+  const [accountQuery, setAccountQuery] = useState("");
+  const [accountResults, setAccountResults] = useState<AccountSearchResult[]>([]);
+  const [accountSearching, setAccountSearching] = useState(false);
+  const [accountPicked, setAccountPicked] = useState<AccountSearchResult | null>(null);
   const [purgeConfirm, setPurgeConfirm] = useState("");
-  const [detailTab, setDetailTab] = useState<"members" | "invites" | "exports" | "settings">("members");
+  // Cam kết sử dụng dữ liệu — phải tự tay tích lại mỗi lần mở tổ chức khác,
+  // không giữ từ tổ chức trước: đồng ý cho gói của A không phải đồng ý cho B.
+  const [exportAgree, setExportAgree] = useState(false);
+  const [detailTab, setDetailTab] = useUrlTab("tab", DETAIL_TAB_DEFS, "members");
+  // Tên hiển thị đang sửa ở tab Cài đặt — tách khỏi `current.display_name` để
+  // gõ dở không tự ghi đè tên thật cho tới khi bấm Lưu.
+  const [nameDraft, setNameDraft] = useState("");
   /** Lọc danh sách theo tên hoặc mã — người mới tìm theo TÊN, không nhớ mã. */
   const [query, setQuery] = useState("");
 
@@ -213,8 +253,36 @@ export default function AdminTenantsPage() {
   useEffect(() => {
     if (!selected) return;
     setPurgeConfirm("");
+    setAddForm({ user_id: "", role: null });
+    setAccountQuery("");
+    setAccountResults([]);
+    setAccountPicked(null);
+    setExportAgree(false);
     loadDetail(selected);
   }, [selected, loadDetail]);
+
+  // Nháp tên hiển thị theo đúng tổ chức đang mở. Đổi tổ chức phải nạp lại từ
+  // dữ liệu máy chủ, không giữ nháp dở dang của tổ chức vừa rời đi.
+  useEffect(() => {
+    setNameDraft(current?.display_name ?? "");
+  }, [current?.tenant_id, current?.display_name]);
+
+  // Tìm tài khoản theo email/tên đăng nhập, có trễ để không gọi API mỗi phím
+  // gõ. Đã chọn một mục rồi thì ngưng tìm — đổi ô tìm sau khi chọn nghĩa là
+  // người dùng muốn chọn lại, xử lý ở nút "Đổi" thay vì tự tìm ngầm.
+  useEffect(() => {
+    if (accountPicked) return;
+    const q = accountQuery.trim();
+    if (q.length < 2) { setAccountResults([]); return; }
+    setAccountSearching(true);
+    const id = setTimeout(() => {
+      searchAccounts(q)
+        .then(setAccountResults)
+        .catch(() => setAccountResults([]))
+        .finally(() => setAccountSearching(false));
+    }, 300);
+    return () => clearTimeout(id);
+  }, [accountQuery, accountPicked]);
 
   // Bản xuất "full" chạy khoảng một phút. Một bảng chỉ nạp một lần thì không
   // phân biệt được với một bảng hỏng — hỏi lại chừng nào còn việc chưa xong.
@@ -405,7 +473,7 @@ export default function AdminTenantsPage() {
             ) : (
               <div className="space-y-1.5 mb-4">
                 {members.map((m) => (
-                  <div key={m.user_id} className="flex items-center gap-2 text-sm border-b border-slate-50 pb-1.5">
+                  <div key={m.user_id} className="flex flex-wrap items-center gap-2 text-sm border-b border-slate-50 py-1.5">
                     <span className="min-w-0">
                       <span className="block truncate text-slate-700">{memberIdentity(m).primary}</span>
                       {memberIdentity(m).secondary ? (
@@ -448,13 +516,64 @@ export default function AdminTenantsPage() {
             )}
 
             <div className="flex flex-wrap gap-2 items-center">
-              <input
-                aria-label={t("ID tài khoản")}
-                placeholder={t("ID tài khoản có sẵn")}
-                value={addForm.user_id}
-                onChange={(e) => setAddForm({ ...addForm, user_id: e.target.value })}
-                className="px-3 py-1.5 rounded-md border border-slate-200 text-sm font-mono flex-1 min-w-[220px]"
-              />
+              {accountPicked ? (
+                <span className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm">
+                  <span className="font-medium text-slate-700">{accountPicked.email || accountPicked.username || accountPicked.id}</span>
+                  {accountPicked.username && accountPicked.email && (
+                    <span className="text-slate-400">({accountPicked.username})</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccountPicked(null);
+                      setAddForm({ ...addForm, user_id: "" });
+                      setAccountQuery("");
+                    }}
+                    className="text-xs font-medium text-ctu-blue hover:underline"
+                  >
+                    {t("Đổi")}
+                  </button>
+                </span>
+              ) : (
+                <div className="relative min-w-[220px] flex-1">
+                  <input
+                    aria-label={t("Tìm tài khoản theo email hoặc tên đăng nhập")}
+                    placeholder={t("Tìm theo email hoặc tên đăng nhập")}
+                    value={accountQuery}
+                    onChange={(e) => setAccountQuery(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-md border border-slate-200 text-sm"
+                  />
+                  {(accountSearching || accountResults.length > 0) && accountQuery.trim().length >= 2 && (
+                    <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+                      {accountSearching ? (
+                        <p className="px-3 py-2 text-xs text-slate-400">{t("Đang tìm…")}</p>
+                      ) : accountResults.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-slate-400">{t("Không khớp tài khoản nào.")}</p>
+                      ) : (
+                        accountResults.map((acc) => (
+                          <button
+                            key={acc.id}
+                            type="button"
+                            onClick={() => {
+                              setAccountPicked(acc);
+                              setAddForm({ ...addForm, user_id: acc.id });
+                            }}
+                            className="block w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                          >
+                            <span className="font-medium text-slate-700">{acc.email || acc.username}</span>
+                            {acc.username && acc.email && (
+                              <span className="ml-1.5 text-xs text-slate-400">{acc.username}</span>
+                            )}
+                            {!acc.is_active && (
+                              <span className="ml-1.5 text-xs text-amber-600">{t("đã khoá")}</span>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <select value={addForm.role ?? NO_ROLE_OPTION} aria-label={t("Vai khi gắn")}
                       onChange={(e) => setAddForm({ ...addForm, role: parseRole(e.target.value) })}
                       className="px-2 py-1.5 rounded-md border border-slate-200 text-sm">
@@ -466,6 +585,8 @@ export default function AdminTenantsPage() {
                 onClick={() => run("add", async () => {
                   await addMember(current.tenant_id, addForm.user_id.trim(), addForm.role);
                   setAddForm({ user_id: "", role: null });
+                  setAccountPicked(null);
+                  setAccountQuery("");
                   await loadDetail(current.tenant_id);
                   await loadTenants();
                 }, t("Đã gắn tài khoản vào tổ chức"))}
@@ -482,6 +603,8 @@ export default function AdminTenantsPage() {
                 onClick={() => run("home", async () => {
                   await setHomeTenant(addForm.user_id.trim(), current.tenant_id, addForm.role);
                   setAddForm({ user_id: "", role: null });
+                  setAccountPicked(null);
+                  setAccountQuery("");
                   await loadDetail(current.tenant_id);
                   await loadTenants();
                 }, t("Đã chuyển tổ chức nhà của tài khoản"))}
@@ -494,7 +617,7 @@ export default function AdminTenantsPage() {
               </p>
             </div>
             <p className="text-xs text-slate-400 mt-2">
-              {t("Gắn thẳng theo ID là thao tác của quản trị viên nền tảng. Cách đưa người vào dành cho quản trị viên tổ chức là")} <strong>{t("lời mời")}</strong> {t("bên dưới — nó đòi hỏi chính người được mời phải hành động.")}
+              {t("Gắn thẳng là thao tác của quản trị viên nền tảng. Cách đưa người vào dành cho quản trị viên tổ chức là")} <strong>{t("lời mời")}</strong> {t("bên dưới — nó đòi hỏi chính người được mời phải hành động.")}
             </p>
             <p className="text-xs text-slate-400 mt-1">
               <strong>{t("Chuyển tổ chức nhà")}</strong> {t("khác với gắn: nó quyết định dữ liệu tài khoản đó thu về sau này thuộc tổ chức nào. Dữ liệu đã thu trước đó vẫn nằm ở tổ chức cũ.")}
@@ -626,20 +749,33 @@ export default function AdminTenantsPage() {
           <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <h2 className="font-semibold text-slate-700">{t("Xuất dữ liệu")}</h2>
-              <div className="ml-auto flex gap-2">
-                {(["metadata", "full"] as const).map((scope) => (
-                  <button key={scope}
-                    disabled={busy === `ex-${scope}`}
-                    onClick={() => run(`ex-${scope}`, async () => {
-                      await requestExport(current.tenant_id, scope);
-                      await loadDetail(current.tenant_id);
-                    }, t("Đã đặt hàng bản xuất; theo dõi trạng thái bên dưới"))}
-                    className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 disabled:opacity-50"
-                  >
-                    {scope === "metadata" ? t("Xuất siêu dữ liệu") : t("Xuất toàn bộ")}
-                  </button>
-                ))}
-              </div>
+            </div>
+            {/* Gói này chứa dữ liệu của NHIỀU người đóng góp, không chỉ của
+                người bấm nút — nên phải tự tay đồng ý mỗi lần, không có nút
+                nào gọi được khi chưa tích. Máy chủ kiểm lại điều này, ô này
+                chỉ là chỗ HIỆN cam kết ra trước mắt người bấm. */}
+            <label className="mb-3 flex items-start gap-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={exportAgree}
+                onChange={(e) => setExportAgree(e.target.checked)}
+                className="mt-0.5 accent-sky-600"
+              />
+              <span>{t(EXPORT_AGREEMENT_TEXT)}</span>
+            </label>
+            <div className="mb-3 flex gap-2">
+              {(["metadata", "full"] as const).map((scope) => (
+                <button key={scope}
+                  disabled={!exportAgree || busy === `ex-${scope}`}
+                  onClick={() => run(`ex-${scope}`, async () => {
+                    await requestExport(current.tenant_id, scope, exportAgree);
+                    await loadDetail(current.tenant_id);
+                  }, t("Đã đặt hàng bản xuất; theo dõi trạng thái bên dưới"))}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {scope === "metadata" ? t("Xuất siêu dữ liệu") : t("Xuất toàn bộ")}
+                </button>
+              ))}
             </div>
             {detail.errors.exports ? (
               <BlockError text={detail.errors.exports} />
@@ -680,8 +816,40 @@ export default function AdminTenantsPage() {
 
           </>)}
           {detailTab === "settings" && (<>
+          {/* Cài đặt chung — trước đây tab này chỉ có Vùng nguy hiểm, nên bấm
+              vào "Cài đặt" mong đổi tên tổ chức lại rơi thẳng vào khu vực phá
+              huỷ dữ liệu. Mục này đứng riêng, phía trên, với việc duy nhất
+              hiện làm được ở đây: đổi tên hiển thị. */}
+          <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <h2 className="font-semibold text-slate-700 mb-3">{t("Cài đặt chung")}</h2>
+            <label className="block text-xs font-medium text-slate-600 mb-1" htmlFor="tenant-name-draft">
+              {t("Tên hiển thị")}
+            </label>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                id="tenant-name-draft"
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                className="px-3 py-1.5 rounded-md border border-slate-200 text-sm flex-1 min-w-[220px]"
+              />
+              <button
+                disabled={!nameDraft.trim() || nameDraft.trim() === current.display_name || busy === "rename"}
+                onClick={() => run("rename", async () => {
+                  await updateTenant(current.tenant_id, { display_name: nameDraft.trim() });
+                  await loadTenants();
+                }, t("Đã đổi tên tổ chức"))}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium border ${toneClasses("success", "solid")} ${FOCUS_RING} disabled:opacity-40`}
+              >
+                {t("Lưu")}
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              {t("Mã tổ chức")} <code className="font-mono">{current.tenant_id}</code> {t("là khoá trong mọi bảng dữ liệu và không đổi được — chỉ tên hiển thị đổi được ở đây.")}
+            </p>
+          </section>
+
             <p className="text-sm text-slate-600">
-              {t("Các thao tác ở đây hiếm khi cần và khó hoàn tác. Vùng xoá vĩnh viễn nằm ở cuối, tách khỏi việc thường ngày.")}
+              {t("Việc dưới đây hiếm khi cần và khó hoàn tác — tách khỏi cài đặt thường ngày ở trên.")}
             </p>
           {/* Vùng nguy hiểm */}
           <section className="bg-white rounded-xl shadow-sm border border-red-200 p-5">

@@ -300,6 +300,22 @@ def create_tenant(
     return tenant
 
 
+@router.get("/accounts/search", dependencies=[Depends(limit_catalog)])
+def search_accounts_endpoint(
+    q: str = Query(..., min_length=2, max_length=255),
+    _: Dict[str, Any] = Depends(require_admin),
+) -> List[Dict[str, Any]]:
+    """Tài khoản khớp một phần email hoặc tên đăng nhập. Platform operators only.
+
+    Dùng cho "Gắn tài khoản" ở `AdminTenantsPage`: gõ ID người dùng thô vừa khó
+    nhớ vừa dễ gõ nhầm sang một tài khoản khác. Đường này thay ID bằng email/tên
+    đăng nhập — cùng thứ người quản trị thực sự nhớ được. Xem
+    `tenant_admin.search_accounts` về việc vì sao khớp MỘT PHẦN chỉ an toàn ở
+    đây, sau `require_admin`, chứ không an toàn ở ô mời (`InvitationCreate`).
+    """
+    return tenant_admin.search_accounts(q)
+
+
 @router.post("/self-serve", status_code=status.HTTP_201_CREATED,
              dependencies=[Depends(limit_catalog)])
 def create_own_tenant(
@@ -780,9 +796,24 @@ def set_subscription_auto_renew(
     return describe(tenant_id)
 
 
+#: Văn bản cam kết hiện ở nút "Xuất dữ liệu" của trang Tổ chức. Đây KHÔNG phải
+#: `legal_documents` (những văn bản đó ràng người KÝ, tức chủ thể dữ liệu) —
+#: đây là lời hứa của người ĐANG TẢI, một vai hoàn toàn khác. Hằng số vì
+#: `EXPORT_AGREEMENT_VERSION` phải đứng yên: đổi câu chữ mà không đổi số hiệu
+#: sẽ làm một dòng kiểm toán cũ ghi "đã đồng ý bản 1" bị hiểu nhầm là đồng ý
+#: với câu chữ MỚI mà họ chưa từng đọc.
+EXPORT_AGREEMENT_VERSION = 1
+EXPORT_AGREEMENT_TEXT = (
+    "Tôi cam kết chỉ dùng dữ liệu trong gói xuất này cho đúng mục đích đã chọn, "
+    "không bán, không cấp phép lại, không tái phân phối nếu chưa có thoả thuận "
+    "riêng, và sẽ xoá bản sao khi không còn cần thiết."
+)
+
+
 @router.post("/{tenant_id}/exports", status_code=status.HTTP_202_ACCEPTED)
 def request_export(
     tenant_id: str,
+    request: Request,
     # `Literal`, not `Query(pattern=...)` — FastAPI 0.95 on pydantic 1.10 spells
     # that constraint `regex`, and swallows an unknown `pattern` without
     # enforcing it. `tenant_lifecycle.request_export` re-checks and raises 422,
@@ -792,6 +823,9 @@ def request_export(
     export_purpose: Literal[
         "tenant_portability", "internal_training", "research_release", "public_library"
     ] = Query("tenant_portability"),
+    # KHÔNG mặc định True: một client cũ không gửi tham số này phải NGÃ, không
+    # âm thầm được coi là đã đồng ý với một cam kết nó chưa từng hiện ra.
+    agree: bool = Query(...),
     requester: Dict[str, Any] = Depends(require_tenant_admin),
 ) -> Dict[str, Any]:
     """Đặt hàng một bản xuất. Trả về ngay; việc dựng gói do tác vụ nền làm.
@@ -804,8 +838,19 @@ def request_export(
     (gói hoàn trả đầy đủ, kèm bản kê hạn chế), chứ không vô tình dựng được một
     gói phát hành. Mặc định phải nghiêng về phía không cấp quyền; ở tầng dưới,
     `tenant_lifecycle.request_export` bắt buộc tham số và không có mặc định nào.
+
+    `agree` bắt buộc và không có mặc định: gói này chứa dữ liệu của NHIỀU
+    người đóng góp, không phải của riêng người bấm nút, nên phải có bằng chứng
+    người gọi đã đọc cam kết sử dụng trước khi tác vụ nền bắt đầu — ghi bằng
+    `audit.record`, không chỉ bằng việc bấm nút thành công.
     """
-    from app import tenant_lifecycle
+    from app import audit, tenant_lifecycle
+
+    if not agree:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Bạn phải đồng ý với cam kết sử dụng dữ liệu trước khi xuất.",
+        )
 
     try:
         job = tenant_lifecycle.request_export(
@@ -814,6 +859,15 @@ def request_export(
         )
     except tenant_lifecycle.LifecycleError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    # Ghi TRƯỚC khi phái tác vụ: nếu việc phái hỏng ở dưới, cam kết vẫn phải
+    # còn dấu vết — người này ĐÃ đồng ý, dù gói có dựng được hay không.
+    audit.record(
+        "tenant.export_requested", actor=requester, request=request,
+        target_type="tenant_export", target_id=job["export_id"], tenant_id=tenant_id,
+        detail={"scope": scope, "export_purpose": export_purpose,
+                "agreement_version": EXPORT_AGREEMENT_VERSION},
+    )
 
     try:
         from app.saas_tasks import run_tenant_export
@@ -846,16 +900,27 @@ def list_exports(
 def download_export(
     tenant_id: str,
     export_id: str,
-    _: Dict[str, Any] = Depends(require_tenant_admin),
+    request: Request,
+    requester: Dict[str, Any] = Depends(require_tenant_admin),
 ):
+    """Tải tệp. Ghi kiểm toán ở ĐÂY, không chỉ ở lúc đặt hàng — đặt hàng và tải
+    về là hai việc khác nhau (một quản trị viên có thể đặt hàng rồi không bao
+    giờ quay lại tải), và câu hỏi "ai thật sự lấy dữ liệu đi" chỉ đường này
+    trả lời được.
+    """
     from fastapi.responses import FileResponse
 
-    from app import tenant_lifecycle
+    from app import audit, tenant_lifecycle
 
     try:
         path = tenant_lifecycle.export_file(tenant_id, export_id)
     except tenant_lifecycle.LifecycleError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    audit.record(
+        "tenant.export_downloaded", actor=requester, request=request,
+        target_type="tenant_export", target_id=export_id, tenant_id=tenant_id,
+    )
     return FileResponse(
         path, media_type="application/zip", filename=f"{tenant_id}-export.zip"
     )

@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 PURGE_ORDER: tuple[str, ...] = (
     # v4 — không bảng nào bị bảng khác trỏ tới, nên đi trước cho gọn
     "webhook_deliveries", "webhook_endpoints", "api_keys",
-    "tenant_exports", "tenant_usage_daily", "tenant_subscriptions",
+    "tenant_exports", "personal_exports", "tenant_usage_daily", "tenant_subscriptions",
     # `tenant_storage` (v8): không bảng nào trỏ tới nó nên đứng đâu cũng được;
     # đặt cạnh các bảng vận hành khác của tenant cho dễ đọc.
     "tenant_storage",

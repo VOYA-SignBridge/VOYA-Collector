@@ -793,6 +793,34 @@ def find_account_by_username(username: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
+def search_accounts(query: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    """Tài khoản khớp MỘT PHẦN email hoặc tên đăng nhập — vòng NỀN TẢNG.
+
+    Khác `find_account_by_username` ngay trên: hàm đó khớp tuyệt đối vì lời mời
+    gọi nó từ BẤT KỲ thành viên tổ chức nào — trả về danh sách gợi ý ở đó là một
+    công cụ dò toàn nền tảng. Hàm này chỉ được gọi sau `require_admin` (xem
+    `routers/tenants.py::search_accounts_endpoint`) — người gọi đã thấy được
+    `/admin/users` và danh sách MỌI tổ chức, nên khớp một phần ở đây không mở
+    thêm gì họ chưa có sẵn.
+
+    `query` dưới hai ký tự trả rỗng ngay tại đây, không đợi vòng gọi: một ô tìm
+    gần như trống mà vẫn được chuyển xuống sẽ kéo cả bảng `users` về qua ILIKE.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    q = (query or "").strip()
+    if len(q) < 2:
+        return []
+    with system_scope("tenant admin: tim tai khoan theo email hoac ten dang nhap"):
+        rows = _fetch_all(
+            "SELECT id, username, email, is_active FROM users "
+            "WHERE email ILIKE %s OR username ILIKE %s "
+            "ORDER BY username LIMIT %s",
+            (f"%{q}%", f"%{q}%", limit),
+        )
+    return [{**r, "id": str(r["id"])} for r in rows]
+
+
 def create_self_serve_tenant(
     user_id: str,
     *,

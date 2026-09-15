@@ -1249,6 +1249,10 @@ TENANT_SCOPED_TABLES = (
     # dưới quyền NGƯỜI GỌI và chịu đúng policy đó. Bỏ `security_invoker` đi là
     # mở toang view này — xem chú thích ở `_TENANT_MEMBERS_VIEW`.
     "tenant_exports", "tenant_invitations",
+    # `personal_exports` (15/09/2026) — bản xuất CÁ NHÂN, khác `tenant_exports`
+    # ở phạm vi (một người, không phải cả tổ chức). Cùng BA việc bắt buộc: sổ
+    # này, `rls.RLS_TABLES`, `tenant_lifecycle.PURGE_ORDER` — đã làm cả ba.
+    "personal_exports",
     # `tenant_storage` (v8) — bộ đếm dung lượng. Có `tenant_id` nên phải đủ
     # BỐN việc: sổ này, `rls.RLS_TABLES`, `PURGE_ORDER`, và QUYỀN cho vai
     # ứng dụng. Việc thứ tư nằm trong CSDL nên diff không thấy.
@@ -2589,6 +2593,11 @@ MIGRATION_STATEMENTS = [
         started_at   TIMESTAMP WITH TIME ZONE,
         ended_at     TIMESTAMP WITH TIME ZONE,
         note         TEXT,
+        -- 'private' (chỉ chủ phiên và biên tập viên thấy) hay 'tenant' (chủ
+        -- phiên TỰ mở cho thành viên thường khác cùng tổ chức xem — biên tập
+        -- viên đã thấy mọi phiên từ trước, cờ này không đổi gì với họ). Xem
+        -- `routers/capture_sessions.py::list_sessions`.
+        visibility   TEXT NOT NULL DEFAULT 'private',
         created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
         CONSTRAINT uq_capture_sessions_natural
             UNIQUE (tenant_id, class_uid, session_id),
@@ -3509,6 +3518,40 @@ MIGRATION_STATEMENTS = [
     END $$
     """,
     # ---------------------------------------------------------------------
+    # 15/09/2026 — bản xuất CỦA MỘT NGƯỜI, khác `tenant_exports` ở phạm vi.
+    #
+    # `tenant_exports` phục vụ việc một TỔ CHỨC rời nền tảng — toàn bộ tenant,
+    # chỉ quản trị viên gọi được (`require_tenant_admin`), và mang theo cổng
+    # đồng thuận theo `export_purpose` vì gói có thể đi ra ngoài tổ chức. Bảng
+    # này phục vụ một câu hỏi khác hẳn: "cho TÔI tệp của CHÍNH TÔI" — mọi thành
+    # viên tự gọi được, luôn giới hạn ở `auth_user_id = chính họ`, và không có
+    # `export_purpose` vì gói không rời khỏi tay người đã tạo ra dữ liệu đó.
+    #
+    # Không tái dùng `tenant_exports` cho việc này: gộp hai câu hỏi "xuất cho ai"
+    # (tổ chức hay cá nhân) và "xuất để làm gì" (rời nền tảng hay tải về dùng
+    # hàng ngày) vào một bảng là đúng lỗi mà cột `export_purpose` đã được thêm
+    # riêng để sửa cho `tenant_exports` — xem chú thích ở
+    # `tenant_lifecycle.request_export`.
+    """
+    CREATE TABLE IF NOT EXISTS personal_exports (
+        export_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id    TEXT NOT NULL,
+        user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        file_path    TEXT,
+        size_bytes   BIGINT,
+        sample_count INTEGER,
+        error        TEXT,
+        created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMP WITH TIME ZONE,
+        expires_at   TIMESTAMP WITH TIME ZONE NOT NULL,
+        CONSTRAINT ck_personal_exports_status
+            CHECK (status IN ('pending', 'running', 'ready', 'failed', 'expired'))
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_personal_exports_user "
+    "ON personal_exports(user_id, created_at DESC)",
+    # ---------------------------------------------------------------------
     # v4.8 — Sổ xoá vĩnh viễn.
     #
     # CỐ Ý KHÔNG có khoá ngoại tới `tenants`, và vì thế cũng CỐ Ý không nằm
@@ -4188,6 +4231,15 @@ MIGRATION_STATEMENTS = [
     # TENANT_FK_LOOP_SQL: các bảng v3 và v4 vừa được tạo bên trên, sau khi lượt
     # chạy đầu tiên của vòng lặp đã đi qua chỗ chúng còn chưa tồn tại.
     TENANT_FK_LOOP_SQL,
+    # ---------------------------------------------------------------------
+    # 15/09/2026 — chủ phiên tự mở phiên thu của mình cho thành viên thường
+    # khác cùng tổ chức xem. Trước đây chỉ có hai mức: "của tôi" và "cả tổ
+    # chức" (dành riêng cho biên tập viên) — không có mức trung gian nào cho
+    # người đóng góp bình thường tự chọn công khai một phần dữ liệu của họ.
+    # Cùng hình dạng với `collection_session_id` ở trên nên an toàn lúc khởi
+    # động: thêm cột, có DEFAULT, không đổi hàng đang có.
+    "ALTER TABLE capture_sessions ADD COLUMN IF NOT EXISTS "
+    "visibility TEXT NOT NULL DEFAULT 'private'",
 ]
 
 def _column_exists(table: str, column: str) -> bool:

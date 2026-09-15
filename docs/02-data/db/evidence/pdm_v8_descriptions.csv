@@ -659,3 +659,15 @@ webhook_endpoints,last_failure_at,Lần giao thất bại gần nhất.,VERIFIED
 webhook_endpoints,failure_streak,Số lần hỏng LIÊN TIẾP; về 0 ngay khi có một lượt giao thành công.,VERIFIED,
 webhook_endpoints,disabled_at,Thời điểm endpoint bị tắt.,VERIFIED,"Tự tắt khi `failure_streak` chạm `webhooks.FAILURE_STREAK_LIMIT = 20` — ngắt mạch để một endpoint chết không kéo hàng đợi mãi. Chính sách runtime, không phải ràng buộc lược đồ"
 webhook_endpoints,disabled_reason,Lý do endpoint bị tắt.,VERIFIED,
+capture_sessions,visibility,Phạm vi xem: `private` (chỉ chủ phiên và biên tập viên) hoặc `tenant` (chủ phiên tự mở cho thành viên thường cùng tổ chức).,VERIFIED,Không có CHECK ở CSDL; miền do `routers/capture_sessions.py::SessionUpdate` (Literal) cưỡng chế ở tầng API. Biên tập viên thấy mọi phiên bất kể cờ — cờ chỉ nới cho thành viên thường. Thêm 15/09/2026.
+personal_exports,export_id,Định danh lượt xuất dữ liệu cá nhân.,VERIFIED,
+personal_exports,tenant_id,Tổ chức mà người yêu cầu đang đứng trong lúc xuất.,VERIFIED,"Luôn là kết quả `require_tenant()` của chính request, không phải tham số đường dẫn — khác `tenant_exports.tenant_id`."
+personal_exports,user_id,"Tài khoản yêu cầu, ĐỒNG THỜI là chủ của mọi dòng trong gói.",VERIFIED,Gói chỉ chứa mẫu có `samples.auth_user_id` = cột này (`personal_export._owned_rows`). ON DELETE CASCADE: xoá tài khoản là xoá sổ xuất của họ.
+personal_exports,status,"Trạng thái: `pending`, `running`, `ready`, `failed` hoặc `expired`.",VERIFIED,"MIỀN CHO PHÉP do ck_personal_exports_status quy định: pending, running, ready, failed, expired"
+personal_exports,file_path,Đường dẫn tệp zip kết quả trên máy chủ.,VERIFIED,Dưới `<dataset_root>/_exports/personal/`; NULL sau khi hết hạn và bị dọn.
+personal_exports,size_bytes,Kích thước tệp kết quả.,VERIFIED,
+personal_exports,sample_count,Số dòng mẫu đã đưa vào `samples.csv` của gói.,VERIFIED,"Đếm dòng, không đếm tệp .npz — tệp có thể ít hơn nếu không còn trên đĩa."
+personal_exports,error,Thông báo lỗi khi lượt xuất thất bại.,VERIFIED,Cắt còn 500 ký tự.
+personal_exports,created_at,Thời điểm yêu cầu.,VERIFIED,
+personal_exports,completed_at,"Thời điểm hoàn tất, thành công hay thất bại.",VERIFIED,
+personal_exports,expires_at,Thời điểm tệp hết hạn và bị `cleanup_saas_artifacts` dọn.,VERIFIED,Cùng TTL với bản xuất tổ chức (`tenant_export_ttl_days`).

@@ -41,6 +41,8 @@ memberships,user_id,users,id,1,0..N,1,CASCADE,memberships_user_id_fkey
 notifications,tenant_id,tenants,tenant_id,1,0..N,1,RESTRICT,fk_notifications_tenant
 notifications,user_id,users,id,1,0..N,1,CASCADE,notifications_user_id_fkey
 password_reset_tokens,user_id,users,id,1,0..N,1,CASCADE,password_reset_tokens_user_id_fkey
+personal_exports,tenant_id,tenants,tenant_id,1,0..N,1,RESTRICT,fk_personal_exports_tenant
+personal_exports,user_id,users,id,1,0..N,1,CASCADE,personal_exports_user_id_fkey
 platform_settings,updated_by,users,id,0..1,0..N,1,SET NULL,platform_settings_updated_by_fkey
 project_allocations,tenant_id+project_id,projects,tenant_id+project_id,1,0..N,2,CASCADE,fk_project_allocations_project
 project_allocations,tenant_id,tenants,tenant_id,1,0..N,1,RESTRICT,fk_project_allocations_tenant
@@ -73,7 +75,6 @@ samples,language,languages,code,0..1,0..N,1,NO ACTION,fk_samples_language
 samples,tenant_id+signer_id,signers,tenant_id+signer_id,0..1,0..N,2,NO ACTION,fk_samples_signer
 samples,tenant_id,tenants,tenant_id,1,0..N,1,RESTRICT,fk_samples_tenant
 samples,auth_user_id,users,id,0..1,0..N,1,SET NULL,samples_auth_user_id_fkey
-samples,class_uid,classes,class_uid,0..1,0..N,1,NO ACTION,samples_class_uid_fkey
 samples,tenant_id+dialect,dialects,tenant_id+dialect_id,0..1,0..N,2,NO ACTION,samples_dialect_fkey
 samples,reviewed_by,users,id,0..1,0..N,1,SET NULL,samples_reviewed_by_fkey
 signer_aliases,tenant_id+new_signer_id,signers,tenant_id+signer_id,1,0..N,2,NO ACTION,fk_signer_aliases_new

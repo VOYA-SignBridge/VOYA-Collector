@@ -656,6 +656,18 @@ class TestRequestTenantResolution:
             # Xuất và xoá vĩnh viễn: người vận hành nền tảng tác động LÊN một
             # tenant, không đứng bên trong nó.
             "tenant_lifecycle.py",
+            # `personal_export.py` — CHỈ hai hàm chạy trong Celery:
+            # `run_export` và `cleanup_expired_exports`. Cả hai được worker
+            # gọi, nơi không có request nào đặt phạm vi, và `run_export` phải
+            # ĐỌC hàng `personal_exports` trước khi biết tenant của nó — gà và
+            # trứng giống hệt `tenant_lifecycle.run_export`.
+            #
+            # Ba hàm còn lại (`request_export`, `list_exports`, `export_file`)
+            # CHẠY TRONG một yêu cầu HTTP và KHÔNG bọc `system_scope`: khác
+            # `tenant_lifecycle`, `tenant_id` của chúng luôn là kết quả của
+            # `require_tenant()` — tức đúng phạm vi phiên đang có — không phải
+            # một tham số đường dẫn có thể khác tenant nhà của người gọi.
+            "personal_export.py",
             # /metrics là điểm Prometheus quét, không có người dùng nào; nó
             # tổng hợp số liệu của mọi tenant thành một trang.
             "metrics.py",

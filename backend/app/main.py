@@ -36,6 +36,7 @@ from app.routers import (
     legal as legal_router,
     legal_admin,
     notifications as notifications_router,
+    personal_export as personal_export_router,
     realtime_proxy,
     processing_admin,
     signers_admin,
@@ -382,6 +383,7 @@ api_v1.include_router(legal_router.router)
 api_v1.include_router(learn_router.router)
 api_v1.include_router(legal_admin.router)
 api_v1.include_router(notifications_router.router)
+api_v1.include_router(personal_export_router.router)
 api_v1.include_router(support.router)
 api_v1.include_router(two_factor_router.router)
 app.include_router(api_v1)

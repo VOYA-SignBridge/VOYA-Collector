@@ -23,12 +23,12 @@ theo = {r["tbl"]: r for r in tbl}
 out = []
 w = out.append
 w("# Bảng cơ sở dữ liệu v8 — nguồn cho PDM\n")
-w("Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 26/08/2026, lược đồ **v8**,")
-w("checksum `fb5b9b90c553`. Không gõ tay dòng nào: 62 bảng, 131 khoá ngoại.\n")
+w("Sinh thẳng từ catalog của `signdb` (sản xuất) ngày 15/09/2026, lược đồ **v8**,")
+w("checksum `fb5b9b90c553`. Không gõ tay dòng nào: 63 bảng, 132 khoá ngoại.\n")
 w("Cách đọc cardinality: cột **Cha** là `1` khi mọi cột khoá ngoại đều NOT NULL,")
 w("và `0..1` khi có cột cho phép NULL — tức là con **có thể chưa** nối cha.\n")
 
-w("## 1. Sáu mươi hai bảng theo tám nhóm\n")
+w("## 1. Sáu mươi ba bảng theo tám nhóm\n")
 for k in "ABCDEFGH":
     ts = sorted(t for t, g in NHOM.items() if g == k)
     tong_cot = sum(int(theo[t]["n_cols"]) for t in ts)

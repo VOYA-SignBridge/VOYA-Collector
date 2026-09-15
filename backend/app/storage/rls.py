@@ -213,6 +213,10 @@ RLS_TABLES: tuple[str, ...] = (
     # docs/TENANT_ISOLATION_AND_AUTHZ.md §5.
     "api_keys", "tenant_exports", "tenant_subscriptions", "tenant_usage_daily",
     "webhook_deliveries", "webhook_endpoints",
+    # 15/09/2026 — bản xuất cá nhân. Cùng lý do có mặt ở đây như `tenant_exports`
+    # ngay trên: chứa đường dẫn tệp và số đếm mẫu của một người trong tenant này,
+    # rò sang tenant khác là rò chính thứ người đó vừa tải xuống.
+    "personal_exports",
     # schema v6 — thông báo và hỗ trợ. Cả hai mang nội dung do NGƯỜI viết ra:
     # một phiếu hỗ trợ thường chứa mô tả sự cố, ảnh chụp màn hình, đôi khi cả
     # dữ liệu thật. Rò sang tenant khác là rò chính thứ khách hàng gửi riêng.

@@ -35,6 +35,7 @@ memberships,uq_memberships_workspace_user,UNIQUE INDEX (MOT PHAN),tenant_id+work
 notifications,notifications_pkey,PRIMARY KEY,notification_id,""
 password_reset_tokens,password_reset_tokens_pkey,PRIMARY KEY,token_hash,""
 permissions,permissions_pkey,PRIMARY KEY,permission_code,""
+personal_exports,personal_exports_pkey,PRIMARY KEY,export_id,""
 plans,plans_pkey,PRIMARY KEY,plan_code,""
 platform_settings,platform_settings_pkey,PRIMARY KEY,key,""
 project_allocations,project_allocations_pkey,PRIMARY KEY,tenant_id+project_id+metric,""

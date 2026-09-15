@@ -69,6 +69,7 @@ import {
   revokeInvitation,
   setAutoRenew,
   updateMemberRole,
+  EXPORT_AGREEMENT_TEXT,
   type InvitationCreated,
   type MemberRoleOrNone,
   type SubscriptionInfo,
@@ -1001,12 +1002,16 @@ function ExportsSection({
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
+  // Cam kết sử dụng dữ liệu — gói này chứa dữ liệu của NHIỀU người đóng góp,
+  // không chỉ của người bấm nút. Máy chủ từ chối 422 nếu thiếu; ô này chỉ HIỆN
+  // cam kết ra trước mắt, không phải nơi quyết định nó có hiệu lực.
+  const [agree, setAgree] = useState(false);
 
   const start = useCallback(
     async (scope: "metadata" | "full") => {
       setBusy(true);
       try {
-        await requestExport(tenantId, scope);
+        await requestExport(tenantId, scope, agree);
         // Máy chủ trả 202: đã nhận việc, chưa có gì tải được. Nói đúng như vậy.
         toast.success(t("Đã nhận yêu cầu. Bản xuất sẽ hiện ở danh sách khi xong."));
         await onChanged();
@@ -1016,7 +1021,7 @@ function ExportsSection({
         setBusy(false);
       }
     },
-    [tenantId, onChanged, toast],
+    [tenantId, agree, onChanged, toast],
   );
 
   return (
@@ -1025,16 +1030,25 @@ function ExportsSection({
       description={t("Toàn bộ dữ liệu của tổ chức, đóng thành một gói tải về được. Đây là quyền của bạn, không phải một ưu đãi.")}
       action={
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" loading={busy} onClick={() => void start("metadata")}>
+          <Button size="sm" variant="secondary" disabled={!agree} loading={busy} onClick={() => void start("metadata")}>
             {t("Xuất siêu dữ liệu")}
           </Button>
-          <Button size="sm" loading={busy} onClick={() => void start("full")}>
+          <Button size="sm" disabled={!agree} loading={busy} onClick={() => void start("full")}>
             <UsersIcon className="mr-1.5 h-4 w-4" aria-hidden="true" />
             {t("Xuất toàn bộ")}
           </Button>
         </div>
       }
     >
+      <label className="mb-4 flex items-start gap-2 text-xs text-slate-600">
+        <input
+          type="checkbox"
+          checked={agree}
+          onChange={(e) => setAgree(e.target.checked)}
+          className="mt-0.5 accent-sky-600"
+        />
+        <span>{t(EXPORT_AGREEMENT_TEXT)}</span>
+      </label>
       {exports.length === 0 ? (
         <p className="text-sm text-slate-500">{t("Chưa có bản xuất nào.")}</p>
       ) : (

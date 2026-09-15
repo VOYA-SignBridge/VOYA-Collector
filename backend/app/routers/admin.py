@@ -185,11 +185,29 @@ def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
 
 @router.put("/users/{user_id}/role")
 def update_user_role(
-    user_id: str, 
+    user_id: str,
     payload: UserRoleUpdate,
+    # Mặc định `None`, KHÔNG bọc `Optional[Request]`: FastAPI chỉ nhận diện
+    # được kiểu tiêm-thẳng đặc biệt này khi chú thích kiểu là ĐÚNG `Request`,
+    # và `Optional[Request]` làm nó rơi vào nhánh dựng field Pydantic bình
+    # thường rồi vỡ ngay lúc nạp router (`Request` không phải kiểu Pydantic
+    # hợp lệ) — đo được khi chạy `test_admin_console_reads_under_rls.py`.
+    # `test_admin_console_reads_under_rls.py` gọi thẳng hàm này (bỏ qua HTTP)
+    # mà không truyền `request`; FastAPI vẫn tiêm đúng đối tượng thật khi chạy
+    # qua HTTP dù tham số có giá trị mặc định.
+    request: Request = None,
     current_user: Dict[str, Any] = Depends(require_admin)
 ):
-    """Cập nhật quyền của người dùng (Chỉ Admin)"""
+    """Cấp hoặc gỡ quyền QUẢN TRỊ NỀN TẢNG (`users.is_admin`) — Chỉ Admin.
+
+    Đây là hành động mạnh nhất trong hệ thống: `is_admin=TRUE` ánh xạ sang
+    `platform_administrator`, vai cầm mọi quyền ở MỌI tenant, không riêng
+    tenant của người được cấp. Trước bản vá này endpoint không ghi kiểm toán
+    gì cả — một tài khoản có thể được nâng lên quản trị nền tảng mà không ai
+    tra lại được ai đã cấp, lúc nào.
+    """
+    from app import audit
+
     # Không cho phép tự gỡ quyền admin của chính mình
     if str(user_id) == str(current_user["id"]) and not payload.is_admin:
         raise HTTPException(
@@ -213,6 +231,14 @@ def update_user_role(
             detail="Không tìm thấy người dùng"
         )
     updated = rows[0]
+    # `is_admin_moi` trong `detail` chứ không chỉ hành động: "cấp quyền" và
+    # "gỡ quyền" là hai câu chuyện khác hẳn nhau, cùng lý do đã ghi ở
+    # `tenant.member_role_changed` trong routers/tenants.py.
+    audit.record(
+        "account.platform_admin_role_changed", actor=current_user, request=request,
+        target_type="user", target_id=str(updated["id"]),
+        detail={"username": updated["username"], "is_admin_moi": bool(updated["is_admin"])},
+    )
     return {"status": "success",
             "user": {"id": str(updated["id"]),
                      "username": updated["username"],

@@ -52,7 +52,7 @@ export const EN: Record<string, string> = {
   "Chọn một trong ba việc ở trên, hoặc dùng thanh bên trái. Mọi thứ bạn ghi sẽ thuộc về tổ chức này.": "Pick one of the three actions above, or use the left-hand menu. Everything you record belongs to this organization.",
   "Chọn tổ chức": "Choose an organization",
   "Càng ít tham số, mô hình càng nhẹ để đóng gói": "Fewer parameters, lighter model to package",
-  "Các thao tác ở đây hiếm khi cần và khó hoàn tác. Vùng xoá vĩnh viễn nằm ở cuối, tách khỏi việc thường ngày.": "These actions are rarely needed and hard to undo. The permanent-delete area is at the bottom, away from everyday work.",
+  "Cài đặt chung": "General settings",
   "Có gì thay đổi so với bản trước?": "What changed from the previous version?",
   "Có hiệu lực lúc {when}": "Takes effect at {when}",
   "Có quyền công bố": "Can publish",
@@ -749,8 +749,39 @@ export const EN: Record<string, string> = {
   "Giữ tay hiển thị và ngón tay duỗi": "Keep your hands visible and fingers extended",
   "Giữ ở giữa khung hình": "Stay in the centre of the frame",
   "Gõ lại mã tổ chức để xác nhận": "Type the organization code again to confirm",
-  "Gắn thẳng theo ID là thao tác của quản trị viên nền tảng. Cách đưa người vào dành cho quản trị viên tổ chức là":
-    "Attaching by ID is a platform-administrator action. The way an organization administrator adds people is",
+  "Gắn thẳng là thao tác của quản trị viên nền tảng. Cách đưa người vào dành cho quản trị viên tổ chức là":
+    "Attaching directly is a platform-administrator action. The way an organization administrator adds people is",
+  "Cả tổ chức đang xem được phiên này — bấm để chuyển về riêng tư":
+    "The whole organization can see this session — click to switch it back to private",
+  "Không khớp tài khoản nào.": "No matching account.",
+  "Không đổi được phạm vi xem": "Couldn't change who can see it",
+  "Riêng tư": "Private",
+  "Tìm theo email hoặc tên đăng nhập": "Search by email or username",
+  "Tìm tài khoản theo email hoặc tên đăng nhập": "Search for an account by email or username",
+  "Việc dưới đây hiếm khi cần và khó hoàn tác — tách khỏi cài đặt thường ngày ở trên.":
+    "The action below is rarely needed and hard to undo — kept apart from the everyday settings above.",
+  "là khoá trong mọi bảng dữ liệu và không đổi được — chỉ tên hiển thị đổi được ở đây.":
+    "is the key used in every data table and can't be changed — only the display name can be changed here.",
+  "Đang riêng tư — bấm để mở cho cả tổ chức xem": "Private — click to open it up for the whole organization",
+  "Đã chuyển phiên này về riêng tư": "Session switched back to private",
+  "Đã mở phiên này cho cả tổ chức xem": "Session opened up for the whole organization",
+  "Đã đổi tên tổ chức": "Organization renamed",
+  "đã khoá": "locked",
+  "Chưa có bản xuất nào. Bấm \"Yêu cầu bản xuất mới\" để bắt đầu.":
+    "No exports yet. Click \"Request a new export\" to get started.",
+  "Gói gồm samples.csv và tệp đặc trưng (.npz) thật, chỉ những mẫu bạn đã tự đóng góp.":
+    "The package includes samples.csv and the real feature files (.npz), only for samples you contributed yourself.",
+  "Hỏng": "Failed",
+  "Không tải được danh sách bản xuất": "Couldn't load the list of exports",
+  "Không đặt được bản xuất": "Couldn't request the export",
+  "Tải dữ liệu của tôi": "Download my data",
+  "Yêu cầu bản xuất mới": "Request a new export",
+  "Yêu cầu lúc": "Requested at",
+  "Đang dựng gói": "Building the package",
+  "Đã hết hạn": "Expired",
+  "Xuất dữ liệu cá nhân": "Personal exports",
+  "Tôi cam kết chỉ dùng dữ liệu trong gói xuất này cho đúng mục đích đã chọn, không bán, không cấp phép lại, không tái phân phối nếu chưa có thoả thuận riêng, và sẽ xoá bản sao khi không còn cần thiết.":
+    "I commit to using the data in this export only for the purpose selected above, not selling it, not relicensing it, not redistributing it without a separate agreement, and deleting my copy once it's no longer needed.",
   "Gợi ý nhãn nhanh": "Quick label suggestions",
   "Gửi nguyên cả đường liên kết. Mã nằm sau dấu thăng nên trình duyệt không gửi nó lên máy chủ nào — cắt bớt là hỏng.":
     "Send the whole link. The code sits after the # so no browser ever sends it to a server — trimming it breaks the invitation.",
@@ -783,8 +814,6 @@ export const EN: Record<string, string> = {
   "Hỗ trợ cộng đồng": "Community support",
   "Hỗ trợ nghiên cứu AI": "AI research support",
   "Hủy": "Cancel",
-  "ID tài khoản": "Account ID",
-  "ID tài khoản có sẵn": "Account ID available",
   "IP bị chặn": "Blocked IPs",
   "Khi chưa công bố, đăng ký vẫn chạy nhưng": "Until it is published, registration still works but",
   "Khoá nhãn:": "Label key:",

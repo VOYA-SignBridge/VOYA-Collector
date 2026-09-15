@@ -5,6 +5,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
 import Tabs, { useUrlTab } from "../components/ui/Tabs";
 import CollectionSessionsPage from "./CollectionSessionsPage";
+import MyDataDownloadsPanel from "./MyDataDownloadsPanel";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import LoadingScreen from "../components/LoadingScreen";
@@ -23,6 +24,7 @@ export default function UploadPage() {
   const UPLOAD_TABS = [
     { id: "capture", label: t("Ghi hình & tải lên") },
     { id: "history", label: t("Lịch sử thu") },
+    { id: "downloads", label: t("Tải dữ liệu của tôi") },
   ] as const;
   const [pageTab, setPageTab] = useUrlTab("tab", UPLOAD_TABS, "capture");
   const navigate = useNavigate();
@@ -63,6 +65,8 @@ export default function UploadPage() {
       <Tabs tabs={UPLOAD_TABS} value={pageTab} onChange={setPageTab} label={t("Mục của trang đóng góp")}>
       {pageTab === "history" ? (
         <CollectionSessionsPage embedded />
+      ) : pageTab === "downloads" ? (
+        <MyDataDownloadsPanel />
       ) : (
       <div className="space-y-4">
 

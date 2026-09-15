@@ -6,7 +6,7 @@ same functional domains used in the physical database model.
 
 Structure — data type, nullability, keys, defaults and permitted value sets —
 is read directly from the `signdb` catalog at schema version **v8**
-(62 tables, 660 columns). Descriptions are authored and reviewed separately;
+(63 tables, 672 columns). Descriptions are authored and reviewed separately;
 the database itself carries no column comments.
 
 
@@ -311,6 +311,7 @@ the database itself carries no column comments.
 | note | Text |  | Free-form note. |
 | created_at | Timestamptz | Not Null, Default: current timestamp | Timestamp when the record was created. |
 | collection_session_id | Uuid | Foreign Key -> collection_sessions (composite key) | Collection session containing this capture session; null for data predating the hierarchy. |
+| visibility | Text | Not Null, Default: 'private' | Who may see the session: private (owner and editors only) or tenant (the owner opened it to ordinary members of the same organization). Enforced by the API, not by a CHECK. |
 
 ### samples
 
@@ -725,6 +726,22 @@ the database itself carries no column comments.
 | completed_at | Timestamptz |  | Timestamp when the export completed. |
 | expires_at | Timestamptz |  | Timestamp when the export file expires and is swept. |
 | export_purpose | Text | Not Null, Default: 'tenant_portability', Allowed values: tenant_portability, internal_training, research_release, public_library | Declared purpose of the release. This is the value consent enforcement is checked against. |
+
+### personal_exports
+
+| Field Name | Data Type | Constraint | Description |
+|---|---|---|---|
+| export_id | Uuid | Primary Key, Default: generated UUID | Identifier of one personal data export. |
+| tenant_id | Text | Foreign Key -> tenants, Not Null | Organization the requester was acting in. Always the request's own scope, never a path parameter — unlike tenant_exports. |
+| user_id | Uuid | Foreign Key -> users, Not Null | Account that requested the export AND owns every row in the package: only samples whose auth_user_id equals this value are included. ON DELETE CASCADE. |
+| status | Text | Not Null, Default: 'pending', Allowed values: pending, running, ready, failed, expired | Processing status: pending, running, ready, failed or expired. |
+| file_path | Text |  | Server path of the resulting zip, under <dataset_root>/_exports/personal/; NULL once expired and cleaned. |
+| size_bytes | Bigint |  | Size of the resulting file. |
+| sample_count | Integer |  | Number of sample rows written to the package's samples.csv (feature files may be fewer if no longer on disk). |
+| error | Text |  | Error message when the export failed; truncated to 500 characters. |
+| created_at | Timestamptz | Not Null, Default: current timestamp | Timestamp of the request. |
+| completed_at | Timestamptz |  | Timestamp of completion, successful or not. |
+| expires_at | Timestamptz | Not Null | Timestamp after which the file is cleaned up; same TTL as organization exports. |
 
 ### tenant_purges
 
