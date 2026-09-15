@@ -312,3 +312,6 @@ voya_dump/
 # biểu đồ; excluded_samples.json là quyết định loại mẫu của bộ dựng manifest.
 !logging/grafana/dashboards/*.json
 !config/excluded_samples.json
+
+# Fixture camera giả của Playwright (162 MB, dựng lại bằng frontend/tests-e2e/fixtures/generate.sh)
+frontend/tests-e2e/fixtures/*.y4m
