@@ -306,3 +306,9 @@ docs/02-data/db/erd_png/
 
 # Gói gom dữ liệu để chuyển máy (scripts/dump_may_kia.ps1) — dump DB + npz, không commit
 voya_dump/
+
+# Cấu hình PHẢI theo git dù trùng đuôi *.json (15/09/2026, rà soát deploy):
+# dashboard Grafana được provisioning từ thư mục này — thiếu là máy mới không có
+# biểu đồ; excluded_samples.json là quyết định loại mẫu của bộ dựng manifest.
+!logging/grafana/dashboards/*.json
+!config/excluded_samples.json
