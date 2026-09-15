@@ -322,6 +322,12 @@ def prepare_dataset(
                          "--dataset_manifest", manifest, "--recognition_profile", profile,
                          "--group_col", "signer_id", "--seed", str(seed),
                          "--split_mode", "strict_signer_disjoint",
+                         # Cùng sàn với hiện vật vận hành. Không có sàn, một lớp
+                         # 16 mẫu do MỘT người ký ("lấy chỉ tôm") ở lại trong tập,
+                         # và không phân hoạch tách người ký nào chứa được nó ở cả
+                         # ba phần → cả split hoà-đê bị từ chối dù 7 lớp còn lại
+                         # có 5–6 người ký (15/09/2026).
+                         "--min_samples_per_class", str(floor),
                          "--exclude_unresolved_signers", "--output_version", strict],
                         report, run_id)
                     desc = _describe_research(strict)
