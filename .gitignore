@@ -303,3 +303,6 @@ docs/02-data/db/erd_png/
 # Danh mục học ký hiệu — siêu dữ liệu QIPEDC đã gọn hoá, sinh bởi
 # scripts/dung_danh_muc_hoc.py; backend ĐỌC nó lúc chạy nên phải đi cùng mã.
 !backend/app/data/qipedc_catalog.json
+
+# Gói gom dữ liệu để chuyển máy (scripts/dump_may_kia.ps1) — dump DB + npz, không commit
+voya_dump/

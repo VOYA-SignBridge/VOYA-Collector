@@ -12,6 +12,7 @@ Gom gì:
   4. npz + sidecar .json: TẤT CẢ, hoặc chỉ những sample_uid không có trong -CoRoi
   5. checkpoints realtime + models.json
 Không gom: processed/splits, ảnh Docker, .env, video thô (bật -KemVideo nếu cần).
+Kết quả nằm trong <repo>oya_dump\ — thư mục này bị gitignore, không lọt vào commit.
 #>
 param(
     [string]$CoRoi = "",          # tệp .txt, mỗi dòng một sample_uid máy kia đã có
@@ -21,7 +22,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = (Get-Location).Path
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-if (-not $Ra) { $Ra = Join-Path (Split-Path $repo -Parent) "voya_dump_$stamp" }
+if (-not $Ra) { $Ra = Join-Path $repo "voya_dump\$stamp" }
 New-Item -ItemType Directory -Force $Ra | Out-Null
 function Say($m) { Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $m) }
 
