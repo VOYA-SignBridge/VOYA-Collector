@@ -306,7 +306,16 @@ def prepare_dataset(
                 report["warnings"].append("manifest không hợp lệ: " + "; ".join(fatal))
             else:
                 for profile in (profiles or []):
-                    strict = f"{profile}_strict_{version.split('_')[-1]}"
+                    # Tên mang TRỌN phiên bản manifest (`alphabet_strict_VSL2026_v5`),
+                    # không chỉ số đuôi: `alphabet_loso_v5` từng trùng tên với hiện
+                    # vật isds2026_v5 chép từ máy khác và ghi đè hai fold của nó
+                    # (15/09/2026). Hiện vật nghiên cứu là bất biến — trùng tên là DỪNG.
+                    strict = f"{profile}_strict_{version}"
+                    if (VERSIONS_DIR / strict).exists():
+                        report["warnings"].append(f"{profile}: {strict} đã tồn tại — không ghi đè")
+                        report["research_splits"].append({"split_version": strict, "profile": profile,
+                                                          "ok": False, "exists": True, "error": "đã tồn tại"})
+                        continue
                     ok = _run(
                         f"research_split:{profile}",
                         ["python", "-m", "processed.splits.make_splits",
@@ -319,7 +328,13 @@ def prepare_dataset(
                     desc["profile"] = profile
                     desc["ok"] = bool(ok and desc.get("exists"))
                     if desc["ok"] and (WORKSPACE_ROOT / "processed" / "splits" / "make_loso_folds.py").exists():
-                        loso = f"{profile}_loso_{version.split('_')[-1]}"
+                        loso = f"{profile}_loso_{version}"
+                        if (VERSIONS_DIR / loso).exists():
+                            report["warnings"].append(f"{profile}: {loso} đã tồn tại — bỏ qua LOSO")
+                            desc["loso"] = {"protocol": loso, "ok": False, "folds": [], "error": "đã tồn tại"}
+                            report["research_splits"].append(desc)
+                            _write_report(run_id, report)
+                            continue
                         loso_ok = _run(
                             f"loso_folds:{profile}",
                             ["python", "processed/splits/make_loso_folds.py",

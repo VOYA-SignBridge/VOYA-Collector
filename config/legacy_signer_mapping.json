@@ -1,5 +1,71 @@
 {
   "legacy_name_to_signer_id": {
+    "Trân": "S015",
+    "Tran": "S015",
+    "trân": "S015",
+    "Minh": "S014",
+    "minh": "S014",
+    "Huy": "S001",
+    "Khoa": "S002",
+    "khoa": "S002",
+    "Khang": "S016",
+    "Ảnh": "S004",
+    "Hoàng Anh": "S005",
+    "Thư": "S008",
+    "Nhung": "S012",
+    "Trâm": "S003",
+    "Tram": "S003",
+    "trâm": "S003",
+    "tram": "S003",
+    "Thu Ngân": "S006",
+    "Thungan": "S006",
+    "Ngan": "S006",
+    "thu ngân": "S006",
+    "thungan": "S006",
+    "ngan": "S006",
+    "ha": "S007",
+    "user1": "S009"
+  },
+  "merge_candidates_requiring_confirmation": [],
+  "explicitly_not_merged": [
+    {
+      "names": [
+        "Trân",
+        "Trâm"
+      ],
+      "note": "HAI NGUOI KHAC NHAU (chu du lieu xac nhan 2026-07-31). Trân -> S001, Trâm -> S003."
+    },
+    {
+      "names": [
+        "Minh",
+        "Huy"
+      ],
+      "note": "Giu HAI nguoi (15/09/2026): Minh = tai khoan Minh, Huy = tai khoan Minh6868. Gop sau bang signer_aliases neu chu du lieu xac nhan la mot nguoi."
+    }
+  ],
+  "account_ids_not_signers": {
+    "_comment": "signer_id suy ra tu TAI KHOAN thu thap, khong phai nguoi ky. Moi tai khoan duoi day duoc nhieu nguoi dung de ky, nen khong bao gio duoc dung lam danh tinh nguoi ky. Danh tinh that lay tu user_id roi tra qua legacy_name_to_signer_id.",
+    "S010": [
+      "Khoa",
+      "Nhung",
+      "Trân",
+      "Minh",
+      "Ảnh",
+      "Thư"
+    ],
+    "S011": [
+      "Khoa",
+      "Minh",
+      "Trân"
+    ]
+  },
+  "_doc": [
+    "15/09/2026: sổ này NAY KHỚP sổ người ký của ứng dụng (dataset/signers.csv + bảng signers).",
+    "Trước đó hai sổ lệch: ở đây S001=Trân, S002=Minh, S013=Khoa; ứng dụng S001=Huy (tài khoản Minh6868),",
+    "S002=Khoa. Mọi manifest/split dựng TRƯỚC 15/09 (isds2026_v1..v21, VSL2026_v22..v24, các fold LOSO test_S001...)",
+    "vẫn mang số CŨ theo bảng `legacy_ids_before_2026_09_15` bên dưới — đừng đọc chúng bằng sổ mới."
+  ],
+  "legacy_ids_before_2026_09_15": {
     "Trân": "S001",
     "Minh": "S002",
     "Tran": "S001",
@@ -21,17 +87,5 @@
     "thu ngân": "S006",
     "thungan": "S006",
     "ngan": "S006"
-  },
-  "merge_candidates_requiring_confirmation": [],
-  "explicitly_not_merged": [
-    {
-      "names": ["Trân", "Trâm"],
-      "note": "HAI NGUOI KHAC NHAU (chu du lieu xac nhan 2026-07-31). Trân -> S001, Trâm -> S003."
-    }
-  ],
-  "account_ids_not_signers": {
-    "_comment": "signer_id suy ra tu TAI KHOAN thu thap, khong phai nguoi ky. Moi tai khoan duoi day duoc nhieu nguoi dung de ky, nen khong bao gio duoc dung lam danh tinh nguoi ky. Danh tinh that lay tu user_id roi tra qua legacy_name_to_signer_id.",
-    "S010": ["Khoa", "Nhung", "Trân"],
-    "S011": ["Khoa", "Minh", "Trân"]
   }
 }

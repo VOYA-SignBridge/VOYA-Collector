@@ -146,3 +146,42 @@ class TestRoute:
                                  seed=1, with_research=False, requested_by="bien")
         r = client.get("/training/dataset/prepare/bbbbbb222222")
         assert r.status_code == 200 and r.json()["status"] == "queued"
+
+
+def test_research_names_carry_the_full_manifest_version_and_never_overwrite(prep_dirs, monkeypatch):
+    """`alphabet_loso_v5` từng trùng tên hiện vật isds2026_v5 chép từ máy khác và
+    ghi đè hai fold của nó (15/09/2026). Tên phải mang trọn `VSL2026_v5`, và thư
+    mục đã có thì DỪNG chứ không ghi."""
+    run, calls = _fake_make_splits(prep_dirs)
+    (prep_dirs / "dataset" / "manifests").mkdir(parents=True)
+    (prep_dirs / "processed" / "splits" / "make_loso_folds.py").parent.mkdir(parents=True, exist_ok=True)
+
+    def run_all(cmd, **kw):
+        if "--operational_split_id" in cmd:
+            return run(cmd, **kw)
+
+        class P:
+            returncode = 0
+            stdout = "[OK]"
+            stderr = ""
+
+        if "--output_version" in cmd and "--dataset_manifest" in cmd:
+            out = prep_dirs / "processed" / "splits" / "versions" / cmd[cmd.index("--output_version") + 1]
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "split_metadata.json").write_text(json.dumps({"valid_for_research": True, "num_classes": 3}), encoding="utf-8")
+        calls.append(cmd)
+        return P
+
+    monkeypatch.setattr(dp.subprocess, "run", run_all)
+    # Hiện vật cũ trùng số đuôi đã có sẵn — không được đụng.
+    old = prep_dirs / "processed" / "splits" / "versions" / "alphabet_loso_v1" / "test_S001"
+    old.mkdir(parents=True)
+    (old / "train.csv").write_text("cu", encoding="utf-8")
+
+    report = dp.prepare_dataset.run("abcdef123456", tenant_id="iso_a", dialects=["bang-chu-cai"],
+                                    with_research=True, profiles=["alphabet"])
+    names = [c[c.index("--output_version") + 1] for c in calls if "--output_version" in c]
+    assert "alphabet_strict_VSL2026_v1" in names
+    assert not any(n == "alphabet_strict_v1" or n == "alphabet_loso_v1" for n in names)
+    assert (old / "train.csv").read_text(encoding="utf-8") == "cu"
+    assert report["research_splits"][0]["split_version"] == "alphabet_strict_VSL2026_v1"
