@@ -17,7 +17,7 @@ Kết quả nằm trong <repo>oya_dump\ — thư mục này bị gitignore, kh�
 param(
     [string]$CoRoi = "",          # tệp .txt, mỗi dòng một sample_uid máy kia đã có
     [switch]$KemVideo,            # chép cả dataset/raw_videos (lớn)
-    [string]$Ra = ""              # thư mục đích; mặc định ..\voya_dump_<ngày giờ>
+    [string]$Ra = ""              # thư mục đích; mặc định <repo>\voya_dump\<ngày giờ>
 )
 $ErrorActionPreference = "Stop"
 $repo = (Get-Location).Path
