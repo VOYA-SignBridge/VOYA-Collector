@@ -10,9 +10,9 @@ Chạy TRONG container backend (có `app`, DSN, và hệ tệp dataset):
     docker exec -e MSYS_NO_PATHCONV=1 voya_backend python /tmp/x.py --apply    # xoá thật
 
 Thứ tự (vì khoá ngoại):
-  1. Xoá vĩnh viễn tổ chức tự tạo của họ bằng `tenant_lifecycle.purge_tenant`
-     (cùng đường mà giao diện quản trị dùng; dọn cả tệp và sổ). Người dùng là
-     thành viên cộng đồng nên purge chỉ "chuyển nhà" họ về `default`.
+  1. XOÁ MỀM tổ chức tự tạo của họ (`tenant_admin.delete_tenant`). Xoá vĩnh
+     viễn bị lifecycle giữ 30 ngày ân hạn — cố ý, không lách; sau mốc đó bấm
+     "Xoá vĩnh viễn" ở trang quản trị tổ chức.
   2. Gỡ các tham chiếu KHÔNG cascade (mẫu, phiên thu, phiếu hỗ trợ, nhật ký...):
      đặt NULL — dữ liệu ở lại, chỉ mất người đứng tên.
   3. Xoá `role_assignments` (RESTRICT trên assigned_by) rồi `DELETE FROM users`;
@@ -66,22 +66,23 @@ if not APPLY:
     print("(xem trước; thêm --apply để xoá)")
     sys.exit(0)
 
-from app import tenant_lifecycle as tl  # noqa: E402
-
 from app import tenant_admin as ta  # noqa: E402
 
+# Tổ chức thử: XOÁ MỀM (mất chủ, không đăng nhập vào được). Xoá vĩnh viễn phải
+# chờ hết ân hạn 30 ngày của lifecycle (mốc in ra bên dưới) — lúc đó bấm "Xoá
+# vĩnh viễn" ở trang quản trị tổ chức, hoặc gọi tenant_lifecycle.purge_tenant.
 for t in tenants:
     if not t["is_self_serve"]:
         continue
-    # purge đòi tổ chức đã XOÁ MỀM trước (chốt chặn cố ý của lifecycle).
     with system_scope("xoa tai khoan thu nghiem: xoa mem to chuc"):
-        da_mem = _fetch_all("SELECT deleted_at FROM tenants WHERE tenant_id = %s", (t["tenant_id"],))
-    if da_mem and not da_mem[0]["deleted_at"]:
+        row = _fetch_all("SELECT deleted_at FROM tenants WHERE tenant_id = %s", (t["tenant_id"],))
+    if row and not row[0]["deleted_at"]:
         ta.delete_tenant(t["tenant_id"])
-        print("đã xoá mềm", t["tenant_id"])
-    r = tl.purge_tenant(t["tenant_id"], confirm_tenant_id=t["tenant_id"], requested_by=ADMIN_ID,
-                        reason="don tai khoan thu nghiem 15/09/2026", skip_export_check=True)
-    print("đã xoá tổ chức", t["tenant_id"], r.get("counts"))
+        print("đã xoá mềm tổ chức", t["tenant_id"])
+    else:
+        print("tổ chức đã xoá mềm từ trước:", t["tenant_id"])
+    from app.tenant_lifecycle import purge_preview
+    print("   xoá vĩnh viễn được từ:", (purge_preview(t["tenant_id"]).get("blockers") or ["ngay bây giờ"])[0])
 
 with system_scope("xoa tai khoan thu nghiem: go tham chieu va xoa"):
     for table, col in NULLIFY:
