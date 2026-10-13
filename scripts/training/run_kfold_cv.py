@@ -27,8 +27,9 @@ Outputs mean +/- std across folds for val-best-F1, test-acc, test-F1, plus a
 paired Wilcoxon test between models when more than one model is given.
 
 Example:
-    python run_kfold_cv.py --dialect hoa-de --model_type tcn --model_type cnn \\
-        --n_splits 5 --mode stratified --epochs 80
+    python scripts/training/run_kfold_cv.py --dialect hoa-de \\
+        --model_type tcn --model_type cnn --n_splits 5 \\
+        --mode stratified --epochs 80
 """
 
 from __future__ import annotations
@@ -44,7 +45,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-REPO_ROOT = Path(__file__).resolve().parent
+# File nam trong scripts/training/, vi vay can lui hai cap de ve repo root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DIR = REPO_ROOT / "processed"
 SPLITS_DIR = PROCESSED_DIR / "splits"
 FEATURES_ROOT = REPO_ROOT / "dataset" / "features"
@@ -116,6 +118,7 @@ def build_folds(
 
 
 def write_fold_csv(path: Path, fieldnames: List[str], rows: List[dict]) -> None:
+    """Ghi các dòng của một fold vào CSV theo schema của split nguồn."""
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -134,6 +137,7 @@ def run_one(
     out_dir: Path,
     args: argparse.Namespace,
 ) -> Optional[dict]:
+    """Gọi trainer thật cho một model/fold và đọc các metric tóm tắt."""
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable, "-m", "train_utils.train_tcn",
@@ -189,6 +193,7 @@ def run_one(
 
 
 def _looks_like_summary(p: Path) -> bool:
+    """Kiểm tra một JSON có phải summary do trainer tạo hay không."""
     try:
         obj = json.loads(p.read_text(encoding="utf-8"))
         return "val_best_f1" in obj and "test" in obj
@@ -200,6 +205,7 @@ def _looks_like_summary(p: Path) -> bool:
 # Aggregation + reporting
 # ----------------------------------------------------------------------------
 def summarize(values: List[float]) -> Tuple[float, float]:
+    """Tính trung bình và độ lệch chuẩn tổng thể của một danh sách metric."""
     if not values:
         return 0.0, 0.0
     mean = statistics.fmean(values)
@@ -208,6 +214,7 @@ def summarize(values: List[float]) -> Tuple[float, float]:
 
 
 def main() -> int:
+    """Tạo các fold, chạy từng mô hình và ghi báo cáo cross-validation."""
     parser = argparse.ArgumentParser(description="K-fold CV harness (additive to fixed test holdout).")
     parser.add_argument("--dialect", action="append", default=None,
                         help="Filter to dialect(s). Repeat for multiple. E.g. --dialect hoa-de")

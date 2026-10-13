@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Monitor job progression and metrics collection"""
+"""Theo dõi trạng thái và metric của một nhóm training job qua backend API.
+
+Đây là công cụ quan sát thủ công. Backend không import hoặc gọi file này.
+Các job ID hiện được khai báo trong ``JOB_IDS`` và cần thay bằng job thực tế
+trước khi chạy.
+"""
 
 import requests
 import json
@@ -15,7 +20,7 @@ JOB_IDS = {
 }
 
 def monitor_jobs(duration_seconds=60, interval=5):
-    """Monitor jobs for specified duration"""
+    """Poll trạng thái/metric của các job trong một khoảng thời gian nhất định."""
     start_time = time.time()
 
     print("=" * 70)

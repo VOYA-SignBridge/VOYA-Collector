@@ -50,7 +50,7 @@ làm cho suite biến mất thay vì fail. Đó là lý do có `backend/tests/te
 - Realtime service chỉ hỗ trợ TCN khi promote; Phase 4 (profile routing) chưa triển khai.
 - `nginx :8000` chỉ route một phần API — dev FE dùng vite proxy (same-origin); **không** đặt `VITE_API_URL` tuyệt đối trong dev (xem `frontend/.env.example`).
 - CORS `allow_credentials=False` là chủ đích (cookie auth chạy same-origin qua gateway/proxy).
-- File `*_backup.py` / `verify_refactor.py` / `run_kfold_cv.py` trong `processed/train_utils` là scratch cũ — cân nhắc dọn trước khi nộp báo cáo.
+- `processed/train_utils/verify_refactor.py` là scratch cũ — cần xác minh caller rồi dọn trước khi nộp báo cáo.
 
 ## Đã sửa gần đây (tham chiếu)
 

@@ -7,6 +7,7 @@ artifact training có thể tái lập. Chúng không phục vụ HTTP request t
 |---|---|---|
 | `export_augmentation_contract.py` | Xuất cấu hình augmentation đang dùng thành JSON/Markdown để nghiên cứu có thể truy vết | Ghi artifact vào `reports/` |
 | `make_loso_splits.py` | Tạo fold leave-one-signer-out hoặc matched protocol | Tạo CSV và metadata trong `processed/splits/` |
+| `run_kfold_cv.py` | Tạo K-fold từ train/val rồi gọi trainer thật cho từng model/fold | Chạy nhiều lượt training; ghi checkpoint và báo cáo vào thư mục output |
 | `run_loso_experiment.py` | Lần lượt gọi trainer cho các fold/seed chưa chạy | Chạy nhiều tiến trình training, tạo checkpoint và result |
 | `run_feature_ablation.sh` | Chạy ba cấu hình feature trên GPU trong container | Tốn GPU; ghi log/checkpoint vào `reports/feature_ablation/` |
 | `verify_checkpoint_contract.py` | Kiểm tra checkpoint có đủ metadata và tương thích feature/dataset | Chủ yếu chỉ đọc |
@@ -17,6 +18,7 @@ Ví dụ:
 
 ```powershell
 python scripts/training/make_loso_splits.py --help
+python scripts/training/run_kfold_cv.py --help
 python scripts/training/verify_loso_splits.py --help
 ```
 

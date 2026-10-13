@@ -132,7 +132,7 @@ Frontend tương ứng: đăng nhập, đăng ký, quên/đặt lại mật kh�
 | `processed/train_utils/hpo_search.py` | `ml/training/hpo.py` | Tooling/training |
 | `processed/train_utils/handedness_analysis.py` | `ml/evaluation/handedness.py` | Analysis |
 | `processed/splits/make_splits.py` | `ml/datasets/make_splits.py` | Source; CSV kết quả tách ra runtime |
-| `processed/splits/make_budget_grid.py` | `scripts/research/` hoặc `ml/experiments/` | Research tooling |
+| `processed/splits/make_budget_grid.py` | `scripts/training/` hoặc `ml/experiments/` | Research tooling |
 
 ### 3.7. Realtime
 
@@ -335,9 +335,11 @@ oversample_balance.py
 
 - `scripts/maintenance/`: audit, cleanup, balance.
 - `scripts/migration/`: dialect reclassifier, vocabulary/schema migrations.
-- `scripts/research/`: experiment runner, k-fold, LOSO, figures và statistical reports.
+- `scripts/training/`: split, experiment runner, k-fold và LOSO.
+- `scripts/evaluation/`: figures, statistical reports và kiểm tra kết quả.
 
-Root `monitor_jobs.py` chuyển về `scripts/operations/`; `run_kfold_cv.py` chuyển về `scripts/research/`.
+Đã chuyển root `monitor_jobs.py` về `scripts/maintenance/` và
+`run_kfold_cv.py` về `scripts/training/` ngày 2026-10-14.
 
 ## 6. Dormant, broken và ứng viên xóa
 
@@ -510,4 +512,11 @@ Quyết định `remove` hay `restore` cho router `experiments` phải dựa tr�
 - Giữ `_console.py`, `research_validity.py` và `prepare_research_release.py` ở root `scripts/` vì đây là helper/logic dùng chung và orchestrator.
 - Cập nhật caller trong backend, test, tài liệu và shell script; không đổi logic API, database, Docker service hoặc dataset.
 - Neo `/dataset/` trong `.gitignore` để không bỏ qua nhầm `scripts/dataset/`; cho phép thư mục script này đi vào Docker build qua `.dockerignore`.
+
+### 2026-10-14 - Dọn hai Python CLI còn sót ở repository root
+
+- Chuyển `monitor_jobs.py` vào `scripts/maintenance/` vì đây là công cụ quan sát job thủ công.
+- Chuyển `run_kfold_cv.py` vào `scripts/training/` vì nó trực tiếp điều phối trainer.
+- Cập nhật repo-root resolution, docstring, README và ghi chú cũ trong `KNOWN_ISSUES.md`.
+- Không đổi API, thuật toán chia fold hoặc tham số training.
 
