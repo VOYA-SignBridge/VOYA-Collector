@@ -64,12 +64,12 @@ từ dữ liệu đã chuẩn hóa.
 
 ```bash
 # Migration legacy (dry-run trước)
-python scripts/migrate_legacy_vocabulary_schema.py --dry-run --mapping config/legacy_vocabulary_mapping.json
-python scripts/migrate_legacy_vocabulary_schema.py --mapping config/legacy_vocabulary_mapping.json
+python scripts/migration/migrate_legacy_vocabulary_schema.py --dry-run --mapping config/legacy_vocabulary_mapping.json
+python scripts/migration/migrate_legacy_vocabulary_schema.py --mapping config/legacy_vocabulary_mapping.json
 
 # Manifest immutable + validate
-python scripts/create_dataset_manifest.py --version isds2026_v1
-python scripts/validate_dataset_manifest.py --version isds2026_v1 --check-checksums
+python scripts/dataset/create_dataset_manifest.py --version isds2026_v1
+python scripts/dataset/validate_dataset_manifest.py --version isds2026_v1 --check-checksums
 
 # Split theo profile (versioned, không đụng frozen legacy splits)
 python processed/splits/make_splits.py \
@@ -117,7 +117,7 @@ Run legacy (`--dialect`) ghi `vocabulary_schema_version="v1_legacy"`.
 
 **Đã xác nhận:** `bang-chu-cai` → profile `alphabet` (static, độc lập);
 `trung` → `central`; gộp signer Minh/minh→S002, Tran/Trân/trân→S001
-(đã apply qua `scripts/apply_signer_merges.py`).
+(đã apply qua `scripts/migration/apply_signer_merges.py`).
 
 **Chờ xác nhận:**
 1. `can-tho` (40 mẫu) — ĐÃ REVERT về needs_review theo chỉ thị mới nhất;

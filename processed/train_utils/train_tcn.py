@@ -305,7 +305,7 @@ def set_seed(seed: int, *, strict: bool = False, mode: str = "strict") -> dict:
 
     NOTE: on CUDA, torch requires CUBLAS_WORKSPACE_CONFIG to be set BEFORE the
     CUDA context is created. Setting it here is already too late if a tensor
-    has been allocated; scripts/verify_determinism.py sets it in the child
+    has been allocated; scripts/training/verify_determinism.py sets it in the child
     environment before launching.
     """
     os.environ.setdefault("PYTHONHASHSEED", str(seed))

@@ -496,3 +496,18 @@ Quyết định `remove` hay `restore` cho router `experiments` phải dựa tr�
 - Xóa `frontend/public/vite.svg` và `frontend/src/assets/react.svg` sau khi xác nhận không có caller.
 - Giữ lại hai file `.bak` sau khi phát hiện chúng chứa cấu hình signer và kết quả nghiên cứu chưa có bản canonical tương ứng trên nhánh hiện tại.
 
+### 2026-10-14 - Kiểm kê dataset ngoài repo và signer mapping
+
+- Xác nhận checkout hiện tại không chứa dataset thật; `dataset/` chỉ có các file `*.lock` và toàn bộ dataset được ignore khỏi Git.
+- Xác định file signer mapping `.bak` là mapping lịch sử; bản deploy ngày 2026-09-15 đã tái cấp một số ID và không tương thích ngược với manifest cũ.
+- Xác định code không tự mirror `signers.csv` lên Drive, nên catalog Drive một mình chưa đủ để chứng minh registry canonical.
+- Chưa khôi phục/đổi tên mapping và chưa chạy migration vì còn thiếu metadata Drive cùng registry signer từ PostgreSQL.
+- Chi tiết và checklist đối chiếu nằm tại `docs/DATASET_AND_SIGNER_AUDIT.md`.
+
+### 2026-10-14 - Phân nhóm công cụ trong `scripts/`
+
+- Chuyển các script thực thi vào năm nhóm: `dataset`, `training`, `evaluation`, `migration`, `maintenance`.
+- Giữ `_console.py`, `research_validity.py` và `prepare_research_release.py` ở root `scripts/` vì đây là helper/logic dùng chung và orchestrator.
+- Cập nhật caller trong backend, test, tài liệu và shell script; không đổi logic API, database, Docker service hoặc dataset.
+- Neo `/dataset/` trong `.gitignore` để không bỏ qua nhầm `scripts/dataset/`; cho phép thư mục script này đi vào Docker build qua `.dockerignore`.
+

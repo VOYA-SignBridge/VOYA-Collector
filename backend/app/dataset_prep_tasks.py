@@ -249,12 +249,12 @@ def prepare_dataset(
         return report
 
     if not _run("create_manifest",
-                ["python", "scripts/create_dataset_manifest.py", "--version", version],
+                ["python", "scripts/dataset/create_dataset_manifest.py", "--version", version],
                 report, run_id):
         return fail("không tạo được manifest")
 
     _run("validate_manifest",
-         ["python", "scripts/validate_dataset_manifest.py", "--version", version],
+         ["python", "scripts/dataset/validate_dataset_manifest.py", "--version", version],
          report, run_id)
 
     fatal, advisories = _validation_verdict(report["steps"][-1])

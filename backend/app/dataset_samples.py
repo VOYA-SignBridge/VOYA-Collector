@@ -277,7 +277,7 @@ def save_sequence_npz(
     raw_available = raw_sequence is not None
     metadata.setdefault("raw_landmarks_available", bool(raw_available))
     # Stamped by the WRITER (not the caller) so it always describes what was
-    # actually put in the archive. scripts/validate_pilot_samples.py gates new
+    # actually put in the archive. scripts/dataset/validate_pilot_samples.py gates new
     # campaigns on this; the checkpoint contract records the same token.
     metadata.setdefault(
         "storage_contract_version",

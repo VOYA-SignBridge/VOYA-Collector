@@ -67,7 +67,7 @@ def _vocabulary_mapping() -> Dict[str, Dict[str, str]]:
     """dialect -> its confirmed vocabulary-schema-v2 fields.
 
     Reads config/legacy_vocabulary_mapping.json, the same file
-    scripts/migrate_legacy_vocabulary_schema.py used to back-fill the existing
+    scripts/migration/migrate_legacy_vocabulary_schema.py used to back-fill the existing
     classes. Only entries the owner marked ``status: confirmed`` are returned —
     an unconfirmed dialect keeps empty cells and shows up in the review report,
     which is the behaviour that file was designed around.

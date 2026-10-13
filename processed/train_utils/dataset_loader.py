@@ -380,7 +380,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         signer_id ở đây sẽ khiến split "tách người" âm thầm để hai người khác
         nhau nằm cả ở train lẫn test — đúng thứ rò rỉ mà split này muốn chặn.
         `user_id` ghi tên người ký thật, còn biến thể chính tả thì đã có bảng gộp
-        được chủ dữ liệu xác nhận (xem scripts/apply_signer_merges.py).
+        được chủ dữ liệu xác nhận (xem scripts/migration/apply_signer_merges.py).
         """
         raw = (row.get('user_id') or '').strip()
         if raw:

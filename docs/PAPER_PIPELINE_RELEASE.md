@@ -97,7 +97,7 @@ có raw landmarks. Ablation tiền xử lý chỉ khả thi trên dữ liệu th
 Bảng chuẩn sinh trực tiếp từ code:
 
 ```bash
-python scripts/export_augmentation_contract.py
+python scripts/training/export_augmentation_contract.py
 # -> reports/augmentation_contract.md  (bảng cho methodology section)
 # -> reports/augmentation_contract.json
 ```
@@ -246,7 +246,7 @@ và đẩy ~45% mỗi batch vào vùng toạ độ không bao giờ xuất hiệ
 
 ```bash
 # Hợp đồng augmentation cho methodology section
-python scripts/export_augmentation_contract.py
+python scripts/training/export_augmentation_contract.py
 
 # Chuỗi release (dừng ngay khi có bước fail; không bao giờ dùng --force)
 python scripts/prepare_research_release.py \
@@ -264,14 +264,14 @@ python processed/train_utils/train_tcn.py --run-purpose research \
   --augmentation_profile full --epochs 80 --seed 42
 
 # Kiểm định tái lập
-python scripts/verify_determinism.py --train_csv ... --val_csv ... --test_csv ... \
+python scripts/training/verify_determinism.py --train_csv ... --val_csv ... --test_csv ... \
   --features_root dataset/features --recognition_profile hoa_de --epochs 2 --seed 42
 
 # Hồ sơ và bảng kết quả
-python scripts/audit_checkpoint_validity.py --json --markdown
-python scripts/aggregate_experiment_results.py
-python scripts/report_quality_stats.py --campaign isds2026_v4
-python scripts/audit_duplicate_samples.py --manifest-version isds2026_v4
+python scripts/evaluation/audit_checkpoint_validity.py --json --markdown
+python scripts/evaluation/aggregate_experiment_results.py
+python scripts/dataset/report_quality_stats.py --campaign isds2026_v4
+python scripts/dataset/audit_duplicate_samples.py --manifest-version isds2026_v4
 
 # Toàn bộ test (container)
 docker build -f backend/Dockerfile.test -t voya_backend_test:latest backend

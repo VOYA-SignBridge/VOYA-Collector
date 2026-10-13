@@ -33,7 +33,7 @@ làm cho suite biến mất thay vì fail. Đó là lý do có `backend/tests/te
 
 | # | Vấn đề | Hành động khi quyết |
 |---|---|---|
-| 1 | **7 file orphan/invalid** đang `pending` trong `config/orphan_file_decisions.json` (5 npz lớp `vo-tay` không có dòng nhãn; 1 bản copy `sample_d6ef358990(1).npz`; 1 file không có provenance signer) | Sửa `decision` → `quarantine`/`keep`, chạy `python scripts/quarantine_files.py --confirm` |
+| 1 | **7 file orphan/invalid** đang `pending` trong `config/orphan_file_decisions.json` (5 npz lớp `vo-tay` không có dòng nhãn; 1 bản copy `sample_d6ef358990(1).npz`; 1 file không có provenance signer) | Sửa `decision` → `quarantine`/`keep`, chạy `python scripts/migration/quarantine_files.py --confirm` |
 | 2 | **spa** (2 lớp) chưa gán scope/profile | Sửa `config/legacy_vocabulary_mapping.json` → chạy lại migration → manifest version mới |
 | 3 | **can-tho** (40 mẫu, 8 lớp) đã revert về needs_review theo chỉ thị 2026-07-19; đồng thời KHÔNG có signer provenance | Xác nhận profile + xác nhận ai ký (hoặc thu mới) |
 | 4 | Mảnh UUID lạc `d70872b4-...` từng dính vào `migrated_at` của lớp `vao-lop` (đã tách ra, lưu tại backup `labels_pre_row41_fix_*`) — có thể là tàn dư một dòng nhãn bị mất (nghi liên quan lớp `vo-tay` mồ côi) | Đối chiếu thủ công nếu muốn khôi phục nhãn vo-tay |

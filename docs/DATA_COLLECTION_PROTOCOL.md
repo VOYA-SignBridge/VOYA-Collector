@@ -22,7 +22,7 @@ Pilot gate từ chối mẫu có `signer_id` không nằm trong registry active.
 
 > **Cảnh báo từ dữ liệu cũ.** Registry từng có `Trân` (S001), `Tran` (S003),
 > `trân` (S006) — cùng một người thành 3 signer. Điều này làm hỏng mọi ràng buộc
-> signer-disjoint một cách âm thầm. Đã hợp nhất bằng `scripts/apply_signer_merges.py`.
+> signer-disjoint một cách âm thầm. Đã hợp nhất bằng `scripts/migration/apply_signer_merges.py`.
 > **Không tạo signer mới cho một người đã có ID.** Kiểm tra registry trước.
 
 ### Session ID
@@ -100,7 +100,7 @@ Chạy ở backend, trên chuỗi **trước khi** normalize (toạ độ còn �
 
 Thống kê pass/warn/reject:
 ```bash
-python scripts/report_quality_stats.py --campaign isds2026_v4
+python scripts/dataset/report_quality_stats.py --campaign isds2026_v4
 ```
 
 ---
@@ -124,7 +124,7 @@ phát hiện sai hợp đồng lưu trữ trước khi nó nhân lên hàng tră
 ### Chạy gate
 
 ```bash
-python scripts/validate_pilot_samples.py --campaign isds2026_v4
+python scripts/dataset/validate_pilot_samples.py --campaign isds2026_v4
 ```
 
 Pilot chỉ PASS khi **mọi** mẫu được chấp nhận có đủ:
@@ -159,7 +159,7 @@ Gate cũng in cảnh báo nếu số signer < 6.
 
 Kiểm tra bất cứ lúc nào:
 ```bash
-python scripts/report_dataset_coverage.py --version <manifest-version>
+python scripts/dataset/report_dataset_coverage.py --version <manifest-version>
 ```
 
 ---

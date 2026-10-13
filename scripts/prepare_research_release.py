@@ -51,6 +51,7 @@ SCRIPTS = REPO_ROOT / "scripts"
 
 
 def sha256_file(path: Path) -> str:
+    """Tính SHA-256 theo từng khối để ghi nhận đúng phiên bản artifact."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -59,11 +60,15 @@ def sha256_file(path: Path) -> str:
 
 
 class Release:
+    """Chạy tuần tự các lệnh con và lưu kết quả của từng bước phát hành."""
+
     def __init__(self, dry_run: bool):
+        """Khởi tạo phiên chạy; dry-run chỉ lập kế hoạch, không chạy lệnh con."""
         self.dry_run = dry_run
         self.steps: list = []
 
     def run(self, title: str, argv: list, *, fatal: bool = True) -> int:
+        """Chạy một script con, ghi exit code và cho biết lỗi có chặn chuỗi hay không."""
         cmd = [sys.executable] + [str(a) for a in argv]
         printable = " ".join(str(a) for a in argv)
         print(f"\n{'=' * 72}\n[STEP] {title}\n  $ python {printable}\n{'=' * 72}")
@@ -85,6 +90,7 @@ class Release:
 
 
 def main() -> int:
+    """Kiểm tra tham số rồi điều phối toàn bộ chuỗi tạo research release."""
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--campaign", required=True,
@@ -129,27 +135,27 @@ def main() -> int:
 
     if not args.skip_pilot:
         if rel.run("1/7 pilot validation",
-                   [SCRIPTS / "validate_pilot_samples.py", "--campaign", args.campaign,
+                   [SCRIPTS / "dataset" / "validate_pilot_samples.py", "--campaign", args.campaign,
                     "--features-root", args.features_root]) != 0:
             return _finish(rel, args, started, ok=False)
     else:
         print("[SKIP] pilot validation (--skip-pilot)")
 
     if rel.run("2/7 duplicate audit",
-               [SCRIPTS / "audit_duplicate_samples.py",
+               [SCRIPTS / "dataset" / "audit_duplicate_samples.py",
                 "--features-root", args.features_root]) != 0:
         return _finish(rel, args, started, ok=False)
 
     # NOTE: --force is never passed. A manifest release that would overwrite an
     # existing version must fail.
     if rel.run("3/7 create immutable manifest",
-               [SCRIPTS / "create_dataset_manifest.py",
+               [SCRIPTS / "dataset" / "create_dataset_manifest.py",
                 "--version", args.manifest_version,
                 "--features-root", args.features_root]) != 0:
         return _finish(rel, args, started, ok=False)
 
     if rel.run("4/7 validate manifest",
-               [SCRIPTS / "validate_dataset_manifest.py",
+               [SCRIPTS / "dataset" / "validate_dataset_manifest.py",
                 "--version", args.manifest_version,
                 "--features-root", args.features_root,
                 "--check-checksums"]) != 0:
@@ -185,12 +191,19 @@ def main() -> int:
         split_results[name] = rc
 
     rel.run("7/7 aggregate existing results",
-            [SCRIPTS / "aggregate_experiment_results.py"], fatal=False)
+            [SCRIPTS / "evaluation" / "aggregate_experiment_results.py"], fatal=False)
 
     return _finish(rel, args, started, ok=True, splits=split_results)
 
 
 def _finish(rel: Release, args, started: str, *, ok: bool, splits: dict | None = None) -> int:
+    """Tổng hợp checksum/metadata và ghi release log sau khi chuỗi kết thúc."""
+    if rel.dry_run:
+        print(f"\n{'=' * 72}")
+        print(f"release chain dry-run: {'OK' if ok else 'FAILED'}")
+        print("khong co file nao duoc tao trong che do dry-run")
+        return 0 if ok else 1
+
     manifest_dir = REPO_ROOT / "dataset" / "manifests"
     manifest_csv = manifest_dir / f"dataset_manifest_{args.manifest_version}.csv"
     versions_dir = REPO_ROOT / "processed" / "splits" / "versions"

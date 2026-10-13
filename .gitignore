@@ -62,7 +62,7 @@ merge_data.sql
 *.sql.bak
 
 # Video and model files
-dataset/
+/dataset/
 *.mp4
 *.npz
 *.npy
@@ -126,6 +126,7 @@ reports/determinism/
 # Research records -> committed (negate the blanket rules above)
 !docs/
 !docs/**/*.md
+!scripts/**/README.md
 !reports/checkpoint_validity.md
 !reports/augmentation_contract.md
 !reports/augmentation_contract.json

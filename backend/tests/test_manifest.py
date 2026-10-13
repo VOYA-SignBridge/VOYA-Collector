@@ -16,8 +16,8 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CREATE = REPO_ROOT / "scripts" / "create_dataset_manifest.py"
-VALIDATE = REPO_ROOT / "scripts" / "validate_dataset_manifest.py"
+CREATE = REPO_ROOT / "scripts" / "dataset" / "create_dataset_manifest.py"
+VALIDATE = REPO_ROOT / "scripts" / "dataset" / "validate_dataset_manifest.py"
 
 PASSED: list = []
 FAILED: list = []
