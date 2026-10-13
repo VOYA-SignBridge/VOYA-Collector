@@ -353,11 +353,14 @@ Root `monitor_jobs.py` chuyển về `scripts/operations/`; `run_kfold_cv.py` ch
 Chỉ xóa sau khi Git hoạt động bình thường và có một commit riêng:
 
 ```text
-frontend/public/vite.svg
-frontend/src/assets/react.svg
-config/legacy_signer_mapping.json.bak_20260727_204104
-reports/Source/budget_grid_hoa_de_budget_v2_tcn_raw.txt.bak_144457
+frontend/public/vite.svg                         # Đã xóa 2026-10-14
+frontend/src/assets/react.svg                    # Đã xóa 2026-10-14
 ```
+
+Hai file `.bak` từng được liệt kê ở đây đã được kiểm tra lại và **không còn được xem là ứng viên xóa an toàn**:
+
+- `config/legacy_signer_mapping.json.bak_20260727_204104` là bản mapping signer duy nhất còn có trên nhánh này, trong khi nhiều script mặc định tìm `config/legacy_signer_mapping.json`. Cần quyết định khôi phục/đồng bộ với mapping mới, không xóa.
+- `reports/Source/budget_grid_hoa_de_budget_v2_tcn_raw.txt.bak_144457` chứa 938 dòng kết quả grid đầy đủ (header, 936 lượt, footer), gồm cả các lượt `FAILED`; `reports/Source/tien-do.ps1` đang kỳ vọng file cùng tên không có hậu tố backup. Đây là dữ liệu nghiên cứu cần giữ hoặc đổi tên/archive có chủ đích.
 
 Các file `__init__.py` rỗng không phải file thừa; chúng đánh dấu Python package và nên giữ khi package vẫn tồn tại.
 
@@ -487,4 +490,9 @@ Quyết định `remove` hay `restore` cho router `experiments` phải dựa tr�
 - Xác nhận không còn caller bằng tìm kiếm toàn repo.
 - Compile cú pháp thành công 158 file Python.
 - Chưa chạy pytest vì Python local chưa cài package `pytest`; cần chạy qua image/backend environment khi Docker Engine sẵn sàng.
+
+### 2026-10-14 - Xóa asset mẫu frontend
+
+- Xóa `frontend/public/vite.svg` và `frontend/src/assets/react.svg` sau khi xác nhận không có caller.
+- Giữ lại hai file `.bak` sau khi phát hiện chúng chứa cấu hình signer và kết quả nghiên cứu chưa có bản canonical tương ứng trên nhánh hiện tại.
 
