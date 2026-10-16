@@ -5,8 +5,11 @@ import csv
 import json
 import math
 import os
+import platform
 import random
 import re
+import shutil
+import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -17,159 +20,401 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
+
+def pick_device() -> str:
+    """Choose cuda only when this torch build has kernels for the actual GPU.
+
+    `torch.cuda.is_available()` answers "is there a working driver + runtime",
+    not "can this build run on that chip". A wheel compiled for older
+    architectures reports True on a newer card and then dies on the first kernel
+    launch with `no kernel image is available for execution on the device` —
+    mid-training, after the dataset is loaded, with an error that reads like a
+    bug rather than a build mismatch.
+
+    torch 2.0.0+cu117 ships sm_37…sm_86. That covers Ampere (RTX 30xx) but not
+    Ada (RTX 40xx, sm_89) or Blackwell (RTX 50xx, sm_120), so a newer card needs
+    a newer wheel. Until then, falling back to CPU trains slowly but finishes;
+    the alternative is a job that always crashes.
+    """
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        major, minor = torch.cuda.get_device_capability(0)
+        arch = f"sm_{major}{minor}"
+        supported = torch.cuda.get_arch_list()
+        if supported and arch not in supported:
+            print(
+                f"[TRAINER] GPU {torch.cuda.get_device_name(0)} is {arch}, but this "
+                f"torch {torch.__version__} was built for {supported}. Falling back "
+                f"to CPU — install a torch wheel that includes {arch} to use the GPU.",
+                file=sys.stderr,
+            )
+            return "cpu"
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[TRAINER] GPU capability probe failed ({exc}); using CPU.", file=sys.stderr)
+        return "cpu"
+    return "cuda"
+
+
 try:
-    # local metrics (accuracy, SCS, macro-f1) for future use
-    from .metrics import sequence_consistency_score  # type: ignore
+    # local metrics (accuracy, SCS, macro-f1, and the beyond-accuracy/F1 set:
+    # balanced accuracy, MCC, top-k accuracy, macro ROC-AUC)
+    from .metrics import (  # type: ignore
+        sequence_consistency_score,
+        balanced_accuracy,
+        matthews_corrcoef,
+        top_k_accuracy,
+        roc_auc_macro_ovr,
+        macro_f1 as macro_f1_np,
+        temporal_accuracy,
+    )
 except Exception:  # pragma: no cover
     import sys as _sys
     from pathlib import Path as _P
     _sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.metrics import sequence_consistency_score  # type: ignore
+    from processed.train_utils.metrics import (  # type: ignore
+        sequence_consistency_score,
+        balanced_accuracy,
+        matthews_corrcoef,
+        top_k_accuracy,
+        roc_auc_macro_ovr,
+        macro_f1 as macro_f1_np,
+        temporal_accuracy,
+    )
+
+try:
+    from .handedness_analysis import HandednessAnalyzer, detect_hand_presence  # type: ignore
+except Exception:  # pragma: no cover
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.train_utils.handedness_analysis import HandednessAnalyzer, detect_hand_presence  # type: ignore
+
+try:
+    from .signer_diversity_checker import check_signer_diversity  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.signer_diversity_checker import check_signer_diversity  # type: ignore
+    except Exception:
+        check_signer_diversity = None  # diagnostic optional
+
+try:
+    from .sequence_length_analyzer import check_sequence_length_bias  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.sequence_length_analyzer import check_sequence_length_bias  # type: ignore
+    except Exception:
+        check_sequence_length_bias = None  # diagnostic optional
+
+try:
+    from .imbalance_detector import detect_imbalance  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.imbalance_detector import detect_imbalance  # type: ignore
+    except Exception:
+        detect_imbalance = None  # diagnostic optional
+
+try:
+    from .augmentation import build_train_augment, augment_config_dict
+except Exception:
+    import sys
+    from pathlib import Path as _P
+    sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.train_utils.augmentation import build_train_augment, augment_config_dict
+
+try:
+    from processed.shared.vocabulary import (
+        RECOGNITION_PROFILES,
+        check_label_collisions,
+        label_key_v2,
+        select_rows_for_profile,
+        split_common_and_profile_labels,
+    )
+except Exception:
+    import sys as _sys
+    from pathlib import Path as _P
+    _sys.path.append(str(_P(__file__).resolve().parents[2]))
+    from processed.shared.vocabulary import (
+        RECOGNITION_PROFILES,
+        check_label_collisions,
+        label_key_v2,
+        select_rows_for_profile,
+        split_common_and_profile_labels,
+    )
 
 try:
     # When run as module: python -m processed.train_utils.train_tcn
-    from .dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
+    from .dataset_loader import NPZSignDataset # type: ignore
 except Exception:  # pragma: no cover
     # When run as script: python processed/train_utils/train_tcn.py
     import sys
     from pathlib import Path as _P
     sys.path.append(str(_P(__file__).resolve().parents[2]))
-    from train_model.train_utils.dataset_loader import NPZSignDataset, pad_collate_fn  # type: ignore
+    from processed.train_utils.dataset_loader import NPZSignDataset # type: ignore
+
+# Ở NGOÀI khối try/except trên, và đó không phải chi tiết vặt: bản trước lỡ đặt
+# nó trong nhánh `except`, nên chạy bằng `python -m` (nhánh `try` thành công)
+# thì hai tên này không bao giờ được nạp — `NameError` ngay lúc dựng checkpoint,
+# tức sau khi đã huấn luyện xong. Bộ kiểm đơn vị không thấy vì không cái nào
+# chạy `main()`; smoke đầu-cuối bắt được ngay lượt đầu.
+from processed.train_utils.label_mapping import (  # noqa: E402
+    CHECKPOINT_MAPPING_KEY, build_checkpoint_mapping,
+)
+
+try:
+    try:
+        from .tracking_client import TrackingClient as _TrackingClient  # type: ignore
+    except ImportError:
+        from processed.train_utils.tracking_client import TrackingClient as _TrackingClient  # type: ignore
+except Exception:
+    _TrackingClient = None  # type: ignore
+
+try:
+    from .models import get_model_class  # type: ignore
+except Exception:
+    try:
+        from processed.train_utils.models import get_model_class  # type: ignore
+    except Exception:
+        get_model_class = None  # models not available yet
 
 
 EXPECTED_FEATURE_DIM = 126
 
 
-def set_seed(seed: int) -> None:
+def _git_commit_hash() -> str:
+    """Best-effort HEAD commit for the checkpoint contract ('' if unavailable).
+
+    Falls back to parsing .git/HEAD directly — training containers usually
+    have the repo mounted but no git binary installed.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, cwd=str(repo_root),
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    try:
+        head = (repo_root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(None, 1)[1].strip()
+            ref_file = repo_root / ".git" / ref
+            if ref_file.exists():
+                return ref_file.read_text(encoding="utf-8").strip()
+            packed = repo_root / ".git" / "packed-refs"
+            if packed.exists():
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    if line.endswith(ref):
+                        return line.split()[0]
+            return ""
+        return head
+    except Exception:
+        return ""
+
+
+def _read_split_manifest_checksum(train_csv: Path) -> str:
+    """Read dataset_manifest_checksum from split_metadata.json next to the
+    split CSVs (written by make_splits manifest mode). '' when absent."""
+    try:
+        meta_path = Path(train_csv).resolve().parent / "split_metadata.json"
+        if meta_path.exists():
+            return str(json.loads(meta_path.read_text(encoding="utf-8")).get(
+                "dataset_manifest_checksum", ""))
+    except Exception:
+        pass
+    return ""
+
+
+CUBLAS_DETERMINISTIC_CONFIG = ":4096:8"
+
+
+def _enforce_augmentation_contract(aug_cfg: dict, run_purpose: str) -> None:
+    """Refuse to train on an augmentation config that cannot be trusted.
+
+    Guards the three ways the augmentation contract can silently go wrong:
+      1. the config carries no contract version at all;
+      2. the mirror implementation drifts from the wrist-centered reflection
+         the contract promises;
+      3. temporal masking is switched back on while the model input has no
+         frame-validity channel to disambiguate a masked frame from a padded
+         one or from "both hands absent".
+    """
+    from processed.train_utils.augmentation import (
+        AUGMENTATION_CONTRACT_VERSION, SignAugment,
+    )
+
+    def _fail(msg: str) -> None:
+        if run_purpose == "research":
+            raise SystemExit(f"[AUGMENT][CONTRACT] {msg}")
+        print(f"[AUGMENT][CONTRACT][WARN] {msg}")
+
+    if not aug_cfg.get("enabled", False):
+        return
+
+    version = str(aug_cfg.get("augmentation_contract_version") or "")
+    if not version:
+        _fail("augmentation config carries no augmentation_contract_version; "
+              "the run would not be attributable to a mirror implementation.")
+    elif version != AUGMENTATION_CONTRACT_VERSION:
+        _fail(f"augmentation_contract_version '{version}' != code version "
+              f"'{AUGMENTATION_CONTRACT_VERSION}'.")
+
+    # Behavioural check: reflect a synthetic wrist-centered hand and verify the
+    # wrist stays at the origin and the span is preserved. Catches a mirror
+    # implementation that drifted back to the image-space form.
+    probe = np.zeros((60, 126), dtype=np.float32)
+    hand = np.linspace(0.05, 0.35, 21 * 3).astype(np.float32).reshape(21, 3)
+    hand[0, 0] = 0.0
+    hand[0, 1] = 0.0
+    probe[:, :63] = hand.reshape(-1)
+    mirrored = SignAugment(
+        p=1.0, noise_std=0.0, scale_range=(1.0, 1.0), translation_std=0.0,
+        dropout_prob=0.0, temporal_mask_prob=0.0, temporal_jitter_prob=0.0,
+        mirror_prob=1.0, max_temporal_shift=0,
+    )(probe).reshape(60, 2, 21, 3)
+    src_x = hand[:, 0]
+    dst_x = mirrored[0, 1, :, 0]  # slots are swapped by the mirror
+    if abs(float(dst_x[0])) > 1e-6:
+        _fail(f"mirror moved the wrist off the origin (x={float(dst_x[0]):.4f}); "
+              f"implementation does not match the wrist-centered contract.")
+    span_src = float(src_x.max() - src_x.min())
+    span_dst = float(dst_x.max() - dst_x.min())
+    if span_src > 1e-6 and abs(span_dst / span_src - 1.0) > 1e-3:
+        _fail(f"mirror changed hand span by {span_dst / span_src:.2f}x; "
+              f"expected an isometry.")
+
+    if float(aug_cfg.get("temporal_mask_prob", 0.0)) > 0.0:
+        _fail("temporal_mask_prob > 0 but the model input has no frame-validity "
+              "channel: a masked frame is indistinguishable from padding and "
+              "from a both-hands-absent frame.")
+
+
+def _enforce_research_preconditions(args, cfg, manifest_checksum: str) -> None:
+    """--run-purpose research: provenance and split validity must hold BEFORE
+    a long training run burns compute and produces an uncitable checkpoint."""
+    problems = []
+    if not str(args.dataset_version or "").strip():
+        problems.append("--dataset_version is empty")
+    if not str(args.split_version or "").strip():
+        problems.append("--split_version is empty")
+    if not manifest_checksum:
+        problems.append("no dataset_manifest_checksum found next to the split "
+                        "(generate splits with make_splits.py --dataset_manifest ...)")
+    if not _git_commit_hash():
+        problems.append("git commit hash unavailable; run provenance cannot be pinned")
+
+    meta_path = Path(cfg.train_csv).resolve().parent / "split_metadata.json"
+    if not meta_path.exists():
+        # cfg.train_csv may already point at the filtered copy in run_dir
+        meta_path = Path(args.train_csv).resolve().parent / "split_metadata.json"
+    if not meta_path.exists():
+        problems.append(f"split_metadata.json not found next to {args.train_csv}")
+    else:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            problems.append(f"split_metadata.json unreadable: {exc}")
+            meta = {}
+        if "valid_for_research" not in meta:
+            problems.append("split_metadata.json predates the validity gate "
+                            "(no valid_for_research field) — regenerate the split")
+        elif not meta.get("valid_for_research"):
+            reasons = "; ".join(meta.get("invalid_reasons") or ["unspecified"])
+            problems.append(f"split is not valid for research: {reasons}")
+
+    if problems:
+        detail = "\n  - ".join(problems)
+        raise SystemExit(
+            f"[RESEARCH] refusing to start a research run:\n  - {detail}\n"
+            f"Fix the above, or use --run-purpose smoke_test for an exploratory run.")
+    print("[RESEARCH] preconditions OK — provenance and split validity verified.")
+
+
+def set_seed(seed: int, *, strict: bool = False, mode: str = "strict") -> dict:
+    """Seed every RNG and request deterministic kernels.
+
+    Returns a report describing what was actually achieved, so callers (and the
+    checkpoint) can record whether the run was genuinely deterministic instead
+    of assuming it. With strict=True a failure to enable deterministic
+    algorithms raises instead of degrading silently.
+
+    mode="fast" seeds every RNG exactly the same but leaves kernel selection
+    free. Chỉ dành cho run thăm dò: cuDNN phải dùng thuật toán backward
+    deterministic cho dilated Conv1d, và trên GPU này nó chậm hơn ~170 lần
+    (4 ms -> 750 ms mỗi batch với TCN). Chế độ đã dùng luôn được ghi vào
+    checkpoint nên không thể nhầm run thăm dò với run cho bài báo.
+
+    NOTE: on CUDA, torch requires CUBLAS_WORKSPACE_CONFIG to be set BEFORE the
+    CUDA context is created. Setting it here is already too late if a tensor
+    has been allocated; scripts/verify_determinism.py sets it in the child
+    environment before launching.
+    """
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+
+    cublas_cfg = os.environ.get("CUBLAS_WORKSPACE_CONFIG", "")
+    using_cuda = torch.cuda.is_available()
+    fast_mode = str(mode).lower() == "fast"
+
+    torch.backends.cudnn.deterministic = not fast_mode
+    torch.backends.cudnn.benchmark = fast_mode
+
+    report = {
+        "seed": int(seed),
+        "mode": "fast" if fast_mode else "strict",
+        "cudnn_deterministic": not fast_mode,
+        "cublas_workspace_config": cublas_cfg,
+        "deterministic_algorithms": False,
+        "warnings": [],
+    }
+
+    if fast_mode:
+        msg = (
+            "determinism=fast: kernel không deterministic, kết quả KHÔNG tái lập "
+            "bit-for-bit. Chỉ dùng cho run thăm dò, không dùng cho số liệu bài báo."
+        )
+        report["warnings"].append(msg)
+        print(f"[DETERMINISM][WARN] {msg}")
+        return report
+
+    if using_cuda and cublas_cfg not in (":4096:8", ":16:8"):
+        msg = (
+            "CUDA is available but CUBLAS_WORKSPACE_CONFIG is not set to "
+            f"'{CUBLAS_DETERMINISTIC_CONFIG}' (got {cublas_cfg!r}); cuBLAS matmuls "
+            "may be non-deterministic across runs."
+        )
+        if strict:
+            raise RuntimeError(msg)
+        report["warnings"].append(msg)
+        print(f"[DETERMINISM][WARN] {msg}")
+
     try:
         torch.use_deterministic_algorithms(True)
-    except Exception:
-        pass
+        report["deterministic_algorithms"] = True
+    except Exception as exc:
+        msg = f"torch.use_deterministic_algorithms(True) failed: {exc}"
+        if strict:
+            raise RuntimeError(msg) from exc
+        report["warnings"].append(msg)
+        # Loud, not silent: a swallowed failure here silently invalidates any
+        # reproducibility claim made about the run.
+        print(f"[DETERMINISM][WARN] {msg}")
+
+    return report
 
 
 def _seed_worker(worker_id: int) -> None:
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
-
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size: int):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, : x.size(2) - self.chomp_size]
-
-
-class TemporalBlock(nn.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int,
-        dilation: int,
-        dropout: float,
-    ) -> None:
-        super().__init__()
-        pad = (kernel_size - 1) * dilation
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp1 = Chomp1d(pad)
-        self.relu1 = nn.ReLU()
-        self.drop1 = nn.Dropout(dropout)
-
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp2 = Chomp1d(pad)
-        self.relu2 = nn.ReLU()
-        self.drop2 = nn.Dropout(dropout)
-
-        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
-        self.out_relu = nn.ReLU()
-
-        # Kaiming initialization
-        for m in [self.conv1, self.conv2]:
-            nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-        if self.downsample is not None:
-            nn.init.kaiming_normal_(self.downsample.weight, nonlinearity="linear")
-            if self.downsample.bias is not None:
-                nn.init.zeros_(self.downsample.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.conv1(x)
-        out = self.chomp1(out)
-        out = self.relu1(out)
-        out = self.drop1(out)
-
-        out = self.conv2(out)
-        out = self.chomp2(out)
-        out = self.relu2(out)
-        out = self.drop2(out)
-
-        res = x if self.downsample is None else self.downsample(x)
-        return self.out_relu(out + res)
-
-
-class TCNClassifier(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        num_classes: int,
-        channels: int = 64,
-        levels: int = 3,
-        kernel_size: int = 5,
-        dropout: float = 0.3,
-        use_proj: bool = True,
-        proj_dim: Optional[int] = None,
-    ) -> None:
-        super().__init__()
-        proj_dim = proj_dim or channels
-        self.proj = nn.Identity()
-        current_in = in_dim
-        if use_proj and in_dim != proj_dim:
-            self.proj = nn.Conv1d(in_dim, proj_dim, kernel_size=1)
-            current_in = proj_dim
-
-        blocks: List[nn.Module] = []
-        for i in range(levels):
-            dilation = 2 ** i
-            blocks.append(
-                TemporalBlock(
-                    in_channels=current_in if i == 0 else channels,
-                    out_channels=channels,
-                    kernel_size=kernel_size,
-                    dilation=dilation,
-                    dropout=dropout,
-                )
-            )
-        self.network = nn.Sequential(*blocks)
-        self.classifier = nn.Linear(channels, num_classes)
-        nn.init.kaiming_uniform_(self.classifier.weight, a=math.sqrt(5))
-        if self.classifier.bias is not None:
-            nn.init.zeros_(self.classifier.bias)
-
-    def forward(self, x_btd: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        # x_btd: [B, T, D] -> [B, D, T]
-        x = x_btd.transpose(1, 2)
-        x = self.proj(x)
-        x = self.network(x)
-        # masked global average pooling over time
-        b, c, t = x.shape
-        mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        mask = mask.unsqueeze(1)  # [B,1,T]
-        x = x.masked_fill(~mask, 0.0)
-        denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)  # [B,1]
-        pooled = x.sum(dim=2) / denom
-        logits = self.classifier(pooled)
-        return logits
 
 
 @dataclass
@@ -186,7 +431,8 @@ class TrainConfig:
     levels: int = 3
     kernel_size: int = 5
     seed: int = 42
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    patience: int = 10
+    device: str = pick_device()
     num_workers: int = 0
     out_dir: Path = Path(__file__).resolve().parents[1] / "train_utils" / "outputs"
 
@@ -254,32 +500,33 @@ def build_loader(
     batch_size: int,
     shuffle: bool,
     num_workers: int,
+    augment_fn=None,
     *,
     features_root: Optional[Path] = None,
     label_to_index_json: Optional[Path] = None,
+    class_uid_to_target_idx: Optional[Dict[str, int]] = None,
     feature_dim: Optional[int] = None,
     seed: int = 42,
 ) -> DataLoader:
-    ds = NPZSignDataset(csv_path, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
-    if feature_dim is None:
-        collate = pad_collate_fn
-    else:
-        collate = lambda b: pad_collate_fn(
-            b,
-            feature_dim=int(feature_dim),
-            on_feature_dim_mismatch="error",
-            log_feature_dim_mismatch=False,
-        )
+    ds = NPZSignDataset(
+        csv_path,
+        root=features_root,
+        label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=class_uid_to_target_idx,
+        to_tensor=True,
+        augment_fn=augment_fn,
+    )
     g = torch.Generator()
     g.manual_seed(int(seed))
     return DataLoader(
         ds,
         batch_size=batch_size,
         shuffle=shuffle,
-        collate_fn=collate,
         num_workers=num_workers,
         worker_init_fn=_seed_worker,
         generator=g,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=( num_workers > 0 and os.name != "nt" ),
     )
 
 
@@ -526,12 +773,14 @@ def train_one_epoch(model: nn.Module, loader: DataLoader, opt: torch.optim.Optim
     total_acc = 0.0
     n = 0
     criterion = nn.CrossEntropyLoss()
-    for X, y, lengths, _ in loader:
+    for X, y, _ in loader:
         X = X.to(device)
         y = y.to(device)
-        lengths = lengths.to(device)
-        logits = model(X, lengths)
+        logits = model(X)
         loss = criterion(logits, y)
+        if not torch.isfinite(loss):
+            print("Non-finite loss detected.")
+            continue
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -552,11 +801,10 @@ def evaluate(model: nn.Module, loader: DataLoader, device: str, num_classes: int
     n = 0
     all_logits: List[torch.Tensor] = []
     all_targets: List[torch.Tensor] = []
-    for X, y, lengths, _ in loader:
+    for X, y, _ in loader:
         X = X.to(device)
         y = y.to(device)
-        lengths = lengths.to(device)
-        logits = model(X, lengths)
+        logits = model(X)
         loss = criterion(logits, y)
         bs = y.size(0)
         total_loss += loss.item() * bs
@@ -570,6 +818,323 @@ def evaluate(model: nn.Module, loader: DataLoader, device: str, num_classes: int
     return total_loss / n, total_acc / n, mf1
 
 
+@torch.no_grad()
+def evaluate_with_handedness(
+    model: nn.Module,
+    loader: DataLoader,
+    device: str,
+    num_classes: int,
+) -> Tuple[float, float, float, Dict[str, float]]:
+    """
+    Evaluate with per-hand accuracy tracking.
+
+    Returns:
+        (loss, accuracy, macro_f1, handedness_metrics)
+    """
+    model.eval()
+    criterion = nn.CrossEntropyLoss()
+    total_loss = 0.0
+    total_acc = 0.0
+    n = 0
+
+    # Per-hand tracking
+    left_only_acc = 0.0
+    left_only_n = 0
+    right_only_acc = 0.0
+    right_only_n = 0
+    both_acc = 0.0
+    both_n = 0
+
+    all_logits: List[torch.Tensor] = []
+    all_targets: List[torch.Tensor] = []
+
+    for X, y, meta in loader:
+        X = X.to(device)
+        y = y.to(device)
+        logits = model(X)
+        loss = criterion(logits, y)
+
+        preds = logits.argmax(1)
+        correct = (preds == y).float()
+
+        bs = y.size(0)
+        total_loss += loss.item() * bs
+        total_acc += correct.sum().item()
+        n += bs
+
+        # Analyze hand presence per sample
+        X_np = X.cpu().numpy()
+        for i in range(bs):
+            left_p, right_p = detect_hand_presence(X_np[i])
+            is_correct = bool(correct[i].item())
+
+            if left_p and not right_p:
+                left_only_acc += float(is_correct)
+                left_only_n += 1
+            elif right_p and not left_p:
+                right_only_acc += float(is_correct)
+                right_only_n += 1
+            elif left_p and right_p:
+                both_acc += float(is_correct)
+                both_n += 1
+
+        all_logits.append(logits.cpu())
+        all_targets.append(y.cpu())
+
+    logits = torch.cat(all_logits, dim=0) if all_logits else torch.empty(0, num_classes)
+    targets = torch.cat(all_targets, dim=0) if all_targets else torch.empty(0, dtype=torch.long)
+    mf1 = macro_f1(logits, targets, num_classes) if logits.numel() > 0 else 0.0
+
+    hand_metrics = {
+        'left_only_acc': left_only_acc / max(1, left_only_n),
+        'left_only_n': left_only_n,
+        'right_only_acc': right_only_acc / max(1, right_only_n),
+        'right_only_n': right_only_n,
+        'both_acc': both_acc / max(1, both_n),
+        'both_n': both_n,
+    }
+
+    return total_loss / n, total_acc / n, mf1, hand_metrics
+
+@torch.no_grad()
+def compute_test_evaluation(
+    model: nn.Module,
+    loader: DataLoader,
+    device: str,
+    num_classes: int,
+    label_map: Dict[str, int],
+) -> Dict[str, object]:
+    """Confusion matrix + per-class precision/recall/F1, plus an "overall"
+    block that goes beyond accuracy/F1: balanced accuracy and MCC stay
+    informative under class imbalance (accuracy/F1 alone can look fine while
+    the model ignores rare classes), and top-k / ROC-AUC read the full
+    probability output instead of collapsing it to a single argmax.
+
+    Returned structure is JSON-serializable and goes into the metrics-file
+    "final" record so the trainer can persist it for the Step 7 UI.
+    """
+    model.eval()
+    cm = [[0] * num_classes for _ in range(num_classes)]
+    all_probs: List[np.ndarray] = []
+    all_preds: List[int] = []
+    all_targets: List[int] = []
+    for X, y, _ in loader:
+        X = X.to(device)
+        probs = torch.softmax(model(X), dim=1).cpu().numpy()
+        preds = probs.argmax(1).tolist()
+        all_probs.append(probs)
+        all_preds.extend(preds)
+        all_targets.extend(y.tolist())
+        for t, p in zip(y.tolist(), preds):
+            if 0 <= t < num_classes and 0 <= p < num_classes:
+                cm[t][p] += 1
+
+    idx_to_label = {int(v): str(k) for k, v in label_map.items()}
+    per_class = []
+    for c in range(num_classes):
+        tp = cm[c][c]
+        support = sum(cm[c])
+        pred_total = sum(cm[r][c] for r in range(num_classes))
+        precision = tp / pred_total if pred_total else 0.0
+        recall = tp / support if support else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+        per_class.append({
+            "class_idx": c,
+            "label_key": idx_to_label.get(c, f"class_{c}"),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "support": support,
+        })
+
+    labels = [idx_to_label.get(c, f"class_{c}") for c in range(num_classes)]
+
+    probs_arr = np.concatenate(all_probs, axis=0) if all_probs else np.zeros((0, num_classes))
+    overall: Dict[str, object] = {
+        "accuracy": round(temporal_accuracy(all_preds, all_targets), 4),
+        "macro_f1": round(macro_f1_np(all_preds, all_targets, num_classes), 4),
+        "balanced_accuracy": round(balanced_accuracy(all_preds, all_targets, num_classes), 4),
+        "matthews_corrcoef": round(matthews_corrcoef(all_preds, all_targets, num_classes), 4),
+        "roc_auc_macro_ovr": (
+            round(roc_auc_macro_ovr(probs_arr, all_targets, num_classes), 4)
+            if probs_arr.shape[0] else 0.0
+        ),
+    }
+    if num_classes > 3:
+        overall["top3_accuracy"] = round(top_k_accuracy(probs_arr, all_targets, 3), 4)
+
+    return {"labels": labels, "confusion_matrix": cm, "per_class": per_class, "overall": overall}
+
+
+def measure_model_efficiency(
+    model: nn.Module,
+    input_dim: int,
+    *,
+    seq_len: int = 60,
+    n_runs: int = 30,
+    warmup: int = 10,
+) -> Dict[str, object]:
+    """Param count, checkpoint size, and inference latency on CPU.
+
+    Always measured on CPU regardless of the training device: the training
+    GPU says nothing about whether an architecture is light enough for a
+    phone, which is the question a "lightweight for mobile" claim needs to
+    answer. Runs on a detached copy so it never disturbs the model object the
+    rest of the run still uses (device placement, BN/dropout mode, grads).
+    """
+    import copy
+    import time as _time
+
+    cpu_model = copy.deepcopy(model).to("cpu").eval()
+    param_count = sum(p.numel() for p in cpu_model.parameters())
+    trainable_count = sum(p.numel() for p in cpu_model.parameters() if p.requires_grad)
+    size_bytes = sum(p.numel() * p.element_size() for p in cpu_model.parameters())
+    size_bytes += sum(b.numel() * b.element_size() for b in cpu_model.buffers())
+
+    x = torch.randn(1, seq_len, input_dim)
+    times_ms: List[float] = []
+    with torch.no_grad():
+        for _ in range(warmup):
+            cpu_model(x)
+        for _ in range(n_runs):
+            t0 = _time.perf_counter()
+            cpu_model(x)
+            times_ms.append((_time.perf_counter() - t0) * 1000.0)
+    times = np.asarray(times_ms)
+
+    return {
+        "param_count": int(param_count),
+        "trainable_param_count": int(trainable_count),
+        "checkpoint_size_mb": round(float(size_bytes / (1024 ** 2)), 4),
+        "cpu_inference_latency_ms": {
+            "mean": round(float(times.mean()), 4),
+            "p50": round(float(np.percentile(times, 50)), 4),
+            "p95": round(float(np.percentile(times, 95)), 4),
+            "std": round(float(times.std()), 4),
+            "batch_size": 1,
+            "seq_len": seq_len,
+            "n_runs": n_runs,
+        },
+    }
+
+
+def normalization_version_for(feature_version: str, in_dim: int) -> str:
+    """The normalization identity a checkpoint must declare.
+
+    This exists because the realtime service admits a checkpoint by comparing
+    THIS string (and feature_dim) against its registry entry, then feeds the
+    model whatever `shared/normalization.normalize_hands_vector_126` produces —
+    which is the v1 transform. A model trained under VOYA_FEATURE_VERSION=v1z
+    has the same 126 dims as v1 but different semantics (depth re-referenced),
+    so stamping it "hands126_v1" would pass every check and then serve silently
+    wrong predictions: the one failure mode with no error anywhere. Encoding the
+    feature version here turns that into a loud refusal at load time, which is
+    what it should be until realtime's own preprocessing is switched to match.
+    """
+    fv = (feature_version or "v1").strip() or "v1"
+    return f"hands{int(in_dim)}_{fv}"
+
+
+def build_checkpoint(
+    *,
+    model,
+    cfg,
+    in_dim,
+    num_classes,
+    label_map,
+    te_acc=None,
+    te_f1=None,
+    te_hand_metrics=None,
+    stamp="",
+    index_to_label: Optional[Dict[int, object]] = None,
+    feature_version: str = "v1",
+    contract_extra: Optional[Dict[str, object]] = None,
+    idx_to_label_rich: Optional[Dict[int, Dict[str, object]]] = None,
+):
+    ckpt = {
+        "schema_version": "1.0",
+
+        "model_state_dict": {
+            k: v.detach().cpu()
+            for k, v in model.state_dict().items()
+        },
+
+        "model_type": "TCN",
+
+        # model.get_config() is each architecture's own mirror of its
+        # from_config() — the realtime service rebuilds the model by calling
+        # model_class.from_config(config=ckpt["model_config"]), so this MUST
+        # be the config of the model actually trained. A hand-picked TCN-shaped
+        # dict here (channels/levels/kernel_size) used to be written for every
+        # architecture; for BiGRU/LSTM/HandGCN it carried none of their real
+        # keys (hidden_size, num_layers, gcn_channels, ...), which only stayed
+        # silent because no CLI flag could vary those away from from_config()'s
+        # own defaults. Now that they're tunable (see --hidden_size etc.), a
+        # wrong model_config here would fail to load: the rebuilt module's
+        # layer shapes would no longer match the saved state_dict.
+        "model_config": model.get_config(),
+
+        # The dimension actually fed to the model. `in_dim` was already a
+        # parameter of this function but the body ignored it and wrote the
+        # 126 constant, so a 182-dim v1g checkpoint used to describe itself as
+        # 126-dim — a contract the loader would then fail to satisfy.
+        "feature_dim": int(in_dim),
+
+        "seq_len": 60,
+
+        "num_classes": num_classes,
+
+        # Ba nguồn, theo thứ tự ưu tiên — và cả ba đều cần, vì mỗi cái được
+        # đặt ở MỘT đường chạy khác nhau:
+        #
+        #   index_to_label     đường VẬN HÀNH (`i2l_for_ckpt`, chỉ đặt khi
+        #                      split tự khai `purpose="operational"`)
+        #   idx_to_label_rich  đường PROFILE/SUBSET (`rich_i2l`)
+        #   label_map          đường trần — chỉ còn khoá nhãn
+        #
+        # Vì sao không bỏ được cái thứ hai: khoá trần buộc dịch vụ thời gian
+        # thực đi tra tên hiển thị trong `processed/analysis/index_to_label.json`
+        # toàn cục, mà tệp đó chỉ phủ từ vựng hoa-de. Với một mô hình bảng chữ
+        # cái thì không khớp gì cả, và giao diện hiện "vn/alphabet/a" ở chỗ đáng
+        # lẽ phải là "A". Checkpoint vốn đã mang đủ thứ để tự gọi tên lớp của
+        # mình, nên nó phải mang theo.
+        #
+        # `normalize_idx_to_label` phía suy luận xử lý được cả hai kiểu.
+        "idx_to_label": (
+            index_to_label if index_to_label
+            else {int(k): v for k, v in idx_to_label_rich.items()} if idx_to_label_rich
+            else {int(v): k for k, v in label_map.items()}
+        ),
+
+        "label_to_idx": label_map,
+
+        # "hands126_v1" for the default path, so every existing checkpoint and
+        # registry entry keeps matching exactly as before.
+        "normalization_version": normalization_version_for(feature_version, in_dim),
+
+        "feature_version": str(feature_version or "v1"),
+
+        "preprocess_contract": {
+            "landmark_order": "MP_Left(63)+MP_Right(63)",
+            "missing_hands": "zero_filled",
+            "coordinate_space": "mediapipe_normalized",
+            "coordinate_order": "xyz",
+            "frontend_mirroring": "visual_only",
+            "expects_strict_shape": [60, int(in_dim)],
+        },
+
+        "metrics": {
+            "test_acc": te_acc,
+            "test_f1": te_f1,
+            "handedness": te_hand_metrics or {},
+        },
+
+        "created_at": stamp,
+    }
+    if contract_extra:
+        ckpt.update(contract_extra)
+    return ckpt
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a TCN classifier on NPZ sign-sequence features.")
     try:
@@ -581,10 +1146,50 @@ def main() -> None:
     parser.add_argument("--val_csv", type=Path, default=default_root / "val.csv")
     parser.add_argument("--test_csv", type=Path, default=default_root / "test.csv")
     parser.add_argument(
+        "--features_root",
+        type=Path,
+        default=None,
+        help="Root directory containing feature .npz files"
+    )
+    parser.add_argument(
         "--dialect",
         action="append",
         default=None,
-        help="Optional: filter to one or more dialects (can repeat or comma-separate). Example: --dialect bac",
+        help="[DEPRECATED — legacy experiments only] filter by legacy dialect column. "
+             "New experiments must use --recognition_profile / --unified.",
+    )
+    # --- Vocabulary schema v2: recognition-profile training ---
+    parser.add_argument(
+        "--recognition_profile",
+        type=str,
+        default="",
+        choices=["", *RECOGNITION_PROFILES],
+        help="Train a profile model: common vocabulary + this profile's vocabulary. "
+             "One of: " + ", ".join(RECOGNITION_PROFILES),
+    )
+    parser.add_argument(
+        "--include_common", dest="include_common", action="store_true", default=False,
+        help="EXPLICITLY include common vocabulary in the profile model. "
+             "Default: false — profiles (including the standalone 'alphabet') train independently.",
+    )
+    parser.add_argument("--no_include_common", dest="include_common", action="store_false",
+                        help="[kept for compatibility — no-op now that the default is false]")
+    parser.add_argument(
+        "--unified", action="store_true",
+        help="Unified baseline: common + every validly-assigned profile (mutually exclusive with --recognition_profile)",
+    )
+    parser.add_argument("--dataset_version", type=str, default="unversioned",
+                        help="Dataset manifest version this run trains on (goes into output path + checkpoint)")
+    parser.add_argument("--split_version", type=str, default="unversioned",
+                        help="Split version identifier (goes into output path + checkpoint)")
+    parser.add_argument(
+        "--augmentation_profile", type=str, default="full",
+        choices=["none", "spatial", "temporal", "full"],
+        help="Train-time augmentation profile (validation/test are never augmented)",
+    )
+    parser.add_argument(
+        "--aug_set", action="append", default=None, metavar="KEY=VALUE",
+        help="Override an augmentation parameter, e.g. --aug_set mirror_probability=0.0 (repeatable)",
     )
     parser.add_argument(
         "--filter_language",
@@ -604,7 +1209,23 @@ def main() -> None:
         default="",
         help="Optional output tag. If omitted, auto-generated from subset (e.g. dialect).",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="tcn",
+        choices=["tcn", "cnn", "lstm", "bigru_attention", "hdgcn"],
+        help="Model architecture to use. Default: tcn",
+    )
     parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument(
+        "--metrics_file",
+        type=str,
+        default="",
+        help=(
+            "Optional path to a JSONL file. One JSON object per epoch is appended "
+            "(structured metrics channel for the backend — more robust than stdout parsing)."
+        ),
+    )
     parser.add_argument(
         "--feature_dim",
         type=int,
@@ -621,14 +1242,87 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--dropout", type=float, default=0.3)
-    parser.add_argument("--channels", type=int, default=64)
-    parser.add_argument("--levels", type=int, default=3)
-    parser.add_argument("--kernel_size", type=int, default=5)
+    parser.add_argument("--channels", type=int, default=64,
+                        help="TCN/CNN: conv channel width.")
+    parser.add_argument("--levels", type=int, default=3,
+                        help="TCN: number of temporal blocks (dilation 2**i each).")
+    parser.add_argument("--kernel_size", type=int, default=5,
+                        help="TCN/CNN: convolution kernel size.")
+    parser.add_argument("--num_conv_layers", type=int, default=3,
+                        help="CNN: number of conv blocks (1-4).")
+    parser.add_argument("--hidden_size", type=int, default=64,
+                        help="LSTM/BiGRU+Attention: recurrent hidden width.")
+    parser.add_argument("--num_layers", type=int, default=2,
+                        help="LSTM/BiGRU+Attention: number of recurrent layers (1-4).")
+    parser.add_argument("--gcn_channels", type=int, default=64,
+                        help="HandGCN: graph-conv channel width.")
+    parser.add_argument("--num_gcn_layers", type=int, default=2,
+                        help="HandGCN: number of fine-level graph-conv layers.")
+    parser.add_argument("--temporal_channels", type=int, default=128,
+                        help="HandGCN: channel width of the temporal-conv stage.")
+    parser.add_argument(
+        "--temporal_pool", type=str, default="attention",
+        choices=["gap", "attention", "mean_max"],
+        help="TCN time-axis aggregation. 'attention' (default) keeps temporal "
+             "order — better for dynamic multi-action phrases; 'gap' is the legacy "
+             "order-agnostic average (only for reproducing old runs).",
+    )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--patience", type=int, default=10,
+        help="Early-stopping patience on validation macro-F1. Default 10 keeps "
+             "every published result reproducible. Raise it when validation is "
+             "measured on signers the model never trains on: that signal is far "
+             "noisier than same-signer validation, and 10 has been observed to "
+             "stop while the model is still underfitted (train acc 0.88 at the "
+             "epoch it stopped, against 0.98 on a fold whose validation shares "
+             "signers with training).",
+    )
+    parser.add_argument(
+        "--run-purpose", dest="run_purpose", type=str, default="smoke_test",
+        choices=["smoke_test", "research"],
+        help="Declare what this run is for. Defaults to smoke_test so an "
+             "exploratory run can NEVER drift into a paper table: "
+             "aggregate_experiment_results.py only reports run_purpose=research. "
+             "Pass --run-purpose research for an official experiment; it also "
+             "enforces provenance and split validity before training starts.",
+    )
+    parser.add_argument(
+        "--determinism", type=str, default="strict", choices=["strict", "fast"],
+        help="strict (mặc định): kernel deterministic, tái lập bit-for-bit — dùng "
+             "cho mọi số liệu đưa vào bài báo. fast: bỏ ràng buộc kernel, TCN nhanh "
+             "hơn ~170 lần nhưng KHÔNG tái lập; chỉ dùng để thử nghiệm. Chế độ được "
+             "ghi vào checkpoint (determinism.mode).",
+    )
+    # pick_device(), not torch.cuda.is_available(): the latter says "there is a
+    # working driver", not "this torch build has kernels for this chip". See
+    # pick_device's docstring — a wheel without the card's sm_ arch dies mid-run.
+    parser.add_argument("--device", type=str, default=pick_device())
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--out_dir", type=Path, default=Path("train_utils/outputs"))
+    parser.add_argument("--out_dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
+    parser.add_argument("--run_diagnostics", action="store_true", help="Run signer diversity, imbalance, and sequence length diagnostics after training")
+    parser.add_argument(
+        "--track",
+        action="store_true",
+        default=False,
+        help="Enable experiment tracking via the SignBridge API. Training is unaffected if the API is unavailable.",
+    )
+    parser.add_argument(
+        "--api-url",
+        type=str,
+        default="http://localhost:8000/api/v1",
+        help="Base URL for the SignBridge tracking API (default: http://localhost:8000/api/v1).",
+    )
+    parser.add_argument(
+        "--experiment-id",
+        type=int,
+        default=None,
+        help="Attach tracking to an existing experiment ID instead of creating a new one.",
+    )
     args = parser.parse_args()
+    # Set when a profile/subset run builds its own label maps; stays None on the
+    # plain path, where build_checkpoint falls back to bare keys as before.
+    rich_i2l: Optional[Dict[int, Dict[str, object]]] = None
 
     cfg = TrainConfig(
         train_csv=args.train_csv,
@@ -643,31 +1337,199 @@ def main() -> None:
         levels=args.levels,
         kernel_size=args.kernel_size,
         seed=args.seed,
+        patience=args.patience,
         device=args.device,
         num_workers=args.num_workers,
         out_dir=args.out_dir,
     )
 
-    set_seed(cfg.seed)
+    if args.determinism == "fast" and args.run_purpose == "research":
+        raise SystemExit(
+            "[RESEARCH] --determinism=fast không dùng được với --run-purpose research: "
+            "số liệu bài báo phải tái lập bit-for-bit."
+        )
+    determinism_report = set_seed(cfg.seed, mode=args.determinism)
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
     dialects = _parse_multi_values(args.dialect)
     languages = _parse_multi_values(args.filter_language)
+
+    profile_mode = bool(args.recognition_profile or args.unified)
+    if args.unified and args.recognition_profile:
+        raise SystemExit("--unified and --recognition_profile are mutually exclusive.")
+    if profile_mode and (dialects or languages):
+        raise SystemExit("--recognition_profile/--unified cannot be combined with the "
+                         "deprecated --dialect/--filter_language flags.")
+    if dialects:
+        print("[DEPRECATED] --dialect is a legacy-compatibility flag. New experiments "
+              "must use --recognition_profile or --unified (vocabulary schema v2).")
+
+    # Parse augmentation overrides (KEY=VALUE)
+    aug_overrides: Dict[str, object] = {}
+    for kv in (args.aug_set or []):
+        if "=" not in kv:
+            raise SystemExit(f"--aug_set expects KEY=VALUE, got '{kv}'")
+        k, v = kv.split("=", 1)
+        try:
+            aug_overrides[k.strip()] = float(v)
+        except ValueError:
+            raise SystemExit(f"--aug_set value must be numeric: '{kv}'")
+
     subset_mode = bool(dialects or languages)
 
     # For subset runs, create a filtered copy of split CSVs and a local label mapping.
     # IMPORTANT: default behavior remains unchanged when no subset args are provided.
     features_root: Optional[Path] = None
     label_to_index_json: Optional[Path] = None
+    #: `{class_uid: target_idx}` khi và chỉ khi split tự khai `purpose=operational`.
+    #: `None` nghĩa là đường nghiên cứu/legacy — giữ nguyên mọi hành vi cũ.
+    declared_mapping: Optional[Dict[str, int]] = None
+    #: Mục `classes` nguyên văn của split, giữ để chép `slug/dialect/region`
+    #: sang checkpoint. Chỉ để ĐỌC — không tham gia quyết định chỉ số.
+    declared_classes: List[Dict[str, object]] = []
+    #: `index_to_label` mang metadata hiển thị, chỉ đặt ở đường vận hành.
+    i2l_for_ckpt: Dict[int, object] = {}
+    #: Nguồn gốc hiện vật, chép nguyên văn từ bản khai của split và đóng băng
+    #: vào checkpoint. Khác `label_mapping` ở chỗ khối kia được TÍNH LẠI từ ánh
+    #: xạ mà trainer thật sự dùng, còn khối này là điều hiện vật ĐÃ KHAI. Hai
+    #: khối phải khớp; đối chiếu chúng là cách phát hiện trainer đã đổi tập lớp
+    #: hoặc đổi ánh xạ trên đường đi.
+    declared_provenance: Dict[str, object] = {}
     subset_tag = ""
-    if subset_mode:
+    subset_dir: Optional[Path] = None
+    common_labels: List[str] = []
+    profile_specific_labels: List[str] = []
+    # Đọc ngay từ thư mục split gốc, trước khi bất kỳ nhánh nào repoint
+    # cfg.train_csv sang bản lọc trong run_dir. Trước đây chỉ nhánh profile mode
+    # đọc checksum, nên một split hợp lệ chia theo dialect luôn trượt cổng
+    # --run-purpose research với lý do "no dataset_manifest_checksum" dù
+    # split_metadata.json nằm ngay cạnh train.csv.
+    manifest_checksum = _read_split_manifest_checksum(cfg.train_csv)
+    motion_types_present: List[str] = []
+
+    if profile_mode:
+        # ------------------------------------------------------------------
+        # Vocabulary schema v2: common + selected profile (or unified).
+        # Split CSVs must carry vocabulary_scope/recognition_profile columns
+        # (produced by make_splits --dataset_manifest ...).
+        # ------------------------------------------------------------------
+        features_root = (args.features_root if args.features_root is not None
+                         else _find_features_root_from_csv(cfg.train_csv))
+        if features_root is None:
+            try:
+                dataset_root = cfg.train_csv.resolve().parents[2]
+                features_root = dataset_root / "dataset" / "features"
+            except Exception:
+                features_root = None
+        if features_root is None or not features_root.exists():
+            raise SystemExit("Profile mode requires locating the 'features' folder.")
+
+        profile_tag = "unified" if args.unified else args.recognition_profile
+        subset_tag = profile_tag
+        run_dir = (args.out_dir / args.dataset_version / profile_tag /
+                   args.split_version / args.model_type / f"seed_{args.seed}")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        subset_dir = run_dir
+        # Capture the manifest checksum from the ORIGINAL split dir before
+        # cfg.train_csv is repointed at the filtered copy in run_dir.
+        manifest_checksum = _read_split_manifest_checksum(cfg.train_csv)
+
+        def _prep_profile_csv(src_csv: Path, name: str) -> Path:
+            rows, fieldnames = _read_csv_rows(src_csv)
+            if rows and "vocabulary_scope" not in rows[0]:
+                raise SystemExit(
+                    f"{name} split CSV has no vocabulary schema v2 columns "
+                    f"(vocabulary_scope/recognition_profile). Generate splits with "
+                    f"make_splits.py --dataset_manifest ... first: {src_csv}")
+            rows = select_rows_for_profile(
+                rows,
+                recognition_profile=(args.recognition_profile or None),
+                include_common=args.include_common,
+                unified=args.unified,
+            )
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split empty after filtering.")
+            for r in rows:
+                r["label_key"] = label_key_v2(
+                    r.get("language") or "vn", r.get("vocabulary_scope") or "",
+                    r.get("recognition_profile") or "",
+                    r.get("slug") or r.get("label_slug") or "")
+                if not (r.get("label_slug") or "").strip():
+                    r["label_slug"] = (r.get("slug") or "").strip()
+            collisions = check_label_collisions(rows)
+            if collisions:
+                raise SystemExit(f"Label collision between common and profile-specific "
+                                 f"vocabulary: {collisions} — resolve before training.")
+            fieldnames = _ensure_cols(fieldnames, ["label_key", "label_slug", "label_original"])
+            rows = _filter_rows_with_existing_features(
+                rows, features_root=features_root, default_language="vn", label=f"{name} split")
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split empty after "
+                                 f"removing missing feature files.")
+            out_csv = run_dir / f"{name}.csv"
+            _write_csv_rows(out_csv, rows, fieldnames)
+            return out_csv
+
+        sub_train = _prep_profile_csv(cfg.train_csv, "train")
+        sub_val = _prep_profile_csv(cfg.val_csv, "val")
+        sub_test = _prep_profile_csv(cfg.test_csv, "test")
+
+        train_rows, _ = _read_csv_rows(sub_train)
+        l2i, i2l = _build_subset_label_maps(train_rows, default_language="vn")
+        rich_i2l = i2l
+        if len(l2i) < 2:
+            raise SystemExit(f"Profile '{profile_tag}': need at least 2 classes, got {len(l2i)}.")
+        common_labels, profile_specific_labels = split_common_and_profile_labels(list(l2i.keys()))
+
+        # Hard cross-profile guard: a profile checkpoint must never contain
+        # another profile's labels (alphabet vs regional vs hoa_de isolation).
+        if not args.unified:
+            allowed = {f"vn/{args.recognition_profile}/"}
+            if args.include_common:
+                allowed.add("vn/common/")
+            foreign = [k for k in l2i if not any(k.startswith(p) for p in allowed)]
+            assert not foreign, (
+                f"Cross-profile label leak into '{profile_tag}' label space: {foreign[:5]}")
+
+        # Motion types present in this label space (checkpoint contract field).
+        motion_types_present = sorted(
+            {(r.get("motion_type") or "").strip() or "unknown" for r in train_rows})
+
+        def _filter_profile_known(src_csv: Path, name: str) -> None:
+            rows, fieldnames = _read_csv_rows(src_csv)
+            before = len(rows)
+            rows = [r for r in rows if (r.get("label_key") or "").strip() in l2i]
+            if before - len(rows) > 0:
+                print(f"Profile '{profile_tag}': removed {before - len(rows)} rows "
+                      f"from {name} due to labels unseen in train.")
+            if not rows:
+                raise SystemExit(f"Profile '{profile_tag}': {name} split became empty.")
+            _write_csv_rows(src_csv, rows, fieldnames)
+
+        _filter_profile_known(sub_val, "val")
+        _filter_profile_known(sub_test, "test")
+
+        label_to_index_json = run_dir / "label_to_index.json"
+        (run_dir / "label_to_index.json").write_text(
+            json.dumps(l2i, indent=2, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "index_to_label.json").write_text(
+            json.dumps({str(k): v for k, v in i2l.items()}, indent=2, ensure_ascii=False),
+            encoding="utf-8")
+
+        cfg.train_csv, cfg.val_csv, cfg.test_csv = sub_train, sub_val, sub_test
+        cfg.out_dir = run_dir
+        subset_mode = True  # reuse downstream subset bookkeeping (tag/summary/tracking)
+        print(f"[PROFILE] {profile_tag}: common={len(common_labels)} "
+              f"profile_specific={len(profile_specific_labels)} classes={len(l2i)}")
+
+    if subset_mode and not profile_mode:
         # Determine an absolute features root so generated CSVs can live anywhere.
-        features_root = _find_features_root_from_csv(cfg.train_csv)
+        features_root = ( args.features_root if args.features_root is not None else _find_features_root_from_csv(cfg.train_csv) )
         if features_root is None:
             # Back-compat heuristic for the default layout: <root>/processed/splits/train.csv
             try:
                 dataset_root = cfg.train_csv.resolve().parents[2]
-                features_root = dataset_root / "features"
+                features_root = dataset_root / "dataset" / "features"
             except Exception:
                 features_root = None
         if features_root is None or not features_root.exists():
@@ -733,9 +1595,92 @@ def main() -> None:
         sub_val = _prep_one(cfg.val_csv, "val")
         sub_test = _prep_one(cfg.test_csv, "test")
 
-        # Build label maps from TRAIN split only (common practice).
-        train_rows, _ = _read_csv_rows(sub_train)
-        l2i, i2l = _build_subset_label_maps(train_rows, default_language=str(args.language or "vn"))
+        # ------------------------------------------------------------------
+        # Đường VẬN HÀNH: danh tính lớp là `class_uid`, do split KHAI BÁO.
+        #
+        # Chỉ chạy khi `split_metadata.json` cạnh split gốc tự khai
+        # `purpose="operational"`. Không split nào khai như vậy tính đến
+        # 14/08/2026, nên nhánh này hiện KHÔNG đổi hành vi của bất kỳ lượt chạy
+        # nào — nó chờ sẵn cho hiện vật vận hành đầu tiên.
+        #
+        # Vì sao phải có: `_build_subset_label_maps` dựng ánh xạ bằng
+        # `enumerate` trên `label_key = vn/<dialect>/<slug>` gom theo THỨ TỰ
+        # HÀNG. Hai hệ quả, cả hai đều im lặng:
+        #   - đổi thứ tự hàng trong CSV là đổi ngữ nghĩa đầu ra của mô hình;
+        #   - `label_key` KHÔNG chứa region, trong khi CSDL cho phép
+        #     `ăn|bac` và `ăn|nam` cùng một dialect — hai lớp hợp lệ bị GỘP
+        #     làm một, không lỗi, không cảnh báo, và độ chính xác vẫn ra số.
+        #
+        # Ánh xạ được truyền THẲNG xuống `NPZSignDataset(class_uid_to_target_idx=…)`.
+        #
+        # Bản trước của khối này dùng một cầu tạm: ghi đè `label_key := class_uid`
+        # trong bản sao ở run dir để `_resolve_target` cũ tra trúng. Nó chạy
+        # đúng, nhưng làm hỏng provenance — split gốc khai một đằng, còn tệp
+        # trainer thật sự đọc là một bản ĐÃ BỊ SỬA trường ngữ nghĩa. Membership
+        # không đổi, nhưng hiện vật được tiêu thụ không còn khớp từng byte với
+        # hiện vật đã khai, nên mã băm mất ý nghĩa làm bằng chứng. Đã gỡ.
+        # ------------------------------------------------------------------
+        from processed.train_utils.label_mapping import (
+            consume_declared, partitions_agree, read_declared,
+        )
+
+        khai_bao = read_declared(Path(cfg.train_csv).resolve().parent)
+        van_hanh = bool(khai_bao) and str(khai_bao.get("purpose") or "") == "operational"
+
+        if van_hanh:
+            anh_xa = consume_declared(khai_bao)
+
+            # ĐỌC, không GHI. Tệp split đi tới trainer nguyên vẹn.
+            theo_phan = {ten: _read_csv_rows(duong_dan)[0]
+                         for duong_dan, ten in ((sub_train, "train"),
+                                                (sub_val, "val"),
+                                                (sub_test, "test"))}
+
+            # Ba phần phải nói cùng một chuyện, và không phần nào được chứa
+            # class_uid ngoài bản khai. KHÔNG lọc chúng đi — một lượt chạy trên
+            # tập khác với tập đã khai là một lượt chạy nói sai về nguồn gốc.
+            partitions_agree(theo_phan, anh_xa)
+
+            declared_mapping = dict(anh_xa)
+            declared_classes = list(khai_bao.get('classes') or [])
+            declared_provenance = {
+                k: khai_bao.get(k) for k in
+                ("split_id", "purpose", "class_set_hash", "class_mapping_hash",
+                 "num_classes", "scope", "files", "policy", "generated_at")
+                if khai_bao.get(k) is not None
+            }
+            l2i = dict(anh_xa)
+            _mo_ta = {str(m.get('class_uid') or ''): m for m in declared_classes}
+            # Mang theo tên hiển thị: nếu chỉ có `class_uid`, giao diện
+            # thời gian thực sẽ hiện UID thô — `normalize_idx_to_label`
+            # tra từ vựng hiện tại theo `label_key`, mà UID thì không
+            # khớp gì cả. Danh tính vẫn là class_uid; đây chỉ là nhãn đọc.
+            i2l = {}
+            for k, v in anh_xa.items():
+                _m = _mo_ta.get(k, {})
+                _slug = str(_m.get('slug') or '')
+                _vung = str(_m.get('region') or '')
+                # Tên người đọc lấy từ bản khai nếu có; nếu không thì dựng từ
+                # slug + vùng. Vùng phải xuất hiện được, vì `ăn [bac]` và
+                # `ăn [nam]` là hai lớp khác nhau và người xem cần phân biệt.
+                _goc = str(_m.get('label_original') or '').strip()
+                i2l[v] = {
+                    "label_key": k,
+                    "class_uid": k,
+                    "label_slug": _slug,
+                    "label_original": _goc or (f"{_slug} [{_vung}]" if _vung else _slug),
+                    "language": "vn",
+                    "dialect": str(_m.get('dialect') or ''),
+                    "region": _vung,
+                }
+            i2l_for_ckpt = dict(i2l)
+            print(f"[OPERATIONAL] ánh xạ theo class_uid từ bản khai: "
+                  f"{len(l2i)} lớp, hash={khai_bao.get('class_mapping_hash', '')[:16]}…")
+        else:
+            # Build label maps from TRAIN split only (common practice).
+            train_rows, _ = _read_csv_rows(sub_train)
+            l2i, i2l = _build_subset_label_maps(train_rows, default_language=str(args.language or "vn"))
+
         if len(l2i) < 2:
             raise SystemExit(f"Subset '{subset_tag}': need at least 2 classes to train; got {len(l2i)}.")
 
@@ -752,8 +1697,13 @@ def main() -> None:
                 raise SystemExit(f"Subset '{subset_tag}': {name} split became empty after removing unseen labels.")
             _write_csv_rows(src_csv, rows, fieldnames)
 
-        _filter_to_known_labels(sub_val, "val")
-        _filter_to_known_labels(sub_test, "test")
+        if not van_hanh:
+            # Đường vận hành KHÔNG lọc: `partitions_agree` phía trên đã từ chối
+            # hẳn nếu có class_uid ngoài bản khai. Lọc lặng lẽ ở đây sẽ khiến
+            # lượt chạy học một tập nhỏ hơn tập mà split khai báo — đúng thứ
+            # `_consent_preflight` đã cấm, và checkpoint sẽ nói sai nguồn gốc.
+            _filter_to_known_labels(sub_val, "val")
+            _filter_to_known_labels(sub_test, "test")
 
         label_to_index_json = subset_dir / "label_to_index.json"
         index_to_label_json = subset_dir / "index_to_label.json"
@@ -770,10 +1720,44 @@ def main() -> None:
     if requested_dim != EXPECTED_FEATURE_DIM:
         raise SystemExit(f"feature_dim must be {EXPECTED_FEATURE_DIM}; got {requested_dim}.")
     in_dim = EXPECTED_FEATURE_DIM
+    # A non-default feature version changes the width of the input. v1 keeps the
+    # constant, so nothing moves unless a run explicitly asks for another version.
+    _fv = os.environ.get("VOYA_FEATURE_VERSION", "v1").strip() or "v1"
+    if _fv != "v1":
+        from shared import features_v2 as _features_v2
+        in_dim = _features_v2.feature_dim(_fv)
+        print(f"[FEATURES] version={_fv} input_dim={in_dim}")
     # infer number of classes from label_to_index if present
-    ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root, label_to_index_json=label_to_index_json, to_tensor=True)
-    if ds_tmp.index_to_label:
+    ds_tmp = NPZSignDataset(cfg.train_csv, root=features_root,
+                            label_to_index_json=label_to_index_json,
+                            class_uid_to_target_idx=declared_mapping, to_tensor=True)
+    label_map = ds_tmp.label_to_index or {}
+
+    if not label_map:
+        raise SystemExit(
+            "label_map is empty; ensure labels.csv or label_to_index.json is present and valid."
+        )
+    if declared_mapping is not None:
+        # Đường VẬN HÀNH: số lớp đến từ chính bản khai, không suy từ dữ liệu.
+        # Kích thước tầng đầu ra và ánh xạ nhãn phải đến từ CÙNG một nguồn —
+        # nếu không thì vẫn có thể xảy ra "ánh xạ nói 22 lớp, đầu ra dựng 23".
+        num_classes = len(declared_mapping)
+        chi_so = sorted(int(v) for v in declared_mapping.values())
+        if chi_so != list(range(num_classes)):
+            raise SystemExit(
+                f"target_idx đã khai không phải 0..{num_classes - 1} liên tục: {chi_so}")
+        if len(label_map) != num_classes:
+            raise SystemExit(
+                f"ánh xạ mà dataset đọc lên ({len(label_map)} lớp) không khớp bản "
+                f"khai ({num_classes} lớp) — hiện vật đã lệch giữa hai bước.")
+        if num_classes < 2:
+            raise SystemExit(f"Need at least 2 classes, got {num_classes}")
+    elif ds_tmp.index_to_label:
         num_classes = len(ds_tmp.index_to_label)
+        if num_classes < 2:
+            raise SystemExit(
+                f"Need at least 2 classes, got {num_classes}"
+            )
     else:
         # fallback: scan labels from a subset of the train set
         label_set = set()
@@ -783,14 +1767,54 @@ def main() -> None:
             label_set.add(int(y_i))
         num_classes = max(label_set) + 1 if label_set else 1
 
-    model = TCNClassifier(
-        in_dim=in_dim,
-        num_classes=num_classes,
-        channels=cfg.channels,
-        levels=cfg.levels,
-        kernel_size=cfg.kernel_size,
-        dropout=cfg.dropout,
-    ).to(cfg.device)
+    # Create model from registry (unified for all architectures)
+    if get_model_class is None:
+        raise RuntimeError("Models registry not available. Check processed/train_utils/models/__init__.py")
+
+    try:
+        model_class = get_model_class(args.model_type)
+        # A single superset dict for every architecture: each model's
+        # from_config() only reads the keys it knows via config.get(key,
+        # default) and silently ignores the rest, so passing all of them
+        # here (instead of hand-picking per model_type) is what lets one CLI
+        # tune any of the five registered architectures.
+        config = {
+            "channels": cfg.channels,                    # TCN, CNN
+            "levels": cfg.levels,                         # TCN
+            "kernel_size": cfg.kernel_size,                # TCN, CNN
+            "num_conv_layers": args.num_conv_layers,       # CNN
+            "dropout": cfg.dropout,                        # all
+            "temporal_pool": args.temporal_pool,           # TCN
+            "hidden_size": args.hidden_size,                # LSTM, BiGRU+Attention
+            "num_layers": args.num_layers,                  # LSTM, BiGRU+Attention
+            "gcn_channels": args.gcn_channels,              # HandGCN
+            "num_gcn_layers": args.num_gcn_layers,          # HandGCN
+            "temporal_channels": args.temporal_channels,    # HandGCN
+        }
+        model = model_class.from_config(
+            input_dim=in_dim,
+            output_dim=num_classes,
+            config=config,
+        ).to(cfg.device)
+        model_name = model.get_model_name()
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load model '{args.model_type}': {e}\n"
+            f"Supported models: tcn, cnn, lstm, bigru_attention, handgcn (hdgcn)"
+        )
+
+    print(f"\n{'='*70}")
+    print(f"Model: {model_name}")
+    print(f"Input Dim: {in_dim} | Output Dim: {num_classes}")
+    print(f"{'='*70}")
+
+    train_augment = build_train_augment(args.augmentation_profile, aug_overrides)
+    augmentation_config = augment_config_dict(args.augmentation_profile, aug_overrides)
+    print(f"[AUGMENT] profile={args.augmentation_profile} overrides={aug_overrides or '{}'}")
+
+    _enforce_augmentation_contract(augmentation_config, args.run_purpose)
+    if args.run_purpose == "research":
+        _enforce_research_preconditions(args, cfg, manifest_checksum)
 
     train_loader = build_loader(
         cfg.train_csv,
@@ -799,8 +1823,10 @@ def main() -> None:
         num_workers=cfg.num_workers,
         features_root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=declared_mapping,
         feature_dim=in_dim,
         seed=cfg.seed,
+        augment_fn=train_augment,
     )
     val_loader = build_loader(
         cfg.val_csv,
@@ -809,8 +1835,10 @@ def main() -> None:
         num_workers=cfg.num_workers,
         features_root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=declared_mapping,
         feature_dim=in_dim,
         seed=cfg.seed,
+        augment_fn=None,
     )
     test_loader = build_loader(
         cfg.test_csv,
@@ -819,66 +1847,322 @@ def main() -> None:
         num_workers=cfg.num_workers,
         features_root=features_root,
         label_to_index_json=label_to_index_json,
+        class_uid_to_target_idx=declared_mapping,
         feature_dim=in_dim,
         seed=cfg.seed,
+        augment_fn=None,
     )
+
+    sample_batch = next(iter(train_loader))
+
+    X0 = sample_batch[0]
+
+    if X0.shape[-1] != in_dim:
+        raise RuntimeError(
+            f"Invalid feature dim: {X0.shape}, expected last dim {in_dim}"
+        )
+
 
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.epochs)
 
     best_val_f1 = -1.0
     best_state = None
-    patience = 10
+    patience = int(getattr(cfg, "patience", 10) or 10)
     since_best = 0
+    _best_epoch_track = 0
+    _best_val_acc_track = 0.0
 
-    for epoch in range(1, cfg.epochs + 1):
-        tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, cfg.device)
-        va_loss, va_acc, va_f1 = evaluate(model, val_loader, cfg.device, num_classes)
-        scheduler.step()
-        improved = va_f1 > best_val_f1
-        if improved:
-            best_val_f1 = va_f1
-            best_state = {k: v.cpu() for k, v in model.state_dict().items()}
-            since_best = 0
-        else:
-            since_best += 1
+    # For handedness analysis
+    hand_analyzer = HandednessAnalyzer()
 
-        print(
-            f"epoch {epoch:03d} | train loss {tr_loss:.4f} acc {tr_acc:.4f} | val loss {va_loss:.4f} acc {va_acc:.4f} f1 {va_f1:.4f}"
-        )
-        if since_best >= patience:
-            print("Early stopping: no improvement in validation F1.")
-            break
+    # === EXPERIMENT TRACKING SETUP ===
+    # Active only when --track is passed. All failures are caught and logged.
+    # If the API is offline or returns errors, training continues unaffected.
+    tracker = None
+    experiment_id = None
+    if args.track and _TrackingClient is not None:
+        try:
+            tracker = _TrackingClient(args.api_url)
+            if args.experiment_id is not None:
+                # Attach to existing experiment — caller (e.g. run_training_job) already
+                # created the row and set status to "running". Skip create_experiment().
+                experiment_id = args.experiment_id
+                print(f"[TRACKING] Attached to existing experiment {experiment_id} at {args.api_url}")
+            else:
+                if subset_mode:
+                    _subset_path_track = str(subset_dir.resolve())
+                else:
+                    # Freeze a snapshot of the live splits so every tracked experiment
+                    # references an immutable directory, not the mutable splits folder.
+                    _snap_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    _snapshot_dir = cfg.out_dir / f"snapshot_{_snap_stamp}"
+                    _snapshot_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(cfg.train_csv, _snapshot_dir / "train.csv")
+                    shutil.copy2(cfg.val_csv,   _snapshot_dir / "val.csv")
+                    shutil.copy2(cfg.test_csv,  _snapshot_dir / "test.csv")
+                    _subset_path_track = str(_snapshot_dir.resolve())
+                _dialect_track = "+".join(dialects) if dialects else "all"
+                experiment_id = tracker.create_experiment(
+                    dialect=_dialect_track,
+                    subset_path=_subset_path_track,
+                    hyperparameters={
+                        "lr": cfg.lr,
+                        "batch_size": cfg.batch_size,
+                        "epochs": cfg.epochs,
+                        "dropout": cfg.dropout,
+                        "channels": cfg.channels,
+                        "levels": cfg.levels,
+                        "kernel_size": cfg.kernel_size,
+                        "seed": cfg.seed,
+                        "weight_decay": cfg.weight_decay,
+                    },
+                    split_manifest={
+                        "train_count": len(train_loader.dataset),
+                        "val_count": len(val_loader.dataset),
+                        "test_count": len(test_loader.dataset),
+                    },
+                )
+                if experiment_id is not None:
+                    tracker.update_status(experiment_id, "running")
+                    print(f"[TRACKING] Experiment {experiment_id} created at {args.api_url}")
+        except Exception as _te:
+            print(f"[TRACKING] Setup failed (tracking disabled for this run): {_te}")
+            tracker = None
+            experiment_id = None
+    elif args.track:
+        print("[TRACKING] tracking_client.py not available; --track disabled.")
 
-    if best_state is not None:
+    # Structured metrics channel (JSONL) — appended per epoch, fsync'd so an
+    # external tailer (Celery trainer task) sees each line as soon as written.
+    metrics_file_path: Optional[Path] = None
+    if getattr(args, "metrics_file", ""):
+        metrics_file_path = Path(args.metrics_file)
+        metrics_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _append_metric_line(payload: Dict[str, object]) -> None:
+        if metrics_file_path is None:
+            return
+        try:
+            with open(metrics_file_path, "a", encoding="utf-8") as mf:
+                mf.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                mf.flush()
+                os.fsync(mf.fileno())
+        except Exception as _me:
+            print(f"[METRICS_FILE] write failed: {_me}")
+
+    try:
+        for epoch in range(1, cfg.epochs + 1):
+            tr_loss, tr_acc = train_one_epoch(model, train_loader, opt, cfg.device)
+            va_loss, va_acc, va_f1, hand_metrics = evaluate_with_handedness(model, val_loader, cfg.device, num_classes)
+            _lr_logged = float(opt.param_groups[0]['lr'])
+            scheduler.step()
+            improved = va_f1 > best_val_f1
+            if improved:
+                best_val_f1 = va_f1
+                best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+                since_best = 0
+                _best_epoch_track = epoch
+                _best_val_acc_track = va_acc
+            else:
+                since_best += 1
+
+            hand_str = f"left_only:{hand_metrics['left_only_acc']:.3f}({hand_metrics['left_only_n']}) right_only:{hand_metrics['right_only_acc']:.3f}({hand_metrics['right_only_n']}) both:{hand_metrics['both_acc']:.3f}({hand_metrics['both_n']})"
+            print(
+                f"[{model_name}] epoch {epoch:03d} | train loss {tr_loss:.4f} acc {tr_acc:.4f} | val loss {va_loss:.4f} acc {va_acc:.4f} f1 {va_f1:.4f}"
+            )
+            print(f"           | {hand_str}")
+
+            _append_metric_line({
+                "type": "epoch",
+                "epoch": epoch,
+                "total_epochs": cfg.epochs,
+                "train_loss": round(tr_loss, 6),
+                "train_acc": round(tr_acc, 6),
+                "val_loss": round(va_loss, 6),
+                "val_acc": round(va_acc, 6),
+                "val_f1": round(va_f1, 6),
+                "learning_rate": _lr_logged,
+            })
+
+            if tracker and experiment_id:
+                tracker.log_metric(
+                    experiment_id, epoch,
+                    tr_loss, tr_acc, va_loss, va_acc, va_f1, _lr_logged,
+                )
+
+            if since_best >= patience:
+                print("Early stopping: no improvement in validation F1.")
+                break
+    except BaseException:
+        if tracker and experiment_id:
+            tracker.update_status(experiment_id, "failed")
+        raise
+
+    # C13: test metrics must come from the restored best-validation state, and
+    # the checkpoint must SAY so rather than leaving it to be assumed.
+    restored_best_state = best_state is not None
+    if restored_best_state:
         model.load_state_dict(best_state)  # type: ignore[arg-type]
+    else:
+        print("[WARN] no best-validation state was captured; test metrics come from "
+              "the final epoch. This run is NOT research-valid (C13).")
+    model_selection = {
+        "criterion": "val_macro_f1",
+        "restored_best_state": bool(restored_best_state),
+        "best_epoch": int(_best_epoch_track),
+        "best_val_f1": float(best_val_f1),
+        "best_val_acc": float(_best_val_acc_track),
+        "early_stopping_patience": int(patience),
+    }
 
-    te_loss, te_acc, te_f1 = evaluate(model, test_loader, cfg.device, num_classes)
+    te_loss, te_acc, te_f1, te_hand_metrics = evaluate_with_handedness(model, test_loader, cfg.device, num_classes)
+
+    # Per-class breakdown + confusion matrix for the Step 7 results UI
+    test_evaluation = None
+    try:
+        test_evaluation = compute_test_evaluation(model, test_loader, cfg.device, num_classes, label_map)
+    except Exception as _ee:
+        print(f"[EVAL] confusion matrix computation failed (non-fatal): {_ee}")
+
+    try:
+        efficiency = measure_model_efficiency(model, in_dim)
+        print(f"[EFFICIENCY] params={efficiency['param_count']:,} "
+              f"size={efficiency['checkpoint_size_mb']:.2f}MB "
+              f"cpu_latency_p50={efficiency['cpu_inference_latency_ms']['p50']:.2f}ms")
+        if test_evaluation is None:
+            test_evaluation = {}
+        test_evaluation["efficiency"] = efficiency
+    except Exception as _ee:
+        print(f"[EVAL] model efficiency measurement failed (non-fatal): {_ee}")
     # Note: SCS (Sequence Consistency Score) pertains to stability across consecutive window predictions.
     # This trainer produces one prediction per sequence, not per sliding window, so SCS is not applicable here.
     # We include it as None in the summary for compatibility with realtime/windowed evaluation.
     te_scs = None
+    print(f"\n{'='*70}")
+    print("TEST METRICS")
+    print(f"{'='*70}")
     print(f"test loss {te_loss:.4f} acc {te_acc:.4f} f1 {te_f1:.4f}")
+    print(f"Handedness breakdown:")
+    print(f"  Left-hand-only:  {te_hand_metrics['left_only_acc']:.4f} ({te_hand_metrics['left_only_n']} samples)")
+    print(f"  Right-hand-only: {te_hand_metrics['right_only_acc']:.4f} ({te_hand_metrics['right_only_n']} samples)")
+    print(f"  Both hands:      {te_hand_metrics['both_acc']:.4f} ({te_hand_metrics['both_n']} samples)")
+    print(f"{'='*70}\n")
+
+    if tracker and experiment_id:
+        tracker.update_status(experiment_id, "completed")
+        tracker.update_summary(experiment_id, _best_epoch_track, _best_val_acc_track, best_val_f1)
 
     # save
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = f"tcn_{stamp}" if not subset_mode else f"tcn_{subset_tag}_{stamp}"
-    out_ckpt = cfg.out_dir / f"{prefix}.pt"
-    label_map = ds_tmp.label_to_index or {}
-    if not label_map:
-        raise SystemExit("label_map is empty; ensure labels.csv or label_to_index.json is present and valid.")
+    cfg_json_for_ckpt = {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(cfg).items()}
+    contract_extra = {
+        # Mắt xích cuối: ánh xạ ngữ nghĩa đóng băng trong chính checkpoint.
+        # Suy luận giải mã bằng nó, KHÔNG bằng `labels.csv` lúc đó.
+        **({CHECKPOINT_MAPPING_KEY: build_checkpoint_mapping(
+              declared_mapping, declared_classes)}
+           if declared_mapping is not None else {}),
+        # Nguồn gốc hiện vật. Đây là nửa còn lại của bằng chứng: khối
+        # `label_mapping` phía trên được tính lại từ ánh xạ trainer thật sự
+        # dùng, khối này là điều split đã khai. Bằng nhau nghĩa là trainer
+        # không đổi membership hay ánh xạ trên đường đi; lệch nhau là có một
+        # bước ở giữa đã sửa hiện vật.
+        **({"split_provenance": declared_provenance} if declared_provenance else {}),
+        "vocabulary_schema_version": "v2" if profile_mode else "v1_legacy",
+        "recognition_profile": (args.recognition_profile or ("unified" if args.unified else "")),
+        "include_common": bool(args.include_common),
+        "unified": bool(args.unified),
+        "dataset_version": args.dataset_version,
+        "split_version": args.split_version,
+        "preprocess_contract_version": "v2",
+        "storage_contract_version": "npz_v2",
+        "motion_types_present": motion_types_present,
+        "common_labels": common_labels,
+        "profile_specific_labels": profile_specific_labels,
+        "seed": int(cfg.seed),
+        "run_purpose": args.run_purpose,
+        "run_status": "completed",
+        "model_selection": model_selection,
+        "determinism": determinism_report,
+        "runtime_env": {
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "pytorch_version": str(torch.__version__),
+            "numpy_version": np.__version__,
+            "cuda_version": torch.version.cuda or "none",
+            "cudnn_version": (torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else None),
+            "device": cfg.device,
+            "platform": platform.platform(),
+        },
+        "git_commit": _git_commit_hash(),
+        "training_config": {**cfg_json_for_ckpt, "model_type": args.model_type,
+                            "augmentation": augmentation_config},
+        "dataset_manifest_checksum": manifest_checksum or _read_split_manifest_checksum(cfg.train_csv),
+    }
+    final_checkpoint = build_checkpoint(
+        idx_to_label_rich=rich_i2l,
+        model=model,
+        cfg=cfg,
+        in_dim=in_dim,
+        num_classes=num_classes,
+        label_map=label_map,
+        te_acc=te_acc,
+        te_f1=te_f1,
+        te_hand_metrics=te_hand_metrics,
+        stamp=stamp,
+        index_to_label=(i2l_for_ckpt or None),
+        feature_version=_fv,
+        contract_extra=contract_extra,
+    )
+    # Use actual model name instead of hardcoded "tcn"
+    # Clean up model name: remove special chars, normalize spaces
+    model_type = model_name.lower()
+    model_type = model_type.replace(" + ", "_").replace(" ", "_").replace("(legacy)", "").strip()
+    model_type = "".join(c for c in model_type if c.isalnum() or c == "_")  # Remove special chars
 
-    torch.save({
-        "model_state": model.state_dict(),
-        "config": asdict(cfg),
-        "in_dim": in_dim,
-        "feature_dim": in_dim,
-        "num_classes": num_classes,
-        "label_map": label_map,
-        "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
-        "label_to_index_json": str(label_to_index_json) if label_to_index_json else None,
-        "metrics": {"test_acc": te_acc, "test_f1": te_f1, "test_scs": te_scs},
-    }, out_ckpt)
+    # Update checkpoint with actual model type
+    final_checkpoint["model_type"] = model_name
+
+    prefix = f"{model_type}_{stamp}" if not subset_mode else f"{model_type}_{subset_tag}_{stamp}"
+    out_ckpt = cfg.out_dir / f"{prefix}.pt"
+
+    torch.save(final_checkpoint, out_ckpt)
+
+    # Final line tells the tailer the EXACT checkpoint of this run
+    # (no more "latest file by mtime" guessing) + test metrics.
+    _append_metric_line({
+        "type": "final",
+        "checkpoint_path": str(out_ckpt.resolve()),
+        "test_acc": round(float(te_acc), 6),
+        "test_f1": round(float(te_f1), 6),
+        "model_type": model_name,
+        "evaluation": test_evaluation,  # confusion matrix + per-class (may be None)
+    })
+
+    if tracker and experiment_id:
+        _model_family_track = f"{subset_tag}-{model_type}" if subset_mode else model_type
+        _dialect_model_track = "+".join(dialects) if dialects else "all"
+        _runtime_env_track = {
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "pytorch_version": str(torch.__version__),
+            "cuda_version": torch.version.cuda or "none",
+            "device": cfg.device,
+        }
+        tracker.register_model(
+            experiment_id=experiment_id,
+            model_family=_model_family_track,
+            dialect=_dialect_model_track,
+            checkpoint_path=str(out_ckpt.resolve()),
+            feature_contract={
+                "extractor": "mediapipe_hands",
+                "input_shape": [60, 126],
+                "normalization": "hands126_v1",
+                "coordinate_order": "xyz",
+                "missing_hands": "zero_filled",
+            },
+            runtime_env=_runtime_env_track,
+            accuracy=te_acc,
+            f1_macro=te_f1,
+        )
 
     cfg_json = {
         k: (str(v) if isinstance(v, Path) else v)
@@ -887,18 +2171,78 @@ def main() -> None:
 
     summary = {
         "timestamp": stamp,
+        "vocabulary_schema_version": contract_extra["vocabulary_schema_version"],
+        "recognition_profile": contract_extra["recognition_profile"],
+        "dataset_version": args.dataset_version,
+        "split_version": args.split_version,
+        "git_commit": contract_extra["git_commit"],
+        "augmentation": augmentation_config,
+        "dataset_manifest_checksum": contract_extra["dataset_manifest_checksum"],
         "subset": {"languages": languages, "dialects": dialects, "language_default": args.language, "tag": subset_tag} if subset_mode else None,
         "config": cfg_json,
         "in_dim": in_dim,
         "feature_dim": in_dim,
         "num_classes": num_classes,
         "val_best_f1": best_val_f1,
-        "test": {"loss": te_loss, "acc": te_acc, "f1": te_f1, "scs": te_scs},
+        "test": {
+            "loss": te_loss,
+            "acc": te_acc,
+            "f1": te_f1,
+            "scs": te_scs,
+            "handedness": {
+                "left_only_acc": te_hand_metrics['left_only_acc'],
+                "left_only_n": te_hand_metrics['left_only_n'],
+                "right_only_acc": te_hand_metrics['right_only_acc'],
+                "right_only_n": te_hand_metrics['right_only_n'],
+                "both_acc": te_hand_metrics['both_acc'],
+                "both_n": te_hand_metrics['both_n'],
+            }
+        },
         "checkpoint": str(out_ckpt),
     }
 
     (cfg.out_dir / f"{prefix}.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Saved checkpoint and summary to {cfg.out_dir}")
+
+    # OPTIONAL: Run diagnostic tools (additive observability only)
+    if args.run_diagnostics:
+        print(f"\n{'='*80}")
+        print("RUNNING DIAGNOSTICS (ADDITIVE OBSERVABILITY)")
+        print(f"{'='*80}")
+
+        label_by_idx = {int(v): k for k, v in label_map.items()}
+
+        # Signer diversity check
+        if check_signer_diversity is not None:
+            try:
+                check_signer_diversity(cfg.train_csv, label_by_idx)
+            except Exception as e:
+                print(f"[WARN] Signer diversity check failed: {e}")
+
+        # Imbalance detection
+        if detect_imbalance is not None:
+            try:
+                detect_imbalance(cfg.train_csv, label_by_idx)
+            except Exception as e:
+                print(f"[WARN] Imbalance detection failed: {e}")
+
+        # Sequence length analysis
+        if check_sequence_length_bias is not None:
+            try:
+                features_root = _find_features_root_from_csv(cfg.train_csv)
+                if features_root is None:
+                    try:
+                        dataset_root = cfg.train_csv.resolve().parents[2]
+                        features_root = dataset_root / "dataset" / "features"
+                    except Exception:
+                        features_root = None
+
+                if features_root is not None and features_root.exists():
+                    check_sequence_length_bias(cfg.train_csv, features_root, label_by_idx)
+                else:
+                    print(f"[WARN] Features root not found for sequence length analysis")
+            except Exception as e:
+                print(f"[WARN] Sequence length analysis failed: {e}")
 
 
 if __name__ == "__main__":

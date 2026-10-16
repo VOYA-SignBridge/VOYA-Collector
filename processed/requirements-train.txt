@@ -7,3 +7,6 @@ torch
 # Optional: only needed for plotting metrics/figures
 matplotlib==3.8.4
 seaborn==0.13.2
+
+# Optional: only needed for train_utils/hpo_search.py (hyperparameter search)
+optuna==4.5.0

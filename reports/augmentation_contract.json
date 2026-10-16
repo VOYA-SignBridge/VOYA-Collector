@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-07-21T14:15:01",
+  "augmentation_contract_version": "v2_wrist_centered_mirror",
+  "input_shape": [
+    60,
+    126
+  ],
+  "coordinate_space": "wrist_centered_per_hand_scaled_by_hand_span (z raw)",
+  "applied_to": "train split only; validation and test are never augmented",
+  "mirror_geometry": {
+    "transform": "x -> -x about the wrist origin, then anatomical slot swap",
+    "wrist_offset_after_mirror": 0.0,
+    "max_pairwise_distance_error": 0.0,
+    "hand_span_ratio": 1.0,
+    "empty_slot_stays_zero": true,
+    "involution_exact": true,
+    "z_axis_untouched": true
+  },
+  "temporal_mask_policy": {
+    "default": "disabled in every shipped profile",
+    "reason": "temporal_mask zeroes whole frames, which is ambiguous with the missing-hand / padding encoding in the 126-dim contract",
+    "reenable_requires": "a frame-validity channel in the model input contract",
+    "override_flag": "--aug_set temporal_mask_probability=<p>"
+  },
+  "cli_overrides": {
+    "noise_sigma": "noise_std",
+    "scale_range": "scale_range",
+    "translation_sigma": "translation_std",
+    "mirror_probability": "mirror_prob",
+    "landmark_dropout_probability": "dropout_prob",
+    "temporal_mask_probability": "temporal_mask_prob",
+    "temporal_roll_probability": "temporal_jitter_prob"
+  },
+  "profiles": {
+    "none": {
+      "profile": "none",
+      "enabled": false,
+      "augmentation_contract_version": "v2_wrist_centered_mirror"
+    },
+    "spatial": {
+      "profile": "spatial",
+      "enabled": true,
+      "augmentation_contract_version": "v2_wrist_centered_mirror",
+      "p": 0.9,
+      "noise_std": 0.008,
+      "scale_range": [
+        0.97,
+        1.03
+      ],
+      "translation_std": 0.01,
+      "mirror_prob": 0.5,
+      "dropout_prob": 0.015,
+      "temporal_mask_prob": 0.0,
+      "temporal_jitter_prob": 0.0,
+      "max_temporal_shift": 0
+    },
+    "temporal": {
+      "profile": "temporal",
+      "enabled": true,
+      "augmentation_contract_version": "v2_wrist_centered_mirror",
+      "p": 0.9,
+      "noise_std": 0.0,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "translation_std": 0.0,
+      "mirror_prob": 0.0,
+      "dropout_prob": 0.0,
+      "temporal_mask_prob": 0.0,
+      "temporal_jitter_prob": 0.25,
+      "max_temporal_shift": 2
+    },
+    "full": {
+      "profile": "full",
+      "enabled": true,
+      "augmentation_contract_version": "v2_wrist_centered_mirror",
+      "p": 0.9,
+      "noise_std": 0.008,
+      "scale_range": [
+        0.97,
+        1.03
+      ],
+      "translation_std": 0.01,
+      "mirror_prob": 0.5,
+      "dropout_prob": 0.015,
+      "temporal_mask_prob": 0.0,
+      "temporal_jitter_prob": 0.25,
+      "max_temporal_shift": 2
+    }
+  }
+}

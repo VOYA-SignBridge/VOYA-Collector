@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axiosClient from '../api/axiosClient';
 import './DebugPanel.css';
+import { BugIcon, LinkIcon, XIcon } from './ui/Icons';
+import { useI18n } from "../i18n";
 
 export interface DebugOperation {
   timestamp: number;
@@ -11,7 +13,7 @@ export interface DebugOperation {
   job_id?: string;
   message?: string;
   error?: string;
-  response?: Record<string, any>;
+  response?: Record<string, unknown>;
 }
 
 export interface DebugState {
@@ -21,7 +23,18 @@ export interface DebugState {
   backendConnected: boolean;
 }
 
+interface DebuggerInterface {
+  log: (operation: DebugOperation) => void;
+  getState: () => DebugState;
+  setState: (newState: Partial<DebugState>) => void;
+}
+
+type DebugWindow = Window & {
+  __voyadebug?: DebuggerInterface;
+};
+
 const DebugPanel: React.FC = () => {
+  const { t } = useI18n();
   const [debugState, setDebugState] = useState<DebugState>(() => {
     // Try to load from localStorage
     const saved = localStorage.getItem('voya_debug_state');
@@ -47,7 +60,8 @@ const DebugPanel: React.FC = () => {
 
   // Global debug tracker (expose to window for easy access from upload functions)
   useEffect(() => {
-    (window as any).__voyadebug = {
+    const debugWindow = window as DebugWindow;
+    debugWindow.__voyadebug = {
       log: (operation: DebugOperation) => {
         setDebugState((prev) => ({
           ...prev,
@@ -85,7 +99,7 @@ const DebugPanel: React.FC = () => {
       }));
 
       // Log connectivity check
-      (window as any).__voyadebug?.log({
+      (window as DebugWindow).__voyadebug?.log({
         timestamp: Date.now(),
         operation: 'CONNECTIVITY',
         status: response.status >= 200 && response.status < 300 ? 'SUCCESS' : 'FAILURE',
@@ -98,7 +112,7 @@ const DebugPanel: React.FC = () => {
         backendConnected: false,
       }));
 
-      (window as any).__voyadebug?.log({
+      (window as DebugWindow).__voyadebug?.log({
         timestamp: Date.now(),
         operation: 'CONNECTIVITY',
         status: 'FAILURE',
@@ -114,7 +128,8 @@ const DebugPanel: React.FC = () => {
         onClick={toggleDebugMode}
         title="Enable debug mode"
       >
-        🐛 Debug
+        <BugIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" />
+        Debug
       </button>
     );
   }
@@ -144,14 +159,18 @@ const DebugPanel: React.FC = () => {
   return (
     <div className="debug-panel">
       <div className="debug-panel__header">
-        <h3 className="debug-panel__title">🐛 Debug Console</h3>
+        <h3 className="debug-panel__title">
+          <BugIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" />
+          Debug Console
+        </h3>
         <div className="debug-panel__controls">
           <button
             className="debug-panel__button"
             onClick={checkBackendConnectivity}
             title="Check backend connectivity"
           >
-            🔗 Ping
+            <LinkIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" />
+            Ping
           </button>
           <button
             className="debug-panel__button"
@@ -164,8 +183,9 @@ const DebugPanel: React.FC = () => {
             className="debug-panel__button"
             onClick={toggleDebugMode}
             title="Close debug panel"
+            aria-label={t("Đóng bảng gỡ lỗi")}
           >
-            ✕
+            <XIcon className="h-4 w-4"  aria-hidden="true" />
           </button>
         </div>
       </div>

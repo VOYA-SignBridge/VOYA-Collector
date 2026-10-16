@@ -1,16 +1,18 @@
 import type { Filters } from "../../types";
+import { useI18n } from "../../i18n";
 
 export default function FilterPanel({ filters, setFilters }: { filters: Filters; setFilters: (f: Filters) => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-wrap gap-4 bg-gray-50 p-3 border rounded mb-4">
       <input
-        placeholder="Lọc theo user"
+        placeholder={t("Lọc theo user")}
         className="border p-2 rounded"
         value={filters.user}
         onChange={(e) => setFilters({ ...filters, user: e.target.value })}
       />
       <input
-        placeholder="Lọc theo label"
+        placeholder={t("Lọc theo label")}
         className="border p-2 rounded"
         value={filters.label}
         onChange={(e) => setFilters({ ...filters, label: e.target.value })}

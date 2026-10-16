@@ -1,0 +1,545 @@
+/**
+ * Training API Hook
+ * Manages communication with backend training endpoints
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getClassesList } from '../api/dataset';
+import axiosClient, { getAuthToken, getApiBaseURL } from '../api/axiosClient';
+// Lỗi 4xx mang `detail` do máy chủ soạn (vd. "Tập chia còn 1 lớp chưa đủ 25
+// mẫu..."); axios chỉ đưa "Request failed with status code 400" — người
+// huấn luyện không biết vì sao. friendlyError trả đúng câu của máy chủ.
+import { friendlyError } from '../lib/errors';
+
+/**
+ * Tập dữ liệu ĐANG được chia thế nào — sự thật, không phải thanh trượt.
+ *
+ * Máy chủ đọc nó từ chính hiện vật mà lượt huấn luyện sẽ đọc (qua
+ * `_resolve_for_run`), nên những con số ở đây là con số sẽ được huấn luyện,
+ * chứ không phải một tỉ lệ do giao diện tự nghĩ ra.
+ */
+export interface SplitProvenance {
+  split_id?: string | null;
+  purpose?: string | null;
+  owner_state?: string | null;
+  /** Cột mang danh tính người ký: `user_id`, `signer_id`, hoặc null. */
+  identity_column?: string | null;
+  /**
+   * Không người ký nào vừa ở tập học vừa ở tập đánh giá.
+   *
+   * `false` KHÔNG có nghĩa "đã đo và thấy rò rỉ" — nó cũng là câu trả lời khi
+   * không kiểm được. Đọc kèm `warning` để phân biệt hai trường hợp.
+   */
+  signer_disjoint: boolean;
+  signers: Record<string, string[]>;
+  counts: Record<string, number>;
+  warning?: string | null;
+}
+
+export interface DatasetInfo {
+  total_samples: number;
+  total_classes: number;
+  languages: string[];
+  dialects: Record<string, string[]>;
+  class_distribution: Record<string, number>;
+  // Số mẫu theo từng phương ngữ — dùng cho bước chia tập (DataSplitVisualization)
+  samples_by_dialect?: Record<string, number>;
+  split_info?: { train: number; val: number; test: number };
+  // Optional mapping from class uid/slug -> human label
+  label_map?: Record<string, string>;
+  split_provenance?: SplitProvenance | null;
+}
+
+export type ModelType = 'tcn' | 'cnn' | 'lstm' | 'bigru_attention' | 'hdgcn';
+
+export interface TrainingConfig {
+  model_type: ModelType;
+  dialects: string[];
+  languages: string[];
+  epochs: number;
+  batch_size: number;
+  learning_rate: number;
+  dropout: number;
+  channels: number;
+  levels: number;
+  kernel_size: number;
+  /** 'smoke_test' = thăm dò nhanh (mặc định); 'research' = chạy trên split đã
+   *  versioned để kết quả trích dẫn được. */
+  run_purpose?: 'smoke_test' | 'research';
+  split_version?: string | null;
+  /** Hiện vật vận hành được ghim (processed/splits/operational/<id>). Có nó thì
+   *  server coi lượt chạy là 'operational' và soi đúng hiện vật này thay vì ba
+   *  tệp nghiên cứu đóng băng. */
+  operational_split_id?: string | null;
+  /** Server ghi đè từ split đã chọn khi chạy chế độ research. */
+  recognition_profile?: string | null;
+}
+
+// GET /training/splits/operational — hiện vật vận hành tổ chức mình sở hữu.
+export interface OperationalSplit {
+  split_id: string;
+  dialects: string[];
+  num_classes: number;
+  min_samples_per_class: number | null;
+  generated_at: string | null;
+  split_mode: string | null;
+  counts: { train: number; val: number; test: number };
+}
+
+// POST /training/dataset/prepare → GET /training/dataset/prepare/{run_id}
+export interface PreparationStep {
+  step: string;
+  ok?: boolean;
+  returncode?: number | null;
+  stderr_tail?: string;
+  stdout_tail?: string;
+}
+
+export interface PreparationReport {
+  run_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | string;
+  dialects: string[];
+  min_samples_per_class: number;
+  current_step: string | null;
+  steps: PreparationStep[];
+  operational_splits: Array<{ split_id: string; dialect: string; ok: boolean; num_classes?: number; error?: string }>;
+  research_splits: Array<{ split_version: string; profile: string; ok: boolean; error?: string }>;
+  warnings: string[];
+  error?: string;
+}
+
+export interface ResearchSplit {
+  split_version: string;
+  dataset_version: string;
+  recognition_profile: string;
+  split_mode: string;
+  num_classes: number | null;
+  counts: { train: number | null; val: number | null; test: number | null };
+  seed: number | null;
+  dataset_manifest_checksum: string;
+}
+
+export interface ProvenanceCheck {
+  id: string;      // C1/C5/C10/C11/C13 — same ids as scripts/research_validity.py
+  label: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface JobProvenance {
+  available: boolean;
+  job_id?: string;
+  code?: {
+    git_commit: string;
+    seed: number | null;
+    run_purpose: string;
+    run_status: string;
+    determinism: string;
+    created_at: string;
+  };
+  data?: {
+    dataset_version: string;
+    split_version: string;
+    dataset_manifest_checksum: string;
+    recognition_profile: string;
+    vocabulary_schema_version: string;
+  };
+  model?: {
+    model_type: string;
+    num_classes: number | null;
+    seq_len: number | null;
+    feature_dim: number | null;
+    normalization_version: string;
+    storage_contract_version: string;
+  };
+  model_selection?: Record<string, unknown>;
+  runtime_env?: Record<string, unknown>;
+  checks?: ProvenanceCheck[];
+  reproducible?: boolean;
+}
+
+export interface TrainingMetrics {
+  epoch: number;
+  train_loss: number;
+  train_acc: number;
+  val_loss: number;
+  val_acc: number;
+  val_f1: number;
+  learning_rate?: number;
+}
+
+export interface TrainingJob {
+  id: string;
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  config: TrainingConfig;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  current_epoch: number;
+  total_epochs: number;
+  checkpoint_path?: string;
+  test_acc?: number;
+  test_f1?: number;
+  error_message?: string;
+  promoted_at?: string;
+}
+
+// GET /training/jobs — lịch sử jobs kèm username người chạy
+export interface TrainingJobListItem extends TrainingJob {
+  username?: string | null;
+}
+
+// GET /training/jobs/{id}/evaluation — per-class breakdown + confusion matrix (test set)
+export interface JobEvaluationClass {
+  class_idx: number;
+  label_key: string;
+  precision: number;
+  recall: number;
+  f1: number;
+  support: number;
+}
+
+// Metrics beyond accuracy/F1 — informative under class imbalance
+// (balanced_accuracy, matthews_corrcoef) and over the full probability
+// output rather than a single argmax (top3_accuracy, roc_auc_macro_ovr).
+export interface JobEvaluationOverall {
+  accuracy: number;
+  macro_f1: number;
+  balanced_accuracy: number;
+  matthews_corrcoef: number;
+  roc_auc_macro_ovr: number;
+  top3_accuracy?: number;
+}
+
+// Param count, checkpoint size, and CPU inference latency — always measured
+// on CPU since that is what a "light enough for mobile" claim needs.
+export interface JobEvaluationEfficiency {
+  param_count: number;
+  trainable_param_count: number;
+  checkpoint_size_mb: number;
+  cpu_inference_latency_ms: {
+    mean: number;
+    p50: number;
+    p95: number;
+    std: number;
+    batch_size: number;
+    seq_len: number;
+    n_runs: number;
+  };
+}
+
+export interface JobEvaluation {
+  available: boolean;
+  job_id?: string;
+  per_class?: JobEvaluationClass[];
+  confusion_matrix?: number[][];
+  labels?: string[];
+  overall?: JobEvaluationOverall;
+  efficiency?: JobEvaluationEfficiency;
+}
+
+// POST /training/jobs/{id}/promote
+export interface PromoteResponse {
+  job: TrainingJob;
+  model_id: string;
+  deployed_checkpoint: string;
+  registry_updated: boolean;
+  realtime_reloaded: boolean;
+  message: string;
+}
+
+// Use relative URL so it proxies through frontend server (nginx, dev server, etc.)
+// When using axiosClient, we just need the path prefix since baseURL is already set
+const API_PREFIX = `/api/v1/training`;
+
+export function useTrainingAPI() {
+  const [datasetInfo, setDatasetInfo] = useState<DatasetInfo | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Tải dataset info
+  const loadDatasetInfo = useCallback(async (dialect?: string, language?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (dialect) params.append('dialect', dialect);
+      if (language) params.append('language', language);
+
+      const response = await axiosClient.get(`${API_PREFIX}/dataset-info`, { params });
+      const data = response.data;
+      // Try to enrich dataset info with class labels (if available)
+      try {
+        const classesRes = await getClassesList();
+        if (classesRes.ok && classesRes.data && Array.isArray(classesRes.data.items)) {
+          const map: Record<string, string> = {};
+          for (const c of classesRes.data.items) {
+            const label = c.label_original || c.slug || '';
+            if (c.class_uid) map[c.class_uid] = label;
+            if (c.slug) map[c.slug] = label;
+            // also map numeric idx
+            if (c.class_idx !== undefined && c.class_idx !== null) map[String(c.class_idx)] = label;
+          }
+          setDatasetInfo({ ...(data as DatasetInfo), label_map: map });
+        } else {
+          setDatasetInfo(data);
+        }
+      } catch (err) {
+        // If classes fetch fails, still set dataset info
+        setDatasetInfo(data);
+      }
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Bắt đầu training
+  const startTraining = useCallback(async (config: TrainingConfig): Promise<TrainingJob | null> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/start`, config);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Lấy job status
+  const getJobStatus = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Lấy metrics
+  const getJobMetrics = useCallback(async (jobId: string): Promise<TrainingMetrics[]> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/metrics`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return [];
+    }
+  }, []);
+
+  // Lịch sử jobs (mới nhất trước), kèm username người chạy
+  const listJobs = useCallback(async (limit = 100): Promise<TrainingJobListItem[]> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/jobs`, { params: { limit } });
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return [];
+    }
+  }, []);
+
+  // Hủy training job đang chạy/đang chờ
+  const cancelTraining = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/cancel`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Promote model của job lên realtime (admin only)
+  const promoteJob = useCallback(async (jobId: string): Promise<PromoteResponse | null> => {
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/promote`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Per-class breakdown + confusion matrix trên test set (Step 7)
+  const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/evaluation`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Danh sách split đã versioned — chế độ 'research' bắt buộc chọn một cái.
+  const getResearchSplits = useCallback(async (): Promise<ResearchSplit[]> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/splits`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return [];
+    }
+  }, []);
+
+  // Hiện vật vận hành có thể ghim — bước Chia Tập chọn sẵn cái mới nhất.
+  const getOperationalSplits = useCallback(async (): Promise<OperationalSplit[]> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/splits/operational`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return [];
+    }
+  }, []);
+
+  // Chuẩn bị dữ liệu: dựng hiện vật vận hành cho các phương ngữ đã chọn.
+  const prepareDataset = useCallback(
+    async (dialects: string[], opts: { with_research?: boolean } = {}): Promise<{ run_id: string } | null> => {
+      try {
+        const response = await axiosClient.post(`${API_PREFIX}/dataset/prepare`, {
+          dialects,
+          with_research: !!opts.with_research,
+        });
+        return response.data;
+      } catch (err) {
+        setError(friendlyError(err));
+        return null;
+      }
+    },
+    [],
+  );
+
+  const getPreparation = useCallback(async (runId: string): Promise<PreparationReport | null> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/dataset/prepare/${encodeURIComponent(runId)}`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Xuất xứ của một lần chạy: code + data + model + các kiểm tra tính tái lập.
+  const getJobProvenance = useCallback(async (jobId: string): Promise<JobProvenance | null> => {
+    try {
+      const response = await axiosClient.get(`${API_PREFIX}/jobs/${jobId}/provenance`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc: completed/failed/cancelled)
+  const deleteJob = useCallback(async (jobId: string): Promise<boolean> => {
+    try {
+      await axiosClient.delete(`${API_PREFIX}/jobs/${jobId}`);
+      return true;
+    } catch (err) {
+      setError(friendlyError(err));
+      return false;
+    }
+  }, []);
+
+  // Note: `useWebSocketProgress` is provided as a top-level hook below
+
+  return {
+    datasetInfo,
+    loading,
+    error,
+    loadDatasetInfo,
+    startTraining,
+    getJobStatus,
+    getJobMetrics,
+    listJobs,
+    cancelTraining,
+    promoteJob,
+    getJobEvaluation,
+    getResearchSplits,
+    getOperationalSplits,
+    prepareDataset,
+    getPreparation,
+    getJobProvenance,
+    deleteJob,
+    useWebSocketProgress,
+  };
+}
+
+// Top-level hook for subscribing to training WebSocket progress.
+// Kept separate to avoid calling hooks inside callbacks returned from other hooks.
+export function useWebSocketProgress(
+  jobId: string | null,
+  onMetric: (m: TrainingMetrics) => void,
+  onStatus: (j: TrainingJob) => void,
+  onError?: (msg: string) => void,
+) {
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Keep the latest callbacks in a ref. Callers usually pass inline arrow
+  // functions (new identity every render); if the socket effect depended on
+  // them it would tear down + reopen the WebSocket on EVERY render, so the
+  // connection never stayed up long enough to receive data (UI stuck at 0/0,
+  // server logging a flood of "1005 no status received").
+  const callbacksRef = useRef({ onMetric, onStatus, onError });
+  useEffect(() => {
+    callbacksRef.current = { onMetric, onStatus, onError };
+  }, [onMetric, onStatus, onError]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    const token = getAuthToken();
+    
+    let wsUrl = '';
+    let apiBase = getApiBaseURL().replace(/\/+$/, "");
+    if (apiBase.endsWith("/api")) {
+      apiBase = apiBase.slice(0, -4);
+    }
+    
+    if (apiBase && (apiBase.startsWith('http://') || apiBase.startsWith('https://'))) {
+      const wsProtocol = apiBase.startsWith('https') ? 'wss:' : 'ws:';
+      const hostPath = apiBase.replace(/^https?:\/\//, '');
+      wsUrl = `${wsProtocol}//${hostPath}/api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      const pathPrefix = apiBase ? apiBase.replace(/^\//, '') + '/' : '';
+      wsUrl = `${protocol}//${host}/${pathPrefix}api/v1/training/ws/${jobId}?token=${encodeURIComponent(token || '')}`;
+    }
+
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'metric') {
+          callbacksRef.current.onMetric(message.data);
+        } else if (message.type === 'status') {
+          callbacksRef.current.onStatus(message.data);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('WebSocket message parse error:', err);
+      }
+    };
+
+    ws.onerror = () => {
+      const { onError: cb } = callbacksRef.current;
+      if (cb) cb('WebSocket connection error');
+      else console.error('WebSocket connection error');
+    };
+
+    return () => {
+      ws.close();
+    };
+    // Only reconnect when the job actually changes — callbacks are read via ref.
+  }, [jobId]);
+
+  return wsRef.current;
+}

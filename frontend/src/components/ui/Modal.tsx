@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
+import { XIcon } from "./Icons";
+import { useI18n } from "../../i18n";
 
 interface ModalProps {
   isOpen: boolean;
@@ -10,6 +12,7 @@ interface ModalProps {
 }
 
 export default function Modal({ isOpen, onClose, title, children, size = "md" }: ModalProps) {
+  const { t } = useI18n();
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
@@ -41,22 +44,22 @@ export default function Modal({ isOpen, onClose, title, children, size = "md" }:
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div 
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       />
-      <div className={`relative w-full ${sizes[size]} animate-fade-in`}>
-        <div className="card card-large">
+      <div className={`relative w-full ${sizes[size]} max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)] animate-fade-in`}>
+        <div className="card overflow-y-auto p-4 sm:p-6 max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2rem)]">
           {title && (
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-4 sm:mb-6">
               <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
               <button
                 onClick={onClose}
                 className="btn btn-ghost p-2 rounded-full"
-                aria-label="Close modal"
+                aria-label={t("Đóng hộp thoại")}
               >
-                ✕
+                <XIcon className="h-4 w-4"  aria-hidden="true" />
               </button>
             </div>
           )}

@@ -4,9 +4,10 @@ from typing import Dict
 from collections import defaultdict
 from app.dataset_samples import list_samples
 from app.dataset_manager import load_labels, ClassMetadata
+from app.tenancy import tenant_id_of
 
-def count_samples_per_class() -> Dict[str, int]:
-    samples = list_samples()
+def count_samples_per_class(tenant_id: str) -> Dict[str, int]:
+    samples = list_samples(tenant_id)
     counts: Dict[str, int] = defaultdict(int)
     for s in samples:
         cid = s.get("class_uid")
@@ -14,8 +15,8 @@ def count_samples_per_class() -> Dict[str, int]:
             counts[cid] += 1
     return counts
 
-def load_class_meta_map() -> Dict[str, ClassMetadata]:
-    rows = load_labels()
+def load_class_meta_map(tenant_id: str) -> Dict[str, ClassMetadata]:
+    rows = load_labels(tenant_id)
     out: Dict[str, ClassMetadata] = {}
     for r in rows:
         out[r["class_uid"]] = ClassMetadata(
@@ -26,12 +27,23 @@ def load_class_meta_map() -> Dict[str, ClassMetadata]:
             dialect=r["dialect"],
             is_common_global=bool(int(r["is_common_global"])),
             is_common_language=bool(int(r["is_common_language"])),
+            # oversample_balance reads `hierarchy_path()` off these, so without
+            # the owner it would oversample into the bootstrap tenant's tree.
+            tenant_id=tenant_id_of(r),
         )
     return out
 
-def build_balance_plan(target: int | None = None, min_threshold: int | None = None) -> Dict:
-    counts = count_samples_per_class()
-    meta_map = load_class_meta_map()
+def build_balance_plan(tenant_id: str, target: int | None = None,
+                       min_threshold: int | None = None) -> Dict:
+    """Kế hoạch cân bằng lớp, TRONG phạm vi một tổ chức.
+
+    `tenant_id` là tham số ĐẦU TIÊN và bắt buộc, không phải tuỳ chọn có mặc
+    định. Một kế hoạch cân bằng đọc toàn kho sẽ đếm mẫu của mọi tổ chức rồi đề
+    xuất bù dữ liệu cho lớp của tổ chức khác — vừa rò số lượng, vừa vô nghĩa về
+    nghiệp vụ.
+    """
+    counts = count_samples_per_class(tenant_id)
+    meta_map = load_class_meta_map(tenant_id)
     if not counts:
         return {"error": "no samples"}
     max_count = max(counts.values())

@@ -39,8 +39,8 @@ def enqueue_process_video(
                 temp_files_to_clean.append(local_video_path)
         
         result = process_video_job(
-            local_video_path,
-            user,
+            video_path=local_video_path,
+            user=user,
             user_id=user_id,
             label=label,
             session_id=session_id,

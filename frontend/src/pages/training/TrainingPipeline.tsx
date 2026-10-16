@@ -1,0 +1,509 @@
+/**
+ * Training Pipeline Page - Professional UI/UX Design
+ * 7-Step Training Workflow with Real-time Feedback
+ *
+ * @i18n-key-table — `title`/`description` trong `STEP_LABELS` là KHOÁ từ điển.
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useTrainingAPI, useWebSocketProgress } from '../../hooks/useTrainingAPI';
+import type { TrainingJob, TrainingConfig, TrainingJobListItem, TrainingMetrics, OperationalSplit } from '../../hooks/useTrainingAPI';
+import { useAuth } from '../../hooks/useAuth';
+import TrainingHistory from './components/TrainingHistory';
+import PageHeader from '../../components/ui/PageHeader';
+import Button from '../../components/ui/Button';
+import {
+  ChipIcon,
+  ClipboardCheckIcon,
+  DatabaseIcon,
+  GearIcon,
+  GlobeIcon,
+  SparkleIcon,
+  SplitIcon,
+} from '../../components/ui/Icons';
+import DatasetInfo from './components/DatasetInfo';
+import DataSplitVisualization from './components/DataSplitVisualization';
+import OperationalSplitPicker from './components/OperationalSplitPicker';
+import AugmentationPreview from './components/AugmentationPreview';
+import DialectSelector from './components/DialectSelector';
+import TrainingSettings from './components/TrainingSettings';
+import TrainingProgress from './components/TrainingProgress';
+import ResultsInsights from './components/ResultsInsights';
+import { useI18n } from "../../i18n";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  ClipboardIcon,
+  RocketIcon,
+} from '../../components/ui/Icons';
+
+type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+const STEP_ICON_CLASS = 'h-6 w-6 sm:h-7 sm:w-7';
+
+const STEP_LABELS: Record<number, { title: string; icon: ReactNode; description: string }> = {
+  1: { title: 'Dữ Liệu', icon: <DatabaseIcon className={STEP_ICON_CLASS} />, description: 'Xem thông tin dataset' },
+  2: { title: 'Chọn Dialect', icon: <GlobeIcon className={STEP_ICON_CLASS} />, description: 'Lựa chọn phương ngữ' },
+  3: { title: 'Chia Tập', icon: <SplitIcon className={STEP_ICON_CLASS} />, description: 'Phân tách train/val/test' },
+  4: { title: 'Tăng Cường', icon: <SparkleIcon className={STEP_ICON_CLASS} />, description: 'Xem trước augmentation' },
+  5: { title: 'Cấu Hình', icon: <GearIcon className={STEP_ICON_CLASS} />, description: 'Điều chỉnh hyperparameters' },
+  6: { title: 'Huấn Luyện', icon: <ChipIcon className={STEP_ICON_CLASS} />, description: 'Quá trình training' },
+  7: { title: 'Kết Quả', icon: <ClipboardCheckIcon className={STEP_ICON_CLASS} />, description: 'Phân tích kết quả' },
+};
+
+type View = 'landing' | 'wizard';
+
+const TrainingPipeline: React.FC = () => {
+  const { t } = useI18n();
+  const [view, setView] = useState<View>('landing');
+  const [historyJobs, setHistoryJobs] = useState<TrainingJobListItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState<Step>(1);
+  const [job, setJob] = useState<TrainingJob | null>(null);
+  const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
+  const [selectedDialects, setSelectedDialects] = useState<string[]>([]);
+  // Hiện vật vận hành ghim cho lượt này (bước Chia Tập). Null = không có hiện
+  // vật khớp → server sẽ từ chối với lý do rõ ràng thay vì học trên tệp đóng băng.
+  const [operationalSplits, setOperationalSplits] = useState<OperationalSplit[]>([]);
+  const [operationalSplitsLoading, setOperationalSplitsLoading] = useState(false);
+  const [operationalSplitId, setOperationalSplitId] = useState<string | null>(null);
+  const [trainingConfig, setTrainingConfig] = useState<TrainingConfig>({
+    model_type: 'tcn',
+    dialects: [],
+    languages: [],
+    epochs: 80,
+    batch_size: 32,
+    learning_rate: 0.001,
+    dropout: 0.3,
+    channels: 64,
+    levels: 3,
+    kernel_size: 5,
+  });
+
+  const api = useTrainingAPI();
+  const { datasetInfo, loading, error, loadDatasetInfo, startTraining, getJobMetrics, listJobs, getOperationalSplits, prepareDataset, getPreparation } = api;
+  const { isAdmin } = useAuth();
+
+  useEffect(() => {
+    loadDatasetInfo();
+  }, [loadDatasetInfo]);
+
+  // Load lịch sử jobs khi ở landing view
+  const refreshHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      setHistoryJobs(await listJobs());
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [listJobs]);
+
+  useEffect(() => {
+    if (view === 'landing') {
+      refreshHistory();
+    }
+  }, [view, refreshHistory]);
+
+  // Xóa job khỏi lịch sử huấn luyện (chỉ job đã kết thúc)
+  const handleDeleteJob = async (item: TrainingJobListItem) => {
+    const ok = await api.deleteJob(item.id);
+    if (!ok) {
+      window.alert(api.error || t('Không thể xóa phiên huấn luyện này.'));
+      return;
+    }
+    await refreshHistory();
+  };
+
+  // Mở một job từ lịch sử: completed → Kết Quả (7); còn lại → Tiến Độ (6)
+  const handleOpenJob = (item: TrainingJobListItem) => {
+    setJob(item);
+    setMetrics([]);
+    setCurrentStep(item.status === 'completed' ? 7 : 6);
+    setView('wizard');
+  };
+
+  // Bắt đầu run mới: reset toàn bộ state wizard
+  const handleNewTraining = () => {
+    setJob(null);
+    setMetrics([]);
+    setSelectedDialects([]);
+    setCurrentStep(1);
+    setView('wizard');
+  };
+
+  // Setup WebSocket to stream training progress.
+  // Dedupe theo epoch: server replay toàn bộ lịch sử mỗi khi (re)connect,
+  // nên chỉ thêm epoch chưa có — không bao giờ nhân bản card metrics.
+  useWebSocketProgress(
+    job?.id ?? null,
+    (metric) => {
+      setMetrics((prev) =>
+        prev.some((m) => m.epoch === metric.epoch) ? prev : [...prev, metric]
+      );
+    },
+    (updatedJob) => {
+      setJob(updatedJob);
+    },
+    (msg) => console.error('[WS_ERROR]', msg)
+  );
+
+  // Bước Chia Tập: tải danh sách hiện vật vận hành một lần mỗi lượt vào bước.
+  const reloadOperationalSplits = useCallback(async () => {
+    setOperationalSplitsLoading(true);
+    const rows = await getOperationalSplits();
+    setOperationalSplits(rows);
+    setOperationalSplitsLoading(false);
+    return rows;
+  }, [getOperationalSplits]);
+
+  useEffect(() => {
+    if (currentStep !== 3) return;
+    let cancelled = false;
+    setOperationalSplitsLoading(true);
+    getOperationalSplits().then((rows) => {
+      if (cancelled) return;
+      setOperationalSplits(rows);
+      setOperationalSplitsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep, getOperationalSplits]);
+
+  // Dựng xong → tải lại danh sách và chọn sẵn tập vừa dựng.
+  const handlePrepared = useCallback(
+    async (newIds: string[]) => {
+      await reloadOperationalSplits();
+      if (newIds[0]) setOperationalSplitId(newIds[0]);
+    },
+    [reloadOperationalSplits],
+  );
+
+  // Dispatch a run with an explicit config and reset the progress view.
+  const startWith = async (config: TrainingConfig) => {
+    const newJob = await startTraining(config);
+    if (newJob) {
+      setJob(newJob);
+      setMetrics([]);
+      setCurrentStep(6);
+    }
+  };
+
+  const handleStartTraining = () =>
+    startWith({
+      ...trainingConfig,
+      dialects: selectedDialects,
+      // Chế độ nghiên cứu ghim split versioned riêng; ngoài ra ghim hiện vật vận hành.
+      operational_split_id: trainingConfig.run_purpose === 'research' ? null : operationalSplitId,
+    });
+
+  // Retry a failed run with the SAME config it used (works even when the job was
+  // opened from history and the wizard state is empty).
+  const handleRetryTraining = () =>
+    startWith(job?.config ?? { ...trainingConfig, dialects: selectedDialects });
+
+  const isTraining = job?.status === 'running';
+  const progressRef = useRef<HTMLDivElement>(null);
+
+  // Validation logic for each step
+  const isStepValid = (): boolean => {
+    switch (currentStep) {
+      case 1: // Dataset Info - always valid
+        return !!datasetInfo;
+      case 2: // Dialect Selector - must select at least one (moved before split)
+        return selectedDialects.length > 0;
+      case 3: // Data Split — cần một hiện vật vận hành để ghim (trừ chế độ nghiên cứu)
+        return trainingConfig.run_purpose === 'research' || operationalSplitId !== null;
+      case 4: // Augmentation Preview - always valid
+        return true;
+      case 5: // Training Settings - always valid
+        return selectedDialects.length > 0;
+      case 6: // Training Progress - automatic
+        return true;
+      case 7: // Results - automatic
+        return true;
+      default:
+        return true;
+    }
+  };
+
+  const getNextButtonText = (): string => {
+    if (!isStepValid()) {
+      switch (currentStep) {
+        // Dialect is step 2 now, so the "pick a dialect first" hint moves with it.
+        case 2:
+          return 'Chọn phương ngữ trước';
+        case 3:
+          return 'Chưa có tập chia để ghim';
+        default:
+          return 'Hoàn thành bước này';
+      }
+    }
+    return 'Tiếp theo →';
+  };
+
+  const handleNext = () => {
+    if (!isStepValid()) {
+      return;
+    }
+    setCurrentStep((currentStep + 1) as Step);
+  };
+
+  // Scroll to top when step changes
+  useEffect(() => {
+    if (progressRef.current) {
+      progressRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [currentStep]);
+
+  // Auto-advance to results when training completes
+  useEffect(() => {
+    if (job?.status === 'completed' && currentStep === 6) {
+      setCurrentStep(7);
+    }
+  }, [job?.status, currentStep]);
+
+  // Fetch metrics when entering Step 7 (always refresh to get latest)
+  useEffect(() => {
+    if (currentStep === 7 && job?.id) {
+      getJobMetrics(job.id).then((freshMetrics) => {
+        if (freshMetrics && freshMetrics.length > 0) {
+          setMetrics(freshMetrics);
+        }
+      });
+    }
+  }, [currentStep, job?.id, getJobMetrics]);
+
+  if (view === 'landing') {
+    return (
+      <div className="space-y-8">
+        <PageHeader
+          title={t("Huấn Luyện Mô Hình")}
+          subtitle={t("Lịch sử các lần huấn luyện, so sánh model và bắt đầu run mới")}
+          breadcrumb={[{ label: 'Dashboard', href: '/' }, 'Huấn luyện']}
+        />
+
+        <div className="flex justify-end">
+          <Button variant="primary" onClick={handleNewTraining}>
+            <RocketIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" />
+            {t("Bắt đầu huấn luyện mới")}
+          </Button>
+        </div>
+
+        <TrainingHistory
+          jobs={historyJobs}
+          loading={historyLoading}
+          onOpenJob={handleOpenJob}
+          onRefresh={refreshHistory}
+          onDeleteJob={handleDeleteJob}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title={t("Huấn Luyện Mô Hình")}
+        subtitle={t("Quy trình 7 bước để huấn luyện mô hình nhận diện ký hiệu với hiệu suất tối ưu")}
+        breadcrumb={[{ label: 'Dashboard', href: '/' }, 'Huấn luyện']}
+      />
+
+      {/* Progress Bar - Minimal & Clean */}
+      <div ref={progressRef} className="mb-8 space-y-3">
+        {/* Progress Bar */}
+        <div className="flex items-center gap-4">
+          <div className="flex-1">
+            <div className="h-3 bg-slate-200 rounded-full overflow-hidden shadow-sm">
+              <div
+                className="h-full bg-gradient-to-r from-ctu-navy via-ctu-blue to-ctu-blue-light transition-all duration-500 ease-out rounded-full"
+                style={{ width: `${(currentStep / 7) * 100}%` }}
+              />
+            </div>
+          </div>
+          <button
+            onClick={() => {}}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-ctu-blue/10 border border-ctu-blue/30 hover:bg-ctu-blue/20 transition-colors flex-shrink-0"
+            title={t("Hiển thị các bước")}
+          >
+            <span className="font-bold text-ctu-blue text-lg">{currentStep}</span>
+            <span className="text-slate-500">/</span>
+            <span className="text-slate-600">7</span>
+          </button>
+        </div>
+
+        {/* Step Info Header */}
+        <div className="flex items-center gap-3 p-4 bg-gradient-to-r from-ctu-blue/5 to-ctu-navy/5 rounded-xl border border-ctu-blue/20">
+          <div className="flex-shrink-0 text-ctu-blue">{STEP_LABELS[currentStep].icon}</div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900">
+              {t(STEP_LABELS[currentStep].title)}
+            </h2>
+            <p className="text-sm text-slate-600 line-clamp-1 sm:line-clamp-2">
+              {t(STEP_LABELS[currentStep].description)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <main>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          {/* Content Area */}
+          <div className="px-6 py-6 sm:px-8 sm:py-8 min-h-[500px]">
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <AlertTriangleIcon className="h-4 w-4"  aria-hidden="true" />
+                  {t("Lỗi")}
+                </div>
+                <div className="mt-1">{error}</div>
+              </div>
+            )}
+
+            {currentStep === 1 && <DatasetInfo datasetInfo={datasetInfo} loading={loading} />}
+            {currentStep === 2 && (
+              <DialectSelector
+                dialects={datasetInfo?.dialects || {}}
+                selected={selectedDialects}
+                onChange={setSelectedDialects}
+              />
+            )}
+            {currentStep === 3 && (
+              <div className="space-y-4">
+                {trainingConfig.run_purpose !== 'research' && (
+                  <OperationalSplitPicker
+                    splits={operationalSplits}
+                    loading={operationalSplitsLoading}
+                    selectedDialects={selectedDialects}
+                    value={operationalSplitId}
+                    onChange={setOperationalSplitId}
+                    onPrepare={(dialects) => prepareDataset(dialects)}
+                    getPreparation={getPreparation}
+                    onPrepared={handlePrepared}
+                  />
+                )}
+                <DataSplitVisualization datasetInfo={datasetInfo} selectedDialects={selectedDialects} />
+              </div>
+            )}
+            {currentStep === 4 && <AugmentationPreview />}
+            {currentStep === 5 && (
+              <TrainingSettings config={trainingConfig} onChange={setTrainingConfig} />
+            )}
+            {currentStep === 6 && job && (
+              <TrainingProgress
+                job={job}
+                metrics={metrics}
+                onCancel={async () => {
+                  const cancelled = await api.cancelTraining(job.id);
+                  if (cancelled) setJob(cancelled);
+                }}
+                onBack={() => {
+                  // Run đã kết thúc/thất bại → về bước cấu hình để chỉnh & chạy lại.
+                  setJob(null);
+                  setMetrics([]);
+                  setCurrentStep(5);
+                }}
+                onRetry={handleRetryTraining}
+                isAdmin={isAdmin}
+              />
+            )}
+            {currentStep === 7 && (
+              <ResultsInsights
+                metrics={metrics}
+                job={job}
+                onPromote={async () => {
+                  if (!job) return null;
+                  const res = await api.promoteJob(job.id);
+                  if (res?.job) setJob(res.job);
+                  return res;
+                }}
+              />
+            )}
+          </div>
+
+          {/* Action Buttons */}
+          <div className="border-t border-slate-100 px-6 py-4 sm:px-8 sm:py-5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setView('landing')}
+                size="sm"
+                title={t("Quay về danh sách lịch sử training")}
+              >
+                <ClipboardIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" />
+                {t("Lịch sử")}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => currentStep > 1 && setCurrentStep((currentStep - 1) as Step)}
+                disabled={currentStep === 1 || currentStep >= 6}
+                size="sm"
+              >
+                {t("← Quay lại")}
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {currentStep < 5 && (
+                <Button
+                  variant="primary"
+                  onClick={handleNext}
+                  disabled={!isStepValid()}
+                  size="sm"
+                  title={!isStepValid() ? t('Vui lòng hoàn thành bước hiện tại') : t('Chuyển sang bước tiếp theo')}
+                >
+                  {getNextButtonText()}{" "}
+                  <CheckIcon className="inline h-4 w-4 -mt-0.5"  aria-hidden="true" />
+                </Button>
+              )}
+
+              {currentStep === 5 && (
+                <Button
+                  variant="primary"
+                  onClick={handleStartTraining}
+                  disabled={selectedDialects.length === 0 || isTraining}
+                  size="sm"
+                  title={selectedDialects.length === 0 ? t('Vui lòng chọn ít nhất một phương ngữ') : t('Bắt đầu quá trình huấn luyện')}
+                >
+                  {isTraining ? (
+                    'Đang xử lý…'
+                  ) : (
+                    <><RocketIcon className="inline h-4 w-4 mr-1.5 -mt-0.5"  aria-hidden="true" /> {t("Bắt đầu huấn luyện")}</>
+                  )}
+                </Button>
+              )}
+
+              {currentStep === 6 && job?.status === 'completed' && (
+                <Button
+                  variant="primary"
+                  onClick={() => setCurrentStep(7)}
+                  size="sm"
+                  title={t("Xem kết quả chi tiết của huấn luyện")}
+                >
+                  {t("Xem Kết Quả →")}
+                </Button>
+              )}
+
+              {currentStep === 7 && (
+                <Button
+                  variant="primary"
+                  onClick={() => setView('landing')}
+                  size="sm"
+                  title={t("Hoàn tất và quay về màn hình chính")}
+                >
+                  {t("Hoàn tất")}{" "}
+                  <CheckIcon className="inline h-4 w-4 -mt-0.5"  aria-hidden="true" />
+                </Button>
+              )}
+
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default TrainingPipeline;

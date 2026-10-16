@@ -3,6 +3,22 @@ import { validateUploadResult } from "./validators";
 import type { Result } from "./validators";
 import type { UploadResult, CameraUploadPayload } from "../types";
 
+type DebugStatus = 'SUCCESS' | 'FAILURE' | 'IN_PROGRESS';
+
+type DebugLogData = Record<string, unknown>;
+
+type DebugLogger = {
+  log?: (entry: {
+    timestamp: number;
+    operation: string;
+    status: DebugStatus;
+  } & DebugLogData) => void;
+};
+
+type DebugWindow = Window & {
+  __voyadebug?: DebugLogger;
+};
+
 const extractErrorMessage = (err: unknown, fallback = "Upload failed"): string => {
   type AxiosLikeError = {
     response?: { status?: number; data?: unknown };
@@ -31,11 +47,29 @@ const extractErrorMessage = (err: unknown, fallback = "Upload failed"): string =
   return fallback;
 };
 
+// 4xx responses (validation / QC reject) are deterministic — retrying would
+// re-POST the same bad payload. Returns the failure Result to short-circuit
+// the retry loop with, or null when the error is retryable (network / 5xx).
+const clientErrorResult = (err: unknown): { ok: false; error: string; errorCode?: string } | null => {
+  type AxiosLikeError = { response?: { status?: number; data?: unknown } };
+  const status = (err as AxiosLikeError)?.response?.status;
+  if (typeof status !== "number" || status < 400 || status >= 500) return null;
+  const data = (err as AxiosLikeError).response?.data;
+  let errorCode: string | undefined;
+  if (data && typeof data === "object") {
+    const detail = (data as { detail?: unknown }).detail;
+    if (detail && typeof detail === "object" && typeof (detail as { code?: unknown }).code === "string") {
+      errorCode = (detail as { code: string }).code;
+    }
+  }
+  return { ok: false, error: extractErrorMessage(err), errorCode };
+};
+
 // Helper to log to debug panel
-const logDebugOperation = (operation: string, status: 'SUCCESS' | 'FAILURE' | 'IN_PROGRESS', data: Record<string, any>) => {
-  const debugger_interface = (window as any).__voyadebug;
-  if (debugger_interface?.log) {
-    debugger_interface.log({
+const logDebugOperation = (operation: string, status: DebugStatus, data: DebugLogData) => {
+  const debugWindow = window as DebugWindow;
+  if (debugWindow.__voyadebug?.log) {
+    debugWindow.__voyadebug.log({
       timestamp: Date.now(),
       operation,
       status,
@@ -44,13 +78,35 @@ const logDebugOperation = (operation: string, status: 'SUCCESS' | 'FAILURE' | 'I
   }
 };
 
-export const uploadVideo = async (file: File, user: string, label: string, dialect?: string): Promise<Result<UploadResult>> => {
+// Stable hex idempotency key — reused across retries of the same upload so
+// the backend can dedupe instead of storing the file twice.
+const genUploadUid = (): string => {
+  try {
+    return crypto.randomUUID().replace(/-/g, "");
+  } catch {
+    return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  }
+};
+
+// Video uploads can be large (backend allows up to 1GB) — the axios default
+// of 30s caused client timeouts mid-upload followed by full re-uploads.
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+export const uploadVideo = async (
+  file: File,
+  user: string,
+  label: string,
+  dialect?: string,
+  onProgress?: (percent: number) => void,
+): Promise<Result<UploadResult>> => {
   const startTime = Date.now();
   const sessionId = Math.random().toString(36).substring(7);
+  const uploadUid = genUploadUid();
   const formData = new FormData();
   formData.append("file", file);
   formData.append("user", user);
   formData.append("label", label);
+  formData.append("upload_uid", uploadUid);
   if (dialect) formData.append('dialect', dialect);
 
   // Log start
@@ -65,7 +121,14 @@ export const uploadVideo = async (file: File, user: string, label: string, diale
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       // Let the browser set Content-Type (with boundary). Setting it manually can break the request.
-      const res = await axiosClient.post("/upload/video", formData);
+      const res = await axiosClient.post("/upload/video", formData, {
+        timeout: UPLOAD_TIMEOUT_MS,
+        onUploadProgress: (e) => {
+          if (onProgress && e.total) {
+            onProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        },
+      });
       const result = validateUploadResult(res.data);
       
       if (result.ok) {
@@ -86,15 +149,17 @@ export const uploadVideo = async (file: File, user: string, label: string, diale
       }
       return result;
     } catch (err: unknown) {
-      // If this is the last attempt, return a helpful error message
-      if (attempt === maxAttempts) {
-        const errorMsg = extractErrorMessage(err);
+      const clientErr = clientErrorResult(err);
+      // If 4xx or this is the last attempt, return a helpful error message
+      if (clientErr || attempt === maxAttempts) {
+        const failure = clientErr ?? { ok: false as const, error: extractErrorMessage(err) };
         logDebugOperation('UPLOAD_VIDEO', 'FAILURE', {
           session_id: sessionId,
-          error: errorMsg,
+          error: failure.error,
+          error_code: failure.errorCode,
           duration_ms: Date.now() - startTime,
         });
-        return { ok: false, error: errorMsg };
+        return failure;
       }
       // exponential backoff with jitter
       const jitter = Math.random() * 100;
@@ -145,14 +210,16 @@ export const uploadCamera = async (payload: CameraUploadPayload): Promise<Result
       }
       return result;
     } catch (err: unknown) {
-      if (attempt === maxAttempts) {
-        const errorMsg = extractErrorMessage(err);
+      const clientErr = clientErrorResult(err);
+      if (clientErr || attempt === maxAttempts) {
+        const failure = clientErr ?? { ok: false as const, error: extractErrorMessage(err) };
         logDebugOperation('UPLOAD_CAMERA', 'FAILURE', {
           session_id: sessionId,
-          error: errorMsg,
+          error: failure.error,
+          error_code: failure.errorCode,
           duration_ms: Date.now() - startTime,
         });
-        return { ok: false, error: errorMsg };
+        return failure;
       }
       const jitter = Math.random() * 100;
       const delay = baseDelay * 2 ** (attempt - 1) + jitter;

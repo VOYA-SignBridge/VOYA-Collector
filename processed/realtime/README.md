@@ -4,27 +4,27 @@ This demo loads the latest TCN checkpoint and runs realtime recognition from a w
 
 ## Install
 
-Activate your venv, then install deps:
+Activate your venv, then install deps from the repo root:
 
 ```powershell
-pip install -r train_model/requirements-realtime.txt
+pip install -r processed/requirements-realtime.txt
 ```
 
-(PyTorch and NumPy are already required by training.)
+This runtime also needs PyTorch and NumPy, and they are included in `processed/requirements-realtime.txt`.
 
 ## Run
 
 - Webcam:
 ```powershell
-python train_model/realtime/run_realtime.py
+python processed/realtime/run_realtime.py
 ```
 - Video file:
 ```powershell
-python train_model/realtime/run_realtime.py --video path/to/video.mp4
+python processed/realtime/run_realtime.py --video path/to/video.mp4
 ```
 - Use a specific checkpoint:
 ```powershell
-python train_model/realtime/run_realtime.py --checkpoint train_model/processed/train_utils/outputs/tcn_YYYYMMDD_HHMMSS.pt
+python processed/realtime/run_realtime.py --checkpoint processed/train_utils/outputs/tcn_YYYYMMDD_HHMMSS.pt
 ```
 
 Keys: press `q` to quit.

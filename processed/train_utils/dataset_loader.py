@@ -1,6 +1,7 @@
 from __future__ import annotations
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -24,6 +25,31 @@ _FEATURE_DIM_TRUNCATE_WARNED = False
 _EXPECTED_SEQ_LEN = 60
 _EXPECTED_FEATURE_DIM = 126
 
+# Feature version. "v1" reads the stored `sequence` exactly as before and is the
+# default, so nothing changes unless a run asks for something else. "v2" and
+# "v2g" rebuild the frame from `landmarks_raw`, which every .npz carries, so no
+# stored artefact and no manifest checksum is touched. See shared/features_v2.py.
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from shared import features_v2 as _fv2
+except Exception:  # pragma: no cover - v1 runs must not depend on this
+    _fv2 = None  # type: ignore
+
+from . import signer_identity as _signer_identity
+
+_DEFAULT_FEATURE_VERSION = os.environ.get("VOYA_FEATURE_VERSION", "v1").strip() or "v1"
+
+
+class MissingRawLandmarks(Exception):
+    """A sample cannot supply `landmarks_raw` for a non-v1 feature version.
+
+    This must never be treated as a corrupt file. The corrupt-file path silently
+    substitutes a neighbouring sample, which would quietly duplicate rows and
+    mislabel them; on root_strict_v13 that would have hit 9% of train and 62% of
+    test without raising anything.
+    """
+
 
 class NPZSignDataset(Dataset):  # type: ignore[misc]
     """
@@ -43,8 +69,55 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         to_tensor: bool = False,
         feature_key_priority: Optional[List[str]] = None,
         dtype: str = "float32",
+        augment_fn: Optional[Any] = None,
+        class_uid_to_target_idx: Optional[Dict[str, int]] = None,
+        feature_version: Optional[str] = None,
     ) -> None:
+        self.feature_version = (feature_version or _DEFAULT_FEATURE_VERSION)
+        if self.feature_version != "v1" and _fv2 is None:
+            raise RuntimeError(
+                "feature_version=%r needs processed/shared/features_v2.py, which "
+                "failed to import" % (self.feature_version,)
+            )
+        # Geometry is appended after augmentation, so the array carried around
+        # before that point is always the 126-dim landmark block.
+        self._base_version = ("v1z" if self.feature_version == "v1g"
+                              else "v2" if self.feature_version == "v2g"
+                              else self.feature_version)
+        self.expected_feature_dim = (
+            _EXPECTED_FEATURE_DIM if self.feature_version == "v1"
+            else _fv2.feature_dim(self.feature_version)
+        )
+
+        # `class_uid_to_target_idx` BẬT chế độ VẬN HÀNH, và nó thay đổi hẳn
+        # cách một hàng thành nhãn: `row['class_uid']` tra thẳng vào ánh xạ do
+        # split KHAI BÁO. Không nhìn `label_key`, không nhìn `class_idx`, không
+        # đọc `labels.csv`.
+        #
+        # Vì sao phải cắt cả ba: mỗi cái là một nguồn sự thật cạnh tranh, và
+        # cả ba đều sai theo cách im lặng.
+        #   `label_key`   = `vn/<dialect>/<slug>` — KHÔNG chứa region, trong khi
+        #                   CSDL cho phép `ăn|bac` và `ăn|nam` cùng dialect. Hai
+        #                   lớp hợp lệ gộp làm một, không lỗi, không cảnh báo.
+        #   `class_idx-1` = định danh danh mục TOÀN CỤC và THƯA. `{17,103,812}`
+        #                   thành `{16,102,811}` trong khi `num_classes = 3`.
+        #   `labels.csv`  = từ vựng HIỆN TẠI, không phải từ vựng lúc huấn luyện.
+        #                   Một checkpoint cũ sẽ bị giải mã bằng danh mục mới.
+        #
+        # `None` giữ nguyên toàn bộ hành vi cũ cho đường nghiên cứu/legacy —
+        # các hiện vật đã đóng băng cần đúng hành vi lịch sử để tái lập được.
+        self._declared_mapping: Optional[Dict[str, int]] = (
+            dict(class_uid_to_target_idx) if class_uid_to_target_idx else None
+        )
         self.csv_path = Path(csv_path)
+        # Whether the caller NAMED a features root, as opposed to us guessing one.
+        # An explicit root has to outrank the `file_path` column (see
+        # _resolve_feature_path): a split CSV carries the path the features had
+        # when the split was made, so any experiment that swaps the feature tree
+        # — a preprocessing ablation, a rebuilt corpus, a restored backup — was
+        # silently reading the ORIGINAL tree while believing otherwise, and both
+        # arms came out identical for the most convincing possible reason.
+        self.root_is_explicit = bool(root)
         if root:
             self.root = Path(root)
         else:
@@ -57,6 +130,34 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         self.rows: List[Dict[str, str]] = []
         self.to_tensor = bool(to_tensor and TORCH_AVAILABLE)
         self.dtype = dtype
+        self.augment_fn = augment_fn
+
+        # Mỗi epoch đọc lại toàn bộ .npz từ đĩa (giải nén zip cho từng mẫu) —
+        # với num_workers=0 chi phí này nằm thẳng trên luồng chính và lấn át cả
+        # thời gian tính của model. Giữ mảng đã giải nén trong RAM: augmentation
+        # vẫn chạy lại mỗi epoch trên bản copy nên kết quả huấn luyện không đổi.
+        # TRAIN_FEATURE_CACHE_MB=0 để tắt.
+        try:
+            budget_mb = float(os.environ.get('TRAIN_FEATURE_CACHE_MB', '512'))
+        except ValueError:
+            budget_mb = 512.0
+        self._cache_budget_bytes = int(max(budget_mb, 0.0) * 1024 * 1024)
+        self._feature_cache: Dict[str, Any] = {}
+        self._cache_bytes = 0
+        self._cache_full_logged = False
+
+        # _resolve_feature_path phải stat() 1-2 lần cho mỗi mẫu để dò đúng vị trí
+        # file. Trên bind mount Windows/WSL2 một stat tốn ~1 ms, nhân với số mẫu
+        # × số epoch thì đây là phần đắt nhất của cả vòng huấn luyện. Layout thư
+        # mục không đổi trong một lần chạy nên nhớ luôn kết quả theo chỉ số dòng.
+        self._path_cache: Dict[int, Path] = {}
+
+        # Bảng gộp nạp qua `signer_identity`, KHÔNG đọc lại tệp ở đây.
+        # `routers/training` hỏi cùng câu hỏi "ai ký hàng này" để nói cho người
+        # dùng biết con số họ sắp đọc đo trên ai; hai bản cài đặt của cùng một
+        # định nghĩa thì trôi lệch được, và khi lệch thì giao diện nói một đằng
+        # còn mô hình học một nẻo mà không có gì đỏ.
+        self._legacy_signer_map: Dict[str, str] = _signer_identity.load_legacy_signer_map()
         self.feature_key_priority = feature_key_priority or [
             'sequence',
             'features', 'x', 'data', 'arr_0'
@@ -66,61 +167,72 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         self.label_to_index: Dict[str, int] = {}
         self.index_to_label: Dict[int, Dict[str, str]] = {}
         self._class_idx_to_label: Dict[int, Dict[str, str]] = {}
-        if label_to_index_json:
-            l2i_path = Path(label_to_index_json)
+        if self._declared_mapping is not None:
+            # CHẾ ĐỘ VẬN HÀNH: ánh xạ đã được resolve ở tầng trên và truyền
+            # thẳng vào đây. Không đi tìm ở đâu nữa — mỗi chỗ tìm là một
+            # nguồn sự thật cạnh tranh. Xem chú thích ở __init__.
+            self.label_to_index = dict(self._declared_mapping)
+            self.index_to_label = {
+                int(v): {'label_key': k, 'class_uid': k, 'label_slug': '',
+                         'label_original': '', 'language': 'vn', 'dialect': ''}
+                for k, v in self._declared_mapping.items()
+            }
         else:
+            if label_to_index_json:
+                l2i_path = Path(label_to_index_json)
+            else:
+                try:
+                    from train_model.dataset_versioning import get_analysis_dir
+                    l2i_path = get_analysis_dir() / 'label_to_index.json'
+                except Exception:
+                    l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
+            i2l_path = l2i_path.with_name('index_to_label.json')
             try:
-                from train_model.dataset_versioning import get_analysis_dir
-                l2i_path = get_analysis_dir() / 'label_to_index.json'
+                self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))
             except Exception:
-                l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
-        i2l_path = l2i_path.with_name('index_to_label.json')
-        try:
-            self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))
-        except Exception:
-            self.label_to_index = {}
-        try:
-            raw = json.loads(i2l_path.read_text(encoding='utf-8'))
-            # keys may be strings in json; convert to int
-            self.index_to_label = {int(k): v for k, v in raw.items()}
-        except Exception:
-            self.index_to_label = {}
+                self.label_to_index = {}
+            try:
+                raw = json.loads(i2l_path.read_text(encoding='utf-8'))
+                # keys may be strings in json; convert to int
+                self.index_to_label = {int(k): v for k, v in raw.items()}
+            except Exception:
+                self.index_to_label = {}
 
-        # fallback to labels.csv if mapping JSON is missing or empty
-        if not self.label_to_index:
-            try:
-                from train_model.dataset_versioning import get_labels_csv, get_data_root
-                labels_csv = get_labels_csv(get_data_root())
-            except Exception:
-                labels_csv = Path(__file__).resolve().parents[1].parent / 'dataset' / 'labels.csv'
-            if labels_csv.exists():
-                with labels_csv.open('r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for r in reader:
-                        try:
-                            class_idx = int((r.get('class_idx') or '').strip())
-                        except Exception:
-                            continue
-                        slug = (r.get('slug') or '').strip()
-                        language = (r.get('language') or 'vn').strip()
-                        dialect = (r.get('dialect') or '').strip()
-                        label_key = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
-                        self.label_to_index[label_key] = class_idx - 1
-                        self._class_idx_to_label[class_idx] = {
-                            'label_key': label_key,
-                            'label_slug': slug,
-                            'label_original': (r.get('label_original') or '').strip(),
-                            'language': language,
-                            'dialect': dialect,
-                        }
-                if self.label_to_index:
-                    self.index_to_label = {v: {
-                        'label_key': k,
-                        'label_slug': (self._class_idx_to_label.get(v + 1, {}).get('label_slug') or ''),
-                        'label_original': (self._class_idx_to_label.get(v + 1, {}).get('label_original') or ''),
-                        'language': (self._class_idx_to_label.get(v + 1, {}).get('language') or 'vn'),
-                        'dialect': (self._class_idx_to_label.get(v + 1, {}).get('dialect') or ''),
-                    } for k, v in self.label_to_index.items()}
+            # fallback to labels.csv if mapping JSON is missing or empty
+            if not self.label_to_index:
+                try:
+                    from train_model.dataset_versioning import get_labels_csv, get_data_root
+                    labels_csv = get_labels_csv(get_data_root())
+                except Exception:
+                    labels_csv = Path(__file__).resolve().parents[1].parent / 'dataset' / 'labels.csv'
+                if labels_csv.exists():
+                    with labels_csv.open('r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for r in reader:
+                            try:
+                                class_idx = int((r.get('class_idx') or '').strip())
+                            except Exception:
+                                continue
+                            slug = (r.get('slug') or '').strip()
+                            language = (r.get('language') or 'vn').strip()
+                            dialect = (r.get('dialect') or '').strip()
+                            label_key = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
+                            self.label_to_index[label_key] = class_idx - 1
+                            self._class_idx_to_label[class_idx] = {
+                                'label_key': label_key,
+                                'label_slug': slug,
+                                'label_original': (r.get('label_original') or '').strip(),
+                                'language': language,
+                                'dialect': dialect,
+                            }
+                    if self.label_to_index:
+                        self.index_to_label = {v: {
+                            'label_key': k,
+                            'label_slug': (self._class_idx_to_label.get(v + 1, {}).get('label_slug') or ''),
+                            'label_original': (self._class_idx_to_label.get(v + 1, {}).get('label_original') or ''),
+                            'language': (self._class_idx_to_label.get(v + 1, {}).get('language') or 'vn'),
+                            'dialect': (self._class_idx_to_label.get(v + 1, {}).get('dialect') or ''),
+                        } for k, v in self.label_to_index.items()}
 
         # load CSV rows
         with self.csv_path.open('r', encoding='utf-8') as f:
@@ -131,8 +243,40 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         if np is None:
             raise RuntimeError('numpy is required to load .npz files but is not installed.')
 
+        # Drop rows whose feature file is missing or 0-byte BEFORE training.
+        # A single corrupt/empty npz (e.g. a download that failed midway) used
+        # to raise EOFError inside __getitem__ and kill the entire run. Pruning
+        # here is a cheap stat() per row and keeps split counts self-consistent
+        # (each split is its own CSV/dataset, so length changes don't misalign).
+        self._prune_unreadable_rows()
+
+    def _prune_unreadable_rows(self) -> None:
+        kept: List[Dict[str, str]] = []
+        dropped = 0
+        for r in self.rows:
+            try:
+                path = self._resolve_feature_path(r)
+                if path.stat().st_size > 0:
+                    kept.append(r)
+                else:
+                    dropped += 1
+            except Exception:
+                dropped += 1
+        if dropped:
+            print(
+                f"[DATASET] Pruned {dropped} unreadable/empty feature file(s) "
+                f"from {self.csv_path.name}; {len(kept)} usable samples remain."
+            )
+        self.rows = kept
+
         # normalize labels to 0-based if inputs are 1-based
         self._label_offset = 0
+        if self._declared_mapping is not None:
+            # Ánh xạ đã khai LUÔN là 0..K-1 (`consume_declared` từ chối nếu
+            # không). Suy đoán offset ở đây sẽ là một phép sửa lên một giá trị
+            # đã đúng — và nếu suy sai thì mọi nhãn lệch đi một, âm thầm.
+            self._label_offset = 0
+            return
         try:
             if self.label_to_index:
                 vals = list(self.label_to_index.values())
@@ -157,6 +301,27 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         return len(self.rows)
 
     def _resolve_target(self, row: Dict[str, str]) -> int:
+        # CHẾ ĐỘ VẬN HÀNH: một đường, không có đường thứ hai.
+        #
+        # Cố ý KHÔNG rơi sang `label_key`, `class_idx` hay `labels.csv` khi tra
+        # trượt. Rơi sang được nghĩa là một hàng lạ vẫn học được dưới một nhãn
+        # đoán ra — và đó chính là cách ba nguồn sự thật cũ cùng tồn tại mà
+        # không ai phát hiện.
+        if self._declared_mapping is not None:
+            uid = (row.get('class_uid') or '').strip()
+            if not uid:
+                raise ValueError(
+                    "hàng không có `class_uid` trong khi split khai chế độ vận "
+                    "hành — danh tính lớp phải là class_uid, không suy từ "
+                    "slug/dialect/region")
+            idx = self._declared_mapping.get(uid)
+            if idx is None:
+                raise ValueError(
+                    f"class_uid {uid!r} không nằm trong ánh xạ đã khai của split. "
+                    f"Không đoán nhãn thay: hãy chia lại split, hoặc bỏ hàng này "
+                    f"khỏi split một cách tường minh.")
+            return int(idx)
+
         # Prefer explicit label_key (language/dialect/slug) via mapping.
         label_key = (row.get('label_key') or '').strip()
         if label_key and self.label_to_index:
@@ -199,7 +364,30 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             return (parts[0], '')
         return (default_language, '')
 
+    def _root_relative_candidate(self, row: Dict[str, str]) -> Optional[Path]:
+        """Where this row's file would live under an explicitly named root."""
+        folder_name = (row.get('folder_name') or '').strip()
+        file_name = (row.get('file') or '').strip()
+        if not folder_name or not file_name:
+            return None
+        language = (row.get('language') or 'vn').strip() or 'vn'
+        dialect = (row.get('dialect') or '').strip()
+        if not dialect:
+            lk = (row.get('label_key') or '').strip()
+            _, inferred = self._infer_language_dialect_from_label_key(lk, default_language=language)
+            dialect = (inferred or '').strip()
+        return self.root / language / (dialect or 'common') / folder_name / file_name
+
     def _resolve_feature_path(self, row: Dict[str, str]) -> Path:
+        # An explicitly requested root wins over the CSV's remembered path.
+        # Without this, `--features_root` is accepted, reported in the run
+        # config, and then ignored for every row whose `file_path` still
+        # resolves — which is every row of a freshly built split.
+        if getattr(self, 'root_is_explicit', False):
+            cand = self._root_relative_candidate(row)
+            if cand is not None and cand.exists():
+                return cand
+
         file_path = (row.get('file_path') or '').strip()
         if file_path:
             candidate = Path(file_path)
@@ -241,6 +429,23 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         )
 
     def _choose_array_from_npz(self, npz: Any) -> Any:
+        # Rebuild from raw when the run asks for a newer feature version. The
+        # stored `sequence` is left alone; it is simply not the array we use.
+        if self.feature_version != "v1":
+            if _fv2.needs_raw(self.feature_version):
+                if 'landmarks_raw' not in npz:
+                    raise MissingRawLandmarks(
+                        "feature_version=%s needs 'landmarks_raw'; this .npz only has %s"
+                        % (self.feature_version, sorted(npz.keys()))
+                    )
+                return _fv2.build_sequence(npz['landmarks_raw'], self._base_version)
+            # v1z / v1g derive from the stored, already v1-normalised sequence, so
+            # they apply to every sample including the older captures that never
+            # kept raw landmarks.
+            for k in self.feature_key_priority:
+                if k in npz:
+                    return _fv2.build_sequence_from_normalized(npz[k], self._base_version)
+            raise KeyError('No stored sequence found in npz archive')
         # try priority keys
         for k in self.feature_key_priority:
             if k in npz:
@@ -256,11 +461,80 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
                 continue
         raise KeyError('No array found in npz archive')
 
+    def _canonical_signer(self, row: Dict[str, str]) -> str:
+        """Danh tính NGƯỜI KÝ, chuẩn hoá các biến thể viết hoa/thường.
+
+        Ưu tiên `user_id` chứ không phải `signer_id`, ngược với trực giác. Lý do:
+        `signer_id` được suy ra từ TÀI KHOẢN thu thập, nên khi nhiều người cùng
+        ký dưới một tài khoản thì họ bị gộp thành một. Dữ liệu hoa-de có đúng
+        trường hợp đó: S010 (tài khoản "tran") chứa cả Nhung lẫn Khoa. Dùng
+        signer_id ở đây sẽ khiến split "tách người" âm thầm để hai người khác
+        nhau nằm cả ở train lẫn test — đúng thứ rò rỉ mà split này muốn chặn.
+        `user_id` ghi tên người ký thật, còn biến thể chính tả thì đã có bảng gộp
+        được chủ dữ liệu xác nhận (xem scripts/apply_signer_merges.py).
+        """
+        return _signer_identity.canonical_signer(row, self._legacy_signer_map)
+
+    def _feature_path_for(self, idx: int, row: Dict[str, str]) -> Path:
+        """_resolve_feature_path có nhớ kết quả — tránh stat() lại mỗi epoch."""
+        cached = self._path_cache.get(idx)
+        if cached is not None:
+            return cached
+        resolved = self._resolve_feature_path(row)
+        self._path_cache[idx] = resolved
+        return resolved
+
+    def _cache_put(self, key: str, x: "np.ndarray") -> None:
+        if self._cache_budget_bytes <= 0:
+            return
+        nbytes = int(x.nbytes)
+        if self._cache_bytes + nbytes > self._cache_budget_bytes:
+            if not self._cache_full_logged:
+                print(
+                    f"[DATASET] feature cache đầy ở {self._cache_bytes / 1048576:.0f} MB "
+                    f"({len(self._feature_cache)} mẫu); phần còn lại đọc thẳng từ đĩa. "
+                    "Tăng TRAIN_FEATURE_CACHE_MB nếu còn RAM."
+                )
+                self._cache_full_logged = True
+            return
+        self._feature_cache[key] = x
+        self._cache_bytes += nbytes
+
     def __getitem__(self, idx: int):
         r = self.rows[idx]
-        path = self._resolve_feature_path(r)
-        with np.load(path, allow_pickle=False) as data:  # type: ignore[attr-defined]
-            arr = self._choose_array_from_npz(data)
+        path = self._feature_path_for(idx, r)
+
+        cached = self._feature_cache.get(str(path))
+        if cached is not None:
+            # Bản copy: augment_fn được phép sửa tại chỗ.
+            return self._finalize(r, path, cached.copy())
+
+        try:
+            with np.load(path, allow_pickle=False) as data:  # type: ignore[attr-defined]
+                arr = self._choose_array_from_npz(data)
+        except MissingRawLandmarks:
+            # Never fall through to the neighbour substitution below: a missing
+            # feature version is a dataset-coverage problem, not a corrupt file.
+            raise
+        except Exception as e:
+            # Size-prefilter catches 0-byte files; this catches the rarer case
+            # of a non-empty but truncated/corrupt archive. Fall back to a
+            # neighbouring sample rather than crashing the whole training run.
+            n = len(self.rows)
+            print(f"[DATASET] Skipping corrupt feature {path} ({e}); using neighbour.")
+            for step in range(1, n):
+                alt_idx = (idx + step) % n
+                alt = self.rows[alt_idx]
+                try:
+                    alt_path = self._feature_path_for(alt_idx, alt)
+                    with np.load(alt_path, allow_pickle=False) as data:  # type: ignore[attr-defined]
+                        arr = self._choose_array_from_npz(data)
+                    r, path = alt, alt_path
+                    break
+                except Exception:
+                    continue
+            else:
+                raise RuntimeError(f"No readable feature file found near index {idx}") from e
         x = np.asarray(arr, dtype=self.dtype)
         # enforce expected temporal-first shape (T, D) without modifying dimensions
         if x.ndim != 2:
@@ -269,13 +543,69 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             raise ValueError(
                 f"Invalid feature shape {tuple(x.shape)} in {path}; expected ({_EXPECTED_SEQ_LEN}, {_EXPECTED_FEATURE_DIM})."
             )
+
+        # Cache mảng thô đã qua kiểm tra shape; augmentation/kiểm tra hữu hạn vẫn
+        # chạy lại mỗi lần lấy mẫu trong _finalize.
+        self._cache_put(str(path), x)
+        return self._finalize(r, path, x.copy() if self.augment_fn is not None else x)
+
+    def _finalize(self, r: Dict[str, Any], path: Any, x: "np.ndarray"):
+        if self.augment_fn is not None:
+            x = self.augment_fn(x)
+
+            x = np.asarray(
+                x,
+                dtype=self.dtype
+            )
+
+            if tuple(x.shape) != (
+                _EXPECTED_SEQ_LEN,
+                _EXPECTED_FEATURE_DIM
+            ):
+                raise ValueError(
+                    f"Augmentation returned invalid shape {tuple(x.shape)}"
+                )
+
+        if self.feature_version != "v1" and _fv2.has_geometry(self.feature_version):
+            x = _fv2.append_geometry(x, self.feature_version)
+
+        # Chiều rộng CUỐI CÙNG, sau khi hình học đã nối thêm.
+        #
+        # `self.expected_feature_dim` từng LÀ phép kiểm shape ở `__getitem__`.
+        # Khi hình học được chuyển ra sau augmentation, hai phép kiểm ấy phải
+        # đổi sang hằng 126 (lúc đó mảng chưa nối hình học) — và thuộc tính này
+        # thành mã chết: được tính ra, không ai đọc. Nghĩa là không còn gì đối
+        # chiếu chiều rộng SAU cùng với phiên bản đặc trưng đã khai.
+        #
+        # `train_tcn` có kiểm ở dòng ~1709, nhưng chỉ trên lô đầu tiên và chỉ
+        # khi đi qua trainer. Loader còn được dùng ở chỗ khác — suy luận,
+        # `compute_pooled_confusion.py` — và ở đó không có gì cả.
+        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, self.expected_feature_dim):
+            raise ValueError(
+                f"feature_version={self.feature_version} phải cho "
+                f"({_EXPECTED_SEQ_LEN}, {self.expected_feature_dim}) "
+                f"nhưng nhận {tuple(x.shape)} từ {path}"
+            )
+
+        x = np.ascontiguousarray( x, dtype=np.float32 )
+
+        if not np.isfinite(x).all(): 
+            raise ValueError( f"Non-finite values detected in {path}" )
+    
         y = self._resolve_target(r)
 
+        # All-string meta: torch default_collate rejects None values, and
+        # manifest-era CSVs carry signer_id (normalized) instead of the legacy
+        # free-text user_id — prefer it, fall back for old split CSVs.
         meta = {
-            'sample_id': r.get('sample_id'),
-            'label_slug': r.get('label_slug'),
-            'label_original': r.get('label_original'),
+            'sample_id': r.get('sample_id') or '',
+            'label_slug': r.get('label_slug') or '',
+            'label_original': r.get('label_original') or '',
             'file_path': str(path),
+            'class_uid': r.get('class_uid') or '',
+            'signer_id': self._canonical_signer(r),
+            'language': r.get('language') or '',
+            'dialect': r.get('dialect') or '',
         }
 
         if self.to_tensor and TORCH_AVAILABLE:
@@ -283,81 +613,15 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             y = torch.as_tensor(y, dtype=torch.long)
         return x, y, meta
 
-
-def pad_collate_fn(
-    batch: List[Tuple[Any, int, Dict[str, Any]]],
-    *,
-    feature_dim: Optional[int] = None,
-    on_feature_dim_mismatch: str = "truncate",
-    log_feature_dim_mismatch: bool = False,
-    max_log_paths: int = 3,
-):
-    """Pad variable-length time series to max length in batch (temporal axis=0).
-
-    Returns (X_pad, y_tensor, lengths, metas).
-
-    feature_dim:
-      - None (default): pad feature dimension to max D in the batch (legacy behavior)
-      - int: enforce a fixed feature dimension across all batches.
-
-    on_feature_dim_mismatch: when feature_dim is set and a sample has D > feature_dim
-      - 'truncate' (default): truncate to feature_dim
-      - 'error': raise an error
-    """
-
-    if not TORCH_AVAILABLE:
-        xs, ys, metas = zip(*batch)
-        lengths = [x.shape[0] if hasattr(x, 'shape') and len(x.shape) >= 1 else 1 for x in xs]
-        return list(xs), list(ys), lengths, list(metas)
-
-    xs, ys, metas = zip(*batch)
-    xs = list(xs)
-    ys_t = torch.as_tensor(ys, dtype=torch.long)
-    lengths = torch.as_tensor([x.shape[0] for x in xs], dtype=torch.long)
-    if feature_dim is None:
-        D = max(int(x.shape[1]) if x.ndim >= 2 else 1 for x in xs)
-    else:
-        D = int(feature_dim)
-    T = int(lengths.max())
-    X_pad = torch.zeros((len(xs), T, D), dtype=xs[0].dtype)
-    for i, x in enumerate(xs):
-        t = x.shape[0]
-        d = x.shape[1] if x.ndim >= 2 else 1
-        if feature_dim is not None and d > D:
-            if on_feature_dim_mismatch == 'error':
-                raise RuntimeError(f"Sample feature dim {d} exceeds fixed feature_dim={D}")
-            # default: truncate
-            global _FEATURE_DIM_TRUNCATE_WARNED
-            if log_feature_dim_mismatch and not _FEATURE_DIM_TRUNCATE_WARNED:
-                try:
-                    # log a few example paths to help trace upstream feature extraction issues
-                    example_paths: List[str] = []
-                    for j in range(min(len(metas), max(1, int(max_log_paths)))):
-                        p = metas[j].get('file_path') if isinstance(metas[j], dict) else None
-                        if p:
-                            example_paths.append(str(p))
-                    suffix = (" Examples: " + " | ".join(example_paths)) if example_paths else ""
-                except Exception:
-                    suffix = ""
-                print(
-                    f"[WARN] Feature dim mismatch: truncating sample features from D={d} to fixed feature_dim={D}."
-                    + suffix
-                )
-                _FEATURE_DIM_TRUNCATE_WARNED = True
-            x = x[:, :D]
-            d = D
-        if d != D:
-            # right-pad feature dimension if needed
-            tmp = torch.zeros((t, D), dtype=X_pad.dtype)
-            tmp[:, :d] = x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
-            X_pad[i, :t] = tmp
-        else:
-            X_pad[i, :t] = x if isinstance(x, torch.Tensor) else torch.from_numpy(x)
-    return X_pad, ys_t, lengths, list(metas)
-
-
-def build_dataloader(csv_path: Union[str, Path], batch_size: int = 16, shuffle: bool = True):
+def build_dataloader(csv_path: Union[str, Path], batch_size: int = 16, shuffle: bool = True, augment_fn=None):
     if not TORCH_AVAILABLE:
         raise RuntimeError('PyTorch is not installed; DataLoader is unavailable. Use NPZSignDataset directly.')
-    ds = NPZSignDataset(csv_path, to_tensor=True)
-    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, collate_fn=pad_collate_fn)
+    ds = NPZSignDataset(csv_path, to_tensor=True, augment_fn=augment_fn)
+    return DataLoader(
+        ds,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=2,
+        pin_memory=True,
+        persistent_workers=True,
+    )

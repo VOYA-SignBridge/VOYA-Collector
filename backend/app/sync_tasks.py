@@ -1,0 +1,231 @@
+import os
+import shutil
+import logging
+from pathlib import Path
+from typing import List, Dict, Any
+
+from app.worker import celery_app
+from app.config import settings
+from app.storage.postgres_connection import connect_postgres
+from app.storage.rls import apply_scope
+from psycopg2.extras import RealDictCursor
+from app.storage.gdrive_client import download_from_gdrive
+from app.monitoring import DISK_CRIT_PCT
+
+logger = logging.getLogger(__name__)
+
+# Cùng một ngưỡng với cảnh báo "nguy cấp" trên bảng quản trị, và cố ý lấy từ
+# đó chứ không viết lại: nếu hai con số trôi ra khỏi nhau thì bảng quản trị sẽ
+# báo "còn ổn" trong khi việc tải đã âm thầm dừng, hoặc ngược lại. Xem
+# `app/monitoring.py` để biết vì sao chiều nhập khẩu là như vậy.
+DISK_HIGH_WATERMARK = DISK_CRIT_PCT / 100.0
+
+
+def _disk_over_watermark() -> bool:
+    """Return True when the dataset volume is ≥ 95% full.
+
+    shutil.disk_usage is a single statvfs syscall (< 1µs), so calling it once
+    per download-loop iteration adds no measurable overhead.  On OSError (e.g.
+    a missing mount) we err on the side of caution and report "over"."""
+    try:
+        usage = shutil.disk_usage(str(settings.dataset_root))
+        return (usage.used / usage.total) >= DISK_HIGH_WATERMARK if usage.total else False
+    except OSError:
+        return True
+
+
+def _is_present(path: Path) -> bool:
+    """A local file counts as present only if it exists AND is non-empty.
+
+    A 0-byte file is the signature of a download that failed midway; treating
+    it as present would skip re-download forever and leave a corrupt artifact.
+    """
+    try:
+        return path.exists() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+# `platform_wide`: this sweeps every tenant's samples and raw_uploads for
+# missing local files, and it is dispatched from the admin router — from inside
+# a request, which now carries a tenant header. Without the flag the sweep would
+# silently cover one tenant and log success. The body below documents its
+# dependency on system scope explicitly; this is what keeps that true.
+@celery_app.task(bind=True, platform_wide=True)
+def download_missing_files_to_local(self):
+    """
+    Scans the database for samples and raw_uploads that have a storage_url
+    but are missing their local files on disk. Downloads them from GDrive.
+    """
+    logger.info("[SYNC] Starting download_missing_files_to_local task")
+    conn = connect_postgres()
+    try:
+        downloaded_count = 0
+        skipped_count = 0
+        error_count = 0
+        current_progress = 0
+        disk_stopped = False
+
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # This task opens its own connection instead of going through
+                # metadata_db, so it has to bind the tenant scope itself — the
+                # two reads below hit policy-protected tables and would return
+                # zero rows otherwise, i.e. the job would log success having
+                # downloaded nothing. The ambient scope is `system`, set for
+                # every task by worker.py's task_prerun handler.
+                apply_scope(cur)
+
+                # 1. Fetch Features
+                cur.execute(
+                    """
+                    SELECT sample_uid, file_path, storage_url 
+                    FROM samples 
+                    WHERE storage_url IS NOT NULL AND storage_url != '' AND deleted_at IS NULL
+                    """
+                )
+                samples = cur.fetchall()
+                
+                # 2. Fetch Raw Videos
+                cur.execute(
+                    """
+                    SELECT upload_uid, local_path, storage_url 
+                    FROM raw_uploads 
+                    WHERE storage_url IS NOT NULL AND storage_url != '' AND deleted_at IS NULL
+                    """
+                )
+                raw_uploads = cur.fetchall()
+                
+                total_items = len(samples) + len(raw_uploads)
+                
+                def report_progress():
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={
+                            "current": current_progress,
+                            "total": total_items,
+                            "downloaded": downloaded_count,
+                            "skipped": skipped_count,
+                            "errors": error_count
+                        }
+                    )
+                
+                report_progress()
+                
+                # Process Features
+                for sample in samples:
+                    storage_url = sample["storage_url"]
+                    file_path = sample["file_path"]
+                    
+                    # Resilient check in case they are swapped in the DB
+                    if file_path and (file_path.startswith("http") or file_path.startswith("gdrive://")):
+                        if storage_url and not (storage_url.startswith("http") or storage_url.startswith("gdrive://")):
+                            # Swap them back
+                            storage_url, file_path = file_path, storage_url
+                        else:
+                            # Both are URLs? We can't determine the local path
+                            file_path = None
+                    
+                    if not file_path or not storage_url:
+                        current_progress += 1
+                        report_progress()
+                        continue
+                        
+                    if not (storage_url.startswith("http") or storage_url.startswith("gdrive://")):
+                        skipped_count += 1
+                        current_progress += 1
+                        report_progress()
+                        continue
+                        
+                    local_abs_path = Path(settings.dataset_root) / file_path
+
+                    # A 0-byte local file is a FAILED prior download, not a real
+                    # copy. Checking only .exists() would skip it forever, leaving
+                    # a corrupt npz that crashes training. Require size > 0.
+                    if _is_present(local_abs_path):
+                        skipped_count += 1
+                    elif _disk_over_watermark():
+                        logger.warning("[SYNC] Disk ≥ %.0f%% — stopping downloads (backpressure)",
+                                       DISK_HIGH_WATERMARK * 100)
+                        disk_stopped = True
+                        break
+                    else:
+                        try:
+                            logger.info(f"[SYNC] Downloading feature for {sample['sample_uid']} from {storage_url}")
+                            local_abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            download_from_gdrive(storage_url, str(local_abs_path))
+                            downloaded_count += 1
+                        except Exception as e:
+                            logger.error(f"[SYNC] Failed to download feature {sample['sample_uid']}: {e}")
+                            error_count += 1
+                            
+                    current_progress += 1
+                    report_progress()
+
+                # Process Raw Videos
+                if not disk_stopped:
+                  for raw in raw_uploads:
+                    storage_url = raw["storage_url"]
+                    local_path = raw["local_path"]
+                    
+                    # Resilient check in case they are swapped in the DB
+                    if local_path and (local_path.startswith("http") or local_path.startswith("gdrive://")):
+                        if storage_url and not (storage_url.startswith("http") or storage_url.startswith("gdrive://")):
+                            # Swap them back
+                            storage_url, local_path = local_path, storage_url
+                        else:
+                            # Both are URLs? We can't determine the local path
+                            local_path = None
+                            
+                    if not local_path or not storage_url:
+                        current_progress += 1
+                        report_progress()
+                        continue
+                        
+                    if not (storage_url.startswith("http") or storage_url.startswith("gdrive://")):
+                        skipped_count += 1
+                        current_progress += 1
+                        report_progress()
+                        continue
+                        
+                    local_abs_path = Path(local_path)
+                    if not local_abs_path.is_absolute():
+                         local_abs_path = Path(settings.dataset_root) / local_path
+                         
+                    if _is_present(local_abs_path):
+                        skipped_count += 1
+                    elif _disk_over_watermark():
+                        logger.warning("[SYNC] Disk ≥ %.0f%% — stopping downloads (backpressure)",
+                                       DISK_HIGH_WATERMARK * 100)
+                        disk_stopped = True
+                        break
+                    else:
+                        try:
+                            logger.info(f"[SYNC] Downloading raw video for {raw['upload_uid']} from {storage_url}")
+                            local_abs_path.parent.mkdir(parents=True, exist_ok=True)
+                            download_from_gdrive(storage_url, str(local_abs_path))
+                            downloaded_count += 1
+                        except Exception as e:
+                            logger.error(f"[SYNC] Failed to download raw video {raw['upload_uid']}: {e}")
+                            error_count += 1
+                            
+                    current_progress += 1
+                    report_progress()
+
+        status = "stopped_disk_full" if disk_stopped else "completed"
+        logger.info(f"[SYNC] Finished ({status}). Downloaded: {downloaded_count}, Skipped: {skipped_count}, Errors: {error_count}")
+        return {
+            "status": status,
+            "current": current_progress,
+            "total": total_items,
+            "downloaded": downloaded_count,
+            "skipped": skipped_count,
+            "errors": error_count,
+            "disk_stopped": disk_stopped,
+        }
+
+    except Exception as e:
+        logger.exception("[SYNC] Critical error in download_missing_files_to_local task")
+        raise
+    finally:
+        conn.close()

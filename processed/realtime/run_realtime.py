@@ -5,14 +5,20 @@ import argparse
 import json
 import re
 import time
-import urllib.error
-import urllib.request
+import sys
+import numpy as np
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Deque, List, Optional, Tuple
 
-import numpy as np
+ROOT = Path(__file__).resolve().parents[2]
+
+BACKEND_DIR = ROOT / "processed"
+
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.append(str(BACKEND_DIR))
+from shared.normalization import ( normalize_hands_vector_126, )
 
 try:
     import cv2
@@ -27,55 +33,18 @@ except Exception as e:  # pragma: no cover
 import torch
 import torch.nn as nn
 try:
-    from train_model.dataset_versioning import get_analysis_dir
+    from dataset_versioning import get_analysis_dir
 except Exception:
     get_analysis_dir = None  # type: ignore
+
 
 @dataclass
 class ModelBundle:
     model: nn.Module
-    in_dim: int
+    feature_dim: int
     num_classes: int
     label_map: List[str]
     device: str
-
-
-_HAND_LANDMARKER_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-_HAND_LANDMARKER_MODEL_PATH = Path(__file__).resolve().parent / "assets" / "hand_landmarker.task"
-
-
-def _ensure_hand_landmarker_model() -> Path:
-    model_path = _HAND_LANDMARKER_MODEL_PATH
-    if model_path.exists() and model_path.stat().st_size > 0:
-        return model_path
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = model_path.with_suffix(".task.download")
-    try:
-        with urllib.request.urlopen(_HAND_LANDMARKER_MODEL_URL, timeout=120) as response:
-            model_path.write_bytes(response.read())
-        return model_path
-    except Exception as exc:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except Exception:
-                pass
-        raise RuntimeError(f"Failed to download hand landmarker model: {exc}") from exc
-
-
-def _create_hand_landmarker():
-    if mp is None:
-        raise RuntimeError("mediapipe is not available")
-    model_path = _ensure_hand_landmarker_model()
-    options = mp.tasks.vision.HandLandmarkerOptions(
-        base_options=mp.tasks.BaseOptions(model_asset_path=str(model_path)),
-        running_mode=mp.tasks.vision.RunningMode.IMAGE,
-        num_hands=2,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
-    return mp.tasks.vision.HandLandmarker.create_from_options(options)
 
 
 class Chomp1d(nn.Module):
@@ -112,7 +81,7 @@ class TemporalBlock(nn.Module):
 class TCNClassifier(nn.Module):
     def __init__(
         self,
-        in_dim: int,
+        feature_dim: int,
         num_classes: int,
         channels: int = 64,
         levels: int = 3,
@@ -120,7 +89,7 @@ class TCNClassifier(nn.Module):
         dropout: float = 0.3,
     ):
         super().__init__()
-        self.proj = nn.Conv1d(in_dim, channels, kernel_size=1)
+        self.proj = nn.Conv1d(feature_dim, channels, kernel_size=1)
         blocks = []
         for i in range(levels):
             dilation = 2 ** i
@@ -133,7 +102,10 @@ class TCNClassifier(nn.Module):
         x = x_btd.transpose(1, 2)
         x = self.proj(x)
         x = self.network(x)
-        # masked GAP
+        # NOTE: lengths parameter is always set to args.window (hardcoded as 60 in the caller).
+        # This makes the masked GAP code mathematically equivalent to unmasked mean(dim=2).
+        # The masked pooling is semantically correct but operationally a no-op.
+        # Pooling contract: unmasked_gap_v1 (matches train_tcn.py).
         b, c, t = x.shape
         mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
         mask = mask.unsqueeze(1)
@@ -192,100 +164,139 @@ def _load_label_map_from_index_to_label(i2l_path: Path, *, num_classes: int) -> 
     return label_map
 
 
-def build_model_from_ckpt(ckpt_path: Path, device: str) -> ModelBundle:
+def _label_map_from_checkpoint(obj: dict, *, num_classes: int) -> Optional[List[str]]:
+    """Build an index->label list from checkpoint contents.
+
+    Trainer checkpoints store either:
+    - idx_to_label: {index(int/str): label_key(str)}
+    - label_to_idx: {label_key(str): index(int/str)}
+
+    This is the most reliable source to stay compatible with the model.
+    """
+    i2l = obj.get("idx_to_label")
+    if isinstance(i2l, dict):
+        out: List[str] = []
+        for i in range(num_classes):
+            v = i2l.get(i, i2l.get(str(i), str(i)))
+            out.append(str(v))
+        return out
+
+    l2i = obj.get("label_to_idx")
+    if isinstance(l2i, dict):
+        inv: dict[int, str] = {}
+        for k, v in l2i.items():
+            try:
+                inv[int(v)] = str(k)
+            except Exception:
+                continue
+        out = [inv.get(i, str(i)) for i in range(num_classes)]
+        return out
+
+    return None
+
+
+def build_model_from_ckpt(ckpt_path: Path, device: str, *, meta: Optional[dict] = None) -> ModelBundle:
     # FIX for PyTorch 2.6+ (weights_only=True became default)
     obj = torch.load(ckpt_path, map_location=device, weights_only=False)
 
-    in_dim = int(obj.get('in_dim'))
+    feature_dim = int( obj.get('feature_dim', 126) )
     num_classes = int(obj.get('num_classes'))
 
-    cfg = obj.get('config') or {}
+    # Trainer uses "model_config"; keep backward-compat with older keys.
+    cfg = obj.get('model_config') or obj.get('config') or {}
     channels = int(cfg.get('channels', 64)) if isinstance(cfg, dict) else 64
     levels = int(cfg.get('levels', 3)) if isinstance(cfg, dict) else 3
     kernel_size = int(cfg.get('kernel_size', 5)) if isinstance(cfg, dict) else 5
     dropout = float(cfg.get('dropout', 0.3)) if isinstance(cfg, dict) else 0.3
 
     model = TCNClassifier(
-        in_dim=in_dim,
+        feature_dim=feature_dim,
         num_classes=num_classes,
         channels=channels,
         levels=levels,
         kernel_size=kernel_size,
         dropout=dropout,
     )
-    model.load_state_dict(obj['model_state'])
+    model.load_state_dict(obj['model_state_dict'])
     model.to(device).eval()
 
-    # label map: prefer per-checkpoint subset mapping if present.
-    label_map: List[str]
-    l2i = obj.get('label_to_index_json')
-    if l2i:
-        try:
-            i2l_path = Path(str(l2i)).with_name('index_to_label.json')
-            if i2l_path.exists():
-                label_map = _load_label_map_from_index_to_label(i2l_path, num_classes=num_classes)
-            else:
-                raise FileNotFoundError
-        except Exception:
-            if get_analysis_dir:
-                i2l = get_analysis_dir() / 'index_to_label.json'
-            else:
-                root = Path(__file__).resolve().parents[2]
-                i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-            label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
-    else:
-        if get_analysis_dir:
-            i2l = get_analysis_dir() / 'index_to_label.json'
-        else:
-            root = Path(__file__).resolve().parents[2]
-            i2l = root / 'processed' / 'analysis' / 'index_to_label.json'
-        label_map = _load_label_map_from_index_to_label(i2l, num_classes=num_classes)
+    # label map:
+    # - ALWAYS prefer checkpoint-embedded mapping for compatibility with num_classes/order.
+    # - Optionally replace display names using an index_to_label.json that matches this checkpoint.
+    label_map = _label_map_from_checkpoint(obj, num_classes=num_classes)
+    lookup_path = (
+        ROOT
+        / "processed"
+        / "analysis"
+        / "index_to_label.json"
+    )
+
+    if lookup_path.exists():
+
+        display_lookup = (
+            _load_label_original_lookup(
+                lookup_path
+            )
+        )
+
+        label_map = [
+            display_lookup.get(x, x)
+            for x in label_map
+        ]
+    label_source = "checkpoint"
+    if label_map is None:
+        label_map = [str(i) for i in range(num_classes)]
+        label_source = "fallback"
+
+    print(f"[realtime] label_map_source={label_source} num_classes={num_classes}")
 
     return ModelBundle(
         model=model,
-        in_dim=in_dim,
+        feature_dim=feature_dim,
         num_classes=num_classes,
         label_map=label_map,
         device=device,
     )
 
 
-def extract_hands_126(frame_bgr: np.ndarray, landmarker) -> Tuple[np.ndarray, np.ndarray, bool]:
+def extract_hands_126(frame_bgr: np.ndarray, hands) -> Tuple[np.ndarray, np.ndarray, bool]:
+    feat = np.zeros(
+        126,
+        dtype=np.float32
+    )
+
+    has_hand = False
+
     h, w = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-    result = landmarker.detect(mp_image)
+    result = hands.process(frame_rgb)
 
     left = np.zeros((21, 3), dtype=np.float32)
     right = np.zeros((21, 3), dtype=np.float32)
 
     has_hand = False
-    hand_connections = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 
-    if result.hand_landmarks and result.handedness:
-        has_hand = True
-        for landmarks, handedness in zip(result.hand_landmarks, result.handedness):
-            handedness_label = ""
-            if handedness:
-                category = handedness[0]
-                handedness_label = (getattr(category, "category_name", "") or getattr(category, "display_name", "") or "").lower()
-            coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks], dtype=np.float32)
-            if handedness_label == 'left':
+    if result.multi_hand_landmarks and result.multi_handedness:
+        has_hand = True   # ----> HAND DETECTED
+        for lm, hd in zip(result.multi_hand_landmarks, result.multi_handedness):
+            label = hd.classification[0].label.lower()
+            coords = np.array([[p.x, p.y, p.z] for p in lm.landmark], dtype=np.float32)
+            if label == 'right':
                 left = coords
             else:
                 right = coords
+            mp.solutions.drawing_utils.draw_landmarks(frame_bgr, lm, mp.solutions.hands.HAND_CONNECTIONS)
 
-            points = [(int(lm.x * w), int(lm.y * h)) for lm in landmarks]
-            for connection in hand_connections:
-                start_pt = points[connection.start]
-                end_pt = points[connection.end]
-                cv2.line(frame_bgr, start_pt, end_pt, (0, 255, 0), 2)
-            for x, y in points:
-                cv2.circle(frame_bgr, (x, y), 2, (0, 0, 255), -1)
+        feat = np.concatenate(
+            [left.reshape(-1), right.reshape(-1)],
+            axis=0
+        ).astype(np.float32)
 
-    feat = np.concatenate([left.reshape(-1), right.reshape(-1)], axis=0)
+        # IMPORTANT:
+        # must match training preprocessing
+        feat = normalize_hands_vector_126(feat)
+
     return feat, frame_bgr, has_hand
-
 
 
 def softmax(x: np.ndarray) -> np.ndarray:
@@ -333,6 +344,41 @@ def draw_text_vietnamese(frame_bgr, text, pos=(10, 30), color=(0, 255, 0), font_
     # convert RGB back to BGR
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
+def _load_label_original_lookup(
+    path: Path,
+) -> dict[str, str]:
+
+    out = {}
+
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8")
+        )
+
+        if isinstance(data, dict):
+
+            for _, meta in data.items():
+
+                if not isinstance(meta, dict):
+                    continue
+
+                key = str(
+                    meta.get("label_key", "")
+                ).strip()
+
+                original = str(
+                    meta.get("label_original", "")
+                ).strip()
+
+                if key:
+                    out[key] = (
+                        original or key
+                    )
+
+    except Exception:
+        pass
+
+    return out
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Realtime sign recognition using TCN + MediaPipe Hands')
@@ -371,12 +417,12 @@ def main() -> None:
         ckpt = args.checkpoint
         meta = {}
 
-    bundle = build_model_from_ckpt(ckpt, args.device)
-    in_dim = bundle.in_dim
-    if in_dim != 126:
-        raise SystemExit(f'Model in_dim={in_dim} must match feature extractor (126).')
+    bundle = build_model_from_ckpt(ckpt, args.device, meta=meta)
+    feature_dim = bundle.feature_dim
+    if feature_dim != 126:
+        raise SystemExit(f'Model feature_dim={feature_dim} must match feature extractor (126).')
 
-    hands = _create_hand_landmarker()
+    hands = mp.solutions.hands.Hands(static_image_mode=False, max_num_hands=2, model_complexity=1, min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
     cap = cv2.VideoCapture(0 if not args.video else args.video)
     if not cap.isOpened():
@@ -442,10 +488,10 @@ def main() -> None:
                 continue
 
             # ----- HAND DETECTED → normal flow -----
-            if feat.shape[0] < in_dim:
-                feat = np.pad(feat, (0, in_dim - feat.shape[0]))
-            elif feat.shape[0] > in_dim:
-                feat = feat[:in_dim]
+            if feat.shape[0] < feature_dim:
+                feat = np.pad(feat, (0, feature_dim - feat.shape[0]))
+            elif feat.shape[0] > feature_dim:
+                feat = feat[:feature_dim]
 
             buf.append(feat.astype(np.float32))
 
@@ -458,8 +504,8 @@ def main() -> None:
                 inference_start = time.time()
                 
                 X = np.stack(list(buf), axis=0)
-                lengths = torch.tensor([X.shape[0]], dtype=torch.long, device=bundle.device)
-                X_pad = np.zeros((1, args.window, in_dim), dtype=np.float32)
+                lengths = torch.tensor( [args.window], dtype=torch.long, device=bundle.device )
+                X_pad = np.zeros((1, args.window, feature_dim), dtype=np.float32)
                 t = min(args.window, X.shape[0])
                 X_pad[0, -t:] = X[-t:]
 

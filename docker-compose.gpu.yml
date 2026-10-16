@@ -1,0 +1,32 @@
+# GPU opt-in overlay — add ONLY on a host with an NVIDIA GPU.
+#
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.prod.yml \
+#                  -f docker-compose.gpu.yml up -d --build
+#
+# This block used to live in docker-compose.prod.yml, which made the whole stack
+# undeployable on any machine without the NVIDIA Container Toolkit: Docker
+# resolves `driver: nvidia` when it creates the container, so the trainer failed
+# outright with
+#
+#   could not select device driver "nvidia" with capabilities: [[gpu]]
+#
+# rather than quietly falling back. Keeping it separate means the default deploy
+# works everywhere and GPU hosts opt in with one extra -f.
+#
+# Nothing in the application needs to change either way: train_tcn.py picks CUDA
+# through torch.cuda.is_available() and runs on CPU when there is no device.
+#
+# Check the host first:
+#   docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+# If that prints a GPU table, this overlay will work. If it errors, don't use it.
+
+services:
+  trainer:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

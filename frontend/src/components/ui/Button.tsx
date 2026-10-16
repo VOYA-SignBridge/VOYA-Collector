@@ -22,7 +22,7 @@ export default function Button({
     primary: "btn btn-primary",
     secondary: "btn btn-secondary",
     ghost: "btn btn-ghost",
-    danger: "btn bg-red-600 text-white hover:bg-red-700 shadow-md"
+    danger: "btn bg-ctu-red text-white hover:bg-red-700 shadow-md"
   };
 
   const sizes = {

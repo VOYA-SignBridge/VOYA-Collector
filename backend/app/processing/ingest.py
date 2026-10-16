@@ -5,29 +5,6 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def sample_frames_from_video(video_path: str, target_fps: float = 5.0):
-    """
-    Decode video and sample frames roughly at target_fps.
-    Returns list of BGR numpy arrays.
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError("Cannot open video file")
-    video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    sample_rate = max(1, int(video_fps / target_fps))
-    frames = []
-    idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if idx % sample_rate == 0:
-            frames.append(frame)
-        idx += 1
-    cap.release()
-    return frames
-
-
 def ffmpeg_resample(input_path: str, fps_target: int) -> Tuple[str, float, float]:
     """
     If ffmpeg is available, resample video to fixed fps before processing.
@@ -42,10 +19,16 @@ def ffmpeg_resample(input_path: str, fps_target: int) -> Tuple[str, float, float
     if not ffmpeg_path or fps_in == float(fps_target):
         return input_path, float(fps_in or 0.0), float(fps_in or 0.0)
 
-    # Create temp output in same directory for atomicity/cleanup
-    dir_name = os.path.dirname(input_path) or "."
-    os.makedirs(dir_name, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(prefix="resampled_", suffix=".mp4", dir=dir_name)
+    # Temp output goes to the system temp dir, NOT next to the input.
+    #
+    # It used to be written to `dirname(input_path)` "for atomicity" — but this
+    # file is only ever read and deleted, never renamed over anything, so there
+    # was no atomicity to gain. What it cost was real: the source directory has
+    # to be writable (a read-only mount or an archive volume fails outright),
+    # and any crash between mkstemp and cleanup drops a `resampled_*.mp4` into
+    # the data tree — including `dataset/raw/`, which is meant to hold exactly
+    # what was uploaded and nothing else.
+    fd, tmp_path = tempfile.mkstemp(prefix="voya_resampled_", suffix=".mp4")
     os.close(fd)
     cmd = [
         ffmpeg_path,
@@ -84,14 +67,18 @@ def frame_generator(video_path: str,
     # Resample if needed using ffmpeg
     resampled_path, fps_in, fps_out = ffmpeg_resample(video_path, fps_target)
 
-    cap = cv2.VideoCapture(resampled_path)
-    if not cap.isOpened():
-        raise RuntimeError("Cannot open video file")
-
-    # Use fps_out when available; fallback to cap's reported fps
-    fps = fps_out or cap.get(cv2.CAP_PROP_FPS) or float(fps_target)
-    idx = 0
+    # The open and its failure check live INSIDE the try: `raise RuntimeError`
+    # used to sit above it, so an unopenable resample leaked its temp file every
+    # time — the one path where cleanup mattered most.
+    cap = None
     try:
+        cap = cv2.VideoCapture(resampled_path)
+        if not cap.isOpened():
+            raise RuntimeError("Cannot open video file")
+
+        # Use fps_out when available; fallback to cap's reported fps
+        fps = fps_out or cap.get(cv2.CAP_PROP_FPS) or float(fps_target)
+        idx = 0
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -104,7 +91,8 @@ def frame_generator(video_path: str,
             yield idx, ts, frame
             idx += 1
     finally:
-        cap.release()
+        if cap is not None:
+            cap.release()
         # cleanup temp resampled file if created
         if resampled_path != video_path and os.path.exists(resampled_path):
             try:
@@ -113,11 +101,13 @@ def frame_generator(video_path: str,
                 pass
 
 
-def temporal_speed_variants(video_path: str, speeds=[1.0, 1.2, 0.8]) -> list:
+def temporal_speed_variants(video_path: str, speeds=None) -> list:
     """
     Create temporal speed variants of video using ffmpeg setpts filter.
     Returns list of (speed_factor, temp_video_path).
     """
+    if speeds is None:
+        speeds = [1.0, 1.2, 0.8]
     variants = []
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:

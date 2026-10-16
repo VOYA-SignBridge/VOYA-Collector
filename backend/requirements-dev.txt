@@ -1,0 +1,8 @@
+# Test-only dependencies. Deliberately NOT in requirements.txt: nothing here
+# ships in the production image.
+#
+# Used by backend/Dockerfile.test, which layers these on top of the already
+# built voya_backend image so the heavy runtime deps (torch, mediapipe) are
+# reused rather than reinstalled.
+pytest==8.3.4
+pytest-timeout==2.3.1

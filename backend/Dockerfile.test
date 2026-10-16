@@ -1,0 +1,30 @@
+# Test image for the research pipeline + backend suites.
+#
+# Layers ONLY the test dependencies on top of the already built runtime image,
+# so the heavy deps (torch, mediapipe, opencv) are reused and nothing
+# test-related can leak into the production image.
+#
+# Build:
+#   docker build -f backend/Dockerfile.test -t voya_backend_test:latest backend
+# Run (repo mounted at /src so tests see processed/, scripts/, dataset/):
+#   docker run --rm -v "$PWD:/src" -w /src voya_backend_test:latest \
+#     python -m pytest backend/tests -q
+ARG BASE_IMAGE=voya_backend:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+COPY requirements-dev.txt /tmp/requirements-dev.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements-dev.txt \
+    && rm /tmp/requirements-dev.txt
+
+# Tests import `app` (backend/app) and the research modules (processed/,
+# scripts/) from the repo mounted at /src.
+ENV PYTHONPATH=/src:/src/backend \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER appuser
+WORKDIR /src
+
+CMD ["python", "-m", "pytest", "backend/tests", "-q"]

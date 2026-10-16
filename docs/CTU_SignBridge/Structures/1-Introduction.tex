@@ -1,0 +1,19 @@
+Automatic sign recognition can support accessible human--computer interaction, education, and assistive communication. Large-scale isolated-sign benchmarks and pose-based models have advanced the field, but their results transfer poorly to low-resource settings, where a handful of physical performers, incomplete class coverage, and limited independent collection are the norm \cite{li_wlasl_2020,selvaraj_openhands_2022,starner_popsign_2023,desai_asl_citizen_2023}.
+
+In such settings, disjoint sample identifiers prove less than they appear to. When two recordings of the same person land on opposite sides of a split, the model can still lean on that person's morphology, timing, signing style, or capture conditions. Validation deserves particular attention, because validation is what drives early stopping and checkpoint selection: a model tuned against a performer has already met them. We therefore treat an unseen-performer claim as valid only when the target person is absent from training and validation alike.
+
+Artifacts fail in quieter ways. An identity mapping that merges two people, a split regenerated after the fact, a renamed label, a preprocessing step changed between runs, a checkpoint that does not record what produced it --- any one of these can move a number or make it impossible to rebuild. Fixed random seeds do nothing about them. Dataset inventories, split membership, processing contracts, source revisions, and runtime provenance have to be verifiable as well.
+
+This paper presents CTU.SignBridge, a protocol- and artifact-aware pipeline for isolated sign recognition from fixed-length two-hand landmark sequences. We do not propose a new recognition backbone. We examine instead how the evaluation protocol, physical performer identity, and artifact validity shape the interpretation of low-resource results. CTU.SignBridge binds canonical identities, checksummed manifests, versioned splits, processing contracts, and self-describing checkpoints behind fail-closed validity gates.
+
+We evaluate two profiles: a seven-class Hòa Đê community-origin workplace-sign profile with 445 usable samples from four complete-coverage performers, and a 23-class fingerspelling subset with 793 usable samples from five physical performers, only two of whom cover every class. Five compact architectures share one optimization budget: HandGCN, TCN, CNN, bidirectional LSTM, and BiGRU with attention. Our principal protocol holds one performer out of both training and validation. A matched control then sets performer-unseen against performer-exposed development on the same fixed, disjoint test samples.
+
+That matched experiment comprises 120 research-valid runs. Exposing the target performer during training and validation raised fixed-test accuracy in all 20 model--performer comparisons, from 0.794 to 0.958 on average. On Hòa Đê, HandGCN reached the highest mean held-out-performer accuracy, 0.878, and ranked first on all four folds; the two complete fingerspelling folds supported no stable ranking.
+
+We contribute:
+\begin{enumerate}
+    \item a fail-closed pipeline that links canonical physical-performer identities to immutable manifests, versioned splits, processing contracts, and self-describing checkpoints;
+    \item a matched 120-run experiment that measures what target-performer exposure during training and validation is worth on fixed disjoint test sets;
+    \item held-out-performer comparisons of five compact architectures across two low-resource recognition profiles;
+    \item reliability evidence drawn from identity reconciliation, augmentation semantics, checkpoint provenance, and deterministic execution.
+\end{enumerate}

@@ -1,5 +1,6 @@
 import Button from "./ui/Button";
 import useSpeechToText from "../hooks/useSpeechToText";
+import { useI18n } from "../i18n";
 
 interface SpeechInputButtonProps {
   onText: (text: string) => void;
@@ -10,11 +11,12 @@ interface SpeechInputButtonProps {
 // Small mic button that toggles speech recognition and
 // passes recognized text back via onText.
 export default function SpeechInputButton({ onText, title, className }: SpeechInputButtonProps) {
+  const { t } = useI18n();
   const { listening, supported, error, start, stop } = useSpeechToText();
 
   const handleClick = () => {
     if (!supported) {
-      window.alert(error || "Trình duyệt không hỗ trợ microphone / Web Speech API");
+      window.alert(error || t("Trình duyệt không hỗ trợ microphone / Web Speech API"));
       return;
     }
 
@@ -30,7 +32,7 @@ export default function SpeechInputButton({ onText, title, className }: SpeechIn
     });
   };
 
-  const label = listening ? "Đang ghi âm, hãy đọc" : "Nhấn để đọc bằng giọng nói";
+  const label = listening ? t("Đang ghi âm, hãy đọc") : t("Nhấn để đọc bằng giọng nói");
 
   return (
     <Button
@@ -66,7 +68,7 @@ export default function SpeechInputButton({ onText, title, className }: SpeechIn
         />
       </svg>
       {listening && (
-        <span className="mt-0.5 text-[9px] leading-none text-red-100">Đang nghe…</span>
+        <span className="mt-0.5 text-[9px] leading-none text-red-100">{t("Đang nghe…")}</span>
       )}
       <span className="sr-only">{label}</span>
     </Button>

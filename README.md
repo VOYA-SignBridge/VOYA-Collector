@@ -18,7 +18,7 @@ Sign language data collection and processing system for Vietnamese Sign Language
 ## Project Overview
 
 VOYA-Collector captures sign language gesture data from:
-- **Live camera** (MediaPipe Holistic hand tracking)
+- **Live camera** (MediaPipe Hands landmark tracking, client-side)
 - **Video files** (MP4, MOV)
 
 Processed data is stored for training sign language recognition models.
@@ -31,7 +31,7 @@ Processed data is stored for training sign language recognition models.
 - **React 19** + TypeScript
 - **Vite** (build tool)
 - **Tailwind CSS v4**
-- **MediaPipe Holistic** (client-side hand tracking)
+- **MediaPipe Hands** (client-side hand tracking)
 - **Axios** (API client)
 
 ### Backend
@@ -76,6 +76,70 @@ docker-compose up --build -d
 # View logs
 docker-compose logs -f backend worker
 ```
+
+### Production Deployment (docker-compose.prod.yml)
+
+```bash
+# 1. Copy the template and fill in real values — do NOT deploy with the
+#    placeholder secrets/passwords as-is (see .env.example comments)
+cp .env.example .env
+
+# 2. Build and start
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+#### After every deploy: check that what runs is what you built
+
+```bash
+python scripts/check_deploy_freshness.py     # exit 0 = running code == working tree
+```
+
+`docker compose ps` answers "is the process alive", not "is it the process you
+just built". A frontend image once sat five hours behind its source while all
+13 containers reported healthy — the site loaded perfectly, serving the previous
+bundle. The script compares each image against the files its Dockerfile actually
+copies, and each container against the image tag, so it separates the three
+cases that have three different fixes: rebuild, force-recreate, or restart
+(`realtime_service` bind-mounts its code, so rebuilding it does nothing).
+
+Before going live, make sure `.env` has:
+- Real `SECRET_KEY` / `AUTH_TOKEN_SECRET_KEY` (`python -c "import secrets; print(secrets.token_hex(32))"`)
+- A real `POSTGRES_PASSWORD` / `ADMIN_PASSWORD` (not `admin`/`change-me`)
+- `FRONTEND_BASE_URL` set to the server's real domain/IP
+- `VITE_API_URL` left **empty** unless the frontend is served from a different origin than the nginx gateway (empty = same-origin, proxied by `nginx.conf`)
+
+#### GPU (training on a CUDA machine)
+
+`processed/train_utils/train_tcn.py` already auto-selects `cuda` when available — no code or `requirements.txt` change needed, `torch` from PyPI ships CUDA support by default. `docker-compose.prod.yml`'s `trainer` service reserves a GPU:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+```
+
+For this to work, the **host** (school server) needs, one-time:
+
+1. An up-to-date NVIDIA driver (`nvidia-smi` must work on the host itself).
+2. The [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed and Docker restarted:
+   ```bash
+   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+   curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+3. Verify before trusting compose: `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi` should print the GPU info.
+
+If the toolkit isn't installed yet, `docker compose -f docker-compose.prod.yml up` will fail to start `trainer` with a device-request error — that's expected; install the toolkit above, or remove the `deploy:` block from the `trainer` service in `docker-compose.prod.yml` to fall back to CPU-only training.
+
+Only `trainer` requests a GPU (training is CPU/GPU-heavy and runs one job at a time). `backend`'s real-time inference endpoint intentionally stays on CPU (single-sequence prediction is cheap, and this avoids VRAM contention with an in-progress training job).
 
 ### Frontend Development
 ```bash
@@ -134,6 +198,34 @@ MAX_SAMPLES_PER_CLASS=2000
 - **Local filesystem** (default)
 - **Google Drive** (when `USE_GOOGLE_DRIVE=1`)
 ```
+
+### Changing the public URL (tunnels, new domain)
+
+The stack is host-agnostic: nginx has no `server_name`, there is no trusted-host
+middleware, session cookies are host-only and the SPA calls relative paths. So
+serving the same deployment at a new hostname — an ngrok/cloudflared tunnel that
+gets a fresh name on every restart, a new domain — needs **no rebuild and no
+container restart**. `CORS_ALLOWED_ORIGINS` is not involved either: the SPA and
+the API share one origin through nginx, so the browser never runs a CORS check.
+
+The one thing that has to follow the hostname is the password-reset link that
+goes out by email. List the hostname in `deploy/public_hosts.txt` (copy it from
+`deploy/public_hosts.example.txt`); the backend re-reads that file on each
+request, so the change is live immediately. With ngrok, let the script do it:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\sync-public-host.ps1
+# ...or leave it running so a restarted tunnel needs no action at all:
+powershell -ExecutionPolicy Bypass -File scripts\sync-public-host.ps1 -Watch
+```
+
+A host that is not listed falls back to `FRONTEND_BASE_URL`. That fallback is
+the security boundary, not a convenience: `Host` is set by the caller, so
+without the allowlist an attacker could trigger a reset for your account and
+have the email carry a real token pointing at their server. `COOKIE_SECURE`
+likewise no longer needs to be flipped per environment — cookies are marked
+`Secure` on the requests that actually arrive over HTTPS, so an HTTPS tunnel and
+plain-HTTP localhost can serve from one stack at the same time.
 
 ---
 

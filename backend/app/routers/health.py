@@ -1,25 +1,67 @@
 import logging
 import os
+import threading
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
+import redis
 from fastapi import APIRouter, HTTPException
-import psycopg2
 
 from app.config import settings
+from app.storage.postgres_connection import get_pooled_conn, put_pooled_conn
 
 router = APIRouter(prefix="/health", tags=["health"])
 logger = logging.getLogger("health")
 
 
+# These probes run on a hot path — the readiness/deps endpoints plus the
+# Prometheus /metrics scrape (every ~5s). Opening a fresh Redis connection and a
+# fresh Postgres connection on every call meant a TCP+auth handshake several
+# times a second (thousands of short-lived connections/hour). Reuse a pooled
+# client/connection instead: same liveness signal, ~zero connection churn.
+
+_redis_singleton: Optional[redis.Redis] = None
+_redis_lock = threading.Lock()
+
+
+def _redis_client() -> redis.Redis:
+    """Process-local, pooled Redis client for health probes (reused, not closed).
+
+    redis-py keeps an internal connection pool, and health_check_interval +
+    retry_on_timeout make a stale pooled socket (e.g. after a Redis restart)
+    transparently reconnect instead of erroring once."""
+    global _redis_singleton
+    if _redis_singleton is None:
+        with _redis_lock:
+            if _redis_singleton is None:
+                _redis_singleton = redis.from_url(
+                    settings.broker_url,
+                    socket_connect_timeout=3,
+                    socket_timeout=3,
+                    socket_keepalive=True,
+                    retry_on_timeout=True,
+                    health_check_interval=30,
+                )
+    return _redis_singleton
+
+
 def _check_postgres() -> None:
-    conn = psycopg2.connect(settings.database_url, connect_timeout=3)
+    # Borrow from the shared pool instead of opening a fresh connection per call.
+    conn = get_pooled_conn()
+    broken = False
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
+    except Exception:
+        broken = bool(getattr(conn, "closed", 0))
+        raise
     finally:
-        conn.close()
+        put_pooled_conn(conn, close=broken)
+
+
+def _check_redis() -> None:
+    _redis_client().ping()
 
 
 @router.get("", tags=["health"])
@@ -42,30 +84,30 @@ async def readiness_check() -> Dict[str, Any]:
     Readiness probe: checks if service is ready to accept traffic.
     Verifies database connectivity and essential services.
     """
-    try:
-        # Check database connectivity
-        try:
-            _check_postgres()
-            db_status = "connected"
-        except Exception as e:
-            logger.error(f"Database connection failed: {e}")
-            db_status = f"error: {str(e)}"
+    checks: Dict[str, str] = {}
 
-        # All checks passed
-        if db_status == "connected":
-            return {
-                "status": "ready",
-                "timestamp": datetime.utcnow().isoformat(),
-                "checks": {
-                    "database": "ok",
-                    "redis": "ok",
-                },
-            }
-        else:
-            raise HTTPException(status_code=503, detail=f"Database unavailable: {db_status}")
+    try:
+        _check_postgres()
+        checks["database"] = "ok"
     except Exception as e:
-        logger.error(f"Readiness check failed: {e}")
-        raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
+        logger.error(f"Database connection failed: {e}")
+        checks["database"] = f"error: {str(e)}"
+
+    try:
+        _check_redis()
+        checks["redis"] = "ok"
+    except Exception as e:
+        logger.error(f"Redis connection failed: {e}")
+        checks["redis"] = f"error: {str(e)}"
+
+    if all(v == "ok" for v in checks.values()):
+        return {
+            "status": "ready",
+            "timestamp": datetime.utcnow().isoformat(),
+            "checks": checks,
+        }
+
+    raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
 
 
 @router.get("/live", tags=["health"])
@@ -182,6 +224,19 @@ async def dependencies_check() -> Dict[str, Any]:
         }
     except Exception as e:
         deps_status["dependencies"]["postgres"] = {
+            "status": "error",
+            "error": str(e),
+        }
+
+    # Redis
+    try:
+        _check_redis()
+        deps_status["dependencies"]["redis"] = {
+            "status": "ok",
+            "response_time_ms": 0,
+        }
+    except Exception as e:
+        deps_status["dependencies"]["redis"] = {
             "status": "error",
             "error": str(e),
         }

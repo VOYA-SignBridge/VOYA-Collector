@@ -1,0 +1,4 @@
+# The GeoLite2 database is licensed and large — never commit it.
+*.mmdb
+!README.md
+!.gitignore
