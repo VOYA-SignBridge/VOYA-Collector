@@ -132,3 +132,9 @@ reports/determinism/
 !reports/augmentation_contract.json
 !release/
 !release/*.json
+
+# ExecuTorch mobile export
+processed/mobile/artifacts/
+.venv-executorch/
+!processed/mobile/README.md
+!processed/mobile/requirements-executorch.txt
