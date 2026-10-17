@@ -1,9 +1,6 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import timedelta
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status, Depends  # pyright: ignore[reportMissingImports]
-from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
-
 from app.config import settings
 from app.modules.identity import (
     authenticate_user,
@@ -26,6 +23,14 @@ from app.modules.identity import (
     reset_login_attempts,
     send_password_reset_email,
 )
+from app.modules.identity.schemas import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    RegisterRequest,
+    ResetPasswordRequest,
+    UserOut,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -34,30 +39,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _FORGOT_PASSWORD_GENERIC_MESSAGE = (
     "Nếu tài khoản tồn tại, chúng tôi đã gửi email hướng dẫn đặt lại mật khẩu."
 )
-
-
-class RegisterRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
-    email: str = Field(..., min_length=3, max_length=255)
-    password: str = Field(..., min_length=8, max_length=128)
-
-
-class LoginRequest(BaseModel):
-    identifier: str = Field(..., min_length=1, max_length=255)
-    password: str = Field(..., min_length=1, max_length=128)
-
-
-class UserOut(BaseModel):
-    id: str
-    username: str
-    email: str
-    is_active: bool
-    is_admin: bool
-    created_at: Optional[datetime] = None
-
-
-class MessageResponse(BaseModel):
-    message: str
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -184,15 +165,6 @@ def logout(request: Request, response: Response):
 @router.get("/me", response_model=UserOut)
 def me(current_user=Depends(get_current_user)):
     return current_user
-
-
-class ForgotPasswordRequest(BaseModel):
-    identifier: str = Field(..., min_length=1, max_length=255)
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 @router.post("/forgot-password", response_model=MessageResponse)

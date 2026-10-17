@@ -157,3 +157,47 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Đổi import trong các router về các legacy modules ban đầu.
 - Xóa `app/modules/` và regression test của BR-003.
 - Không cần hoàn tác database, cookie hoặc token.
+
+## 2026-10-18 — BR-004: Tách auth schemas khỏi HTTP router
+
+### Mục tiêu
+
+- Giữ auth router tập trung vào HTTP orchestration thay vì định nghĩa data model.
+- Đặt request/response contract cạnh bounded context `identity`.
+- Giữ nguyên OpenAPI schema names và validation constraints.
+
+### Thay đổi
+
+- Thêm `app/modules/identity/schemas.py` chứa:
+  - `RegisterRequest`;
+  - `LoginRequest`;
+  - `UserOut`;
+  - `MessageResponse`;
+  - `ForgotPasswordRequest`;
+  - `ResetPasswordRequest`.
+- Export các schema qua `app.modules.identity`.
+- Xóa định nghĩa Pydantic model khỏi `routers/auth.py`; router import contract từ
+  identity module.
+- Loại các import `BaseModel`, `Field`, `datetime`, `Optional` không còn dùng ở
+  router.
+- Thêm `tests/test_identity_schemas.py` bảo vệ các giới hạn username, identifier
+  và password đã tồn tại trước refactor.
+
+### Contract được giữ nguyên
+
+- Tên Pydantic classes và field names không đổi.
+- Min/max length của toàn bộ auth payload không đổi.
+- Response model của register/login/refresh/logout/me/reset không đổi.
+- Không đổi endpoint, status code, cookie hoặc token behavior.
+
+### Kiểm tra
+
+- CodeGraph xác nhận các schema trước đó chỉ được sử dụng trong auth router.
+- Kiểm tra source xác nhận router không còn định nghĩa Pydantic model.
+- AST parse được dùng để kiểm tra cú pháp các file thay đổi.
+- Runtime pytest vẫn chờ môi trường dependency của project hoặc Docker daemon.
+
+### Hoàn tác
+
+- Đưa sáu schema class về `routers/auth.py` và khôi phục import Pydantic cũ.
+- Xóa `identity/schemas.py`, schema exports và regression test BR-004.

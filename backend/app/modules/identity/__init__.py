@@ -25,6 +25,14 @@ from app.modules.identity.api import (
     send_password_reset_email,
     set_auth_cookies,
 )
+from app.modules.identity.schemas import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    RegisterRequest,
+    ResetPasswordRequest,
+    UserOut,
+)
 
 __all__ = [
     "ACCESS_COOKIE",
@@ -50,4 +58,10 @@ __all__ = [
     "rotate_refresh_token",
     "send_password_reset_email",
     "set_auth_cookies",
+    "ForgotPasswordRequest",
+    "LoginRequest",
+    "MessageResponse",
+    "RegisterRequest",
+    "ResetPasswordRequest",
+    "UserOut",
 ]
