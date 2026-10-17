@@ -253,6 +253,9 @@ class Settings(BaseSettings):
     google_drive_download_chunk_mb: int = int(os.getenv("GOOGLE_DRIVE_DOWNLOAD_CHUNK_MB", "10"))
     google_drive_simple_upload_threshold_mb: int = int(os.getenv("GOOGLE_DRIVE_SIMPLE_UPLOAD_THRESHOLD_MB", "64"))
     gdrive_filename_suffix: str = os.getenv("GDRIVE_FILENAME_SUFFIX", "")
+    # Bố cục trên Drive: "legacy" (soi đúng cây trên đĩa) | "tenant" (tenants/<id>/…).
+    # Chỉ bật "tenant" sau khi đã dời dữ liệu cũ trên Drive — xem app/storage/drive_layout.py.
+    gdrive_layout: str = os.getenv("GDRIVE_LAYOUT", "legacy")
     google_sheets_labels_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_LABELS_SPREADSHEET_ID", "")
     google_sheets_labels_sheet_gid: int = int(os.getenv("GOOGLE_SHEETS_LABELS_SHEET_GID", "0"))
     google_sheets_samples_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_SAMPLES_SPREADSHEET_ID", "")

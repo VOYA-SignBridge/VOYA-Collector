@@ -342,8 +342,29 @@ def _google_drive_configured() -> bool:
     return credentials_path.exists()
 
 
-def _drive_relative_path(local_path: Path) -> Optional[str]:
-    return _dataset_storage_key(local_path)
+def _drive_relative_path(local_path: Path, tenant_id: Optional[str] = None) -> Optional[str]:
+    """Đường dẫn Drive của một đường dẫn cục bộ, theo bố cục Drive đang chọn.
+
+    `tenant_id` bắt buộc cho thư mục `raw_videos/` ở bố cục `tenant` (cây đó
+    không phân vùng trên đĩa); với `features/` tenant đọc được từ chính đường dẫn.
+    Ném ValueError khi không ánh xạ được — người gọi best-effort tự bắt.
+    """
+    from app.storage.drive_layout import drive_path_for
+
+    key = _dataset_storage_key(local_path)
+    if key is None:
+        return None
+    return drive_path_for(key, tenant_id)
+
+
+def _drive_relative_path_or_skip(local_path: Path, tenant_id: Optional[str]) -> Optional[str]:
+    """Như `_drive_relative_path` nhưng ghi log và bỏ qua thay vì ném: đổi tên/xoá
+    lớp đã commit cục bộ, phần Drive phía sau không được làm hỏng nó."""
+    try:
+        return _drive_relative_path(local_path, tenant_id)
+    except (ValueError, TypeError) as exc:
+        logger.warning("[CATALOG][GDRIVE] bỏ qua %s: không ánh xạ được sang Drive (%s)", local_path, exc)
+        return None
 
 
 def _sync_drive_catalog_csv(local_path: Path, remote_name: str) -> None:
@@ -399,9 +420,9 @@ def _sync_drive_and_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]]
         logger.warning("[CATALOG] async Drive/Sheets sync dispatch failed: %s", exc)
 
 
-def _dispatch_gdrive_folder_delete(paths: Sequence[Path]) -> None:
+def _dispatch_gdrive_folder_delete(paths: Sequence[Path], tenant_id: Optional[str] = None) -> None:
     """Queue Drive folder deletion (async cleanup) for the given local paths."""
-    rel_paths = [rel for rel in (_drive_relative_path(p) for p in paths) if rel]
+    rel_paths = [rel for rel in (_drive_relative_path_or_skip(p, tenant_id) for p in paths) if rel]
     if not rel_paths:
         return
     try:
@@ -412,12 +433,12 @@ def _dispatch_gdrive_folder_delete(paths: Sequence[Path]) -> None:
         logger.warning("[CATALOG] Drive folder delete dispatch failed for %s: %s", rel_paths, exc)
 
 
-def _dispatch_gdrive_folder_move(pairs: Sequence[tuple[Path, Path]]) -> None:
+def _dispatch_gdrive_folder_move(pairs: Sequence[tuple[Path, Path]], tenant_id: Optional[str] = None) -> None:
     """Queue Drive folder moves (async) for (old_local, new_local) path pairs."""
     rel_pairs = []
     for old_path, new_path in pairs:
-        old_rel = _drive_relative_path(old_path)
-        new_rel = _drive_relative_path(new_path)
+        old_rel = _drive_relative_path_or_skip(old_path, tenant_id)
+        new_rel = _drive_relative_path_or_skip(new_path, tenant_id)
         if old_rel and new_rel and old_rel != new_rel:
             rel_pairs.append([old_rel, new_rel])
     if not rel_pairs:
@@ -865,7 +886,10 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any], *,
                 [
                     (old_feature_dir, new_feature_dir),
                     (old_raw_dir, new_raw_dir),
-                ]
+                ],
+                # Lớp không đổi chủ khi đổi tên (xem `_retarget_meta`); raw_videos/
+                # không phân vùng trên đĩa nên tenant phải đi kèm.
+                tenant_id=old_meta.tenant_id,
             )
             _sync_drive_and_sheets_versioned_tables(updated_label_rows, sample_rows_after)
             op_logs.append("dispatched async Drive folder move + catalog mirror")
@@ -1000,7 +1024,7 @@ def sync_delete_class(class_idx: int | str, *, tenant_id: str) -> Dict[str, Any]
 
             # Async, best-effort Drive cleanup + catalog mirror (never blocks
             # or fails the delete the user just confirmed).
-            _dispatch_gdrive_folder_delete([old_feature_dir, old_raw_dir])
+            _dispatch_gdrive_folder_delete([old_feature_dir, old_raw_dir], tenant_id=old_meta.tenant_id)
             _sync_drive_and_sheets_versioned_tables(remaining_label_rows, remaining_sample_rows)
             op_logs.append("dispatched async Drive folder delete + catalog mirror")
 
@@ -1267,7 +1291,7 @@ def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
 
         _invalidate_tts_cache(old_meta.label_original)
 
-        _dispatch_gdrive_folder_delete([feature_dir, raw_dir])
+        _dispatch_gdrive_folder_delete([feature_dir, raw_dir], tenant_id=old_meta.tenant_id)
         _sync_drive_and_sheets_versioned_tables(None, None)
 
         slog.log_operation(

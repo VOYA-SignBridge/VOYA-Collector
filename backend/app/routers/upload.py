@@ -347,6 +347,8 @@ async def upload_video(
                 local_path=local_path_str,
                 storage_key=storage_key,
                 content_type=file.content_type or "application/octet-stream",
+                # raw_videos/ không phân vùng trên đĩa: tenant đi theo LỚP.
+                tenant_id=class_meta.tenant_id,
             )
             gdrive_mirror = "queued"
             log.info("[UPLOAD][video] Google Drive mirror deferred to Celery key=%s", storage_key)

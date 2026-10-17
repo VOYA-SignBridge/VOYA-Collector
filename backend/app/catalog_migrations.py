@@ -23,7 +23,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Sequence, Tuple
 
 from filelock import FileLock, Timeout
 
@@ -120,6 +120,42 @@ def _rewrite_sidecars(root: Path, new: str, old: str) -> int:
     return n
 
 
+def drive_dialect_move_pairs(root: Path, old: str, new: str,
+                             raw_tenants: Sequence[str]) -> List[Tuple[str, str]]:
+    """Cặp (cũ, mới) trên Drive cho một lần gộp phương ngữ — TƯỜNG MINH.
+
+    Trước 18/10/2026 bước này gửi `features/*/<old>`. Drive không có ký tự đại
+    diện: `resolve_folder_path` tìm một thư mục tên đúng là `*`, không thấy, và
+    `move_gdrive_paths_task` ghi "skipped (source missing)" — bước Drive của gộp
+    phương ngữ chưa từng chạy, và `raw_videos/` thì chưa từng được gửi.
+
+    Dựng từ cây cục bộ SAU khi `_move_tree` đã dời: ngôn ngữ nào có
+    `<lang>/<new>` thì có một cặp. `raw_videos/` không phân vùng trên đĩa nên mỗi
+    tenant sở hữu video của phương ngữ này có một cặp riêng ở bố cục `tenant`
+    (ở `legacy` các cặp trùng nhau và gộp lại).
+    """
+    from app.storage.drive_layout import drive_path_for
+
+    pairs: List[Tuple[str, str]] = []
+
+    def _add(pair: Tuple[str, str]) -> None:
+        if pair[0] != pair[1] and pair not in pairs:
+            pairs.append(pair)
+
+    for tree, tenants in (("features", [None]), ("raw_videos", sorted(set(raw_tenants or [])))):
+        base = Path(root) / tree
+        if not base.is_dir():
+            continue
+        for lang_dir in sorted(base.iterdir()):
+            # `_tenants/` là thư mục phân vùng, không phải mã ngôn ngữ.
+            if lang_dir.name.startswith("_") or not (lang_dir / new).is_dir():
+                continue
+            for tenant in tenants:
+                _add((drive_path_for(f"{tree}/{lang_dir.name}/{old}", tenant),
+                      drive_path_for(f"{tree}/{lang_dir.name}/{new}", tenant)))
+    return pairs
+
+
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=60)
 def merge_dialect_task(self, old_id: str, new_id: str) -> Dict[str, int]:
     """Move every row and file from `old_id` to `new_id`.
@@ -166,8 +202,13 @@ def merge_dialect_task(self, old_id: str, new_id: str) -> Dict[str, int]:
     # 5. Drive — remote, no transaction, never blocks the answer to the admin.
     try:
         from app.export_tasks import move_gdrive_paths_task
+        from app.storage.metadata_db import _fetch_all
 
-        move_gdrive_paths_task.delay(pairs=[(f"features/*/{old_id}", f"features/*/{new_id}")])
+        raw_tenants = [r["tenant_id"] for r in _fetch_all(
+            "SELECT DISTINCT tenant_id FROM raw_uploads WHERE dialect = %s AND tenant_id IS NOT NULL", (new_id,))]
+        pairs = drive_dialect_move_pairs(root, old_id, new_id, raw_tenants)
+        if pairs:
+            move_gdrive_paths_task.delay(pairs=pairs)
     except Exception as exc:
         logger.warning("[MERGE] Drive move dispatch thất bại (dữ liệu cục bộ đã đúng): %s", exc)
 

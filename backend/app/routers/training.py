@@ -2326,6 +2326,7 @@ async def promote_training_job(
             dialect=dialect,
             language=language,
             promoted_at=job.promoted_at,
+            tenant_id=(job_info.get("tenant_id") or None),
         )
         logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
     except Exception as e:

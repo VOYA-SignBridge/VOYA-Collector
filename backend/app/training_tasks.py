@@ -29,7 +29,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import redis
 
@@ -862,6 +862,20 @@ def _build_deploy_manifest(
     }
 
 
+def model_drive_paths(folder_name: str, deploy_stamp: str, *, tenant_id: Optional[str]) -> Tuple[str, str]:
+    """(thư mục Deploy, đường dẫn latest_manifest.json) trên Drive cho một lần promote.
+
+    Ở bố cục `legacy` đây đúng là `models/<tên>/…` như trước — `latest_manifest.json`
+    là đường dẫn CỐ ĐỊNH mà app di động đọc, nên chỉ bật bố cục `tenant` sau khi
+    app đã đọc được `tenants/<id>/models/<tên>/latest_manifest.json`.
+    """
+    from app.storage.drive_layout import drive_path_for
+
+    return (drive_path_for(f"models/{folder_name}/Deploy {deploy_stamp}", tenant_id),
+            drive_path_for(f"models/{folder_name}/latest_manifest.json", tenant_id))
+
+
+
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=30)
 def backup_promoted_checkpoint_task(
     self,
@@ -872,6 +886,7 @@ def backup_promoted_checkpoint_task(
     dialect: str = "",
     language: str = "vn",
     promoted_at: str = "",
+    tenant_id: Optional[str] = None,
 ):
     """Publish a PROMOTED model to Google Drive as a self-contained deploy folder.
 
@@ -905,7 +920,8 @@ def backup_promoted_checkpoint_task(
             deploy_stamp = datetime.fromisoformat(promoted_at).strftime("%Y-%m-%d %H-%M-%S")
         except ValueError:
             deploy_stamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        deploy_dir = f"models/{folder_name}/Deploy {deploy_stamp}"
+        deploy_dir, latest_manifest_path = model_drive_paths(
+            folder_name, deploy_stamp, tenant_id=tenant_id)
 
         logger.info("[MODEL_BACKUP] job %s uploading %s -> gdrive:%s/", job_id, src, deploy_dir)
         # replace_existing ở mọi upload: task này retry tới 5 lần, không có nó
@@ -956,7 +972,7 @@ def backup_promoted_checkpoint_task(
                              content_type="application/json", make_public=False,
                              replace_existing=True)
             # Con trỏ ổn định cho client ngoài — ghi đè sau mỗi lần promote
-            upload_to_gdrive(payload, f"models/{folder_name}/latest_manifest.json",
+            upload_to_gdrive(payload, latest_manifest_path,
                              content_type="application/json", make_public=False,
                              replace_existing=True)
         except Exception as e:

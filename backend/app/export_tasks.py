@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.worker import celery_app
 from app.config import settings
+from app.storage.drive_layout import drive_path_for
+
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +388,7 @@ def upload_raw_video_to_gdrive_task(
     local_path: str,
     storage_key: str,
     content_type: str = "application/octet-stream",
+    tenant_id: Optional[str] = None,
 ):
     """Mirror a raw uploaded video to Google Drive in the background.
 
@@ -404,8 +407,13 @@ def upload_raw_video_to_gdrive_task(
             logger.warning("[GDRIVE_RAW_VIDEO] Local file not found: %s", local_path)
             return {"status": "skipped", "reason": "file_not_found"}
 
-        logger.info("[GDRIVE_RAW_VIDEO] Uploading %s to GDrive key %s", local_path, storage_key)
-        storage_url = upload_to_gdrive(local_path, storage_key, content_type=content_type)
+        # `raw_videos/` không phân vùng trên đĩa nên tenant phải đến từ người gọi.
+        # Thiếu tenant ở bố cục `tenant` -> drive_path_for từ chối, task retry rồi
+        # dừng; video vẫn an toàn trên đĩa. (Task xếp hàng trước 18/10/2026 không
+        # mang tenant, nhưng chúng chạy ở `legacy`, nơi tenant không cần.)
+        drive_path = drive_path_for(storage_key, tenant_id)
+        logger.info("[GDRIVE_RAW_VIDEO] Uploading %s to GDrive %s (key %s)", local_path, drive_path, storage_key)
+        storage_url = upload_to_gdrive(local_path, drive_path, content_type=content_type)
         if not storage_url:
             raise RuntimeError("upload_to_gdrive returned None")
 
@@ -441,8 +449,10 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
             logger.warning("[GDRIVE_UPLOAD] Local file not found: %s", local_path)
             return {"status": "skipped", "reason": "file_not_found"}
 
-        logger.info("[GDRIVE_UPLOAD] Uploading %s to GDrive key %s", local_path, storage_key)
-        storage_url = upload_to_gdrive(local_path, storage_key)
+        # Drive theo bố cục đang chọn; DB/CSV/sidecar vẫn nhận `storage_key` trên đĩa.
+        drive_path = drive_path_for(storage_key)
+        logger.info("[GDRIVE_UPLOAD] Uploading %s to GDrive %s (key %s)", local_path, drive_path, storage_key)
+        storage_url = upload_to_gdrive(local_path, drive_path)
         
         if not storage_url:
             raise RuntimeError("upload_to_gdrive returned None")
@@ -513,7 +523,7 @@ def upload_npz_batch_to_gdrive_task(self, items: list):
                 logger.warning("[GDRIVE_BATCH] file not found, skipping: %s", local_path)
                 continue
 
-            storage_url = upload_to_gdrive(local_path, storage_key)
+            storage_url = upload_to_gdrive(local_path, drive_path_for(storage_key))
             if not storage_url:
                 raise RuntimeError("upload_to_gdrive returned None")
 

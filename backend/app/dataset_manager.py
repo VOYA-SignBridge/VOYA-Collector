@@ -283,6 +283,21 @@ def iter_tenant_feature_files(tenant_id: str):
             yield Path(thu_muc) / ten
 
 
+def drive_class_folder(meta: "ClassMetadata") -> str:
+    """Thư mục Drive của một lớp, theo bố cục Drive đang chọn.
+
+    Suy từ `hierarchy_path()` — đúng cây trên đĩa, gồm `_tenants/<id>/`,
+    `global_common/` và `<lang>/common/` — rồi qua `drive_path_for`. Trước
+    18/10/2026 đường này viết cứng `features/<lang>/<dialect>/<lớp>`: lớp của
+    tenant khác được tạo thư mục Drive nằm trong cây của tenant gốc, và lớp dùng
+    chung được tạo dưới phương ngữ thay vì `common/`.
+    """
+    from app.storage.drive_layout import drive_path_for
+
+    rel = Path("features") / meta.hierarchy_path().relative_to(FEATURES_ROOT)
+    return drive_path_for(rel.as_posix())
+
+
 def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
     """ASCII slug. preserve_vn_letters keeps Ă/Â/Đ/Ê/Ô/Ơ/Ư distinct from their
     base letter for the fingerspelling alphabet (see class_registry.slugify)."""
@@ -1036,7 +1051,7 @@ def register_class(
         try:
             from app.storage.gdrive_client import get_gdrive_client
 
-            drive_folder_path = f"features/{meta.language}/{meta.dialect}/{meta.folder_name()}"
+            drive_folder_path = drive_class_folder(meta)
             get_gdrive_client().ensure_path(drive_folder_path)
             logger.info("[CLASS] Ensured Drive folder path=%s", drive_folder_path)
         except Exception as exc:
