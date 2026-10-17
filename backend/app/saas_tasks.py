@@ -72,14 +72,16 @@ def run_tenant_export(self, export_id: str):
         raise
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True)
 def run_personal_export(self, export_id: str):
     """Dựng gói zip cho một yêu cầu xuất dữ liệu CÁ NHÂN.
 
-    `platform_wide` cùng lý do với `run_tenant_export` ngay trên: một worker
-    Celery là một tiến trình riêng, không thừa hưởng ngữ cảnh tenant của yêu
-    cầu HTTP đã phái nó — mọi câu đọc/ghi bên trong `run_export` tự bọc
-    `system_scope()` nên không dựa vào ngữ cảnh ấy.
+    KHÔNG `platform_wide`, khác `run_tenant_export` ngay trên. Bản xuất cá nhân
+    do chính người dùng phái từ tenant của họ, nên ngữ cảnh mà `worker.py` lấy
+    từ header của lượt phái là ĐÚNG tenant cần xuất — không có tình huống "quản
+    trị viên đứng ở tenant khác" như bản xuất tổ chức. Chạy hẹp theo tenant là
+    mặc định an toàn; các câu ghi trạng thái bên trong `run_export` vẫn tự bọc
+    `system_scope()` của riêng chúng.
     """
     from app.personal_export import run_export
 
