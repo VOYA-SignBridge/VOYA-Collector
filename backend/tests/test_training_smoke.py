@@ -30,10 +30,16 @@ except Exception:
     _DEPS = False
 
 _HAVE = _SCRIPT.exists() and (_SPLITS / "train.csv").exists() and (_SPLITS / "val.csv").exists()
+# Split CSV một mình KHÔNG đủ để nói "máy có dữ liệu": các split nghiên cứu đóng
+# băng đã được track trong git, nên một checkout sạch có chúng mà không có npz lẫn
+# snapshot từ vựng (`dataset/` chỉ có `.gitkeep`) — và lượt train đỏ vì thiếu dữ
+# liệu chứ không vì mã. `dataset/features/` chỉ tồn tại trên máy có dữ liệu.
+# Trên máy ấy thiếu snapshot vẫn phải ĐỎ: đó là lỗi thật, không phải môi trường.
+_DATA = (_REPO / "dataset" / "features").is_dir()
 
 pytestmark = pytest.mark.skipif(
-    not (_HAVE and _DEPS),
-    reason="needs processed/splits/*.csv + torch + scikit-learn (data machine / trainer)",
+    not (_HAVE and _DEPS and _DATA),
+    reason="needs dataset/features + processed/splits/*.csv + torch + scikit-learn (data machine / trainer)",
 )
 
 

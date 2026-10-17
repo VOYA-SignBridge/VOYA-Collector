@@ -14,6 +14,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_DIR = REPO_ROOT / "dataset" / "manifests"
+#: Chỉ có trên máy có dữ liệu — checkout sạch có `dataset/.gitkeep` và không gì khác.
+DATA_DIR_MARKER = REPO_ROOT / "dataset" / "features"
 SPLITS_DIR = REPO_ROOT / "processed" / "splits"
 
 PASSED: list = []
@@ -35,17 +37,27 @@ def sha256_file(path: Path) -> str:
 
 def main() -> int:
     print("[F1 manifest immutability]")
-    found = 0
-    for sha_path in sorted(MANIFEST_DIR.glob("dataset_manifest_*.sha256")):
-        version = sha_path.stem.replace("dataset_manifest_", "")
-        manifest = MANIFEST_DIR / f"dataset_manifest_{version}.csv"
-        if not manifest.exists():
-            check(f"{version}: manifest file exists for recorded checksum", False)
-            continue
-        found += 1
-        recorded = sha_path.read_text(encoding="utf-8").strip()
-        check(f"{version}: sha256 unchanged", sha256_file(manifest) == recorded)
-    check("at least one released manifest present", found >= 1, found)
+    # Manifest nằm dưới `dataset/`, KHÔNG được track (mang mã mẫu và tên người
+    # ký — không đẩy lên git chỉ để bộ kiểm có cái mà kiểm). Checkout sạch chỉ có
+    # `dataset/.gitkeep`, và "0 manifest" ở đó là "không có dữ liệu", không phải
+    # "manifest bị xoá". `dataset/features/` chỉ tồn tại trên máy có dữ liệu; ở
+    # máy ấy 0 manifest vẫn ĐỎ. Chỉ bỏ F1 — F2 (split đóng băng, CÓ track) vẫn
+    # chạy, nên bộ này không bao giờ xanh mà không kiểm gì.
+    if not DATA_DIR_MARKER.is_dir():
+        print(f"  SKIP F1: checkout không có dữ liệu ({DATA_DIR_MARKER.relative_to(REPO_ROOT)} vắng) "
+              "— manifest không được track, kiểm trên máy có dữ liệu")
+    else:
+        found = 0
+        for sha_path in sorted(MANIFEST_DIR.glob("dataset_manifest_*.sha256")):
+            version = sha_path.stem.replace("dataset_manifest_", "")
+            manifest = MANIFEST_DIR / f"dataset_manifest_{version}.csv"
+            if not manifest.exists():
+                check(f"{version}: manifest file exists for recorded checksum", False)
+                continue
+            found += 1
+            recorded = sha_path.read_text(encoding="utf-8").strip()
+            check(f"{version}: sha256 unchanged", sha256_file(manifest) == recorded)
+        check("at least one released manifest present", found >= 1, found)
 
     print("[F2 frozen research splits — checksum, not just presence]")
     # Bản trước của mục này chỉ hỏi "tệp còn đó không". Tên nó là
