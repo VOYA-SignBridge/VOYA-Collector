@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.auth import get_current_user, require_admin
+from app.modules.identity import get_current_user, require_admin
 from app.infrastructure.database.connection import connect_postgres
 from psycopg2.extras import RealDictCursor
 from app.sync_tasks import download_missing_files_to_local

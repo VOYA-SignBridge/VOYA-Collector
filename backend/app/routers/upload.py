@@ -38,7 +38,7 @@ from app.api_validation import (
     validate_dialect,
     save_upload_with_limit,
 )
-from app.auth import get_current_user
+from app.modules.identity import get_current_user
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 

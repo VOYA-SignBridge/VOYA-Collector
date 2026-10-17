@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
 from app.config import settings
-from app.auth import (
+from app.modules.identity import (
     authenticate_user,
     create_access_token,
     create_refresh_token,
@@ -15,21 +15,17 @@ from app.auth import (
     reset_password_with_token,
     revoke_refresh_token,
     rotate_refresh_token,
-)
-from app.cookie_auth import (
     REFRESH_COOKIE,
     clear_auth_cookies,
     generate_csrf_token,
     set_auth_cookies,
-)
-from app.rate_limit import (
     check_login_allowed,
     client_ip,
     enforce_ip_limit,
     register_failed_login,
     reset_login_attempts,
+    send_password_reset_email,
 )
-from app.email_service import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

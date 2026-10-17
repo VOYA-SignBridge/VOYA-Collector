@@ -21,7 +21,7 @@ from app.catalog_sync import (
     empty_class_trash,
 )
 from app.config import settings
-from app.auth import get_current_user, require_admin
+from app.modules.identity import get_current_user, require_admin
 
 router = APIRouter(prefix="/classes", tags=["classes"])
 

@@ -23,7 +23,7 @@ from app.catalog_sync import (
     bulk_purge_samples,
     empty_sample_trash,
 )
-from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.modules.identity import get_current_user, get_current_user_optional, require_admin
 from app.storage.metadata_db import get_sample_owner
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])

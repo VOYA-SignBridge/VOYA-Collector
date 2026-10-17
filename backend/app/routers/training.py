@@ -27,7 +27,7 @@ from importlib.util import spec_from_file_location, module_from_spec
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel
 
-from app.auth import get_current_user, get_user_from_token, require_admin
+from app.modules.identity import get_current_user, get_user_from_token, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -1895,7 +1895,7 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     token (httpOnly), so prefer the access COOKIE the browser sends on the WS
     handshake; fall back to ?token= for legacy/API clients.
     """
-    from app.cookie_auth import ACCESS_COOKIE
+    from app.modules.identity import ACCESS_COOKIE
 
     effective_token = token or websocket.cookies.get(ACCESS_COOKIE, "")
     user = await asyncio.to_thread(get_user_from_token, effective_token) if effective_token else None

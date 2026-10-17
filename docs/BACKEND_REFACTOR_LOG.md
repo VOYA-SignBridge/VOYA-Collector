@@ -106,3 +106,54 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Xóa compatibility alias được thêm vào module cũ.
 - Xóa `app/infrastructure/` và test boundary mới.
 - Không cần hoàn tác dữ liệu hoặc database.
+
+## 2026-10-18 — BR-003: Tạo public boundary cho identity/auth
+
+### Mục tiêu
+
+- Cho router và application code phụ thuộc vào bounded context `identity`, không
+  phụ thuộc trực tiếp vào các file triển khai auth/cookie/rate-limit/email.
+- Chuẩn bị cho việc tách repository, token, password và session ở các đợt sau mà
+  không cần sửa import trên toàn bộ router lần nữa.
+- Giữ nguyên callable identity để FastAPI dependency overrides và test cũ không
+  bị phá vỡ.
+
+### Thay đổi
+
+- Thêm `app/modules/identity/api.py` làm facade công khai cho:
+  - account creation và authentication;
+  - access/refresh token;
+  - current-user/admin dependencies;
+  - auth cookies và CSRF token;
+  - login/register/reset rate limiting;
+  - password-reset email.
+- Thêm `app/modules/identity/__init__.py` với explicit `__all__`.
+- Chuyển các router `auth`, `admin`, `classes`, `dataset`, `upload`, `training`
+  sang import qua `app.modules.identity`.
+- Chuyển WebSocket cookie lookup trong training router sang identity boundary.
+- Giữ implementation hiện tại trong các legacy modules; facade trả chính các
+  function object cũ, không tạo wrapper hoặc thay đổi dependency identity.
+- Thêm `tests/test_identity_module_boundary.py` kiểm tra callable identity.
+
+### Contract được giữ nguyên
+
+- Không đổi auth URL, request/response schema hoặc status code.
+- Không đổi JWT payload, cookie name/path, CSRF, refresh-token rotation hoặc
+  password-reset behavior.
+- `app.auth` và các import cũ vẫn hoạt động cho test/consumer hiện tại.
+- FastAPI `dependency_overrides[get_current_user]` tiếp tục dùng cùng function
+  object trước và sau refactor.
+
+### Kiểm tra
+
+- CodeGraph xác nhận toàn bộ runtime router consumer đã đi qua identity facade.
+- `rg` xác nhận không còn direct `app.auth` import trong routers.
+- AST parse thành công cho module boundary, auth router và regression test.
+- Chưa chạy pytest runtime vì Docker daemon chưa hoạt động và Python host dùng
+  dependency versions khác project.
+
+### Hoàn tác
+
+- Đổi import trong các router về các legacy modules ban đầu.
+- Xóa `app/modules/` và regression test của BR-003.
+- Không cần hoàn tác database, cookie hoặc token.
