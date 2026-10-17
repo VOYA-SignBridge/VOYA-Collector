@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-import secrets
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 import uuid
 
-from psycopg2.extras import RealDictCursor
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -17,6 +13,11 @@ from app.modules.identity.passwords import (
     get_password_hash,
     verify_password,
 )
+from app.modules.identity.password_reset import (
+    apply_password_reset,
+    hash_reset_token,
+    issue_password_reset,
+)
 from app.modules.identity.repository import (
     find_user_by_id,
     find_user_by_login,
@@ -24,6 +25,12 @@ from app.modules.identity.repository import (
     insert_user,
     normalize_login,
     row_to_user,
+)
+from app.modules.identity.sessions import (
+    hash_refresh_token,
+    issue_refresh_token,
+    revoke_refresh_session,
+    rotate_refresh_session,
 )
 from app.modules.identity.tokens import (
     bearer_scheme,
@@ -36,6 +43,8 @@ _DUMMY_PASSWORD_HASH = DUMMY_PASSWORD_HASH
 _decode_token = decode_access_token
 _normalize_login = normalize_login
 _row_to_user = row_to_user
+_hash_reset_token = hash_reset_token
+_hash_token = hash_refresh_token
 
 
 def _get_conn():
@@ -187,10 +196,6 @@ def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> D
 # Forgot / reset password
 # ============================================================================
 
-def _hash_reset_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def request_password_reset(identifier: str) -> Optional[Tuple[Dict[str, Any], str]]:
     """Look up the user and issue a reset token if the account exists and is active.
 
@@ -198,119 +203,30 @@ def request_password_reset(identifier: str) -> Optional[Tuple[Dict[str, Any], st
     Callers must respond with the same generic message either way, to avoid
     leaking which identifiers correspond to real accounts.
     """
-    user = _fetch_user_by_login(identifier)
-    if not user or not user.get("is_active", True):
-        return None
-
-    token = secrets.token_urlsafe(32)
-    token_hash = _hash_reset_token(token)
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.password_reset_token_expire_minutes
+    return issue_password_reset(
+        identifier,
+        user_lookup=_fetch_user_by_login,
+        connection_factory=_get_conn,
     )
-
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO password_reset_tokens (token_hash, user_id, expires_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (token_hash, user["id"], expires_at),
-                )
-    finally:
-        conn.close()
-
-    return user, token
 
 
 def reset_password_with_token(token: str, new_password: str) -> None:
     """Validate a reset token and set the new password. Raises HTTPException on failure."""
-    if len(new_password or "") < int(settings.min_password_length):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Password must be at least {settings.min_password_length} characters",
-        )
-
-    token_hash = _hash_reset_token(token)
-    invalid = HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn",
+    apply_password_reset(
+        token,
+        new_password,
+        connection_factory=_get_conn,
     )
-
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT token_hash, user_id, expires_at, used_at
-                    FROM password_reset_tokens
-                    WHERE token_hash = %s
-                    """,
-                    (token_hash,),
-                )
-                row = cur.fetchone()
-
-                if not row or row["used_at"] is not None:
-                    raise invalid
-
-                expires_at = row["expires_at"]
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at < datetime.now(timezone.utc):
-                    raise invalid
-
-                password_hash = get_password_hash(new_password)
-                cur.execute(
-                    "UPDATE users SET password_hash = %s WHERE id = %s",
-                    (password_hash, row["user_id"]),
-                )
-                # Invalidate every outstanding reset token for this user,
-                # including the one just used, so old links can't be replayed.
-                cur.execute(
-                    """
-                    UPDATE password_reset_tokens
-                    SET used_at = NOW()
-                    WHERE user_id = %s AND used_at IS NULL
-                    """,
-                    (row["user_id"],),
-                )
-    finally:
-        conn.close()
 
 
 # ============================================================================
 # Refresh tokens (cookie session flow)
 # ============================================================================
 
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
 def create_refresh_token(user_id: str) -> str:
     """Issue a new opaque refresh token, storing only its hash. Returns the raw
     token (to be set as an httpOnly cookie)."""
-    raw = secrets.token_urlsafe(48)
-    token_hash = _hash_token(raw)
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.refresh_token_expire_minutes
-    )
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO refresh_tokens (token_hash, user_id, expires_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (token_hash, user_id, expires_at),
-                )
-    finally:
-        conn.close()
-    return raw
+    return issue_refresh_token(user_id, connection_factory=_get_conn)
 
 
 def rotate_refresh_token(raw_token: str) -> Optional[Tuple[Dict[str, Any], str]]:
@@ -320,75 +236,13 @@ def rotate_refresh_token(raw_token: str) -> Optional[Tuple[Dict[str, Any], str]]
     revoked / belongs to an inactive user. Rotation means a stolen refresh
     token stops working the moment the legitimate client next refreshes.
     """
-    if not raw_token:
-        return None
-    token_hash = _hash_token(raw_token)
-
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT token_hash, user_id, expires_at, revoked_at
-                    FROM refresh_tokens
-                    WHERE token_hash = %s
-                    """,
-                    (token_hash,),
-                )
-                row = cur.fetchone()
-                if not row or row["revoked_at"] is not None:
-                    return None
-
-                expires_at = row["expires_at"]
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at < datetime.now(timezone.utc):
-                    return None
-
-                user = _fetch_user_by_id(str(row["user_id"]))
-                if not user or not user.get("is_active", True):
-                    return None
-
-                new_raw = secrets.token_urlsafe(48)
-                new_hash = _hash_token(new_raw)
-                new_expires = datetime.now(timezone.utc) + timedelta(
-                    minutes=settings.refresh_token_expire_minutes
-                )
-                cur.execute(
-                    "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = %s",
-                    (token_hash,),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO refresh_tokens (token_hash, user_id, expires_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (new_hash, row["user_id"], new_expires),
-                )
-                return user, new_raw
-    finally:
-        conn.close()
+    return rotate_refresh_session(
+        raw_token,
+        user_lookup=_fetch_user_by_id,
+        connection_factory=_get_conn,
+    )
 
 
 def revoke_refresh_token(raw_token: str) -> None:
     """Mark a refresh token revoked (logout). Best-effort; never raises."""
-    if not raw_token:
-        return
-    token_hash = _hash_token(raw_token)
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE refresh_tokens
-                    SET revoked_at = NOW()
-                    WHERE token_hash = %s AND revoked_at IS NULL
-                    """,
-                    (token_hash,),
-                )
-    except Exception:
-        pass
-    finally:
-        conn.close()
+    revoke_refresh_session(raw_token, connection_factory=_get_conn)

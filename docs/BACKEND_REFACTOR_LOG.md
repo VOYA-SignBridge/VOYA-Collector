@@ -321,3 +321,69 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Khôi phục startup admin import `_fetch_user_by_login` từ legacy auth.
 - Xóa `identity/repository.py` và regression test BR-006.
 - Không có migration hoặc biến đổi dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-007: Tách password-reset và refresh-session workflows
+
+### Mục tiêu
+
+- Hoàn tất đợt sắp xếp `app/auth.py` bằng cách tách hai workflow còn chứa SQL.
+- Đặt vòng đời password-reset token và refresh-session token trong bounded
+  context `identity`.
+- Giữ legacy functions làm lớp tương thích mỏng cho router và consumer cũ.
+
+### Thay đổi
+
+- Thêm `app/modules/identity/password_reset.py` chứa:
+  - SHA-256 reset-token hashing;
+  - phát hành và lưu reset token;
+  - kiểm tra expiry/used state;
+  - cập nhật password và vô hiệu hóa toàn bộ reset token còn hiệu lực.
+- Thêm `app/modules/identity/sessions.py` chứa:
+  - SHA-256 refresh-token hashing;
+  - phát hành refresh token;
+  - rotation trong transaction;
+  - best-effort revocation khi logout.
+- `app/auth.py` giữ các public function cũ dưới dạng wrapper, truyền rõ
+  user lookup và connection factory vào workflow mới.
+- Giữ `_hash_reset_token` và `_hash_token` làm aliases tương thích.
+- Thêm `tests/test_identity_session_boundaries.py` kiểm tra hash contract và các
+  dependency injection points của legacy wrappers.
+
+### Contract được giữ nguyên
+
+- Độ dài entropy của reset token (`token_urlsafe(32)`) và refresh token
+  (`token_urlsafe(48)`) không đổi.
+- Expiry settings, timezone normalization, SQL, parameter order và transaction
+  boundary không đổi.
+- Refresh rotation vẫn kiểm tra revoked/expired/inactive user trước khi revoke
+  token cũ và insert token mới trong cùng transaction.
+- Password reset vẫn vô hiệu hóa mọi reset token chưa dùng của cùng user.
+- Logout revocation vẫn best-effort và không phát sinh lỗi ra caller.
+- Router/facade tiếp tục gọi đúng các public function trong `app.auth`.
+
+### Kiểm tra
+
+- Docker regression trước BR-007: 8/8 test refactor pass.
+- Docker backend suite trong đúng Compose network: 182 pass, 5 fail ngoài phạm
+  vi auth do thiếu research artifacts/config trong repository hiện tại.
+- CodeGraph được dùng để xác nhận blast radius và toàn bộ caller của reset/
+  refresh workflows trước khi di chuyển.
+- Docker regression BR-001 đến BR-007: 13 pass.
+- Docker training/API lifecycle không phụ thuộc provenance artifacts: 23 pass,
+  8 provenance cases được deselect có chủ đích.
+- Regression test BR-007 bảo vệ legacy aliases, validation short circuit và
+  connection/user-lookup injection để consumer cũ tiếp tục override dependency.
+
+### Lỗi baseline ngoài phạm vi
+
+- `config/legacy_vocabulary_mapping.json` không tồn tại trong HEAD hiện tại.
+- Không có released dataset manifest cho frozen-artifact suite.
+- `scripts/report_dataset_coverage.py` không tồn tại ở path test yêu cầu.
+- Hai provenance assertions phụ thuộc các artifact ở trên nên không đạt.
+
+### Hoàn tác
+
+- Đưa implementation của reset/refresh functions từ hai module mới về
+  `app/auth.py` và khôi phục imports chuẩn thư viện cũ.
+- Xóa hai module mới và regression test BR-007.
+- Không có database migration hoặc dữ liệu cần hoàn tác.
