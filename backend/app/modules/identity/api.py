@@ -7,7 +7,6 @@ another repository-wide rewrite.
 
 from app.auth import (
     authenticate_user,
-    create_access_token,
     create_refresh_token,
     create_user,
     get_current_user,
@@ -19,6 +18,7 @@ from app.auth import (
     revoke_refresh_token,
     rotate_refresh_token,
 )
+from app.modules.identity.tokens import create_access_token
 from app.cookie_auth import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,

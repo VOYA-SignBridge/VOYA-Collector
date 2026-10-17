@@ -92,7 +92,8 @@ def bootstrap_admin_user():
     
     try:
         from app.storage.metadata_db import _column_exists, _execute
-        from app.auth import _fetch_user_by_login, get_password_hash
+        from app.auth import _fetch_user_by_login
+        from app.modules.identity.passwords import get_password_hash
         
         # Check if users table exists
         if not _column_exists("users", "id"):

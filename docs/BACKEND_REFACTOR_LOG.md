@@ -201,3 +201,66 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 
 - Đưa sáu schema class về `routers/auth.py` và khôi phục import Pydantic cũ.
 - Xóa `identity/schemas.py`, schema exports và regression test BR-004.
+
+## 2026-10-18 — BR-005: Tách password và access-token primitives
+
+### Mục tiêu
+
+- Di chuyển logic mật khẩu và JWT thuần khỏi legacy `app/auth.py` vào bounded
+  context `identity`.
+- Giảm trách nhiệm của legacy auth module trước khi tách account repository và
+  session persistence ở các đợt tiếp theo.
+- Giữ nguyên function object và private compatibility aliases để consumer cũ,
+  FastAPI dependency overrides và test hiện hữu không đổi hành vi.
+
+### Thay đổi
+
+- Thêm `app/modules/identity/passwords.py` chứa:
+  - bcrypt context;
+  - dummy password hash chống username enumeration qua timing;
+  - `get_password_hash`;
+  - `verify_password`.
+- Thêm `app/modules/identity/tokens.py` chứa:
+  - HTTP bearer dependency;
+  - `create_access_token`;
+  - `decode_access_token`.
+- `app/auth.py` chuyển sang import các primitive trên và giữ aliases
+  `_DUMMY_PASSWORD_HASH`, `_decode_token` cho tương thích ngược.
+- Identity facade export `create_access_token` trực tiếp từ token module.
+- `app/db.py` lấy password hashing từ identity boundary thay vì legacy auth.
+- Chuyển `app/modules/identity/__init__.py` sang lazy exports. Việc này giữ nguyên
+  public import path nhưng tránh vòng import trong giai đoạn legacy auth đang
+  lần lượt ủy quyền implementation cho identity module.
+- Thêm `tests/test_identity_security_primitives.py` kiểm tra callable identity
+  và hành vi hash/verify mật khẩu.
+
+### Contract được giữ nguyên
+
+- JWT algorithm, secret, expiry, `iat`, `exp`, `typ` và subject validation không
+  đổi.
+- Nội dung lỗi 401 cho token hết hạn/không hợp lệ và token thiếu subject không
+  đổi.
+- Bcrypt scheme và xử lý password/hash rỗng hoặc hash lỗi không đổi.
+- `app.auth.create_access_token`, `get_password_hash`, `verify_password`,
+  `_decode_token` và `bearer_scheme` vẫn tồn tại và trỏ đúng function/object mới.
+- `from app.modules.identity import ...` vẫn là public API của router.
+
+### Kiểm tra
+
+- CodeGraph xác nhận call path của password/token primitive đã đi qua module mới
+  và blast radius chỉ gồm các consumer dự kiến.
+- CodeGraph xác nhận `decode_access_token` phục vụ ba call site legacy và
+  `create_access_token` phục vụ router/facade/legacy auth như trước.
+- AST parse thành công cho 7 file Python được thêm hoặc thay đổi.
+- `rg` xác nhận các thư viện `CryptContext`, `HTTPBearer`, `JWTError` chỉ còn ở
+  primitive modules tương ứng.
+- Chưa chạy pytest runtime vì Docker daemon chưa hoạt động và Python host dùng
+  dependency versions khác project (Pydantic 2 so với Pydantic 1.10.11 được
+  pin trong project).
+
+### Hoàn tác
+
+- Đưa password/token primitive về `app/auth.py`, khôi phục eager exports trong
+  `identity/__init__.py` và import cũ trong `identity/api.py`, `app/db.py`.
+- Xóa `identity/passwords.py`, `identity/tokens.py` và regression test BR-005.
+- Không cần thay đổi database schema hoặc dữ liệu.

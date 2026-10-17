@@ -9,23 +9,25 @@ import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+from fastapi.security import HTTPAuthorizationCredentials
 
 from app.config import settings
 from app.cookie_auth import ACCESS_COOKIE
 from app.infrastructure.database.connection import connect_postgres
+from app.modules.identity.passwords import (
+    DUMMY_PASSWORD_HASH,
+    get_password_hash,
+    verify_password,
+)
+from app.modules.identity.tokens import (
+    bearer_scheme,
+    create_access_token,
+    decode_access_token,
+)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-bearer_scheme = HTTPBearer(auto_error=False)
-
-# Precomputed bcrypt hash used to equalize login response time when the account
-# does not exist. Without it, a missing user returns immediately (no bcrypt)
-# while a real user with a wrong password pays the bcrypt cost — an attacker can
-# measure that gap to enumerate valid usernames. Verifying against this dummy on
-# the "no such user" path makes both branches take the same time.
-_DUMMY_PASSWORD_HASH = pwd_context.hash("voya-timing-equalizer-not-a-real-secret")
+# Compatibility aliases for consumers that still import private legacy names.
+_DUMMY_PASSWORD_HASH = DUMMY_PASSWORD_HASH
+_decode_token = decode_access_token
 
 
 def _get_conn():
@@ -48,60 +50,6 @@ def _row_to_user(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "is_admin": bool(row.get("is_admin", False)),
         "created_at": row.get("created_at"),
     }
-
-
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    if not plain_password or not hashed_password:
-        return False
-    try:
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception:
-        return False
-
-
-def create_access_token(
-    data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
-) -> str:
-    payload = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
-    )
-    payload.update(
-        {
-            "exp": expire,
-            "iat": datetime.now(timezone.utc),
-            "typ": "access",
-        }
-    )
-    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
-
-
-def _decode_token(token: str) -> Dict[str, Any]:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.secret_key,
-            algorithms=[settings.algorithm],
-            options={"verify_aud": False},
-        )
-    except JWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        ) from exc
-
-    sub = payload.get("sub")
-    if not sub:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing subject",
-        )
-    return payload
 
 
 def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
