@@ -1,0 +1,7 @@
+profile_id,display_name,is_trainable,display_order,note
+alphabet,Bảng chữ cái,1,1,"Chữ cái ngón tay, tĩnh. Là profile ĐỘC LẬP — không tự gộp vào model vùng miền."
+north,Miền Bắc,1,2,""
+central,Miền Trung,1,3,""
+south,Miền Nam,1,4,""
+hoa_de,Hòa Đê,1,5,""
+legacy_unassigned,Chưa phân loại,0,99,"Dữ liệu cũ chưa xác nhận được vùng miền. KHÔNG train được — nhưng phải có mặt trong danh sách, nếu không lớp gán nhãn này sẽ bị lọc bỏ trong im lặng."
