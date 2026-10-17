@@ -6,7 +6,7 @@ import logging
 import re
 
 from app.config import settings
-from app.storage.postgres_connection import get_pooled_conn, put_pooled_conn
+from app.infrastructure.database.connection import get_pooled_conn, put_pooled_conn
 
 logger = logging.getLogger(__name__)
 

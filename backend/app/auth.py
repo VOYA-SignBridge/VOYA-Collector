@@ -15,7 +15,7 @@ from passlib.context import CryptContext
 
 from app.config import settings
 from app.cookie_auth import ACCESS_COOKIE
-from app.storage.postgres_connection import connect_postgres
+from app.infrastructure.database.connection import connect_postgres
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)

@@ -24,7 +24,7 @@ import psycopg2
 from psycopg2.extras import Json
 
 from app.config import settings
-from app.storage.postgres_connection import connect_postgres
+from app.infrastructure.database.connection import connect_postgres
 
 logger = logging.getLogger(__name__)
 

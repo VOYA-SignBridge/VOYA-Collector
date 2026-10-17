@@ -493,7 +493,7 @@ def is_user_denied(user_id: str, token_iat: Any) -> bool:
 
 def _revoke_all_refresh_tokens(user_id: str) -> None:
     try:
-        from app.storage.postgres_connection import connect_postgres
+        from app.infrastructure.database.connection import connect_postgres
 
         conn = connect_postgres(connect_timeout=5)
         try:
@@ -665,7 +665,7 @@ def _resolve_usernames(user_ids: Set[str]) -> Dict[str, str]:
     if not ids:
         return {}
     try:
-        from app.storage.postgres_connection import connect_postgres
+        from app.infrastructure.database.connection import connect_postgres
         from psycopg2.extras import RealDictCursor
 
         conn = connect_postgres(connect_timeout=5)

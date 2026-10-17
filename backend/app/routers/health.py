@@ -7,7 +7,7 @@ import redis
 from fastapi import APIRouter, HTTPException
 
 from app.config import settings
-from app.storage.postgres_connection import connect_postgres
+from app.infrastructure.database.connection import connect_postgres
 
 router = APIRouter(prefix="/health", tags=["health"])
 logger = logging.getLogger("health")

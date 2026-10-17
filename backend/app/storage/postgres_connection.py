@@ -178,3 +178,12 @@ def put_pooled_conn(conn, *, close: bool = False) -> None:
             conn.close()
         except Exception:
             pass
+
+
+# Compatibility module: new application code imports the infrastructure path.
+# Replacing this entry in sys.modules keeps legacy imports, monkeypatches, and
+# pool state pointed at the exact same module object during the migration.
+import sys as _sys
+from app.infrastructure.database import connection as _connection
+
+_sys.modules[__name__] = _connection

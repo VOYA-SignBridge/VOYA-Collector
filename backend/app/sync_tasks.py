@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 
 from app.worker import celery_app
 from app.config import settings
-from app.storage.postgres_connection import connect_postgres
+from app.infrastructure.database.connection import connect_postgres
 from psycopg2.extras import RealDictCursor
 from app.storage.gdrive_client import download_from_gdrive
 

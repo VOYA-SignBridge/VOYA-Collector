@@ -53,3 +53,56 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Xóa `app/bootstrap/`, `app/core/middleware/`, `app/routers/presence.py` và
   `tests/test_app_composition.py`.
 - Không cần hoàn tác dữ liệu hoặc database vì đợt này không thay đổi persistence.
+
+## 2026-10-18 — BR-002: Thiết lập ranh giới hạ tầng PostgreSQL
+
+### Mục tiêu
+
+- Đưa kết nối PostgreSQL và connection pool ra khỏi `storage/` tổng quát.
+- Tạo hướng phụ thuộc rõ ràng từ application code tới infrastructure adapter.
+- Giữ tương thích cho code/test còn import đường dẫn cũ.
+
+### Thay đổi
+
+- Thêm `app/infrastructure/database/connection.py` làm nguồn sự thật mới cho:
+  - kết nối PostgreSQL có fallback hostname;
+  - process-local threaded connection pool;
+  - fork-safe pool rebuild cho Celery;
+  - borrow/return pooled connection.
+- Thêm package `app/infrastructure/` và `app/infrastructure/database/`.
+- Cập nhật các module runtime sau sang đường dẫn infrastructure mới:
+  - `app/auth.py`;
+  - `app/activity.py`;
+  - `app/sync_tasks.py`;
+  - `app/routers/admin.py`;
+  - `app/routers/health.py`;
+  - `app/storage/metadata_db.py`;
+  - `app/storage/experiment_tracking_db.py`.
+- Giữ `app/storage/postgres_connection.py` làm compatibility module alias. Import
+  cũ và import mới cùng trỏ đến một module object, tránh tách đôi pool state.
+- Thêm `tests/test_database_connection_boundary.py` kiểm tra identity của legacy
+  module, connection function và pool function.
+
+### Contract được giữ nguyên
+
+- Không đổi `DATABASE_URL`, hostname fallback hoặc connect timeout.
+- Không đổi pool min/max, application name hoặc quy tắc rebuild sau fork.
+- Không đổi SQL, transaction boundary hay database schema.
+- Import cũ `app.storage.postgres_connection` vẫn hoạt động.
+- Test/consumer monkeypatch module cũ vẫn tác động lên module infrastructure mới.
+
+### Kiểm tra
+
+- CodeGraph xác nhận 13 call site `connect_postgres` và các call site pooled
+  connection nội bộ đã trỏ sang infrastructure adapter.
+- `rg` xác nhận không còn runtime import đường dẫn cũ ngoài compatibility module.
+- AST parse thành công cho infrastructure package, compatibility module và test.
+- Chưa chạy pytest runtime vì Docker daemon vẫn chưa hoạt động và Python host
+  không dùng dependency versions của project.
+
+### Hoàn tác
+
+- Đổi các import trên về `app.storage.postgres_connection`.
+- Xóa compatibility alias được thêm vào module cũ.
+- Xóa `app/infrastructure/` và test boundary mới.
+- Không cần hoàn tác dữ liệu hoặc database.
