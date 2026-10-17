@@ -92,8 +92,8 @@ def bootstrap_admin_user():
     
     try:
         from app.storage.metadata_db import _column_exists, _execute
-        from app.auth import _fetch_user_by_login
         from app.modules.identity.passwords import get_password_hash
+        from app.modules.identity.repository import find_user_by_login
         
         # Check if users table exists
         if not _column_exists("users", "id"):
@@ -101,7 +101,7 @@ def bootstrap_admin_user():
             return
         
         # Check if admin user already exists
-        existing = _fetch_user_by_login(admin_username)
+        existing = find_user_by_login(admin_username)
         if existing:
             logger.info("[BOOTSTRAP_ADMIN] admin user '%s' already exists, skipping", admin_username)
             return

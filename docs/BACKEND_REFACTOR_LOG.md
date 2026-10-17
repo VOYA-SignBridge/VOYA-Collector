@@ -264,3 +264,60 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
   `identity/__init__.py` và import cũ trong `identity/api.py`, `app/db.py`.
 - Xóa `identity/passwords.py`, `identity/tokens.py` và regression test BR-005.
 - Không cần thay đổi database schema hoặc dữ liệu.
+
+## 2026-10-18 — BR-006: Tách account repository khỏi auth orchestration
+
+### Mục tiêu
+
+- Tách SQL đọc/ghi bảng `users` khỏi legacy auth service.
+- Đặt normalization và mapping của account row cạnh persistence boundary.
+- Giữ validation, password hashing và HTTP error orchestration ngoài repository.
+
+### Thay đổi
+
+- Thêm `app/modules/identity/repository.py` với các hàm:
+  - `get_connection`;
+  - `normalize_login`;
+  - `row_to_user`;
+  - `find_user_by_id`;
+  - `find_user_by_login`;
+  - `insert_user`.
+- Chuyển ba câu SQL account (`SELECT by id`, `SELECT by username/email`,
+  `INSERT user`) từ `app/auth.py` sang repository.
+- Legacy `app/auth.py` giữ wrapper `_fetch_user_by_id`, `_fetch_user_by_login`
+  và aliases normalization/row mapping; wrapper truyền `_get_conn` vào
+  repository để code/test cũ vẫn có thể override connection factory.
+- `create_user` tiếp tục chịu trách nhiệm validation, duplicate check, UUID và
+  password hashing, nhưng ủy quyền thao tác insert cho repository.
+- Startup admin bootstrap đọc account qua repository thay vì private auth helper.
+- Thêm `tests/test_identity_repository_boundary.py` bảo vệ normalization, row
+  mapping, empty-login short circuit và legacy aliases.
+
+### Contract được giữ nguyên
+
+- SQL, selected/returned columns, parameter order và transaction context không
+  đổi.
+- Mỗi connection vẫn được đóng trong `finally`.
+- User dictionary giữ nguyên field names, string conversion của `id`, default
+  boolean và fallback chuỗi rỗng.
+- Username vẫn chỉ trim; email/login vẫn trim và lowercase.
+- Status code và message cho validation/duplicate account không đổi.
+- Private fetch wrappers trong `app.auth` vẫn tồn tại cho consumer chuyển tiếp.
+
+### Kiểm tra
+
+- CodeGraph xác nhận `create_user → _fetch_user_by_login → find_user_by_login`
+  và các call path lookup/insert đều đi qua repository mới.
+- CodeGraph blast radius xác nhận repository mới chỉ được dùng bởi auth service
+  và startup admin bootstrap như dự kiến.
+- AST parse thành công cho auth, db, repository và regression test.
+- Source scan xác nhận `app/auth.py` không còn SQL account và chỉ giữ
+  `RealDictCursor` cho password-reset/refresh-session logic chưa chuyển.
+- Chưa chạy pytest runtime do giới hạn môi trường dependency đã ghi ở BR-005.
+
+### Hoàn tác
+
+- Đưa account SQL, normalization và row mapping về `app/auth.py`.
+- Khôi phục startup admin import `_fetch_user_by_login` từ legacy auth.
+- Xóa `identity/repository.py` và regression test BR-006.
+- Không có migration hoặc biến đổi dữ liệu cần hoàn tác.

@@ -6,18 +6,24 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 import uuid
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.config import settings
 from app.cookie_auth import ACCESS_COOKIE
-from app.infrastructure.database.connection import connect_postgres
 from app.modules.identity.passwords import (
     DUMMY_PASSWORD_HASH,
     get_password_hash,
     verify_password,
+)
+from app.modules.identity.repository import (
+    find_user_by_id,
+    find_user_by_login,
+    get_connection,
+    insert_user,
+    normalize_login,
+    row_to_user,
 )
 from app.modules.identity.tokens import (
     bearer_scheme,
@@ -28,28 +34,12 @@ from app.modules.identity.tokens import (
 # Compatibility aliases for consumers that still import private legacy names.
 _DUMMY_PASSWORD_HASH = DUMMY_PASSWORD_HASH
 _decode_token = decode_access_token
+_normalize_login = normalize_login
+_row_to_user = row_to_user
 
 
 def _get_conn():
-    return connect_postgres(connect_timeout=5)
-
-
-def _normalize_login(identifier: str) -> str:
-    return (identifier or "").strip().lower()
-
-
-def _row_to_user(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not row:
-        return None
-    return {
-        "id": str(row["id"]),
-        "username": row["username"] or "",
-        "email": row["email"] or "",
-        "password_hash": row["password_hash"] or "",
-        "is_active": bool(row.get("is_active", True)),
-        "is_admin": bool(row.get("is_admin", False)),
-        "created_at": row.get("created_at"),
-    }
+    return get_connection()
 
 
 def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
@@ -70,46 +60,11 @@ def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def _fetch_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT id, username, email, password_hash, is_active, is_admin, created_at
-                    FROM users
-                    WHERE id = %s
-                    """,
-                    (user_id,),
-                )
-                row = cur.fetchone()
-                return _row_to_user(row)
-    finally:
-        conn.close()
+    return find_user_by_id(user_id, connection_factory=_get_conn)
 
 
 def _fetch_user_by_login(identifier: str) -> Optional[Dict[str, Any]]:
-    login = _normalize_login(identifier)
-    if not login:
-        return None
-
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT id, username, email, password_hash, is_active, is_admin, created_at
-                    FROM users
-                    WHERE lower(username) = %s OR lower(email) = %s
-                    LIMIT 1
-                    """,
-                    (login, login),
-                )
-                row = cur.fetchone()
-                return _row_to_user(row)
-    finally:
-        conn.close()
+    return find_user_by_login(identifier, connection_factory=_get_conn)
 
 
 def create_user(
@@ -140,29 +95,14 @@ def create_user(
     user_id = str(uuid.uuid4())
     password_hash = get_password_hash(password)
 
-    conn = _get_conn()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    INSERT INTO users (id, username, email, password_hash, is_active, is_admin)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    RETURNING id, username, email, password_hash, is_active, is_admin, created_at
-                    """,
-                    (
-                        user_id,
-                        username_norm,
-                        email_norm,
-                        password_hash,
-                        True,
-                        bool(is_admin),
-                    ),
-                )
-                row = cur.fetchone()
-                return _row_to_user(row) or {}
-    finally:
-        conn.close()
+    return insert_user(
+        user_id=user_id,
+        username=username_norm,
+        email=email_norm,
+        password_hash=password_hash,
+        is_admin=is_admin,
+        connection_factory=_get_conn,
+    )
 
 
 def authenticate_user(identifier: str, password: str) -> Optional[Dict[str, Any]]:
