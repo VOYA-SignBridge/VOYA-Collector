@@ -12,6 +12,7 @@
  *   fetchTenants lỗi → …
  */
 import "@testing-library/jest-dom/vitest";
+import { MemoryRouter } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -38,7 +39,7 @@ describe("AdminTenantsPage + ToastProvider thật — TEN-02", () => {
 
     render(
       <ToastProvider>
-        <AdminTenantsPage />
+        <MemoryRouter><AdminTenantsPage /></MemoryRouter>
       </ToastProvider>,
     );
 
