@@ -378,7 +378,8 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 
 - `config/legacy_vocabulary_mapping.json` không tồn tại trong HEAD hiện tại.
 - Không có released dataset manifest cho frozen-artifact suite.
-- `scripts/report_dataset_coverage.py` không tồn tại ở path test yêu cầu.
+- Test Phase 3.5 vẫn tham chiếu `scripts/report_dataset_coverage.py` ở path cũ;
+  implementation đã được chuyển sang `scripts/dataset/`.
 - Hai provenance assertions phụ thuộc các artifact ở trên nên không đạt.
 
 ### Hoàn tác
@@ -386,4 +387,36 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Đưa implementation của reset/refresh functions từ hai module mới về
   `app/auth.py` và khôi phục imports chuẩn thư viện cũ.
 - Xóa hai module mới và regression test BR-007.
+- Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-008: Đồng bộ test Phase 3.5 với cấu trúc scripts mới
+
+### Mục tiêu
+
+- Sửa regression test còn tham chiếu các script ở vị trí trước khi tổ chức lại
+  thư mục.
+- Không thay đổi implementation, database hoặc dataset thật.
+
+### Thay đổi
+
+- `report_dataset_coverage.py` và `validate_pilot_samples.py` được test qua
+  `scripts/dataset/`.
+- `quarantine_files.py` được test qua `scripts/migration/`.
+- Helper `_run` nhận `Path` đầy đủ để mỗi test thể hiện rõ domain của script.
+
+### Kiểm tra
+
+- Chạy `python backend/tests/test_phase35_scripts.py`: 14 pass, 0 fail.
+- Test chỉ tạo fixture trong thư mục tạm và xóa thư mục đó khi hoàn tất.
+- `git diff --check` thành công.
+
+### Phạm vi dữ liệu
+
+- Không kết nối hoặc thay đổi database.
+- Không đọc, ghi, di chuyển hay tạo manifest trong dataset thật.
+- Không thay đổi vocabulary mapping hoặc provenance artifacts.
+
+### Hoàn tác
+
+- Khôi phục các path cũ trong `backend/tests/test_phase35_scripts.py`.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
