@@ -4575,6 +4575,29 @@ def migrate_database(note: str | None = None, stamp: bool = True) -> None:
             stamp_schema_version(cur, APP_SCHEMA_VERSION, note=note)
 
 
+def _run_authz_ddl(cur, authz_stmts) -> None:
+    """Chạy danh sách DDL phân quyền, seed vai/quyền TRƯỚC bước backfill cộng đồng.
+
+    Bước backfill "mọi tài khoản thuộc cộng đồng" gán vai `community_member` bằng
+    JOIN vào `roles`, nên chỉ gán được khi vai đã tồn tại. Trước đây seed chạy SAU
+    cả danh sách: trên DB dựng từ số không không có tài khoản nào nên hậu điều
+    kiện vẫn đạt, còn trên DB cũ có người dùng (chưa từng có authz) thì `roles`
+    rỗng, backfill chèn 0 vai, hậu điều kiện đỏ và migration dừng giữa chừng —
+    18/10/2026, DB local 11 tài khoản. Seed idempotent (ON CONFLICT) nên lần seed
+    sau danh sách trong `_apply_schema` vẫn giữ nguyên.
+    """
+    from app.storage.authz_schema import _SQL_BACKFILL_COMMUNITY_MEMBERSHIP
+
+    stmts = list(authz_stmts)
+    if _SQL_BACKFILL_COMMUNITY_MEMBERSHIP in stmts:
+        cut = stmts.index(_SQL_BACKFILL_COMMUNITY_MEMBERSHIP)
+        _run_ddl(cur, stmts[:cut], "authz")
+        _seed_authorization(cur)
+        _run_ddl(cur, stmts[cut:], "authz backfill")
+    else:
+        _run_ddl(cur, stmts, "authz")
+
+
 def _apply_schema(*, include_one_way: bool):
     from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
     from app.storage.rls import install_rls
@@ -4670,7 +4693,7 @@ def _apply_schema(*, include_one_way: bool):
 
         cur.execute("SELECT pg_advisory_lock(%s)", (SEED_LOCK_KEY,))
         try:
-            _run_ddl(cur, wanted(AUTHZ_DDL_STATEMENTS), "authz")
+            _run_authz_ddl(cur, wanted(AUTHZ_DDL_STATEMENTS))
 
             # Lần phát thứ BA của vòng lặp khoá ngoại tenant, và cần đúng như
             # hai lần trước cần: `MIGRATION_STATEMENTS` chạy nó ở hai vị trí,
