@@ -124,14 +124,16 @@ export default function CollectionSessionsPage({ embedded = false }: { embedded?
    *  là nơi kiểm quyền thật (`capture_sessions.py::update_session` từ chối nếu
    *  người gọi không phải chủ phiên và không có vai biên tập). */
   const toggleVisibility = async (s: CollectionSession) => {
-    const next = s.visibility === "tenant" ? "private" : "tenant";
+    const next = s.visibility === "private" ? "tenant" : s.visibility === "tenant" ? "community" : "private";
     try {
       setBusy(s.capture_session_id);
       await updateSession(s.capture_session_id, { visibility: next });
       toast.success(
-        next === "tenant"
-          ? t("Đã mở phiên này cho cả tổ chức xem")
-          : t("Đã chuyển phiên này về riêng tư"),
+        next === "community"
+          ? t("Đã mở phiên này cho cộng đồng xem")
+          : next === "tenant"
+            ? t("Đã mở phiên này cho cả tổ chức xem")
+            : t("Đã chuyển phiên này về riêng tư"),
       );
       await load();
     } catch (e) {
@@ -282,13 +284,15 @@ export default function CollectionSessionsPage({ embedded = false }: { embedded?
                             onClick={() => toggleVisibility(s)}
                             disabled={busy === s.capture_session_id}
                             title={
-                              s.visibility === "tenant"
-                                ? t("Cả tổ chức đang xem được phiên này — bấm để chuyển về riêng tư")
-                                : t("Đang riêng tư — bấm để mở cho cả tổ chức xem")
+                              s.visibility === "community"
+                                ? t("Cộng đồng đang xem được phiên này — bấm để chuyển về riêng tư")
+                                : s.visibility === "tenant"
+                                  ? t("Cả tổ chức đang xem được phiên này — bấm để mở cho cộng đồng")
+                                  : t("Đang riêng tư — bấm để mở cho cả tổ chức xem")
                             }
                             className="ml-1.5 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-500 transition-colors hover:bg-slate-100 disabled:opacity-50"
                           >
-                            {s.visibility === "tenant" ? t("Cả tổ chức") : t("Riêng tư")}
+                            {s.visibility === "community" ? t("Cộng đồng") : s.visibility === "tenant" ? t("Cả tổ chức") : t("Riêng tư")}
                           </button>
                         </>
                       )}

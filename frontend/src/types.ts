@@ -73,6 +73,8 @@ export interface CameraUploadPayload {
   label: string;
   dialect?: string;
   language?: string;
+  class_uid?: string;
+  visibility?: "private" | "tenant" | "community";
   session_id: string;
   /** 1 | 2 — persisted on the class at first capture (first-capture-wins). */
   hands_required?: number;
