@@ -69,6 +69,11 @@ REQUIRED_COLUMNS: Dict[str, List[str]] = {
         "deleted_at",
         # multi-tenant (A1)
         "tenant_id",
+        # Phạm vi hiển thị của bản tải lên (private|tenant|community).
+        # `_RAW_UPLOAD_DB_KEYS` ghi cột này nên bên đọc phải có nó; thiếu thì
+        # xác minh vẫn qua rồi nhập hỏng giữa chừng. Bản SOT cũ không có cột thì
+        # `insert_raw_upload` hạ về 'private' — mặc định hẹp, không mở rộng ai xem.
+        "visibility",
     ],
 }
 

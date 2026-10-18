@@ -32,7 +32,9 @@ def require_moderator(current_user: Dict[str, Any] = Depends(get_current_user)):
     Vỏ giao diện ẩn mục Kiểm duyệt với người không có quyền, nhưng ẩn không
     phải chặn — một lệnh `curl` không đọc thanh bên.
     """
-    if not moderation_admin.can_moderate(current_user):
+    # Theo tenant ĐANG thao tác: vai duyệt ở trường A không cho duyệt hàng đợi
+    # của tenant B, kể cả khi người ấy cũng là thành viên của B.
+    if not moderation_admin.can_moderate(current_user, require_tenant()):
         raise HTTPException(
             status_code=403,
             detail="Bạn không có quyền kiểm duyệt dữ liệu.",

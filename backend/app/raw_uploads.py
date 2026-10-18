@@ -38,6 +38,7 @@ RAW_UPLOAD_FIELDS = [
     # sync writes and the third table A3 puts under RLS; leaving it out would
     # keep the tenant-less-rebuild hole alive in exactly one of the three.
     TENANT_COLUMN,
+    "visibility",
 ]
 
 
@@ -79,6 +80,11 @@ def _upgrade_raw_uploads_header() -> bool:
             rows = list(reader)
         for row in rows:
             row[TENANT_COLUMN] = tenant_id_of(row)
+            # Dòng có trước cột `visibility`: KÍN, cùng mặc định với cột DB
+            # (`DEFAULT 'private'`). Để trống thì CSV không nói gì, và một bản
+            # đọc nào đó đoán khác đi là đủ mở rộng phạm vi chia sẻ.
+            if not (row.get("visibility") or "").strip():
+                row["visibility"] = "private"
         tmp = str(RAW_UPLOADS_CSV) + ".tmp"
         with open(tmp, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(

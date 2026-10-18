@@ -41,8 +41,15 @@ class ModerationError(Exception):
 # --------------------------------------------------------------------------- quyền
 
 
-def can_moderate(user: Dict[str, Any]) -> bool:
-    """Người này có được duyệt không.
+def can_moderate(user: Dict[str, Any], tenant_id: Optional[str] = None) -> bool:
+    """Người này có được duyệt không — Ở TENANT `tenant_id`.
+
+    `tenant_id` là tenant mà hàng đợi / quyết định đang chạy trong đó. Có nó thì
+    chỉ grant thuộc CHÍNH tenant ấy (hoặc grant phạm vi hệ thống) mới tính. Bản
+    trước không có tham số này và hỏi "có vai duyệt ở BẤT KỲ đâu không": admin
+    của một trường, vốn cũng là thành viên cộng đồng VOYA như mọi tài khoản, chỉ
+    cần đổi tenant đang dùng sang VOYA là duyệt/từ chối được dữ liệu của VOYA
+    (đo 16/10/2026). `None` giữ câu hỏi cũ, chỉ dành cho chỗ không có tenant.
 
     Hỏi BA câu, cùng hình dạng với `access_gate._has_any_tenant_grant` — và vì
     cùng một lý do: không có câu nào trong ba trả lời thay được hai câu kia.
@@ -73,6 +80,7 @@ def can_moderate(user: Dict[str, Any]) -> bool:
     user_id = str(user.get("id") or user.get("user_id") or "").strip()
     if not user_id:
         return False
+    tenant = (tenant_id or "").strip() or None
 
     try:
         from app.storage.metadata_db import _fetch_all
@@ -90,9 +98,10 @@ def can_moderate(user: Dict[str, Any]) -> bool:
                 "   AND rp.permission_code = %s "
                 "   AND (a.membership_id IS NULL "
                 "        OR (m.status = 'ACTIVE' AND m.left_at IS NULL "
-                "            AND t.deleted_at IS NULL AND t.is_active)) "
+                "            AND t.deleted_at IS NULL AND t.is_active "
+                "            AND (%s::text IS NULL OR m.tenant_id = %s))) "
                 " LIMIT 1",
-                (user_id, PERM_MODERATE),
+                (user_id, PERM_MODERATE, tenant, tenant),
             )
             if v5:
                 return True
@@ -100,8 +109,9 @@ def can_moderate(user: Dict[str, Any]) -> bool:
             cu = _fetch_all(
                 "SELECT role FROM tenant_members "
                 " WHERE user_id = %s AND role IS NOT NULL "
-                "   AND status = 'ACTIVE' AND removed_at IS NULL",
-                (user_id,),
+                "   AND status = 'ACTIVE' AND removed_at IS NULL "
+                "   AND (%s::text IS NULL OR tenant_id = %s)",
+                (user_id, tenant, tenant),
             )
     except Exception:
         logger.exception("[MODERATION] khong tra duoc quyen cho %s; tu choi", user_id)
@@ -134,8 +144,10 @@ def pending_session_count(tenant_id: str) -> int:
     from app.storage.metadata_db import _fetch_all
 
     rows = _fetch_all(
-        "SELECT count(DISTINCT capture_session_id) AS n FROM samples "
-        " WHERE tenant_id = %s AND review_status = %s AND deleted_at IS NULL",
+        "SELECT count(DISTINCT s.capture_session_id) AS n FROM samples s "
+        " JOIN capture_sessions cs ON cs.capture_session_id = s.capture_session_id AND cs.tenant_id = s.tenant_id "
+        " WHERE s.tenant_id = %s AND s.review_status = %s AND s.deleted_at IS NULL "
+        " AND cs.visibility IN ('tenant', 'community')",
         (tenant_id, PENDING),
     )
     return int(rows[0]["n"]) if rows else 0
@@ -166,8 +178,10 @@ def list_pending_sessions(tenant_id: str, limit: int = 100) -> List[Dict[str, An
         "       min(s.completeness)   AS completeness, "
         "       (array_agg(s.sample_uid ORDER BY s.augment_id NULLS LAST))[1] AS original_uid "
         "  FROM samples s LEFT JOIN users u ON u.id = s.auth_user_id "
+        " JOIN capture_sessions cs ON cs.capture_session_id = s.capture_session_id AND cs.tenant_id = s.tenant_id "
         " WHERE s.tenant_id = %s AND s.review_status = %s AND s.deleted_at IS NULL "
         "   AND s.capture_session_id IS NOT NULL "
+        "   AND cs.visibility IN ('tenant', 'community') "
         " GROUP BY s.capture_session_id "
         " ORDER BY min(s.created_at) "
         " LIMIT %s",
@@ -211,6 +225,17 @@ def decide_session(
             status_code=400)
 
     trang_thai = APPROVED if approve else REJECTED
+    from app.storage.metadata_db import _fetch_all
+    sessions = _fetch_all(
+        "SELECT auth_user_id, visibility FROM capture_sessions WHERE tenant_id = %s AND capture_session_id = %s",
+        (tenant_id, sid),
+    )
+    # Phiên `private` chưa được đăng ký chia sẻ nên KHÔNG có gì để duyệt — với
+    # mọi người, kể cả chủ phiên. Bản trước miễn cho chủ: một biên tập viên có
+    # thể tự duyệt phiên riêng của mình rồi mới mở `tenant`, và dữ liệu được
+    # chia sẻ ở trạng thái "đã duyệt" mà không ai khác xem qua.
+    if not sessions or (sessions[0].get("visibility") or "private") == "private":
+        raise ModerationError("Không tìm thấy phiên thu.", status_code=404)
 
     # Ghi tệp + cơ sở dữ liệu do `catalog_sync` làm, KHÔNG làm ở đây.
     #

@@ -78,15 +78,21 @@ class SessionUpdate(BaseModel):
     #: kết thúc là một dữ kiện của lịch sử thu, không phải một ô cấu hình.
     close: Optional[bool] = None
     note: Optional[str] = Field(None, max_length=500)
-    #: 'private' (mặc định — chỉ chủ phiên và biên tập viên thấy) hay 'tenant'
+    #: 'private' (mặc định — chỉ chủ phiên thấy, không có ngoại lệ quản trị) hay 'tenant'
     #: (chủ phiên tự mở cho thành viên thường khác cùng tổ chức xem).
-    visibility: Optional[Literal["private", "tenant"]] = None
+    visibility: Optional[Literal["private", "tenant", "community"]] = None
 
 
-def _is_editor(user: Dict[str, Any]) -> bool:
-    if user.get("is_admin"):
-        return True
-    return str(user.get("tenant_role") or "").lower() in ("admin", "editor", "owner")
+def _is_editor(user: Dict[str, Any], tenant_id: str) -> bool:
+    """Admin/editor CỦA tenant đang dùng (hoặc admin nền tảng).
+
+    Trước 17/10/2026 hàm này đọc `user["tenant_role"]` — trường chỉ được tính ở
+    `/auth/me`, nên ở đây nó luôn rỗng và chỉ admin nền tảng được coi là biên
+    tập viên. Giờ hỏi đúng một chỗ với mọi cổng mẫu khác: `app.sample_access`.
+    """
+    from app.sample_access import can_manage_tenant_samples
+
+    return can_manage_tenant_samples(user, tenant_id)
 
 
 @router.get("", response_model=SessionsResponse)
@@ -107,7 +113,7 @@ def list_sessions(
     """
     tenant = require_tenant()
     uid = str(current_user.get("id") or "")
-    editor = _is_editor(current_user)
+    editor = _is_editor(current_user, tenant)
     want = scope if scope != "auto" else ("tenant" if editor else "mine")
 
     # Thứ tự tham số phải khớp thứ tự dấu %s trong câu dưới, và câu ấy có tenant
@@ -119,12 +125,15 @@ def list_sessions(
     if want == "mine":
         where_extra = "AND cs.auth_user_id = %s"
         params.append(uid)
-    elif not editor:
-        # Thành viên thường xin xem "cả tổ chức": biên tập viên vẫn thấy MỌI
-        # phiên như trước (cờ `visibility` không đổi gì với họ — họ đã có toàn
-        # quyền qua vai biên tập, không qua cờ này). Thành viên thường chỉ thấy
-        # phiên của chính mình cộng phiên mà CHỦ phiên đã tự mở.
-        where_extra = "AND (cs.visibility = 'tenant' OR cs.auth_user_id = %s)"
+    elif editor:
+        # Admin/editor của tenant thấy MỌI phiên của tenant, kể cả `private`:
+        # `private` là riêng với các thành viên khác, không riêng với người
+        # quản lý tổ chức (xem `app.sample_access`). Không thêm điều kiện nên
+        # cũng không thêm tham số.
+        pass
+    else:
+        # Thành viên thường: phiên của mình + phiên chủ đã tự mở.
+        where_extra = "AND (cs.visibility IN ('tenant', 'community') OR cs.auth_user_id = %s)"
         params.append(uid)
     params.append(limit)                      # (4) LIMIT
 
@@ -203,14 +212,21 @@ def update_session(
     uid = str(current_user.get("id") or "")
 
     found = _fetch_all(
-        "SELECT capture_session_id, auth_user_id, ended_at FROM capture_sessions "
+        "SELECT capture_session_id, auth_user_id, ended_at, visibility FROM capture_sessions "
         "WHERE tenant_id = %s AND capture_session_id = %s",
         (tenant, capture_session_id),
     )
     if not found:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Không có phiên thu này")
     row = found[0]
-    if str(row.get("auth_user_id") or "") != uid and not _is_editor(current_user):
+    is_owner = str(row.get("auth_user_id") or "") == uid
+    editor = _is_editor(current_user, tenant)
+    if not is_owner and not editor and (row.get("visibility") or "private") == "private":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Không có phiên thu này")
+    # Chia sẻ là lựa chọn (đồng thuận) của CHỦ dữ liệu, kể cả với người quản lý.
+    if body.visibility is not None and not is_owner:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Chỉ chủ phiên được đổi quyền hiển thị")
+    if not is_owner and not editor:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Phiên này không phải của bạn")
 
     if body.close and row.get("ended_at") is not None:

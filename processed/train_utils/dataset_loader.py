@@ -384,6 +384,11 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # config, and then ignored for every row whose `file_path` still
         # resolves — which is every row of a freshly built split.
         if getattr(self, 'root_is_explicit', False):
+            relative = Path((row.get('file_path') or '').strip().replace('\\', '/'))
+            if str(relative) != '.' and not relative.is_absolute():
+                portable = (self.root / relative).resolve()
+                if portable.is_relative_to(self.root.resolve()) and portable.is_file():
+                    return portable
             cand = self._root_relative_candidate(row)
             if cand is not None and cand.exists():
                 return cand
@@ -420,6 +425,19 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         else:
             # dialect missing: try language/common
             candidates.append(self.root / language / 'common' / folder_name / file_name)
+        # Mẫu của tenant khác tenant khởi tạo: `file_path` tương đối tính từ gốc
+        # dataset (`features/_tenants/<tenant>/...`), hoặc dựng lại từ tenant_id.
+        # Cùng thứ tự với `_tenant_feature_candidates` trong train_tcn.py — bộ
+        # lọc ở đó giữ dòng nào thì ở đây phải mở được đúng tệp ấy.
+        rel = file_path.replace('\\', '/')
+        if rel and not rel.startswith('/'):
+            dataset_root = self.root.parent.resolve()
+            portable = (dataset_root / rel).resolve()
+            if portable.is_relative_to(dataset_root):
+                candidates.append(portable)
+        tenant = (row.get('tenant_id') or '').strip()
+        if tenant and tenant != 'default' and '/' not in tenant and dialect:
+            candidates.append(self.root / '_tenants' / tenant / language / dialect / folder_name / file_name)
 
         for cand in candidates:
             if cand.exists():

@@ -1141,6 +1141,7 @@ DDL_STATEMENTS = [
         created_at TIMESTAMP WITH TIME ZONE,
         updated_at TIMESTAMP WITH TIME ZONE,
         deleted_at TIMESTAMP WITH TIME ZONE,
+        visibility TEXT NOT NULL DEFAULT 'private',
         FOREIGN KEY (auth_user_id) REFERENCES users(id) ON DELETE SET NULL
     )
     """,
@@ -1747,6 +1748,11 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
     "ALTER TABLE raw_uploads ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
+    "ALTER TABLE raw_uploads ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'",
+    _add_constraint(
+        "raw_uploads", "raw_uploads_visibility_valid",
+        "CHECK (visibility IN ('private', 'tenant', 'community'))",
+    ),
     # Add sheets_synced column to samples (safe for existing data: defaults to FALSE)
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS sheets_synced BOOLEAN DEFAULT FALSE",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS gdrive_synced BOOLEAN DEFAULT TRUE",
@@ -4240,6 +4246,10 @@ MIGRATION_STATEMENTS = [
     # động: thêm cột, có DEFAULT, không đổi hàng đang có.
     "ALTER TABLE capture_sessions ADD COLUMN IF NOT EXISTS "
     "visibility TEXT NOT NULL DEFAULT 'private'",
+    _add_constraint(
+        "capture_sessions", "capture_sessions_visibility_valid",
+        "CHECK (visibility IN ('private', 'tenant', 'community'))",
+    ),
 ]
 
 def _column_exists(table: str, column: str) -> bool:
@@ -4567,7 +4577,7 @@ def migrate_database(note: str | None = None, stamp: bool = True) -> None:
 
 def _apply_schema(*, include_one_way: bool):
     from app.storage.authz_schema import AUTHZ_DDL_STATEMENTS
-    from app.storage.rls import rls_ddl
+    from app.storage.rls import install_rls
     from app.storage.schema_version import SCHEMA_VERSION_DDL
 
     def wanted(statements):
@@ -4713,7 +4723,11 @@ def _apply_schema(*, include_one_way: bool):
         # migration statements above are responsible for adding. Installing them
         # earlier would fail on a database that predates the column and then be
         # skipped for the rest of that boot.
-        _run_ddl(cur, rls_ddl(), "rls")
+        #
+        # `install_rls`, not `_run_ddl(rls_ddl())`: the latter dropped and
+        # re-created every policy on every boot, statement by statement, leaving
+        # a deny-all window that a concurrently starting worker fell into.
+        install_rls(cur)
 
     verify_integrity_constraints()
 
@@ -4888,8 +4902,13 @@ ON CONFLICT (class_uid) DO UPDATE SET
     is_common_global = EXCLUDED.is_common_global,
     is_common_language = EXCLUDED.is_common_language,
     folder_name = EXCLUDED.folder_name,
-    created_at = EXCLUDED.created_at,
-    migrated_at = EXCLUDED.migrated_at,
+    -- Mốc tạo chỉ có thể được SỬA SỚM HƠN, không bao giờ muộn hơn: một lớp
+    -- không được "tạo lại" mỗi lần có người thu mẫu vào nó (lỗi 17/09/2026,
+    -- to_label_row đóng dấu now_str()). LEAST tự lành cả DB đã lệch khi
+    -- boot-sync/SOT mang mốc thật tới.
+    created_at = LEAST(COALESCE(classes.created_at, EXCLUDED.created_at),
+                       COALESCE(EXCLUDED.created_at, classes.created_at)),
+    migrated_at = COALESCE(EXCLUDED.migrated_at, classes.migrated_at),
     hands_required = COALESCE(EXCLUDED.hands_required, classes.hands_required),
     semantic_label = COALESCE(EXCLUDED.semantic_label, classes.semantic_label),
     vocabulary_scope = COALESCE(EXCLUDED.vocabulary_scope, classes.vocabulary_scope),
@@ -5009,7 +5028,26 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     --
     -- Đọc tham số giữ được phân biệt "không có ý kiến" (giữ nguyên trạng thái
     -- trong CSDL) với "trạng thái là X".
-    review_status = COALESCE(%(review_status)s, samples.review_status),
+    -- `pending` KHÔNG phải một quyết định, nó là sự VẮNG MẶT của quyết định —
+    -- nên một nguồn nói 'pending' không bao giờ được hạ cấp một mẫu đã duyệt.
+    --
+    -- Vì sao cần thêm vế này dù đã đọc THAM SỐ: gói SOT là ảnh chụp CSV tại
+    -- thời điểm publish. Mẫu được duyệt SAU lượt publish thì gói vẫn mang
+    -- 'pending' một cách tường minh, và `sot-init` chạy ở MỖI `docker compose
+    -- up` sẽ ghi đè công của người kiểm duyệt. Đã xảy ra hai lần: 17/09/2026
+    -- (1.294 mẫu, chủ sở hữu) và 27/09/2026 (72 mẫu Minh67 duyệt hôm 17/09,
+    -- bị gói Ver13 kéo lùi khi dựng lại container).
+    --
+    -- Quyết định THẬT vẫn lan truyền được: đảo một mẫu đã duyệt là ghi
+    -- 'rejected' (xem `app.moderation`), và vế dưới không chặn đường đó.
+    -- Cái mất duy nhất là đặt-lại-về-chờ-duyệt qua SOT từ máy khác; đổi lại là
+    -- không lượt khởi động nào âm thầm xoá kết quả kiểm duyệt.
+    review_status = CASE
+        WHEN samples.review_status = 'approved'
+             AND lower(COALESCE(%(review_status)s, '')) = 'pending'
+        THEN samples.review_status
+        ELSE COALESCE(%(review_status)s, samples.review_status)
+    END,
     -- COALESCE giữ con trỏ đã có khi nguồn im lặng, và điều đó quan trọng vì
     -- lượt đồng bộ CSV->DB chạy định kỳ KHÔNG biết gì về `capture_session_id`
     -- (cột này không có trong samples.csv). Dùng EXCLUDED trần ở đây sẽ khiến
@@ -5023,7 +5061,7 @@ SQL_UPSERT_RAW_UPLOAD = f"""
 INSERT INTO raw_uploads(
     upload_uid, class_uid, slug, label_original, language, dialect,
     source_type, user_id, auth_user_id, session_id, original_filename,
-    local_path, storage_key, storage_url, created_at, updated_at, tenant_id
+    local_path, storage_key, storage_url, created_at, updated_at, tenant_id, visibility
 )
 VALUES(
     %(upload_uid)s, %(class_uid)s, %(slug)s, %(label_original)s, %(language)s, %(dialect)s,
@@ -5032,7 +5070,7 @@ VALUES(
     -- raw_uploads is the third table the startup sync writes and the third
     -- table A3 puts under RLS. Leaving it without a tenant column here would
     -- keep the silent-reassignment bug alive in exactly one of the three.
-    COALESCE(%(tenant_id)s, '{DEFAULT_TENANT_ID}')
+    COALESCE(%(tenant_id)s, '{DEFAULT_TENANT_ID}'), %(visibility)s
 )
 ON CONFLICT (upload_uid) DO UPDATE SET
     class_uid = EXCLUDED.class_uid,
@@ -5050,6 +5088,7 @@ ON CONFLICT (upload_uid) DO UPDATE SET
     storage_url = COALESCE(EXCLUDED.storage_url, raw_uploads.storage_url),
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at,
+    visibility = EXCLUDED.visibility,
     -- Parameter, not EXCLUDED — see the note on samples.tenant_id above.
     tenant_id = COALESCE(%(tenant_id)s, raw_uploads.tenant_id)
 """
@@ -5192,6 +5231,19 @@ def upsert_class(row: Dict[str, Any]):
         # được "cột không tồn tại" với "ô để trống", nên đọc nó thành một khẳng
         # định là đọc quá lời.
         payload["region"] = normalize_region(_vung) if _vung else None
+    if payload["vocabulary_group"]:
+        # Nhóm từ vựng không có bảng danh mục cộng đồng để clone sang tenant mới:
+        # nó chỉ từng được backfill từ chính `classes` (khối v3.10). Thiếu bước này
+        # thì lớp ĐẦU TIÊN của mọi tenant mới vấp `fk_classes_vocabulary_group`,
+        # DB mirror hỏng, và kéo theo phiên thu + mẫu cũng hỏng khoá ngoại
+        # (kiểm chứng hai tenant 17/10/2026). Cùng quy tắc với backfill: tên hiển
+        # thị = id, ON CONFLICT giữ tên tenant đã sửa.
+        _execute(
+            "INSERT INTO vocabulary_groups(tenant_id, group_id, display_name) "
+            f"VALUES(COALESCE(%s, '{DEFAULT_TENANT_ID}'), %s, %s) "
+            "ON CONFLICT (tenant_id, group_id) DO NOTHING",
+            (payload[TENANT_COLUMN], payload["vocabulary_group"], payload["vocabulary_group"]),
+        )
     _execute(SQL_UPSERT_CLASS, payload)
 
 
@@ -5247,9 +5299,9 @@ buoi AS (
 phien_moi AS (
     INSERT INTO capture_sessions
         (capture_session_id, tenant_id, class_uid, session_id,
-         collection_session_id, auth_user_id, source_type)
+         collection_session_id, auth_user_id, source_type, visibility)
     SELECT gen_random_uuid(), %(tenant)s, %(lop)s, %(code)s, buoi.id,
-           %(nguoi)s, %(nguon)s
+           %(nguoi)s, %(nguon)s, %(pham_vi)s
       FROM buoi WHERE buoi.id IS NOT NULL
     ON CONFLICT (tenant_id, class_uid, session_id) DO NOTHING
     RETURNING capture_session_id
@@ -5265,7 +5317,7 @@ SELECT COALESCE(
 
 def ensure_capture_session(
     *, tenant_id: str, class_uid: str, session_id: str,
-    auth_user_id: Any = None, source_type: str = "",
+    auth_user_id: Any = None, source_type: str = "", visibility: str = "private",
 ) -> str | None:
     """`capture_session_id` cho một mẫu sắp ghi — dựng cả hai tầng nếu chưa có.
 
@@ -5313,10 +5365,14 @@ def ensure_capture_session(
     if not (tid and lop and ma):
         return None
 
+    visibility = str(visibility or "private").strip().lower()
+    if visibility not in {"private", "tenant", "community"}:
+        visibility = "private"
     tham_so = {
         "tenant": tid, "lop": lop, "code": ma,
         "nguoi": str(auth_user_id) if auth_user_id else None,
         "nguon": (source_type or "").strip() or None,
+        "pham_vi": visibility,
     }
 
     # Hai lượt, và lượt thứ hai KHÔNG phải phòng xa vu vơ. `ON CONFLICT DO
@@ -5401,7 +5457,22 @@ def delete_sample(sample_uid: str):
     _execute("DELETE FROM samples WHERE sample_uid = %s", (sample_uid,))
 
 
-def update_sample_gdrive_url(sample_uid: str, storage_url: str):
+def update_sample_gdrive_url(sample_uid: str, storage_url: str, storage_key: Optional[str] = None):
+    """Ghi kết quả đẩy Drive vào DB.
+
+    `storage_key` đi kèm vì cả ba nơi còn lại (sidecar, samples.csv, CSV Drive)
+    đều được cập nhật khoá này trong cùng một bước — chỉ DB bị bỏ quên, nên mọi
+    mẫu sinh từ video có `storage_key` NULL ở Postgres trong khi CSV có (305
+    dòng phải backfill 08/2026, rồi 112 dòng nữa 17/09/2026). Không có khoá này
+    thì xoá vĩnh viễn không gỡ được tệp trên Drive.
+    """
+    if storage_key:
+        _execute(
+            "UPDATE samples SET storage_url = %s, storage_key = COALESCE(NULLIF(storage_key, ''), %s), "
+            "gdrive_synced = TRUE WHERE sample_uid = %s",
+            (storage_url, storage_key, sample_uid)
+        )
+        return
     _execute(
         "UPDATE samples SET storage_url = %s, gdrive_synced = TRUE WHERE sample_uid = %s",
         (storage_url, sample_uid)
@@ -5416,7 +5487,7 @@ _RAW_UPLOAD_DB_KEYS = (
     "upload_uid", "class_uid", "slug", "label_original", "language", "dialect",
     "source_type", "user_id", "auth_user_id", "session_id", "original_filename",
     "local_path", "storage_key", "storage_url", "created_at", "updated_at",
-    "tenant_id",   # literal — see the note in _CLASS_DB_KEYS
+    "tenant_id", "visibility",   # literal — see the note in _CLASS_DB_KEYS
 )
 
 
@@ -5424,6 +5495,9 @@ def insert_raw_upload(row: Dict[str, Any]):
     payload = {k: row.get(k) for k in _RAW_UPLOAD_DB_KEYS}
     payload["auth_user_id"] = _uuid_or_none(payload.get("auth_user_id"))
     payload[TENANT_COLUMN] = optional_tenant_id(payload.get(TENANT_COLUMN))
+    payload["visibility"] = str(payload.get("visibility") or "private").strip().lower()
+    if payload["visibility"] not in {"private", "tenant", "community"}:
+        payload["visibility"] = "private"
     if not payload.get("session_id"):
         payload["session_id"] = row.get("session_id") or row.get("session_uid") or ""
     payload["created_at"] = _ts_or_none(payload.get("created_at"))
@@ -5959,6 +6033,28 @@ def get_sample_owner(sample_uid: str):
             return str(row[0]) if row[0] is not None else None
     except Exception:
         return None
+
+
+def get_readable_sample_uids(sample_uids: list, user_id: str, tenant_id: str, *,
+                             include_deleted: bool = False, manage_all: bool = False) -> set[str]:
+    """Own samples or sessions shared inside this tenant — or, with
+    `manage_all`, every sample of this tenant (admin/editor of the tenant; the
+    caller decides that via `app.sample_access`, not this query).
+
+    Missing session/owner metadata never grants access to a regular member. DB
+    failures propagate rather than falling back to the unfiltered CSV catalogue.
+    """
+    if not sample_uids or not user_id:
+        return set()
+    rows = _fetch_all(
+        "SELECT s.sample_uid FROM samples s "
+        "LEFT JOIN capture_sessions cs ON cs.tenant_id = s.tenant_id "
+        "AND cs.capture_session_id = s.capture_session_id "
+        "WHERE s.tenant_id = %s AND s.sample_uid = ANY(%s) AND (%s OR s.deleted_at IS NULL) "
+        "AND (%s OR s.auth_user_id = %s OR cs.visibility IN ('tenant', 'community'))",
+        (tenant_id, sample_uids, include_deleted, bool(manage_all), user_id),
+    )
+    return {str(row["sample_uid"]) for row in rows}
 
 
 def get_sample_owners(sample_uids: list) -> Dict[str, Any]:

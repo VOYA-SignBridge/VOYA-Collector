@@ -301,6 +301,12 @@ def rls_enabled_tables(conn, tables: Iterable[str]) -> list[str]:
 _pool: _pg_pool.ThreadedConnectionPool | None = None
 _pool_pid: int | None = None
 _pool_lock = threading.Lock()
+#: One slot per pooled connection. psycopg2's pool does not wait: the 9th
+#: concurrent borrower gets `PoolError("connection pool exhausted")` at once,
+#: and FastAPI runs sync endpoints on ~40 threads per worker. Measured
+#: 16/10/2026: 30 parallel GETs -> 53-60 of 300 answered 500. Borrowers now
+#: queue for a slot (bounded by `db_pool_wait_seconds`) instead of failing.
+_pool_slots: threading.BoundedSemaphore | None = None
 
 
 def _resolve_working_dsn(connect_timeout: int) -> str:
@@ -344,20 +350,32 @@ def _build_pool() -> _pg_pool.ThreadedConnectionPool:
 
 def get_pool() -> _pg_pool.ThreadedConnectionPool:
     """Return the process-local pool, (re)building it after a fork."""
-    global _pool, _pool_pid
+    global _pool, _pool_pid, _pool_slots
     pid = os.getpid()
     if _pool is None or _pool_pid != pid:
         with _pool_lock:
             if _pool is None or _pool_pid != pid:
                 # A pool inherited across fork must not be reused; drop the ref.
                 _pool = _build_pool()
+                _pool_slots = threading.BoundedSemaphore(int(_pool.maxconn))
                 _pool_pid = pid
     return _pool
 
 
 def get_pooled_conn():
-    """Borrow a connection from the process-local pool."""
-    return get_pool().getconn()
+    """Borrow a connection from the process-local pool, waiting for a free one."""
+    pool = get_pool()
+    slots = _pool_slots
+    wait = float(getattr(settings, "db_pool_wait_seconds", 10))
+    if slots is not None and not slots.acquire(timeout=wait):
+        raise _pg_pool.PoolError(
+            f"connection pool exhausted: no connection freed within {wait:g}s")
+    try:
+        return pool.getconn()
+    except Exception:
+        if slots is not None:
+            slots.release()
+        raise
 
 
 def put_pooled_conn(conn, *, close: bool = False) -> None:
@@ -375,3 +393,11 @@ def put_pooled_conn(conn, *, close: bool = False) -> None:
             conn.close()
         except Exception:
             pass
+    finally:
+        # Free the slot even when putconn failed: the connection is gone either
+        # way, and a leaked slot would shrink the pool for the process lifetime.
+        if _pool_slots is not None:
+            try:
+                _pool_slots.release()
+            except ValueError:
+                pass  # A connection borrowed before a fork-rebuild; nothing held.

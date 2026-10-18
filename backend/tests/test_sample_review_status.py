@@ -222,6 +222,41 @@ class TestUpsert:
 
         assert _trang_thai(uid) == "rejected"
 
+    def test_goi_cu_noi_pending_KHONG_keo_lui_mau_da_duyet(self, lop_va_mau):
+        """Sự cố 27/09/2026. `sot-init` chạy ở mỗi `docker compose up` và áp
+        gói đã ký — một ảnh chụp CSV tại thời điểm publish. Mẫu được duyệt SAU
+        lượt publish thì gói mang 'pending' TƯỜNG MINH (không phải im lặng),
+        nên mọi lượt dựng lại container xoá kết quả kiểm duyệt: 72 mẫu do
+        Minh67 duyệt ngày 17/09 quay về chờ duyệt.
+
+        `pending` là sự VẮNG MẶT của quyết định, nên nó không bao giờ thắng một
+        quyết định đã có. Đảo quyết định thì ghi 'rejected' — xem test ngay
+        trên, đường đó vẫn phải đi được.
+        """
+        class_uid, mau = lop_va_mau
+        uid = mau()
+        db.insert_sample({"sample_uid": uid, "class_uid": class_uid,
+                          "review_status": "approved"})
+
+        db.insert_sample({"sample_uid": uid, "class_uid": class_uid,
+                          "review_status": "pending"})
+
+        assert _trang_thai(uid) == "approved", (
+            "Mot goi SOT cu vua ha cap mau da duyet ve 'pending'."
+        )
+
+    def test_mau_cho_duyet_van_nhan_duoc_quyet_dinh_duyet(self, lop_va_mau):
+        """Chốt chặn trên chỉ chặn ĐÚNG chiều approved->pending; chiều thường
+        dùng nhất (chờ duyệt -> đã duyệt) không được đụng tới."""
+        class_uid, mau = lop_va_mau
+        uid = mau()
+        db.insert_sample({"sample_uid": uid, "class_uid": class_uid})
+        assert _trang_thai(uid) == "pending"
+
+        db.insert_sample({"sample_uid": uid, "class_uid": class_uid,
+                          "review_status": "approved"})
+        assert _trang_thai(uid) == "approved"
+
     def test_gia_tri_la_thi_bi_rang_buoc_chan(self, lop_va_mau):
         """Ba giá trị, không hơn. Không có ràng buộc thì một lỗi gõ phím tạo ra
         một trạng thái thứ tư mà không bộ lọc nào biết phải xử lý thế nào."""

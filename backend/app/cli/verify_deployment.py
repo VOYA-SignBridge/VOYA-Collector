@@ -438,7 +438,9 @@ def main() -> int:
         record(PASS if n == 0 else FAIL, label, f"{n} hang")
 
     # ---- 4. CSV mirrors vs DB (startup sync would undo cleanup) ----------
-    n_classes = scalar("SELECT count(*) FROM classes")
+    # Lớp trong thùng rác (deleted_at) bị ẩn khỏi labels.csv theo thiết kế —
+    # đếm cả chúng thì "CSV thiếu dữ liệu" báo giả mỗi lần ai đó xoá mềm một lớp.
+    n_classes = scalar("SELECT count(*) FROM classes WHERE deleted_at IS NULL")
     n_samples = scalar("SELECT count(*) FROM samples")
     for label, path, db_n in (
         ("labels.csv vs classes", "/dataset/labels.csv", n_classes),
@@ -519,13 +521,14 @@ def main() -> int:
         record(PASS, "file .npz tren dia", f"{len(rows)}/{len(rows)} co mat")
 
     # ---- 6. class_idx sane for training ----------------------------------
-    n_idx = scalar("SELECT count(DISTINCT class_idx) FROM classes WHERE class_idx IS NOT NULL")
-    n_cls = scalar("SELECT count(*) FROM classes")
+    n_idx = scalar("SELECT count(DISTINCT class_idx) FROM classes WHERE class_idx IS NOT NULL AND deleted_at IS NULL")
+    n_cls = scalar("SELECT count(*) FROM classes WHERE deleted_at IS NULL")
     record(PASS if n_idx == n_cls else FAIL, "class_idx duy nhat", f"{n_idx} idx / {n_cls} lop")
 
     empty = scalar(
         "SELECT count(*) FROM (SELECT c.class_uid FROM classes c "
-        "LEFT JOIN samples s ON s.class_uid = c.class_uid "
+        "LEFT JOIN samples s ON s.class_uid = c.class_uid AND s.deleted_at IS NULL "
+        "WHERE c.deleted_at IS NULL "
         "GROUP BY c.class_uid HAVING count(s.sample_uid) = 0) d")
     record(WARN if empty else PASS, "lop rong",
            f"{empty} lop khong co mau — moi lop van chiem 1 o dau ra cua model" if empty else "0")

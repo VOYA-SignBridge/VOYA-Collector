@@ -913,7 +913,7 @@ def download_export(
     from app import audit, tenant_lifecycle
 
     try:
-        path = tenant_lifecycle.export_file(tenant_id, export_id)
+        path = tenant_lifecycle.export_file(tenant_id, export_id, viewer_id=str(requester.get("id") or "") or None)
     except tenant_lifecycle.LifecycleError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -922,7 +922,7 @@ def download_export(
         target_type="tenant_export", target_id=export_id, tenant_id=tenant_id,
     )
     return FileResponse(
-        path, media_type="application/zip", filename=f"{tenant_id}-export.zip"
+        path, media_type="application/zip", filename=f"{tenant_id}-export.zip", headers={"Cache-Control": "private, no-store"}
     )
 
 

@@ -301,6 +301,13 @@ nhận để rà lại, không phải việc gấp.
 `include_router`**. Mã chết — hoặc mount có chủ đích, hoặc xoá. Import treo như vậy là
 loại nhầm lẫn khiến người sau tưởng endpoint đang chạy.
 
+**Đã xử lý 16/10/2026: xoá.** `experiments.py` ghi vào `experiments` /
+`experiment_metrics` / `model_versions` — ba bảng không migration nào tạo — nên mount nó
+sẽ hỏng ngay lượt gọi đầu. Xoá cùng chuỗi phụ thuộc: `train_task.py`,
+`storage/experiment_tracking_api.py`, `experiment_tracking_api_revised.py`,
+`experiment_tracking_db.py`, và `dataset_exporter.py`. Huấn luyện thật đi qua
+`routers/training.py` + bảng `training_jobs`.
+
 ---
 
 ## PHẦN C — Không đụng vào trước 13/08

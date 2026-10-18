@@ -64,8 +64,8 @@ BANG_DAU_RA = [
 #:
 #: `experiments`, `experiment_metrics`, `model_versions` chỉ có DDL trong
 #: `backend/migrations/001_…sql` và `002_…sql`, không có trong `ensure_tables()`;
-#: `experiment_tracking_api.py` ghi vào chúng nhưng `routers/experiments.py`
-#: **không được mount** (`main.py:18` nói rõ là cố ý). Không có URL nào tới được.
+#: Mã từng ghi vào chúng (`experiment_tracking_api*.py`, `routers/experiments.py`,
+#: chưa bao giờ được mount) đã bị xoá ngày 16/10/2026. Không có URL nào tới được.
 #:
 #: Vì vậy C3 không đi tìm rò rỉ tenant ở đó — không có gì để rò. Nhưng phải ghi
 #: lại, vì "chưa kiểm" và "kiểm rồi, không tồn tại" là hai trạng thái khác nhau,

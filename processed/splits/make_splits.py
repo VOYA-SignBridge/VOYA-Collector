@@ -1539,6 +1539,24 @@ def main():
         enriched.append(r)
     rows = enriched
 
+    # Cổng TỔ CHỨC: hiện vật vận hành có chủ thì chỉ chứa mẫu của đúng chủ ấy.
+    #
+    # `samples.csv` là MỘT tệp chung cho mọi tenant. Trước 17/10/2026 cờ
+    # `--tenant_id` chỉ được đóng dấu vào bản khai, còn dòng thì không lọc: kiểm
+    # chứng hai tenant cho thấy split của B chứa 60 mẫu của B CỘNG 60 mẫu của A —
+    # cách ly ở API đúng, nhưng dữ liệu của A vẫn chảy vào mô hình của B qua đây.
+    # Ô trống là dữ liệu có từ trước đa tenant, thuộc tenant khởi tạo.
+    if str(args.tenant_id or '').strip():
+        try:
+            from app.tenancy import normalize_tenant_id, tenant_id_of
+        except ImportError as exc:            # pragma: no cover - lỗi cấu hình
+            raise SystemExit(f"Khong import duoc app.tenancy nen khong loc duoc theo to chuc: {exc}")
+        # `tenant_id_of` — cùng bộ đọc ô tenant với mọi bên đọc CSV khác.
+        _chu = normalize_tenant_id(str(args.tenant_id).strip())
+        _truoc = len(rows)
+        rows = [r for r in rows if tenant_id_of(r) == _chu]
+        print(f'[TENANT] {_chu}: giữ {len(rows)}/{_truoc} mẫu của đúng tổ chức này')
+
     # Cổng KIỂM DUYỆT, áp trước mọi bộ lọc khác.
     #
     # Vì sao ở ĐÂY chứ không ở trainer

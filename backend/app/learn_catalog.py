@@ -36,6 +36,15 @@ QIPEDC_VIDEO_URL = "https://qipedc.moet.gov.vn/videos/{code}.mp4"
 
 REGION_NAME = {"bac": "Bắc", "trung": "Trung", "nam": "Nam", "khong_ghi": "Chung"}
 
+#: Ba loại mục trong danh mục — từ thường chiếm 4.259/4.362; bảng chữ cái và
+#: chữ số là hai bộ nhỏ nhưng là thứ người mới học tìm ĐẦU TIÊN, nên có bộ lọc.
+KIND_NAME = {"tu_thuong": "Từ thường", "bang_chu_cai": "Bảng chữ cái", "chu_so": "Chữ số"}
+
+#: Từ loại đưa lên bộ lọc: chỉ những nhóm ĐỦ LỚN. Danh mục ghi hơn 30 nhãn từ
+#: loại ("tt, dt", "Khẩu ngữ", …) mà 25 nhãn chỉ có dưới 10 mục — đem cả lên
+#: là một ô chọn 30 dòng không ai dùng. Ngưỡng ở `facets()`.
+POS_FACET_MIN = 20
+
 
 def slugify(text: str) -> str:
     t = (text or "").replace("đ", "d").replace("Đ", "D")
@@ -80,30 +89,91 @@ def _words() -> List[Dict[str, Any]]:
     return out
 
 
-def search(q: str = "", region: str = "", limit: int = 50) -> List[Dict[str, Any]]:
-    """Tìm theo từ (không dấu, không phân biệt hoa/thường), lọc theo vùng.
+def _norm(text: str) -> str:
+    return (text or "").strip().lower()
 
-    Ưu tiên: khớp đầu từ trước, khớp giữa từ sau — để "chao" ra "chào" trước
-    "chim chào mào".
+
+def filter_words(
+    q: str = "",
+    region: str = "",
+    kind: str = "",
+    pos: str = "",
+    letter: str = "",
+) -> List[Dict[str, Any]]:
+    """Mọi mục khớp, ĐÃ xếp hạng, CHƯA cắt trang.
+
+    Tìm theo từ (không dấu, không phân biệt hoa/thường), rồi lọc theo vùng,
+    loại mục, từ loại và chữ cái đầu. Ưu tiên: khớp đúng → khớp đầu từ → khớp
+    giữa từ — để "chao" ra "chào" trước "chim chào mào". Khi không gõ gì thì
+    theo thứ tự bảng chữ cái, tức là duyệt được như một cuốn từ điển.
+
+    Trả cả danh sách để nơi gọi đếm được tổng và cắt trang; `search()` bên
+    dưới là lối cũ giữ cho tương thích.
     """
     needle = slugify(q)
     region = (region or "").strip()
+    kind = (kind or "").strip()
+    pos_n = _norm(pos)
+    letter = slugify(letter)[:1]
     hits: List[tuple[int, Dict[str, Any]]] = []
     for w in _words():
         if region and not any(v["region"] == region for v in w["variants"]):
             continue
-        if not needle:
-            hits.append((1, w))
+        if kind and w["kind"] != kind:
+            continue
+        if pos_n and _norm(w["pos"]) != pos_n:
+            continue
+        if letter and not w["slug"].startswith(letter):
             continue
         s = w["slug"]
-        if s == needle:
+        if not needle:
+            hits.append((1, w))
+        elif s == needle:
             hits.append((0, w))
         elif s.startswith(needle):
             hits.append((1, w))
         elif needle in s:
             hits.append((2, w))
-    hits.sort(key=lambda t: (t[0], t[1]["slug"]))
-    return [w for _, w in hits[:max(1, min(limit, 200))]]
+    # Chữ trước số: không gõ gì mà trang đầu toàn "0", "1 000 000" thì trông
+    # như một bảng số chứ không phải từ điển. Có từ khoá thì hạng khớp vẫn đi trước.
+    hits.sort(key=lambda t: (t[0], t[1]["slug"][:1].isdigit(), t[1]["slug"]))
+    return [w for _, w in hits]
+
+
+def search(q: str = "", region: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+    """Lối cũ: `filter_words` cắt còn `limit` mục đầu."""
+    return filter_words(q, region)[:max(1, min(limit, 200))]
+
+
+@lru_cache(maxsize=1)
+def facets() -> Dict[str, Any]:
+    """Các nhóm để dựng bộ lọc, kèm số từ mỗi nhóm — tính một lần, danh mục
+    là tệp tĩnh. Chữ cái đầu chỉ liệt kê những chữ CÓ từ, để thanh A–Z không
+    có nút chết."""
+    words = _words()
+    kinds = {k: 0 for k in KIND_NAME}
+    regions = {r: 0 for r in REGION_NAME}
+    pos_count: Dict[str, int] = {}
+    letters: Dict[str, int] = {}
+    for w in words:
+        kinds[w["kind"]] = kinds.get(w["kind"], 0) + 1
+        for r in {v["region"] for v in w["variants"]}:
+            regions[r] = regions.get(r, 0) + 1
+        p = (w["pos"] or "").strip()
+        if p:
+            pos_count[p] = pos_count.get(p, 0) + 1
+        first = w["slug"][:1]
+        if first:
+            letters[first] = letters.get(first, 0) + 1
+    return {
+        "kinds": [{"key": k, "name": KIND_NAME.get(k, k), "count": n} for k, n in kinds.items() if n],
+        "regions": [{"key": r, "name": REGION_NAME.get(r, r), "count": n} for r, n in regions.items() if n],
+        "pos": sorted(
+            ({"name": p, "count": n} for p, n in pos_count.items() if n >= POS_FACET_MIN),
+            key=lambda x: -x["count"],
+        ),
+        "letters": sorted(letters),
+    }
 
 
 def get(slug: str) -> Optional[Dict[str, Any]]:

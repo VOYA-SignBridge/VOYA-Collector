@@ -214,7 +214,10 @@ def test_seed_covers_every_dialect_used_by_the_catalog():
     with open(seed_path, newline="", encoding="utf-8-sig") as f:
         seeded = {r["dialect_id"].strip() for r in csv.DictReader(f)}
     with open(labels_path, newline="", encoding="utf-8-sig") as f:
-        used = {(r.get("dialect") or "").strip() for r in csv.DictReader(f)}
+        # Chỉ lớp của tenant khởi tạo: phương ngữ riêng của tổ chức khác (vd.
+        # `gdcbst`) nằm trong registry của tổ chức ấy, không thuộc seed chung.
+        used = {(r.get("dialect") or "").strip() for r in csv.DictReader(f)
+                if (r.get("tenant_id") or "").strip() in ("", "default")}
     used.discard("")
 
     missing = sorted(used - seeded)

@@ -155,7 +155,7 @@ không có gì để đối chiếu. Thư mục `operational/` vẫn cố ý n�
 - Realtime service chỉ hỗ trợ TCN khi promote; Phase 4 (profile routing) chưa triển khai.
 - `nginx :8000` chỉ route một phần API — dev FE dùng vite proxy (same-origin); **không** đặt `VITE_API_URL` tuyệt đối trong dev (xem `frontend/.env.example`).
 - CORS `allow_credentials=False` là chủ đích (cookie auth chạy same-origin qua gateway/proxy).
-- File `*_backup.py` / `verify_refactor.py` / `run_kfold_cv.py` trong `processed/train_utils` là scratch cũ — cân nhắc dọn trước khi nộp báo cáo.
+- ~~File `*_backup.py` / `verify_refactor.py` / `run_kfold_cv.py` trong `processed/train_utils` là scratch cũ~~ — đã xoá 16/10/2026 (còn trong lịch sử Git).
 
 ## Đã sửa gần đây (tham chiếu)
 

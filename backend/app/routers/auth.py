@@ -198,8 +198,12 @@ def _with_capabilities(user: dict) -> dict:
     # giá trên từng request.
     try:
         from app.moderation_admin import can_moderate
+        from app.tenant_context import current_tenant
 
-        out["can_moderate"] = can_moderate(out)
+        # Cùng tenant mà `/moderation/*` sẽ kiểm, để mục menu không hiện ra
+        # rồi trả 403 ở tenant người dùng không có vai duyệt.
+        out["can_moderate"] = can_moderate(
+            out, current_tenant() or str(out.get("tenant_id") or "") or None)
     except Exception:  # noqa: BLE001
         logger.warning("[AUTH] không tra được quyền kiểm duyệt cho %s", out.get("id"))
         out["can_moderate"] = False
