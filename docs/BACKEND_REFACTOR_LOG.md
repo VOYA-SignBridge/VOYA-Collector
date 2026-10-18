@@ -514,3 +514,60 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Đưa orchestration/dependencies từ hai component mới trở lại `app/auth.py`.
 - Khôi phục `identity/api.py` import qua legacy facade và xóa regression BR-010.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-011: Tách web security controls khỏi activity monitor
+
+### Mục tiêu
+
+- Giảm trách nhiệm của `app/activity.py` mà không đổi API admin, middleware hoặc
+  identity force-logout contract.
+- Tách Redis connection và các security control khỏi logic theo dõi session.
+
+### Thay đổi
+
+- Thêm `infrastructure/redis/connection.py` quản lý activity Redis singleton và
+  fail-open khi Redis không khả dụng.
+- Thêm `modules/security/ip_controls.py` chứa block/unblock/list IP cùng timed
+  TTL metadata.
+- Thêm `modules/security/audit_log.py` chứa capped Redis security event log.
+- Thêm `modules/security/account_controls.py` chứa:
+  - force logout và refresh-token revocation;
+  - lock/unlock account;
+  - one-off user warning;
+  - username/admin lookup cho activity report.
+- `app/activity.py` re-export các callable cũ và tiếp tục sở hữu session/GeoIP
+  monitoring trong lát cắt này; kích thước giảm từ khoảng 798 xuống 381 dòng.
+- Thêm `tests/test_security_module_boundaries.py` bảo vệ facade identity,
+  fail-open contract, timed IP payload và force-logout marker/revocation.
+
+### Contract được giữ nguyên
+
+- Redis keys, TTL, JSON payload, log cap và fail-open behaviour không đổi.
+- IP block vẫn được middleware áp dụng qua `activity.guard`.
+- Lock account vẫn đặt marker, force logout ngay và revoke refresh tokens.
+- Router admin/auth cùng identity dependency tiếp tục dùng legacy names qua
+  `app.activity`; không đổi route hoặc response contract.
+- SQL revoke refresh token và username lookup giữ nguyên câu lệnh/transaction.
+
+### Kiểm tra
+
+- Compile check thành công cho activity facade, Redis infrastructure, security
+  components và regression test mới.
+- Security/identity/composition regression: 11 pass.
+- Toàn bộ backend pytest trong Docker: 207 pass, 3 fail.
+- Ba lỗi còn lại đúng baseline ngoài phạm vi: một released manifest và hai
+  provenance assertions phụ thuộc research artifacts.
+- CodeGraph xác nhận admin → security component → Redis infrastructure call
+  path và identity force-logout callers vẫn đi qua facade tương thích.
+
+### Phạm vi dữ liệu
+
+- Không thay đổi database schema hoặc dữ liệu hiện hữu.
+- Không chạy dataset migration và không sửa manifest/split/checkpoint.
+- Test security dùng fake Redis và không ghi Redis/Postgres thật.
+
+### Hoàn tác
+
+- Đưa Redis/IP/audit/account-control implementation về `app/activity.py`.
+- Xóa hai package mới và regression BR-011.
+- Không có database migration hoặc dữ liệu cần hoàn tác.

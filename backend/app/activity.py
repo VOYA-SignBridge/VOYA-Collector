@@ -1,11 +1,15 @@
-"""Per-user / per-IP activity tracking for the admin activity monitor.
+"""Activity tracking plus compatibility exports for web security controls.
 
 Multi-user web: the admin needs to see who is connected, from where (IP +
 geolocation), how heavily each is using the service, plus a way to react —
 block an abusive IP or force-logout a user.
 
-Everything here is **best-effort and fail-open**: monitoring must never break a
-real request. Redis down => tracking silently no-ops; requests still flow.
+Redis connection, IP controls, audit logging, and account controls live in
+focused infrastructure/security modules.  Their legacy names are re-exported
+here while request/session monitoring remains in this module.
+
+Everything is **best-effort and fail-open**: monitoring must never break a real
+request. Redis down => tracking silently no-ops; requests still flow.
 
 Storage (all in Redis, short TTLs so it self-prunes):
   act:active                 ZSET  ip -> last_seen (enumerate online sessions)
@@ -26,20 +30,44 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-import redis
 from fastapi import Request
 from jose import jwt
 
 from app.config import settings
 from app.cookie_auth import ACCESS_COOKIE
+from app.infrastructure.redis.connection import get_activity_client
+from app.modules.security.account_controls import (
+    ack_user_warning,
+    force_logout_user,
+    format_until as _fmt_until,
+    get_force_logout,
+    get_user_lock,
+    get_user_warning,
+    is_user_denied,
+    is_user_locked,
+    list_locked_users,
+    list_warned_users,
+    lock_user,
+    resolve_usernames as _resolve_usernames,
+    revoke_all_refresh_tokens as _revoke_all_refresh_tokens,
+    unlock_user,
+    userlock_key as _userlock_key,
+    warn_user,
+)
+from app.modules.security.audit_log import log_security_event, list_security_log
+from app.modules.security.ip_controls import (
+    block_ip,
+    block_key as _block_key,
+    get_block,
+    is_blocked,
+    list_blocked,
+    unblock_ip,
+)
 from app.rate_limit import client_ip
 
 logger = logging.getLogger("activity")
-
-_REDIS_URL = os.getenv("REDIS_URL", getattr(settings, "broker_url", "redis://redis:6379/0"))
 
 ONLINE_TTL = int(os.getenv("ACTIVITY_ONLINE_TTL", "600"))        # session considered gone after
 ONLINE_ACTIVE_SECONDS = int(os.getenv("ACTIVITY_ACTIVE_SECONDS", "120"))  # "online now" window
@@ -55,26 +83,7 @@ _RATE_SKIP_PREFIXES = ("/api/v1/realtime", "/realtime", "/api/v1/tts", "/tts", "
 # Requests we don't record at all (health probes / preflight noise).
 _RECORD_SKIP_PREFIXES = ("/health", "/api/v1/health")
 
-_client_singleton: Optional[redis.Redis] = None
-_client_failed = False
-
-
-def _client() -> Optional[redis.Redis]:
-    global _client_singleton, _client_failed
-    if _client_singleton is not None:
-        return _client_singleton
-    if _client_failed:
-        return None
-    try:
-        c = redis.from_url(_REDIS_URL, decode_responses=True,
-                           socket_connect_timeout=2, socket_timeout=3)
-        c.ping()
-        _client_singleton = c
-        return c
-    except Exception as exc:  # pragma: no cover
-        logger.warning("[ACTIVITY] Redis unavailable, tracking disabled: %s", exc)
-        _client_failed = True
-        return None
+_client = get_activity_client
 
 
 # ---------------------------------------------------------------------------
@@ -309,379 +318,6 @@ def record_presence(ip: str, lat: Any, lon: Any, acc: Any) -> None:
         pipe.execute()
     except Exception:
         pass
-
-
-# ---------------------------------------------------------------------------
-# Blocklist (enforced in middleware) — one key per IP with an optional TTL, so
-# timed blocks auto-expire. Value carries who/when/why + expiry.
-# ---------------------------------------------------------------------------
-_BLOCK_PREFIX = "block:ip:"
-
-
-def _block_key(ip: str) -> str:
-    return f"{_BLOCK_PREFIX}{ip}"
-
-
-def is_blocked(ip: str) -> bool:
-    c = _client()
-    if c is None or not ip:
-        return False
-    try:
-        return bool(c.exists(_block_key(ip)))
-    except Exception:
-        return False
-
-
-def get_block(ip: str) -> Optional[Dict[str, Any]]:
-    """Full block record for an IP (reason/by/until + remaining ttl), or None."""
-    c = _client()
-    if c is None or not ip:
-        return None
-    try:
-        raw = c.get(_block_key(ip))
-        if not raw:
-            return None
-        d = json.loads(raw)
-        ttl = c.ttl(_block_key(ip))
-        d["ttl"] = ttl if ttl and ttl > 0 else 0  # 0 => permanent
-        return d
-    except Exception:
-        return None
-
-
-def block_ip(ip: str, by: str = "", reason: str = "", duration_seconds: int = 0) -> bool:
-    """Block an IP. duration_seconds<=0 => permanent; otherwise auto-expires."""
-    c = _client()
-    if c is None or not ip:
-        return False
-    try:
-        dur = int(duration_seconds or 0)
-        until = (time.time() + dur) if dur > 0 else 0
-        payload = json.dumps({"by": by, "at": time.time(), "reason": reason, "until": until})
-        if dur > 0:
-            c.set(_block_key(ip), payload, ex=dur)
-        else:
-            c.set(_block_key(ip), payload)
-        logger.info("[ACTIVITY] IP blocked: %s by=%s dur=%ss reason=%s", ip, by, dur, (reason or "")[:40])
-        return True
-    except Exception:
-        return False
-
-
-def unblock_ip(ip: str) -> bool:
-    c = _client()
-    if c is None or not ip:
-        return False
-    try:
-        c.delete(_block_key(ip))
-        return True
-    except Exception:
-        return False
-
-
-def list_blocked() -> List[Dict[str, Any]]:
-    c = _client()
-    if c is None:
-        return []
-    out: List[Dict[str, Any]] = []
-    try:
-        for key in c.scan_iter(match=f"{_BLOCK_PREFIX}*", count=200):
-            ip = key[len(_BLOCK_PREFIX):]
-            raw = c.get(key)
-            if not raw:
-                continue
-            try:
-                d = json.loads(raw)
-            except Exception:
-                d = {}
-            ttl = c.ttl(key)
-            out.append({
-                "ip": ip, "by": d.get("by", ""), "at": d.get("at"),
-                "reason": d.get("reason", ""), "until": d.get("until", 0),
-                "ttl": ttl if ttl and ttl > 0 else 0,
-            })
-        return out
-    except Exception:
-        return []
-
-
-# ---------------------------------------------------------------------------
-# Security audit log (admin actions) — capped Redis list
-# ---------------------------------------------------------------------------
-def log_security_event(action: str, actor: str = "", target: str = "",
-                       reason: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
-    c = _client()
-    if c is None:
-        return
-    try:
-        entry = {"ts": time.time(), "action": action, "actor": actor,
-                 "target": target, "reason": reason}
-        if extra:
-            entry.update(extra)
-        c.lpush("sec:log", json.dumps(entry))
-        c.ltrim("sec:log", 0, 499)
-    except Exception:
-        pass
-
-
-def list_security_log(limit: int = 100) -> List[Dict[str, Any]]:
-    c = _client()
-    if c is None:
-        return []
-    try:
-        out = []
-        for r in c.lrange("sec:log", 0, max(0, limit - 1)):
-            try:
-                out.append(json.loads(r))
-            except Exception:
-                pass
-        return out
-    except Exception:
-        return []
-
-
-# ---------------------------------------------------------------------------
-# Force-logout (checked in auth.get_current_user_optional)
-# ---------------------------------------------------------------------------
-def force_logout_user(user_id: str, by: str = "", reason: str = "") -> bool:
-    """Deny every access token this user holds NOW; revoke their refresh tokens.
-
-    A fresh login afterwards works (its token iat is newer than the marker).
-    Stores the reason so the client can tell the user why they were logged out.
-    """
-    if not user_id:
-        return False
-    ttl = int(settings.access_token_expire_minutes) * 60 + 120
-    c = _client()
-    if c is not None:
-        try:
-            c.set(f"forcelogout:{user_id}",
-                  json.dumps({"ts": time.time(), "by": by, "reason": reason}), ex=ttl)
-        except Exception:
-            pass
-    _revoke_all_refresh_tokens(user_id)
-    logger.info("[ACTIVITY] force-logout user=%s by=%s", user_id, by)
-    return True
-
-
-def get_force_logout(user_id: str) -> Optional[Dict[str, Any]]:
-    c = _client()
-    if c is None or not user_id:
-        return None
-    try:
-        v = c.get(f"forcelogout:{user_id}")
-        if v is None:
-            return None
-        try:
-            return json.loads(v)
-        except Exception:
-            return {"ts": float(v), "reason": ""}  # legacy plain-float value
-    except Exception:
-        return None
-
-
-def is_user_denied(user_id: str, token_iat: Any) -> bool:
-    """True if this token was issued before an active force-logout marker."""
-    fl = get_force_logout(user_id)
-    if not fl:
-        return False
-    try:
-        return float(token_iat or 0) < float(fl.get("ts", 0))
-    except Exception:
-        return False
-
-
-def _revoke_all_refresh_tokens(user_id: str) -> None:
-    try:
-        from app.infrastructure.database.connection import connect_postgres
-
-        conn = connect_postgres(connect_timeout=5)
-        try:
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE refresh_tokens SET revoked_at = NOW() "
-                        "WHERE user_id = %s AND revoked_at IS NULL",
-                        (user_id,),
-                    )
-        finally:
-            conn.close()
-    except Exception as exc:
-        logger.warning("[ACTIVITY] revoke refresh tokens failed for %s: %s", user_id, exc)
-
-
-# ---------------------------------------------------------------------------
-# Account lock (disable a user for a reason + optional duration) & warnings
-# ---------------------------------------------------------------------------
-_USERLOCK_PREFIX = "userlock:"
-_USERWARN_PREFIX = "userwarn:"
-
-
-def _userlock_key(uid: str) -> str:
-    return f"{_USERLOCK_PREFIX}{uid}"
-
-
-def _fmt_until(until: float) -> str:
-    if not until:
-        return ""
-    try:
-        return datetime.fromtimestamp(until).strftime("%H:%M %d/%m/%Y")
-    except Exception:
-        return ""
-
-
-def lock_user(user_id: str, by: str = "", reason: str = "", duration_seconds: int = 0) -> bool:
-    """Disable an account (optionally timed) and cut off its live sessions now."""
-    if not user_id:
-        return False
-    c = _client()
-    if c is None:
-        return False
-    try:
-        dur = int(duration_seconds or 0)
-        until = (time.time() + dur) if dur > 0 else 0
-        c.set(_userlock_key(user_id),
-              json.dumps({"by": by, "at": time.time(), "reason": reason, "until": until}),
-              **({"ex": dur} if dur > 0 else {}))
-        # Immediately end any active sessions with a clear message.
-        msg = f"Tài khoản của bạn đã bị khóa. Lý do: {reason or 'vi phạm quy định'}"
-        if until:
-            msg += f" (đến {_fmt_until(until)})"
-        force_logout_user(user_id, by=by, reason=msg)
-        logger.info("[ACTIVITY] user locked: %s by=%s dur=%ss", user_id, by, dur)
-        return True
-    except Exception:
-        return False
-
-
-def unlock_user(user_id: str) -> bool:
-    c = _client()
-    if c is None or not user_id:
-        return False
-    try:
-        c.delete(_userlock_key(user_id))
-        return True
-    except Exception:
-        return False
-
-
-def get_user_lock(user_id: str) -> Optional[Dict[str, Any]]:
-    c = _client()
-    if c is None or not user_id:
-        return None
-    try:
-        raw = c.get(_userlock_key(user_id))
-        if not raw:
-            return None
-        d = json.loads(raw)
-        ttl = c.ttl(_userlock_key(user_id))
-        d["ttl"] = ttl if ttl and ttl > 0 else 0
-        return d
-    except Exception:
-        return None
-
-
-def is_user_locked(user_id: str) -> bool:
-    c = _client()
-    if c is None or not user_id:
-        return False
-    try:
-        return bool(c.exists(_userlock_key(user_id)))
-    except Exception:
-        return False
-
-
-def list_locked_users() -> Dict[str, Dict[str, Any]]:
-    c = _client()
-    if c is None:
-        return {}
-    out: Dict[str, Dict[str, Any]] = {}
-    try:
-        for key in c.scan_iter(match=f"{_USERLOCK_PREFIX}*", count=200):
-            uid = key[len(_USERLOCK_PREFIX):]
-            raw = c.get(key)
-            try:
-                d = json.loads(raw) if raw else {}
-            except Exception:
-                d = {}
-            ttl = c.ttl(key)
-            d["ttl"] = ttl if ttl and ttl > 0 else 0
-            out[uid] = d
-        return out
-    except Exception:
-        return {}
-
-
-def warn_user(user_id: str, by: str = "", message: str = "") -> bool:
-    """Queue a one-off warning the user will see on their next visit."""
-    c = _client()
-    if c is None or not user_id:
-        return False
-    try:
-        c.set(f"{_USERWARN_PREFIX}{user_id}",
-              json.dumps({"by": by, "at": time.time(), "message": message}),
-              ex=30 * 86400)
-        return True
-    except Exception:
-        return False
-
-
-def get_user_warning(user_id: str) -> Optional[Dict[str, Any]]:
-    c = _client()
-    if c is None or not user_id:
-        return None
-    try:
-        raw = c.get(f"{_USERWARN_PREFIX}{user_id}")
-        return json.loads(raw) if raw else None
-    except Exception:
-        return None
-
-
-def ack_user_warning(user_id: str) -> None:
-    c = _client()
-    if c is None or not user_id:
-        return
-    try:
-        c.delete(f"{_USERWARN_PREFIX}{user_id}")
-    except Exception:
-        pass
-
-
-def list_warned_users() -> Set[str]:
-    c = _client()
-    if c is None:
-        return set()
-    try:
-        return {key[len(_USERWARN_PREFIX):] for key in c.scan_iter(match=f"{_USERWARN_PREFIX}*", count=200)}
-    except Exception:
-        return set()
-
-
-# ---------------------------------------------------------------------------
-# Read side (admin endpoint)
-# ---------------------------------------------------------------------------
-def _resolve_usernames(user_ids: Set[str]) -> Dict[str, str]:
-    ids = [u for u in user_ids if u]
-    if not ids:
-        return {}
-    try:
-        from app.infrastructure.database.connection import connect_postgres
-        from psycopg2.extras import RealDictCursor
-
-        conn = connect_postgres(connect_timeout=5)
-        try:
-            with conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # id is a UUID column; compare as text so a Python list of
-                    # string ids matches without an explicit uuid[] cast.
-                    cur.execute("SELECT id, username, is_admin FROM users WHERE id::text = ANY(%s)", (ids,))
-                    return {str(r["id"]): {"username": r["username"], "is_admin": bool(r["is_admin"])}
-                            for r in cur.fetchall()}
-        finally:
-            conn.close()
-    except Exception as exc:
-        logger.warning("[ACTIVITY] username resolve failed: %s", exc)
-        return {}
 
 
 def list_sessions(limit: int = 100) -> List[Dict[str, Any]]:
