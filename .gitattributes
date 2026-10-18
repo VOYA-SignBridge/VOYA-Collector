@@ -24,3 +24,11 @@ docs/02-data/db/PDM_V8_DATA_DICTIONARY.md text eol=lf
 docs/02-data/db/voya_erd.drawio text eol=lf
 docs/02-data/db/erd_groups/*.drawio text eol=lf
 docs/02-data/db/erd_layout_v8.json text eol=lf
+
+# Frozen research splits: FROZEN_RESEARCH_SPLITS.json records their sha256 over the
+# CRLF bytes a Windows checkout produced. A Linux checkout (CI) gets LF, the hash no
+# longer matches, and the freeze check fails though nothing changed. Pin CRLF on
+# every platform so the checked-out bytes are the frozen bytes.
+processed/splits/train.csv text eol=crlf
+processed/splits/val.csv text eol=crlf
+processed/splits/test.csv text eol=crlf
