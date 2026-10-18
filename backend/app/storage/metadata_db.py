@@ -6325,7 +6325,7 @@ def insert_audit_log(
 def replace_training_job_classes(
     *, job_id: str, tenant_id: str, pairs: List[tuple]
 ) -> None:
-    """Ghi hợp đồng đầu ra của một job: [(class_idx, label), ...].
+    """Ghi hợp đồng đầu ra của một job: [(class_idx, label[, class_uid]), ...].
 
     Thay thế toàn bộ chứ không chèn thêm: một job train lại (Celery giao trùng,
     hoặc người dùng chạy lại) phải cho ra đúng một tập lớp, không phải hai tập
@@ -6339,16 +6339,27 @@ def replace_training_job_classes(
     """
     if not pairs:
         return
+    # Mỗi phần tử là (class_idx, label) hoặc (class_idx, label, class_uid). Khi
+    # checkpoint đã mang sẵn `class_uid` thì dùng nó (nếu lớp còn trong danh mục)
+    # thay vì tra ngược theo tên — hai phương ngữ có thể trùng `label_original`.
+    rows = []
+    for item in pairs:
+        idx, label = item[0], item[1]
+        uid = str(item[2]).strip() if len(item) > 2 and item[2] else ""
+        rows.append((job_id, idx, label, tenant_id,
+                     tenant_id, uid, tenant_id, label, label))
     with _cursor() as cur:
         cur.execute("DELETE FROM training_job_classes WHERE job_id = %s", (job_id,))
         cur.executemany(
             "INSERT INTO training_job_classes (job_id, class_idx, label, tenant_id, class_uid) "
-            "VALUES (%s, %s, %s, %s, ("
-            "    SELECT c.class_uid FROM classes c "
-            "    WHERE c.tenant_id = %s AND c.deleted_at IS NULL "
-            "      AND (c.label_original = %s OR c.slug = %s) LIMIT 1))",
-            [(job_id, idx, label, tenant_id, tenant_id, label, label)
-             for idx, label in pairs],
+            "VALUES (%s, %s, %s, %s, COALESCE("
+            "    (SELECT c.class_uid FROM classes c "
+            "      WHERE c.tenant_id = %s AND c.class_uid = NULLIF(%s, '') "
+            "        AND c.deleted_at IS NULL), "
+            "    (SELECT c.class_uid FROM classes c "
+            "      WHERE c.tenant_id = %s AND c.deleted_at IS NULL "
+            "        AND (c.label_original = %s OR c.slug = %s) LIMIT 1)))",
+            rows,
         )
 
 

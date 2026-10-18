@@ -1946,6 +1946,35 @@ async def get_job_metrics(
     return job_info["progress"]
 
 
+def _evaluation_label_names(labels: Sequence[str]) -> Dict[str, str]:
+    """{khoá nhãn trong evaluation: tên hiển thị}.
+
+    Job từ split vận hành ghi `labels` là `class_uid` (UUID) — vô nghĩa với người
+    đọc ma trận nhầm lẫn. Tra `label_original` trong danh mục của tổ chức đang
+    làm việc; khoá không tra được (checkpoint cũ dạng `vn/<phương ngữ>/<slug>`,
+    lớp đã xoá) bị bỏ qua và giao diện lùi về cách hiển thị cũ.
+    """
+    keys = [str(k) for k in labels if k]
+    if not keys:
+        return {}
+    try:
+        from app.storage.metadata_db import _fetch_all
+        from app.tenant_context import require_tenant
+
+        rows = _fetch_all(
+            "SELECT class_uid, label_original, slug FROM classes "
+            " WHERE tenant_id = %s AND class_uid = ANY(%s)",
+            (require_tenant(), keys),
+        )
+    except Exception as exc:
+        logger.warning("[EVAL] không tra được tên nhãn: %s", exc)
+        return {}
+    return {
+        str(r["class_uid"]): str(r.get("label_original") or r.get("slug") or "").strip()
+        for r in rows if (r.get("label_original") or r.get("slug"))
+    }
+
+
 @router.get("/jobs/{job_id}/evaluation")
 async def get_job_evaluation(
     job_id: str,
@@ -1971,7 +2000,8 @@ async def get_job_evaluation(
     if not isinstance(evaluation, dict) or not evaluation.get("per_class"):
         return {"available": False, "job_id": job_id}
 
-    return {"available": True, "job_id": job_id, **evaluation}
+    label_names = await asyncio.to_thread(_evaluation_label_names, evaluation.get("labels") or [])
+    return {"available": True, "job_id": job_id, **evaluation, "label_names": label_names}
 
 
 def _determinism_summary(determinism: Any) -> str:
@@ -2587,48 +2617,53 @@ async def predict_trained_model(
         confidence = float(probs[pred_idx])
 
         # Build label map from checkpoint + labels.csv for label_original
-        # Checkpoint idx_to_label: {0: "vn/dialect/slug", 1: ...}
+        # Checkpoint idx_to_label: {0: "vn/dialect/slug", ...} (cũ) hoặc
+        # {0: {"label_key", "class_uid", "label_slug", "label_original", ...}} (split vận hành).
         i2l = ckpt.get("idx_to_label")
         label_key = f"class_{pred_idx}"
         label = f"class_{pred_idx}"
+        class_uid = ""
 
-        # Extract label_key from checkpoint
+        v = None
         if isinstance(i2l, dict):
             v = i2l.get(pred_idx) or i2l.get(str(pred_idx))
-            if v:
-                label_key = str(v).strip()
-                label = label_key  # default to label_key
         elif isinstance(i2l, list) and pred_idx < len(i2l):
             v = i2l[pred_idx]
-            if v:
-                label_key = str(v).strip()
-                label = label_key
 
-        # Load labels.csv to get label_original
+        if isinstance(v, dict):
+            # Checkpoint mới đã mang sẵn nhãn gốc — không cần tra labels.csv.
+            label_key = str(v.get("label_key") or v.get("class_uid") or label_key).strip()
+            class_uid = str(v.get("class_uid") or "").strip()
+            label = str(v.get("label_original") or v.get("label_slug") or label_key).strip()
+        elif v:
+            label_key = str(v).strip()
+            label = label_key  # default to label_key
+
+        # Checkpoint cũ (chuỗi): tra labels.csv lấy label_original theo slug.
         # label_key format: "vn/hoa-de/rang-muoi" or "vn/rang-muoi"
-        try:
-            if LABELS_CSV.exists():
-                # Parse label_key to extract slug (last part)
-                parts = label_key.replace("\\", "/").split("/")
-                slug = parts[-1] if parts else ""
+        if not isinstance(v, dict):
+            try:
+                if LABELS_CSV.exists():
+                    parts = label_key.replace("\\", "/").split("/")
+                    slug = parts[-1] if parts else ""
 
-                logger.debug("job=%s looking up slug='%s' from label_key='%s'", job_id, slug, label_key)
+                    logger.debug("job=%s looking up slug='%s' from label_key='%s'", job_id, slug, label_key)
 
-                with open(LABELS_CSV, "r", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
-                    found = False
-                    for row in reader:
-                        if row.get("slug", "").strip() == slug:
-                            label_original = row.get("label_original", "").strip()
-                            if label_original:
-                                label = label_original
-                                logger.debug("job=%s found label_original: %s", job_id, label)
-                            found = True
-                            break
-                    if not found:
-                        logger.warning("job=%s slug '%s' not found in labels.csv", job_id, slug)
-        except Exception as e:
-            logger.warning("job=%s error loading labels.csv: %s", job_id, e)
+                    with open(LABELS_CSV, "r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        found = False
+                        for row in reader:
+                            if row.get("slug", "").strip() == slug:
+                                label_original = row.get("label_original", "").strip()
+                                if label_original:
+                                    label = label_original
+                                    logger.debug("job=%s found label_original: %s", job_id, label)
+                                found = True
+                                break
+                        if not found:
+                            logger.warning("job=%s slug '%s' not found in labels.csv", job_id, slug)
+            except Exception as e:
+                logger.warning("job=%s error loading labels.csv: %s", job_id, e)
 
         return TrainedModelPredictResponse(
             label=label,

@@ -704,6 +704,23 @@ def _emit_training_event(row: Dict[str, Any], event: str, payload: Dict[str, Any
         logger.warning("[TRAINER] không phát được sự kiện %s: %s", event, type(exc).__name__)
 
 
+def checkpoint_label_pair(value: Any) -> Tuple[str, str]:
+    """(nhãn, class_uid) của một mục `idx_to_label` trong checkpoint.
+
+    Checkpoint cũ lưu chuỗi `vn/<phương ngữ>/<slug>`; checkpoint từ split vận hành
+    lưu một dict `{label_key, class_uid, label_slug, label_original, ...}`. Ép
+    thẳng dict qua `str()` ghi cả chuỗi `{'label_key': ...}` vào cột `label` và
+    để `class_uid` NULL (18/10/2026) — nhãn hiển thị cho người dùng phải là
+    `label_original`, còn `class_uid` lấy thẳng từ checkpoint thay vì đoán lại
+    qua tên nhãn (hai phương ngữ có thể trùng tên).
+    """
+    if isinstance(value, dict):
+        label = (value.get("label_original") or value.get("label_slug")
+                 or value.get("label_key") or value.get("class_uid") or "")
+        return str(label).strip(), str(value.get("class_uid") or "").strip()
+    return str(value).strip(), ""
+
+
 def _record_output_contract(job_id: str, row: Dict[str, Any], checkpoint_path: str) -> None:
     """Đóng băng ánh xạ chỉ số → nhãn của model vào `training_job_classes`.
 
@@ -762,9 +779,9 @@ def _record_output_contract(job_id: str, row: Dict[str, Any], checkpoint_path: s
         ckpt = load_checkpoint(checkpoint_path)
         raw = ckpt.get("idx_to_label")
         if isinstance(raw, dict):
-            pairs = [(int(k), str(v)) for k, v in raw.items()]
+            pairs = [(int(k),) + checkpoint_label_pair(v) for k, v in raw.items()]
         elif isinstance(raw, (list, tuple)):
-            pairs = [(i, str(v)) for i, v in enumerate(raw)]
+            pairs = [(i,) + checkpoint_label_pair(v) for i, v in enumerate(raw)]
         else:
             logger.warning("[TRAINER] job %s: checkpoint khong co idx_to_label — "
                            "khong ghi duoc hop dong dau ra", job_id)

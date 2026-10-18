@@ -234,6 +234,8 @@ export interface JobEvaluation {
   per_class?: JobEvaluationClass[];
   confusion_matrix?: number[][];
   labels?: string[];
+  /** khoá nhãn (class_uid) → nhãn gốc để hiển thị; khoá vắng thì lùi về slug trong khoá */
+  label_names?: Record<string, string>;
   overall?: JobEvaluationOverall;
   efficiency?: JobEvaluationEfficiency;
 }

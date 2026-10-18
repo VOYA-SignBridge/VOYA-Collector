@@ -28,8 +28,10 @@ interface Props {
   onPromote?: () => Promise<PromoteResponse | null>;
 }
 
-/** "vn/hoa-de/rang-muoi" → "rang-muoi" */
-const prettyLabel = (labelKey: string): string => {
+/** "vn/hoa-de/rang-muoi" → "rang-muoi"; khoá class_uid → nhãn gốc nếu backend trả `names`. */
+const prettyLabel = (labelKey: string, names?: Record<string, string>): string => {
+  const named = names?.[labelKey];
+  if (named) return named;
   const parts = String(labelKey || '').replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || labelKey;
 };
@@ -273,7 +275,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                                   aria-label={t("F1 dưới 0.5 — lớp yếu")}
                                 />
                               )}
-                              {prettyLabel(c.label_key)}
+                              {prettyLabel(c.label_key, evaluation.label_names)}
                             </span>
                           </td>
                           <td className="py-2 px-3 text-right tabular-nums text-slate-700">{(c.precision * 100).toFixed(1)}%</td>
@@ -291,7 +293,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
           </div>
 
           {evaluation.confusion_matrix && evaluation.labels && (
-            <ConfusionMatrixHeatmap labels={evaluation.labels} matrix={evaluation.confusion_matrix} />
+            <ConfusionMatrixHeatmap labels={evaluation.labels} matrix={evaluation.confusion_matrix} names={evaluation.label_names} />
           )}
         </div>
       )}
@@ -653,7 +655,7 @@ function MetricCard({
  * samples predicted as each column (row-normalized). The diagonal (correct
  * predictions) is marked structurally with a ring, not a different hue.
  */
-function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: number[][] }) {
+function ConfusionMatrixHeatmap({ labels, matrix, names }: { labels: string[]; matrix: number[][]; names?: Record<string, string> }) {
   const { t } = useI18n();
   const n = labels.length;
   if (n === 0) return null;
@@ -684,7 +686,7 @@ function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: 
               return (
                 <tr key={i}>
                   <th className="pr-2 py-0.5 text-right text-[11px] font-normal text-slate-600 whitespace-nowrap">
-                    <span className="text-slate-400">{i}</span> · {prettyLabel(labels[i])}
+                    <span className="text-slate-400">{i}</span> · {prettyLabel(labels[i], names)}
                   </th>
                   {row.map((v, j) => {
                     const share = rowTotal > 0 ? v / rowTotal : 0;
@@ -692,7 +694,7 @@ function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: 
                     return (
                       <td
                         key={j}
-                        title={`Thật: ${prettyLabel(labels[i])} → Dự đoán: ${prettyLabel(labels[j])}\n${v} mẫu (${(share * 100).toFixed(0)}% của lớp thật)`}
+                        title={`Thật: ${prettyLabel(labels[i], names)} → Dự đoán: ${prettyLabel(labels[j], names)}\n${v} mẫu (${(share * 100).toFixed(0)}% của lớp thật)`}
                         className={`h-8 w-8 min-w-8 text-center align-middle text-[10px] tabular-nums ${
                           isDiag ? 'ring-1 ring-inset ring-slate-500' : ''
                         }`}
