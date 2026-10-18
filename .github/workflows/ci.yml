@@ -137,7 +137,11 @@ jobs:
         env:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: admin
-          POSTGRES_DB: signdb_ci
+          # Tên phải qua cổng của tests/conftest.py (signdb_test | tiền tố signdb_pytest_).
+          # `signdb_ci` KHÔNG qua: từ 13/08/2026 pytest tự dừng với mã 3 trước khi chạy
+          # ca nào, nên job này đỏ ở bước Test suốt hai tháng mà không kiểm được gì.
+          # Đổi tên ở đây, đừng nới danh sách cho phép trong conftest.
+          POSTGRES_DB: signdb_pytest_ci
         ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U admin"
@@ -156,15 +160,15 @@ jobs:
       # (vai nay doc duoc kho cua moi tenant, va Postgres mo voi moi container
       # trong mang compose). Ban truoc dung `ci_password` — 11 ky tu — nen lenh
       # cap vai that se thoat 2 ngay lap tuc.
-      DATABASE_URL: postgresql://voya_app:ci_password_16_chars_min@localhost:5432/signdb_ci
-      MIGRATION_DATABASE_URL: postgresql://admin:admin@localhost:5432/signdb_ci
+      DATABASE_URL: postgresql://voya_app:ci_password_16_chars_min@localhost:5432/signdb_pytest_ci
+      MIGRATION_DATABASE_URL: postgresql://admin:admin@localhost:5432/signdb_pytest_ci
       VOYA_APP_DB_PASSWORD: ci_password_16_chars_min
 
       # Vai DIEU KHIEN, tach khoi vai ung dung va BAT BUOC khac mat khau.
       # `test_rls_covers_every_tenant_table` kiem dung ranh gioi nay: vai ung
       # dung khong duoc co quyen truc tiep tren `tenant_purges`.
       VOYA_CONTROL_DB_PASSWORD: ci_control_password_16_min
-      CONTROL_DATABASE_URL: postgresql://voya_control:ci_control_password_16_min@localhost:5432/signdb_ci
+      CONTROL_DATABASE_URL: postgresql://voya_control:ci_control_password_16_min@localhost:5432/signdb_pytest_ci
       REDIS_URL: redis://localhost:6379/12
       CELERY_BROKER_URL: redis://localhost:6379/12
       CELERY_RESULT_BACKEND: redis://localhost:6379/12
@@ -204,7 +208,7 @@ jobs:
       - name: Dựng lược đồ (lệnh migration rõ ràng)
         working-directory: backend
         env:
-          EXPECTED_DATABASE: signdb_ci
+          EXPECTED_DATABASE: signdb_pytest_ci
         run: |
           target=$(python -c "from app.storage.schema_version import APP_SCHEMA_VERSION; print(APP_SCHEMA_VERSION)")
           echo "luoc do dich: v$target"
