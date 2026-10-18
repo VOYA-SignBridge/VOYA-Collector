@@ -571,3 +571,59 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Đưa Redis/IP/audit/account-control implementation về `app/activity.py`.
 - Xóa hai package mới và regression BR-011.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-012: Tách GeoIP và activity session monitor
+
+### Mục tiêu
+
+- Hoàn tất việc thu gọn `app/activity.py` sau BR-011 mà không làm thay đổi API
+  middleware, presence hoặc admin activity report.
+- Đặt logic GeoIP và theo dõi request/session vào hai component có ranh giới rõ.
+
+### Thay đổi
+
+- Thêm `modules/security/geo.py` chứa:
+  - optional MaxMind City/ASN reader;
+  - nhận diện IP nội bộ;
+  - Redis GeoIP cache và nhãn vị trí hiển thị.
+- Thêm `modules/security/activity_monitor.py` chứa:
+  - nhận diện browser và user từ access token;
+  - request/session heartbeat và rate counter;
+  - browser GPS presence;
+  - danh sách phiên, anomaly detection và activity report.
+- Thu gọn `app/activity.py` thành compatibility facade re-export toàn bộ tên cũ.
+- Mở rộng `tests/test_security_module_boundaries.py` để bảo vệ facade aliases,
+  private-IP short circuit, health filtering và invalid GPS fail-open.
+
+### Contract được giữ nguyên
+
+- Middleware vẫn gọi `activity.guard`, presence router vẫn gọi
+  `activity.record_presence`, admin vẫn gọi `activity.activity_report`.
+- Redis key, TTL, rate window, response fields và thông báo anomaly không đổi.
+- GeoIP vẫn hoàn toàn offline; thiếu MaxMind DB hoặc Redis vẫn fail-open.
+- Các private helper/constant cũ vẫn được alias qua facade để tránh làm vỡ test
+  hoặc consumer chưa migration.
+
+### Kiểm tra
+
+- Compile check trong Docker thành công cho facade, GeoIP, activity monitor và
+  regression test.
+- Security/identity/composition focused regression: 12 pass.
+- Toàn bộ backend pytest trên Docker Compose network: 209 pass, 3 fail.
+- Ba lỗi còn lại đúng baseline ngoài phạm vi: một released manifest và hai
+  provenance assertions phụ thuộc research artifacts.
+- Một lần chạy test container ngoài Compose network làm disk-watermark test
+  không resolve được hostname `redis`; chạy lại trên đúng network đã pass và
+  xác nhận đây là lỗi cấu hình môi trường test, không phải regression.
+
+### Phạm vi dữ liệu
+
+- Không thay đổi SQL, database schema hoặc dữ liệu database.
+- Không chạy dataset migration và không sửa manifest/split/checkpoint.
+- Test mới dùng fake Redis và không kết nối Redis/Postgres thật.
+
+### Hoàn tác
+
+- Đưa implementation GeoIP/session monitor trở lại `app/activity.py`.
+- Xóa hai component mới và các regression assertion BR-012.
+- Không có database migration hoặc dữ liệu cần hoàn tác.
