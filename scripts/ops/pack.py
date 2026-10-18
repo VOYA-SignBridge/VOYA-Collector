@@ -323,7 +323,8 @@ def pack_host(target):
 #: Launchers copied to the ROOT of every pack, numbered in the order to run them.
 NEW_HOST_SCRIPTS = ("0_CHUAN_BI_MAY_MOI.bat", "CHUAN_BI_MAY_MOI.ps1",
                     "1_KHOI_PHUC_MAY_MOI.bat", "KHOI_PHUC_MAY_MOI.ps1",
-                    "2_BAT_DOMAIN_MAY_MOI.bat", "BAT_DOMAIN_MAY_MOI.ps1")
+                    "2_BAT_DOMAIN_MAY_MOI.bat", "BAT_DOMAIN_MAY_MOI.ps1",
+                    "3_TAI_DU_LIEU_MAY_MOI.bat", "TAI_DU_LIEU_MAY_MOI.ps1")
 
 
 def pack_tools(scripts_dir, destination):
@@ -563,6 +564,7 @@ Chỉ cần cài tay trước: **driver NVIDIA** (nếu muốn GPU). Mọi thứ
 | 1 | `1_KHOI_PHUC_MAY_MOI.bat` | Kiểm máy → kiểm SHA-256 → **bản triển khai cũ trên máy (nếu có): sao lưu toàn bộ DB cũ, ghi lại, DỪNG để nhường cổng — không xoá gì, có `QUAY_LAI_BAN_CU.txt`** → dò GPU → nạp Docker images từ gói (**không tải torch/CUDA**) → khôi phục DB/file/volume vào `D:/SignBridge/app` (không có ổ D thì `C:/SignBridge/app`) → Git, lịch sử, video, khoá SOT → chờ `http://127.0.0.1` trả 200 → cài 2 tác vụ Windows (tự bật sau khởi động, canh gác 30 phút) + 2 lối tắt Desktop. **Không đụng domain.** |
 | — | (máy cũ) `scripts/chuyen_server/TAT_MAY_CU.bat` | Dừng service Cloudflared (Disabled) và stack cũ. Không xoá gì; `-HoanTac` để bật lại |
 | 2 | `2_BAT_DOMAIN_MAY_MOI.bat` | Hỏi xác nhận máy cũ đã tắt → cài connector của **chính tunnel hiện có** bằng token trong gói → chờ tunnel sẵn sàng → kiểm tra {url} trả 200 |
+| 3 | `3_TAI_DU_LIEU_MAY_MOI.bat` | Tải lại dữ liệu KHÔNG mang theo gói: mẫu/video thiếu trên đĩa (từ Drive, theo `storage_url` trong DB) và video mẫu QIPEDC vào `qipedc_mau` cạnh ứng dụng. Bước 1 đã tự gọi; chạy lại được |
 
 Bản cũ khác schema không sao: bản mới chạy project và volume RIÊNG, DB cũ không bị đọc hay ghi đè.
 Nếu bản cũ có mẫu MỚI hơn lúc tạo gói, `so_lieu_ban_cu.txt` trong thư mục dự phòng sẽ cho thấy — cần hợp nhất sau.
@@ -579,13 +581,16 @@ Route hiện tại xem trong `{HOST}/cloudflared/ingress.json`; giữ Nginx publ
 
 
 def create(stack, destination, *, drive_cache=None, extra_history=(), skip_images=False,
-           keep_stopped=False, skip_drive=False, skip_related=False):
+           keep_stopped=False, skip_drive=False, skip_related=False, skip_git=False, skip_history=False,
+           skip_training_outputs=False):
     destination = Path(destination).resolve()
     root = stack.root
     if destination.exists() or inside(destination, root) or inside(root, destination):
         raise Failure("Pack path must be NEW and OUTSIDE the workspace.")
     env = stack.config["services"]["backend"]["environment"]
-    histories = history_sources(root, env, extra_history)
+    # --skip-history: các bản sao lưu cũ ở lại máy cũ; --skip-git: máy mới lấy mã
+    # từ GitHub (nguồn trong gói đã gồm cả thay đổi chưa commit).
+    histories = {} if skip_history else history_sources(root, env, extra_history)
     # Gói GỌN (17/10/2026): máy mới tự dựng image, vẫn dùng chung Drive, thư mục
     # phụ cạnh repo ở lại máy cũ. Chỉ dữ liệu ứng dụng + lịch sử Git + cấu hình máy.
     related = {} if skip_related else related_sources(root)
@@ -594,7 +599,7 @@ def create(stack, destination, *, drive_cache=None, extra_history=(), skip_image
             raise Failure(f"Pack path overlaps a history/related folder: {path}")
     uses_drive = str(env.get("USE_GOOGLE_DRIVE", "0")).lower() in ("1", "true") and not skip_drive
     need = (tree_size(root, skip={"node_modules", ".git", "__pycache__", "backups"})
-            + tree_size(root / ".git") + sum(tree_size(p) for p in [*histories.values(), *related.values()]))
+            + (0 if skip_git else tree_size(root / ".git")) + sum(tree_size(p) for p in [*histories.values(), *related.values()]))
     destination.parent.mkdir(parents=True, exist_ok=True)
     if shutil.disk_usage(destination.parent).free < need * 1.1 + 20 * 1024**3:
         raise Failure(f"Destination needs > {need * 1.1 / 1024**3 + 20:.0f} GiB free "
@@ -605,7 +610,8 @@ def create(stack, destination, *, drive_cache=None, extra_history=(), skip_image
     # Phase 1, writers still running: content that live traffic does not change.
     print("[1/4] Restore tools, Git history, Docker images, host configuration...")
     sections["tools"] = pack_tools(root / "scripts", destination)
-    sections["git"] = pack_git(root, destination / GIT)
+    sections["git"] = ({"status": "skipped", "warnings": ["Git history skipped by --skip-git; clone from the remote."]}
+                       if skip_git else pack_git(root, destination / GIT))
     sections["images"] = ({"status": "skipped", "warnings": ["Images skipped by --skip-images."]}
                           if skip_images else pack_images(stack, destination / IMAGES))
     sections["host"] = pack_host(destination / HOST)
@@ -625,7 +631,8 @@ def create(stack, destination, *, drive_cache=None, extra_history=(), skip_image
         # Phase 2: the consistent snapshot. backup() stops writers and, with
         # resume=False, leaves them stopped so phase 3 sees the same state.
         print("[2/4] Application bundle (writers stopped)...")
-        backup(stack, destination / APP, accept_external=True, resume=False)
+        backup(stack, destination / APP, accept_external=True, resume=False,
+               skip_training_outputs=skip_training_outputs)
         sections["app-bundle"] = {"status": "ok"}
         print("[3/4] Drive, backup history, volumes, container files, DB file references...")
         sections["drive"] = (drive_sync(stack, destination / DRIVE) if uses_drive
@@ -634,7 +641,8 @@ def create(stack, destination, *, drive_cache=None, extra_history=(), skip_image
                              if skip_drive else {"status": "absent"})
         for label, path in histories.items():
             copy_tree(path, destination / HISTORY / label, dedup)
-        sections["history"] = {"status": "ok", "sources": {k: str(v) for k, v in histories.items()}}
+        sections["history"] = ({"status": "skipped", "warnings": ["Backup history skipped by --skip-history."]}
+                               if skip_history else {"status": "ok", "sources": {k: str(v) for k, v in histories.items()}})
         sections["volumes"] = pack_anonymous_volumes(stack, destination / VOLUMES)
         sections["container-files"] = pack_container_layers(stack, destination / LAYERS)
         inventory_file = destination / DRIVE / "inventory.json"

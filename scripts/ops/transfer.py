@@ -394,7 +394,12 @@ def dump_database(stack, destination):
     return databases
 
 
-def backup(stack, destination, *, accept_external=False, resume=True):
+#: Kết quả các lượt huấn luyện (checkpoint, đánh giá). Tái tạo được; mô hình đã
+#: phát hành nằm trên Drive. `--skip-training-outputs` để chúng ở lại máy cũ.
+TRAINING_OUTPUTS = "processed/train_utils/outputs"
+
+
+def backup(stack, destination, *, accept_external=False, resume=True, skip_training_outputs=False):
     destination = Path(destination).resolve()
     if inside(destination, stack.root) or destination.exists():
         raise Failure("Backup path must be NEW and OUTSIDE the workspace.")
@@ -446,14 +451,16 @@ def backup(stack, destination, *, accept_external=False, resume=True):
                 run(["docker", "run", "--rm", "--network", "none", "-v", f"{actual}:/payload:ro",
                      "--entrypoint", "tar", stack.pg_image, "-czf", "-", "-C", "/payload", "."], output=stream)
             volumes[key] = actual
-        snapshot_workspace(stack.root, destination / "workspace.tar.gz", exclusions)
+        snapshot_workspace(stack.root, destination / "workspace.tar.gz",
+                           [*exclusions, *([stack.root / TRAINING_OUTPUTS] if skip_training_outputs else [])])
         manifest = {"format": 1, "created_at": datetime.now(timezone.utc).isoformat(),
                     "postgres_image": stack.pg_image, "database": stack.db["POSTGRES_DB"],
                     "bootstrap_role": stack.db["POSTGRES_USER"],
                     "counts": databases[stack.db["POSTGRES_DB"]]["counts"], "databases": databases,
                     "database_bytes": sum(db["bytes"] for db in databases.values()),
                     "volumes": volumes, "external_storage": external,
-                    "exclusions": sorted(SKIP) + [".venv*", "backups", "backup mirror mounts"],
+                    "exclusions": sorted(SKIP) + [".venv*", "backups", "backup mirror mounts"]
+                                  + ([TRAINING_OUTPUTS] if skip_training_outputs else []),
                     "files": {}}
         for path in destination.iterdir():
             path.chmod(0o600)

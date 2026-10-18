@@ -50,6 +50,10 @@ def main():
     p.add_argument("--skip-images", action="store_true", help="New host builds images from source (needs internet)")
     p.add_argument("--skip-drive", action="store_true", help="No Drive copy; new host keeps using the same Drive")
     p.add_argument("--skip-related", action="store_true", help="Leave the folders next to the repo on the old host")
+    p.add_argument("--skip-git", action="store_true", help="No Git bundle; the new host clones from the remote")
+    p.add_argument("--skip-history", action="store_true", help="Leave old backups on the old host")
+    p.add_argument("--skip-training-outputs", action="store_true",
+                   help="Leave processed/train_utils/outputs (training runs) on the old host")
     p.add_argument("--keep-stopped", action="store_true", help="Leave writers stopped (final cutover)")
     p = commands.add_parser("zip")
     p.add_argument("pack", type=Path)
@@ -87,7 +91,9 @@ def main():
         print(f"Pack: {destination}")
         create(Stack(args.root), destination, drive_cache=cache if cache.is_dir() else None,
                extra_history=args.external, skip_images=args.skip_images, keep_stopped=args.keep_stopped,
-               skip_drive=args.skip_drive, skip_related=args.skip_related)
+               skip_drive=args.skip_drive, skip_related=args.skip_related,
+               skip_git=args.skip_git, skip_history=args.skip_history,
+               skip_training_outputs=args.skip_training_outputs)
         if args.zip:
             zip_pack(destination)
     elif args.command == "zip":

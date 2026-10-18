@@ -18,7 +18,8 @@ param(
     [string]$AppRoot = "D:\SignBridge\app",
     [string]$Project = "signbridge-ctu",
     [string]$PublicUrl = "",
-    [switch]$NoGpu
+    [switch]$NoGpu,
+    [switch]$BoQuaQipedc
 )
 $ErrorActionPreference = "Stop"
 # May khong co o D: dat ung dung o C (chi khi nguoi chay khong tu chon -AppRoot).
@@ -201,6 +202,14 @@ foreach ($i in 1..30) {
 }
 if (-not $ok) { Fail "Trang chua tra 200 tren http://127.0.0.1 sau 5 phut. Xem: docker compose ps (trong $AppRoot)" }
 Write-Host "  http://127.0.0.1/ va /api/v1/health: 200"
+
+# ------------------------------------------------------------------ 8b
+Step "8b/9" "Tai lai du lieu khong mang theo goi (mau/video thieu tu Drive, video mau QIPEDC)"
+# Loi o day khong dung khoi phuc: ung dung da chay; chay lai 3_TAI_DU_LIEU_MAY_MOI.bat sau.
+$taiArgs = @{ AppRoot = $AppRoot }
+if ($BoQuaQipedc) { $taiArgs.BoQuaQipedc = $true }
+try { & (Join-Path $Pack "TAI_DU_LIEU_MAY_MOI.ps1") @taiArgs }
+catch { Warn "tai du lieu loi: $($_.Exception.Message). Chay lai 3_TAI_DU_LIEU_MAY_MOI.bat." }
 
 # ------------------------------------------------------------------ 9
 Step "9/9" "Van hanh: tu bat sau khoi dong, canh gac 30 phut, loi tat tren Desktop"
