@@ -40,11 +40,18 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$REPO/.env"
 PROD_DB="${VOYA_PROD_DATABASE:-signdb}"
 TEST_DB="${VOYA_TEST_DATABASE:-signdb_test}"
+# Container Postgres để `docker exec` vào. Đặt "-" để gọi `psql` trực tiếp tới
+# PGHOST/PGPORT (mặc định localhost:5432) — đường của CI, nơi Postgres là một
+# service container và không có `voya_postgres`. Mật khẩu admin lấy từ PGPASSWORD.
 PG="${VOYA_PG_CONTAINER:-voya_postgres}"
 
-[ -f "$ENV_FILE" ] || { echo "khong thay $ENV_FILE"; exit 2; }
-
-read_env() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+# Biến môi trường thắng `.env`: CI không có `.env`, nó đưa ba mật khẩu qua env.
+read_env() {
+  local v
+  eval "v=\${$1:-}"
+  if [ -n "$v" ]; then printf '%s' "$v"; return; fi
+  [ -f "$ENV_FILE" ] && grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- || true
+}
 
 OWNER_PW=$(read_env VOYA_TEST_OWNER_PASSWORD)
 APP_PW=$(read_env VOYA_TEST_APP_PASSWORD)
@@ -67,7 +74,18 @@ if [ "$APP_PW" = "$CONTROL_PW" ] || [ "$OWNER_PW" = "$CONTROL_PW" ]; then
   exit 2
 fi
 
-psql_admin() { docker exec -i "$PG" psql -U admin -v ON_ERROR_STOP=1 -P pager=off "$@"; }
+psql_admin() {
+  if [ "$PG" = "-" ]; then
+    psql -h "${PGHOST:-localhost}" -p "${PGPORT:-5432}" -U admin -v ON_ERROR_STOP=1 -P pager=off "$@"
+  else
+    docker exec -i "$PG" psql -U admin -v ON_ERROR_STOP=1 -P pager=off "$@"
+  fi
+}
+
+# Cụm có CSDL sản xuất không? Máy dev: có (cùng cụm với `signdb_test`). CI: không —
+# cụm chỉ chứa CSDL test dựng mới, nên bước 2 (khoá cửa vào sản xuất) không có gì
+# để khoá và phép đo ở bước 4 bỏ cột đó thay vì ném lỗi "database does not exist".
+HAS_PROD=$(psql_admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${PROD_DB}'" | tr -d '[:space:]')
 
 echo "==> 1/4  ba role test (NOSUPERUSER, NOBYPASSRLS)"
 psql_admin -d postgres <<SQL
@@ -135,6 +153,9 @@ REVOKE voya_test_app   FROM voya_test_control;
 REVOKE voya_test_control FROM voya_test_app;
 SQL
 
+if [ "$HAS_PROD" != "1" ]; then
+echo "==> 2/4  bo qua: cum nay khong co '${PROD_DB}' (vd CI) — khong co gi de khoa"
+else
 echo "==> 2/4  mac dinh-tu-choi tren '${PROD_DB}' (mot giao dich, co khang dinh)"
 psql_admin -d postgres <<SQL
 BEGIN;
@@ -161,6 +182,7 @@ END \$\$;
 
 COMMIT;
 SQL
+fi
 
 echo "==> 3/4  quyen tren '${TEST_DB}'"
 psql_admin -d postgres <<SQL
@@ -270,7 +292,9 @@ SQL
 echo "==> 4/4  do lai bang has_database_privilege (khong suy luan tu lenh da go)"
 psql_admin -d postgres -c "
 SELECT r.rolname AS role,
-       has_database_privilege(r.rolname, '${PROD_DB}',  'CONNECT') AS connect_prod,
+       CASE WHEN '${HAS_PROD}' = '1'
+            THEN has_database_privilege(r.rolname, '${PROD_DB}', 'CONNECT')::text
+            ELSE '(khong co)' END AS connect_prod,
        has_database_privilege(r.rolname, '${TEST_DB}', 'CONNECT') AS connect_test,
        r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb
   FROM pg_roles r
