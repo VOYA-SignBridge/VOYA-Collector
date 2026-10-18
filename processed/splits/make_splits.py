@@ -781,6 +781,12 @@ def class_mapping_checksum(mapping) -> str:
     tính metadata bằng `canonical_mapping_hash` thay vì chạy qua `make_splits`.
     Một quy ước chỉ có một định nghĩa thì không có gì để lệch.
     """
+    # Chạy như script thì sys.path[0] là processed/splits/, không phải gốc repo:
+    # không có đoạn này, `processed` chỉ import được khi người gọi tự đặt PYTHONPATH.
+    import sys as _sys
+    _repo_root = Path(__file__).resolve().parents[2]
+    if str(_repo_root) not in _sys.path:
+        _sys.path.insert(0, str(_repo_root))
     from processed.train_utils.label_mapping import canonical_mapping_hash
 
     return canonical_mapping_hash({str(k): int(i) for k, i in mapping})
