@@ -138,3 +138,5 @@ processed/mobile/artifacts/
 .venv-executorch/
 !processed/mobile/README.md
 !processed/mobile/requirements-executorch.txt
+
+.codegraph
