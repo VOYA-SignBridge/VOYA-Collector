@@ -1,3 +1,12 @@
+# Log rotation for EVERY service. Without it the json-file driver keeps each
+# container's log forever: measured 16/10/2026, loki alone had 97.5 MB of one
+# repeated warning after a month. 3 x 20 MB per container caps the total.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   frontend:
     build:
@@ -8,6 +17,7 @@ services:
         VITE_API_URL: ${VITE_API_URL:-}
     image: voya_frontend:latest
     container_name: ${CONTAINER_PREFIX:-voya}_frontend
+    logging: *default-logging
     expose:
       - "80"
     env_file:
@@ -51,6 +61,7 @@ services:
     build: ./backend/realtime_service
     image: voya_realtime_service:latest
     container_name: ${CONTAINER_PREFIX:-voya}_realtime_service
+    logging: *default-logging
     expose:
       - "8010"
     environment:
@@ -96,6 +107,7 @@ services:
     # context+tag once and the rest reuse it, so this costs nothing.
     build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_sot_init
+    logging: *default-logging
     env_file:
       - .env
     volumes:
@@ -125,6 +137,7 @@ services:
     # context+tag once and the rest reuse it, so this costs nothing.
     build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_backend
+    logging: *default-logging
     expose:
       - "8000"
     volumes:
@@ -136,7 +149,9 @@ services:
     environment:
       REALTIME_SERVICE_URL: http://realtime_service:8010
       TTS_REDIS_URL: redis://redis:6379/0
-    command: gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --max-requests 1000 --max-requests-jitter 100 --bind 0.0.0.0:8000
+    # BACKEND_WORKERS: each worker imports torch + mediapipe (~350 MB anon RSS,
+    # measured 16/10/2026). 4 workers sat at 97% of BACKEND_MEM=1500m.
+    command: gunicorn app.main:app -w ${BACKEND_WORKERS:-4} -k uvicorn.workers.UvicornWorker --max-requests 1000 --max-requests-jitter 100 --bind 0.0.0.0:8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,6 +189,7 @@ services:
     # context+tag once and the rest reuse it, so this costs nothing.
     build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_worker
+    logging: *default-logging
     env_file:
       - .env
     volumes:
@@ -227,6 +243,7 @@ services:
     # context+tag once and the rest reuse it, so this costs nothing.
     build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_trainer
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -286,6 +303,7 @@ services:
     # context+tag once and the rest reuse it, so this costs nothing.
     build: ./backend
     container_name: ${CONTAINER_PREFIX:-voya}_celery_beat
+    logging: *default-logging
     env_file:
       - .env
     volumes:
@@ -315,6 +333,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: ${CONTAINER_PREFIX:-voya}_redis
+    logging: *default-logging
     # Bound Redis memory even on a base-only launch. Without this the server
     # runs with maxmemory=0 (unlimited) + noeviction: the Celery result backend
     # keeps accumulating keys until Redis exhausts host RAM and gets OOM-killed
@@ -338,6 +357,7 @@ services:
   postgres:
     image: postgres:17
     container_name: ${CONTAINER_PREFIX:-voya}_postgres
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -370,6 +390,7 @@ services:
   pg-backup:
     image: postgres:17
     container_name: ${CONTAINER_PREFIX:-voya}_pg_backup
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -433,6 +454,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: ${CONTAINER_PREFIX:-voya}_nginx
+    logging: *default-logging
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       # :8000 is the un-gatewayed backend vhost and :8001 a plain-text "OK"
@@ -466,6 +488,7 @@ services:
   loki:
     image: grafana/loki:3.0.0
     container_name: ${CONTAINER_PREFIX:-voya}_loki
+    logging: *default-logging
     user: "root"
     volumes:
       - ./logging/loki-config.yaml:/etc/loki/local-config.yaml:ro
@@ -490,6 +513,7 @@ services:
   promtail:
     image: grafana/promtail:3.0.0
     container_name: ${CONTAINER_PREFIX:-voya}_promtail
+    logging: *default-logging
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./logging/promtail-config.yaml:/etc/promtail/config.yml:ro
@@ -515,6 +539,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.51.2
     container_name: ${CONTAINER_PREFIX:-voya}_prometheus
+    logging: *default-logging
     volumes:
       - ./logging/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -542,6 +567,7 @@ services:
   grafana:
     image: grafana/grafana-oss:10.4.2
     container_name: ${CONTAINER_PREFIX:-voya}_grafana
+    logging: *default-logging
     ports:
       # Bind to loopback only: Grafana has no campus-proxy route and its own
       # login is the only thing guarding it. Reach it from the server over an

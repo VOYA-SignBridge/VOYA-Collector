@@ -25,6 +25,9 @@ docs/02-data/db/voya_erd.drawio text eol=lf
 docs/02-data/db/erd_groups/*.drawio text eol=lf
 docs/02-data/db/erd_layout_v8.json text eol=lf
 
+# Windows launchers for the server move (scripts/chuyen_server). cmd.exe needs CRLF.
+*.bat text eol=crlf
+
 # Frozen research splits: FROZEN_RESEARCH_SPLITS.json records their sha256 over the
 # CRLF bytes a Windows checkout produced. A Linux checkout (CI) gets LF, the hash no
 # longer matches, and the freeze check fails though nothing changed. Pin CRLF on

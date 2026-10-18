@@ -379,8 +379,17 @@ preflight || exit 1
 run_backup || log "lượt sao lưu đầu tiên thất bại; sẽ thử lại ở chu kỳ sau"
 prune_old
 
+# Dừng êm khi được bảo dừng. Script chạy làm PID 1 của container, và kernel bỏ
+# qua SIGTERM gửi tới PID 1 nếu nó không tự bắt — `docker compose stop` khi ấy
+# chờ đủ hạn rồi SIGKILL (mã 137). Gói chuyển server coi 137 là "bị giết giữa
+# chừng" và từ chối, nên lần tạo gói thật đầu tiên (17/10/2026) hỏng đúng ở đây.
+# `sleep ... & wait` để tín hiệu được xử lý NGAY, không phải sau khi hết 24 giờ.
+# Một lượt dump đang chạy dở thì chờ nó xong (trap chỉ chạy giữa hai lệnh).
+trap 'log "nhận tín hiệu dừng, thoát"; exit 0' TERM INT
+
 while true; do
-    sleep "$INTERVAL_SECONDS"
+    sleep "$INTERVAL_SECONDS" &
+    wait $!
     run_backup || log "lượt sao lưu thất bại; sẽ thử lại ở chu kỳ sau"
     prune_old
 done

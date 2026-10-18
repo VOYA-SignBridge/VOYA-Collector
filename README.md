@@ -2,6 +2,9 @@
 
 Sign language data collection and processing system for Vietnamese Sign Language.
 
+> **Vận hành:** bấm đúp `VOYA.bat` (menu) hoặc gõ `VOYA status`, `VOYA logs`, `VOYA backup`, `VOYA help`.
+> Bản đồ các script: [scripts/README.md](scripts/README.md).
+
 ---
 
 ## Architecture Diagram
