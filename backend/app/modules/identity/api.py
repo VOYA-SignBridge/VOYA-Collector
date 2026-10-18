@@ -1,19 +1,20 @@
 """Stable identity boundary used by HTTP and application modules.
 
-The implementation remains in the legacy modules during the incremental
-migration. Consumers import only this facade so internals can move later without
-another repository-wide rewrite.
+Consumers import only this facade; orchestration, request dependencies, and
+security primitives live in focused identity components behind it.
 """
 
-from app.auth import (
+from app.modules.identity.dependencies import (
+    get_current_user,
+    get_current_user_optional,
+    require_admin,
+)
+from app.modules.identity.service import (
     authenticate_user,
     create_refresh_token,
     create_user,
-    get_current_user,
-    get_current_user_optional,
     get_user_from_token,
     request_password_reset,
-    require_admin,
     reset_password_with_token,
     revoke_refresh_token,
     rotate_refresh_token,

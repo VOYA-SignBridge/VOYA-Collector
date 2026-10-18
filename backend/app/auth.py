@@ -1,13 +1,18 @@
+"""Compatibility facade for the identity bounded context.
+
+New application code imports ``app.modules.identity``.  Legacy imports remain
+stable here while implementation lives in focused identity components.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
-import uuid
 
-from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials
-
-from app.config import settings
-from app.cookie_auth import ACCESS_COOKIE
+from app.modules.identity.dependencies import (
+    get_current_user,
+    get_current_user_optional,
+    require_admin,
+)
 from app.modules.identity.passwords import (
     DUMMY_PASSWORD_HASH,
     get_password_hash,
@@ -25,6 +30,11 @@ from app.modules.identity.repository import (
     insert_user,
     normalize_login,
     row_to_user,
+)
+from app.modules.identity.service import (
+    authenticate_user,
+    create_user,
+    get_user_from_token,
 )
 from app.modules.identity.sessions import (
     hash_refresh_token,
@@ -51,145 +61,12 @@ def _get_conn():
     return get_connection()
 
 
-def get_user_from_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decode a raw JWT and fetch the user, returning None instead of raising.
-
-    Intended for WebSocket endpoints, where the token arrives as a query
-    param (browsers cannot set Authorization headers on WS connections)
-    rather than through the HTTPBearer dependency used by regular routes.
-    """
-    try:
-        payload = _decode_token(token)
-    except HTTPException:
-        return None
-    user = _fetch_user_by_id(str(payload.get("sub") or ""))
-    if not user or not user.get("is_active", True):
-        return None
-    return user
-
-
 def _fetch_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
     return find_user_by_id(user_id, connection_factory=_get_conn)
 
 
 def _fetch_user_by_login(identifier: str) -> Optional[Dict[str, Any]]:
     return find_user_by_login(identifier, connection_factory=_get_conn)
-
-
-def create_user(
-    username: str,
-    email: str,
-    password: str,
-    is_admin: bool = False,
-) -> Dict[str, Any]:
-    username_norm = (username or "").strip()
-    email_norm = _normalize_login(email)
-    if not username_norm:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username is required")
-    if not email_norm:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email is required")
-    if len(password or "") < int(settings.min_password_length):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Password must be at least {settings.min_password_length} characters",
-        )
-
-    existing = _fetch_user_by_login(username_norm) or _fetch_user_by_login(email_norm)
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already exists",
-        )
-
-    user_id = str(uuid.uuid4())
-    password_hash = get_password_hash(password)
-
-    return insert_user(
-        user_id=user_id,
-        username=username_norm,
-        email=email_norm,
-        password_hash=password_hash,
-        is_admin=is_admin,
-        connection_factory=_get_conn,
-    )
-
-
-def authenticate_user(identifier: str, password: str) -> Optional[Dict[str, Any]]:
-    user = _fetch_user_by_login(identifier)
-    if not user or not user.get("is_active", True):
-        # Run a dummy verify so this path costs the same as a real "wrong
-        # password" — defeats username enumeration via timing side-channel.
-        verify_password(password, _DUMMY_PASSWORD_HASH)
-        return None
-    if not verify_password(password, user["password_hash"]):
-        return None
-    return user
-
-
-def get_current_user_optional(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-) -> Optional[Dict[str, Any]]:
-    # Prefer the httpOnly access COOKIE (the SPA's session), then fall back to
-    # the Authorization: Bearer header (API clients / WS fallback). Order
-    # matters: browsers migrated from the legacy localStorage flow may still
-    # send a STALE Bearer header on every request — if that were preferred, a
-    # perfectly valid fresh cookie session would 401 forever (login -> bounce
-    # loop). Pure API clients send no cookies, so they are unaffected.
-    token = request.cookies.get(ACCESS_COOKIE)
-    if not token and credentials is not None:
-        token = credentials.credentials
-    if not token:
-        return None
-
-    payload = _decode_token(token)
-    user_id = str(payload.get("sub") or "")
-
-    # Force-logout: an admin can invalidate a user's live sessions. Tokens
-    # issued before the force-logout marker are rejected; a fresh login works.
-    try:
-        from app import activity
-
-        if activity.is_user_denied(user_id, payload.get("iat")):
-            fl = activity.get_force_logout(user_id) or {}
-            msg = "Phiên đã bị đăng xuất bởi quản trị viên"
-            if fl.get("reason"):
-                msg += f": {fl['reason']}"
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=msg)
-    except HTTPException:
-        raise
-    except Exception:
-        pass
-
-    user = _fetch_user_by_id(user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-    return user
-
-
-def get_current_user(
-    request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
-) -> Dict[str, Any]:
-    user = get_current_user_optional(request, credentials)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-        )
-    return user
-
-
-def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    if not current_user.get("is_admin", False):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required",
-        )
-    return current_user
 
 
 # ============================================================================

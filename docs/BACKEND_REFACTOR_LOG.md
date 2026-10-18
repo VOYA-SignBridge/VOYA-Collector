@@ -456,3 +456,61 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 
 - Bỏ ngoại lệ mapping khỏi `.gitignore` và untrack file mapping.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-010: Hoàn tất identity service và HTTP dependencies
+
+### Mục tiêu
+
+- Chuyển account orchestration và FastAPI authorization dependencies ra khỏi
+  `app/auth.py`.
+- Biến `app/auth.py` thành compatibility facade cho consumer và test cũ.
+- Giữ nguyên public callable identity, HTTP contract, SQL và session behaviour.
+
+### Thay đổi
+
+- Thêm `app/modules/identity/service.py` chứa:
+  - đăng ký và xác thực tài khoản;
+  - tra user từ raw access token cho WebSocket;
+  - điều phối password reset và refresh-session public workflows.
+- Thêm `app/modules/identity/dependencies.py` chứa:
+  - cookie-first/Bearer-fallback current-user resolution;
+  - force-logout check;
+  - authenticated-user và admin dependencies.
+- `identity/api.py` export trực tiếp từ các component mới và không còn import
+  ngược `app.auth`.
+- `app/auth.py` giữ aliases cùng reset/refresh wrappers tương thích; private
+  injection points cũ vẫn được bảo vệ bởi regression test.
+- Thêm `tests/test_identity_service_dependencies.py` bảo vệ public callable
+  identity, account orchestration, dummy password verification và cookie
+  precedence mà không mở database.
+
+### Contract được giữ nguyên
+
+- Validation messages/status, email normalization, UUID và duplicate lookup
+  order không đổi.
+- Unknown/inactive account vẫn chạy dummy bcrypt verify chống timing probe.
+- Access cookie vẫn được ưu tiên trước stale Bearer header.
+- Force logout vẫn fail-open khi activity/Redis gặp lỗi và trả đúng thông báo
+  admin khi marker hợp lệ.
+- Router, WebSocket và legacy import tiếp tục nhận cùng callable contract.
+
+### Kiểm tra
+
+- Compile check thành công cho facade, service, dependencies, API và test mới.
+- Identity regression: 14 pass.
+- Toàn bộ backend pytest trong Docker: 203 pass, 3 fail.
+- Ba lỗi còn lại đúng baseline ngoài phạm vi: một released manifest và hai
+  provenance assertions phụ thuộc research artifacts.
+- Source scan xác nhận code runtime không còn import `app.auth`; chỉ lifecycle
+  test cố ý dùng legacy path để bảo vệ compatibility.
+
+### Phạm vi dữ liệu
+
+- Không thay đổi SQL, database schema hoặc dữ liệu database.
+- Không chạy dataset migration và không sửa manifest/split/checkpoint.
+
+### Hoàn tác
+
+- Đưa orchestration/dependencies từ hai component mới trở lại `app/auth.py`.
+- Khôi phục `identity/api.py` import qua legacy facade và xóa regression BR-010.
+- Không có database migration hoặc dữ liệu cần hoàn tác.
