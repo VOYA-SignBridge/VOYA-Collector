@@ -684,3 +684,53 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
   `app/rate_limit.py`.
 - Khôi phục import consumer qua facade, xóa component/test BR-013.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-014: Tách admin data operations khỏi web security admin
+
+### Mục tiêu
+
+- Giảm `routers/admin.py` theo một ranh giới nghiệp vụ rõ, không chia nhỏ từng
+  nhóm route thành quá nhiều file.
+- Giữ quản trị user/security/resource trong router web-system và cô lập các
+  route báo cáo dữ liệu/đồng bộ Google Drive.
+
+### Thay đổi
+
+- Thêm `routers/admin_data.py` chứa ba route:
+  - `GET /admin/data-report`;
+  - `POST /admin/sync-local`;
+  - `GET /admin/sync-status/{task_id}`.
+- `routers/admin.py` include data sub-router và re-export ba endpoint function
+  cũ để giữ compatibility cho code/test import trực tiếp.
+- Giữ nguyên user role, resource monitoring, activity, IP controls, force
+  logout, account lock/warn và security log trong `routers/admin.py`.
+- Thêm `tests/test_admin_router_boundaries.py` bảo vệ route path, endpoint
+  identity và việc mỗi route chỉ được đăng ký một lần.
+
+### Contract được giữ nguyên
+
+- Prefix `/api/v1/admin` ở application level và ba path tương đối không đổi.
+- Dependency `require_admin`, response field, Celery task và dataset aggregation
+  giữ nguyên.
+- Không tách tiếp user/security routes vì phần còn lại vẫn là một cụm quản trị
+  web-system gắn kết và có kích thước vừa phải.
+
+### Kiểm tra
+
+- Compile check trong Docker thành công cho hai admin router và regression test.
+- Admin/composition/security focused regression: 10 pass.
+- Toàn bộ backend pytest trên Docker Compose network: 215 pass, 3 fail.
+- Ba lỗi còn lại đúng baseline ngoài phạm vi: một released manifest và hai
+  provenance assertions phụ thuộc research artifacts.
+
+### Phạm vi dữ liệu
+
+- Không thay đổi SQL, database schema, dữ liệu database hoặc dataset.
+- Không kích hoạt tác vụ đồng bộ Google Drive trong test.
+- Không sửa manifest/split/checkpoint.
+
+### Hoàn tác
+
+- Đưa ba endpoint implementation trở lại cuối `routers/admin.py`.
+- Xóa `admin_data.py` và regression test BR-014.
+- Không có database migration hoặc dữ liệu cần hoàn tác.

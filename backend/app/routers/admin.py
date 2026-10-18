@@ -1,15 +1,21 @@
-from typing import Any, Dict, List
+from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.modules.identity import get_current_user, require_admin
+from app.modules.identity import require_admin
 from app.infrastructure.database.connection import connect_postgres
 from psycopg2.extras import RealDictCursor
-from app.sync_tasks import download_missing_files_to_local
 from app.monitoring import collect_resources
 from app import activity
+from app.routers.admin_data import (
+    get_data_report,
+    get_sync_status,
+    router as data_router,
+    sync_local_files,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+router.include_router(data_router)
 
 class UserRoleUpdate(BaseModel):
     is_admin: bool
@@ -193,108 +199,3 @@ def warn_user_account(user_id: str, payload: WarnUser, current_user: Dict[str, A
 def get_security_log(current_user: Dict[str, Any] = Depends(require_admin)):
     """Recent admin security actions (block / unblock / force-logout)."""
     return {"events": activity.list_security_log(limit=150)}
-
-
-@router.get("/data-report")
-def get_data_report(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Dataset dashboard: totals, per-label / per-region / per-source breakdowns,
-    top contributors, and the most recent samples."""
-    from collections import Counter
-    from app.dataset_manager import list_classes
-    from app.dataset_samples import list_samples
-
-    metas = list_classes()
-    samples = list_samples()
-
-    label_c: Counter = Counter()
-    region_c: Counter = Counter()
-    source_c: Counter = Counter()
-    contrib_c: Counter = Counter()
-    for s in samples:
-        label_c[(s.get("label_original") or s.get("slug") or "?").strip() or "?"] += 1
-        region_c[(s.get("dialect") or "").strip() or "khác"] += 1
-        source_c[(s.get("source_type") or "").strip() or "khác"] += 1
-        uid = (s.get("user_id") or "").strip()
-        if uid:
-            contrib_c[uid] += 1
-
-    regions = {(getattr(m, "dialect", "") or "").strip() for m in metas}
-    regions.discard("")
-
-    top_ids = [uid for uid, _ in contrib_c.most_common(10)]
-    umap = activity._resolve_usernames(set(top_ids))
-    top_contributors = [
-        {"user_id": uid, "username": (umap.get(uid) or {}).get("username") or uid[:8], "count": cnt}
-        for uid, cnt in contrib_c.most_common(10)
-    ]
-
-    recent = sorted(samples, key=lambda s: str(s.get("created_at") or ""), reverse=True)[:12]
-    recent_out = [{
-        "label": r.get("label_original") or r.get("slug"),
-        "dialect": r.get("dialect"),
-        "source": r.get("source_type"),
-        "created_at": str(r.get("created_at") or ""),
-    } for r in recent]
-
-    return {
-        "labels_count": len(metas),
-        "total_samples": len(samples),
-        "contributors_count": len(contrib_c),
-        "regions_count": len(regions),
-        "top_labels": [{"label": l, "count": c} for l, c in label_c.most_common(12)],
-        "by_region": [{"region": r, "count": c} for r, c in region_c.most_common()],
-        "by_source": [{"source": s, "count": c} for s, c in source_c.most_common()],
-        "top_contributors": top_contributors,
-        "recent": recent_out,
-    }
-
-
-@router.post("/sync-local")
-def sync_local_files(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Trigger task tải các file feature và raw video thiếu từ Google Drive về local"""
-    task = download_missing_files_to_local.delay()
-    return {
-        "status": "success",
-        "message": "Đã bắt đầu quá trình đồng bộ hóa file về server",
-        "task_id": task.id
-    }
-
-@router.get("/sync-status/{task_id}")
-def get_sync_status(task_id: str, current_user: Dict[str, Any] = Depends(require_admin)):
-    """Kiểm tra trạng thái tiến trình đồng bộ"""
-    from celery.result import AsyncResult
-    task = AsyncResult(task_id)
-    
-    if task.state == 'PENDING':
-        response = {
-            'state': task.state,
-            'current': 0,
-            'total': 1,
-            'status': 'Pending...'
-        }
-    elif task.state == 'PROGRESS':
-        response = {
-            'state': task.state,
-            'current': task.info.get('current', 0),
-            'total': task.info.get('total', 1),
-            'downloaded': task.info.get('downloaded', 0),
-            'skipped': task.info.get('skipped', 0),
-            'errors': task.info.get('errors', 0)
-        }
-    elif task.state == 'SUCCESS':
-        response = {
-            'state': task.state,
-            'current': task.info.get('current', 1),
-            'total': task.info.get('total', 1),
-            'downloaded': task.info.get('downloaded', 0),
-            'skipped': task.info.get('skipped', 0),
-            'errors': task.info.get('errors', 0)
-        }
-    else:
-        # FAILURE or others
-        response = {
-            'state': task.state,
-            'status': str(task.info)
-        }
-    
-    return response
