@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 from app import plans as plans_service
 from app import tenant_admin, usage
 from app.auth import get_current_user, require_admin
-from app.quota_deps import tenant_of
+from app.quota_deps import working_tenant_of
 from app.rate_limit_deps import limit_catalog
 from app.sudo_mode import require_sudo
 
@@ -70,7 +70,7 @@ def my_billing(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict
     Một lượt gọi trả đủ thứ giao diện cần để vẽ trang "Gói dịch vụ": không bắt
     nó ghép ba endpoint lại rồi tự xử lý ba trạng thái tải khác nhau.
     """
-    tenant_id = tenant_of(current_user)
+    tenant_id = working_tenant_of(current_user)
     try:
         tenant = tenant_admin.get_tenant(tenant_id)
     except tenant_admin.TenantError as exc:
@@ -96,7 +96,7 @@ def my_usage(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Chuỗi thời gian mức dùng của tổ chức người gọi."""
-    tenant_id = tenant_of(current_user)
+    tenant_id = working_tenant_of(current_user)
     return {
         "tenant_id": tenant_id,
         "days": days,

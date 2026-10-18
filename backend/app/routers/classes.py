@@ -30,7 +30,7 @@ from app.catalog_sync import (
 from app.config import settings
 from app.auth import get_current_user, require_admin, require_tenant_editor
 from app.tenant_context import require_tenant
-from app.quota_deps import tenant_of
+
 from app.webhooks import emit
 
 router = APIRouter(prefix="/classes", tags=["classes"])
@@ -108,7 +108,7 @@ def register_class(
     # Ràng buộc dữ liệu duy nhất là dung lượng — xem `plans.USAGE_METRICS`.
     label = validate_label(payload.get("label"))
     language = validate_language(payload.get("language", "vn"))
-    dialect = validate_dialect(normalize_dialect(payload.get("dialect", "")))
+    dialect = validate_dialect(normalize_dialect(payload.get("dialect", ""), tenant_id=require_tenant()))
     is_common_global = bool(payload.get("is_common_global", False))
     is_common_language = bool(payload.get("is_common_language", False))
     # Vùng của KÝ HIỆU, trục riêng với `dialect`. Bỏ trống thì `unclassified`,
@@ -131,8 +131,10 @@ def register_class(
         # accepted as a new class that would collide with a real letter.
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # Sự kiện thuộc tổ chức sở hữu LỚP, không phải tổ chức nhà của người gọi: trước
+    # 18/10/2026 lớp của VOYA tạo bởi người có nhà ở trường B bị gửi tới webhook của B.
     emit(
-        tenant_of(current_user), "class.created",
+        meta.tenant_id, "class.created",
         {
             "class_uid": meta.class_uid, "slug": meta.slug,
             "label": meta.label_original, "language": meta.language,
@@ -142,10 +144,73 @@ def register_class(
     return {
         "success": True,
         "class_uid": meta.class_uid,
+        "class_idx": meta.class_idx,
         "slug": meta.slug,
+        "label_original": meta.label_original,
         "language": meta.language,
         "dialect": meta.dialect,
         "region": meta.region,
+    }
+
+
+@router.post("/request", dependencies=[Depends(limit_catalog)])
+def request_class(
+    request: Request,
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Allow a signed-in contributor to add a usable label in this tenant.
+
+    The existing `/register` contract remains editor-only. This separate door
+    avoids widening that catalogue-management permission while making label
+    creation available from collection screens.
+
+    What keeps it from becoming an unreviewed catalogue door (17/10/2026):
+
+    * `is_common_language` — a catalogue-wide classification — is honoured
+      only for an admin/editor of this tenant; a member's request is always a
+      plain label in the chosen dialect.
+    * every NEW label is written to the audit log with who asked, so a tenant
+      admin can find and remove junk labels (Trash) — there is no approval
+      state on classes, and adding one would make the label unusable on the
+      capture screen that asked for it.
+    * samples recorded into it still start `pending` and only reach the tenant
+      through moderation, exactly like samples of any other label.
+    """
+    from app.sample_access import can_manage_tenant_samples
+
+    tenant = require_tenant()
+    manager = can_manage_tenant_samples(current_user, tenant)
+    label = validate_label(payload.get("label"))
+    language = validate_language(payload.get("language", "vn"))
+    dialect = validate_dialect(normalize_dialect(payload.get("dialect", ""), tenant_id=tenant))
+    region = normalize_region(payload.get("region"))
+    before = {m.class_uid for m in list_classes(tenant_id=tenant)}
+    try:
+        meta = get_or_register_class(
+            label_original=label, language=language, dialect=dialect,
+            is_common_language=bool(manager and payload.get("is_common_language", False)),
+            region=region,
+        )
+    except AlphabetLabelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if meta.class_uid not in before:
+        audit.record("data.class.request", actor=current_user, request=request,
+                     target_type="class", target_id=meta.class_uid,
+                     detail={"label": meta.label_original, "dialect": meta.dialect,
+                             "region": meta.region, "by_manager": manager})
+    # Sự kiện thuộc tổ chức sở hữu LỚP, không phải tổ chức nhà của người gọi: trước
+    # 18/10/2026 lớp của VOYA tạo bởi người có nhà ở trường B bị gửi tới webhook của B.
+    emit(meta.tenant_id, "class.requested", {
+        "class_uid": meta.class_uid, "slug": meta.slug,
+        "label": meta.label_original, "language": meta.language,
+        "dialect": meta.dialect, "region": meta.region,
+        "requested_by": str(current_user.get("id") or ""),
+    })
+    return {
+        "success": True, "class_uid": meta.class_uid, "class_idx": meta.class_idx,
+        "slug": meta.slug, "label_original": meta.label_original,
+        "language": meta.language, "dialect": meta.dialect, "region": meta.region,
     }
 
 

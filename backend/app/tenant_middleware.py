@@ -127,6 +127,24 @@ def resolve_tenant(access_cookie: Optional[str], bearer: Optional[str]) -> Optio
     """Tenant for a request carrying these credentials. Never raises."""
     from app.auth import _subject_of
 
+    # Khoá API (`Bearer voya_...`) không phải JWT: `_subject_of` trả None và yêu
+    # cầu từng rơi về phạm vi CÔNG KHAI (`default`) — khoá của trường B đọc/ghi
+    # qua phạm vi request là chạm dữ liệu VOYA (rà 18/10/2026). Khoá thuộc đúng
+    # một tổ chức; phạm vi là tổ chức đó. Cùng thứ tự với `get_current_user_optional`:
+    # có cookie phiên thì người đang ngồi trước trình duyệt là danh tính, không
+    # phải khoá ai đó dán vào một lệnh curl.
+    if not access_cookie and bearer and bearer.startswith("voya_"):
+        try:
+            from app.api_keys import authenticate
+
+            record = authenticate(bearer)
+            if record and record.get("tenant_id"):
+                return str(record["tenant_id"])
+        except Exception:
+            logger.warning("[SCOPE] api key tenant resolution failed; treating as anonymous",
+                           exc_info=True)
+        return (settings.public_tenant_id or "").strip() or None
+
     token = access_cookie or bearer
     if token:
         try:

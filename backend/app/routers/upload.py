@@ -13,6 +13,7 @@ from app.rate_limit_deps import limit_upload
 from app.processing import storage_utils as su
 from app.dataset_manager import (
     get_or_register_class,
+    list_classes,
     normalize_dialect,
     parse_hands_required,
     set_class_hands_required,
@@ -44,8 +45,9 @@ from app.api_validation import (
     save_upload_with_limit,
 )
 from app.auth import get_current_user
+from app.tenant_context import require_tenant
 from app import storage_quota
-from app.quota_deps import guard_storage, storage_full_http, tenant_of
+from app.quota_deps import guard_storage, storage_full_http
 from app.webhooks import emit
 
 # The limit is declared on the router rather than per endpoint because all three
@@ -65,6 +67,18 @@ def _safe_path_part(value: str | None, fallback: str) -> str:
     text = str(value or fallback).strip() or fallback
     text = Path(text).name.strip() or fallback
     return "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in text)
+
+
+def _class_by_uid(class_uid: str):
+    """Resolve a selected class inside the request tenant, never globally."""
+    uid = str(class_uid or "").strip()
+    if not uid:
+        return None
+    tenant = require_tenant()
+    found = next((m for m in list_classes(tenant_id=tenant) if m.class_uid == uid), None)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Nhãn không thuộc tổ chức hiện tại")
+    return found
 
 
 #: Chu ky container video, ghi bang HEX cua bon byte dau. Dung hex chu khong
@@ -152,9 +166,28 @@ def _bytes_da_ghi(npz_path) -> int:
 
 
 def _raw_upload_local_path(class_meta, upload_uid: str, original_filename: str) -> Path:
-    raw_dir = settings.dataset_root / "raw_videos" / class_meta.language / class_meta.dialect / class_meta.folder_name()
-    return raw_dir / f"{upload_uid}_{original_filename}"
+    from app.dataset_manager import raw_class_dir
 
+    return raw_class_dir(class_meta) / f"{upload_uid}_{original_filename}"
+
+
+
+def _alphabet_error_detail(exc: Exception, requested: str, resolved: str) -> str:
+    """Câu 422 cho nhãn bảng chữ cái sai — kèm lý do NẾU phương ngữ bị đổi.
+
+    16/09/2026: người thu chọn phương ngữ `test`, nhận "A fingerspelling label
+    must be exactly one letter" và không hiểu vì sao — `test` đã được gộp vào
+    `bang-chu-cai` từ 22/08 (`dialect_aliases`), nên máy chủ âm thầm đưa mẫu
+    sang bảng chữ cái rồi áp luật một chữ cái. Không nói ra bước gộp thì thông
+    báo đúng mà vô nghĩa với người đọc.
+    """
+    from app.vocabulary_registry import slugify_dialect
+
+    req = slugify_dialect(requested or "")
+    if req and resolved and req != resolved:
+        return (f"{exc} Phương ngữ '{req}' đã được gộp vào '{resolved}' (bảng chữ cái), "
+                f"nên nhãn phải là một chữ cái. Chọn phương ngữ khác nếu đây không phải mẫu bảng chữ cái.")
+    return str(exc)
 
 @router.post("/video")
 async def upload_video(
@@ -163,6 +196,8 @@ async def upload_video(
     label: str = Form(...),
     language: str = Form("vn"),
     dialect: str = Form("common"),
+    class_uid: str = Form(None),
+    visibility: str = Form("private"),
     session_id: str = Form(None),
     upload_uid: str = Form(None),
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -195,7 +230,16 @@ async def upload_video(
     # Validate & normalize inputs
     label = validate_label(label)
     language = validate_language(language)
-    dialect = validate_dialect(normalize_dialect(dialect))
+    dialect_requested = dialect
+    # A selected class_uid is canonical. Do not resolve a stale display
+    # dialect through an alias before the UID is checked; an old alias such as
+    # `test -> bang-chu-cai` must not make "Xin chào" fail the alphabet rule.
+    dialect = (
+        ""
+        if class_uid
+        else validate_dialect(normalize_dialect(dialect, tenant_id=require_tenant()))
+    )
+    visibility = visibility if visibility in {"private", "tenant", "community"} else "private"
 
     log.info("[UPLOAD][video] user=%s label=%s lang=%s dialect=%s filename=%s session=%s", user or current_user.get("username", ""), label, language, dialect, getattr(file, 'filename', ''), session_id)
     # Log pipeline-relevant settings for traceability
@@ -259,14 +303,20 @@ async def upload_video(
     try:
         # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
         try:
-            class_meta = await asyncio.to_thread(
-                get_or_register_class, label_original=label, language=language, dialect=dialect or ""
-            )
+            class_meta = await asyncio.to_thread(_class_by_uid, class_uid)
+            if class_meta is None:
+                class_meta = await asyncio.to_thread(
+                    get_or_register_class, label_original=label, language=language, dialect=dialect or ""
+                )
+            else:
+                # class_uid is canonical; stale display fields must not move
+                # the upload to another class.
+                label, language, dialect = class_meta.label_original, class_meta.language, class_meta.dialect
         except AlphabetLabelError as exc:
             # Nhãn bảng chữ cái nhiều hơn một ký tự. Lỗi của NGƯỜI GỬI, phải
             # về 422 kèm câu giải thích — trước đây rơi xuống 500 "Internal
             # Server Error" (đo 15/09/2026), người thu không biết mình sai gì.
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=_alphabet_error_detail(exc, dialect_requested, dialect)) from exc
 
         original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
         local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
@@ -312,6 +362,11 @@ async def upload_video(
         "source_type": "video",
         "user_id": user or current_user.get("username", ""),
         "session_id": session_id,
+        # Chủ của video đi theo LỚP (khoá ngoại ghép `(tenant_id, class_uid)`):
+        # tổ chức nhà của người tải ≠ tổ chức của lớp khi họ làm việc ở nơi khác,
+        # và khi ấy dòng này từng bị DB từ chối mà không ai biết (18/10/2026).
+        "tenant_id": class_meta.tenant_id,
+        "visibility": visibility,
         "original_filename": original_filename,
         "local_path": local_path_str,
         "storage_key": storage_key,
@@ -383,6 +438,32 @@ async def upload_video(
     }
 
 
+def _raw_upload_owner(upload_uid: str) -> str:
+    """`auth_user_id` của người đã tải video lên (rỗng nếu không tra được)."""
+    if not upload_uid:
+        return ""
+    try:
+        from app.storage.metadata_db import _fetch_all
+
+        rows = _fetch_all("SELECT auth_user_id FROM raw_uploads WHERE upload_uid = %s", (upload_uid,))
+        return str(rows[0]["auth_user_id"] or "") if rows else ""
+    except Exception:
+        return ""
+
+
+def _in_request_tenant(row: Dict[str, Any], tenant: str) -> bool:
+    """`uploads.csv` là tệp CHUNG của mọi tenant: chỉ nhận dòng của tenant đang dùng.
+
+    Trước 17/10/2026 endpoint xử lý lại nhận bất kỳ `upload_uid`/`class_uid` nào
+    trong tệp, nên thành viên tenant A đưa được video của tenant B vào hàng xử lý.
+    Lọc ở đây cũng làm task mang đúng header tenant (tenant của request = tenant
+    của bản tải lên), nên pipeline tìm được `class_uid` của nó.
+    """
+    from app.tenancy import tenant_id_of
+
+    return tenant_id_of(row) == tenant
+
+
 def _enqueue_video_processing(row: Dict[str, Any], triggered_by: str) -> Dict[str, Any]:
     """Enqueue the async feature-extraction pipeline for one raw upload row.
 
@@ -404,7 +485,11 @@ def _enqueue_video_processing(row: Dict[str, Any], triggered_by: str) -> Dict[st
         session_id=row.get("session_id", "") or uuid.uuid4().hex,
         dialect=row.get("dialect", "") or "common",
         language=row.get("language", "") or "vn",
-        user_id=triggered_by,
+        # Chủ mẫu là người TẢI video lên, không phải người bấm xử lý lại.
+        # `uploads.csv` không có cột này nên đọc từ bảng `raw_uploads`.
+        user_id=_raw_upload_owner(uid) or triggered_by,
+        class_uid=row.get("class_uid", "") or "",
+        visibility=row.get("visibility", "private") or "private",
     )
     return {"upload_uid": uid, "job_id": task.id, "status": "queued"}
 
@@ -433,8 +518,10 @@ async def process_uploaded_videos(
     # 1. Resolve the set of raw-upload rows to process.
     rows: list[Dict[str, Any]] = []
     class_uid = str(payload.get("class_uid", "") or "").strip()
+    tenant = require_tenant()
     if class_uid:
         rows = await asyncio.to_thread(find_raw_uploads_by_class, class_uid)
+        rows = [r for r in rows if _in_request_tenant(r, tenant)]
         if not rows:
             raise HTTPException(status_code=404, detail=f"no raw uploads for class_uid: {class_uid}")
     else:
@@ -462,7 +549,8 @@ async def process_uploaded_videos(
                 results.append({"upload_uid": uid, "status": "invalid_uid"})
                 continue
             row = await asyncio.to_thread(find_raw_upload, uid)
-            if not row:
+            if not row or not _in_request_tenant(row, tenant):
+                # Cùng câu trả lời cho "không có" và "của tenant khác".
                 results.append({"upload_uid": uid, "status": "not_found"})
                 continue
             results.append(_enqueue_video_processing(row, triggered_by))
@@ -483,8 +571,17 @@ async def upload_camera(
     """
     user = payload.get("user", "") or current_user.get("username", "")
     label = validate_label(payload.get("label"))
-    dialect = validate_dialect(normalize_dialect(payload.get("dialect", "common")))
+    dialect_requested = str(payload.get("dialect", "common") or "")
     language = validate_language(payload.get("language", "vn"))
+    class_uid = str(payload.get("class_uid") or "").strip()
+    dialect = (
+        ""
+        if class_uid
+        else validate_dialect(normalize_dialect(dialect_requested, tenant_id=require_tenant()))
+    )
+    visibility = str(payload.get("visibility") or "private").strip().lower()
+    if visibility not in {"private", "tenant", "community"}:
+        visibility = "private"
     session_id = payload.get("session_id", None) or uuid.uuid4().hex
     frames = payload.get("frames")
     # Client-declared hand requirement (1|2, anything else -> unknown) and
@@ -505,10 +602,14 @@ async def upload_camera(
 
     # Ensure label exists
     try:
-        class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+        class_meta = _class_by_uid(class_uid)
+        if class_meta is None:
+            class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+        else:
+            label, language, dialect = class_meta.label_original, class_meta.language, class_meta.dialect
     except AlphabetLabelError as exc:
         # Cùng lý do như ở /video: lỗi của người gửi thì trả 422 có lời, không 500.
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=_alphabet_error_detail(exc, dialect_requested, dialect)) from exc
 
     log = logging.getLogger("upload.camera")
 
@@ -757,6 +858,7 @@ async def upload_camera(
         "user": user,
         "user_id": user,
         "auth_user_id": current_user["id"],
+        "visibility": visibility,
         "signer_id": signer_id,
         "session_id": session_id,
         "collection_campaign": getattr(settings, "collection_campaign", "") or "",
@@ -886,7 +988,7 @@ async def upload_camera(
     # dùng. `emit` cũng nuốt mọi lỗi — webhook là tính năng phụ trợ và không
     # được phép làm hỏng một lượt tải mẫu đã thành công.
     emit(
-        tenant_of(current_user), "sample.created",
+        class_meta.tenant_id, "sample.created",
         {
             "session_id": session_id, "label": label, "language": language,
             "dialect": dialect, "class_uid": class_meta.class_uid,

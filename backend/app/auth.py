@@ -661,9 +661,11 @@ def require_tenant_editor(
     Ghép với đường đăng ký mở cũ, nghĩa là người lạ ghi được vào danh mục của
     tổ chức đang giữ dữ liệu thật.
 
-    Vai trò được đọc trên tenant NHÀ của người gọi (`users.tenant_id`) chứ
-    không phải một tenant nêu trong yêu cầu: không endpoint nào ở bậc này nhận
-    tenant từ người gọi, và nếu có thì đó mới là chỗ phải chặn.
+    Vai trò được đọc trên tổ chức ĐANG LÀM VIỆC (phạm vi request, do middleware
+    đặt sau khi kiểm tư cách thành viên) — chính tổ chức mà lệnh ghi đi vào —
+    chứ không phải một tenant nêu trong yêu cầu. Trước 18/10/2026 nó đọc tổ
+    chức NHÀ (`users.tenant_id`): vai biên tập ở trường B mở được danh mục của
+    VOYA khi người đó chuyển sang làm việc ở VOYA. Xem `quota_deps.working_tenant_of`.
     """
     from app.tenancy import normalize_tenant_id
     from app.vocabulary_registry import can_edit_registry
@@ -679,12 +681,17 @@ def require_tenant_editor(
             )
         return current_user
 
-    # Fail-closed khi không xác định được tenant nhà. `normalize_tenant_id("")`
+    # Fail-closed khi không xác định được tổ chức. `normalize_tenant_id("")`
     # trả `"default"`, nên viết `normalize_tenant_id(...)` thẳng ở đây sẽ đánh
     # giá quyền trên TENANT KHỞI TẠO cho một người gọi mà ta không biết thuộc
-    # đâu — đúng phép rơi-về-default đã gỡ khỏi mặt phẳng danh tính 16/08/2026,
-    # còn sót lại ở cổng này.
-    tho = (current_user.get("tenant_id") or "").strip()
+    # đâu — đúng phép rơi-về-default đã gỡ khỏi mặt phẳng danh tính 16/08/2026.
+    from app.quota_deps import working_tenant_of
+    from app.tenant_context import TenantScopeError
+
+    try:
+        tho = (working_tenant_of(current_user) or "").strip()
+    except TenantScopeError:
+        tho = ""
     if not tho:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
