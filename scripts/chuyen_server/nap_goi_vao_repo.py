@@ -154,6 +154,9 @@ def main() -> int:
     args = ap.parse_args()
 
     pack = args.pack.resolve()
+    # "Extract All" của Windows thêm một tầng cùng tên quanh thư mục gốc có sẵn trong zip.
+    if not (pack / "PACK_MANIFEST.json").is_file() and (pack / pack.name / "PACK_MANIFEST.json").is_file():
+        pack = pack / pack.name
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     backup = (args.backup_dir or pack.parent / f"du_phong_VOYA-Collector_{stamp}").resolve()
     if inside(pack, ROOT) or inside(backup, ROOT):

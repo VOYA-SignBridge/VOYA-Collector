@@ -806,8 +806,9 @@ def zip_pack(pack):
         raise Failure(f"Zip CRC check failed for {bad}; {partial.name} kept for inspection.")
     partial.replace(archive)
     checksum = archive.with_name(archive.name + ".sha256")
-    # `sha256sum -c` format, so Linux can check it too.
-    checksum.write_text(f"{digest(archive)}  {archive.name}\n", encoding="ascii")
+    # `sha256sum -c` format, so Linux can check it too. newline="\n": Windows text mode
+    # would write CRLF, and sha256sum then looks for a file named "<zip>\r".
+    checksum.write_text(f"{digest(archive)}  {archive.name}\n", encoding="ascii", newline="\n")
     print(f"Zip: {archive} ({archive.stat().st_size / 1024**3:.2f} GiB), checksum {checksum.name}")
     return archive
 
