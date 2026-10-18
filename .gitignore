@@ -321,3 +321,6 @@ frontend/tests-e2e/fixtures/*.y4m
 
 # Cờ bảo trì do voya tạo/xoá trên máy chạy
 nginx.conf.d/maintenance.on
+
+# Ghi chú, log và script kiểm tạm của từng phiên làm việc — không phải mã của dự án.
+scratchpad/
