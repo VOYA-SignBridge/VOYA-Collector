@@ -283,6 +283,43 @@ def iter_tenant_feature_files(tenant_id: str):
             yield Path(thu_muc) / ten
 
 
+def class_storage_dir(meta: "ClassMetadata") -> str:
+    """Khoá lưu trữ (tương đối gốc dataset) của thư mục một lớp — NGUỒN DUY NHẤT.
+
+    Suy từ `hierarchy_path()`, nên luôn trùng vị trí tệp thật: gồm `_tenants/<id>/`,
+    `<lang>/common/` và `global_common/`. Đừng ghép tay `features/<lang>/<dialect>/…`
+    ở nơi khác — bản ghép tay trong `save_sequence_npz` từng gán khoá sai cho mẫu
+    của lớp tenant khác và lớp dùng chung (18/10/2026).
+    """
+    h = meta.hierarchy_path()
+    try:
+        rel = h.relative_to(FEATURES_ROOT)
+    except ValueError:
+        # Thư mục lớp không nằm dưới gốc dataset ĐANG cấu hình (gốc dataset đã
+        # dời, hoặc kho tạm của test): khoá vẫn là phần sau đoạn `features` cuối
+        # cùng — cùng cấu trúc, chỉ khác gốc. Không có đoạn đó thì không suy được.
+        name = FEATURES_ROOT.name
+        if name not in h.parts:
+            raise
+        i = len(h.parts) - 1 - h.parts[::-1].index(name)
+        rel = Path(*h.parts[i + 1:])
+    return (Path(FEATURES_ROOT.name) / rel).as_posix()
+
+
+def raw_class_dir(meta: "ClassMetadata") -> Path:
+    """Thư mục video thô của một lớp trên đĩa — NGUỒN DUY NHẤT.
+
+    `raw_videos/` không phân vùng theo tenant trên đĩa (tên tệp mang `upload_uid`
+    duy nhất); tenant của video nằm ở dòng `raw_uploads` và đi theo lớp. Đọc
+    `settings.dataset_root` lúc GỌI chứ không lúc nạp module, để test dời gốc
+    dataset được. Trước 18/10/2026 đường này được ghép tay ở sáu nơi.
+    """
+    from app.storage.drive_layout import RAW_VIDEOS_TREE
+
+    return (Path(settings.dataset_root) / RAW_VIDEOS_TREE / meta.language / meta.dialect
+            / meta.folder_name())
+
+
 def drive_class_folder(meta: "ClassMetadata") -> str:
     """Thư mục Drive của một lớp, theo bố cục Drive đang chọn.
 
@@ -294,8 +331,7 @@ def drive_class_folder(meta: "ClassMetadata") -> str:
     """
     from app.storage.drive_layout import drive_path_for
 
-    rel = Path("features") / meta.hierarchy_path().relative_to(FEATURES_ROOT)
-    return drive_path_for(rel.as_posix())
+    return drive_path_for(class_storage_dir(meta))
 
 
 def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
@@ -386,7 +422,7 @@ def _assert_known_dialect(dialect_id: str) -> None:
         )
 
 
-def normalize_dialect(dialect: Optional[str]) -> str:
+def normalize_dialect(dialect: Optional[str], tenant_id: Optional[str] = None) -> str:
     """Free-text dialect from the API -> a registered dialect_id.
 
     Two near-identical copies of this function used to sit here, the second
@@ -408,7 +444,9 @@ def normalize_dialect(dialect: Optional[str]) -> str:
         return ""
     slug = _INPUT_ALIASES.get(slug, slug)
     try:
-        return resolve_dialect(slug)   # follow a merge, e.g. mien-bac -> bac
+        # Alias tables are tenant-owned. Falling back to the registry default
+        # here can turn a normal word label into the fingerspelling dialect.
+        return resolve_dialect(slug, tenant_id=tenant_id or ambient_tenant())
     except Exception:
         return slug                     # DB unreachable: never block a capture
 
@@ -439,6 +477,12 @@ class ClassMetadata:
     # at each call site) is what makes it impossible to register a class with no
     # tenant: there is one constructor and it always has an answer.
     tenant_id: str = DEFAULT_TENANT_ID
+    # Mốc tạo THẬT đọc từ labels.csv. Trống = lớp mới, `to_label_row` mới được
+    # đóng dấu "bây giờ". Trước 17/09/2026 `to_label_row` luôn ghi now_str(),
+    # nên mỗi lần thu mẫu vào lớp cũ (đường camera gọi upsert_class) mốc tạo
+    # trong Postgres — và từ đó gói SOT — nhảy về thời điểm thu.
+    created_at: str = ""
+    migrated_at: str = ""
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -472,8 +516,8 @@ class ClassMetadata:
             "is_common_global": str(int(self.is_common_global)),
             "is_common_language": str(int(self.is_common_language)),
             "folder_name": self.folder_name(),
-            "created_at": now_str(),
-            "migrated_at": now_str(),
+            "created_at": self.created_at or now_str(),
+            "migrated_at": self.migrated_at or self.created_at or now_str(),
             "hands_required": str(self.hands_required or ""),
             "semantic_label": self.semantic_label or "",
             "vocabulary_scope": self.vocabulary_scope or "",
@@ -813,6 +857,8 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
         motion_type=(existing.get("motion_type") or "").strip(),
         region=normalize_region(existing.get("region")),
+        created_at=(existing.get("created_at") or "").strip(),
+        migrated_at=(existing.get("migrated_at") or "").strip(),
         # Without this every class read back from labels.csv would come out as
         # the bootstrap tenant, and since A4 derives the storage directory from
         # this field, tenant B's samples would be written into tenant A's tree —

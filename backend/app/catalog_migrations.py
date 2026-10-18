@@ -134,7 +134,7 @@ def drive_dialect_move_pairs(root: Path, old: str, new: str,
     tenant sở hữu video của phương ngữ này có một cặp riêng ở bố cục `tenant`
     (ở `legacy` các cặp trùng nhau và gộp lại).
     """
-    from app.storage.drive_layout import drive_path_for
+    from app.storage.drive_layout import FEATURES_TREE, RAW_VIDEOS_TREE, drive_path_for
 
     pairs: List[Tuple[str, str]] = []
 
@@ -142,7 +142,7 @@ def drive_dialect_move_pairs(root: Path, old: str, new: str,
         if pair[0] != pair[1] and pair not in pairs:
             pairs.append(pair)
 
-    for tree, tenants in (("features", [None]), ("raw_videos", sorted(set(raw_tenants or [])))):
+    for tree, tenants in ((FEATURES_TREE, [None]), (RAW_VIDEOS_TREE, sorted(set(raw_tenants or [])))):
         base = Path(root) / tree
         if not base.is_dir():
             continue

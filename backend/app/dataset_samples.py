@@ -870,8 +870,9 @@ def save_sequence_npz(
     use_google_drive = settings.use_google_drive
 
     if use_google_drive:
-        folder_name = class_meta.folder_name()
-        storage_key = f"features/{class_meta.language}/{class_meta.dialect}/{folder_name}/{fname}"
+        # Khoá = vị trí THẬT của tệp vừa lưu, không ghép tay: lớp của tenant khác
+        # nằm dưới `_tenants/<id>/`, lớp dùng chung dưới `<lang>/common/`.
+        storage_key = Path(fpath).relative_to(DATASET_ROOT).as_posix()
         upload_item = {
             "sample_uid": sample_uid,
             "local_path": str(fpath),
@@ -1043,6 +1044,7 @@ def save_sequence_npz(
                 session_id=meta.get("session_id", ""),
                 auth_user_id=meta.get("auth_user_id"),
                 source_type=source_type,
+                visibility=meta.get("visibility", "private"),
             ),
         }
         insert_sample(db_row)

@@ -22,6 +22,7 @@ Scale note:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,10 @@ from app.storage.drive_layout import drive_path_for
 
 
 logger = logging.getLogger(__name__)
+
+
+#: Sau bao lâu thì đẩy lại sheet nhãn dù danh mục không đổi — để vá sheet bị sửa tay.
+_LABELS_SHEET_REFRESH_SECONDS = 3600
 
 
 def _rows_to_values(rows: List[Dict[str, Any]], fieldnames: List[str]) -> List[List[Any]]:
@@ -145,11 +150,7 @@ def export_labels_to_sheets(self):
     For labels, we use the full replace approach since the dataset typically
     has < 10K labels and the full state needs to be accurate.
     """
-    from app.storage.metadata_db import ensure_tables
-
     try:
-        ensure_tables()
-
         spreadsheet_id = str(getattr(settings, "google_sheets_labels_spreadsheet_id", "")).strip()
         sheet_gid = int(getattr(settings, "google_sheets_labels_sheet_gid", 0) or 0)
 
@@ -158,7 +159,7 @@ def export_labels_to_sheets(self):
             return {"status": "skipped", "reason": "not_configured"}
 
         # Labels are small enough to do full replace safely
-        from app.dataset_manager import _load_all_labels_unscoped, LABEL_FIELDS
+        from app.dataset_manager import _load_all_labels_unscoped, LABEL_FIELDS, MASTER_LABELS
 
         # Active labels from labels.csv PLUS soft-deleted classes from Postgres,
         # each carrying a deleted_at marker, ordered by class_idx (stable). A
@@ -175,20 +176,18 @@ def export_labels_to_sheets(self):
             rr = dict(r)
             rr.setdefault("deleted_at", "")
             merged.append(rr)
-        try:
-            for r in list_deleted_classes():
-                if (r.get("class_uid") or "") in seen:
-                    continue
-                row = dict(r)
-                # DB stores is_common_* as booleans; match the CSV "0"/"1" form.
-                row["is_common_global"] = str(int(bool(r.get("is_common_global"))))
-                row["is_common_language"] = str(int(bool(r.get("is_common_language"))))
-                merged.append(row)
-        except Exception as exc:  # DB unreachable: fall back to active-only
-            logger.warning("[EXPORT] deleted-classes marker load failed: %s", exc)
+        # Schema initialization belongs to startup, not this minute-by-minute
+        # read. If the DB read fails, retry without publishing a partial sheet.
+        for r in list_deleted_classes():
+            if (r.get("class_uid") or "") in seen:
+                continue
+            row = dict(r)
+            # DB stores is_common_* as booleans; match the CSV "0"/"1" form.
+            row["is_common_global"] = str(int(bool(r.get("is_common_global"))))
+            row["is_common_language"] = str(int(bool(r.get("is_common_language"))))
+            merged.append(row)
 
         if not merged:
-            logger.debug("[EXPORT] No labels to export")
             return {"status": "skipped", "reason": "no_labels"}
 
         def _idx(r: Dict[str, Any]) -> int:
@@ -204,9 +203,36 @@ def export_labels_to_sheets(self):
         for row in merged:
             values.append([str(row.get(field, "") or "") for field in header])
 
+        import hashlib
+        import json
+
+        # Include the destination: changing Sheets settings must populate the
+        # new sheet even when the catalogue itself has not changed.
+        digest = hashlib.sha256(json.dumps(
+            [spreadsheet_id, sheet_gid, values], ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        guard = MASTER_LABELS.parent / ".labels_sheet.synced"
+        # Bỏ qua chỉ khi CÙNG nội dung VÀ lần đẩy gần nhất còn mới. Không có hạn
+        # thì một sheet bị ai đó sửa/xoá tay sẽ không bao giờ được vá lại cho tới
+        # khi danh mục đổi — lượt chạy mỗi phút cứ báo "unchanged" mãi.
+        try:
+            if (guard.read_text(encoding="utf-8").strip() == digest
+                    and time.time() - guard.stat().st_mtime < _LABELS_SHEET_REFRESH_SECONDS):
+                return {"status": "skipped", "reason": "unchanged", "rows": len(merged)}
+        except (OSError, UnicodeError):
+            pass
+
         from app.storage.gdrive_client import get_gdrive_client
         client = get_gdrive_client()
         client.replace_sheet_values(spreadsheet_id, sheet_gid, values)
+
+        # Never cache a failed upload. An unavailable cache merely causes a
+        # redundant sync next time; it must not make a successful upload fail.
+        try:
+            guard.write_text(digest, encoding="utf-8")
+        except OSError:
+            logger.warning("[EXPORT] Could not save labels sync fingerprint")
 
         logger.info("[EXPORT] ✅ Synced %d labels to Sheets (%d active + %d deleted)",
                     len(merged), len(active), len(merged) - len(active))
@@ -220,37 +246,44 @@ def export_labels_to_sheets(self):
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60,
                  platform_wide=True)  # mirrors the whole catalogue, not one tenant's
 def mirror_catalog_csvs_to_drive(self):
-    """Periodically mirror local catalog CSV snapshots to Google Drive.
+    """Đã nghỉ (18/10/2026): Drive không còn giữ bản `.csv` nào.
 
-    Why: the per-append Drive mirror was removed (it hammered the API on every
-    sample), which silently left the Drive copies of samples.csv / labels.csv /
-    raw_uploads.csv frozen. This batch task refreshes them on a beat schedule.
-    replace_existing=True updates each file IN PLACE, so existing share links
-    keep pointing at fresh content.
+    Trước đây task này tải samples.csv / labels.csv / raw_uploads.csv lên gốc
+    Drive mỗi 5 phút, có đổi hay không. Thay bằng Sheet Lookup list theo tổ chức
+    (`sync_lookup_lists`). Giữ tên task để tin nhắn còn xếp hàng không làm worker
+    báo "unregistered task".
     """
-    from app.storage.catalog_mirror import _mirror_csv_to_gdrive_sync
-    from app.dataset_samples import SAMPLES_CSV
-    from app.dataset_manager import MASTER_LABELS
-    from app.raw_uploads import RAW_UPLOADS_CSV
+    return {"status": "skipped", "reason": "retired: Lookup list sheets replace Drive CSVs"}
 
+
+@celery_app.task(bind=True, max_retries=0,
+                 platform_wide=True)  # dựng Sheet cho MỌI tổ chức + Sheet của nền tảng
+def sync_lookup_lists(self, force: bool = False):
+    """Cập nhật các Sheet Lookup list — chỉ Sheet nào có dữ liệu đổi (xem app/lookup_list.py).
+
+    Một lượt dựng lần đầu có thể lâu hơn chu kỳ beat, nên giữ khoá Redis: lượt
+    sau gặp khoá thì bỏ qua thay vì chạy chồng và tạo Sheet hai lần.
+    """
     if not getattr(settings, "use_google_drive", False):
         return {"status": "skipped", "reason": "gdrive_disabled"}
+    import redis
 
-    results = {}
-    for local_path, remote_name in [
-        (SAMPLES_CSV, "samples.csv"),
-        (MASTER_LABELS, "labels.csv"),
-        (RAW_UPLOADS_CSV, "raw_uploads.csv"),
-    ]:
+    from app import lookup_list
+
+    lock = redis.from_url(settings.broker_url).lock("voya:lookup-list:sync", timeout=3600, blocking=False)
+    if not lock.acquire():
+        return {"status": "skipped", "reason": "another sync is running"}
+    try:
+        result = lookup_list.sync_all(force=bool(force))
+    finally:
         try:
-            _mirror_csv_to_gdrive_sync(local_path, remote_name)
-            results[remote_name] = "ok"
-        except Exception as exc:  # per-file: one failure must not block the rest
-            logger.warning("[CSV_MIRROR] %s failed: %s", remote_name, exc)
-            results[remote_name] = f"failed: {exc}"
-
-    logger.info("[CSV_MIRROR] snapshot mirror done: %s", results)
-    return {"status": "done", "results": results}
+            lock.release()
+        except Exception:
+            pass
+    changed = {t: {k: v for k, v in r.items() if v not in ("khong doi", "chua toi gio")}
+               for t, r in result.items()}
+    logger.info("[LOOKUP] sync done: %s", {t: r for t, r in changed.items() if r} or "khong co gi doi")
+    return {"status": "done", "result": result}
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30,
@@ -472,7 +505,7 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
             logger.warning("[GDRIVE_UPLOAD] Failed to update sidecar JSON: %s", e)
 
         # 2. Update Postgres database
-        update_sample_gdrive_url(sample_uid, storage_url)
+        update_sample_gdrive_url(sample_uid, storage_url, storage_key)
 
         # 3. Update samples.csv
         update_sample_row(sample_uid, {
@@ -541,7 +574,7 @@ def upload_npz_batch_to_gdrive_task(self, items: list):
 
             # DB per-item (pooled connection → cheap)
             try:
-                update_sample_gdrive_url(sample_uid, storage_url)
+                update_sample_gdrive_url(sample_uid, storage_url, storage_key)
             except Exception as e:
                 logger.warning("[GDRIVE_BATCH] DB update failed for %s: %s", sample_uid, e)
 

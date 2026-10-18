@@ -253,6 +253,9 @@ class TestTheAggregateTasksStayPlatformWide:
         "app.export_tasks.export_samples_to_sheets",
         "app.export_tasks.export_labels_to_sheets",
         "app.export_tasks.mirror_catalog_csvs_to_drive",
+        # Dựng Sheet Lookup list cho MỌI tổ chức và Sheet của nền tảng; beat phái,
+        # không có người dùng nào để lấy phạm vi.
+        "app.export_tasks.sync_lookup_lists",
         "app.export_tasks.reconcile_samples_csv_task",
         "app.sync_tasks.download_missing_files_to_local",
         "app.training_tasks.cleanup_training_artifacts",

@@ -97,17 +97,11 @@ class GDriveSotStore:
         """
         parent = client.root_folder_id or "root"
         for part in [p for p in folder_path.strip("/").split("/") if p]:
-            q = (
-                f"name='{part}' and '{parent}' in parents "
-                "and mimeType='application/vnd.google-apps.folder' and trashed=false"
-            )
-            res = client.service.files().list(q=q, spaces="drive", fields="files(id)").execute(
-                num_retries=client.num_retries
-            )
-            files = res.get("files", [])
-            if not files:
+            # Cùng lối tra với bên ghi: nhiều thư mục trùng tên thì lấy cái cũ
+            # nhất, nên người đọc và người ghi luôn nhìn vào một thư mục.
+            parent = client._get_folder_id(part, parent)
+            if parent is None:
                 return None
-            parent = files[0]["id"]
         return parent
 
     def _resolve_file_id(self, client, rel_path: str):

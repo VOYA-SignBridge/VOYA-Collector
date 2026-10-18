@@ -356,32 +356,35 @@ class TestSignupNeverLandsInTheBootstrapTenant:
                 purge_tenant(t["tenant_id"])
             _drop_account(name)
 
-    def test_ma_to_chuc_KHONG_lo_ai_da_lap_truoc(self):
-        """Hai tổ chức TRÙNG TÊN phải ra hai mã không đoán được.
+    def test_ten_to_chuc_trung_bi_tu_choi(self):
+        """Tên tổ chức là duy nhất (18/10/2026): lần lập thứ hai cùng tên bị từ chối.
 
-        Một bộ đếm (`truong-b`, `truong-b-2`) biến ô tên thành máy dò: thử một
-        cái tên và xem hậu tố trả về là biết đã có bao nhiêu tổ chức trùng tên
-        trên nền tảng.
-
-        Dời từ đường đăng ký sang đường tự lập, cùng lý do như bài trên.
+        Trước đây hai tổ chức trùng tên được hai mã mang hậu tố ngẫu nhiên. Nay
+        mã chính là khoá của tên, và cũng là tên thư mục trên Drive — trùng tên
+        là chung thư mục — nên lần thứ hai phải nhận 409, kể cả khi chỉ khác
+        hoa/thường và dấu.
         """
         from conftest import purge_tenant
         from app import auth, tenant_admin
 
         ten_tk, tao = [], []
         try:
-            for _ in range(2):
+            ten = f"Truong Trung Ten {_unique('t')}"
+            for i in range(2):
                 n = _unique("dup")
                 u = auth.create_user(username=n, email=f"{n}@example.com",
                                      password=PW)
                 ten_tk.append(n)
-                tao.append(tenant_admin.create_self_serve_tenant(
-                    str(u["id"]), display_name="Truong Trung Ten")["tenant_id"])
+                if i == 0:
+                    tao.append(tenant_admin.create_self_serve_tenant(
+                        str(u["id"]), display_name=ten)["tenant_id"])
+                else:
+                    with pytest.raises(tenant_admin.TenantError) as exc:
+                        tenant_admin.create_self_serve_tenant(
+                            str(u["id"]), display_name=ten.upper())
+                    assert exc.value.status_code == 409
 
-            assert tao[0] != tao[1], "hai to chuc trung ten ra cung mot ma"
-            assert not tao[1].endswith("-2"), (
-                "hau to la mot BO DEM — o ten tro thanh may do so to chuc "
-                "trung ten da co tren nen tang")
+            assert tao[0] == tenant_admin.tenant_name_key(ten), "ma to chuc khong phai khoa cua ten"
         finally:
             for tid in tao:
                 purge_tenant(tid)

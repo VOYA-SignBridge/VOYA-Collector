@@ -4,12 +4,12 @@ Two jobs, both needed for `pytest backend/tests` to mean what it looks like it
 means.
 
 1. Environment. A bare `pytest` on the HOST is pointed at the localhost stack
-   (the compose test-ports override publishes postgres:5432 + redis:6379) and at
-   the repo's Google Drive credentials — so the suite runs with NO skips and no
-   "forgot to export an env var" false failures. Only UNSET values are filled,
-   so the real container env (postgres:/redis: hostnames, /gdrive paths) and
-   anything exported explicitly are never overridden. On a machine without
-   gdrive credentials the SOT integration tests still skip gracefully.
+   (the compose test-ports override publishes postgres:5432 + redis:6379) — so
+   the suite runs without "forgot to export an env var" false failures. Only
+   UNSET values are filled, so the real container env (postgres:/redis:
+   hostnames) and anything exported explicitly are never overridden. Real
+   Google Drive/Sheets is blocked outright (see `_CHAN_GOOGLE_API_THAT`); the
+   SOT integration tests that need it skip.
 
 2. Collection. Most research-pipeline suites are STANDALONE scripts: pure-stdlib
    files with a main() that prints PASS/FAIL and returns an exit code, runnable
@@ -72,14 +72,11 @@ _LEGAL_STORE_FOR_TESTS = Path(tempfile.gettempdir()) / "voya-test-legal-store"
 _LEGAL_STORE_FOR_TESTS.mkdir(parents=True, exist_ok=True)
 os.environ["LEGAL_STORE_ROOT"] = str(_LEGAL_STORE_FOR_TESTS)
 
-# 2. Point Google Drive at the repo's gdrive/ (host absolute path) so the SOT
-#    integration tests find the credentials and RUN instead of skipping. If the
-#    files aren't present (e.g. CI), we leave it alone and those tests skip.
-_gdrive = _REPO / "gdrive"
-if (_gdrive / "credentials.json").exists():
-    os.environ.setdefault("GOOGLE_DRIVE_CREDENTIALS", str(_gdrive / "credentials.json"))
-if (_gdrive / "token.json").exists():
-    os.environ.setdefault("GOOGLE_DRIVE_TOKEN", str(_gdrive / "token.json"))
+# 2. Google Drive: KHÔNG trỏ bộ test vào thông tin đăng nhập thật nữa. Trước
+#    18/10/2026 chỗ này trỏ vào gdrive/ của repo để test tích hợp SOT chạy với
+#    Drive thật — và bộ test để lại thư mục SOT_PYIT, dời `hoa-de` ra gốc My
+#    Drive, tạo `pho-thong` 342 mục trên Drive sản xuất. Chặn hẳn: xem
+#    `_CHAN_GOOGLE_API_THAT` bên dưới.
 
 # 2b. A real hand-sign clip for the video->npz extraction test. Point it at the
 #     first clip in a known sample folder if present, so the test RUNS (no skip)
@@ -91,13 +88,14 @@ if (_gdrive / "token.json").exists():
 #     were purged. Mounting a clip folder read-only at /testvideos is what keeps
 #     this test running rather than skipping:
 #
-#       -v "E:\CTU_ProjectOutside\Videos:/testvideos:ro"
+#       -v "E:\CTU_ProjectOutside\qipedc_mau:/testvideos:ro"
 if not os.environ.get("VOYA_TEST_VIDEO"):
     _vids = []
     for _cand in (
         Path("/testvideos"),
         _REPO / "sample_clips",
-        Path("E:/CTU_ProjectOutside/Videos"),
+        # `Videos` was a byte-identical copy of qipedc_mau (removed 16/10/2026).
+        Path("E:/CTU_ProjectOutside/qipedc_mau"),
     ):
         try:
             _vids = sorted(_cand.glob("*.mp4")) if _cand.exists() else []
@@ -483,6 +481,34 @@ def registration_consents() -> dict:
 #: giờ là nguồn duy nhất; `test_tenant_purge_order_covers_every_tenant_table`
 #: vẫn canh nó khớp `metadata_db.TENANT_SCOPED_TABLES`.
 from app.tenant_lifecycle import PURGE_ORDER as _TENANT_PURGE_ORDER  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Bộ test không bao giờ gọi Google Drive/Sheets thật
+#
+# Hai lớp, cùng kiểu với chặn SMTP ở trên, chạy ngay lúc nạp conftest (trước khi
+# tệp test nào được nạp) chứ không đợi fixture:
+#   1. không dựng được `GoogleDriveClient` — `get_gdrive_client()` ném lỗi, nên
+#      test tích hợp cần Drive thật tự bỏ qua (xem `_infra_available`);
+#   2. mọi lệnh gọi HTTP của `googleapiclient` ném lỗi — bắt cả đường nào dựng
+#      dịch vụ Google bằng cách khác.
+# Test cần Drive thì thay `get_gdrive_client` bằng client giả, như vẫn làm.
+_CHAN_GOOGLE_API_THAT = (
+    "Bộ test không được gọi Google Drive/Sheets thật — "
+    "monkeypatch `get_gdrive_client` bằng một client giả."
+)
+
+
+def _tu_choi_google_api(*_a, **_kw):
+    raise RuntimeError(_CHAN_GOOGLE_API_THAT)
+
+
+import app.storage.gdrive_client as _gdrive_client_module  # noqa: E402
+import googleapiclient.http as _googleapiclient_http  # noqa: E402
+
+_gdrive_client_module.GoogleDriveClient.__init__ = _tu_choi_google_api
+_gdrive_client_module._gdrive_client = None
+_googleapiclient_http.HttpRequest.execute = _tu_choi_google_api
 
 
 # ---------------------------------------------------------------------------

@@ -101,13 +101,9 @@ echo "==> dich test: $(printf '%s' "$app_dsn" | sed -E 's#://([^:]+):[^@]*@#://\
 # --------------------------------------------------------------------------
 extra=""
 
-# 1) Google Drive. `gdrive_client` tìm ĐÚNG /gdrive/credentials.json; mount
-#    read-only vì bộ test chỉ cần đọc chứng thư, không cần ghi đè nó.
-if [ -f "$REPO/gdrive/credentials.json" ]; then
-  extra="$extra -v ${REPO_MOUNT}/gdrive:/gdrive:ro"
-else
-  echo "==> khong co gdrive/credentials.json — 13 ca SOT se skip"
-fi
+# 1) Google Drive: KHÔNG mount gdrive/ vào container test (từ 18/10/2026). Bộ
+#    test từng ghi thẳng lên Drive sản xuất qua đường này; conftest giờ chặn
+#    mọi lệnh gọi Google API, và 13 ca SOT tích hợp skip.
 
 # 2) Một clip thật để chạy trích đặc trưng đầu-đến-cuối. `skipif` bám vào BIẾN
 #    MÔI TRƯỜNG chứ không vào sự tồn tại của thư mục, nên mount không thôi là
