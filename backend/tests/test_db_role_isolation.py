@@ -602,6 +602,12 @@ class TestTestRolesCannotReachProduction:
     def test_a_test_role_is_refused_by_production(self, role):
         error = _try_connect(role, _PRODUCTION_DATABASE)
 
+        # Cụm không có CSDL sản xuất (CI dựng một Postgres chỉ chứa CSDL test):
+        # không có gì để chặn, nên phép đo không có nghĩa — nói ra, đừng xanh giả
+        # mà cũng đừng đỏ oan. Ở máy dev `signdb` có thật nên ca này vẫn chạy.
+        if error is not None and "does not exist" in str(error):
+            pytest.skip(f"cum nay khong co CSDL {_PRODUCTION_DATABASE} — khong co gi de chan")
+
         assert error is not None, (
             f"{role} MO DUOC ket noi toi {_PRODUCTION_DATABASE}. Lop quyen "
             f"khong con, va hai lop tren deu la ma co the viet sai.")

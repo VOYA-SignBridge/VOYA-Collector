@@ -1003,7 +1003,14 @@ def corpus_row_to_poke():
     from app.tenant_context import system_scope
 
     with system_scope("test: bảo đảm corpus có dòng để thử ràng buộc"):
-        if db._fetch_all("SELECT 1 FROM samples LIMIT 1"):
+        # Hỏi đúng thứ các test cần, không hỏi "bảng có rỗng không": chúng đâm vào
+        # một mẫu CỦA `default` và một NGƯỜI KÝ. Trên CI, fixture cách ly đã gieo
+        # mẫu cho `iso_a`/`iso_b`, nên câu hỏi cũ trả lời "đã có dữ liệu" và không
+        # gieo gì — năm test đỏ với "DID NOT RAISE" / "cannot unpack NoneType".
+        co_mau_default = db._fetch_all(
+            "SELECT 1 FROM samples WHERE tenant_id = %s LIMIT 1", (DEFAULT_TENANT_ID,))
+        co_nguoi_ky = db._fetch_all("SELECT 1 FROM signers LIMIT 1")
+        if co_mau_default and co_nguoi_ky:
             yield None          # đã có dữ liệu thật — không đụng vào
             return
 

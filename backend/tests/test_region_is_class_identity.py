@@ -86,6 +86,13 @@ def phuong_ngu_that():
     # môi trường tệ hơn lúc nhận — đúng cái đã gây ra ba ca đỏ này.
     if not da_co:
         with system_scope("test cleanup"):
+            # Phương ngữ do CHÍNH fixture này tạo, nên mọi lớp mang nó đều do test
+            # vừa chạy tạo ra (vd. `register_class("an", ...)`, slug khác `SLUG`).
+            # Fixture này gỡ TRƯỚC `kho_tam` (thứ tự ngược lúc dựng), nên phải dọn
+            # lớp ở đây — xoá phương ngữ khi lớp còn trỏ tới là đổ `classes_dialect_fkey`
+            # (chỉ lộ trên CSDL dựng mới như CI, nơi `pho-thong` chưa có sẵn).
+            _execute("DELETE FROM classes WHERE tenant_id='default' "
+                     "AND dialect='pho-thong'")
             _execute("DELETE FROM dialects WHERE tenant_id='default' "
                      "AND dialect_id='pho-thong'")
 
@@ -97,17 +104,38 @@ def kho_tam(monkeypatch, tmp_path):
     `MASTER_LABELS` được phân giải lúc NẠP MODULE, nên đặt `DATASET_ROOT` sau
     đó không có tác dụng — bài thử sẽ lặng lẽ ghi vào `dataset/labels.csv`
     thật. Đây đúng là sự cố 13/08 ở dạng khác, nên nó được nói ra ở đây.
+
+    Chuyển CSV sang thư mục tạm KHÔNG đủ: từ 15/09 `register_class` còn soi lớp
+    mới vào bảng `classes` ngay lúc đăng ký, và bảng ấy nằm trong `signdb_test`
+    dùng chung chứ không ở `tmp_path`. Bản trước không dọn phần đó, nên mỗi lượt
+    chạy để lại `an-vung-test|pho-thong` ở hai vùng — hợp lệ với khoá năm cột,
+    nhưng chặn `TestDuongNangCap` dựng lại chỉ mục bốn cột cũ. Dọn theo `SLUG`
+    cả trước lẫn sau: trước để không thừa hưởng rác của lượt hỏng giữa chừng.
     """
     import importlib
 
     from app import dataset_manager as dm
 
+    _don_lop_test_trong_db()
     monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
     monkeypatch.setattr(dm, "MASTER_LABELS", tmp_path / "labels.csv")
     monkeypatch.setattr(dm, "DATASET_ROOT", tmp_path)
     assert dm.MASTER_LABELS.parent == tmp_path
-    yield dm
-    importlib.reload(dm)
+    try:
+        yield dm
+    finally:
+        importlib.reload(dm)
+        _don_lop_test_trong_db()
+
+
+def _don_lop_test_trong_db():
+    """Chỉ xoá lớp mang `SLUG` của tệp này — không đụng lớp nào khác."""
+    from app.storage.metadata_db import _execute
+    from app.tenant_context import system_scope
+
+    with system_scope("test cleanup: an-vung-test"):
+        _execute("DELETE FROM classes WHERE tenant_id = 'default' AND slug = %s",
+                 (SLUG,))
 
 
 def _viet_labels(dm, hang):
