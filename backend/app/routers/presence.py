@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from app import activity
-from app.rate_limit import client_ip
+from app.modules.security.rate_limits import client_ip
 
 
 router = APIRouter()

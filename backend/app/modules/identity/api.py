@@ -28,7 +28,7 @@ from app.cookie_auth import (
     set_auth_cookies,
 )
 from app.email_service import send_password_reset_email
-from app.rate_limit import (
+from app.modules.security.rate_limits import (
     check_login_allowed,
     client_ip,
     enforce_ip_limit,

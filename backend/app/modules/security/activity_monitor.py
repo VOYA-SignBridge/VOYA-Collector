@@ -21,7 +21,7 @@ from app.modules.security.geo import (
     location_label,
 )
 from app.modules.security.ip_controls import block_key, get_block, list_blocked
-from app.rate_limit import client_ip
+from app.modules.security.rate_limits import LOGIN_MAX_ATTEMPTS, client_ip
 
 ONLINE_TTL = int(os.getenv("ACTIVITY_ONLINE_TTL", "600"))
 ONLINE_ACTIVE_SECONDS = int(os.getenv("ACTIVITY_ACTIVE_SECONDS", "120"))
@@ -242,8 +242,6 @@ def detect_anomalies(sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     client = get_activity_client()
     if client is not None:
         try:
-            from app.rate_limit import LOGIN_MAX_ATTEMPTS
-
             for key in client.scan_iter(match="ratelimit:login:ip:*", count=200):
                 try:
                     count = int(client.get(key) or 0)

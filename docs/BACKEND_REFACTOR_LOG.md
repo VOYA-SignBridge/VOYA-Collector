@@ -627,3 +627,60 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Đưa implementation GeoIP/session monitor trở lại `app/activity.py`.
 - Xóa hai component mới và các regression assertion BR-012.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-013: Thống nhất Redis và tách rate-limit component
+
+### Mục tiêu
+
+- Loại bỏ Redis singleton trùng lặp trong `app/rate_limit.py`.
+- Đặt nghiệp vụ chống brute-force/spam vào security module đúng tầng.
+- Giữ nguyên import contract cũ cho consumer chưa migration.
+
+### Thay đổi
+
+- `infrastructure/redis/connection.py` cung cấp tên tổng quát
+  `get_redis_client`; `get_activity_client` được giữ làm compatibility alias.
+- Thêm `modules/security/rate_limits.py` chứa:
+  - xác định client IP sau nginx;
+  - fixed-window Redis counter;
+  - giới hạn login theo IP và normalized identifier;
+  - giới hạn register/forgot/reset theo IP;
+  - HTTP 429 cùng `Retry-After` và fail-open behaviour.
+- Thu gọn `app/rate_limit.py` thành compatibility facade, bao gồm các public
+  callable/constant và private helper aliases cũ.
+- Identity API, presence và activity monitor import component mới trực tiếp,
+  không đi vòng qua facade.
+- Thêm `tests/test_rate_limit_module_boundaries.py` bảo vệ facade identity,
+  shared Redis client, key/TTL/reset contract, forwarded IP và fail-open.
+
+### Contract được giữ nguyên
+
+- Redis key prefix, login threshold/window, identifier normalization và generic
+  bucket format không đổi.
+- HTTP status, thông báo tiếng Việt và `Retry-After` không đổi.
+- Redis không khả dụng vẫn cho request đi qua; nginx tiếp tục là lớp giới hạn
+  lưu lượng ngoài cùng.
+- `app.rate_limit` và exports qua `modules.identity` vẫn dùng được như trước.
+
+### Kiểm tra
+
+- Compile check trong Docker thành công cho infrastructure, component, facade
+  và các consumer đã migration.
+- Rate-limit/security/identity/composition focused regression: 16 pass.
+- Toàn bộ backend pytest trên Docker Compose network: 213 pass, 3 fail.
+- Ba lỗi còn lại đúng baseline ngoài phạm vi: một released manifest và hai
+  provenance assertions phụ thuộc research artifacts.
+
+### Phạm vi dữ liệu
+
+- Không thay đổi SQL, database schema hoặc dữ liệu database.
+- Không chạy dataset migration và không sửa manifest/split/checkpoint.
+- Regression test dùng fake Redis; full suite dùng Redis của Docker test
+  network theo cấu hình dự án.
+
+### Hoàn tác
+
+- Đưa rate-limit implementation và Redis singleton riêng về
+  `app/rate_limit.py`.
+- Khôi phục import consumer qua facade, xóa component/test BR-013.
+- Không có database migration hoặc dữ liệu cần hoàn tác.
