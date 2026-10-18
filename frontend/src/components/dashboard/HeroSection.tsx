@@ -2,12 +2,20 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSamples } from "../../api/dataset";
 import type { Session } from "../../types";
-import Button from "../ui/Button";
 import { useI18n } from "../../i18n";
 
 interface HeroSectionProps {
   username: string | null;
 }
+
+// Khung chào nằm trên nền NAVY CTU, cùng tông với thanh bên (18/10/2026). Hai nút
+// không dùng `Button`: `.btn-primary`/`.btn-ghost` viết ngoài layer của Tailwind
+// v4 nên luôn thắng class ghi đè, và nút "ghost" chữ xanh CTU trên nền navy thì
+// không đủ tương phản.
+const CTA_PRIMARY =
+  "inline-flex items-center justify-center rounded-lg bg-white px-6 py-3 sm:px-8 text-base font-semibold text-ctu-navy shadow-md transition-colors hover:bg-blue-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-ctu-navy";
+const CTA_SECONDARY =
+  "inline-flex items-center justify-center rounded-lg border border-white/40 px-6 py-3 sm:px-8 text-base font-semibold text-white transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-ctu-navy";
 
 export default function HeroSection({ username }: HeroSectionProps) {
   const { t } = useI18n();
@@ -42,31 +50,29 @@ export default function HeroSection({ username }: HeroSectionProps) {
   }, [username]);
 
   return (
-    <div className="relative bg-gradient-to-br from-ctu-blue/5 via-white to-ctu-navy/5 rounded-3xl px-6 py-12 sm:px-8 sm:py-16 lg:px-12 lg:py-20 border border-slate-100/50 shadow-lg overflow-hidden">
+    <div className="relative isolate bg-gradient-to-br from-ctu-navy via-ctu-navy-mid to-ctu-blue rounded-3xl px-6 py-12 sm:px-8 sm:py-16 lg:px-12 lg:py-20 shadow-lg overflow-hidden text-white">
       {/* Background decoration */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-ctu-blue/10 rounded-full blur-3xl -z-10" />
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-ctu-navy/10 rounded-full blur-3xl -z-10" />
+      <div className="absolute -top-24 -right-24 w-96 h-96 bg-ctu-blue-light/25 rounded-full blur-3xl -z-10" aria-hidden="true" />
+      <div className="absolute -bottom-32 left-1/3 w-96 h-96 bg-white/10 rounded-full blur-3xl -z-10" aria-hidden="true" />
 
       <div className="relative z-10 max-w-3xl">
         {username ? (
           <>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">
-                {t("Xin chào, {ten}!", { ten: username })}
-              </span>
+              {t("Xin chào, {ten}!", { ten: username })}
             </h1>
 
             <div className="mb-8 space-y-3">
-              <p className="text-lg sm:text-xl font-semibold text-slate-900">
+              <p className="text-lg sm:text-xl font-semibold text-white">
                 {loading ? (
-                  <span className="text-slate-400">{t("Đang tính toán đóng góp của bạn...")}</span>
+                  <span className="text-blue-100/80">{t("Đang tính toán đóng góp của bạn...")}</span>
                 ) : (
                   <>
-                    {t("Bạn đã đóng góp")} <span className="text-ctu-blue">{userSamples.toLocaleString()}</span> {t("mẫu cho cộng đồng.")}
+                    {t("Bạn đã đóng góp")} <span className="text-ctu-blue-light">{userSamples.toLocaleString()}</span> {t("mẫu cho cộng đồng.")}
                   </>
                 )}
               </p>
-              <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
+              <p className="text-base sm:text-lg text-blue-100/90 leading-relaxed">
                 {t("Mỗi mẫu dữ liệu giúp cải thiện hệ thống nhận dạng Ngôn ngữ Ký hiệu Việt Nam.")}
                 <br />
                 <strong>{t("Tác động của bạn là có thật.")}</strong>
@@ -74,33 +80,25 @@ export default function HeroSection({ username }: HeroSectionProps) {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-3">
-              <Button
-                onClick={() => navigate("/upload")}
-                className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
-                variant="primary"
-              >
+              <button type="button" onClick={() => navigate("/upload")} className={CTA_PRIMARY}>
                 {t("Đóng góp thêm dữ liệu →")}
-              </Button>
-              <Button
-                onClick={() => navigate("/realtime")}
-                className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
-                variant="ghost"
-              >
+              </button>
+              <button type="button" onClick={() => navigate("/realtime")} className={CTA_SECONDARY}>
                 {t("Thử nhận dạng")}
-              </Button>
+              </button>
             </div>
           </>
         ) : (
           <>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-4">
-              <span className="bg-gradient-to-r from-ctu-navy via-ctu-navy-mid to-ctu-blue bg-clip-text text-transparent">{t("Xin chào")}</span>
+              {t("Xin chào")}
             </h1>
 
             <div className="mb-8 space-y-3">
-              <p className="text-lg sm:text-xl font-semibold text-slate-900">
+              <p className="text-lg sm:text-xl font-semibold text-white">
                 {t("Khám phá CTU.SignBridge")}
               </p>
-              <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
+              <p className="text-base sm:text-lg text-blue-100/90 leading-relaxed">
                 {t("Cùng xây dựng cộng đồng Ngôn ngữ Ký hiệu Việt Nam thông qua công nghệ nhận dạng AI.")}
                 <br />
                 <strong>{t("Mỗi đóng góp đều quan trọng.")}</strong>
@@ -108,20 +106,12 @@ export default function HeroSection({ username }: HeroSectionProps) {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-3">
-              <Button
-                onClick={() => navigate("/realtime")}
-                className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
-                variant="primary"
-              >
+              <button type="button" onClick={() => navigate("/realtime")} className={CTA_PRIMARY}>
                 {t("Thử nhận dạng ngay →")}
-              </Button>
-              <Button
-                onClick={() => navigate("/register")}
-                className="justify-center px-6 py-3 sm:px-8 text-base font-semibold"
-                variant="ghost"
-              >
+              </button>
+              <button type="button" onClick={() => navigate("/register")} className={CTA_SECONDARY}>
                 {t("Đăng ký đóng góp")}
-              </Button>
+              </button>
             </div>
           </>
         )}
