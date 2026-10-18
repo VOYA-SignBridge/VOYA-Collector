@@ -734,3 +734,52 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 - Đưa ba endpoint implementation trở lại cuối `routers/admin.py`.
 - Xóa `admin_data.py` và regression test BR-014.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-015: Tách admin user database service
+
+### Mục tiêu
+
+- Loại bỏ transaction SQL và response shaping khỏi admin HTTP router.
+- Hoàn tất lát cắt cấu trúc web-system cuối mà không chia nhỏ security routes.
+
+### Thay đổi
+
+- Thêm `modules/admin/user_service.py` chứa:
+  - truy vấn danh sách user;
+  - chuẩn hóa UUID/datetime;
+  - bổ sung lock/warning state từ security controls;
+  - cập nhật quyền admin và trả updated row.
+- Thêm `modules/admin/__init__.py` làm public boundary cho admin services.
+- `routers/admin.py` chỉ còn HTTP authorization/validation/status mapping cho
+  hai route user và gọi service mới.
+- Kiểm tra cấm tự gỡ quyền admin và HTTP 404 vẫn ở router như trước.
+- Thêm `tests/test_admin_user_service.py` với fake Postgres connection/cursor;
+  test không mở database thật.
+
+### Contract được giữ nguyên
+
+- Câu SELECT/UPDATE, transaction context và connection close không đổi.
+- `GET /admin/users` giữ nguyên response fields và lock/warning enrichment.
+- `PUT /admin/users/{user_id}/role` giữ nguyên self-demotion guard, status code,
+  thông báo lỗi và success payload.
+- Không thay đổi dependency `require_admin` hoặc route path.
+
+### Kiểm tra
+
+- Compile check local và trong Docker thành công cho service, router và test.
+- Admin user/router/composition/security focused regression: 13 pass.
+- Toàn bộ backend pytest trên Docker Compose network: 218 pass, 3 fail.
+- Ba lỗi còn lại đúng baseline ngoài phạm vi: một released manifest và hai
+  provenance assertions phụ thuộc research artifacts.
+
+### Phạm vi dữ liệu
+
+- Không thay đổi SQL, database schema hoặc dữ liệu database.
+- Unit test dùng fake connection/cursor; không ghi Postgres thật.
+- Không chạy dataset migration và không sửa manifest/split/checkpoint.
+
+### Hoàn tác
+
+- Đưa hai transaction SQL và response shaping trở lại `routers/admin.py`.
+- Xóa package `modules/admin` và regression test BR-015.
+- Không có database migration hoặc dữ liệu cần hoàn tác.

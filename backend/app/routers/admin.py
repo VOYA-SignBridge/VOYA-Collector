@@ -2,9 +2,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from app.modules.admin.user_service import list_users, set_user_admin_role
 from app.modules.identity import require_admin
-from app.infrastructure.database.connection import connect_postgres
-from psycopg2.extras import RealDictCursor
 from app.monitoring import collect_resources
 from app import activity
 from app.routers.admin_data import (
@@ -39,33 +38,7 @@ class WarnUser(BaseModel):
 @router.get("/users")
 def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
     """Lấy danh sách tất cả người dùng (Chỉ Admin)"""
-    conn = connect_postgres()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT id, username, email, is_active, is_admin, created_at
-                    FROM users
-                    ORDER BY created_at DESC
-                    """
-                )
-                users = cur.fetchall()
-                locked = activity.list_locked_users()
-                warned = activity.list_warned_users()
-                # Chuyển đổi UUID/datetime sang string để FastAPI tự serialize
-                for u in users:
-                    u["id"] = str(u["id"])
-                    if u["created_at"]:
-                        u["created_at"] = u["created_at"].isoformat()
-                    lk = locked.get(u["id"])
-                    u["locked"] = bool(lk)
-                    u["lock_reason"] = (lk or {}).get("reason", "")
-                    u["lock_until"] = (lk or {}).get("until", 0)
-                    u["has_warning"] = u["id"] in warned
-                return users
-    finally:
-        conn.close()
+    return list_users()
 
 @router.put("/users/{user_id}/role")
 def update_user_role(
@@ -81,23 +54,13 @@ def update_user_role(
             detail="Không thể tự gỡ quyền Admin của chính mình."
         )
 
-    conn = connect_postgres()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "UPDATE users SET is_admin = %s WHERE id = %s RETURNING id, username, is_admin",
-                    (payload.is_admin, user_id)
-                )
-                updated = cur.fetchone()
-                if not updated:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Không tìm thấy người dùng"
-                    )
-                return {"status": "success", "user": {"id": str(updated["id"]), "username": updated["username"], "is_admin": updated["is_admin"]}}
-    finally:
-        conn.close()
+    updated = set_user_admin_role(user_id, payload.is_admin)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy người dùng",
+        )
+    return {"status": "success", "user": updated}
 
 @router.get("/resources")
 def get_resources(current_user: Dict[str, Any] = Depends(require_admin)):
