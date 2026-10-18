@@ -122,7 +122,13 @@ def current_layout() -> str:
 
 # ------------------------------------------------------------- thư mục của tổ chức
 
-_tenant_root_cache: Dict[str, str] = {}
+#: tenant_id -> (thư mục Drive, thời điểm nạp theo `time.monotonic()`).
+_tenant_root_cache: Dict[str, tuple] = {}
+#: Hạn của một mục cache. Worker Celery sống hàng giờ và `tenants.slug` có thể đổi
+#: bởi một tiến trình KHÁC (API, script dời Drive); `clear_tenant_root_cache()`
+#: chỉ xoá được cache của chính tiến trình gọi nó. Không có hạn thì worker cứ ghi
+#: vào thư mục của slug cũ cho tới khi ai đó restart nó.
+TENANT_ROOT_TTL_SECONDS = 60.0
 
 
 def clear_tenant_root_cache() -> None:
@@ -133,13 +139,16 @@ def clear_tenant_root_cache() -> None:
 def tenant_drive_root(tenant_id: str) -> str:
     """`Community` cho tổ chức cộng đồng, `Tenants/<slug>` cho tổ chức khác.
 
-    Đọc `tenants` một lần mỗi tổ chức mỗi tiến trình, DƯỚI phạm vi hiện hành:
+    Đọc `tenants` (cache `TENANT_ROOT_TTL_SECONDS` giây mỗi tổ chức mỗi tiến trình), DƯỚI phạm vi hiện hành:
     RLS cho mỗi tổ chức thấy dòng của chính nó, và task toàn nền tảng chạy trong
     `system_scope`. Không thấy dòng thì TỪ CHỐI — đoán một thư mục là cách dữ
     liệu rơi vào chỗ không ai tìm.
     """
-    if tenant_id in _tenant_root_cache:
-        return _tenant_root_cache[tenant_id]
+    import time
+
+    cached = _tenant_root_cache.get(tenant_id)
+    if cached is not None and time.monotonic() - cached[1] < TENANT_ROOT_TTL_SECONDS:
+        return cached[0]
     from app.storage.metadata_db import _fetch_all
 
     rows = _fetch_all("SELECT slug, tenant_type FROM tenants WHERE tenant_id = %s", (tenant_id,))
@@ -152,7 +161,7 @@ def tenant_drive_root(tenant_id: str) -> str:
         if not is_valid_tenant_id(slug):
             raise ValueError(f"slug không hợp lệ cho thư mục Drive của {tenant_id!r}: {slug!r}")
         root = f"{TENANTS_ROOT}/{slug}"
-    _tenant_root_cache[tenant_id] = root
+    _tenant_root_cache[tenant_id] = (root, time.monotonic())
     return root
 
 

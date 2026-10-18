@@ -100,10 +100,25 @@ def _move_tree(root: Path, old: str, new: str) -> int:
     return moved
 
 
-def _rewrite_sidecars(root: Path, new: str, old: str) -> int:
-    """The layer everyone forgets: one JSON per class AND one per sample."""
+def _feature_base(root: Path, tenant_id: str) -> Path:
+    """Cây `features/` của MỘT tổ chức: tenant gốc ở ngay gốc, tổ chức khác ở
+    `features/_tenants/<id>/` (xem `dataset_manager.tenant_features_root`)."""
+    from app.tenancy import DEFAULT_TENANT_ID
+
+    base = Path(root) / "features"
+    return base if tenant_id == DEFAULT_TENANT_ID else base / "_tenants" / tenant_id
+
+
+def _rewrite_sidecars(root: Path, new: str, old: str, *, skip_partitions: bool = False) -> int:
+    """The layer everyone forgets: one JSON per class AND one per sample.
+
+    `skip_partitions`: khi `root` là cây của tenant GỐC thì `_tenants/` nằm bên
+    trong nó và chứa dữ liệu của tổ chức KHÁC — không được viết lại.
+    """
     n = 0
     for path in root.rglob("*.json"):
+        if skip_partitions and "_tenants" in path.relative_to(root).parts:
+            continue
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -121,7 +136,8 @@ def _rewrite_sidecars(root: Path, new: str, old: str) -> int:
 
 
 def drive_dialect_move_pairs(root: Path, old: str, new: str,
-                             raw_tenants: Sequence[str]) -> List[Tuple[str, str]]:
+                             raw_tenants: Sequence[str],
+                             tenant_id: str = "default") -> List[Tuple[str, str]]:
     """Cặp (cũ, mới) trên Drive cho một lần gộp phương ngữ — TƯỜNG MINH.
 
     Trước 18/10/2026 bước này gửi `features/*/<old>`. Drive không có ký tự đại
@@ -142,8 +158,17 @@ def drive_dialect_move_pairs(root: Path, old: str, new: str,
         if pair[0] != pair[1] and pair not in pairs:
             pairs.append(pair)
 
-    for tree, tenants in ((FEATURES_TREE, [None]), (RAW_VIDEOS_TREE, sorted(set(raw_tenants or [])))):
-        base = Path(root) / tree
+    # `features/` là của đúng tổ chức đang gộp (khoá chứa `_tenants/<id>/` nên
+    # `drive_path_for` tự tìm ra thư mục Drive của nó); `raw_videos/` không phân
+    # vùng trên đĩa nên đi theo các tenant sở hữu video của phương ngữ này.
+    feature_prefix = (
+        FEATURES_TREE if tenant_id == "default" else f"{FEATURES_TREE}/_tenants/{tenant_id}"
+    )
+    for tree, prefix, tenants in (
+        (FEATURES_TREE, feature_prefix, [None]),
+        (RAW_VIDEOS_TREE, RAW_VIDEOS_TREE, sorted(set(raw_tenants or []))),
+    ):
+        base = Path(root) / prefix
         if not base.is_dir():
             continue
         for lang_dir in sorted(base.iterdir()):
@@ -151,8 +176,8 @@ def drive_dialect_move_pairs(root: Path, old: str, new: str,
             if lang_dir.name.startswith("_") or not (lang_dir / new).is_dir():
                 continue
             for tenant in tenants:
-                _add((drive_path_for(f"{tree}/{lang_dir.name}/{old}", tenant),
-                      drive_path_for(f"{tree}/{lang_dir.name}/{new}", tenant)))
+                _add((drive_path_for(f"{prefix}/{lang_dir.name}/{old}", tenant),
+                      drive_path_for(f"{prefix}/{lang_dir.name}/{new}", tenant)))
     return pairs
 
 
@@ -173,6 +198,16 @@ def merge_dialect_task(self, old_id: str, new_id: str) -> Dict[str, int]:
     report: Dict[str, int] = {}
     root = settings.dataset_root
 
+    # Tổ chức đang gộp = phạm vi tenant mà worker đặt từ header của lượt phái. Cây
+    # `features/` được dời là của RIÊNG tổ chức ấy; trước đây luôn là cây tenant
+    # gốc, nên tổ chức khác gộp phương ngữ thì chẳng có gì của nó được dời, còn
+    # thư mục cùng tên của tenant gốc (nếu có) lại bị dời nhầm.
+    from app.tenancy import DEFAULT_TENANT_ID
+    from app.tenant_context import current_tenant
+
+    tenant = current_tenant() or DEFAULT_TENANT_ID
+    features_base = _feature_base(root, tenant)
+
     # 1. Postgres — one statement per table, all inside psycopg's transaction.
     for table in ("classes", "samples", "raw_uploads"):
         _execute(f"UPDATE {table} SET dialect = %s WHERE dialect = %s", (new_id, old_id))
@@ -190,11 +225,12 @@ def merge_dialect_task(self, old_id: str, new_id: str) -> Dict[str, int]:
             report[f"csv:{name}"] = _rewrite_csv(root / name, old_id, new_id)
 
         # 3. Local trees (both of them — raw_videos is the one that gets missed)
-        report["moved_features"] = _move_tree(root / "features", old_id, new_id)
+        report["moved_features"] = _move_tree(features_base, old_id, new_id)
         report["moved_raw_videos"] = _move_tree(root / "raw_videos", old_id, new_id)
 
         # 4. Sidecars — slowest and least urgent: nothing serves a request from them.
-        report["sidecars"] = _rewrite_sidecars(root / "features", new_id, old_id)
+        report["sidecars"] = _rewrite_sidecars(features_base, new_id, old_id,
+                                               skip_partitions=tenant == DEFAULT_TENANT_ID)
     except Exception as exc:
         logger.exception("[MERGE] %s -> %s dừng giữa chừng: %s", old_id, new_id, exc)
         raise self.retry(exc=exc)
@@ -206,7 +242,7 @@ def merge_dialect_task(self, old_id: str, new_id: str) -> Dict[str, int]:
 
         raw_tenants = [r["tenant_id"] for r in _fetch_all(
             "SELECT DISTINCT tenant_id FROM raw_uploads WHERE dialect = %s AND tenant_id IS NOT NULL", (new_id,))]
-        pairs = drive_dialect_move_pairs(root, old_id, new_id, raw_tenants)
+        pairs = drive_dialect_move_pairs(root, old_id, new_id, raw_tenants, tenant_id=tenant)
         if pairs:
             move_gdrive_paths_task.delay(pairs=pairs)
     except Exception as exc:
