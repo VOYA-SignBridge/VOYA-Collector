@@ -420,3 +420,39 @@ file thay đổi, contract runtime được giữ nguyên, cách kiểm tra và 
 
 - Khôi phục các path cũ trong `backend/tests/test_phase35_scripts.py`.
 - Không có database migration hoặc dữ liệu cần hoàn tác.
+
+## 2026-10-18 — BR-009: Khôi phục vocabulary mapping vào source control
+
+### Mục tiêu
+
+- Đưa `config/legacy_vocabulary_mapping.json` trở lại Git để backend, Docker và
+  CI cùng đọc một source of truth thay vì phụ thuộc file local bị ignore.
+
+### Thay đổi
+
+- Thêm ngoại lệ `!config/legacy_vocabulary_mapping.json` ngay sau quy tắc
+  `*.json` trong `.gitignore`.
+- Track lại mapping có nội dung trùng byte-for-byte với bản ở commit `028c1a0`.
+
+### Kiểm tra
+
+- SHA Git object hiện tại và lịch sử cùng là
+  `7a659984e6b5c3a87147c9a127560fca4a6d4543`.
+- Pytest vocabulary trong Docker: 10 pass.
+- Standalone migration test trên host: 19 pass.
+- Toàn bộ backend pytest trong Docker: 197 pass, 5 fail.
+  - 1 lỗi do chưa có released dataset manifest.
+  - 2 lỗi provenance do thiếu research artifacts/split metadata.
+  - 2 lỗi sync do ổ D: đang dùng 96%, kích hoạt backpressure ≥95%; download
+    được chủ động dừng trước khi mock trong test được gọi.
+
+### Phạm vi dữ liệu
+
+- Không chạy migration trên dataset thật.
+- Không kết nối hoặc thay đổi database.
+- Không thay đổi labels, split, manifest hoặc checkpoint.
+
+### Hoàn tác
+
+- Bỏ ngoại lệ mapping khỏi `.gitignore` và untrack file mapping.
+- Không có database migration hoặc dữ liệu cần hoàn tác.

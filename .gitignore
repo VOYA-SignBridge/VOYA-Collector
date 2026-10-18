@@ -82,6 +82,7 @@ SsheetAPI/
 processed/train_utils/outputs
 processed/analysis
 *.json
+!config/legacy_vocabulary_mapping.json
 processed/splits
 *.csv
 
