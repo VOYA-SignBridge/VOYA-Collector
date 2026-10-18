@@ -1,4 +1,5 @@
 import logging
+import os
 from celery import Celery
 from celery.signals import (
     before_task_publish, task_prerun, task_postrun, worker_ready, setup_logging,
@@ -185,25 +186,14 @@ if settings.subscription_sweep_enabled:
         "schedule": 3600.0,
     }
 
-if str(settings.google_sheets_samples_spreadsheet_id).strip():
-    beat_schedule["export-samples-every-30s"] = {
-        "task": "app.export_tasks.export_samples_to_sheets",
-        "schedule": 30.0,
-    }
-
-if str(settings.google_sheets_labels_spreadsheet_id).strip():
-    beat_schedule["export-labels-every-60s"] = {
-        "task": "app.export_tasks.export_labels_to_sheets",
-        "schedule": 60.0,
-    }
-
+# Sheet Lookup list theo tổ chức (app/lookup_list.py) thay cho ba chu kỳ cũ:
+# Sheet `samples` mỗi 30 giây, `labels` mỗi 60 giây và ba tệp .csv lên gốc Drive
+# mỗi 5 phút có đổi hay không. Lượt này chạy thưa và tự dừng ngay ở dấu vân tay
+# trong DB khi không có gì đổi — không đọc dữ liệu, không gọi Drive.
 if settings.use_google_drive:
-    # Keep the Drive CSV snapshots (samples.csv/labels.csv/raw_uploads.csv)
-    # fresh — the per-append mirror was removed for quota reasons, and without
-    # this beat the Drive copies go permanently stale.
-    beat_schedule["mirror-catalog-csvs-every-5min"] = {
-        "task": "app.export_tasks.mirror_catalog_csvs_to_drive",
-        "schedule": 300.0,
+    beat_schedule["sync-lookup-lists"] = {
+        "task": "app.export_tasks.sync_lookup_lists",
+        "schedule": float(os.getenv("LOOKUP_LIST_INTERVAL_SECONDS", "300")),
     }
 
 # Optional periodic Drive->local pull: restores any samples/raw uploads whose

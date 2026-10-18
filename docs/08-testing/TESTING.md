@@ -74,7 +74,7 @@ xanh. Tệp `.md` thì sửa thoải mái.
 ```bash
 docker run --rm --network voya-collector_voya_network \
   -v "E:/CTU_ProjectOutside/VOYA-Collector:/src" \
-  -v "E:/CTU_ProjectOutside/Videos:/testvideos:ro" \
+  -v "E:/CTU_ProjectOutside/qipedc_mau:/testvideos:ro" \
   -w /src/backend -e PYTHONPATH=/src/backend \
   -e VOYA_TEST_VIDEO=/testvideos/D0001B.mp4 \
   -e DATABASE_URL="postgresql://voya_app:<mật khẩu>@postgres:5432/signdb_test" \

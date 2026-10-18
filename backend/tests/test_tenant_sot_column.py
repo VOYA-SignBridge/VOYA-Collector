@@ -303,11 +303,18 @@ def test_label_fields_never_shift_existing_columns():
     assert LABEL_FIELDS[-1] == "region"
 
 
-def test_raw_upload_fields_end_with_tenant_id():
+def test_raw_upload_fields_keep_tenant_id_in_place():
+    """Cùng quy tắc với LABEL_FIELDS ngay trên: cột mới chỉ được NỐI vào cuối.
+
+    `tenant_id` từng là cột cuối; từ khi có `visibility` (bản xuất cá nhân &
+    phạm vi chia sẻ) nó đứng ngay trước. Điều phải giữ là nó không bị dời đi
+    và không có cột nào chen vào giữa — không phải nó mãi là cột cuối.
+    """
     from app.raw_uploads import RAW_UPLOAD_FIELDS
 
-    assert RAW_UPLOAD_FIELDS[-1] == TENANT_COLUMN
     assert RAW_UPLOAD_FIELDS.count(TENANT_COLUMN) == 1
+    assert RAW_UPLOAD_FIELDS.index(TENANT_COLUMN) == 15
+    assert RAW_UPLOAD_FIELDS[-1] == "visibility"
 
 
 @pytest.mark.parametrize(
@@ -559,15 +566,18 @@ class TestRawUploadsMigration:
         a header for an EMPTY file — so a 15-column file gaining a 16-column row
         would put every value one place left of its name."""
         ru, path = raw_module
-        old_header = [c for c in ru.RAW_UPLOAD_FIELDS if c != TENANT_COLUMN]
+        old_header = [c for c in ru.RAW_UPLOAD_FIELDS if c not in (TENANT_COLUMN, "visibility")]
         _write(path, [old_header, ["u1"] + [""] * (len(old_header) - 1)])
 
         assert ru._upgrade_raw_uploads_header() is True
 
         rows = _read(path)
         assert rows[0] == list(ru.RAW_UPLOAD_FIELDS)
-        assert rows[1][0] == "u1"
-        assert rows[1][-1] == DEFAULT_TENANT_ID
+        row = dict(zip(rows[0], rows[1]))
+        assert row["upload_uid"] == "u1"
+        assert row[TENANT_COLUMN] == DEFAULT_TENANT_ID
+        # Dòng cũ mặc định KÍN, khớp `DEFAULT 'private'` của cột DB.
+        assert row["visibility"] == "private"
 
     def test_header_upgrade_is_idempotent(self, raw_module):
         ru, path = raw_module

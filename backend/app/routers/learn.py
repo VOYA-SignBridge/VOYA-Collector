@@ -75,16 +75,45 @@ def _attach_own(word: Dict[str, Any], own: Dict[str, List[Dict[str, Any]]]) -> D
 def list_signs(
     q: str = Query("", max_length=100, description="Từ cần tìm; không dấu cũng được."),
     region: str = Query("", max_length=16),
-    limit: int = Query(50, ge=1, le=200),
+    kind: str = Query("", max_length=16, description="tu_thuong | bang_chu_cai | chu_so"),
+    pos: str = Query("", max_length=40, description="Từ loại, đúng như danh mục ghi (Danh từ, Động từ, …)."),
+    letter: str = Query("", max_length=4, description="Chữ cái đầu (không dấu): a–z hoặc 0–9."),
+    has_own: bool = Query(False, description="Chỉ ký hiệu hệ thống đã có mẫu (thử được với camera)."),
+    page: int = Query(1, ge=1),
+    limit: int = Query(24, ge=1, le=100, description="Số mục mỗi trang."),
 ) -> Dict[str, Any]:
     if region and region not in learn_catalog.REGION_NAME:
         raise HTTPException(status_code=422, detail={"code": "bad_region",
                                                      "message": "Vùng phải là bac, trung, nam hoặc khong_ghi."})
-    words = learn_catalog.search(q, region, limit)
+    if kind and kind not in learn_catalog.KIND_NAME:
+        raise HTTPException(status_code=422, detail={"code": "bad_kind",
+                                                     "message": "Loại phải là tu_thuong, bang_chu_cai hoặc chu_so."})
+    words = learn_catalog.filter_words(q, region, kind, pos, letter)
+    # "Thử được" là dữ liệu của MÌNH chứ không phải của danh mục, nên lọc ở
+    # đây sau khi đã ghép; các bộ lọc khác đi qua `filter_words`.
     own = _own_classes_by_slug() if words else {}
+    if has_own:
+        # Bộ lọc này cần biết mục nào có mẫu, nên phải ghép trên CẢ danh sách.
+        items = [_attach_own(w, own) for w in words]
+        items = [w for w in items if w["own_sample_count"] > 0]
+    else:
+        items = words
+    total = len(items)
+    pages = max(1, -(-total // limit))
+    page = min(page, pages)
+    start = (page - 1) * limit
+    page_items = items[start:start + limit]
+    if not has_own:
+        # Chỉ ghép cho trang đang xem (24 mục), không cho cả ~4.362 mục khớp.
+        page_items = [_attach_own(w, own) for w in page_items]
     return {
-        "items": [_attach_own(w, own) for w in words],
+        "items": page_items,
+        "total": total,
+        "page": page,
+        "pages": pages,
+        "limit": limit,
         "total_words": learn_catalog.count()["words"],
+        "facets": learn_catalog.facets(),
         "attribution": _ATTRIBUTION,
         "dictionary_url": learn_catalog.QIPEDC_DICTIONARY_URL,
     }

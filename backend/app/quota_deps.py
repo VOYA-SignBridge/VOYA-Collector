@@ -43,19 +43,44 @@ def tenant_of(current_user: Optional[Dict[str, Any]]) -> str:
     return normalize_tenant_id(tenant)
 
 
+def working_tenant_of(current_user: Optional[Dict[str, Any]]) -> str:
+    """Tổ chức ĐANG LÀM VIỆC của người gọi — nơi dữ liệu được đọc/ghi và vai được xét.
+
+    KHÁC `tenant_of` (tổ chức NHÀ, chỉ để tính hạn mức). Hai thứ lệch nhau ngay
+    khi người dùng chuyển nơi làm việc (`POST /tenants/switch`): `TenantScopeMiddleware`
+    đặt phạm vi request bằng `users.active_tenant_id` SAU khi đã kiểm tư cách
+    thành viên, nên đọc phạm vi ấy không mở thêm quyền nào. Đọc tổ chức nhà ở đây
+    là lỗi 18/10/2026: biên tập viên ở trường B sửa được danh mục của VOYA, còn
+    biên tập viên của VOYA có nhà ở nơi khác bị chặn oan.
+
+    Khoá API thuộc đúng MỘT tổ chức và không có khái niệm "đang làm việc", nên
+    với khoá thì hai thứ trùng nhau. Fail-closed: không có phạm vi thì ném.
+    """
+    from app.tenant_context import require_tenant
+
+    if (current_user or {}).get("auth_method") == "api_key":
+        return tenant_of(current_user)
+    return require_tenant()
+
+
 def guard_quota(
     current_user: Optional[Dict[str, Any]],
     metric: str,
     *,
     adding: int = 1,
+    tenant_id: Optional[str] = None,
 ) -> None:
     """Chặn thao tác nếu tenant bị treo hoặc đã chạm trần gói.
 
     Gọi ở ĐẦU handler, trước mọi tác dụng phụ. Gọi sau khi đã ghi tệp thì hạn
     mức không còn là hạn mức nữa — nó chỉ là một thông báo sau khi chuyện đã
     rồi.
+
+    Mặc định kiểm ở tổ chức NHÀ của người gọi. `tenant_id` dùng khi thứ được
+    đếm thuộc về một tổ chức khác — vd. job huấn luyện thuộc tổ chức ĐANG LÀM
+    VIỆC, mà `training_jobs_*` đếm `WHERE tenant_id = <chủ job>`.
     """
-    tenant_id = tenant_of(current_user)
+    tenant_id = tenant_of(current_user) if tenant_id is None else tenant_id
     try:
         enforce(tenant_id, metric, adding=adding)
     except TenantSuspended as exc:

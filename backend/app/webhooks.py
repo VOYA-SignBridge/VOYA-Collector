@@ -51,6 +51,9 @@ EVENT_TYPES = (
     "training.completed",
     "training.failed",
     "class.created",
+    # Người thu tạo/xin một nhãn từ màn hình thu (`POST /classes/request`). Khác
+    # `class.created`: nhãn có thể đã tồn tại và chỉ được trả về.
+    "class.requested",
     "quota.exceeded",
     "tenant.plan_changed",
 )

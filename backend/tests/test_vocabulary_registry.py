@@ -31,11 +31,20 @@ def _seeded_ids() -> set:
 
 
 def _csv_dialects(name: str) -> set:
+    """Phương ngữ mà dữ liệu của tenant KHỞI TẠO dùng.
+
+    `config/dialects.seed.csv` là danh mục chung mà tenant mới được clone từ đó.
+    Phương ngữ riêng của một tổ chức (vd. `gdcbst` của trường Sóc Trăng) sống
+    trong registry của chính tổ chức ấy và cố ý KHÔNG được đưa vào danh mục
+    chung — đưa vào là mọi tenant mới đều thấy nó. Labels/samples.csv là tệp
+    chung cho mọi tenant, nên phải lọc theo `tenant_id` (ô trống = khởi tạo).
+    """
     path = DATASET / name
     if not path.is_file():
         return set()
     with path.open(newline="", encoding="utf-8-sig") as fh:
-        return {(r.get("dialect") or "").strip() for r in csv.DictReader(fh)} - {""}
+        return {(r.get("dialect") or "").strip() for r in csv.DictReader(fh)
+                if (r.get("tenant_id") or "").strip() in ("", "default")} - {""}
 
 
 # --------------------------------------------------------------------- slug

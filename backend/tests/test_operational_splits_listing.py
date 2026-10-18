@@ -57,13 +57,21 @@ def splits_root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _as(tenant):
+def _as(tenant, monkeypatch):
+    """Người dùng làm việc ở chính tổ chức nhà: tài khoản VÀ phạm vi request.
+
+    Danh sách đi theo phạm vi request (tổ chức đang làm việc) từ 18/10/2026,
+    không theo `tenant_id` của tài khoản — xem test_training_working_tenant.py.
+    """
+    import app.tenant_middleware as tm
+
+    monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: tenant)
     app.dependency_overrides[get_current_user] = lambda: {
         "id": "u1", "username": "x", "is_admin": False, "tenant_id": tenant}
 
 
-def test_lists_only_owned_resolvable_artifacts_newest_first(splits_root):
-    _as("iso_a")
+def test_lists_only_owned_resolvable_artifacts_newest_first(splits_root, monkeypatch):
+    _as("iso_a", monkeypatch)
     try:
         r = client.get("/training/splits/operational")
     finally:
@@ -77,8 +85,8 @@ def test_lists_only_owned_resolvable_artifacts_newest_first(splits_root):
     assert first["min_samples_per_class"] == 25
 
 
-def test_other_tenant_sees_only_its_own(splits_root):
-    _as("iso_b")
+def test_other_tenant_sees_only_its_own(splits_root, monkeypatch):
+    _as("iso_b", monkeypatch)
     try:
         r = client.get("/training/splits/operational")
     finally:

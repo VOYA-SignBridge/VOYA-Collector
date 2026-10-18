@@ -735,7 +735,34 @@ def _row_feature_path_candidates(row: Dict[str, str], *, features_root: Path, de
         dialect = (inferred_dialect or "").strip()
     if dialect:
         candidates.append(features_root / language / dialect / folder_name / file_name)
+    candidates.extend(_tenant_feature_candidates(row, features_root=features_root,
+                                                 language=language, dialect=dialect))
     return candidates
+
+
+def _tenant_feature_candidates(row: Dict[str, str], *, features_root: Path,
+                               language: str, dialect: str) -> List[Path]:
+    """Mẫu của tenant không phải tenant khởi tạo nằm dưới
+    `features/_tenants/<tenant>/<ngôn ngữ>/<phương ngữ>/` (xem
+    `TENANT_PARTITION_DIRNAME` ở backend). Trước 17/10/2026 trainer chỉ tìm
+    ở cây của tenant khởi tạo, nên mọi job của tenant khác loại sạch dữ liệu
+    rồi chết với "train split became empty".
+
+    `file_path` trong samples.csv là đường dẫn tương đối tính từ gốc dataset
+    (`features/_tenants/...`), nên thử nó trước; giữ trong gốc dataset."""
+    out: List[Path] = []
+    folder_name = (row.get("folder_name") or "").strip()
+    file_name = (row.get("file") or "").strip()
+    rel = (row.get("file_path") or "").strip().replace("\\", "/")
+    if rel and not rel.startswith("/"):
+        dataset_root = features_root.parent.resolve()
+        cand = (dataset_root / rel).resolve()
+        if cand.is_relative_to(dataset_root):
+            out.append(cand)
+    tenant = (row.get("tenant_id") or "").strip()
+    if tenant and tenant != "default" and "/" not in tenant and dialect:
+        out.append(features_root / "_tenants" / tenant / language / dialect / folder_name / file_name)
+    return out
 
 
 def _filter_rows_with_existing_features(

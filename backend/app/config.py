@@ -216,6 +216,8 @@ class Settings(BaseSettings):
     db_pool_min: int = int(os.getenv("DB_POOL_MIN", "1"))
     db_pool_max: int = int(os.getenv("DB_POOL_MAX", "8"))
     db_connect_timeout: int = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
+    # How long a request waits for a free pooled connection before failing.
+    db_pool_wait_seconds: float = float(os.getenv("DB_POOL_WAIT_SECONDS", "10"))
 
     # Celery memory hygiene: recycle prefork children to release native
     # memory held by MediaPipe/OpenCV. Tune per host RAM.

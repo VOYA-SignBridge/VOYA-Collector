@@ -22,17 +22,12 @@
 #    hành vì thế triển khai được (ghim theo sha) mà không bao giờ tự động đổi
 #    thứ mà máy sản xuất kéo về.
 #
-# 3. **Tag là sha NGẮN.** Bản trước dùng `${{ github.sha }}` — 40 ký tự — trong
-#    khi chú thích của chính nó nói `sha-<short>`. Không sai về mặt kỹ thuật,
-#    nhưng không ai gõ lại được bằng tay, và một tag không gõ lại được thì
-#    không phải là đường lùi.
+# 3. Tag SHA đầy đủ; CI cùng commit phải pass trước khi phát hành.
 #
 # Ảnh này dùng ở đâu
 # -------------------
-# `docker-compose.registry.yml` + `scripts/deploy_pinned.sh`. Đường triển khai
-# mặc định (`scripts/deploy.sh`) vẫn dựng tại chỗ và KHÔNG đụng tới registry —
-# đó là chủ ý: đường đang chạy tốt thì không đổi, đường mới phải tự chứng minh
-# trước.
+# `docker-compose.registry.yml` + `scripts/deploy.py`. Xem
+# docs/06-operations/HOST_TRANSFER.md cho backup, chuyển host và cấu hình CD.
 
 name: Build & push images
 
@@ -41,19 +36,23 @@ on:
     branches:
       - main
       - 'deploy_ctu_**'
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - '.github/workflows/build_docker.yml'
   # Cho phép phát hành lại đúng một commit mà không cần commit rỗng.
   workflow_dispatch:
 
 concurrency:
   group: images-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a workflow during the database/production deployment stage.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: checks
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     strategy:
@@ -92,7 +91,7 @@ jobs:
       - name: Tính tag
         id: tags
         run: |
-          short=$(git rev-parse --short HEAD)
+          short=$(git rev-parse HEAD)
           ns='${{ secrets.DOCKER_USERNAME }}'
           img="$ns/${{ matrix.image }}"
           branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
@@ -133,6 +132,44 @@ jobs:
             echo "Triển khai đúng ảnh này trên máy deploy:"
             echo ""
             echo '```bash'
-            echo "VOYA_IMAGE_TAG=sha-${{ steps.tags.outputs.short }} bash scripts/deploy_pinned.sh"
+            echo "python scripts/deploy.py --image-tag sha-${{ steps.tags.outputs.short }} --backup-dir /secure/backups/UNIQUE-NAME --allow-downtime"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Production (opt-in, protected environment)
+    needs: [checks, build]
+    if: vars.ENABLE_AUTO_DEPLOY == 'true' && github.ref_name == vars.DEPLOY_BRANCH
+    runs-on: [self-hosted, linux, voya-prod]
+    environment: production
+    concurrency:
+      group: voya-production-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT }}
+      BACKUP_ROOT: ${{ vars.BACKUP_ROOT }}
+      VOYA_REGISTRY_NS: ${{ secrets.DOCKER_USERNAME }}
+      RELEASE_SHA: ${{ github.sha }}
+      ACCEPT_EXTERNAL_STORAGE: ${{ vars.ACCEPT_EXTERNAL_STORAGE }}
+    steps:
+      # No checkout action in the live directory: it can clean untracked data.
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Snapshot, pin source, migrate and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_ROOT" && test -n "$BACKUP_ROOT"
+          cd "$DEPLOY_ROOT"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          git fetch origin "$RELEASE_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
+          python3 scripts/deploy.py --check
+          bundle="$BACKUP_ROOT/${RELEASE_SHA}-$(date -u +%Y%m%dT%H%M%SZ)"
+          external=()
+          if [ "$ACCEPT_EXTERNAL_STORAGE" = true ]; then external+=(--accept-external-storage); fi
+          python3 scripts/backup.py "$bundle" --allow-downtime --keep-stopped "${external[@]}"
+          git checkout --detach "$RELEASE_SHA"
+          python3 scripts/deploy.py --prepared-backup "$bundle" --image-tag "sha-$RELEASE_SHA" --allow-downtime

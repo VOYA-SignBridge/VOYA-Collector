@@ -728,6 +728,19 @@ async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
 # Helper Functions
 # ============================================================================
 
+def _working_tenant() -> str:
+    """Tổ chức ĐANG LÀM VIỆC của request — dữ liệu huấn luyện thuộc về nó.
+
+    `TenantScopeMiddleware` đặt nó từ `users.active_tenant_id` sau khi đã kiểm tư
+    cách thành viên, nên dùng nó không mở thêm quyền. KHÁC `tenant_of(user)`
+    (tổ chức nhà, để tính hạn mức): hai thứ lệch nhau ngay khi người dùng đổi nơi
+    làm việc. Fail-closed — không có phạm vi thì ném, không rơi về `default`.
+    """
+    from app.tenant_context import require_tenant
+
+    return require_tenant()
+
+
 def _load_samples_and_labels() -> tuple[List[Dict], List[Dict]]:
     """Tải samples.csv và labels.csv"""
     samples = []
@@ -752,9 +765,21 @@ def _load_samples_and_labels() -> tuple[List[Dict], List[Dict]]:
     return samples, list(labels.values())
 
 
-def _get_dialects_by_language() -> Dict[str, List[str]]:
+def _rows_of_tenant(rows: List[Dict], tenant_id: str) -> List[Dict]:
+    """Dòng CSV thuộc đúng một tổ chức. `samples.csv`/`labels.csv` là tệp CHUNG
+    cho mọi tenant, nên mọi số liệu đọc thẳng từ chúng phải lọc ở đây; ô trống
+    là dữ liệu có từ trước đa tenant, thuộc tenant khởi tạo — `tenant_id_of` là
+    bộ đọc DUY NHẤT cho câu hỏi ấy, để mọi bên đọc CSV hiểu ô tenant giống nhau."""
+    from app.tenancy import tenant_id_of
+
+    return [r for r in rows if tenant_id_of(r) == tenant_id]
+
+
+def _get_dialects_by_language(tenant_id: Optional[str] = None) -> Dict[str, List[str]]:
     """Lấy mapping language -> dialects"""
     _, labels = _load_samples_and_labels()
+    if tenant_id is not None:
+        labels = _rows_of_tenant(labels, tenant_id)
 
     dialects_map: Dict[str, set] = {}
     for label in labels:
@@ -1155,8 +1180,8 @@ def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
 async def list_operational_splits(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
-    """Hiện vật vận hành tổ chức của người gọi có thể ghim cho một lượt chạy."""
-    tenant_id = tenant_of(current_user)
+    """Hiện vật vận hành tổ chức ĐANG LÀM VIỆC có thể ghim cho một lượt chạy."""
+    tenant_id = _working_tenant()
     return await asyncio.to_thread(_operational_splits, tenant_id)
 
 
@@ -1329,8 +1354,13 @@ async def get_dataset_info(
         logger.debug("SAMPLES_CSV exists: %s", SAMPLES_CSV.exists())
         logger.debug("LABELS_CSV exists: %s", LABELS_CSV.exists())
 
+        # Chỉ dữ liệu của tổ chức ĐANG LÀM VIỆC. Trước 17/10/2026 hai tenant mỗi
+        # bên 60 mẫu đều thấy "120 mẫu", kèm tên phương ngữ riêng của tenant kia.
+        tenant_id = _working_tenant()
         samples, labels = await run_in_threadpool(_load_samples_and_labels)
-        dialects_map = await run_in_threadpool(_get_dialects_by_language)
+        samples = _rows_of_tenant(samples, tenant_id)
+        labels = _rows_of_tenant(labels, tenant_id)
+        dialects_map = await run_in_threadpool(_get_dialects_by_language, tenant_id)
 
         # Nếu có filter dialect/language, giới hạn samples về đúng các
         # class_uid có label khớp trước khi tính total/class_distribution.
@@ -1376,7 +1406,7 @@ async def get_dataset_info(
         # nhưng đây là handler `async`, nên một lượt đọc tệp đồng bộ sẽ chặn cả
         # vòng lặp sự kiện chứ không chỉ request này.
         prov = await run_in_threadpool(
-            lambda: _split_provenance(tenant_id=tenant_of(current_user)))
+            lambda: _split_provenance(tenant_id=tenant_id))
 
         return DatasetInfo(
             total_samples=len(samples),
@@ -1395,10 +1425,11 @@ async def get_dataset_info(
 # Chuẩn bị dữ liệu từ giao diện (port từ feature-v2, chỉnh cho hiện vật có chủ)
 # ---------------------------------------------------------------------------
 
-def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
+def _profiles_for_dialects(dialects: List[str], tenant_id: str) -> Tuple[List[str], List[str]]:
     """Phương ngữ đã chọn → các recognition_profile chuẩn bị được (đọc từ
     labels.csv, không gắn cứng). Trả (profiles, phương ngữ không có profile)."""
     _, labels = _load_samples_and_labels()
+    labels = _rows_of_tenant(labels, tenant_id)
     wanted = {str(d).strip() for d in dialects if str(d).strip()}
     by_dialect: Dict[str, set] = {}
     rows = labels.values() if isinstance(labels, dict) else labels
@@ -1452,10 +1483,10 @@ async def start_dataset_preparation(
             raise HTTPException(status_code=403, detail=str(exc))
 
     floor = int(body.min_samples_per_class or _cfg.min_samples_per_class_for_training or 0)
-    tenant_id = tenant_of(current_user)
+    tenant_id = _working_tenant()
     profiles: List[str] = []
     if body.with_research:
-        profiles, unsupported = await asyncio.to_thread(_profiles_for_dialects, dialects)
+        profiles, unsupported = await asyncio.to_thread(_profiles_for_dialects, dialects, tenant_id)
         if not profiles:
             raise HTTPException(
                 status_code=400,
@@ -1489,7 +1520,7 @@ async def get_dataset_preparation(
     from app.dataset_prep_tasks import read_report
 
     report = await asyncio.to_thread(read_report, run_id)
-    if report is None or str(report.get("tenant_id") or "") != tenant_of(current_user):
+    if report is None or str(report.get("tenant_id") or "") != _working_tenant():
         # Cùng một câu trả lời cho "không có" và "của tổ chức khác".
         raise HTTPException(status_code=404, detail=f"Không tìm thấy lần chuẩn bị {run_id}")
     return report
@@ -1520,14 +1551,21 @@ async def start_training(
     # `training_jobs_this_month` đã gỡ ở v8 — chặn theo SỐ LẦN trong khi thứ
     # tốn kém là compute. Hai câu dưới KHÔNG phải hạn mức gói mà là kiểm soát
     # an toàn cho bộ chạy GPU: job vượt mức vào hàng đợi, không bị từ chối.
+    #
+    # Hai tổ chức, hai vai (18/10/2026). Dữ liệu, cổng hiện vật và CHỦ JOB là tổ
+    # chức ĐANG LÀM VIỆC — cái mà Thư viện nhãn và mọi trang dữ liệu khác cũng
+    # đọc; trước đây là tổ chức nhà, nên người ở nhà B làm việc ở VOYA thấy dữ
+    # liệu của B ("hoa-de còn 0 lớp" trong khi VOYA có 988 mẫu). Hạn mức kiểm ở
+    # CẢ HAI: tổ chức nhà như trước (gồm cả trạng thái bị treo), và tổ chức đang
+    # làm việc vì `training_jobs_*` đếm `WHERE tenant_id = <chủ job>` — chỉ kiểm
+    # ở nhà thì job thuộc tổ chức kia không bao giờ được đếm, xếp hàng vô hạn.
+    # `require_tenant` fail-closed, nên tới được dòng sau là đã biết chắc tổ chức.
+    pham_vi_nguoi_goi = _working_tenant()
     guard_quota(current_user, "training_jobs_running")
     guard_quota(current_user, "training_jobs_queued")
-
-    # MỘT nguồn danh tính cho cả lượt gọi này: hạn mức, cổng hiện vật và chủ sở
-    # hữu của mục cache đều đọc đúng giá trị này. Ba nguồn khác nhau cho cùng
-    # một lượt chạy là cách một hệ thống tự mâu thuẫn mà không tầng nào sai.
-    # `tenant_of` fail-closed, nên tới được dòng sau là đã biết chắc tổ chức.
-    pham_vi_nguoi_goi = tenant_of(current_user)
+    if pham_vi_nguoi_goi != tenant_of(current_user):
+        guard_quota(current_user, "training_jobs_running", tenant_id=pham_vi_nguoi_goi)
+        guard_quota(current_user, "training_jobs_queued", tenant_id=pham_vi_nguoi_goi)
 
     try:
         # ------------------------------------------------------------------
@@ -1756,9 +1794,8 @@ async def start_training(
         training_jobs[job_id] = {
             "job": job,
             "progress": [],
-            # Chủ sở hữu lấy từ tenant NHÀ của người gọi — cùng nguồn mà
-            # `guard_quota` và cổng hiện vật ở trên đã dùng. Ba quyết định về
-            # một lượt chạy phải đọc cùng một danh tính.
+            # Chủ sở hữu là tổ chức ĐANG LÀM VIỆC — cùng nguồn với cổng hiện vật
+            # ở trên, và là tổ chức mà hạn mức hàng đợi được kiểm thêm.
             "tenant_id": pham_vi_nguoi_goi,
         }
 
@@ -2384,11 +2421,18 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     # ngoài phạm vi thì cổng ấy vừa chặn nhầm người đúng, vừa không chặn được
     # gì ở bảng chỉ số. Đặt phạm vi ở đây làm cả hai chuyện đó biến mất.
     #
-    # Phạm vi lấy từ tài khoản ĐÃ xác thực ngay phía trên, cùng nguồn mà
+    # Phạm vi lấy từ tài khoản ĐÃ xác thực ngay phía trên, bằng ĐÚNG hàm mà
     # middleware dùng cho đường HTTP — không phải từ `job_id` người gọi đưa.
+    # Hàm ấy trả tổ chức ĐANG LÀM VIỆC (`active_tenant_id`, sau khi kiểm tư cách
+    # thành viên), rơi về tổ chức nhà. Bản trước đọc thẳng `user["tenant_id"]`
+    # (tổ chức nhà): từ khi job thuộc tổ chức đang làm việc (18/10/2026), người ở
+    # nhà B làm việc ở VOYA không tra thấy job của chính mình, kết nối bị đóng
+    # trước `accept()` (trình duyệt thấy 403) và màn hình kẹt ở "queued".
     from app.tenant_context import tenant_scope
+    from app.tenant_middleware import _tenant_of_user
 
-    pham_vi = str((user or {}).get("tenant_id") or "").strip()
+    pham_vi = str((await asyncio.to_thread(_tenant_of_user, str((user or {}).get("id") or "")))
+                  or "").strip()
     if not pham_vi:
         await websocket.close(code=4001, reason="Unauthorized")
         return

@@ -39,11 +39,41 @@ export interface Sign {
   own_sample_count: number;
 }
 
+export type LearnKind = "tu_thuong" | "bang_chu_cai" | "chu_so";
+
+export interface LearnFacets {
+  kinds: { key: LearnKind | string; name: string; count: number }[];
+  regions: { key: LearnRegion | string; name: string; count: number }[];
+  /** Từ loại đủ lớn để lọc (Danh từ, Động từ, …) — tên là DỮ LIỆU, không dịch. */
+  pos: { name: string; count: number }[];
+  /** Chữ cái đầu (không dấu) CÓ từ — để thanh A–Z không có nút chết. */
+  letters: string[];
+}
+
 export interface SignList {
   items: Sign[];
+  /** Số mục khớp bộ lọc (mọi trang). */
+  total: number;
+  page: number;
+  pages: number;
+  limit: number;
+  /** Cả danh mục, không tính bộ lọc. */
   total_words: number;
+  facets: LearnFacets;
   attribution: string;
   dictionary_url: string;
+}
+
+export interface SignQuery {
+  q?: string;
+  region?: string;
+  kind?: string;
+  pos?: string;
+  letter?: string;
+  /** Chỉ ký hiệu hệ thống đã có mẫu — "thử được với camera". */
+  hasOwn?: boolean;
+  page?: number;
+  limit?: number;
 }
 
 export interface SignDetail extends Sign {
@@ -51,8 +81,11 @@ export interface SignDetail extends Sign {
   dictionary_url: string;
 }
 
-export async function searchSigns(q: string, region: string = "", limit = 50): Promise<SignList> {
-  const res = await axiosClient.get<SignList>(`${PREFIX}/signs`, { params: { q, region, limit } });
+export async function searchSigns(query: SignQuery = {}): Promise<SignList> {
+  const { q = "", region = "", kind = "", pos = "", letter = "", hasOwn = false, page = 1, limit = 24 } = query;
+  const res = await axiosClient.get<SignList>(`${PREFIX}/signs`, {
+    params: { q, region, kind, pos, letter, has_own: hasOwn, page, limit },
+  });
   return res.data;
 }
 
@@ -67,4 +100,11 @@ export const REGION_LABEL: Record<string, string> = {
   trung: "Miền Trung",
   nam: "Miền Nam",
   khong_ghi: "Chung (không ghi vùng)",
+};
+
+/** @i18n-key-table — loại mục là KHOÁ từ điển, dịch bằng `t(KIND_LABEL[k])`. */
+export const KIND_LABEL: Record<string, string> = {
+  tu_thuong: "Từ thường",
+  bang_chu_cai: "Bảng chữ cái",
+  chu_so: "Chữ số",
 };

@@ -26,6 +26,8 @@ def enqueue_process_video(
     dialect: str = "common",
     language: str = "vn",
     user_id: str = "",
+    class_uid: str = "",
+    visibility: str = "private",
 ):
     """Process video from Google Drive or local filesystem."""
     local_video_path = video_path
@@ -46,6 +48,8 @@ def enqueue_process_video(
             session_id=session_id,
             dialect=dialect,
             language=language,
+            class_uid=class_uid,
+            visibility=visibility,
         )
         return {"status": "done", "result": result}
     except Exception as e:

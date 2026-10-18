@@ -16,6 +16,8 @@ from app.config import settings
 from app.dataset_manager import (
     ClassMetadata,
     LABEL_FIELDS,
+    class_storage_dir,
+    raw_class_dir,
     MASTER_LABELS,
     DATASET_ROOT,
     _load_all_labels_unscoped,
@@ -397,27 +399,15 @@ def _sync_drive_catalog_snapshots() -> None:
 
 def _sync_drive_and_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]] | None = None,
                                             sample_rows: Sequence[Dict[str, Any]] | None = None) -> None:
-    """Mirror catalog CSVs to Drive and export labels/samples to Sheets — async.
+    """Không còn phái gì (18/10/2026).
 
-    This name was referenced in class update/delete but never defined, so every
-    catalog mutation raised NameError *after* doing the destructive work and
-    then failed its own rollback. It now simply dispatches the existing Celery
-    tasks (best-effort, non-blocking): the request thread neither waits on nor
-    fails because of Google API calls. Args are accepted for call-site
-    compatibility but unused (the tasks read the freshly written CSVs).
+    Trước đây mỗi lần sửa danh mục phái ba task: tải ba tệp .csv lên gốc Drive
+    và viết lại hai Sheet chung. Sheet Lookup list theo tổ chức
+    (`export_tasks.sync_lookup_lists`) tự thấy thay đổi qua dấu vân tay trong DB
+    ở lượt beat kế tiếp và gộp cả đợt sửa vào một lần ghi — phái thêm ở đây chỉ
+    làm nó chạy sớm khi dữ liệu còn đang ghi dở. Giữ tên hàm vì mười chỗ gọi.
     """
-    try:
-        from app.export_tasks import (
-            export_labels_to_sheets,
-            export_samples_to_sheets,
-            mirror_catalog_csvs_to_drive,
-        )
-
-        mirror_catalog_csvs_to_drive.delay()
-        export_labels_to_sheets.delay()
-        export_samples_to_sheets.delay()
-    except Exception as exc:  # dispatch failure (e.g. broker down) must not break CRUD
-        logger.warning("[CATALOG] async Drive/Sheets sync dispatch failed: %s", exc)
+    logger.debug("[CATALOG] catalog changed; Lookup list sheets pick it up on the next sync")
 
 
 def _dispatch_gdrive_folder_delete(paths: Sequence[Path], tenant_id: Optional[str] = None) -> None:
@@ -727,7 +717,7 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any], *,
 
         snapshot_root = Path(tempfile.mkdtemp(prefix="catalog_sync_"))
         backup_feature_dir = _backup_tree(old_meta.hierarchy_path(), snapshot_root)
-        old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
+        old_raw_dir = raw_class_dir(old_meta)
         backup_raw_dir = _backup_tree(old_raw_dir, snapshot_root)
 
         all_samples_before = _load_all_samples_unscoped()
@@ -760,8 +750,8 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any], *,
 
         old_feature_dir = old_meta.hierarchy_path()
         new_feature_dir = new_meta.hierarchy_path()
-        old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
-        new_raw_dir = Path(settings.dataset_root) / "raw_videos" / new_meta.language / new_meta.dialect / new_meta.folder_name()
+        old_raw_dir = raw_class_dir(old_meta)
+        new_raw_dir = raw_class_dir(new_meta)
         try:
             if old_feature_dir.exists() and old_feature_dir != new_feature_dir:
                 new_feature_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -983,7 +973,7 @@ def sync_delete_class(class_idx: int | str, *, tenant_id: str) -> Dict[str, Any]
         sample_rows_before = [row for row in all_samples_before if row.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [row for row in all_raw_before if row.get("class_uid") == old_meta.class_uid]
         old_feature_dir = old_meta.hierarchy_path()
-        old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
+        old_raw_dir = raw_class_dir(old_meta)
         snapshot_root = Path(tempfile.mkdtemp(prefix="catalog_sync_"))
         backup_feature_dir = _backup_tree(old_feature_dir, snapshot_root)
         backup_raw_dir = _backup_tree(old_raw_dir, snapshot_root)
@@ -1260,7 +1250,7 @@ def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
 
         old_meta = _build_class_meta_from_row(meta_row)
         feature_dir = old_meta.hierarchy_path()
-        raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
+        raw_dir = raw_class_dir(old_meta)
 
         # Kiểm mọi ràng buộc TRƯỚC khi đụng tệp. Thứ tự cũ gỡ thư mục rồi mới
         # DELETE ở DB; câu DELETE vướng khoá ngoại thì tệp đã mất mà dòng còn —
@@ -1622,8 +1612,7 @@ def sync_reassign_sample(sample_uid: str, target_class_ref: int | str,
                 _update_sample_metadata_json(new_file, target_meta)
 
             new_key = _dataset_storage_key(new_file) or (
-                f"features/{target_meta.language}/{target_meta.dialect}/"
-                f"{target_meta.folder_name()}/{filename}")
+                f"{class_storage_dir(target_meta)}/{filename}")
 
             updated = dict(sample_row)
             updated.update({

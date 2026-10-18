@@ -6,7 +6,8 @@ from app.config import settings
 from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
-from app.dataset_manager import get_or_register_class
+from app.dataset_manager import get_or_register_class, list_classes
+from app.tenant_context import current_tenant
 from app.dataset_samples import save_sequence_npz, count_samples_for_class, COORD_SPACE_IMAGE
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ def _window_activity_mean_abs_diff(seq_arr: np.ndarray) -> float:
     diffs = np.diff(seq_arr.astype(np.float32, copy=False), axis=0)
     return float(np.mean(np.abs(diffs)))
 
-def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn", user_id: str = ""):
+def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn", user_id: str = "", class_uid: str = "", visibility: str = "private"):
     """
     Synchronous function to process video without Celery decorator.
     This is called by the Celery task in tasks.py
@@ -60,7 +61,16 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
         speed_variants = temporal_speed_variants(video_path, speeds=settings.speed_variants)
         
         # Resolve / register class metadata in new hierarchy
-        class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+        if class_uid:
+            tenant = current_tenant()
+            class_meta = next(
+                (m for m in list_classes(tenant_id=tenant) if m.class_uid == class_uid),
+                None,
+            ) if tenant else None
+            if class_meta is None:
+                raise ValueError("class_uid does not belong to the active tenant")
+        else:
+            class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
 
         # Enforce a global per-class cap across the whole dataset (not just per upload job).
         # Set MAX_SAMPLES_PER_CLASS <= 0 to disable the cap.
@@ -184,6 +194,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                         # (invisible to the owner's Trash / reassign / delete).
                         "user_id": user,
                         "auth_user_id": user_id,
+                        "visibility": visibility if visibility in ("private", "tenant", "community") else "private",
                         "session_id": session_id,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,

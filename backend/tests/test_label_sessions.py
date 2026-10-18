@@ -105,6 +105,7 @@ def dataset(tmp_path, monkeypatch):
     import app.routers.label_sessions as ls
 
     monkeypatch.setattr(ls, "find_class_meta", _meta)
+    monkeypatch.setattr("app.storage.metadata_db.get_readable_sample_uids", lambda uids, user_id, tenant_id, **_k: set(uids))
     return {"meta": meta, "seq": seq, "class_dir": class_dir}
 
 
@@ -136,7 +137,7 @@ def test_sessions_unknown_class_404(dataset):
 def test_frames_payload_and_cache_header(dataset):
     res = client.get("/classes/cls123/sessions/sess-1/frames")
     assert res.status_code == 200
-    assert res.headers["cache-control"] == "private, max-age=604800"
+    assert res.headers["cache-control"] == "private, no-store"
     body = res.json()
     assert body["frames"] == 60
     assert body["dim"] == 126
@@ -182,7 +183,7 @@ def test_preview_status_renders_inline_without_broker(dataset):
     video = client.get("/classes/cls123/sessions/sess-1/preview.mp4")
     assert video.status_code == 200
     assert video.headers["content-type"] == "video/mp4"
-    assert video.headers["cache-control"] == "private, max-age=604800"
+    assert video.headers["cache-control"] == "private, no-store"
     assert len(video.content) > 0
 
     # Session list now reports the cached preview.
@@ -407,7 +408,9 @@ def owned_dataset(dataset, monkeypatch):
     import app.catalog_sync as cs
 
     monkeypatch.setattr(mdb, "get_sample_owner", lambda uid: "u-owner" if uid == "abc" else None)
-    monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {u: "u-owner" for u in uids if u == "abc"})
+    monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {u: "u-owner" for u in uids if u in {"abc", "abc-aug"}})
+    # Ownership tests use tenant-shared sessions; privacy is exercised below.
+    monkeypatch.setattr(mdb, "get_readable_sample_uids", lambda uids, user_id, tenant_id, **_k: set(uids))
     # Cổng access_gate đòi người gọi có MỘT grant tenant nào đó (community_member
     # được gắn lúc đăng ký). Người giả trong test không có dòng nào trong DB,
     # nên cho họ qua cổng ở đây — thứ đang được kiểm là phép kiểm CHỦ SỞ HỮU ở
@@ -426,6 +429,63 @@ def _as(user):
 
 
 class TestSessionOwnershipPermissions:
+    @pytest.mark.parametrize("allowed", [set(), {"abc"}])
+    def test_private_or_mixed_session_denied_on_every_view_route(self, owned_dataset, monkeypatch, allowed):
+        import app.storage.metadata_db as mdb
+        monkeypatch.setattr(mdb, "get_readable_sample_uids", lambda *args, **_k: allowed)
+        _as(OTHER)
+        assert client.get("/classes/cls123/sessions").json()["sessions"] == []
+        for suffix in ("frames", "provenance", "preview", "preview.mp4"):
+            assert client.get(f"/classes/cls123/sessions/sess-1/{suffix}").status_code == 404
+
+    @pytest.mark.parametrize("user,role,expected", [
+        (OWNER, None, 200),
+        (OTHER, "editor", 200),     # editor CỦA tenant: quản lý mọi mẫu của tenant
+        (ADMIN, None, 200),         # admin nền tảng
+        (OTHER, None, 404),         # thành viên thường khác: private vẫn kín
+    ])
+    def test_private_is_visible_to_owner_and_tenant_managers_only(
+            self, owned_dataset, monkeypatch, user, role, expected):
+        """Chính sách 17/10/2026: `private` kín với THÀNH VIÊN khác, không kín với
+        người quản lý tenant (xem `app.sample_access`)."""
+        import app.storage.metadata_db as mdb
+        import app.vocabulary_registry as vr
+        monkeypatch.setattr(vr, "tenant_role", lambda t, u: role)
+        monkeypatch.setattr(mdb, "get_readable_sample_uids",
+                            lambda uids, user_id, tenant_id, manage_all=False, **_k:
+                            {"abc", "abc-aug"} if (manage_all or user_id == OWNER["id"]) else set())
+        _as(user)
+        assert client.get("/classes/cls123/sessions/sess-1/frames").status_code == expected
+
+    @pytest.mark.parametrize("operation", ["delete", "reassign"])
+    def test_partial_mutation_is_not_reported_as_complete(self, owned_dataset, monkeypatch, operation):
+        import app.catalog_sync as cs
+
+        def mutate(uid, *args, **kwargs):
+            if uid == "abc-aug":
+                raise ValueError("test write failure")
+
+        monkeypatch.setattr(cs, "sync_soft_delete_sample" if operation == "delete" else "sync_reassign_sample", mutate)
+        _as(OWNER)
+        url = "/classes/cls123/sessions/sess-1"
+        response = client.delete(url) if operation == "delete" else client.post(url + "/reassign", json={"target_class_ref": "cls999"})
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+        assert response.json()["failed"][0]["sample_uid"] == "abc-aug"
+        assert response.json()["deleted_count" if operation == "delete" else "moved_count"] == 1
+
+    @pytest.mark.parametrize("owner", ["u-other", None])
+    def test_mixed_owner_session_cannot_be_managed(self, owned_dataset, monkeypatch, owner):
+        import app.storage.metadata_db as mdb
+        monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {"abc": "u-owner", "abc-aug": owner})
+        _as(OWNER)
+        sessions = client.get("/classes/cls123/sessions").json()["sessions"]
+        assert not next(s for s in sessions if s["session_id"] == "sess-1")["can_manage"]
+        assert client.delete("/classes/cls123/sessions/sess-1").status_code == 403
+        assert client.post("/classes/cls123/sessions/sess-1/reassign",
+                           json={"target_class_ref": "cls999"}).status_code == 403
+        assert owned_dataset == {"deleted": [], "moved": []}
+
     def test_list_marks_only_owner_session_manageable(self, owned_dataset):
         _as(OWNER)
         sessions = {s["session_id"]: s for s in client.get("/classes/cls123/sessions").json()["sessions"]}

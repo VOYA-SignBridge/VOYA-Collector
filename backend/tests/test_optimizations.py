@@ -388,8 +388,11 @@ def test_batch_upload_task():
             calls["up"] += 1
             return f"https://drive/{key}"
 
-        def fake_db(uid, url):
+        def fake_db(uid, url, storage_key=None):
+            # `storage_key` đi cùng URL từ 17/09/2026 (DB từng là nơi duy nhất
+            # không nhận khoá này). Kiểm luôn rằng nó THẬT SỰ được truyền.
             calls["db"] += 1
+            calls.setdefault("keys", []).append(storage_key)
 
         gc.upload_to_gdrive = fake_up
         mdb.update_sample_gdrive_url = fake_db
@@ -398,6 +401,7 @@ def test_batch_upload_task():
         check("batch task: uploaded=2", res.get("uploaded") == 2, res)
         check("batch task: upload called 2x", calls["up"] == 2, calls["up"])
         check("batch task: db updated 2x", calls["db"] == 2, calls["db"])
+        check("batch task: db got storage_key", all(calls.get("keys") or [None]), calls.get("keys"))
         rows = _read_samples_csv()
         check("batch task: csv x1 url set", rows["x1"]["storage_url"] == "https://drive/features/x1.npz", rows["x1"]["storage_url"])
         check("batch task: csv x2 url set", rows["x2"]["storage_url"].startswith("https://drive/"))

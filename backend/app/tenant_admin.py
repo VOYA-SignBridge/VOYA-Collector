@@ -315,6 +315,7 @@ def create_tenant(
 
     from app.storage.metadata_db import _execute
 
+    assert_tenant_name_free(display, extra_keys=(tenant_id, slug_value))
     with system_scope("tenant admin: create tenant"):
         if _tenant_row(tenant_id):
             raise TenantError(f"tenant {tenant_id!r} already exists", status_code=409)
@@ -330,9 +331,10 @@ def create_tenant(
                     str(owner_user_id) if owner_user_id else None,
                 ),
             )
-        except Exception as exc:  # unique violation on slug
+        except Exception as exc:  # unique violation: hai lượt tạo cùng tên chạy cùng lúc
+            logger.warning("[TENANT] could not create %s: %s", tenant_id, exc)
             raise TenantError(
-                f"could not create tenant {tenant_id!r}: {exc}", status_code=409
+                "Đã có tổ chức mang tên này, hãy chọn tên khác.", status_code=409
             ) from exc
 
         _open_subscription(
@@ -510,11 +512,55 @@ def _slugify_tenant(text: str) -> str:
     ascii_only = ascii_only.replace("đ", "d").replace("Đ", "D")
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_only.lower()).strip("-")
     slug = re.sub(r"-{2,}", "-", slug)
-    # Chừa chỗ cho "-" + 6 ký tự hậu tố trong giới hạn 63 ký tự của tenant id.
     slug = slug[:50].strip("-")
     # Tenant id phải bắt đầu bằng chữ hoặc số. Một tên toàn ký tự đặc biệt
     # ("!!!") rút lại thành chuỗi rỗng, và chuỗi rỗng thì không tạo id được.
     return slug if slug and slug[0].isalnum() else f"t{slug}" if slug else "tenant"
+
+
+def tenant_name_key(display_name: str) -> str:
+    """Khoá so trùng tên tổ chức: "Trường A", "truong a", "TRUONG-A" là một.
+
+    Cũng là `tenant_id`/`slug` của tổ chức mới, và tên thư mục của nó trên
+    Drive — nên hai tổ chức trùng khoá sẽ chung một thư mục.
+    """
+    if not any(c.isalnum() for c in (display_name or "")):
+        raise TenantError("Tên tổ chức phải có ít nhất một chữ hoặc số.", status_code=422)
+    return _slugify_tenant(display_name)
+
+
+def _reserved_tenant_keys() -> frozenset:
+    from app.storage.drive_layout import RESERVED_NAMES
+
+    return frozenset(_slugify_tenant(n) for n in (DEFAULT_TENANT_ID, *RESERVED_NAMES))
+
+
+def assert_tenant_name_free(display_name: str, *, ignore_tenant_id: Optional[str] = None,
+                            extra_keys: Tuple[str, ...] = ()) -> str:
+    """Từ chối (409) tên trùng với một tổ chức khác hoặc với tên dành riêng.
+
+    So với `tenant_id`, `slug` VÀ khoá của tên hiển thị của mọi tổ chức, kể cả
+    đã xoá mềm: thư mục Drive của tổ chức đã xoá có thể vẫn còn, và tổ chức cũ
+    mang hậu tố ngẫu nhiên (`truong-b-a9690c`) chỉ trùng ở tên hiển thị.
+    `ignore_tenant_id` là chính tổ chức đang đổi tên. Trả về khoá của tên.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    key = tenant_name_key(display_name)
+    wanted = {key, *(k.strip().lower() for k in extra_keys if k)}
+    if wanted & _reserved_tenant_keys():
+        raise TenantError("Tên này dành riêng cho hệ thống, hãy chọn tên khác.", status_code=409)
+    with system_scope("tenant admin: kiem ten to chuc trung"):
+        rows = _fetch_all("SELECT tenant_id, slug, display_name FROM tenants")
+    for r in rows:
+        if r["tenant_id"] == ignore_tenant_id:
+            continue
+        taken = {r["tenant_id"], (r.get("slug") or "").lower()}
+        if r.get("display_name") and any(c.isalnum() for c in r["display_name"]):
+            taken.add(_slugify_tenant(r["display_name"]))
+        if wanted & taken:
+            raise TenantError("Đã có tổ chức mang tên này, hãy chọn tên khác.", status_code=409)
+    return key
 
 
 #: Số tổ chức tối đa một tài khoản được TỰ LẬP, theo gói.
@@ -833,42 +879,27 @@ def create_self_serve_tenant(
     phải không bao giờ trả về tenant gốc, kể cả khi mọi thứ khác hỏng. Đó là
     lý do hàm này ném lỗi thay vì rơi về một mặc định.
 
-    Hậu tố ngẫu nhiên chứ không phải bộ đếm: `truong-b-2` cho biết đã có
-    `truong-b`, tức là ai cũng dò được danh sách tổ chức trên nền tảng bằng
-    cách thử đăng ký. Sáu ký tự hex thì không cho biết gì.
+    `tenant_id` là chính khoá của tên (`tenant_name_key`), không hậu tố: nó
+    cũng là tên thư mục của tổ chức trên Drive. Đến 18/10/2026 id mang sáu ký
+    tự hex ngẫu nhiên để không ai dò được tên tổ chức bằng cách thử đăng ký —
+    nhưng nay tên trùng bị từ chối, và chính lời từ chối đã cho biết tên có
+    tồn tại, nên hậu tố không còn che được gì.
     """
-    import secrets
-
     if not settings.self_serve_signup:
         raise TenantError(
             "Nền tảng đang chỉ nhận thành viên qua lời mời.", status_code=403
         )
 
-    base = _slugify_tenant(display_name)
+    display = (display_name or "").strip()
+    tenant_key = tenant_name_key(display)
     plan = _resolve_plan(plan_code or settings.self_serve_plan_code, must_be_self_serve=True)
-
-    last_error: Optional[Exception] = None
-    for _ in range(5):
-        candidate = f"{base}-{secrets.token_hex(3)}"
-        try:
-            tenant = create_tenant(
-                candidate,
-                display_name=display_name.strip() or candidate,
-                created_by=str(user_id),
-                plan_code=plan["plan_code"],
-                is_self_serve=True,
-            )
-            break
-        except TenantError as exc:
-            # Chỉ thử lại khi trùng id. Mọi lỗi khác (gói sai, id không hợp lệ)
-            # thử lại cũng chỉ ra đúng lỗi đó, chỉ chậm hơn năm lần.
-            if exc.status_code != 409:
-                raise
-            last_error = exc
-    else:
-        raise TenantError(
-            "Không tạo được mã tổ chức duy nhất, vui lòng thử lại.", status_code=503
-        ) from last_error
+    tenant = create_tenant(
+        tenant_key,
+        display_name=display,
+        created_by=str(user_id),
+        plan_code=plan["plan_code"],
+        is_self_serve=True,
+    )
 
     tenant_id = tenant["tenant_id"]
     set_home_tenant(str(user_id), tenant_id, role="admin")
@@ -910,6 +941,9 @@ def update_tenant(
 
     sets, params = [], []
     if display_name is not None:
+        # Đổi tên không đổi `slug`/thư mục Drive, nhưng tên mới vẫn không được
+        # trùng tổ chức khác — hai tổ chức hiện cùng một tên là đủ gây nhầm.
+        assert_tenant_name_free(display_name, ignore_tenant_id=tenant_id)
         sets.append("display_name = %s")
         params.append(display_name.strip())
     if is_active is not None:

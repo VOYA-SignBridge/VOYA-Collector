@@ -15,8 +15,7 @@ Endpoints backing /admin/labels/:id (LabelDetailPage):
 
 Auth: signed-in users only — the viewer page itself is admin-gated in the
 frontend, but reviewers without the admin flag may be granted the URL later.
-Responses are immutable per session, so browsers may cache them for 7 days
-(private: they sit behind cookie auth, shared caches must not store them).
+Visibility can be revoked: viewer payloads must not persist in browser caches.
 """
 
 from __future__ import annotations
@@ -45,9 +44,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/classes", tags=["label-sessions"])
 
-# Immutable per-session data behind cookie auth: browser cache yes (7 days),
-# shared/proxy caches no.
-_CACHE_HEADER = "private, max-age=604800"
+# A contributor can make a session private after it has been viewed.
+_CACHE_HEADER = "private, no-store"
 
 
 def _get_class_or_404(class_uid: str):
@@ -76,6 +74,45 @@ def _get_session_rows_or_404(class_uid: str, session_id: str) -> list:
     return rows
 
 
+def _owns_all_rows(rows: list, owners: dict, user_id: str) -> bool:
+    return bool(user_id and rows) and all(
+        owners.get(r.get("sample_uid") or "") is not None
+        and str(owners[r.get("sample_uid") or ""]) == user_id for r in rows
+    )
+
+
+def _readable_groups(groups: dict, current_user: Dict[str, Any]) -> dict:
+    from app.sample_access import readable_sample_uids
+
+    allowed = readable_sample_uids(
+        current_user,
+        [r.get("sample_uid") or "" for rows in groups.values() for r in rows],
+        require_tenant(),
+    )
+    # A cached preview may contain any row in this group. Never partially
+    # disclose a mixed-owner/mixed-visibility group via its shared preview.
+    return {key: rows for key, rows in groups.items()
+            if rows and all(r.get("sample_uid") in allowed for r in rows)}
+
+
+def _require_session_read(rows: list, current_user: Dict[str, Any]) -> None:
+    if not _readable_groups({"session": rows}, current_user):
+        raise HTTPException(status_code=404, detail="Không tìm thấy lần quay (session)")
+
+
+def _require_session_owner(rows: list, current_user: Dict[str, Any]) -> None:
+    """Chủ của MỌI mẫu trong lần quay, hoặc admin/editor của tenant đang dùng."""
+    from app.sample_access import can_manage_tenant_samples
+    from app.storage.metadata_db import get_sample_owners
+
+    if can_manage_tenant_samples(current_user, require_tenant()):
+        _require_session_read(rows, current_user)
+        return
+    owners = get_sample_owners([r.get("sample_uid") or "" for r in rows])
+    if not _owns_all_rows(rows, owners, str(current_user.get("id") or "")):
+        raise HTTPException(status_code=403, detail="Bạn chỉ có thể sửa lần quay gồm các mẫu của chính mình")
+
+
 @router.get("/{class_uid}/sessions")
 def list_label_sessions(
     class_uid: str,
@@ -83,19 +120,22 @@ def list_label_sessions(
 ):
     meta = _get_class_or_404(class_uid)
     groups = list_session_rows(class_uid, tenant_id=require_tenant())
+    groups = _readable_groups(groups, current_user)
 
     # Ownership is decided by auth_user_id (a UUID), NOT by the display name in
-    # user_id/username — two people can share a name, so a name-based check would
-    # let one edit/delete another's data. samples.csv has no auth_user_id column,
-    # so read it from Postgres (get_sample_owner) for the session's original row.
+    # user_id/username — two people can share a name. Read every row's owner
+    # from Postgres: a client-supplied session_id can group different owners.
     from app.storage.metadata_db import get_sample_owners
 
     me = str(current_user.get("id") or "")
+    from app.sample_access import can_manage_tenant_samples
 
-    # One batched owner lookup for every session's original sample (avoids an
+    manager = can_manage_tenant_samples(current_user, require_tenant())
+
+    # One batched owner lookup for every sample (avoids an
     # N+1 query when the label has many recordings).
     originals = {key: (pick_original_sample(rows) or {}) for key, rows in groups.items()}
-    owners = get_sample_owners([o.get("sample_uid") or "" for o in originals.values()])
+    owners = get_sample_owners([r.get("sample_uid") or "" for rows in groups.values() for r in rows])
 
     sessions = []
     for key, rows in groups.items():
@@ -118,9 +158,10 @@ def list_label_sessions(
                 "has_preview": preview_exists,
                 # Per-session permission flags computed on the server (by ID):
                 #   is_owner    — this recording belongs to the caller
-                #   can_manage  — caller may download/delete it (owner or admin)
+                #   can_manage  — caller may download/delete it (owner, or
+                #                 admin/editor of this tenant)
                 "is_owner": is_owner,
-                "can_manage": bool(is_owner or current_user.get("is_admin")),
+                "can_manage": bool(manager or _owns_all_rows(rows, owners, me)),
             }
         )
 
@@ -160,6 +201,7 @@ def session_provenance(
     rows = groups.get(session_id)
     if not rows:
         raise HTTPException(status_code=404, detail="Không có lần thu này")
+    _require_session_read(rows, current_user)
 
     original = pick_original_sample(rows) or {}
 
@@ -273,21 +315,11 @@ def delete_label_session(
     _get_class_or_404(class_uid)
     rows = _get_session_rows_or_404(class_uid, session_id)
 
-    from app.storage.metadata_db import get_sample_owner
-    from app.catalog_sync import sync_soft_delete_sample, CatalogSyncError
+    from app.catalog_sync import sync_soft_delete_sample
 
-    original = pick_original_sample(rows) or {}
-    owner_id = get_sample_owner(original.get("sample_uid") or "")
+    _require_session_owner(rows, current_user)
     is_admin = bool(current_user.get("is_admin"))
     me = str(current_user.get("id") or "")
-    if not is_admin and (owner_id is None or str(owner_id) != me):
-        logger.warning(
-            "[SESSION_DELETE][DENY] user=%s(id=%s) tried to delete class=%s session=%s owned by %s",
-            current_user.get("username"), me, class_uid, session_id, owner_id,
-        )
-        raise HTTPException(
-            status_code=403, detail="Bạn chỉ có thể xóa lần quay của chính mình"
-        )
 
     deleted: list = []
     failed: list = []
@@ -306,7 +338,7 @@ def delete_label_session(
         current_user.get("username"), me, is_admin, class_uid, session_id, len(deleted), len(failed),
     )
     return {
-        "success": True,
+        "success": not failed,
         "session_id": session_id,
         "deleted_count": len(deleted),
         "failed": failed,
@@ -330,21 +362,11 @@ def reassign_label_session(
     _get_class_or_404(class_uid)
     rows = _get_session_rows_or_404(class_uid, session_id)
 
-    from app.storage.metadata_db import get_sample_owner
     from app.catalog_sync import sync_reassign_sample
 
-    original = pick_original_sample(rows) or {}
-    owner_id = get_sample_owner(original.get("sample_uid") or "")
+    _require_session_owner(rows, current_user)
     is_admin = bool(current_user.get("is_admin"))
     me = str(current_user.get("id") or "")
-    if not is_admin and (owner_id is None or str(owner_id) != me):
-        logger.warning(
-            "[SESSION_REASSIGN][DENY] user=%s(id=%s) tried to reassign class=%s session=%s owned by %s",
-            current_user.get("username"), me, class_uid, session_id, owner_id,
-        )
-        raise HTTPException(
-            status_code=403, detail="Bạn chỉ có thể đổi nhãn lần quay của chính mình"
-        )
 
     target_ref = str(payload.get("target_class_ref") or "").strip()
     if not target_ref:
@@ -372,7 +394,7 @@ def reassign_label_session(
     if not moved and failed:
         raise HTTPException(status_code=400, detail=failed[0].get("error") or "Đổi nhãn thất bại")
     return {
-        "success": True,
+        "success": not failed,
         "session_id": session_id,
         "target_class_ref": target_ref,
         "moved_count": len(moved),
@@ -388,6 +410,7 @@ def get_session_frames(
 ):
     _get_class_or_404(class_uid)
     rows = _get_session_rows_or_404(class_uid, session_id)
+    _require_session_read(rows, current_user)
 
     row = pick_original_sample(rows)
     npz_path = resolve_sample_npz(row) if row else None
@@ -465,7 +488,8 @@ def get_session_preview_status(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     meta = _get_class_or_404(class_uid)
-    _get_session_rows_or_404(class_uid, session_id)
+    rows = _get_session_rows_or_404(class_uid, session_id)
+    _require_session_read(rows, current_user)
 
     if _preview_path(meta, session_id).exists():
         return {"status": "ready"}
@@ -490,6 +514,8 @@ def get_session_preview_video(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     meta = _get_class_or_404(class_uid)
+    rows = _get_session_rows_or_404(class_uid, session_id)
+    _require_session_read(rows, current_user)
     path = _preview_path(meta, session_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Video chưa được render — gọi /preview trước")

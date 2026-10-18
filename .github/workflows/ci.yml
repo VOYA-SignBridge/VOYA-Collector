@@ -43,17 +43,16 @@ name: CI
 # được viết). `**` khớp cả `deploy_ctu_ver-2.2.1` lẫn các nhánh phát hành sau.
 on:
   pull_request:
-    branches: [main]
-  push:
-    branches:
-      - main
-      - 'deploy_ctu_**'
+    branches: [main, 'deploy_ctu_**']
+  # Push releases run this workflow through build_docker.yml's required checks
+  # job, avoiding two complete test runs for the same push.
   # Chạy lại bằng tay khi cần xác nhận một commit cũ vẫn xanh.
   workflow_dispatch:
+  workflow_call:
 
 # Một PR đẩy liên tiếp vài commit thì chỉ lượt cuối cần chạy.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -133,7 +132,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: admin
@@ -266,8 +265,58 @@ jobs:
       # `VOYA_TEST_VIDEO` cố ý KHÔNG đặt: kho clip 2,7 GB không có trên runner,
       # nên test trích npz từ video sẽ skip. Đó là lần skip DUY NHẤT được chấp
       # nhận ở đây, và nó hiện ra trong báo cáo chứ không biến mất.
+      # Máy cài mới gieo danh mục hệ thống (phương ngữ, profile từ config/*.seed.csv)
+      # lúc backend khởi động, qua `init_db` -> `seed_from_csv`. CI không khởi động
+      # backend, nên tenant `default` không có phương ngữ nào và `create_tenant`
+      # của fixture không có gì để nhân bản. Gọi đúng hàm đó, cùng vai ứng dụng.
+      - name: Gieo danh mục hệ thống (như lúc khởi động)
+        working-directory: backend
+        run: |
+          python -c "
+          from app.tenant_context import system_scope
+          from app.vocabulary_registry import seed_from_csv
+          with system_scope('ci: gieo danh muc he thong'):
+              print('dialects:', seed_from_csv())
+          "
+
+      # Cùng đường với máy dev (`scripts/run_tests.sh`): suite chạy bằng BA VAI
+      # TEST, không phải `voya_app`/`admin`. `test_db_role_isolation` và
+      # `test_control_plane` khẳng định đúng điều đó (13 ca đỏ trước 18/10/2026),
+      # và chạy bằng vai sản xuất thì các phép đo RLS đo nhầm chủ thể.
+      - name: Cấp vai test (cùng script với máy dev)
+        env:
+          VOYA_PG_CONTAINER: "-"
+          VOYA_TEST_DATABASE: signdb_pytest_ci
+          PGPASSWORD: admin
+          VOYA_TEST_OWNER_PASSWORD: ci_test_owner_password_16
+          VOYA_TEST_APP_PASSWORD: ci_test_app_password_16_x
+          VOYA_TEST_CONTROL_PASSWORD: ci_test_control_password_16
+        run: bash scripts/provision_test_db_roles.sh
+
+      # Hai tenant đối kháng `iso_a`/`iso_b` cùng người dùng và một lớp mỗi bên.
+      # CSDL dựng mới không có tenant nào ngoài `default`, nên ~30 ca ghi job /
+      # người dùng cho `iso_a` đổ khoá ngoại `fk_*_tenant` trước khi kiểm được gì.
+      - name: Gieo fixture cách ly
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://voya_test_app:ci_test_app_password_16_x@localhost:5432/signdb_pytest_ci
+          MIGRATION_DATABASE_URL: postgresql://voya_test_owner:ci_test_owner_password_16@localhost:5432/signdb_pytest_ci
+          CONTROL_DATABASE_URL: postgresql://voya_test_control:ci_test_control_password_16@localhost:5432/signdb_pytest_ci
+        run: python ../scripts/seed_isolation_fixture.py
+
       - name: Test
         working-directory: backend
+        env:
+          DATABASE_URL: postgresql://voya_test_app:ci_test_app_password_16_x@localhost:5432/signdb_pytest_ci
+          MIGRATION_DATABASE_URL: postgresql://voya_test_owner:ci_test_owner_password_16@localhost:5432/signdb_pytest_ci
+          CONTROL_DATABASE_URL: postgresql://voya_test_control:ci_test_control_password_16@localhost:5432/signdb_pytest_ci
+          VOYA_TEST_OWNER_PASSWORD: ci_test_owner_password_16
+          VOYA_TEST_APP_PASSWORD: ci_test_app_password_16_x
+          VOYA_TEST_CONTROL_PASSWORD: ci_test_control_password_16
+          SMTP_HOST: smtp.test.invalid
+          # `run_tests.sh` đặt biến này; ca đối chứng dương của test_db_role_isolation
+          # đọc nó để biết CSDL test tên gì.
+          POSTGRES_DB: signdb_pytest_ci
         run: python -m pytest -q --junitxml=junit-backend.xml
 
       - name: Nộp báo cáo test
@@ -344,3 +393,9 @@ jobs:
         run: |
           python -m pip install --quiet pyyaml
           python scripts/check_registry_overlay.py
+
+      - name: Backup / deploy contract and safety tests
+        run: python -m unittest discover -s scripts/ops/tests -v
+
+      - name: Real isolated PostgreSQL backup / restore drill
+        run: python scripts/ops/tests/restore_drill.py

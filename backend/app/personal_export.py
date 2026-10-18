@@ -14,15 +14,12 @@ Gói gồm hai phần, không chỉ metadata:
                   `auth_user_id` khớp người gọi
     files/*.npz   tệp đặc trưng thật của đúng các dòng đó
 
-Reuse: khớp tên tệp qua `dataset_manager.iter_tenant_feature_files` + tập tên
-được phép — CÙNG kỹ thuật `tenant_lifecycle._ten_tep_duoc_phep` đã dùng, để
-không có hai đường tìm tệp trôi khỏi nhau theo thời gian.
+`portable_export` kiểm tra đường dẫn chính xác trong tenant, checksum và NPZ;
+gói dùng đường dẫn tương đối, kèm JSON, nhãn và manifest cho máy nhận.
 """
 
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -91,7 +88,19 @@ def _readme(tenant: str, sample_count: int, file_count: int) -> str:
         f"Số tệp đặc trưng đính kèm: {file_count}",
         "",
         "samples.csv   — đúng các cột của kho dữ liệu, chỉ dòng của bạn.",
-        "files/*.npz   — tệp đặc trưng thật cho từng dòng ở trên (nếu còn trên đĩa).",
+        "samples.json  — cùng các mẫu với CSV; đường dẫn tương đối tính từ thư mục giải nén.",
+        "files/*.npz   — đầy đủ tệp đặc trưng; thiếu/hỏng tệp thì không công bố gói.",
+        "labels.json   — metadata danh mục của các nhãn trong gói.",
+        "manifest.json — SHA-256, feature_dim và class_uid_to_target_idx liên tục từ 0.",
+        "",
+        "Trên máy khác: cài cùng phiên bản repo và dependencies của pipeline train.",
+        "Nạp bằng processed.train_utils.dataset_loader.NPZSignDataset(",
+        "  '<export>/samples.csv', root='<export>',",
+        "  class_uid_to_target_idx=<mapping trong manifest>, to_tensor=True).",
+        "Không cần database/Drive của máy nguồn để nạp NPZ đã xuất.",
+        "Chia train/val/test theo signer/session trước khi train; không dùng chung",
+        "một lần quay hay bản augment của nó ở các split khác nhau.",
+        "Gói không tự tạo split và không đảm bảo đủ nhãn/người ký cho nghiên cứu.",
         "",
         "Gói này chỉ chứa dữ liệu bạn đã tự đóng góp. Nó không phải bản phát hành",
         "và không nên dùng để chia sẻ lại nếu bạn chưa xin phép tổ chức.",
@@ -108,8 +117,10 @@ def run_export(export_id: str) -> Dict[str, Any]:
     """
     import zipfile
 
-    from app.dataset_manager import iter_tenant_feature_files
+    from app.config import settings
+    from app.dataset_manager import iter_tenant_feature_files, load_labels
     from app.dataset_samples import SAMPLE_FIELDS
+    from app.portable_export import write_feature_bundle
     from app.storage.metadata_db import _execute, _fetch_all
     from app.tenant_context import system_scope
 
@@ -133,43 +144,15 @@ def run_export(export_id: str) -> Dict[str, Any]:
     try:
         owned = _owned_rows(tenant, user_id)
 
-        # Tên tệp được phép, suy từ CHÍNH các dòng của người này — cùng kỹ
-        # thuật `tenant_lifecycle._ten_tep_duoc_phep` dùng để không có hai
-        # đường quy tệp-về-hàng trôi khỏi nhau.
-        def _ten(row: Dict[str, Any]) -> str:
-            for khoa in ("file_path", "storage_key", "storage_url"):
-                gia_tri = str(row.get(khoa) or "").strip()
-                if gia_tri:
-                    return Path(gia_tri.replace("\\", "/")).name
-            return ""
-
-        duoc_phep = {_ten(r) for r in owned}
-        duoc_phep.discard("")
-
         with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as bundle:
-            buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=SAMPLE_FIELDS, extrasaction="ignore")
-            writer.writeheader()
-            for row in owned:
-                writer.writerow(row)
-            bundle.writestr("samples.csv", buf.getvalue())
-
-            added = 0
-            if duoc_phep:
-                for path in iter_tenant_feature_files(tenant):
-                    if path.name not in duoc_phep:
-                        continue
-                    try:
-                        bundle.write(path, f"files/{path.name}")
-                        added += 1
-                    except OSError as exc:
-                        # Một tệp không đọc được không được làm hỏng cả gói —
-                        # samples.csv vẫn phải xuất trọn vẹn.
-                        logger.warning("[PERSONAL_EXPORT] bỏ qua %s: %s", path, exc)
-
+            added = write_feature_bundle(bundle, owned, iter_tenant_feature_files(tenant),
+                                         Path(settings.dataset_root), SAMPLE_FIELDS,
+                                         labels=load_labels(tenant))
             bundle.writestr("README.txt", _readme(tenant, len(owned), added))
 
-        partial.replace(target)
+        from app.tenant_lifecycle import finish_partial
+
+        finish_partial(partial, target)
         size = target.stat().st_size
         with system_scope("personal export: mark ready"):
             _execute(
@@ -184,7 +167,9 @@ def run_export(export_id: str) -> Dict[str, Any]:
                 "sample_count": len(owned)}
 
     except Exception as exc:
-        partial.unlink(missing_ok=True)
+        from app.tenant_lifecycle import discard_partial
+
+        discard_partial(partial)
         with system_scope("personal export: mark failed"):
             _execute(
                 "UPDATE personal_exports SET status = 'failed', error = %s, "

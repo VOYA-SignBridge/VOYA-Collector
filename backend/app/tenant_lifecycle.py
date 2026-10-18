@@ -43,6 +43,39 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def finish_partial(partial: Path, target: Path, *, attempts: int = 6) -> None:
+    """`.zip.part` -> `.zip`, thử lại khi Windows còn giữ tệp.
+
+    `dataset/` là ổ gắn từ Windows. Ngay sau khi ghi xong, Defender (hoặc trình
+    đánh chỉ mục) có thể đang mở tệp, và `os.replace` qua lớp gắn ấy trả
+    `Permission denied` trong khoảng một giây. Kiểm chứng 17/10/2026: lượt xuất
+    đầu của một tenant hỏng đúng như vậy, lượt bấm lại 2 phút sau thì xong.
+    """
+    import time
+
+    for i in range(attempts):
+        try:
+            partial.replace(target)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(0.25 * (2 ** i))
+
+
+def discard_partial(partial: Path) -> None:
+    """Dọn `.part` trên đường lỗi mà KHÔNG được ném lỗi mới.
+
+    Trước 17/10/2026 dòng dọn dẹp nằm trước câu ghi trạng thái `failed`; khi chính
+    nó cũng gặp `Permission denied` thì câu ghi không bao giờ chạy và bản xuất
+    kẹt ở `running` vĩnh viễn — người dùng thấy "đang chạy" mãi mà không có lỗi.
+    Một tệp `.part` sót lại vô hại; một trạng thái sai thì không."""
+    try:
+        partial.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("[EXPORT] khong xoa duoc %s: %s", partial, exc)
+
 #: Bảng có `tenant_id`, xếp lá trước gốc. Xem chú thích đầu tệp.
 PURGE_ORDER: tuple[str, ...] = (
     # v4 — không bảng nào bị bảng khác trỏ tới, nên đi trước cho gọn
@@ -187,6 +220,48 @@ RELEASE_PURPOSES: tuple = ("internal_training", "research_release", "public_libr
 EXPORT_PURPOSES: tuple = (EXPORT_PURPOSE_PORTABILITY,) + RELEASE_PURPOSES
 
 
+def _check_export_privacy(tenant: str, viewer_id: Optional[str]) -> None:
+    """Full tenant snapshots cannot disclose another contributor's private data
+    to someone who is not allowed to see it.
+
+    A tenant admin/editor (or platform admin) manages every sample of the tenant
+    — `private` is private from OTHER MEMBERS, not from the organisation's own
+    managers (`app.sample_access`, decided 17/10/2026). Without this exemption
+    the tenant `default`, where all 4,205 samples are private, could never be
+    exported by its admin at all.
+
+    Anyone else: stop rather than silently dropping records from a
+    portability/backup ZIP. Individual contributors can still use their
+    personal feature export.
+    """
+    from app.sample_access import can_manage_tenant_samples
+    from app.storage.metadata_db import _fetch_all
+    from app.tenant_context import system_scope
+
+    if viewer_id:
+        with system_scope("lifecycle: is the export requester a tenant manager"):
+            who = _fetch_all("SELECT is_admin FROM users WHERE id = %s::uuid", (viewer_id,))
+            manager = can_manage_tenant_samples(
+                {"id": viewer_id, "is_admin": bool(who and who[0].get("is_admin"))}, tenant)
+        if manager:
+            return
+
+    with system_scope("lifecycle: enforce contributor privacy"):
+        blocked = _fetch_all(
+            "SELECT 1 FROM capture_sessions WHERE tenant_id = %s "
+            "AND visibility = 'private' AND (auth_user_id IS NULL OR auth_user_id IS DISTINCT FROM %s::uuid) "
+            "UNION ALL SELECT 1 FROM raw_uploads WHERE tenant_id = %s "
+            "AND visibility = 'private' AND (auth_user_id IS NULL OR auth_user_id IS DISTINCT FROM %s::uuid) "
+            "UNION ALL SELECT 1 FROM samples s LEFT JOIN capture_sessions cs "
+            "ON cs.capture_session_id = s.capture_session_id AND cs.tenant_id = s.tenant_id "
+            "WHERE s.tenant_id = %s AND COALESCE(cs.visibility, 'private') = 'private' "
+            "AND (s.auth_user_id IS NULL OR s.auth_user_id IS DISTINCT FROM %s::uuid) LIMIT 1",
+            (tenant, viewer_id, tenant, viewer_id, tenant, viewer_id),
+        )
+    if blocked:
+        raise LifecycleError("Không thể xuất toàn bộ tổ chức khi có dữ liệu private của người khác. Dùng bản xuất cá nhân hoặc yêu cầu chủ dữ liệu chia sẻ.", status_code=403)
+
+
 def request_export(
     tenant_id: str,
     *,
@@ -237,6 +312,7 @@ def request_export(
             status_code=422)
 
     tenant = normalize_tenant_id(tenant_id)
+    _check_export_privacy(tenant, requested_by)
     export_id = str(uuid.uuid4())
     expires = datetime.now(timezone.utc) + timedelta(days=settings.tenant_export_ttl_days)
 
@@ -282,6 +358,7 @@ def run_export(export_id: str) -> Dict[str, Any]:
     counts: Dict[str, int] = {}
 
     try:
+        _check_export_privacy(tenant, str(job.get("requested_by") or "") or None)
         with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as bundle:
             for table in EXPORT_TABLES:
                 with system_scope(f"lifecycle: export rows of {table}"):
@@ -319,7 +396,7 @@ def run_export(export_id: str) -> Dict[str, Any]:
                     "MANIFEST_CONSENT.json",
                     json.dumps(ban_ke, ensure_ascii=False, indent=2, default=str))
 
-        partial.replace(target)
+        finish_partial(partial, target)
         size = target.stat().st_size
         with system_scope("lifecycle: mark an export ready"):
             _execute(
@@ -333,7 +410,7 @@ def run_export(export_id: str) -> Dict[str, Any]:
                 "row_counts": counts}
 
     except Exception as exc:
-        partial.unlink(missing_ok=True)
+        discard_partial(partial)
         with system_scope("lifecycle: mark an export failed"):
             _execute(
                 "UPDATE tenant_exports SET status = 'failed', error = %s, "
@@ -525,7 +602,7 @@ def list_exports(tenant_id: str) -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def export_file(tenant_id: str, export_id: str) -> Path:
+def export_file(tenant_id: str, export_id: str, *, viewer_id: Optional[str] = None) -> Path:
     """Đường dẫn tệp của một bản xuất, sau khi đã kiểm nó còn tải được.
 
     Phạm vi theo CẢ tenant lẫn id, cùng lý do với `webhooks.delete_endpoint`:
@@ -546,6 +623,7 @@ def export_file(tenant_id: str, export_id: str) -> Path:
     if not rows:
         raise LifecycleError("không tìm thấy bản xuất", status_code=404)
     row = dict(rows[0])
+    _check_export_privacy(tenant, viewer_id)
     if row["status"] != "ready":
         raise LifecycleError(f"bản xuất đang ở trạng thái {row['status']}", status_code=409)
     expires = row.get("expires_at")

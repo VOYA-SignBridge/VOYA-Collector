@@ -22,6 +22,7 @@ it is actually connected to the signal, which is the half that silently breaks.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -34,9 +35,25 @@ from app.worker import (
     stamp_tenant_on_task,
 )
 
+def _probe_broker() -> str:
+    """The configured broker's host and port, on db 14.
+
+    Host from configuration, not hard-coded: `redis:6379` only resolves inside
+    the compose network, so on CI (Redis at `localhost`) all six cases died with
+    "Temporary failure in name resolution" before testing anything. Read at
+    import time, before the fixture deletes `CELERY_BROKER_URL`.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    from app.config import settings
+
+    base = urlsplit(os.getenv("CELERY_BROKER_URL") or settings.broker_url)
+    return urlunsplit((base.scheme, base.netloc, "/14", "", ""))
+
+
 #: A Redis db used by nothing else. Not 0 (production traffic) and not 15
 #: (the rate-limit namespace the rest of the suite uses).
-PROBE_BROKER = "redis://redis:6379/14"
+PROBE_BROKER = _probe_broker()
 #: With the Redis transport the queue name IS the list key. Naming an
 #: undeclared queue silently publishes nowhere — the first version of this file
 #: used "voya_tenant_probe" and read back None every time. Isolation comes from
@@ -236,6 +253,9 @@ class TestTheAggregateTasksStayPlatformWide:
         "app.export_tasks.export_samples_to_sheets",
         "app.export_tasks.export_labels_to_sheets",
         "app.export_tasks.mirror_catalog_csvs_to_drive",
+        # Dựng Sheet Lookup list cho MỌI tổ chức và Sheet của nền tảng; beat phái,
+        # không có người dùng nào để lấy phạm vi.
+        "app.export_tasks.sync_lookup_lists",
         "app.export_tasks.reconcile_samples_csv_task",
         "app.sync_tasks.download_missing_files_to_local",
         "app.training_tasks.cleanup_training_artifacts",

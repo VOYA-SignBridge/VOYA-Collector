@@ -137,11 +137,12 @@ export default function LabelDetailPage() {
       setDeletingId(session.session_id);
       setError(null);
       try {
-        await deleteLabelSession(classUid, session.session_id);
+        const result = await deleteLabelSession(classUid, session.session_id);
         // Drop the selection if it pointed at the just-removed session, then
         // reload so the list + counts reflect the deletion.
         setSelectedId((prev) => (prev === session.session_id ? "" : prev));
         await loadSessions();
+        if (result?.failed?.length) setError(t("Một số mẫu chưa được cập nhật. Vui lòng kiểm tra và thử lại."));
       } catch (err) {
         const e = err as { userMessage?: string; message?: string };
         setError(e.userMessage || e.message || t("Không xóa được lần quay"));
@@ -173,10 +174,11 @@ export default function LabelDetailPage() {
       setReassignSaving(true);
       setError(null);
       try {
-        await reassignLabelSession(classUid, reassignTarget.session_id, targetClassUid);
+        const result = await reassignLabelSession(classUid, reassignTarget.session_id, targetClassUid);
         setSelectedId((prev) => (prev === reassignTarget.session_id ? "" : prev));
         setReassignTarget(null);
         await loadSessions();
+        if (result?.failed?.length) setError(t("Một số mẫu chưa được cập nhật. Vui lòng kiểm tra và thử lại."));
       } catch (err) {
         const e = err as { userMessage?: string; message?: string };
         setError(e.userMessage || e.message || t("Không đổi được nhãn cho lần quay"));
@@ -239,7 +241,7 @@ export default function LabelDetailPage() {
 
   if (loading) return <LoadingScreen />;
 
-  if (error || !info) {
+  if (!info || notFound) {
     return (
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-4">
         <ErrorBanner message={error || t("Không tải được dữ liệu nhãn")} />
@@ -260,17 +262,31 @@ export default function LabelDetailPage() {
         title={info.label_original}
         subtitle={t("{p1} · {count} lần quay đã thu thập", { p1: dialectLabel(info.dialect), count: info.count })}
         actions={
-          // Một nút nhỏ sang phần học — cùng ký hiệu, khác câu hỏi.
-          <Link
-            to={`/learn/${info.slug}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <GraduationCapIcon className="h-4 w-4 text-ctu-blue" aria-hidden="true" />
-            {t("Học cách ký")}
-          </Link>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Link
+              to={`/upload?tab=capture&method=camera&label=${encodeURIComponent(info.label_original)}&class_uid=${encodeURIComponent(classUid)}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ctu-blue bg-ctu-blue px-3 py-2 text-sm font-medium text-white hover:bg-ctu-blue/90"
+            >
+              {t("Ghi hình trực tiếp")}
+            </Link>
+            <Link
+              to={`/upload?tab=capture&method=video&label=${encodeURIComponent(info.label_original)}&class_uid=${encodeURIComponent(classUid)}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {t("Tải video lên")}
+            </Link>
+            <Link
+              to={`/learn/${info.slug}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <GraduationCapIcon className="h-4 w-4 text-ctu-blue" aria-hidden="true" />
+              {t("Học cách ký")}
+            </Link>
+          </div>
         }
       />
 
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
       <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
         {/* ------- Left: sessions & timeline ------- */}
         <div className="space-y-3">

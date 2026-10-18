@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 from app import api_keys as api_keys_service
 from app import webhooks as webhooks_service
 from app.auth import require_tenant_editor
-from app.quota_deps import tenant_of
+from app.quota_deps import working_tenant_of
 from app.rate_limit_deps import limit_catalog
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def list_api_keys(
     current_user: Dict[str, Any] = Depends(require_tenant_editor),
 ) -> List[Dict[str, Any]]:
     return api_keys_service.list_keys(
-        tenant_of(current_user), include_revoked=include_revoked
+        working_tenant_of(current_user), include_revoked=include_revoked
     )
 
 
@@ -83,7 +83,7 @@ def create_api_key(
 
     try:
         result = api_keys_service.create_key(
-            tenant_of(current_user),
+            working_tenant_of(current_user),
             name=payload.name,
             scopes=payload.scopes,
             created_by=str(current_user.get("id") or ""),
@@ -119,7 +119,7 @@ def revoke_api_key(
 
     try:
         api_keys_service.revoke_key(
-            tenant_of(current_user), key_id, revoked_by=str(current_user.get("id") or "")
+            working_tenant_of(current_user), key_id, revoked_by=str(current_user.get("id") or "")
         )
     except api_keys_service.ApiKeyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -148,7 +148,7 @@ def list_event_types() -> Dict[str, Any]:
 def list_webhooks(
     current_user: Dict[str, Any] = Depends(require_tenant_editor),
 ) -> List[Dict[str, Any]]:
-    return webhooks_service.list_endpoints(tenant_of(current_user))
+    return webhooks_service.list_endpoints(working_tenant_of(current_user))
 
 
 @router.post(
@@ -165,7 +165,7 @@ def create_webhook(
 
     try:
         result = webhooks_service.create_endpoint(
-            tenant_of(current_user),
+            working_tenant_of(current_user),
             url=payload.url,
             event_types=payload.event_types,
             description=payload.description,
@@ -195,7 +195,7 @@ def delete_webhook(
     from app import audit
 
     try:
-        webhooks_service.delete_endpoint(tenant_of(current_user), endpoint_id)
+        webhooks_service.delete_endpoint(working_tenant_of(current_user), endpoint_id)
     except webhooks_service.WebhookError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
@@ -214,7 +214,7 @@ def test_webhook(
     """Xếp một sự kiện thử vào hàng giao cho đúng endpoint này."""
     try:
         delivery_id = webhooks_service.queue_test_delivery(
-            tenant_of(current_user), endpoint_id
+            working_tenant_of(current_user), endpoint_id
         )
     except webhooks_service.WebhookError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -229,5 +229,5 @@ def list_deliveries(
 ) -> List[Dict[str, Any]]:
     """Lịch sử giao gần đây của một endpoint — thứ cần để gỡ rối một tích hợp."""
     return webhooks_service.recent_deliveries(
-        tenant_of(current_user), endpoint_id, limit=limit
+        working_tenant_of(current_user), endpoint_id, limit=limit
     )

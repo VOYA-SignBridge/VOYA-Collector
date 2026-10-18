@@ -1,4 +1,5 @@
 import { tr } from "../i18n";
+import { friendlyError } from "../lib/errors";
 import axiosClient from "./axiosClient";
 import { validateLabels, validateSessions, validateLabel } from "./validators";
 import type { Result } from "./validators";
@@ -363,5 +364,20 @@ export const deleteClass = async (classRef: string): Promise<Result<{ message: s
       ok: false,
       error: errMessage,
     };
+  }
+};
+
+/** Contributor-safe label creation used by collection screens. */
+export const requestClass = async (payload: { label: string; language?: string; dialect?: string; is_common_language?: boolean; region?: string; }): Promise<Result<ClassRow>> => {
+  try {
+    const res = await axiosClient.post('/classes/request', payload);
+    const raw = res.data;
+    if (raw && typeof raw === 'object') return { ok: true, data: raw as ClassRow };
+    return { ok: false, error: 'Invalid request class response' } as Result<ClassRow>;
+  } catch (err) {
+    // `friendlyError`, không phải `err.message`: axios chỉ cho "Request failed
+    // with status code 422" và nuốt mất câu giải thích máy chủ đã soạn (vd. phương
+    // ngữ đã được gộp vào bảng chữ cái nên nhãn phải là một chữ cái).
+    return { ok: false, error: friendlyError(err, tr('Không thể tạo nhãn.')) };
   }
 };

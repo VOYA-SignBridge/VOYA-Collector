@@ -866,13 +866,14 @@ def model_drive_paths(folder_name: str, deploy_stamp: str, *, tenant_id: Optiona
     """(thư mục Deploy, đường dẫn latest_manifest.json) trên Drive cho một lần promote.
 
     Ở bố cục `legacy` đây đúng là `models/<tên>/…` như trước — `latest_manifest.json`
-    là đường dẫn CỐ ĐỊNH mà app di động đọc, nên chỉ bật bố cục `tenant` sau khi
-    app đã đọc được `tenants/<id>/models/<tên>/latest_manifest.json`.
+    là đường dẫn mà app di động đọc. Ở bố cục `tenant` nó là
+    `Community/Models/<tên>/…` hoặc `Tenants/<slug>/Models/<tên>/…`
+    (18/10/2026: trên Drive chưa có tệp latest_manifest.json nào).
     """
-    from app.storage.drive_layout import drive_path_for
+    from app.storage.drive_layout import MODELS_TREE, drive_path_for
 
-    return (drive_path_for(f"models/{folder_name}/Deploy {deploy_stamp}", tenant_id),
-            drive_path_for(f"models/{folder_name}/latest_manifest.json", tenant_id))
+    return (drive_path_for(f"{MODELS_TREE}/{folder_name}/Deploy {deploy_stamp}", tenant_id),
+            drive_path_for(f"{MODELS_TREE}/{folder_name}/latest_manifest.json", tenant_id))
 
 
 

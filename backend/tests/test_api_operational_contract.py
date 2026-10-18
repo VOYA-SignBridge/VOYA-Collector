@@ -70,7 +70,11 @@ FEATURES = REPO_ROOT / "dataset" / "features"
 #: điều nó muốn chứng minh: hai đường gặp nhau trên cùng một hiện vật — chỉ khác
 #: là hiện vật ấy do bộ ca dựng, biết chắc chủ, và dọn được.
 SPLIT_ID = "test-owned-operational-a"
-TENANT = "iso_a"
+#: Chủ hiện vật phải là chủ của DỮ LIỆU nó rót vào. Bộ ca dựng từ
+#: `dataset/samples.csv` thật, nơi mọi dòng thuộc tenant khởi tạo; từ 17/10/2026
+#: `make_splits` chỉ rót mẫu của đúng chủ, nên chủ `iso_a` trên dữ liệu ấy cho
+#: một hiện vật RỖNG — đúng điều cổng tổ chức sinh ra để chặn.
+TENANT = "default"
 ARTIFACT = SPLITS / "operational" / SPLIT_ID
 SO_LOP = 7
 PHUONG_NGU = "hoa-de"
@@ -147,9 +151,9 @@ def hien_vat_cua_bo_test():
 #: Ở đây điền một tenant thật để bộ ca này kiểm ĐÚNG thứ nó sinh ra để kiểm:
 #: cổng ghim hiện vật, chứ không phải danh tính.
 USER = {"id": "u-1", "username": "researcher", "role": "user",
-        "tenant_id": "iso_a"}
+        "tenant_id": TENANT}
 ADMIN = {"id": "a-1", "username": "boss", "role": "admin",
-         "tenant_id": "iso_a"}
+         "tenant_id": TENANT}
 
 
 @pytest.fixture
@@ -163,6 +167,11 @@ def client(monkeypatch):
 
     app = FastAPI()
     app.include_router(router)
+    # Router huấn luyện đọc tổ chức từ PHẠM VI REQUEST (18/10/2026), nên app con
+    # cần đúng middleware đặt phạm vi đó — người dùng ở đây làm việc tại nhà.
+    import app.tenant_middleware as tm
+    monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: TENANT)
+    app.add_middleware(tm.TenantScopeMiddleware)
     app.dependency_overrides[get_current_user] = lambda: USER
     app.dependency_overrides[require_admin] = lambda: ADMIN
 

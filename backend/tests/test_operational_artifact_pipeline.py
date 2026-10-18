@@ -122,6 +122,18 @@ def kho(tmp_path, monkeypatch):
     return goc_splits
 
 
+def _gan_chu(samples_csv: Path, tenant_id: str) -> None:
+    with samples_csv.open(newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        cot = list(r.fieldnames or [])
+        hang = list(r)
+    if "tenant_id" not in cot:
+        cot.append("tenant_id")
+    for h in hang:
+        h["tenant_id"] = tenant_id
+    _viet(samples_csv, cot, hang)
+
+
 def _chay(kho, monkeypatch, *co, split_id="op-test", tenant_id="iso_a"):
     """Gọi CLI thật của make_splits. Trả về thư mục hiện vật.
 
@@ -140,6 +152,12 @@ def _chay(kho, monkeypatch, *co, split_id="op-test", tenant_id="iso_a"):
     # `test_split_owner_metadata.py` và gọi CLI KHÔNG có cờ này.
     if tenant_id is not None:
         argv.append(f"--tenant_id={tenant_id}")
+        if str(tenant_id).strip():
+            # Từ 17/10/2026 `make_splits` chỉ rót mẫu của ĐÚNG tổ chức chủ hiện vật
+            # (samples.csv là tệp chung). Kho tí hon này là kho của tổ chức đang
+            # dựng, nên gắn chủ vào từng dòng trước mỗi lượt — các ca ở đây kiểm
+            # bản khai/chủ sở hữu, không kiểm bộ lọc tổ chức.
+            _gan_chu(ms.SAMPLES_CSV, str(tenant_id).strip())
     monkeypatch.setattr(sys, "argv", argv)
     ms.main()
     # `main()` dời OUT_DIR sang thư mục hiện vật; đọc lại từ chính module để

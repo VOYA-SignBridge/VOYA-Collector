@@ -15,11 +15,11 @@ from app.access_gate import access_gate
 from app.config import settings, redact_db_url
 from app.cookie_auth import ACCESS_COOKIE, CSRF_COOKIE
 from app.rate_limit import client_ip
-# `experiments` and `dataset_exporter` are deliberately NOT imported. Both were
-# imported here and never passed to include_router — 681 lines that read as live
-# endpoints, are reachable by no URL, and were executed at import time on every
-# boot. Removing the import makes their status honest; the files are kept for now
-# pending a decision to mount or delete them (see BACKEND_WORK_PLAN.md B4).
+# `experiments` and `dataset_exporter` were imported here but never mounted, and
+# `experiments` wrote to tables (experiments / experiment_metrics / model_versions)
+# that no migration creates. Deleted 16/10/2026 together with train_task.py and
+# storage/experiment_tracking_*.py (BACKEND_WORK_PLAN.md B4); training runs go
+# through routers/training.py and the training_jobs table.
 from app.routers import (
     admin,
     auth,

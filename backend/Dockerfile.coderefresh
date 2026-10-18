@@ -1,0 +1,16 @@
+# Cập nhật CODE backend mà không tải lại thư viện (torch/CUDA ~3 GB).
+#
+# Dùng khi `requirements.txt` KHÔNG đổi: bước cuối của Dockerfile chính cũng chỉ
+# là `COPY app/`, nên kết quả tương đương một lần build đầy đủ. Build đầy đủ
+# từng kẹt 6 giờ (16/10/2026) vì DNS tới pypi.nvidia.com chập chờn.
+#
+# Xoá hẳn /app/app rồi chép lại, để tệp đã xoá trong repo không sống tiếp trong
+# ảnh. BASE là ảnh đã build đầy đủ (mặc định voya_backend:base, xem scripts/voya.py).
+#
+#   docker build -f Dockerfile.coderefresh --build-arg BASE=voya_backend:base -t voya_backend:latest .
+ARG BASE=voya_backend:base
+FROM ${BASE}
+USER root
+RUN rm -rf /app/app
+COPY --chown=appuser:appuser app/ /app/app/
+USER appuser

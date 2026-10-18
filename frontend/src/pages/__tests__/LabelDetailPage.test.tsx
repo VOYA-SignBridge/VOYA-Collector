@@ -13,6 +13,7 @@ vi.mock("../../api/labelDetail", async () => {
     getLabelSessions: vi.fn(),
     getSessionFrames: vi.fn(),
     getPreviewStatus: vi.fn(),
+    deleteLabelSession: vi.fn(),
   };
 });
 
@@ -93,6 +94,19 @@ function setHardware(cores: number) {
 }
 
 describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
+  it("shows partial-delete errors without hiding the remaining sessions", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(api.deleteLabelSession).mockResolvedValue({
+      success: false, session_id: "sess-2", deleted_count: 4,
+      failed: [{ sample_uid: "uid-2", error: "write failed" }],
+    });
+    render(<LabelDetailPage />);
+    fireEvent.click((await screen.findAllByText("Xóa"))[0]);
+    expect(await screen.findByText("Một số mẫu chưa được cập nhật. Vui lòng kiểm tra và thử lại.")).toBeInTheDocument();
+    expect(screen.getByTestId("session-list")).toBeInTheDocument();
+    expect(api.deleteLabelSession).toHaveBeenCalledWith("cls123", "sess-2");
+    confirm.mockRestore();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();

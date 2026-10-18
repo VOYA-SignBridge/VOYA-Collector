@@ -731,6 +731,9 @@ def assert_system_admin(is_system_admin: bool) -> None:
 
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+# The image copies only app/, so /config does not exist in a container; the repo
+# is mounted at /workspace instead. Same fallback as dataset_manager's mapping.
+_CONFIG_FALLBACK = Path("/workspace/config")
 
 
 def _read_seed(name: str) -> List[Dict[str, str]]:
@@ -738,6 +741,9 @@ def _read_seed(name: str) -> List[Dict[str, str]]:
 
     src = CONFIG_DIR / name
     if not src.is_file():
+        src = _CONFIG_FALLBACK / name
+    if not src.is_file():
+        logger.warning("[VOCAB] seed %s not found in %s or %s", name, CONFIG_DIR, _CONFIG_FALLBACK)
         return []
     with src.open(newline="", encoding="utf-8-sig") as fh:
         return [r for r in _csv.DictReader(fh)]

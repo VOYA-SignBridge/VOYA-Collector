@@ -14,8 +14,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_DIR = REPO_ROOT / "dataset" / "manifests"
-#: Chỉ có trên máy có dữ liệu — checkout sạch có `dataset/.gitkeep` và không gì khác.
-DATA_DIR_MARKER = REPO_ROOT / "dataset" / "features"
 SPLITS_DIR = REPO_ROOT / "processed" / "splits"
 
 PASSED: list = []
@@ -38,13 +36,15 @@ def sha256_file(path: Path) -> str:
 def main() -> int:
     print("[F1 manifest immutability]")
     # Manifest nằm dưới `dataset/`, KHÔNG được track (mang mã mẫu và tên người
-    # ký — không đẩy lên git chỉ để bộ kiểm có cái mà kiểm). Checkout sạch chỉ có
-    # `dataset/.gitkeep`, và "0 manifest" ở đó là "không có dữ liệu", không phải
-    # "manifest bị xoá". `dataset/features/` chỉ tồn tại trên máy có dữ liệu; ở
-    # máy ấy 0 manifest vẫn ĐỎ. Chỉ bỏ F1 — F2 (split đóng băng, CÓ track) vẫn
-    # chạy, nên bộ này không bao giờ xanh mà không kiểm gì.
-    if not DATA_DIR_MARKER.is_dir():
-        print(f"  SKIP F1: checkout không có dữ liệu ({DATA_DIR_MARKER.relative_to(REPO_ROOT)} vắng) "
+    # ký — không đẩy lên git chỉ để bộ kiểm có cái mà kiểm). Checkout sạch không
+    # có thư mục `dataset/manifests/`, và "0 manifest" ở đó là "không có dữ liệu",
+    # không phải "manifest bị xoá". Dấu hiệu là CHÍNH thư mục ấy: bản đầu (18/10)
+    # dùng `dataset/features/`, nhưng các test khác TỰ TẠO thư mục đó trong lúc
+    # chạy, nên trên CI bộ này vẫn đỏ. Thư mục có mà 0 manifest thì vẫn ĐỎ. Chỉ bỏ
+    # F1 — F2 (split đóng băng, CÓ track) vẫn chạy, nên bộ này không bao giờ xanh
+    # mà không kiểm gì.
+    if not MANIFEST_DIR.is_dir():
+        print(f"  SKIP F1: checkout không có {MANIFEST_DIR.relative_to(REPO_ROOT)}/ "
               "— manifest không được track, kiểm trên máy có dữ liệu")
     else:
         found = 0

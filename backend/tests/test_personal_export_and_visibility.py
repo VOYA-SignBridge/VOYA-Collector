@@ -121,16 +121,15 @@ def test_thanh_vien_thuong_xin_ca_to_chuc_chi_thay_cua_minh_va_phien_da_mo(to_ch
     assert mo.visibility == "tenant" and mo.is_mine is False
 
 
-def test_bien_tap_vien_van_thay_moi_phien_bat_ke_co(to_chuc):
-    """Đối chứng dương: cờ `visibility` không được ĐÓNG bớt thứ biên tập viên
-    vốn thấy — nếu không thì thêm tính năng cho thành viên thường lại lấy đi
-    quyền giám sát của biên tập viên."""
+@pytest.mark.parametrize("role", ["editor", "admin", "owner"])
+def test_private_khong_co_ngoai_le_quan_tri(to_chuc, role):
+    """Policy 23/09: private chỉ chủ dữ liệu thấy, kể cả người xem có vai cao."""
     from app.routers.capture_sessions import list_sessions
 
     with tenant_scope(to_chuc["tid"]):
         r = list_sessions(scope="tenant", limit=200,
-                          current_user=_nguoi(to_chuc["a"], role="editor"))
-    assert _ids(r) == {to_chuc["s_a_kin"], to_chuc["s_b_mo"], to_chuc["s_b_kin"]}
+                          current_user=_nguoi(to_chuc["a"], role=role))
+    assert _ids(r) == {to_chuc["s_a_kin"], to_chuc["s_b_mo"]}
 
 
 def test_scope_mine_khong_doi(to_chuc):
@@ -157,7 +156,7 @@ def test_chu_phien_doi_duoc_co_nguoi_khac_thi_khong(to_chuc):
         with pytest.raises(HTTPException) as ei:
             update_session(sid, SessionUpdate(visibility="tenant"), None,
                            current_user=_nguoi(to_chuc["b"]))
-        assert ei.value.status_code == 403
+        assert ei.value.status_code == 404
         assert _visibility_of(sid) == "private"
 
         # A (chủ phiên) mở phiên của mình.
@@ -169,6 +168,73 @@ def test_chu_phien_doi_duoc_co_nguoi_khac_thi_khong(to_chuc):
         from app.routers.capture_sessions import list_sessions
         r = list_sessions(scope="tenant", limit=200, current_user=_nguoi(to_chuc["b"]))
         assert sid in _ids(r)
+
+
+def test_readable_samples_follow_live_session_visibility(to_chuc, tmp_path, monkeypatch):
+    from app.routers import dataset
+    import numpy as np
+    tid, a, b = to_chuc["tid"], to_chuc["a"], to_chuc["b"]
+    uids = [uuid.uuid4().hex[:10] for _ in range(3)]
+    with tenant_scope(tid):
+        for uid, owner, session in zip(uids, [a, b, b], ["s_a_kin", "s_b_mo", "s_b_kin"]):
+            db._execute("INSERT INTO samples (sample_uid, tenant_id, class_uid, auth_user_id, capture_session_id) VALUES (%s,%s,%s,%s,%s)",
+                        (uid, tid, to_chuc["cls"], owner, to_chuc[session]))
+        assert db.get_readable_sample_uids(uids, a, tid) == set(uids[:2])
+        db._execute("UPDATE capture_sessions SET visibility = 'private' WHERE capture_session_id = %s", (to_chuc["s_b_mo"],))
+        assert db.get_readable_sample_uids(uids, a, tid) == {uids[0]}
+        assert db.get_readable_sample_uids(uids, b, tid) == set(uids[1:])
+        assert db.get_readable_sample_uids(uids, a, "other-tenant") == set()
+        path = tmp_path / "private.npz"
+        np.savez_compressed(path, sequence=np.ones((60, 126)))
+        monkeypatch.setattr(dataset, "list_samples_v2", lambda tenant: [
+            {"sample_uid": uids[2], "file_path": str(path), "class_uid": to_chuc["cls"],
+             "review_status": "approved", "auth_user_id": b, "session_id": "private"}])
+        # Thành viên thường khác: mẫu private của b vẫn kín.
+        actor = _nguoi(a)
+        with pytest.raises(HTTPException) as denied:
+            dataset.get_sample_data(uids[2], current_user=actor)
+        assert denied.value.status_code == 404
+        assert dataset.list_samples(current_user=actor) == []
+        assert dataset.list_sessions(current_user=actor) == []
+        # Chủ mẫu, và người quản lý tenant (chính sách 17/10/2026: `private` kín
+        # với thành viên khác, KHÔNG kín với admin/editor của tổ chức).
+        for viewer in [_nguoi(b), {**_nguoi(a), "is_admin": True}]:
+            response = dataset.get_sample_data(uids[2], current_user=viewer)
+            assert response.path == str(path)
+            assert response.headers["cache-control"] == "private, no-store"
+
+
+@pytest.mark.parametrize("visibility", ["private", "tenant"])
+def test_editor_cannot_change_someone_elses_visibility(to_chuc, visibility):
+    from app.routers.capture_sessions import SessionUpdate, update_session
+    sid = to_chuc["s_b_kin"] if visibility == "private" else to_chuc["s_b_mo"]
+    with tenant_scope(to_chuc["tid"]), pytest.raises(HTTPException) as error:
+        update_session(sid, SessionUpdate(visibility="community"), None,
+                       current_user=_nguoi(to_chuc["a"], role="admin"))
+    assert error.value.status_code == (404 if visibility == "private" else 403)
+    assert _visibility_of(sid) == visibility
+
+
+def test_tenant_export_cannot_bypass_private(to_chuc):
+    from app import tenant_lifecycle
+    with pytest.raises(tenant_lifecycle.LifecycleError) as error:
+        tenant_lifecycle.request_export(to_chuc["tid"], requested_by=to_chuc["a"],
+                                        scope="full", export_purpose="tenant_portability")
+    assert error.value.status_code == 403
+    assert _so_ban_xuat(to_chuc["tid"]) == 0
+
+
+def test_private_cannot_enter_moderation_queue_or_be_approved_by_admin(to_chuc):
+    from app import moderation_admin
+    tid, sid = to_chuc["tid"], to_chuc["s_b_kin"]
+    with tenant_scope(tid):
+        db._execute("INSERT INTO samples (sample_uid, tenant_id, class_uid, auth_user_id, capture_session_id, review_status) VALUES (%s,%s,%s,%s,%s,'pending')",
+                    (uuid.uuid4().hex[:10], tid, to_chuc["cls"], to_chuc["b"], sid))
+        assert moderation_admin.pending_session_count(tid) == 0
+        assert moderation_admin.list_pending_sessions(tid) == []
+        with pytest.raises(moderation_admin.ModerationError) as error:
+            moderation_admin.decide_session(sid, approve=True, actor_id=to_chuc["a"], tenant_id=tid)
+        assert error.value.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +266,12 @@ def test_goi_ca_nhan_chi_chua_dong_va_tep_cua_dung_nguoi_do(to_chuc, tmp_path, m
     rows = [_dong_mau(a, "aaaa000001", npz_a), _dong_mau(b, "bbbb000002", npz_b)]
 
     monkeypatch.setattr("app.dataset_samples.list_samples", lambda tenant: list(rows))
-    tep_a, tep_b = tmp_path / npz_a, tmp_path / npz_b
-    tep_a.write_bytes(b"NPZ-A")
-    tep_b.write_bytes(b"NPZ-B")
+    import numpy as np
+    monkeypatch.setattr("app.config.settings.dataset_root", str(tmp_path))
+    tep_a, tep_b = (tmp_path / r["file_path"] for r in rows)
+    tep_a.parent.mkdir(parents=True)
+    np.savez_compressed(tep_a, sequence=np.ones((60, 126), dtype=np.float32))
+    np.savez_compressed(tep_b, sequence=np.ones((60, 126), dtype=np.float32))
     monkeypatch.setattr("app.dataset_manager.iter_tenant_feature_files",
                         lambda tenant: iter([tep_a, tep_b]))
     monkeypatch.setattr(personal_export, "_export_root", lambda: _thu_muc_ra(tmp_path))
@@ -222,6 +291,7 @@ def test_goi_ca_nhan_chi_chua_dong_va_tep_cua_dung_nguoi_do(to_chuc, tmp_path, m
         doc = list(csv.DictReader(io.StringIO(z.read("samples.csv").decode("utf-8"))))
     assert [r["sample_uid"] for r in doc] == ["aaaa000001"]
     assert doc[0]["auth_user_id"] == a
+    assert doc[0]["file_path"] == f"files/{npz_a}"
 
 
 def test_nguoi_khac_khong_tai_duoc_va_khong_thay_ban_xuat_khong_phai_cua_minh(
@@ -269,6 +339,8 @@ def client_quan_tri_to_chuc(to_chuc, monkeypatch):
     with system_scope("test: nang A len quan tri to chuc"):
         db._execute("UPDATE tenant_members SET role = 'admin' WHERE tenant_id = %s AND user_id = %s",
                     (tid, a))
+        # Organization export tests below exercise consent on shared data.
+        db._execute("UPDATE capture_sessions SET visibility = 'tenant' WHERE tenant_id = %s", (tid,))
     # Không phái tác vụ thật: worker đang chạy là ảnh cũ, và một job thật để
     # lại tệp trên đĩa nằm ngoài tầm dọn của fixture này.
     monkeypatch.setattr(saas_tasks.run_tenant_export, "delay", lambda *_a, **_k: None)
