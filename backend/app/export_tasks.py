@@ -340,8 +340,39 @@ def delete_gdrive_paths_task(self, rel_paths: list):
     return {"status": "done", "results": results}
 
 
+def _drive_file_ref_candidates(ref: str, tenant_id: Optional[str] = None) -> List[str]:
+    """Các cách gọi tên một tệp trên Drive, theo thứ tự nên thử.
+
+    Người gọi (xoá/chuyển mẫu) chỉ có `storage_key` — khoá TRÊN ĐĨA. Ở bố cục
+    `legacy` nó trùng đường dẫn Drive; ở bố cục `tenant` thì không
+    (`features/vn/…` trên đĩa là `Community/Samples/vn/…` trên Drive), nên đưa
+    thẳng nó cho `delete_file` không tìm thấy gì và tệp ở lại Drive mãi.
+
+    ID, URL và `gdrive://` đã định danh đúng một tệp -> giữ nguyên. Với đường
+    dẫn: thử đường dẫn đã ánh xạ trước, rồi mới tới nguyên văn (tệp chưa kịp dời
+    sang bố cục mới, hoặc khoá không ánh xạ được — vd. `raw_videos/` thiếu tenant).
+    """
+    text = str(ref or "").strip()
+    if not text:
+        return []
+    if text.startswith("gdrive://") or "drive.google.com" in text:
+        return [text]
+    if "/" not in text and "\\" not in text:
+        return [text]  # ID tệp trần
+    out: List[str] = []
+    try:
+        mapped = drive_path_for(text, tenant_id)
+        if mapped:
+            out.append(mapped)
+    except Exception as exc:  # khoá lạ / thiếu tenant / DB: lùi về nguyên văn
+        logger.debug("[GDRIVE_FILE_DELETE] không ánh xạ được %r: %s", text, exc)
+    if text not in out:
+        out.append(text)
+    return out
+
+
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
-def delete_gdrive_files_task(self, refs: list):
+def delete_gdrive_files_task(self, refs: list, tenant_id: Optional[str] = None):
     """Delete individual Drive FILES by storage_key (dataset-relative file path),
     Drive URL, gdrive:// ref, or file ID.
 
@@ -363,7 +394,13 @@ def delete_gdrive_files_task(self, refs: list):
         if not ref:
             continue
         try:
-            ok = client.delete_file(ref)
+            # Thử lần lượt tới khi một cách gọi tên xoá được tệp; "không thấy" ở
+            # cách này không loại trừ cách kia.
+            ok = False
+            for candidate in _drive_file_ref_candidates(ref, tenant_id):
+                if client.delete_file(candidate):
+                    ok = True
+                    break
             results[ref] = "ok" if ok else "not_found"
         except Exception as exc:  # per-file: one failure must not block the rest
             logger.warning("[GDRIVE_FILE_DELETE] %s failed: %s", ref, exc)
@@ -414,6 +451,28 @@ def move_gdrive_paths_task(self, pairs: list):
     return {"status": "done", "results": results}
 
 
+def _raw_upload_tenant(upload_uid: str) -> Optional[str]:
+    """Tenant sở hữu một video thô, đọc từ `raw_uploads` (None nếu không tra được).
+
+    Task tải video lên Drive xếp hàng TRƯỚC khi có tham số `tenant_id` không mang
+    tenant; ở bố cục `tenant` chúng sẽ bị `drive_path_for` từ chối vì `raw_videos/`
+    không phân vùng trên đĩa. Hàng DB biết chủ của video nên không cần bỏ chúng.
+    Không cần `system_scope`: worker đã đặt phạm vi tenant của lượt phái (hoặc phạm
+    vi hệ thống khi không có header) trước khi task chạy, nên video của tenant nào
+    thì lượt phái của tenant đó đọc được. Không tra được -> None -> bị từ chối,
+    không rơi về `default`.
+    """
+    try:
+        from app.storage.metadata_db import _fetch_all
+
+        rows = _fetch_all("SELECT tenant_id FROM raw_uploads WHERE upload_uid = %s", (upload_uid,))
+        tenant = (rows[0].get("tenant_id") or "").strip() if rows else ""
+        return tenant or None
+    except Exception as exc:
+        logger.warning("[GDRIVE_RAW_VIDEO] không tra được tenant của %s: %s", upload_uid, exc)
+        return None
+
+
 @celery_app.task(bind=True, max_retries=5, default_retry_delay=15)
 def upload_raw_video_to_gdrive_task(
     self,
@@ -442,8 +501,10 @@ def upload_raw_video_to_gdrive_task(
 
         # `raw_videos/` không phân vùng trên đĩa nên tenant phải đến từ người gọi.
         # Thiếu tenant ở bố cục `tenant` -> drive_path_for từ chối, task retry rồi
-        # dừng; video vẫn an toàn trên đĩa. (Task xếp hàng trước 18/10/2026 không
-        # mang tenant, nhưng chúng chạy ở `legacy`, nơi tenant không cần.)
+        # dừng; video vẫn an toàn trên đĩa. Task xếp hàng trước 18/10/2026 không
+        # mang tenant -> tra từ hàng `raw_uploads` ngay bên dưới.
+        if tenant_id is None:
+            tenant_id = _raw_upload_tenant(upload_uid)
         drive_path = drive_path_for(storage_key, tenant_id)
         logger.info("[GDRIVE_RAW_VIDEO] Uploading %s to GDrive %s (key %s)", local_path, drive_path, storage_key)
         storage_url = upload_to_gdrive(local_path, drive_path, content_type=content_type)

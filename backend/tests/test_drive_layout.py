@@ -368,3 +368,138 @@ class TestStorageKeyIsTheFileOnDisk:
 
         assert class_storage_dir(self._meta("truong-b")) == "features/_tenants/truong-b/vn/hoa-de/class_tom_7246af3c"
         assert class_storage_dir(self._meta("default", common=True)) == "features/vn/common/class_tom_7246af3c"
+
+
+class _FakeDriveFiles:
+    """`delete_file` giả: chỉ 'có' những đường dẫn/ID được khai, ghi lại mọi lần thử."""
+
+    def __init__(self, existing):
+        self.existing, self.tried = set(existing), []
+
+    def delete_file(self, ref):
+        self.tried.append(ref)
+        return ref in self.existing
+
+
+@pytest.fixture
+def fake_files(monkeypatch):
+    import app.storage.gdrive_client as gc
+
+    monkeypatch.setattr(settings, "use_google_drive", True, raising=False)
+
+    def _install(existing):
+        client = _FakeDriveFiles(existing)
+        monkeypatch.setattr(gc, "get_gdrive_client", lambda: client)
+        return client
+    return _install
+
+
+class TestDeleteFilesFollowTheDriveLayout:
+    """Xoá/chuyển mẫu chỉ có `storage_key` trên đĩa. Ở bố cục `tenant` đường dẫn
+    Drive khác khoá đó, nên trước đây tệp ở lại Drive mãi (đọc vẫn đúng vì đi
+    theo ID tệp — chỉ lệnh xoá theo đường dẫn là trượt)."""
+
+    def test_tenant_layout_deletes_at_the_mapped_path(self, tenant_mode, fake_files):
+        from app.export_tasks import delete_gdrive_files_task
+
+        mapped = "Community/Samples/" + NPZ.split("/", 1)[1]
+        client = fake_files({mapped})
+        out = delete_gdrive_files_task.apply(args=[[NPZ]], throw=True).result
+        assert out["results"] == {NPZ: "ok"}
+        assert client.tried == [mapped]
+
+    def test_other_tenant_key_maps_into_that_tenants_folder(self, tenant_mode, fake_files):
+        from app.export_tasks import delete_gdrive_files_task
+
+        mapped = "Tenants/truong-b/Samples/" + NPZ_T.split("truong-b/", 1)[1]
+        client = fake_files({mapped})
+        out = delete_gdrive_files_task.apply(args=[[NPZ_T]], throw=True).result
+        assert out["results"] == {NPZ_T: "ok"}
+        assert client.tried == [mapped]
+
+    def test_file_not_yet_moved_is_still_found_at_the_old_path(self, tenant_mode, fake_files):
+        from app.export_tasks import delete_gdrive_files_task
+
+        client = fake_files({NPZ})  # chỉ có ở đường dẫn cũ (chưa chạy script dời Drive)
+        out = delete_gdrive_files_task.apply(args=[[NPZ]], throw=True).result
+        assert out["results"] == {NPZ: "ok"}
+        assert client.tried == ["Community/Samples/" + NPZ.split("/", 1)[1], NPZ]
+
+    def test_missing_everywhere_is_reported_not_raised(self, tenant_mode, fake_files):
+        from app.export_tasks import delete_gdrive_files_task
+
+        fake_files(set())
+        out = delete_gdrive_files_task.apply(args=[[NPZ]], throw=True).result
+        assert out["results"] == {NPZ: "not_found"}
+
+    def test_legacy_layout_is_unchanged(self, legacy_mode, fake_files):
+        from app.export_tasks import delete_gdrive_files_task
+
+        client = fake_files({NPZ})
+        out = delete_gdrive_files_task.apply(args=[[NPZ]], throw=True).result
+        assert out["results"] == {NPZ: "ok"}
+        assert client.tried == [NPZ]
+
+    @pytest.mark.parametrize("ref", [
+        "gdrive://1AbCdEfGhIjKlMn",
+        "https://drive.google.com/file/d/1AbCdEfGhIjKlMn/view",
+        "1AbCdEfGhIjKlMnOpQrS",
+    ])
+    def test_ids_and_urls_are_passed_through_untouched(self, tenant_mode, fake_files, ref):
+        from app.export_tasks import delete_gdrive_files_task
+
+        client = fake_files({ref})
+        out = delete_gdrive_files_task.apply(args=[[ref]], throw=True).result
+        assert out["results"] == {ref: "ok"}
+        assert client.tried == [ref]
+
+    def test_unmappable_video_key_falls_back_to_verbatim(self, tenant_mode, fake_files):
+        """`raw_videos/` không phân vùng trên đĩa: không có tenant thì ánh xạ từ
+        chối. Xoá vẫn phải thử nguyên văn chứ không nổ."""
+        from app.export_tasks import delete_gdrive_files_task
+
+        client = fake_files({VIDEO})
+        out = delete_gdrive_files_task.apply(args=[[VIDEO]], throw=True).result
+        assert out["results"] == {VIDEO: "ok"}
+        assert client.tried == [VIDEO]
+
+
+class TestQueuedRawVideoTaskWithoutTenant:
+    """Task xếp hàng trước khi có tham số `tenant_id` không mang tenant. Ở bố cục
+    `tenant` chúng bị từ chối; hàng `raw_uploads` biết chủ của video nên tra ra."""
+
+    def test_tenant_is_looked_up_when_the_task_has_none(self, tenant_mode, fake_drive, monkeypatch):
+        import app.export_tasks as et
+        import app.raw_uploads as ru
+        import app.storage.metadata_db as mdb
+        from app.export_tasks import upload_raw_video_to_gdrive_task
+
+        monkeypatch.setattr(ru, "update_raw_upload_row", lambda uid, upd: None)
+        monkeypatch.setattr(mdb, "update_raw_upload_gdrive_url", lambda uid, url: None)
+        monkeypatch.setattr(et, "_raw_upload_tenant", lambda uid: "truong-b")
+        upload_raw_video_to_gdrive_task.apply(
+            args=["8219900a", fake_drive.npz, VIDEO, "video/mp4"], throw=True)
+        assert fake_drive.uploads == ["Tenants/truong-b/Videos/" + VIDEO.split("/", 1)[1]]
+
+    def test_explicit_tenant_wins_over_the_lookup(self, tenant_mode, fake_drive, monkeypatch):
+        import app.export_tasks as et
+        import app.raw_uploads as ru
+        import app.storage.metadata_db as mdb
+        from app.export_tasks import upload_raw_video_to_gdrive_task
+
+        monkeypatch.setattr(ru, "update_raw_upload_row", lambda uid, upd: None)
+        monkeypatch.setattr(mdb, "update_raw_upload_gdrive_url", lambda uid, url: None)
+        monkeypatch.setattr(et, "_raw_upload_tenant", lambda uid: pytest.fail("không được tra khi đã có tenant"))
+        upload_raw_video_to_gdrive_task.apply(
+            args=["8219900a", fake_drive.npz, VIDEO, "video/mp4"], kwargs={"tenant_id": "truong-c"}, throw=True)
+        assert fake_drive.uploads == ["Tenants/truong-c/Videos/" + VIDEO.split("/", 1)[1]]
+
+    def test_unknown_owner_is_still_refused_not_defaulted(self, tenant_mode, fake_drive, monkeypatch):
+        import app.export_tasks as et
+        from app.export_tasks import upload_raw_video_to_gdrive_task
+
+        monkeypatch.setattr(et, "_raw_upload_tenant", lambda uid: None)
+        res = upload_raw_video_to_gdrive_task.apply(
+            args=["8219900a", fake_drive.npz, VIDEO, "video/mp4"])
+        assert not res.successful()           # drive_path_for từ chối, KHÔNG rơi về `default`
+        assert fake_drive.uploads == []
