@@ -1760,7 +1760,6 @@ export const EN: Record<string, string> = {
   "Đã xác minh email.": "Email verified.",
   "Đã xảy ra lỗi không xác định trong quá trình huấn luyện.": "An unknown error occurred during training.",
   "Đã đóng": "Closed",
-  "Đã đăng nhập": "Signed in",
   "Đã đặt hàng bản xuất; theo dõi trạng thái bên dưới": "The export has been queued; follow its status below",
   "Đưa vào Realtime": "Deploy to real time",
   "Đặt mật khẩu mới": "Set a new password",

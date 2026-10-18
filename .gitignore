@@ -66,6 +66,8 @@ _tmp/
 backup.sql
 merge_data.sql
 *.sql.bak
+# pg_dump -Fc / pg_dump ra tệp .dump (vd. signdb_backup.dump): dữ liệu người dùng thật.
+*.dump
 
 # Video and model files
 # ...but keep the directory itself tracked. Docker creates a missing bind-mount
