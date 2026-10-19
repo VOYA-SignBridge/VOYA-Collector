@@ -5,12 +5,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import numpy as np
 
 from app.config import settings
-from app.modules.dataset.catalog import load_labels, ClassMetadata
-from app.modules.dataset.samples import list_samples as list_samples_v2, save_sequence_npz
-from app.storage.gdrive_client import materialize_sample_artifacts
+from app.modules.dataset.catalog import load_labels
+from app.modules.dataset.samples import list_samples as list_samples_v2
+from app.modules.dataset import sample_service
 from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
@@ -24,30 +23,9 @@ from app.modules.dataset.catalog_sync import (
     empty_sample_trash,
 )
 from app.modules.identity import get_current_user, get_current_user_optional, require_admin
-from app.storage.metadata_db import get_sample_owner
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
-
-def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
-    """Raise 403 if current_user is not the owner of the sample and is not admin.
-
-    Legacy samples with auth_user_id=NULL (guest uploads) can only be deleted by admin.
-    """
-    if current_user.get("is_admin"):
-        return  # Admin bypass
-    owner_id = get_sample_owner(sample_id)
-    if owner_id is None:
-        # Guest sample or sample not found in DB — only admin can touch
-        raise HTTPException(
-            status_code=403,
-            detail="Chỉ admin mới có thể xóa mẫu không có chủ sở hữu",
-        )
-    if str(owner_id) != str(current_user["id"]):
-        raise HTTPException(
-            status_code=403,
-            detail="Bạn không có quyền thực hiện thao tác này trên mẫu này",
-        )
 
 # ---- Models ----
 class LabelOut(BaseModel):
@@ -81,28 +59,6 @@ def _labels_rows() -> List[Dict[str, str]]:
 def _class_uid_to_label_row_map() -> Dict[str, Dict[str, str]]:
     rows = _labels_rows()
     return {r.get("class_uid"): r for r in rows if r.get("class_uid")}
-
-
-def _class_idx_to_meta() -> Dict[int, ClassMetadata]:
-    out: Dict[int, ClassMetadata] = {}
-    for r in _labels_rows():
-        try:
-            idx = int(r.get("class_idx") or 0)
-        except Exception:
-            continue
-        if idx <= 0:
-            continue
-        out[idx] = ClassMetadata(
-            class_uid=r["class_uid"],
-            slug=r["slug"],
-            label_original=r["label_original"],
-            language=r["language"],
-            dialect=r["dialect"],
-            is_common_global=bool(int(r.get("is_common_global") or 0)),
-            is_common_language=bool(int(r.get("is_common_language") or 0)),
-            class_idx=idx,
-        )
-    return out
 
 
 @router.post("/labels", response_model=LabelOut)
@@ -225,19 +181,14 @@ def get_sample_data(sample_id: str):
     """
     Trả về file npz/json của sample_id
     """
-    samples = list_samples_v2()
-    match = next((s for s in samples if (s.get("sample_uid") == sample_id)), None)
-    if not match:
-        raise HTTPException(status_code=404, detail="Sample not found")
-    file_path = match.get("file_path") or ""
-    if file_path and Path(file_path).exists():
-        return FileResponse(file_path, media_type="application/octet-stream")
-
-    cache_dir = Path(settings.dataset_root) / "cache" / "sample_downloads"
-    resolved = materialize_sample_artifacts([match], cache_dir)
-    if not resolved:
-        raise HTTPException(status_code=404, detail="Sample file missing on disk")
-    return FileResponse(str(resolved[0]), media_type="application/octet-stream")
+    try:
+        path = sample_service.resolve_sample_artifact(sample_id)
+    except (
+        sample_service.SampleNotFoundError,
+        sample_service.SampleArtifactMissingError,
+    ) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(str(path), media_type="application/octet-stream")
 
 
 @router.get("/samples/trash")
@@ -280,7 +231,10 @@ def delete_sample(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Soft-delete a sample to Trash (restorable)."""
-    _check_sample_ownership(sample_id, current_user)
+    try:
+        sample_service.ensure_sample_access(sample_id, current_user)
+    except sample_service.SampleAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
         result = sync_soft_delete_sample(sample_id)
         return {"success": True, **result}
@@ -294,7 +248,10 @@ def restore_sample_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Restore a soft-deleted sample from Trash."""
-    _check_sample_ownership(sample_id, current_user)
+    try:
+        sample_service.ensure_sample_access(sample_id, current_user)
+    except sample_service.SampleAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
         result = sync_restore_sample(sample_id)
         return {"success": True, **result}
@@ -308,7 +265,10 @@ def purge_sample_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete a sample (file + Drive + DB). Irreversible."""
-    _check_sample_ownership(sample_id, current_user)
+    try:
+        sample_service.ensure_sample_access(sample_id, current_user)
+    except sample_service.SampleAccessDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     try:
         result = sync_purge_sample(sample_id)
         return {"success": True, **result}
@@ -326,39 +286,22 @@ def add_sample(
     file: UploadFile = File(...),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    idx_to_meta = _class_idx_to_meta()
-    meta = idx_to_meta.get(int(class_idx))
-    if not meta:
-        raise HTTPException(status_code=404, detail="label not found (class_idx)")
-    if not file.filename.endswith(".npz"):
-        raise HTTPException(status_code=400, detail="Only .npz uploads are supported")
-
     try:
-        data = np.load(file.file, allow_pickle=False)
-        seq = data.get("sequence")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid npz")
-    if seq is None or not isinstance(seq, np.ndarray) or seq.ndim != 2:
-        raise HTTPException(status_code=400, detail="npz must contain 2D 'sequence'")
-
-    saved = save_sequence_npz(
-        meta,
-        seq.astype(np.float32),
-        meta={
-            "user": user or current_user.get("username", ""),
-            "user_id": current_user["id"],
-            "auth_user_id": current_user["id"],
-            "session_id": session_id,
-            "fps_original": "",
-            "fps_processed": "",
-            "completeness": "",
-            "frames": int(frames or seq.shape[0]),
-            "duration": str(duration or ""),
-            "source": source,
-        },
-        augment_id=0,
-        source_type=source or "upload",
-    )
+        saved = sample_service.save_uploaded_npz(
+            class_idx=class_idx,
+            filename=file.filename,
+            file_object=file.file,
+            current_user=current_user,
+            user=user,
+            session_id=session_id,
+            frames=frames,
+            duration=duration,
+            source=source,
+        )
+    except sample_service.SampleLabelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except sample_service.InvalidSampleUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "path": saved}
 
 @router.get("/sessions")
