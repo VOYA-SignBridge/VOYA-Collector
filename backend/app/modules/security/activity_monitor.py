@@ -10,7 +10,7 @@ from fastapi import Request
 from jose import jwt
 
 from app.config import settings
-from app.cookie_auth import ACCESS_COOKIE
+from app.modules.identity.cookies import ACCESS_COOKIE
 from app.infrastructure.redis.connection import get_activity_client
 from app.modules.security.account_controls import resolve_usernames
 from app.modules.security.audit_log import list_security_log

@@ -20,7 +20,7 @@ from app.modules.identity.service import (
     rotate_refresh_token,
 )
 from app.modules.identity.tokens import create_access_token
-from app.cookie_auth import (
+from app.modules.identity.cookies import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,
     clear_auth_cookies,

@@ -45,3 +45,12 @@ def test_retired_root_facades_are_removed() -> None:
     assert not (app_root / "auth.py").exists()
     assert not (app_root / "activity.py").exists()
     assert not (app_root / "monitoring.py").exists()
+
+
+def test_root_implementations_are_relocated_to_their_domains() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
+
+    assert not (app_root / "cookie_auth.py").exists()
+    assert not (app_root / "logging_utils.py").exists()
+    assert (app_root / "modules" / "identity" / "cookies.py").exists()
+    assert (app_root / "core" / "operation_logging.py").exists()

@@ -61,7 +61,7 @@ def test_authenticate_user_keeps_dummy_verify_for_unknown_account(monkeypatch):
 
 
 def test_current_user_dependency_prefers_cookie_over_bearer(monkeypatch):
-    from app.cookie_auth import ACCESS_COOKIE
+    from app.modules.identity.cookies import ACCESS_COOKIE
     from app.modules.identity import dependencies
 
     decoded = []

@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.cookie_auth import ACCESS_COOKIE
+from app.modules.identity.cookies import ACCESS_COOKIE
 from app.modules.identity.repository import find_user_by_id
 from app.modules.identity.tokens import bearer_scheme, decode_access_token
 from app.modules.security.account_controls import get_force_logout, is_user_denied

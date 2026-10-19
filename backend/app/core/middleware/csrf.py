@@ -3,7 +3,7 @@ import hmac
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from app.cookie_auth import ACCESS_COOKIE, CSRF_COOKIE
+from app.modules.identity.cookies import ACCESS_COOKIE, CSRF_COOKIE
 
 
 _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}

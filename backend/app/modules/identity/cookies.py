@@ -1,4 +1,4 @@
-"""Cookie-based auth delivery.
+"""Cookie-based auth delivery for the identity bounded context.
 
 Access + refresh tokens ride in httpOnly cookies so JavaScript (and therefore
 any XSS) can't read them. Two companion non-httpOnly cookies let the SPA work:

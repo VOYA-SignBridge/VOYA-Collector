@@ -25,7 +25,11 @@ from app.modules.dataset.catalog import (
     parse_bool,
 )
 from app.modules.dataset.samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
-from app.logging_utils import get_logger as get_structured_logger, OperationStatus, OperationType
+from app.core.operation_logging import (
+    OperationStatus,
+    OperationType,
+    get_logger as get_structured_logger,
+)
 from app.modules.google_sync.catalog import (
     dispatch_catalog_refresh,
     dispatch_drive_folder_delete,

@@ -1,5 +1,5 @@
 """
-Professional structured logging utilities for VOYA-Collector backend.
+Structured operation logging utilities for VOYA-Collector backend.
 Provides enterprise-grade logging with consistent schema across all operations.
 
 Log Format: [OPERATION][STATUS] key1=val1 key2=val2 ... duration_ms=X error_code=Y
