@@ -363,7 +363,7 @@ def _promotable_job(tmp_path: Path, job_id: str) -> Path:
 def test_promote_rejects_an_unrecognized_architecture(client, tmp_path):
     _promotable_job(tmp_path, "j-alien")
 
-    with patch.object(training_module.torch, "load", return_value={"model_type": "Transformer"}):
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value={"model_type": "Transformer"}):
         response = client.post("/training/jobs/j-alien/promote")
 
     assert response.status_code == 400
@@ -454,14 +454,14 @@ def test_provenance_is_unavailable_without_a_checkpoint(client):
 def test_provenance_is_unavailable_for_a_pre_provenance_checkpoint(client, tmp_path):
     """Older checkpoints predate provenance recording — say so, don't show blanks."""
     _promotable_job(tmp_path, "j-legacy")
-    with patch.object(training_module.torch, "load", return_value={"model_type": "TCN"}):
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value={"model_type": "TCN"}):
         body = client.get("/training/jobs/j-legacy/provenance").json()
     assert body["available"] is False
 
 
 def test_provenance_reports_a_fully_reproducible_run(client, tmp_path):
     _promotable_job(tmp_path, "j-good")
-    with patch.object(training_module.torch, "load", return_value=_reproducible_ckpt()):
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value=_reproducible_ckpt()):
         body = client.get("/training/jobs/j-good/provenance").json()
 
     assert body["available"] is True
@@ -476,7 +476,7 @@ def test_provenance_flags_a_smoke_test_run_as_not_reproducible(client, tmp_path)
     _promotable_job(tmp_path, "j-smoke")
     ckpt = _reproducible_ckpt(run_purpose="smoke_test", dataset_manifest_checksum="")
 
-    with patch.object(training_module.torch, "load", return_value=ckpt):
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value=ckpt):
         body = client.get("/training/jobs/j-smoke/provenance").json()
 
     assert body["reproducible"] is False
@@ -488,7 +488,7 @@ def test_provenance_values_are_scalars_the_ui_can_render(client, tmp_path):
     """Regression: determinism is a dict in the checkpoint and rendered as
     '[object Object]' if passed through untouched."""
     _promotable_job(tmp_path, "j-scalar")
-    with patch.object(training_module.torch, "load", return_value=_reproducible_ckpt()):
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value=_reproducible_ckpt()):
         body = client.get("/training/jobs/j-scalar/provenance").json()
 
     for group in ("code", "data", "model"):
@@ -503,7 +503,7 @@ def test_provenance_summarizes_partial_determinism_with_warnings(client, tmp_pat
         determinism={"cudnn_deterministic": True, "deterministic_algorithms": False,
                      "warnings": ["cublas workspace unset"]}
     )
-    with patch.object(training_module.torch, "load", return_value=ckpt):
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value=ckpt):
         body = client.get("/training/jobs/j-partial/provenance").json()
 
     assert body["code"]["determinism"] == "một phần (1 cảnh báo)"
@@ -528,7 +528,7 @@ def test_promote_accepts_every_trained_architecture(client, tmp_path, monkeypatc
         training_module, "_notify_realtime_service_reload", lambda *a, **k: True
     )
 
-    with patch.object(training_module.torch, "load", return_value={"model_type": model_type}), \
+    with patch.object(training_module.inference_service, "load_checkpoint", return_value={"model_type": model_type}), \
          patch("app.training_tasks.backup_promoted_checkpoint_task"):
         response = client.post(f"/training/jobs/{job_id}/promote")
 

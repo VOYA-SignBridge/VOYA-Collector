@@ -16,15 +16,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import torch
-import torch.nn as nn
-import numpy as np
 import redis
-import sys
-from importlib.util import spec_from_file_location, module_from_spec
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
+from app.modules.training import inference_service
+from app.modules.training.inference_service import (
+    _MODEL_NAME_TO_REGISTRY_KEY,
+    _import_models_registry,
+    _load_model_from_checkpoint,
+)
 from app.modules.training.job_service import (
     TERMINAL_STATUSES,
     _ensure_job_loaded,
@@ -91,178 +92,6 @@ try:
 except Exception as e:
     logger.warning("Redis connection failed: %s", e)
     redis_client = None
-
-# ============================================================================
-# Model Loading Helper
-# ============================================================================
-
-# Map checkpoint model_type values (from model.get_model_name()) to registry keys
-_MODEL_NAME_TO_REGISTRY_KEY = {
-    "cnn": "cnn",
-    "lstm": "lstm",
-    "bigru + attention": "bigru_attention",
-    "bigru attention": "bigru_attention",
-    "bigru_attention": "bigru_attention",
-    "handgcn": "handgcn",
-    "hdgcn": "handgcn",
-    "hd-gcn": "handgcn",   # model.get_model_name() returns "HD-GCN"
-    "hd_gcn": "handgcn",
-    "tcn": "tcn",
-}
-
-
-def _import_models_registry():
-    """Import processed.train_utils.models as a real package.
-
-    Must use a normal package import (not spec_from_file_location on
-    __init__.py) because the package uses relative imports internally.
-    """
-    workspace = str(WORKSPACE_ROOT)
-    if workspace not in sys.path:
-        sys.path.insert(0, workspace)
-    import importlib
-
-    return importlib.import_module("processed.train_utils.models")
-
-
-def _load_model_from_checkpoint(checkpoint_path: Path, model_type_override: Optional[str] = None) -> tuple[nn.Module, dict]:
-    """Load model from checkpoint with support for multiple architectures.
-
-    Returns: (model, ckpt)
-    """
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-
-    # Determine model type saved by train_tcn.py (e.g. "CNN", "BiGRU + Attention")
-    model_type = model_type_override or ckpt.get("model_type", "TCN")
-    model_config = ckpt.get("model_config", {}) or {}
-    num_classes = int(ckpt.get("num_classes", 7))
-    feature_dim = int(ckpt.get("feature_dim", 126))
-
-    model_type_lower = str(model_type).lower().replace(" (legacy)", "").strip()
-    registry_key = _MODEL_NAME_TO_REGISTRY_KEY.get(model_type_lower)
-
-    model: Optional[nn.Module] = None
-
-    if registry_key and registry_key != "tcn":
-        # Non-TCN checkpoint: must load the real architecture from the registry.
-        # Do NOT fall back to TCN here — mismatched weights would fail with a
-        # confusing state_dict error instead of a clear one.
-        try:
-            models_module = _import_models_registry()
-            model_class = models_module.get_model_class(registry_key)
-            model = model_class.from_config(
-                input_dim=feature_dim,
-                output_dim=num_classes,
-                config=model_config,
-            ).to("cpu")
-            logger.info("Loaded %s model from registry (checkpoint model_type=%s)", registry_key, model_type)
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to build '{model_type}' model from registry for checkpoint "
-                f"{checkpoint_path.name}: {e}"
-            ) from e
-    else:
-        # TCN (or legacy checkpoint without model_type): build from the SAME
-        # training registry so the Step 7 test modal always matches the trained
-        # architecture — including the temporal_pool head (gap/attention/mean_max).
-        # The old inline TCNClassifier was gap-only and broke on attention models.
-        try:
-            models_module = _import_models_registry()
-            model = models_module.get_model_class("tcn").from_config(
-                input_dim=feature_dim,
-                output_dim=num_classes,
-                config=model_config,  # carries temporal_pool; absent -> "gap"
-            ).to("cpu")
-            logger.info("Loaded TCN model from registry (temporal_pool=%s)",
-                        model_config.get("temporal_pool", "gap"))
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to build TCN model from registry for checkpoint "
-                f"{checkpoint_path.name}: {e}"
-            ) from e
-
-    try:
-        model.load_state_dict(ckpt["model_state_dict"])
-        model.eval()
-    except Exception as e:
-        logger.error("Error loading model state dict: %s", e)
-        raise
-
-    return model, ckpt
-
-
-# ============================================================================
-# TCN Model Classes (for training model inference)
-# ============================================================================
-# DEPRECATED / UNUSED (2026-07-20): the inline Chomp1d/TemporalBlock/TCNClassifier
-# below are a legacy gap-only copy. The Step 7 test loader now builds the TCN
-# from the training registry (processed/train_utils/models/tcn.py) so it always
-# matches the trained architecture — including the temporal_pool head. Do NOT
-# reintroduce a fourth TCN implementation here; extend the registry model.
-
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size: int):
-        super().__init__()
-        self.chomp_size = chomp_size
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x[:, :, : x.size(2) - self.chomp_size]
-
-
-class TemporalBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int, dropout: float):
-        super().__init__()
-        pad = (kernel_size - 1) * dilation
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp1 = Chomp1d(pad)
-        self.relu1 = nn.ReLU()
-        self.drop1 = nn.Dropout(dropout)
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, padding=pad, dilation=dilation)
-        self.chomp2 = Chomp1d(pad)
-        self.relu2 = nn.ReLU()
-        self.drop2 = nn.Dropout(dropout)
-        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
-        self.out_relu = nn.ReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.drop1(self.relu1(self.chomp1(self.conv1(x))))
-        out = self.drop2(self.relu2(self.chomp2(self.conv2(out))))
-        res = x if self.downsample is None else self.downsample(x)
-        return self.out_relu(out + res)
-
-
-class TCNClassifier(nn.Module):
-    def __init__(
-        self,
-        feature_dim: int,
-        num_classes: int,
-        channels: int = 64,
-        levels: int = 3,
-        kernel_size: int = 5,
-        dropout: float = 0.3,
-    ):
-        super().__init__()
-        self.proj = nn.Conv1d(feature_dim, channels, kernel_size=1)
-        blocks = []
-        for i in range(levels):
-            dilation = 2 ** i
-            blocks.append(TemporalBlock(channels, channels, kernel_size, dilation, dropout))
-        self.network = nn.Sequential(*blocks)
-        self.classifier = nn.Linear(channels, num_classes)
-
-    def forward(self, x_btd: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        x = x_btd.transpose(1, 2)
-        x = self.proj(x)
-        x = self.network(x)
-        b, c, t = x.shape
-        mask = torch.arange(t, device=x.device).unsqueeze(0) < lengths.unsqueeze(1)
-        mask = mask.unsqueeze(1)
-        x = x.masked_fill(~mask, 0.0)
-        denom = lengths.clamp(min=1).unsqueeze(1).to(x.dtype)
-        pooled = x.sum(dim=2) / denom
-        logits = self.classifier(pooled)
-        return logits
-
 
 # Đường dẫn dataset - tính từ docker volume mount
 # In Docker: . mounts to /workspace (root directory)
@@ -954,10 +783,8 @@ async def get_job_status(
                 ckpt_path = Path(job.checkpoint_path)
                 logger.debug("job=%s loading checkpoint from %s, exists=%s", job_id, ckpt_path, ckpt_path.exists())
                 if ckpt_path.exists():
-                    # In thread — torch.load on a large checkpoint would block the event loop
-                    ckpt = await asyncio.to_thread(
-                        torch.load, ckpt_path, map_location="cpu", weights_only=False
-                    )
+                    # In thread — loading a large checkpoint would block the event loop.
+                    ckpt = await asyncio.to_thread(inference_service.load_checkpoint, ckpt_path)
                     metrics = ckpt.get("metrics", {})
                     logger.debug("job=%s checkpoint metrics keys: %s", job_id, list(metrics.keys()))
                     job.test_acc = float(metrics.get("test_acc", 0)) if metrics.get("test_acc") is not None else None
@@ -1047,7 +874,7 @@ async def get_job_provenance(
 
     try:
         ckpt = await asyncio.to_thread(
-            torch.load, str(job.checkpoint_path), map_location="cpu", weights_only=False
+            inference_service.load_checkpoint, job.checkpoint_path
         )
     except Exception as e:
         logger.warning("job=%s không đọc được provenance: %s", job_id, e)
@@ -1189,9 +1016,7 @@ async def promote_training_job(
     # model_type không nhận ra — /reload vẫn validate + warmup trước khi swap.
     src_path = Path(job.checkpoint_path)
     try:
-        ckpt = await asyncio.to_thread(
-            torch.load, str(src_path), map_location="cpu", weights_only=False
-        )
+        ckpt = await asyncio.to_thread(inference_service.load_checkpoint, src_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không đọc được checkpoint: {e}")
 
@@ -1370,119 +1195,13 @@ async def predict_trained_model(
         raise HTTPException(status_code=404, detail="Model checkpoint not found")
 
     try:
-        # Setup sys.path for imports
-        processed_root = str(WORKSPACE_ROOT / "processed")
-        if processed_root not in sys.path:
-            sys.path.insert(0, processed_root)
-
-        # Import normalization from shared
-        normalization_path = WORKSPACE_ROOT / "processed" / "shared" / "normalization.py"
-        spec = spec_from_file_location("normalization", normalization_path)
-        norm_module = module_from_spec(spec)
-        spec.loader.exec_module(norm_module)
-        normalize_hands_vector_126 = norm_module.normalize_hands_vector_126
-
-        # Normalize frames
-        frames_array = np.asarray(request_data.frames, dtype=np.float32)
-        if frames_array.shape != (60, 126):
-            raise ValueError(f"Expected shape (60, 126), got {frames_array.shape}")
-
-        normalized_frames = np.array([
-            normalize_hands_vector_126(frame) for frame in frames_array
-        ], dtype=np.float32)
-
-        # Load checkpoint with dynamic model support
-        # In thread — checkpoint load + inference are disk/CPU heavy and would
-        # stall every other request if run directly on the event loop
-        checkpoint_path_obj = Path(checkpoint_path)
-        model, ckpt = await asyncio.to_thread(_load_model_from_checkpoint, checkpoint_path_obj)
-
-        # Log model type
-        model_type = ckpt.get("model_type", "Unknown")
-        logger.debug("job=%s loaded model: %s", job_id, model_type)
-
-        # Run inference
-        def _run_inference() -> torch.Tensor:
-            x = torch.from_numpy(normalized_frames).unsqueeze(0).to(dtype=torch.float32)
-            with torch.no_grad():
-                # Check if model accepts lengths parameter (old BE TCNClassifier)
-                # or just input (new models from registry)
-                try:
-                    return model(x, torch.tensor([60]))
-                except TypeError:
-                    return model(x)
-
-        logits = await asyncio.to_thread(_run_inference)
-
-        probs = torch.softmax(logits, dim=-1).detach().cpu().numpy().squeeze()
-        pred_idx = int(np.argmax(probs))
-        confidence = float(probs[pred_idx])
-
-        # Build label map from checkpoint + labels.csv for label_original.
-        # Checkpoint idx_to_label entries come in two shapes depending on when
-        # the checkpoint was trained: a bare label_key string (older
-        # checkpoints), or a rich dict that already carries label_original
-        # (current format — see build_checkpoint() in train_tcn.py, and the
-        # matching read in realtime_service/app/predict.py). Both must be
-        # handled here, since this endpoint serves checkpoints from any past
-        # job, not only freshly trained ones.
-        i2l = ckpt.get("idx_to_label")
-        label_key = f"class_{pred_idx}"
-        label = f"class_{pred_idx}"
-
-        v = None
-        if isinstance(i2l, dict):
-            v = i2l.get(pred_idx)
-            if v is None:
-                v = i2l.get(str(pred_idx))
-        elif isinstance(i2l, list) and pred_idx < len(i2l):
-            v = i2l[pred_idx]
-
-        if isinstance(v, dict):
-            # Rich entry: label_original is already resolved, no CSV lookup
-            # needed. Guard against str(v) leaking the whole dict if either
-            # field happens to be missing.
-            label_key = str(v.get("label_key") or label_key).strip()
-            rich_original = str(v.get("label_original") or "").strip()
-            label = rich_original or label_key
-        elif v:
-            label_key = str(v).strip()
-            label = label_key  # default to label_key; refined by the CSV lookup below
-
-        # Load labels.csv to get label_original — only the bare-string legacy
-        # path needs this; a rich idx_to_label entry already carried it.
-        # label_key format: "vn/hoa-de/rang-muoi" or "vn/rang-muoi"
-        if not isinstance(v, dict):
-            try:
-                if LABELS_CSV.exists():
-                    # Parse label_key to extract slug (last part)
-                    parts = label_key.replace("\\", "/").split("/")
-                    slug = parts[-1] if parts else ""
-
-                    logger.debug("job=%s looking up slug='%s' from label_key='%s'", job_id, slug, label_key)
-
-                    with open(LABELS_CSV, "r", encoding="utf-8") as f:
-                        reader = csv.DictReader(f)
-                        found = False
-                        for row in reader:
-                            if row.get("slug", "").strip() == slug:
-                                label_original = row.get("label_original", "").strip()
-                                if label_original:
-                                    label = label_original
-                                    logger.debug("job=%s found label_original: %s", job_id, label)
-                                found = True
-                                break
-                        if not found:
-                            logger.warning("job=%s slug '%s' not found in labels.csv", job_id, slug)
-            except Exception as e:
-                logger.warning("job=%s error loading labels.csv: %s", job_id, e)
-
-        return TrainedModelPredictResponse(
-            label=label,
-            confidence=confidence,
-            label_key=label_key,
+        return await asyncio.to_thread(
+            inference_service.predict_checkpoint,
+            Path(checkpoint_path),
+            request_data.frames,
+            workspace_root=WORKSPACE_ROOT,
+            labels_csv=LABELS_CSV,
         )
-
     except Exception as e:
         logger.exception("job=%s inference error", job_id)
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
