@@ -1,9 +1,8 @@
-def test_legacy_account_helpers_delegate_to_identity_repository():
-    from app import auth as legacy
+def test_account_helpers_live_in_identity_repository():
     from app.modules.identity import repository
 
-    assert legacy._normalize_login is repository.normalize_login
-    assert legacy._row_to_user is repository.row_to_user
+    assert repository.normalize_login.__module__ == "app.modules.identity.repository"
+    assert repository.row_to_user.__module__ == "app.modules.identity.repository"
 
 
 def test_repository_normalizes_login_and_maps_user_rows():

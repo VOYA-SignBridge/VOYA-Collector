@@ -1,28 +1,14 @@
 import json
 
 
-def test_activity_facade_exports_security_components():
-    from app import activity
+def test_security_components_live_in_canonical_modules():
     from app.modules.security import account_controls, activity_monitor, audit_log, geo, ip_controls
 
-    assert activity.block_ip is ip_controls.block_ip
-    assert activity.get_block is ip_controls.get_block
-    assert activity.list_blocked is ip_controls.list_blocked
-    assert activity.log_security_event is audit_log.log_security_event
-    assert activity.list_security_log is audit_log.list_security_log
-    assert activity.force_logout_user is account_controls.force_logout_user
-    assert activity.get_force_logout is account_controls.get_force_logout
-    assert activity.is_user_denied is account_controls.is_user_denied
-    assert activity.lock_user is account_controls.lock_user
-    assert activity.get_user_warning is account_controls.get_user_warning
-    assert activity._fmt_until is account_controls.format_until
-    assert activity._resolve_usernames is account_controls.resolve_usernames
-    assert activity.geo_lookup is geo.geo_lookup
-    assert activity._get_geo_reader is geo.get_geo_reader
-    assert activity._loc_str is geo.location_label
-    assert activity.guard is activity_monitor.guard
-    assert activity.record_presence is activity_monitor.record_presence
-    assert activity.activity_report is activity_monitor.activity_report
+    assert ip_controls.block_ip.__module__ == "app.modules.security.ip_controls"
+    assert audit_log.log_security_event.__module__ == "app.modules.security.audit_log"
+    assert account_controls.force_logout_user.__module__ == "app.modules.security.account_controls"
+    assert geo.geo_lookup.__module__ == "app.modules.security.geo"
+    assert activity_monitor.guard.__module__ == "app.modules.security.activity_monitor"
 
 
 def test_security_controls_fail_open_without_redis(monkeypatch):

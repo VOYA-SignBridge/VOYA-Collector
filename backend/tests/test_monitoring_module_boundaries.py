@@ -1,11 +1,10 @@
-def test_monitoring_facade_exports_component_callables():
-    from app import monitoring
+def test_monitoring_components_live_in_canonical_modules():
     from app.modules.monitoring import compose_config, gpu, service, snapshots
 
-    assert monitoring.start_gpu_monitor is gpu.start_gpu_monitor
-    assert monitoring.collect_resources is service.collect_resources
-    assert monitoring.host_snapshot is snapshots.host_snapshot
-    assert monitoring.resource_config is compose_config.resource_config
+    assert gpu.start_gpu_monitor.__module__ == "app.modules.monitoring.gpu"
+    assert service.collect_resources.__module__ == "app.modules.monitoring.service"
+    assert snapshots.host_snapshot.__module__ == "app.modules.monitoring.snapshots"
+    assert compose_config.resource_config.__module__ == "app.modules.monitoring.compose_config"
 
 
 def test_collect_resources_aggregates_snapshots(monkeypatch):

@@ -21,7 +21,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.auth import get_current_user, require_admin
+from app.modules.identity import get_current_user, require_admin
 from app.routers import training as training_module
 from app.routers.training import (
     SplitProvenance,

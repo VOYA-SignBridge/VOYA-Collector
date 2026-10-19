@@ -4,21 +4,18 @@ import pytest
 from fastapi import HTTPException
 
 
-def test_legacy_token_hashes_are_identity_module_aliases():
-    from app import auth as legacy
+def test_token_hashes_share_the_expected_opaque_token_contract():
     from app.modules.identity.password_reset import hash_reset_token
     from app.modules.identity.sessions import hash_refresh_token
 
     expected = hashlib.sha256(b"opaque-token").hexdigest()
 
-    assert legacy._hash_reset_token is hash_reset_token
-    assert legacy._hash_token is hash_refresh_token
-    assert legacy._hash_reset_token("opaque-token") == expected
-    assert legacy._hash_token("opaque-token") == expected
+    assert hash_reset_token("opaque-token") == expected
+    assert hash_refresh_token("opaque-token") == expected
 
 
-def test_legacy_password_reset_wrapper_preserves_injection_points(monkeypatch):
-    from app import auth as legacy
+def test_password_reset_service_preserves_injection_points(monkeypatch):
+    from app.modules.identity import service
 
     lookup = lambda identifier: {"id": identifier}
     connection_factory = lambda: object()
@@ -28,11 +25,11 @@ def test_legacy_password_reset_wrapper_preserves_injection_points(monkeypatch):
         captured.update(identifier=identifier, **kwargs)
         return ({"id": "user-1"}, "reset-token")
 
-    monkeypatch.setattr(legacy, "_fetch_user_by_login", lookup)
-    monkeypatch.setattr(legacy, "_get_conn", connection_factory)
-    monkeypatch.setattr(legacy, "issue_password_reset", fake_issue)
+    monkeypatch.setattr(service, "find_user_by_login", lookup)
+    monkeypatch.setattr(service, "get_connection", connection_factory)
+    monkeypatch.setattr(service, "issue_password_reset", fake_issue)
 
-    result = legacy.request_password_reset("User@Example.com")
+    result = service.request_password_reset("User@Example.com")
 
     assert result == ({"id": "user-1"}, "reset-token")
     assert captured == {
@@ -42,8 +39,8 @@ def test_legacy_password_reset_wrapper_preserves_injection_points(monkeypatch):
     }
 
 
-def test_legacy_refresh_rotation_wrapper_preserves_injection_points(monkeypatch):
-    from app import auth as legacy
+def test_refresh_rotation_service_preserves_injection_points(monkeypatch):
+    from app.modules.identity import service
 
     lookup = lambda user_id: {"id": user_id}
     connection_factory = lambda: object()
@@ -53,11 +50,11 @@ def test_legacy_refresh_rotation_wrapper_preserves_injection_points(monkeypatch)
         captured.update(raw_token=raw_token, **kwargs)
         return ({"id": "user-1"}, "replacement-token")
 
-    monkeypatch.setattr(legacy, "_fetch_user_by_id", lookup)
-    monkeypatch.setattr(legacy, "_get_conn", connection_factory)
-    monkeypatch.setattr(legacy, "rotate_refresh_session", fake_rotate)
+    monkeypatch.setattr(service, "find_user_by_id", lookup)
+    monkeypatch.setattr(service, "get_connection", connection_factory)
+    monkeypatch.setattr(service, "rotate_refresh_session", fake_rotate)
 
-    result = legacy.rotate_refresh_token("refresh-token")
+    result = service.rotate_refresh_token("refresh-token")
 
     assert result == ({"id": "user-1"}, "replacement-token")
     assert captured == {

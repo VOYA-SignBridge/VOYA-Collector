@@ -2,19 +2,16 @@ from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
 
-def test_legacy_facade_and_identity_api_share_service_callables():
-    from app import auth as legacy
+def test_identity_public_api_exports_canonical_service_callables():
     from app.modules import identity
     from app.modules.identity import dependencies, service
 
-    assert legacy.create_user is service.create_user
-    assert legacy.authenticate_user is service.authenticate_user
-    assert legacy.get_user_from_token is service.get_user_from_token
-    assert legacy.get_current_user_optional is dependencies.get_current_user_optional
-    assert legacy.get_current_user is dependencies.get_current_user
-    assert legacy.require_admin is dependencies.require_admin
     assert identity.create_user is service.create_user
+    assert identity.authenticate_user is service.authenticate_user
+    assert identity.get_user_from_token is service.get_user_from_token
+    assert identity.get_current_user_optional is dependencies.get_current_user_optional
     assert identity.get_current_user is dependencies.get_current_user
+    assert identity.require_admin is dependencies.require_admin
     assert identity.request_password_reset is service.request_password_reset
     assert identity.create_refresh_token is service.create_refresh_token
     assert identity.rotate_refresh_token is service.rotate_refresh_token
@@ -64,7 +61,6 @@ def test_authenticate_user_keeps_dummy_verify_for_unknown_account(monkeypatch):
 
 
 def test_current_user_dependency_prefers_cookie_over_bearer(monkeypatch):
-    from app import activity
     from app.cookie_auth import ACCESS_COOKIE
     from app.modules.identity import dependencies
 
@@ -79,7 +75,7 @@ def test_current_user_dependency_prefers_cookie_over_bearer(monkeypatch):
         "find_user_by_id",
         lambda user_id: {"id": user_id, "is_active": True},
     )
-    monkeypatch.setattr(activity, "is_user_denied", lambda user_id, issued_at: False)
+    monkeypatch.setattr(dependencies, "is_user_denied", lambda user_id, issued_at: False)
 
     request = Request({
         "type": "http",

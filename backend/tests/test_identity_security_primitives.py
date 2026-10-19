@@ -1,12 +1,12 @@
-def test_legacy_auth_exports_identity_security_primitives():
-    from app import auth as legacy
+def test_identity_public_api_exports_security_primitives():
+    from app.modules import identity
     from app.modules.identity import passwords, tokens
 
-    assert legacy.get_password_hash is passwords.get_password_hash
-    assert legacy.verify_password is passwords.verify_password
-    assert legacy.create_access_token is tokens.create_access_token
-    assert legacy._decode_token is tokens.decode_access_token
-    assert legacy.bearer_scheme is tokens.bearer_scheme
+    assert identity.create_access_token is tokens.create_access_token
+    assert passwords.get_password_hash.__module__ == "app.modules.identity.passwords"
+    assert passwords.verify_password.__module__ == "app.modules.identity.passwords"
+    assert tokens.decode_access_token.__module__ == "app.modules.identity.tokens"
+    assert tokens.bearer_scheme is not None
 
 
 def test_password_helpers_keep_existing_behavior():

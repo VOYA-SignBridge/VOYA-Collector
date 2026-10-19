@@ -2,8 +2,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from app import activity
 from app.config import settings
+from app.modules.security.activity_monitor import guard
 
 
 _BLOCK_EXEMPT_PREFIXES = ("/api/v1/auth", "/auth", "/api/v1/admin", "/admin")
@@ -14,7 +14,7 @@ async def activity_guard(request: Request, call_next):
     path = request.url.path
     enforce = not any(path.startswith(prefix) for prefix in _BLOCK_EXEMPT_PREFIXES)
     try:
-        block = await run_in_threadpool(activity.guard, request, enforce)
+        block = await run_in_threadpool(guard, request, enforce)
     except Exception:
         block = None
     if block:

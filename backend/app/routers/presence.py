@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from app import activity
+from app.modules.security.activity_monitor import record_presence
 from app.modules.security.rate_limits import client_ip
 
 
@@ -18,5 +18,5 @@ async def report_presence(request: Request):
     ip = client_ip(request)
     lat, lon, acc = body.get("lat"), body.get("lon"), body.get("accuracy")
     if lat is not None and lon is not None:
-        await run_in_threadpool(activity.record_presence, ip, lat, lon, acc)
+        await run_in_threadpool(record_presence, ip, lat, lon, acc)
     return Response(status_code=204)

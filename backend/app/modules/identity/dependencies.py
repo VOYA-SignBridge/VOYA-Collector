@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from app.cookie_auth import ACCESS_COOKIE
 from app.modules.identity.repository import find_user_by_id
 from app.modules.identity.tokens import bearer_scheme, decode_access_token
+from app.modules.security.account_controls import get_force_logout, is_user_denied
 
 
 def get_current_user_optional(
@@ -31,10 +32,8 @@ def get_current_user_optional(
     # Admin force-logout is a best-effort Redis policy.  Preserve the historical
     # fail-open behaviour when activity tracking itself is unavailable.
     try:
-        from app import activity
-
-        if activity.is_user_denied(user_id, payload.get("iat")):
-            force_logout = activity.get_force_logout(user_id) or {}
+        if is_user_denied(user_id, payload.get("iat")):
+            force_logout = get_force_logout(user_id) or {}
             message = "Phiên đã bị đăng xuất bởi quản trị viên"
             if force_logout.get("reason"):
                 message += f": {force_logout['reason']}"

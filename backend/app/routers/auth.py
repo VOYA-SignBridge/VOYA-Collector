@@ -31,6 +31,7 @@ from app.modules.identity.schemas import (
     ResetPasswordRequest,
     UserOut,
 )
+from app.modules.security import account_controls
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -86,13 +87,11 @@ def login(payload: LoginRequest, request: Request, response: Response):
 
     # Correct password but the account is locked by an admin → say so clearly.
     try:
-        from app import activity
-
-        lock = activity.get_user_lock(user["id"])
+        lock = account_controls.get_user_lock(user["id"])
         if lock:
             reason = lock.get("reason") or "vi phạm quy định"
             msg = f"Tài khoản của bạn đã bị khóa. Lý do: {reason}"
-            until = activity._fmt_until(lock.get("until") or 0)
+            until = account_controls.format_until(lock.get("until") or 0)
             if until:
                 msg += f" (mở lại lúc {until})"
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
@@ -115,17 +114,13 @@ def login(payload: LoginRequest, request: Request, response: Response):
 @router.get("/my-notice")
 def my_notice(current_user: dict = Depends(get_current_user)):
     """Pending admin notice (warning) for the logged-in user, if any."""
-    from app import activity
-
-    return {"warning": activity.get_user_warning(current_user["id"])}
+    return {"warning": account_controls.get_user_warning(current_user["id"])}
 
 
 @router.post("/my-notice/ack")
 def ack_my_notice(current_user: dict = Depends(get_current_user)):
     """Dismiss the pending warning after the user has read it."""
-    from app import activity
-
-    activity.ack_user_warning(current_user["id"])
+    account_controls.ack_user_warning(current_user["id"])
     return {"status": "ok"}
 
 

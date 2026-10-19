@@ -37,3 +37,11 @@ def test_retired_unreferenced_modules_are_removed() -> None:
     assert not (app_root / "rate_limit.py").exists()
     assert not (app_root / "processing" / "feature_writer.py").exists()
     assert not (app_root / "storage" / "experiment_tracking_db.py").exists()
+
+
+def test_retired_root_facades_are_removed() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
+
+    assert not (app_root / "auth.py").exists()
+    assert not (app_root / "activity.py").exists()
+    assert not (app_root / "monitoring.py").exists()

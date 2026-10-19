@@ -5,8 +5,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
 
-from app import activity
 from app.modules.identity import require_admin
+from app.modules.security.account_controls import resolve_usernames
 from app.modules.google_sync.restore_tasks import download_missing_files_to_local
 
 router = APIRouter()
@@ -37,7 +37,7 @@ def get_data_report(current_user: Dict[str, Any] = Depends(require_admin)):
     regions.discard("")
 
     top_ids = [user_id for user_id, _ in contributor_counts.most_common(10)]
-    user_map = activity._resolve_usernames(set(top_ids))
+    user_map = resolve_usernames(set(top_ids))
     top_contributors = [
         {
             "user_id": user_id,

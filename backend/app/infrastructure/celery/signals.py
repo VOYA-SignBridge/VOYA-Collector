@@ -25,7 +25,7 @@ def release_memory_after_task(sender=None, **_kwargs) -> None:
 def start_resource_monitor(**_kwargs) -> None:
     """Start the GPU sampler when this worker has compatible hardware."""
     try:
-        from app.monitoring import start_gpu_monitor
+        from app.modules.monitoring.gpu import start_gpu_monitor
 
         start_gpu_monitor()
     except Exception:
