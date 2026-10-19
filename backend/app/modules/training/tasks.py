@@ -45,6 +45,16 @@ JOB_ARTIFACTS_DIR = OUTPUTS_DIR / "job_artifacts"
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 CANCEL_KEY_PREFIX = "training:cancel:"
+
+
+def _deployment_splits() -> list:
+    """Compatibility facade using this worker's configured workspace root."""
+    return split_selection.deployment_splits(WORKSPACE_ROOT)
+
+
+def _deployment_split_for(dialects: list) -> Optional[Dict[str, Any]]:
+    """Compatibility facade using this worker's configured workspace root."""
+    return split_selection.deployment_split_for(dialects, WORKSPACE_ROOT)
 TRAINING_JOB_TIMEOUT_SECONDS = int(os.getenv("TRAINING_JOB_TIMEOUT_SECONDS", str(6 * 3600)))
 
 POLL_INTERVAL_SECONDS = 2
@@ -585,13 +595,3 @@ def cleanup_training_artifacts(self):
     logger.info("[RETENTION] removed %d old checkpoints, %d old artifacts (keep_n=%d, keep_days=%d)",
                 removed_ckpts, removed_artifacts, keep_n, keep_days)
     return {"removed_checkpoints": removed_ckpts, "removed_artifacts": removed_artifacts}
-def _deployment_splits() -> list:
-    """Compatibility facade using this worker's configured workspace root."""
-    return split_selection.deployment_splits(WORKSPACE_ROOT)
-
-
-def _deployment_split_for(dialects: list) -> Optional[Dict[str, Any]]:
-    """Compatibility facade using this worker's configured workspace root."""
-    return split_selection.deployment_split_for(dialects, WORKSPACE_ROOT)
-
-

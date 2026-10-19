@@ -10,7 +10,6 @@ import csv
 import json
 import logging
 import os
-import uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import preparation_service
-from app.modules.training import inference_service
+from app.modules.training import inference_service, submission_service
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
     _import_models_registry,
@@ -602,116 +601,23 @@ async def start_training(
     Tạo job ID, thêm vào queue, return job info
     """
     try:
-        if config.run_purpose == "research":
-            # Chặn sớm với thông báo rõ, thay vì để train_tcn.py SystemExit ở
-            # _enforce_research_preconditions sau khi job đã vào hàng đợi.
-            if not config.split_version:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Chế độ nghiên cứu cần chọn một split đã versioned.",
-                )
-            available = {s["split_version"]: s for s in _research_splits()}
-            chosen = available.get(config.split_version)
-            if not chosen:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Split '{config.split_version}' không dùng được cho nghiên cứu "
-                        f"(không tồn tại, thiếu checksum manifest, hoặc valid_for_research=false). "
-                        f"Đang dùng được: {sorted(available) or 'chưa có'}."
-                    ),
-                )
-            # Khoá provenance theo đúng split đã chọn.
-            config.dataset_version = chosen["dataset_version"]
-            config.recognition_profile = chosen["recognition_profile"]
-
-        # Chặn sớm: lựa chọn dialect không có đủ dữ liệu trong split hiện tại sẽ
-        # khiến subprocess train fail âm thầm (rc=1). Báo lỗi rõ ràng ngay đây.
-        # Chế độ nghiên cứu không lọc theo dialect — split đã định nghĩa dữ liệu.
-        selected_dialects = [] if config.run_purpose == "research" else list(config.dialects or [])
-        if selected_dialects:
-            trainable = _trainable_dialects_from_splits()
-            empty = [d for d in selected_dialects if trainable.get(d, 0) < 2]
-            if empty:
-                available = sorted(d for d, n in trainable.items() if n >= 2)
-                detail = (
-                    f"Các phương ngữ đã chọn không đủ dữ liệu để huấn luyện "
-                    f"(cần ≥2 lớp có mẫu trong tập chia): {empty}. "
-                    f"Phương ngữ đang huấn luyện được: {available or 'chưa có'}. "
-                    f"Nếu bạn vừa thu dữ liệu mới, hãy chia lại tập "
-                    f"(processed/splits/make_splits.py) trước khi huấn luyện."
-                )
-                raise HTTPException(status_code=400, detail=detail)
-
-        # Snapshot how the data is split right now. Research runs read a frozen
-        # versioned split and already carry their own provenance through the
-        # checkpoint contract; the exploratory path resolves a split from the
-        # dialect being trained, exactly as the dispatcher will.
-        split_prov: Optional[SplitProvenance] = None
-        if config.run_purpose != "research":
-            # Must match what _build_cmd picks, or the results panel will label
-            # the run with a partition it never read.
-            split_prov = _effective_split_provenance(
-                (config.dialects or [None])[0] if len(config.dialects or []) == 1 else None
-            )
-            # Fail closed on a split that cannot train, rather than letting the
-            # subprocess exit rc=1 after the job has been queued and the user has
-            # watched a progress bar for nothing.
-            if not split_prov.counts.get("train") or not split_prov.counts.get("test"):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Tập chia hiện tại không dùng được để huấn luyện "
-                        f"(train={split_prov.counts.get('train', 0)}, "
-                        f"test={split_prov.counts.get('test', 0)} mẫu). "
-                        "Hãy chia lại tập dữ liệu trước khi huấn luyện."
-                    ),
-                )
-
-        job_id = str(uuid.uuid4())[:8]
-        now = datetime.now().isoformat()
-
-        job = TrainingJob(
-            id=job_id,
-            status="queued",  # ✓ Changed from "pending" to "queued"
-            config=config,
-            created_at=now,
-            total_epochs=config.epochs,
-            split_provenance=split_prov,
+        return await submission_service.submit_training_job(
+            config,
+            auth_user_id=str(current_user.get("id") or "") or None,
+            username=current_user.get("username"),
+            jobs=training_jobs,
+            research_splits=_research_splits,
+            trainable_dialects=_trainable_dialects_from_splits,
+            effective_provenance=_effective_split_provenance,
+            persist_job=_persist_job,
         )
-
-        training_jobs[job_id] = {
-            "job": job,
-            "progress": [],
-        }
-
-        # Persist BEFORE enqueue: if the backend dies right after, the job
-        # is recoverable instead of silently vanishing.
-        await _persist_job(job, auth_user_id=str(current_user.get("id") or "") or None)
-
-        # Dispatch to the dedicated trainer container (Celery queue "training",
-        # concurrency 1 — jobs execute strictly one at a time, off the API CPU)
-        try:
-            from app.training_tasks import run_training_job
-
-            await asyncio.to_thread(
-                run_training_job.apply_async, kwargs={"job_id": job_id}, queue="training"
-            )
-            logger.info("job=%s dispatched to trainer by user=%s", job_id, current_user.get("username"))
-        except Exception as dispatch_err:
-            job.status = "failed"
-            job.completed_at = datetime.now().isoformat()
-            job.error_message = f"Không gửi được job tới trainer (Redis/Celery down?): {dispatch_err}"
-            await _persist_job(job)
-            raise HTTPException(
-                status_code=503,
-                detail="Hàng đợi training tạm thời không khả dụng — thử lại sau",
-            )
-
-        return job
-
-    except HTTPException:
-        raise
+    except submission_service.SubmissionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except submission_service.QueueUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Hàng đợi training tạm thời không khả dụng — thử lại sau",
+        ) from exc
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi bắt đầu training: {str(e)}")
 
