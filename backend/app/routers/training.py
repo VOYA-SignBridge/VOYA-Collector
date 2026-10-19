@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from app.infrastructure.redis.connection import get_redis_client
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import preparation_service
-from app.modules.training import inference_service, submission_service
+from app.modules.training import inference_service, job_service, submission_service
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
     _import_models_registry,
@@ -617,22 +617,9 @@ async def list_jobs(
 ) -> List[Dict[str, Any]]:
     """Lịch sử training jobs (mới nhất trước), kèm username người chạy."""
     try:
-        from app.storage.metadata_db import list_training_jobs_with_user
-
-        rows = await asyncio.to_thread(list_training_jobs_with_user, limit)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không đọc được lịch sử training: {e}")
-
-    items: List[Dict[str, Any]] = []
-    for row in rows:
-        try:
-            job = _job_from_db_row(row)
-        except Exception:
-            continue
-        item = job.dict()
-        item["username"] = row.get("username")
-        items.append(item)
-    return items
+        return await job_service.list_job_history(limit)
+    except job_service.JobStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}", response_model=TrainingJob)
@@ -641,34 +628,15 @@ async def get_job_status(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> TrainingJob:
     """Lấy trạng thái training job (fallback sang DB nếu không có trong memory)"""
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
-    job = job_info["job"]
-
-    # Load test metrics from checkpoint if job is completed
-    if job.status == "completed" and job.checkpoint_path:
-        logger.debug("job=%s checking test metrics: test_acc=%s checkpoint=%s", job_id, job.test_acc, job.checkpoint_path)
-        if not job.test_acc:  # Only load if not already set
-            try:
-                ckpt_path = Path(job.checkpoint_path)
-                logger.debug("job=%s loading checkpoint from %s, exists=%s", job_id, ckpt_path, ckpt_path.exists())
-                if ckpt_path.exists():
-                    # In thread — loading a large checkpoint would block the event loop.
-                    ckpt = await asyncio.to_thread(inference_service.load_checkpoint, ckpt_path)
-                    metrics = ckpt.get("metrics", {})
-                    logger.debug("job=%s checkpoint metrics keys: %s", job_id, list(metrics.keys()))
-                    job.test_acc = float(metrics.get("test_acc", 0)) if metrics.get("test_acc") is not None else None
-                    job.test_f1 = float(metrics.get("test_f1", 0)) if metrics.get("test_f1") is not None else None
-                    logger.info("job=%s loaded test metrics: acc=%.4f f1=%.4f", job_id, job.test_acc, job.test_f1)
-                    await _persist_job(job)
-                else:
-                    logger.warning("job=%s checkpoint file not found: %s", job_id, ckpt_path)
-            except Exception:
-                logger.exception("job=%s error loading test metrics", job_id)
-
-    return job
+    try:
+        return await job_service.load_job_status(
+            job_id,
+            ensure_job=_ensure_job_loaded,
+            persist_job=_persist_job,
+            load_checkpoint=inference_service.load_checkpoint,
+        )
+    except job_service.JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}/metrics", response_model=List[TrainingMetrics])
@@ -677,23 +645,10 @@ async def get_job_metrics(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[TrainingMetrics]:
     """Lấy metrics của training job (fallback sang DB nếu không có trong memory)"""
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
-    # Metrics live in Postgres (written by the trainer container). Cache only
-    # once the job is terminal; while running, read fresh each poll.
-    is_terminal = job_info["job"].status in TERMINAL_STATUSES
-    if not job_info["progress"] or not is_terminal:
-        try:
-            from app.storage.metadata_db import list_training_metrics
-
-            rows = await asyncio.to_thread(list_training_metrics, job_id)
-            job_info["progress"] = _metrics_from_db_rows(rows)
-        except Exception as e:
-            logger.warning("Metrics DB load failed for %s: %s", job_id, e)
-
-    return job_info["progress"]
+    try:
+        return await job_service.load_job_metrics(job_id, ensure_job=_ensure_job_loaded)
+    except job_service.JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}/evaluation")
@@ -706,22 +661,12 @@ async def get_job_evaluation(
     Trả về {"available": false} thay vì 404 khi job cũ chưa có dữ liệu này
     (các job train trước khi tính năng evaluation được thêm).
     """
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
     try:
-        from app.storage.metadata_db import get_training_job
-
-        row = await asyncio.to_thread(get_training_job, job_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không đọc được evaluation: {e}")
-
-    evaluation = (row or {}).get("evaluation")
-    if not isinstance(evaluation, dict) or not evaluation.get("per_class"):
-        return {"available": False, "job_id": job_id}
-
-    return {"available": True, "job_id": job_id, **evaluation}
+        return await job_service.load_job_evaluation(job_id, ensure_job=_ensure_job_loaded)
+    except job_service.JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except job_service.JobStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/jobs/{job_id}/provenance")
@@ -764,21 +709,7 @@ async def get_queue_status(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> dict:
     """Get training queue status (từ Postgres — trainer container ghi trạng thái)"""
-    try:
-        from app.storage.metadata_db import list_training_jobs
-
-        rows = await asyncio.to_thread(list_training_jobs, 100)
-    except Exception as e:
-        return {"queue_enabled": False, "message": f"DB unavailable: {e}"}
-
-    queued = [r for r in rows if str(r.get("status")) == "queued"]
-    running = [r for r in rows if str(r.get("status")) == "running"]
-    return {
-        "queue_enabled": True,
-        "queue_length": len(queued),
-        "current_job": str(running[0]["job_id"]) if running else None,
-        "worker_running": True,  # executor là container trainer riêng (celery -Q training)
-    }
+    return await job_service.queue_status()
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=TrainingJob)
@@ -793,35 +724,19 @@ async def cancel_training_job(
     trong ≤2s và terminate subprocess (SIGKILL sau 30s nếu lì).
     DB được đánh dấu cancelled ngay để UI phản hồi tức thì.
     """
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
-    job = job_info["job"]
-
-    if job.status in TERMINAL_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Job đã ở trạng thái kết thúc ({job.status}), không thể hủy",
-        )
-
     logger.info("job=%s cancel requested by user=%s", job_id, current_user.get("username"))
-
-    # Signal the trainer (works for both queued — pre-start check — and running)
-    cancel_client = redis_client or get_redis_client()
-    if cancel_client:
-        try:
-            await asyncio.to_thread(
-                cancel_client.set, f"training:cancel:{job_id}", "1", ex=86400
-            )
-        except Exception as e:
-            logger.warning("job=%s cancel signal to Redis failed: %s", job_id, e)
-
-    job.status = "cancelled"
-    job.completed_at = datetime.now().isoformat()
-    job.error_message = f"Bị hủy bởi {current_user.get('username', 'user')}"
-    await _persist_job(job)
-    return job
+    try:
+        return await job_service.cancel_job(
+            job_id,
+            current_user.get("username", "user"),
+            redis_client=redis_client or get_redis_client(),
+            ensure_job=_ensure_job_loaded,
+            persist_job=_persist_job,
+        )
+    except job_service.JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except job_service.JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.delete("/jobs/{job_id}")
@@ -835,25 +750,14 @@ async def delete_training_job_endpoint(
     chạy/đang chờ phải hủy trước (xem cancel_training_job). Không xóa
     checkpoint file trên đĩa (xem delete_training_job trong metadata_db.py).
     """
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
-    job = job_info["job"]
-    if job.status not in TERMINAL_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Chỉ xóa được job đã kết thúc (trạng thái hiện tại: {job.status}). Hãy hủy job trước.",
-        )
-
     try:
-        from app.storage.metadata_db import delete_training_job
-
-        await asyncio.to_thread(delete_training_job, job_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không xóa được job: {e}")
-
-    training_jobs.pop(job_id, None)
+        await job_service.delete_job(job_id, ensure_job=_ensure_job_loaded)
+    except job_service.JobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except job_service.JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except job_service.JobStorageError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     logger.info("job=%s deleted from history by user=%s", job_id, current_user.get("username"))
     return {"success": True, "job_id": job_id}
 
