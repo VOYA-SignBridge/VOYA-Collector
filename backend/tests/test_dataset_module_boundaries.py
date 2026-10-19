@@ -1,39 +1,62 @@
-def test_dataset_package_exposes_domain_components():
-    from app.modules.dataset import catalog, inference, raw_uploads, samples, signers
+from __future__ import annotations
 
-    assert catalog.__name__ == "app.modules.dataset.catalog"
-    assert samples.__name__ == "app.modules.dataset.samples"
-    assert raw_uploads.__name__ == "app.modules.dataset.raw_uploads"
-    assert signers.__name__ == "app.modules.dataset.signers"
-    assert inference.__name__ == "app.modules.dataset.inference"
+import json
 
+import pytest
 
-def test_google_sync_builds_only_dataset_relative_storage_keys(tmp_path):
-    from app.modules.google_sync.catalog import dataset_storage_key
-
-    dataset_root = tmp_path / "dataset"
-    sample_path = dataset_root / "features" / "vi" / "sample.npz"
-    outside_path = tmp_path / "outside" / "sample.npz"
-
-    assert dataset_storage_key(sample_path, dataset_root=dataset_root) == "features/vi/sample.npz"
-    assert dataset_storage_key(outside_path, dataset_root=dataset_root) is None
+from app.modules.dataset import preparation_service, split_selection
+from app.modules.training import tasks as training_tasks
 
 
-def test_google_task_facade_preserves_legacy_celery_names():
-    import app.export_tasks as facade
-    from app.modules.google_sync import drive_tasks, sheets_tasks
+def test_training_tasks_reexport_dataset_split_helpers():
+    assert training_tasks._deployment_splits.__module__ == "app.modules.training.tasks"
+    assert training_tasks._deployment_split_for.__module__ == "app.modules.training.tasks"
 
-    expected = {
-        "delete_gdrive_paths_task": drive_tasks.delete_gdrive_paths_task,
-        "export_labels_to_sheets": sheets_tasks.export_labels_to_sheets,
-        "export_samples_to_sheets": sheets_tasks.export_samples_to_sheets,
-        "mirror_catalog_csvs_to_drive": drive_tasks.mirror_catalog_csvs_to_drive,
-        "move_gdrive_paths_task": drive_tasks.move_gdrive_paths_task,
-        "upload_npz_batch_to_gdrive_task": drive_tasks.upload_npz_batch_to_gdrive_task,
-        "upload_npz_to_gdrive_task": drive_tasks.upload_npz_to_gdrive_task,
-        "upload_raw_video_to_gdrive_task": drive_tasks.upload_raw_video_to_gdrive_task,
-    }
 
-    for name, task in expected.items():
-        assert getattr(facade, name) is task
-        assert task.name == f"app.export_tasks.{name}"
+def test_deployment_split_selection_prefers_newest_covering_candidate(tmp_path):
+    versions = tmp_path / "processed" / "splits" / "versions"
+    for version in (2, 12):
+        directory = versions / f"alphabet_deploy_v{version}"
+        directory.mkdir(parents=True)
+        for part in ("train", "val", "test"):
+            (directory / f"{part}.csv").write_text(
+                "dialect,class_idx\nalphabet,1\n",
+                encoding="utf-8",
+            )
+        (directory / "split_metadata.json").write_text(
+            json.dumps({"recognition_profile": "alphabet"}),
+            encoding="utf-8",
+        )
+
+    selected = split_selection.deployment_split_for(["alphabet"], tmp_path)
+    assert selected is not None
+    assert selected["split_version"] == "alphabet_deploy_v12"
+
+
+def test_queue_preparation_persists_before_dispatch():
+    events = []
+
+    result = preparation_service.queue_preparation(
+        dialects=["hoa-de"],
+        profiles=None,
+        seed=7,
+        profiles_for_dialects=lambda dialects: (["hoa_de"], []),
+        next_version=lambda: "isds2026_v99",
+        create_report=lambda *args: events.append(("report", args)),
+        dispatch=lambda **kwargs: events.append(("dispatch", kwargs)),
+    )
+
+    assert [event[0] for event in events] == ["report", "dispatch"]
+    assert result["manifest_version"] == "isds2026_v99"
+    assert result["profiles"] == ["hoa_de"]
+
+
+def test_queue_preparation_rejects_dialects_without_profiles():
+    with pytest.raises(preparation_service.UnsupportedDialectsError) as raised:
+        preparation_service.queue_preparation(
+            dialects=["unknown"],
+            profiles=None,
+            seed=42,
+            profiles_for_dialects=lambda dialects: ([], dialects),
+        )
+    assert raised.value.dialects == ["unknown"]

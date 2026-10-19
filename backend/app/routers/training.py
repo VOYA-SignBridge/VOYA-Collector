@@ -20,6 +20,7 @@ import redis
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
+from app.modules.dataset import preparation_service
 from app.modules.training import inference_service
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
@@ -464,47 +465,26 @@ async def start_dataset_preparation(
     đường dùng hằng ngày lẫn đường nghiên cứu, từ cùng một manifest, nên hai
     đường không thể lệch nhau về việc đang mô tả bộ dữ liệu nào.
     """
-    from app.modules.dataset.preparation_tasks import (
-        create_pending_report,
-        next_manifest_version,
-        prepare_dataset,
-    )
-
-    profiles = body.profiles
-    if not profiles and body.dialects:
-        # Chuẩn bị đúng phương ngữ đang chọn. Chuẩn bị cả bộ dữ liệu khi người
-        # dùng chỉ quan tâm một phương ngữ vừa tốn thời gian vừa tạo ra artefact
-        # không ai dùng.
-        profiles, unsupported = await asyncio.to_thread(_profiles_for_dialects, body.dialects)
-        if not profiles:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Phương ngữ đã chọn chưa được gán nhóm nhận dạng "
-                    f"({', '.join(unsupported) or 'không rõ'}), nên chưa chuẩn bị được. "
-                    "Hãy gán recognition_profile cho các nhãn của phương ngữ này trước."
-                ),
-            )
-
-    run_id = uuid.uuid4().hex[:12]
-    version = await asyncio.to_thread(next_manifest_version)
-    # Hàng đợi mặc định, KHÔNG phải "training": worker huấn luyện chạy
-    # concurrency 1 trên GPU, đẩy việc này vào đó sẽ chặn huấn luyện vô cớ.
-    # Ghi trạng thái "đang chờ" TRƯỚC khi đẩy vào hàng đợi: giao diện bắt đầu
-    # hỏi ngay khi có run_id, nên nếu tệp chưa tồn tại nó sẽ báo không tìm thấy.
-    await asyncio.to_thread(
-        create_pending_report, run_id, version, profiles or [], body.seed
-    )
-    # Truyền thẳng version đã tính ở trên — KHÔNG để task tự gọi lại
-    # next_manifest_version(). Nếu không truyền, task tính lại độc lập lúc
-    # nó thực sự chạy (có thể trễ vài phút sau khi vào hàng đợi), và nếu một
-    # lần chuẩn bị khác đã tạo xong manifest trong lúc chờ, con số đó có thể
-    # khác với con số vừa ghi vào report "queued" — đúng nghịch với lý do
-    # duy nhất hàm này tồn tại: một manifest, không lệch giữa hai đường.
-    prepare_dataset.delay(run_id=run_id, profiles=profiles, seed=body.seed, version=version)
+    try:
+        result = await asyncio.to_thread(
+            preparation_service.queue_preparation,
+            dialects=body.dialects,
+            profiles=body.profiles,
+            seed=body.seed,
+            profiles_for_dialects=_profiles_for_dialects,
+        )
+    except preparation_service.UnsupportedDialectsError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Phương ngữ đã chọn chưa được gán nhóm nhận dạng "
+                f"({', '.join(exc.dialects) or 'không rõ'}), nên chưa chuẩn bị được. "
+                "Hãy gán recognition_profile cho các nhãn của phương ngữ này trước."
+            ),
+        ) from exc
     logger.info("[PREP] admin=%s bắt đầu run=%s version=%s",
-                current_user.get("username"), run_id, version)
-    return {"run_id": run_id, "manifest_version": version, "profiles": profiles, "status": "queued"}
+                current_user.get("username"), result["run_id"], result["manifest_version"])
+    return result
 
 
 @router.get("/dataset/prepare/{run_id}")
@@ -513,9 +493,7 @@ async def get_dataset_preparation(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Tiến độ và kết quả của một lần chuẩn bị dữ liệu."""
-    from app.modules.dataset.preparation_tasks import read_report
-
-    report = await asyncio.to_thread(read_report, run_id)
+    report = await asyncio.to_thread(preparation_service.preparation_report, run_id)
     if report is None:
         raise HTTPException(status_code=404, detail=f"Không tìm thấy lần chuẩn bị {run_id}")
     return report

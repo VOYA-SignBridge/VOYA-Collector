@@ -32,6 +32,7 @@ from typing import Any, Dict, Optional
 
 import redis
 
+from app.modules.dataset import split_selection
 from app.worker import celery_app
 
 import logging
@@ -93,92 +94,6 @@ def _insert_metric(job_id: str, m: Dict[str, Any]) -> None:
         })
     except Exception as e:
         logger.warning("[TRAINER] job %s metric epoch=%s DB write failed: %s", job_id, m.get("epoch"), e)
-
-
-_DEPLOY_SPLIT_VERSION_RE = re.compile(r"_v(\d+)$")
-
-
-def _deployment_splits() -> list:
-    """Splits meant for the model that actually gets deployed.
-
-    The default path used to fall through to the root split, which is
-    `strict_signer_disjoint`: it holds two signers out of training so the metric
-    answers "how well does this work for a stranger". That is the right question
-    for the report and the wrong one for a user who presses Train and then wants
-    the recogniser to work. On the alphabet it costs two of six signers, and the
-    measured difference is 0.596 against 0.965.
-
-    A deployment split trains on every signer instead. The metric it reports is
-    therefore NOT signer-independent, and the results panel says so; the
-    signer-independent figure comes from the leave-one-signer-out folds, which
-    are still selectable in research mode.
-
-    No in-process cache here on purpose. `backend`, `worker`, and `trainer` are
-    three separate processes with separate memory, so a cache invalidated only
-    in the process that just created a new split (dataset preparation, running
-    in `worker`) would still leave the other two serving a stale list forever —
-    there is no cheap way to signal all three from one process. Rescanning the
-    versions directory is not on a hot path (once per dataset-info load or job
-    submission), so correctness here is worth more than the saved I/O.
-    """
-    found = []
-    versions = WORKSPACE_ROOT / "processed" / "splits" / "versions"
-    if versions.is_dir():
-        for d in sorted(versions.iterdir()):
-            if not d.is_dir() or "_deploy_" not in d.name:
-                continue
-            if not ((d / "train.csv").exists() and (d / "val.csv").exists()
-                    and (d / "test.csv").exists()):
-                continue
-            try:
-                meta = json.loads((d / "split_metadata.json").read_text(encoding="utf-8"))
-            except Exception as exc:
-                logger.warning("[DEPLOY_SPLIT] bỏ qua %s: %s", d.name, exc)
-                continue
-
-            # Which dialects this split covers is read from the rows, not guessed
-            # from the name: the name is a label, the CSV is the fact.
-            dialects = set()
-            try:
-                import csv as _csv
-                with (d / "train.csv").open(newline="", encoding="utf-8") as f:
-                    for row in _csv.DictReader(f):
-                        v = (row.get("dialect") or "").strip()
-                        if v:
-                            dialects.add(v)
-            except Exception as exc:
-                logger.warning("[DEPLOY_SPLIT] %s: không đọc được dialect (%s)", d.name, exc)
-                continue
-
-            if dialects:
-                m = _DEPLOY_SPLIT_VERSION_RE.search(d.name)
-                found.append({
-                    "split_version": d.name,
-                    "recognition_profile": str(meta.get("recognition_profile") or ""),
-                    "dialects": dialects,
-                    # Chỉ dùng để sắp mới-nhất-trước bên dưới, không phải dữ
-                    # liệu nghiệp vụ — thiếu số ở tên coi như cũ nhất (0).
-                    "_version_num": int(m.group(1)) if m else 0,
-                })
-
-    # Mới nhất trước: _deployment_split_for() trả về ứng viên khớp ĐẦU TIÊN,
-    # nên nếu không sắp lại ở đây nó sẽ luôn chọn bản cũ nhất khớp tên thư mục
-    # theo alphabet (v13 trước v21) thay vì bản vừa chuẩn bị xong.
-    found.sort(key=lambda f: f["_version_num"], reverse=True)
-    logger.info("[DEPLOY_SPLIT] %d split triển khai khả dụng: %s",
-                len(found), [f["split_version"] for f in found])
-    return found
-
-
-def _deployment_split_for(dialects: list) -> Optional[Dict[str, Any]]:
-    """Pick the deployment split that covers every requested dialect."""
-    wanted = {str(d).strip() for d in (dialects or []) if str(d).strip()}
-    if not wanted:
-        return None
-    for cand in _deployment_splits():
-        if wanted <= cand["dialects"]:
-            return cand
-    return None
 
 
 def _build_cmd(config: Dict[str, Any], metrics_file: Path) -> list:
@@ -670,3 +585,13 @@ def cleanup_training_artifacts(self):
     logger.info("[RETENTION] removed %d old checkpoints, %d old artifacts (keep_n=%d, keep_days=%d)",
                 removed_ckpts, removed_artifacts, keep_n, keep_days)
     return {"removed_checkpoints": removed_ckpts, "removed_artifacts": removed_artifacts}
+def _deployment_splits() -> list:
+    """Compatibility facade using this worker's configured workspace root."""
+    return split_selection.deployment_splits(WORKSPACE_ROOT)
+
+
+def _deployment_split_for(dialects: list) -> Optional[Dict[str, Any]]:
+    """Compatibility facade using this worker's configured workspace root."""
+    return split_selection.deployment_split_for(dialects, WORKSPACE_ROOT)
+
+
