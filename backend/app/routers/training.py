@@ -25,9 +25,19 @@ import redis
 import sys
 from importlib.util import spec_from_file_location, module_from_spec
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
-from pydantic import BaseModel
 
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
+from app.modules.training.schemas import (
+    DatasetInfo,
+    DatasetPrepareRequest,
+    PromoteResponse,
+    SplitProvenance,
+    TrainedModelPredictRequest,
+    TrainedModelPredictResponse,
+    TrainingConfig,
+    TrainingJob,
+    TrainingMetrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,108 +256,6 @@ REGISTRY_PATH = WORKSPACE_ROOT / "backend" / "realtime_service" / "config" / "mo
 REALTIME_CHECKPOINTS_DIR = REGISTRY_PATH.parent / "checkpoints"
 # Same dir as seen from INSIDE the realtime container (for /reload payload)
 REALTIME_CONTAINER_CHECKPOINTS = "/app/realtime_service/config/checkpoints"
-
-
-# ============================================================================
-# Pydantic Models
-# ============================================================================
-
-class SplitProvenance(BaseModel):
-    """Cách tập dữ liệu ĐANG được chia, đọc từ split_metadata.json.
-
-    Step 3 trước đây hiện ba thanh trượt tỉ lệ mà không gửi đi đâu: backend luôn
-    dùng split đã sinh sẵn. Người dùng tưởng mình đang điều chỉnh, và quan trọng
-    hơn là không biết con số cuối cùng đo trên người ký đã thấy hay người mới —
-    khác biệt đo được là +0.129 độ chính xác. Model này thay thanh trượt giả bằng
-    sự thật.
-    """
-    split_mode: Optional[str] = None
-    signer_disjoint: bool = False
-    signers: Dict[str, List[str]] = {}     # train/val/test -> danh sách signer_id
-    counts: Dict[str, int] = {}            # train/val/test -> số mẫu
-    dataset_manifest: Optional[str] = None
-    valid_for_research: Optional[bool] = None
-    # Câu hiển thị thẳng cho người dùng; rỗng nghĩa là không có gì bất thường.
-    warning: Optional[str] = None
-    # True: có split triển khai (*_deploy_*) riêng cho đúng dialect đang chọn.
-    # False: không tìm thấy, đã rơi về split gốc processed/splits/ — split đó
-    # LUÔN có counts > 0 vì nó là partition cũ chạy chung cho mọi dialect, nên
-    # counts một mình không đủ để suy ra "phạm vi này đã được chuẩn bị". FE
-    # phải đọc đúng cờ này, không được suy từ counts.
-    is_deployment_split: bool = False
-
-
-class DatasetInfo(BaseModel):
-    """Thông tin dataset"""
-    total_samples: int
-    total_classes: int
-    languages: List[str]
-    dialects: Dict[str, List[str]]  # language -> dialects
-    class_distribution: Dict[str, int]  # class_name -> count
-    samples_by_dialect: Dict[str, int] = {}  # dialect -> sample count (for split viz)
-    split_info: Optional[Dict[str, int]] = None  # train, val, test counts
-    split_provenance: Optional[SplitProvenance] = None
-
-
-class TrainingConfig(BaseModel):
-    """Cấu hình training"""
-    model_type: str = "tcn"  # Supported: tcn, cnn, lstm, bigru_attention, hdgcn
-    dialects: List[str] = []  # nếu rỗng = training all
-    languages: List[str] = []  # nếu rỗng = training all
-    epochs: int = 80
-    batch_size: int = 32
-    learning_rate: float = 0.001
-    dropout: float = 0.3
-    channels: int = 64
-    levels: int = 3
-    kernel_size: int = 5
-
-    # Chế độ nghiên cứu. Mặc định smoke_test là CỐ Ý (xem scripts/research_validity.py
-    # C1): job thăm dò dựng subset tạm từ bộ lọc dialect, nhanh nhưng không truy
-    # ngược được về một phiên bản dữ liệu cố định nên không trích dẫn được.
-    # Đặt run_purpose="research" + split_version để chạy trên split đã versioned;
-    # khi đó dialects/languages bị bỏ qua vì split đã định nghĩa sẵn tập dữ liệu.
-    run_purpose: str = "smoke_test"
-    split_version: Optional[str] = None
-    # Suy ra từ metadata của split ở phía server, không nhận từ client — nếu để
-    # client tự khai, checkpoint có thể khai một dataset_version khác với dữ
-    # liệu thực sự đã train.
-    dataset_version: Optional[str] = None
-    recognition_profile: Optional[str] = None
-
-
-class TrainingJob(BaseModel):
-    """Thông tin training job"""
-    id: str
-    status: str  # queued, running, completed, failed, cancelled
-    config: TrainingConfig
-    created_at: str
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    current_epoch: int = 0
-    total_epochs: int = 80
-    checkpoint_path: Optional[str] = None  # Path to saved model after training
-    test_acc: Optional[float] = None  # Test accuracy from checkpoint
-    test_f1: Optional[float] = None  # Test F1 score from checkpoint
-    error_message: Optional[str] = None  # Failure/cancellation reason
-    promoted_at: Optional[str] = None  # When admin promoted this model to realtime
-    # Cách dữ liệu được chia TẠI THỜI ĐIỂM chạy job này. Ghi vào job chứ không
-    # đọc lại lúc xem kết quả: split trên đĩa sẽ được sinh lại khi thu thêm dữ
-    # liệu, và khi đó một job cũ sẽ hiện điều kiện đánh giá mà nó chưa từng
-    # chạy. test_acc chỉ có nghĩa khi biết nó đo trên người ký mới hay người đã
-    # thấy — chênh lệch giữa hai trường hợp trên tập này là +0.129.
-    split_provenance: Optional[SplitProvenance] = None
-
-
-class TrainingMetrics(BaseModel):
-    """Metrics trong quá trình training"""
-    epoch: int
-    train_loss: float
-    train_acc: float
-    val_loss: float
-    val_acc: float
-    val_f1: float
-    learning_rate: Optional[float] = None
 
 
 # ============================================================================
@@ -897,13 +805,6 @@ def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
         else:
             unsupported.append(dialect)
     return sorted(set(profiles)), unsupported
-
-
-class DatasetPrepareRequest(BaseModel):
-    """Người bấm chỉ chọn phương ngữ; profile suy ra từ danh mục nhãn."""
-    dialects: Optional[List[str]] = None
-    profiles: Optional[List[str]] = None
-    seed: int = 42
 
 
 @router.post("/dataset/prepare")
@@ -1742,16 +1643,6 @@ async def delete_training_job_endpoint(
     return {"success": True, "job_id": job_id}
 
 
-class PromoteResponse(BaseModel):
-    """Kết quả promote model lên realtime"""
-    job: TrainingJob
-    model_id: str
-    deployed_checkpoint: str
-    registry_updated: bool
-    realtime_reloaded: bool
-    message: str
-
-
 @router.post("/jobs/{job_id}/promote", response_model=PromoteResponse)
 async def promote_training_job(
     job_id: str,
@@ -1957,18 +1848,6 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
 # ============================================================================
 # Training Model Inference (for Step 7 test modal)
 # ============================================================================
-
-class TrainedModelPredictRequest(BaseModel):
-    """Request to predict using trained model"""
-    frames: List[List[float]]  # 60 frames x 126 features
-
-
-class TrainedModelPredictResponse(BaseModel):
-    """Prediction response from trained model"""
-    label: str
-    confidence: float
-    label_key: str
-
 
 @router.post("/jobs/{job_id}/predict", response_model=TrainedModelPredictResponse)
 async def predict_trained_model(
