@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 
 from app.infrastructure.redis.connection import get_redis_client
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
-from app.modules.dataset import preparation_service
+from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance
 from app.modules.training import inference_service, job_service, progress_service, submission_service
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
@@ -95,186 +95,28 @@ OUTPUTS_DIR = WORKSPACE_ROOT / "processed" / "train_utils" / "outputs"
 # ============================================================================
 
 def _load_samples_and_labels() -> tuple[List[Dict], List[Dict]]:
-    """Tải samples.csv và labels.csv"""
-    samples = []
-    labels = {}
-
-    # Load labels
-    if LABELS_CSV.exists():
-        with open(LABELS_CSV, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                class_uid = row.get("class_uid", "").strip()
-                if class_uid:
-                    labels[class_uid] = row
-
-    # Load samples
-    if SAMPLES_CSV.exists():
-        with open(SAMPLES_CSV, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                samples.append(row)
-
-    return samples, list(labels.values())
+    return catalog_service.load_samples_and_labels(SAMPLES_CSV, LABELS_CSV)
 
 
 def _get_dialects_by_language() -> Dict[str, List[str]]:
-    """Lấy mapping language -> dialects"""
     _, labels = _load_samples_and_labels()
-
-    dialects_map: Dict[str, set] = {}
-    for label in labels:
-        language = label.get("language", "vn").strip() or "vn"
-        dialect = label.get("dialect", "").strip()
-
-        if language not in dialects_map:
-            dialects_map[language] = set()
-
-        if dialect:
-            dialects_map[language].add(dialect)
-
-    return {lang: sorted(list(dialects)) for lang, dialects in dialects_map.items()}
+    return catalog_service.dialects_by_language(labels)
 
 
 def _provenance_from_dir(split_dir: Path) -> SplitProvenance:
-    """How a split partitions the data, read from the split itself.
-
-    The signer lists are recomputed from the CSVs rather than trusted from
-    split_metadata.json: the metadata describes how the split was *generated*,
-    and the question the UI has to answer is what the files on disk *are*. A
-    hand-edited or stale split would otherwise report a guarantee it no longer
-    keeps — the same class of drift §7.3 of the paper argues has to be checked.
-    """
-    import csv as _csv
-
-    prov = SplitProvenance()
-    meta_path = split_dir / "split_metadata.json"
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            prov.split_mode = meta.get("split_mode")
-            prov.dataset_manifest = str(meta.get("dataset_manifest") or "") or None
-            prov.valid_for_research = meta.get("valid_for_research")
-        except Exception as exc:
-            logger.warning("[SPLIT_PROV] không đọc được split_metadata.json: %s", exc)
-
-    # Identity column: canonical signer_id when the split carries it, else the
-    # raw user_id the legacy splits recorded. Reading only signer_id looked
-    # correct and was worse than useless: on a legacy split every row returns
-    # empty, so the check reports "no signers" and stays silent about the very
-    # overlap it exists to catch. Whichever column is present, the same person
-    # must not appear on both sides.
-    identity_col: Optional[str] = None
-    seen: Dict[str, set] = {}
-    for part in ("train", "val", "test"):
-        path = split_dir / f"{part}.csv"
-        if not path.exists():
-            continue
-        signers: set = set()
-        n = 0
-        try:
-            with open(path, newline="", encoding="utf-8") as f:
-                reader = _csv.DictReader(f)
-                cols = reader.fieldnames or []
-                col = "signer_id" if "signer_id" in cols else (
-                    "user_id" if "user_id" in cols else None)
-                identity_col = identity_col or col
-                for row in reader:
-                    n += 1
-                    who = (row.get(col) or "").strip() if col else ""
-                    if who:
-                        signers.add(who)
-        except Exception as exc:
-            logger.warning("[SPLIT_PROV] không đọc được %s: %s", path.name, exc)
-            continue
-        seen[part] = signers
-        prov.counts[part] = n
-        prov.signers[part] = sorted(signers)
-
-    train, val, test = seen.get("train", set()), seen.get("val", set()), seen.get("test", set())
-    overlap = sorted((train & test) | (train & val))
-    prov.signer_disjoint = bool(train and test) and not overlap
-
-    if identity_col is None and (train or val or test or prov.counts):
-        prov.warning = (
-            "Tập dữ liệu đang dùng không có cột định danh người ký "
-            "(signer_id hoặc user_id), nên KHÔNG kiểm được người ký có bị lẫn "
-            "giữa huấn luyện và đánh giá hay không."
-        )
-    elif not meta_path.exists():
-        prov.warning = (
-            "Tập dữ liệu đang dùng không có split_metadata.json, nên không thể "
-            "xác định nó được chia thế nào."
-        )
-    elif overlap:
-        prov.warning = (
-            f"{len(overlap)} người ký xuất hiện ở cả tập huấn luyện và tập đánh giá "
-            f"({', '.join(overlap[:5])}{'…' if len(overlap) > 5 else ''}). Kết quả sẽ "
-            "lạc quan hơn thực tế: mô hình đã thấy chính người đó lúc học, nên con số "
-            "này KHÔNG phản ánh độ chính xác trên người ký mới."
-        )
-    elif not train or not test:
-        prov.warning = "Tập huấn luyện hoặc tập đánh giá rỗng."
-    return prov
+    return dataset_provenance.provenance_from_dir(split_dir)
 
 
 def _root_split_provenance() -> SplitProvenance:
-    return _provenance_from_dir(SPLITS_DIR)
+    return dataset_provenance.root_split_provenance(WORKSPACE_ROOT)
 
 
 def _effective_split_provenance(dialect: Optional[str]) -> SplitProvenance:
-    """Provenance of the split a run on `dialect` would actually use.
-
-    The split step used to describe the root split no matter which dialect was
-    selected, so it always reported the unified 37-class partition. Since the
-    default path now resolves a deployment split per dialect, that display was
-    describing a different partition from the one training would read — the
-    panel said one thing and the job did another. Resolve it the same way the
-    dispatcher does, from the same helper, so the two cannot disagree.
-    """
-    if dialect:
-        try:
-            from app.training_tasks import _deployment_split_for
-
-            chosen = _deployment_split_for([dialect])
-            if chosen:
-                d = WORKSPACE_ROOT / "processed" / "splits" / "versions" / chosen["split_version"]
-                if (d / "train.csv").exists():
-                    prov = _provenance_from_dir(d)
-                    prov.dataset_manifest = prov.dataset_manifest or chosen["split_version"]
-                    prov.is_deployment_split = True
-                    return prov
-        except Exception as exc:
-            logger.warning("[SPLIT_PROV] không phân giải được split cho dialect %s: %s",
-                           dialect, exc)
-    return _root_split_provenance()
+    return dataset_provenance.effective_split_provenance(dialect, WORKSPACE_ROOT)
 
 
 def _trainable_dialects_from_splits() -> Dict[str, int]:
-    """Đọc split train.csv hiện tại, trả về {dialect: số_class}.
-
-    Legacy training lọc frozen splits theo cột `dialect`; một dialect chỉ train
-    được khi có >= 2 class trong split. Dialect có trong labels.csv nhưng KHÔNG
-    có mẫu trong split (chưa chia lại sau khi thu) sẽ không xuất hiện ở đây —
-    dùng để chặn sớm với thông báo rõ ràng thay vì để subprocess fail rc=1.
-    """
-    import csv as _csv
-
-    train_csv = SPLITS_DIR / "train.csv"
-    counts: Dict[str, set] = {}
-    if not train_csv.exists():
-        return {}
-    try:
-        with open(train_csv, newline="", encoding="utf-8") as f:
-            for row in _csv.DictReader(f):
-                dialect = (row.get("dialect") or "").strip()
-                cls = (row.get("class_idx") or row.get("label_key") or "").strip()
-                if dialect and cls:
-                    counts.setdefault(dialect, set()).add(cls)
-    except Exception as exc:
-        logger.warning("[TRAIN_VALIDATE] không đọc được train split: %s", exc)
-        return {}
-    return {d: len(classes) for d, classes in counts.items()}
+    return dataset_provenance.trainable_dialects(WORKSPACE_ROOT)
 
 
 def _research_splits() -> List[Dict[str, Any]]:
@@ -408,36 +250,7 @@ def _evaluation_protocols() -> List[Dict[str, Any]]:
 
 
 def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
-    """Map chosen dialects to the recognition profiles that can be prepared.
-
-    Read from the label catalogue rather than hard-coded, and resolved on the
-    server rather than in the browser: the pairing is data, it changes when the
-    vocabulary changes, and a copy in the UI would silently rot.
-
-    `legacy_unassigned` marks labels that were never given a profile, so a split
-    built for it would describe nothing coherent. Those dialects come back as
-    unsupported instead, and the caller reports that rather than preparing
-    something unusable.
-    """
-    _, labels = _load_samples_and_labels()
-    wanted = {str(d).strip() for d in dialects if str(d).strip()}
-
-    by_dialect: Dict[str, set] = {}
-    for label in labels:
-        dialect = str(label.get("dialect") or "").strip()
-        profile = str(label.get("recognition_profile") or "").strip()
-        if dialect in wanted and profile:
-            by_dialect.setdefault(dialect, set()).add(profile)
-
-    profiles: List[str] = []
-    unsupported: List[str] = []
-    for dialect in sorted(wanted):
-        found = {p for p in by_dialect.get(dialect, set()) if p != "legacy_unassigned"}
-        if found:
-            profiles.extend(found)
-        else:
-            unsupported.append(dialect)
-    return sorted(set(profiles)), unsupported
+    return catalog_service.profiles_for_dialects(dialects, labels_csv=LABELS_CSV)
 
 
 @router.post("/dataset/prepare")
@@ -518,61 +331,13 @@ async def get_dataset_info(
     Auto-load từ folder dataset, không cần upload
     """
     try:
-        logger.debug("WORKSPACE_ROOT: %s", WORKSPACE_ROOT)
-        logger.debug("DATASET_ROOT: %s", DATASET_ROOT)
-        logger.debug("SAMPLES_CSV exists: %s", SAMPLES_CSV.exists())
-        logger.debug("LABELS_CSV exists: %s", LABELS_CSV.exists())
-
-        samples, labels = _load_samples_and_labels()
-        dialects_map = _get_dialects_by_language()
-
-        # Nếu có filter dialect/language, giới hạn samples về đúng các
-        # class_uid có label khớp trước khi tính total/class_distribution.
-        # dialects/languages trả về vẫn là toàn bộ tập hợp có sẵn để UI
-        # selector không bị mất option khi đang lọc.
-        if dialect or language:
-            label_by_uid = {
-                label.get("class_uid", "").strip(): label
-                for label in labels
-                if label.get("class_uid", "").strip()
-            }
-            matching_uids = {
-                uid
-                for uid, label in label_by_uid.items()
-                if (not language or (label.get("language", "vn").strip() or "vn") == language)
-                and (not dialect or label.get("dialect", "").strip() == dialect)
-            }
-            samples = [s for s in samples if s.get("class_uid", "").strip() in matching_uids]
-
-        class_counts: Dict[str, int] = {}
-        for sample in samples:
-            class_uid = sample.get("class_uid", "").strip()
-            if class_uid:
-                class_counts[class_uid] = class_counts.get(class_uid, 0) + 1
-
-        # Per-dialect sample counts so the split step can show numbers for the
-        # SELECTED dialects instead of the whole dataset.
-        uid_to_dialect = {
-            (lb.get("class_uid", "").strip()): (lb.get("dialect", "").strip())
-            for lb in labels
-            if lb.get("class_uid", "").strip()
-        }
-        samples_by_dialect: Dict[str, int] = {}
-        for sample in samples:
-            d = uid_to_dialect.get(sample.get("class_uid", "").strip(), "")
-            if d:
-                samples_by_dialect[d] = samples_by_dialect.get(d, 0) + 1
-
-        provenance = _effective_split_provenance(dialect)
-        return DatasetInfo(
-            total_samples=len(samples),
-            total_classes=len(class_counts),
-            languages=list(dialects_map.keys()),
-            dialects=dialects_map,
-            class_distribution=class_counts,
-            samples_by_dialect=samples_by_dialect,
-            split_info=provenance.counts or None,
-            split_provenance=provenance,
+        return await asyncio.to_thread(
+            catalog_service.build_dataset_info,
+            dialect=dialect,
+            language=language,
+            effective_provenance=_effective_split_provenance,
+            samples_csv=SAMPLES_CSV,
+            labels_csv=LABELS_CSV,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
