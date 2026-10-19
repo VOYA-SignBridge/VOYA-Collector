@@ -76,11 +76,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/training", tags=["training"])
 
-# ============================================================================
-# Redis (chỉ dùng để gửi tín hiệu cancel tới trainer container;
-# job execution đi qua Celery queue "training")
-# ============================================================================
-
 # Compatibility injection point for tests/legacy callers. Runtime code falls
 # back to the shared lazy infrastructure client instead of owning a connection.
 redis_client = None
@@ -92,11 +87,7 @@ WORKSPACE_ROOT = Path("/workspace")
 DATASET_ROOT = WORKSPACE_ROOT / "dataset"
 SAMPLES_CSV = DATASET_ROOT / "samples.csv"
 LABELS_CSV = DATASET_ROOT / "labels.csv"
-SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
-OUTPUTS_DIR = WORKSPACE_ROOT / "processed" / "train_utils" / "outputs"
-# ============================================================================
-# Helper Functions
-# ============================================================================
+
 
 def _load_samples_and_labels() -> tuple[List[Dict], List[Dict]]:
     return catalog_service.load_samples_and_labels(SAMPLES_CSV, LABELS_CSV)
@@ -491,27 +482,17 @@ async def predict_trained_model(
 
     Load checkpoint locally and run inference without requiring registry entry.
     """
-    # Validate job exists (fallback sang DB — job vẫn test được sau khi backend restart)
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} not found")
-
-    job = job_info.get("job")
-    if not job:
-        raise HTTPException(status_code=404, detail="Job object not found")
-
-    checkpoint_path = job.checkpoint_path
-    if not checkpoint_path or not Path(checkpoint_path).exists():
-        raise HTTPException(status_code=404, detail="Model checkpoint not found")
-
     try:
-        return await asyncio.to_thread(
-            inference_service.predict_checkpoint,
-            Path(checkpoint_path),
+        return await inference_service.predict_job(
+            job_id,
             request_data.frames,
+            ensure_job=_ensure_job_loaded,
+            predict=inference_service.predict_checkpoint,
             workspace_root=WORKSPACE_ROOT,
             labels_csv=LABELS_CSV,
         )
+    except inference_service.InferenceJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as e:
         logger.exception("job=%s inference error", job_id)
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")

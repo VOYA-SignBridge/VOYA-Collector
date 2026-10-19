@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import importlib
 import logging
@@ -33,6 +34,10 @@ _MODEL_NAME_TO_REGISTRY_KEY = {
     "hd_gcn": "handgcn",
     "tcn": "tcn",
 }
+
+
+class InferenceJobNotFoundError(LookupError):
+    """Raised when a job or its checkpoint cannot be used for inference."""
 
 
 def load_checkpoint(checkpoint_path: Path | str) -> dict[str, Any]:
@@ -168,4 +173,35 @@ def predict_checkpoint(
         label=label,
         confidence=float(probabilities[prediction_index]),
         label_key=label_key,
+    )
+
+
+async def predict_job(
+    job_id: str,
+    frames: list[list[float]],
+    *,
+    ensure_job,
+    predict,
+    workspace_root: Path = WORKSPACE_ROOT,
+    labels_csv: Path = LABELS_CSV,
+) -> TrainedModelPredictResponse:
+    """Resolve a persisted job and run inference with its deployed checkpoint."""
+    job_info = await ensure_job(job_id)
+    if not job_info:
+        raise InferenceJobNotFoundError(f"Training job {job_id} not found")
+
+    job = job_info.get("job")
+    if not job:
+        raise InferenceJobNotFoundError("Job object not found")
+
+    checkpoint_path = job.checkpoint_path
+    if not checkpoint_path or not Path(checkpoint_path).exists():
+        raise InferenceJobNotFoundError("Model checkpoint not found")
+
+    return await asyncio.to_thread(
+        predict,
+        Path(checkpoint_path),
+        frames,
+        workspace_root=workspace_root,
+        labels_csv=labels_csv,
     )

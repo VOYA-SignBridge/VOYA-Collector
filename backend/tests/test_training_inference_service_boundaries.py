@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 
 from app.modules.training import inference_service
@@ -50,4 +53,56 @@ def test_predict_rejects_invalid_window_before_loading_model(tmp_path, monkeypat
             [[0.0]],
             workspace_root=tmp_path,
             labels_csv=tmp_path / "labels.csv",
+        )
+
+
+def test_predict_job_resolves_checkpoint_before_calling_inference(tmp_path):
+    checkpoint = tmp_path / "model.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    expected = object()
+    calls = []
+
+    async def ensure_job(job_id):
+        assert job_id == "job-1"
+        return {"job": SimpleNamespace(checkpoint_path=str(checkpoint))}
+
+    def predict(path, frames, **kwargs):
+        calls.append((path, frames, kwargs))
+        return expected
+
+    result = asyncio.run(
+        inference_service.predict_job(
+            "job-1",
+            [[0.0]],
+            ensure_job=ensure_job,
+            predict=predict,
+            workspace_root=tmp_path,
+            labels_csv=tmp_path / "labels.csv",
+        )
+    )
+
+    assert result is expected
+    assert calls == [
+        (
+            checkpoint,
+            [[0.0]],
+            {"workspace_root": tmp_path, "labels_csv": tmp_path / "labels.csv"},
+        )
+    ]
+
+
+def test_predict_job_rejects_missing_job(tmp_path):
+    async def ensure_job(job_id):
+        return None
+
+    with pytest.raises(inference_service.InferenceJobNotFoundError, match="job-404"):
+        asyncio.run(
+            inference_service.predict_job(
+                "job-404",
+                [],
+                ensure_job=ensure_job,
+                predict=lambda *args, **kwargs: None,
+                workspace_root=tmp_path,
+                labels_csv=tmp_path / "labels.csv",
+            )
         )
