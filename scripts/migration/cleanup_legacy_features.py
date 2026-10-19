@@ -1,9 +1,15 @@
 from __future__ import annotations
 import argparse, shutil
+import sys
 from pathlib import Path
-from app.feature_structure_audit import scan
 
-FEATURES_ROOT = Path("dataset") / "features"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.migration.feature_structure_audit import scan
+
+FEATURES_ROOT = REPO_ROOT / "dataset" / "features"
 
 def main():
     ap = argparse.ArgumentParser()

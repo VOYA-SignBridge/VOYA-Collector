@@ -2,10 +2,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def resolve_root(custom_root: str | None) -> Path:
     if custom_root:
         return Path(custom_root).expanduser().resolve()
-    return Path("dataset") / "features"
+    return REPO_ROOT / "dataset" / "features"
 
 def scan(root: str | None = None) -> Dict:
     FEATURES_ROOT = resolve_root(root)

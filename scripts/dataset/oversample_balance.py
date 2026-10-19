@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import argparse
 import numpy as np
+import sys
 from pathlib import Path
 from typing import List
-from app.balancer import build_balance_plan
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = REPO_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from app.modules.dataset.balancing import build_balance_plan
 from app.modules.dataset.catalog import ClassMetadata, load_labels
 from app.modules.dataset.samples import save_sequence_npz
 from app.processing.augmenter import generate_augmented_sequences
@@ -11,7 +19,6 @@ from app.processing.augmenter import generate_augmented_sequences
 def get_class_dirs() -> dict[str, Path]:
     rows = load_labels()
     out = {}
-    from app.modules.dataset.catalog import ClassMetadata
     for r in rows:
         meta = ClassMetadata(
             class_uid=r['class_uid'], slug=r['slug'], label_original=r['label_original'],
@@ -75,5 +82,24 @@ def execute(target: int | None = None, per_sequence_aug: int = 2):
         performed.append({'class_uid': cid, 'added': created})
     return {'performed': performed}
 
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Lập kế hoạch hoặc tạo mẫu augment để cân bằng class."
+    )
+    parser.add_argument("--target", type=int, default=None, help="Số mẫu mục tiêu cho mỗi class")
+    parser.add_argument("--per-sequence-aug", type=int, default=2)
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Thực sự tạo file NPZ; mặc định chỉ in kế hoạch",
+    )
+    args = parser.parse_args()
+
+    if not args.apply:
+        print({"dry_run": True, **build_balance_plan(target=args.target)})
+        return
+    print(execute(target=args.target, per_sequence_aug=args.per_sequence_aug))
+
+
 if __name__ == '__main__':
-    print(execute())
+    main()

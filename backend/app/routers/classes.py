@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.modules.dataset.catalog import get_or_register_class, list_classes, normalize_dialect
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
 from app.modules.dataset.samples import list_samples
-from app.balancer import build_balance_plan
+from app.modules.dataset.balancing import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
 from app.modules.dataset.catalog_sync import (
     CatalogSyncError,

@@ -3,8 +3,14 @@ from __future__ import annotations
 import csv
 import argparse
 import shutil
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = REPO_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.modules.dataset.catalog import load_labels, register_class, ClassMetadata, MASTER_LABELS, LABEL_FIELDS, regenerate_label_indexes
 from app.modules.dataset.samples import SAMPLES_CSV, SAMPLE_FIELDS
@@ -22,6 +28,9 @@ def _resolve_mapping_path(path: str) -> Path:
     p3 = Path.cwd().parent / path
     if p3.exists():
         return p3
+    p4 = REPO_ROOT / path
+    if p4.exists():
+        return p4
     return p
 
 def read_mapping(path: str) -> List[Dict[str,str]]:
