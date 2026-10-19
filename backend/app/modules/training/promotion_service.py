@@ -1,0 +1,231 @@
+"""Deploy completed training checkpoints to the realtime service."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+WORKSPACE_ROOT = Path("/workspace")
+CHECKPOINTS_DIR = WORKSPACE_ROOT / "checkpoints"
+REGISTRY_PATH = WORKSPACE_ROOT / "backend" / "realtime_service" / "config" / "models.json"
+REALTIME_CHECKPOINTS_DIR = REGISTRY_PATH.parent / "checkpoints"
+REALTIME_CONTAINER_CHECKPOINTS = "/app/realtime_service/config/checkpoints"
+
+
+@dataclass(frozen=True)
+class DeploymentResult:
+    model_id: str
+    deployed_path: str
+    display_name: str
+    registry_updated: bool
+    realtime_reloaded: bool
+    message: str
+
+
+class CheckpointCopyError(RuntimeError):
+    """Raised when a trained checkpoint cannot be copied into deployment."""
+
+
+def _copy_checkpoint_to_deployment(
+    src_path: Path,
+    model_id: str,
+    dst_dir: Optional[Path] = None,
+) -> Optional[str]:
+    """Copy a checkpoint and its optional JSON sidecar into deployment."""
+    try:
+        target_dir = dst_dir or CHECKPOINTS_DIR
+        target_dir.mkdir(parents=True, exist_ok=True)
+        dst_path = target_dir / f"{src_path.stem}.pt"
+
+        if src_path.exists():
+            dst_path.write_bytes(src_path.read_bytes())
+            logger.info("Checkpoint copied: %s -> %s", src_path, dst_path)
+
+            json_src = src_path.with_suffix(".json")
+            if json_src.exists():
+                dst_path.with_suffix(".json").write_bytes(json_src.read_bytes())
+            return str(dst_path)
+    except Exception as exc:
+        logger.error("Failed to copy checkpoint: %s", exc)
+    return None
+
+
+def _registry_display_name(dialect: str) -> str:
+    """Return the current display name for a dialect, if one is registered."""
+    try:
+        if not REGISTRY_PATH.exists():
+            return ""
+        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Không đọc được registry để lấy tên hiển thị: %s", exc)
+        return ""
+
+    for model in registry_data.get("models", []):
+        if isinstance(model, dict) and model.get("dialect") == dialect:
+            name = str(model.get("name") or "").strip()
+            if name:
+                return name
+    return ""
+
+
+def _update_registry(
+    model_id: str,
+    checkpoint_rel_path: str,
+    display_name: str,
+    ckpt: Dict[str, Any],
+    dialect: str,
+    language: str,
+) -> bool:
+    """Replace the realtime registry entry for a dialect with this checkpoint."""
+    try:
+        if not REGISTRY_PATH.exists():
+            logger.error("Registry not found: %s", REGISTRY_PATH)
+            return False
+
+        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+        seq_len = int(ckpt.get("seq_len", 60))
+        feature_dim = int(ckpt.get("feature_dim", 126))
+        existing = [
+            model for model in registry_data.get("models", [])
+            if isinstance(model, dict)
+        ]
+        kept_name = _registry_display_name(dialect)
+
+        model_entry = {
+            "id": model_id,
+            "name": kept_name or display_name,
+            "checkpoint_path": checkpoint_rel_path,
+            "language": language,
+            "dialect": dialect,
+            "seq_len": seq_len,
+            "feature_dim": feature_dim,
+            "normalization_version": str(ckpt.get("normalization_version", "hands126_v1")),
+            "expected_contract_hash": None,
+            "preprocess_contract": {
+                "feature_layout": {
+                    "type": "hands_126",
+                    "slots": ["left_slot_63", "right_slot_63"],
+                    "handedness_policy": "swapped_mp_handedness_slots",
+                    "coordinate_space": "mediapipe_normalized",
+                    "coordinate_order": "xyz",
+                    "frontend_mirroring": "visual_only",
+                    "missing_hands_policy": "zero_filled_by_frontend",
+                },
+                "expects_strict_shape": [seq_len, feature_dim],
+            },
+        }
+
+        registry_data["models"] = [
+            model for model in existing
+            if model.get("id") != model_id and model.get("dialect") != dialect
+        ]
+        registry_data["models"].append(model_entry)
+        REGISTRY_PATH.write_text(
+            json.dumps(registry_data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info("Registry updated: %s", model_id)
+        return True
+    except Exception as exc:
+        logger.error("Failed to update registry: %s", exc)
+        return False
+
+
+def _notify_realtime_service_reload(
+    model_id: str,
+    checkpoint_path: str,
+    version_string: str,
+    dialect: str = "",
+    language: str = "vn",
+) -> bool:
+    """Ask the realtime service to validate, warm up and hot-swap a model."""
+    realtime_service_url = os.getenv("REALTIME_SERVICE_URL", "http://realtime_service:8010")
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                f"{realtime_service_url}/reload",
+                json={
+                    "model_id": model_id,
+                    "checkpoint_path": checkpoint_path,
+                    "version_string": version_string,
+                    "dialect": dialect or model_id,
+                    "language": language,
+                },
+            )
+            if response.status_code == 200:
+                logger.info("Realtime service reloaded model: %s", model_id)
+                return True
+            logger.warning(
+                "Realtime service reload failed: status=%s body=%s",
+                response.status_code,
+                response.text[:500],
+            )
+            return False
+    except Exception as exc:
+        logger.error("Failed to notify realtime service: %s", exc)
+        return False
+
+
+def deploy_checkpoint(
+    *,
+    src_path: Path,
+    job_id: str,
+    model_type: str,
+    dialect: str,
+    language: str,
+    ckpt: Dict[str, Any],
+    copy_checkpoint: Callable[..., Optional[str]] = _copy_checkpoint_to_deployment,
+    registry_display_name: Callable[[str], str] = _registry_display_name,
+    update_registry: Callable[..., bool] = _update_registry,
+    notify_reload: Callable[..., bool] = _notify_realtime_service_reload,
+    checkpoints_dir: Path = REALTIME_CHECKPOINTS_DIR,
+    container_checkpoints_dir: str = REALTIME_CONTAINER_CHECKPOINTS,
+) -> DeploymentResult:
+    """Copy, register and hot-reload one completed training checkpoint."""
+    model_id = dialect
+    deployed_path = copy_checkpoint(src_path, model_id, checkpoints_dir)
+    if not deployed_path:
+        raise CheckpointCopyError("Copy checkpoint sang realtime service thất bại")
+
+    filename = Path(deployed_path).name
+    display_name = registry_display_name(dialect) or f"{model_type.upper()} {dialect} ({job_id})"
+    registry_updated = update_registry(
+        model_id,
+        f"checkpoints/{filename}",
+        display_name,
+        ckpt,
+        dialect,
+        language,
+    )
+    realtime_reloaded = notify_reload(
+        model_id,
+        f"{container_checkpoints_dir}/{filename}",
+        f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        dialect,
+        language,
+    )
+
+    if realtime_reloaded:
+        message = "Model đã được đưa vào realtime và sẵn sàng sử dụng ngay"
+    elif registry_updated:
+        message = "Model đã ghi vào registry — sẽ hoạt động sau khi realtime service khởi động lại"
+    else:
+        message = "Checkpoint đã copy nhưng cập nhật registry thất bại — kiểm tra log backend"
+
+    return DeploymentResult(
+        model_id=model_id,
+        deployed_path=deployed_path,
+        display_name=display_name,
+        registry_updated=registry_updated,
+        realtime_reloaded=realtime_reloaded,
+        message=message,
+    )
