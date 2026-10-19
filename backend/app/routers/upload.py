@@ -9,7 +9,6 @@ from typing import Dict, Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
-from app.processing import storage_utils as su
 from app.modules.dataset.catalog import (
     get_or_register_class,
     normalize_dialect,
@@ -32,7 +31,7 @@ from app.modules.dataset.raw_uploads import (
     now_str as raw_upload_now_str,
 )
 from app.config import settings
-from app.api_validation import (
+from app.core.http_validation import (
     validate_label,
     validate_language,
     validate_dialect,
@@ -317,7 +316,7 @@ async def upload_camera(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
-    Accept frames (array of arrays) and metadata, save as npz via storage_utils.save_sample
+    Accept frames (array of arrays) and metadata, then persist through the dataset sample module.
     Payload example: { user: str, label: str, session_id: str, dialect: str, frames: [{timestamp, landmarks}, ...] }
     """
     user = payload.get("user", "") or current_user.get("username", "")
@@ -528,7 +527,7 @@ async def upload_camera(
             "quality_config_version": qc_thresholds["quality_config_version"],
             "quality_thresholds": qc_thresholds,
             "source_type": "camera",
-            "timestamp": su.now_str(),
+            "timestamp": raw_upload_now_str(),
         })
         raise HTTPException(
             status_code=422,
@@ -589,7 +588,7 @@ async def upload_camera(
         "quality_thresholds": qc_thresholds,
         "hands_required": effective_hands or None,
         "client_quality": client_quality,
-        "created_at": su.now_str(),
+        "created_at": raw_upload_now_str(),
     }
 
     try:
@@ -625,7 +624,7 @@ async def upload_camera(
         "quality_thresholds": qc_thresholds,
         "source_type": "camera",
         "sample_path": path,
-        "timestamp": su.now_str(),
+        "timestamp": raw_upload_now_str(),
     })
 
     quality_payload = metrics.as_dict()

@@ -1,6 +1,6 @@
 """ASGI entry point for the VOYA backend."""
 
-from app.logging_config import configure_logging
+from app.bootstrap.logging import configure_logging
 
 
 # Configure logging before the application factory imports routers. Some router

@@ -6,7 +6,7 @@ import logging
 
 from celery.signals import task_postrun, worker_ready
 
-from app.mem_utils import release_memory
+from app.infrastructure.celery.memory import release_memory
 
 logger = logging.getLogger(__name__)
 
