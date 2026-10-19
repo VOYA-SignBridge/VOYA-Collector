@@ -45,7 +45,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.worker import celery_app
+from app.infrastructure.celery.app import celery_app
 
 logger = logging.getLogger(__name__)
 

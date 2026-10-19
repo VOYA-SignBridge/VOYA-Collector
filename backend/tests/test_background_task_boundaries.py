@@ -20,6 +20,21 @@ def test_drive_restore_beat_keeps_legacy_task_name():
         assert schedule["task"] == "app.sync_tasks.download_missing_files_to_local"
 
 
+def test_worker_facade_uses_shared_celery_application():
+    from app.infrastructure.celery.app import celery_app as shared_app
+    from app.worker import celery_app as worker_app
+
+    assert worker_app is shared_app
+
+
+def test_video_task_facade_preserves_legacy_name():
+    import app.tasks as legacy_tasks
+    from app.modules.dataset import video_tasks
+
+    assert legacy_tasks is video_tasks
+    assert video_tasks.enqueue_process_video.name == "app.tasks.enqueue_process_video"
+
+
 def test_obsolete_root_task_modules_are_removed():
     app_root = Path(__file__).resolve().parents[1] / "app"
 

@@ -7,7 +7,7 @@ import json
 import logging
 
 from app.config import settings
-from app.worker import celery_app
+from app.infrastructure.celery.app import celery_app
 
 
 logger = logging.getLogger(__name__)

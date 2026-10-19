@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from app.worker import celery_app
+from app.infrastructure.celery.app import celery_app
 from app.config import settings
 
 logger = logging.getLogger(__name__)

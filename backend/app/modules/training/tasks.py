@@ -33,7 +33,7 @@ from typing import Any, Dict, Optional
 import redis
 
 from app.modules.dataset import split_selection
-from app.worker import celery_app
+from app.infrastructure.celery.app import celery_app
 
 import logging
 

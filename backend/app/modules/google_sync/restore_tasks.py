@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any
 
-from app.worker import celery_app
+from app.infrastructure.celery.app import celery_app
 from app.config import settings
 from app.infrastructure.database.connection import connect_postgres
 from psycopg2.extras import RealDictCursor

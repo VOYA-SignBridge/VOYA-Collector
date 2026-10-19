@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.worker import celery_app
+from app.infrastructure.celery.app import celery_app
 from app.api_validation import validate_job_id
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
