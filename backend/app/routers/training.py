@@ -918,7 +918,7 @@ async def start_dataset_preparation(
     đường dùng hằng ngày lẫn đường nghiên cứu, từ cùng một manifest, nên hai
     đường không thể lệch nhau về việc đang mô tả bộ dữ liệu nào.
     """
-    from app.dataset_prep_tasks import (
+    from app.modules.dataset.preparation_tasks import (
         create_pending_report,
         next_manifest_version,
         prepare_dataset,
@@ -967,7 +967,7 @@ async def get_dataset_preparation(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Tiến độ và kết quả của một lần chuẩn bị dữ liệu."""
-    from app.dataset_prep_tasks import read_report
+    from app.modules.dataset.preparation_tasks import read_report
 
     report = await asyncio.to_thread(read_report, run_id)
     if report is None:

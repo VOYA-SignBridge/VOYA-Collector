@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 
 from app import activity
 from app.modules.identity import require_admin
-from app.sync_tasks import download_missing_files_to_local
+from app.modules.google_sync.restore_tasks import download_missing_files_to_local
 
 router = APIRouter()
 

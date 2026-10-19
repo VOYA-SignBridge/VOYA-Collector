@@ -40,7 +40,7 @@ def _is_present(path: Path) -> bool:
         return False
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, name="app.sync_tasks.download_missing_files_to_local")
 def download_missing_files_to_local(self):
     """
     Scans the database for samples and raw_uploads that have a storage_url

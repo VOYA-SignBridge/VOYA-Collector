@@ -107,5 +107,5 @@ def _start_resource_monitor(**_kwargs):
 from app import tasks  # noqa: F401, E402
 from app import export_tasks  # noqa: F401, E402
 from app import training_tasks  # noqa: F401, E402
-from app import sync_tasks  # noqa: F401, E402
-from app import dataset_prep_tasks  # noqa: F401, E402
+from app.modules.google_sync import restore_tasks  # noqa: F401, E402
+from app.modules.dataset import preparation_tasks  # noqa: F401, E402
