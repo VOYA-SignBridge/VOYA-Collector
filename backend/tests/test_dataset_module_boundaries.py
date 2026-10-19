@@ -18,3 +18,21 @@ def test_email_compatibility_import_aliases_service_module():
     from app.services import email
 
     assert legacy_email is email
+
+
+def test_catalog_sync_compatibility_import_aliases_dataset_module():
+    import app.catalog_sync as legacy_catalog_sync
+    from app.modules.dataset import catalog_sync
+
+    assert legacy_catalog_sync is catalog_sync
+
+
+def test_google_sync_builds_only_dataset_relative_storage_keys(tmp_path):
+    from app.modules.google_sync.catalog import dataset_storage_key
+
+    dataset_root = tmp_path / "dataset"
+    sample_path = dataset_root / "features" / "vi" / "sample.npz"
+    outside_path = tmp_path / "outside" / "sample.npz"
+
+    assert dataset_storage_key(sample_path, dataset_root=dataset_root) == "features/vi/sample.npz"
+    assert dataset_storage_key(outside_path, dataset_root=dataset_root) is None
