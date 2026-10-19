@@ -1,10 +1,16 @@
-"""Boundary checks for the legacy database bootstrap facade."""
+"""Boundary checks for the canonical database bootstrap modules."""
 
-from app import db
+from pathlib import Path
+
 from app.bootstrap import admin, database
 
 
-def test_db_facade_reexports_bootstrap_implementations() -> None:
-    assert db.init_db is database.init_db
-    assert db.sync_missing_data_on_startup is database.sync_missing_data_on_startup
-    assert db.bootstrap_admin_user is admin.bootstrap_admin_user
+def test_database_bootstrap_implementations_have_canonical_modules() -> None:
+    assert database.init_db.__module__ == "app.bootstrap.database"
+    assert database.sync_missing_data_on_startup.__module__ == "app.bootstrap.database"
+    assert admin.bootstrap_admin_user.__module__ == "app.bootstrap.admin"
+
+
+def test_legacy_database_facade_is_removed() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    assert not (app_root / "db.py").exists()

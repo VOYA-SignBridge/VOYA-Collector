@@ -7,31 +7,12 @@ import pytest
 from fastapi import HTTPException
 
 
-def test_http_validation_facade_reexports_core_implementation() -> None:
-    from app import api_validation
-    from app.core import http_validation
+def test_relocated_utility_facades_are_removed() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
 
-    assert api_validation.validate_label is http_validation.validate_label
-    assert api_validation.validate_language is http_validation.validate_language
-    assert api_validation.validate_dialect is http_validation.validate_dialect
-    assert api_validation.validate_job_id is http_validation.validate_job_id
-    assert api_validation.save_upload_with_limit is http_validation.save_upload_with_limit
-
-
-def test_logging_facade_reexports_bootstrap_implementation() -> None:
-    from app import logging_config
-    from app.bootstrap import logging as bootstrap_logging
-
-    assert logging_config.configure_logging is bootstrap_logging.configure_logging
-
-
-def test_memory_facade_reexports_celery_implementation() -> None:
-    from app import mem_utils
-    from app.infrastructure.celery import memory
-
-    assert mem_utils.get_rss_mb is memory.get_rss_mb
-    assert mem_utils.malloc_trim is memory.malloc_trim
-    assert mem_utils.release_memory is memory.release_memory
+    assert not (app_root / "api_validation.py").exists()
+    assert not (app_root / "logging_config.py").exists()
+    assert not (app_root / "mem_utils.py").exists()
 
 
 def test_upload_limit_removes_partial_file(tmp_path: Path) -> None:

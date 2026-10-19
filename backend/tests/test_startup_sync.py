@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from app.storage.metadata_db import (
     _execute, _fetch_all as original_fetch_all, ensure_tables
 )
-from app.db import sync_missing_data_on_startup
+from app.bootstrap.database import sync_missing_data_on_startup
 
 # Mock data
 MOCK_CLASS = {
