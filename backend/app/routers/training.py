@@ -10,7 +10,6 @@ import csv
 import json
 import logging
 import os
-import re
 import uuid
 from collections import Counter
 from datetime import datetime
@@ -38,6 +37,13 @@ from app.modules.training.job_service import (
     _split_prov_from_row,
     restore_jobs_from_db,
     training_jobs,
+)
+from app.modules.training.provenance_service import (
+    _CRITERION_LABELS,
+    _determinism_summary,
+    _load_research_validity,
+    _provenance_checks,
+    build_provenance_report,
 )
 from app.modules.training.schemas import (
     DatasetInfo,
@@ -1166,126 +1172,6 @@ async def get_job_evaluation(
     return {"available": True, "job_id": job_id, **evaluation}
 
 
-def _determinism_summary(determinism: Any) -> str:
-    """Gộp khối determinism thành một dòng đọc được.
-
-    train_tcn.py ghi nó dạng dict (cudnn_deterministic, deterministic_algorithms,
-    cublas_workspace_config, warnings). Giao diện chỉ cần biết: đã bật đủ chưa,
-    và có cảnh báo nào không.
-    """
-    if not isinstance(determinism, dict):
-        return str(determinism or "")
-
-    full = bool(determinism.get("cudnn_deterministic")) and bool(
-        determinism.get("deterministic_algorithms")
-    )
-    warnings = determinism.get("warnings") or []
-    text = "đầy đủ" if full else "một phần"
-    if warnings:
-        text += f" ({len(warnings)} cảnh báo)"
-    return text
-
-
-# Nhãn tiếng Việt cho từng tiêu chí của scripts/research_validity.py. Khoá phải
-# khớp đúng criteria key mà evaluate_checkpoint() trả về.
-_CRITERION_LABELS: Dict[str, str] = {
-    "C1_run_purpose": "Chạy nghiên cứu (không phải smoke test)",
-    "C2_augmentation_contract": "Hợp đồng augmentation đã sửa lỗi mirror",
-    "C3_contract_complete": "Checkpoint ghi đủ trường bắt buộc",
-    "C4_versions_present": "Có phiên bản dataset và split",
-    "C5_manifest_checksum": "Checksum manifest KHỚP file dữ liệu",
-    "C6_split_metadata": "Split có metadata mô tả cách chia",
-    "C7_split_valid_for_research": "Split hợp lệ cho nghiên cứu (không rò rỉ người ký)",
-    "C8_profile_matches_labels": "Nhãn khớp profile đã khai báo",
-    "C9_no_cross_profile": "Không lẫn nhãn của profile khác",
-    "C10_runtime_env": "Ghi đủ môi trường chạy",
-    "C11_git_commit": "Ghim được commit sinh ra model",
-    "C12_test_set_non_empty": "Tập đánh giá không rỗng",
-    "C13_best_val_restored": "Metrics lấy từ checkpoint val tốt nhất",
-    "C14_run_completed": "Lần chạy kết thúc bình thường",
-}
-
-
-def _load_research_validity():
-    """Import bộ tiêu chí dùng chung, hoặc None nếu không tới được.
-
-    scripts/ KHÔNG nằm trong image backend (Dockerfile chỉ COPY app/), nhưng repo
-    được bind-mount tại /workspace, nên module tồn tại lúc chạy. Import theo
-    đường dẫn thay vì nhân bản logic: một bản sao thứ hai sẽ trôi khỏi bản gốc,
-    và đó đúng là loại lệch giữa tuyên bố và hiện vật mà cổng này sinh ra để bắt.
-    """
-    import importlib.util
-
-    for base in (Path("/workspace"), WORKSPACE_ROOT, Path(__file__).resolve().parents[3]):
-        candidate = base / "scripts" / "research_validity.py"
-        if not candidate.exists():
-            continue
-        try:
-            spec = importlib.util.spec_from_file_location("research_validity", candidate)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)  # type: ignore[union-attr]
-            return module
-        except Exception as exc:
-            logger.warning("[PROVENANCE] không nạp được research_validity: %s", exc)
-            return None
-    return None
-
-
-def _provenance_checks(ckpt: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Toàn bộ tiêu chí C1–C14, đánh giá bằng CHÍNH bộ mã của bản audit.
-
-    Trước đây hàm này tự kiểm 5 tiêu chí và dùng lại tên C1/C5/C10/C11/C13 của
-    scripts/research_validity.py — nhưng nội dung kiểm KHÔNG giống. Rõ nhất là
-    C5: bản này chỉ hỏi "có ghi checksum không", còn bản audit so checksum với
-    file manifest thật. Giao diện vì thế hiện C5 màu xanh cho một lần chạy mà
-    audit sẽ loại, và bỏ sót hẳn C6/C7 — đúng hai tiêu chí nói về rò rỉ người ký.
-
-    Giờ gọi thẳng evaluate_checkpoint() nên một lần chạy được phán xét giống hệt
-    nhau dù xem trên web hay chạy audit.
-    """
-    rv = _load_research_validity()
-    if rv is None:
-        # Fail-closed: không kiểm được thì nói là không kiểm được, tuyệt đối
-        # không hiện "đạt". Một cổng báo xanh khi nó không chạy còn tệ hơn là
-        # không có cổng.
-        return [{
-            "id": "—",
-            "label": "Không chạy được bộ kiểm tính hợp lệ",
-            "ok": False,
-            "detail": ("không nạp được scripts/research_validity.py — "
-                        "không thể xác nhận lần chạy này hợp lệ cho nghiên cứu"),
-        }]
-
-    try:
-        verdict = rv.evaluate_checkpoint(ckpt)
-    except Exception as exc:
-        logger.warning("[PROVENANCE] evaluate_checkpoint lỗi: %s", exc)
-        return [{
-            "id": "—", "label": "Bộ kiểm tính hợp lệ gặp lỗi",
-            "ok": False, "detail": str(exc),
-        }]
-
-    # reasons là văn bản tự do có kèm mã "(C5)" ở cuối — gắn về đúng tiêu chí để
-    # người dùng thấy LÝ DO trượt chứ không chỉ thấy dấu đỏ.
-    detail_by_code: Dict[str, str] = {}
-    for reason in verdict.reasons:
-        m = re.search(r"\((C\d+)\)\s*$", str(reason))
-        if m:
-            detail_by_code.setdefault(m.group(1), str(reason))
-
-    out: List[Dict[str, Any]] = []
-    for key, ok in verdict.criteria.items():
-        code = key.split("_", 1)[0]
-        out.append({
-            "id": code,
-            "label": _CRITERION_LABELS.get(key, key),
-            "ok": bool(ok),
-            "detail": detail_by_code.get(code, "đạt" if ok else "không đạt"),
-        })
-    out.sort(key=lambda c: int(c["id"][1:]) if c["id"][1:].isdigit() else 99)
-    return out
-
-
 @router.get("/jobs/{job_id}/provenance")
 async def get_job_provenance(
     job_id: str,
@@ -1318,40 +1204,7 @@ async def get_job_provenance(
         # Checkpoint có trước khi provenance được ghi — nói rõ thay vì hiện ô trống.
         return {"available": False, "job_id": job_id}
 
-    checks = _provenance_checks(ckpt)
-    return {
-        "available": True,
-        "job_id": job_id,
-        "code": {
-            "git_commit": ckpt.get("git_commit") or "",
-            "seed": ckpt.get("seed"),
-            "run_purpose": ckpt.get("run_purpose") or "",
-            "run_status": ckpt.get("run_status") or "",
-            # determinism là dict (cudnn/cublas/algorithms) — rút thành một câu
-            # đọc được thay vì đổ nguyên object ra giao diện.
-            "determinism": _determinism_summary(ckpt.get("determinism")),
-            "created_at": ckpt.get("created_at") or "",
-        },
-        "data": {
-            "dataset_version": ckpt.get("dataset_version") or "",
-            "split_version": ckpt.get("split_version") or "",
-            "dataset_manifest_checksum": ckpt.get("dataset_manifest_checksum") or "",
-            "recognition_profile": ckpt.get("recognition_profile") or "",
-            "vocabulary_schema_version": ckpt.get("vocabulary_schema_version") or "",
-        },
-        "model": {
-            "model_type": ckpt.get("model_type") or "",
-            "num_classes": ckpt.get("num_classes"),
-            "seq_len": ckpt.get("seq_len"),
-            "feature_dim": ckpt.get("feature_dim"),
-            "normalization_version": ckpt.get("normalization_version") or "",
-            "storage_contract_version": ckpt.get("storage_contract_version") or "",
-        },
-        "model_selection": ckpt.get("model_selection") or {},
-        "runtime_env": ckpt.get("runtime_env") or {},
-        "checks": checks,
-        "reproducible": all(c["ok"] for c in checks),
-    }
+    return build_provenance_report(job_id, ckpt, WORKSPACE_ROOT)
 
 
 @router.get("/queue/status")
