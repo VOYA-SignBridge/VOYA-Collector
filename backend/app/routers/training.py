@@ -6,8 +6,6 @@ Auto-loads dataset, manages training jobs, and streams real-time progress.
 from __future__ import annotations
 
 import asyncio
-import csv
-import json
 import logging
 from collections import Counter
 from datetime import datetime
@@ -18,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 
 from app.infrastructure.redis.connection import get_redis_client
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
-from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance
+from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance, research_catalog
 from app.modules.training import inference_service, job_service, progress_service, submission_service
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
@@ -120,133 +118,11 @@ def _trainable_dialects_from_splits() -> Dict[str, int]:
 
 
 def _research_splits() -> List[Dict[str, Any]]:
-    """Các split đã versioned dùng được cho chế độ nghiên cứu.
-
-    Chỉ nhận split "phẳng" (train/val/test ngay trong thư mục) — các bộ LOSO /
-    matched-leak chia theo fold con là giao thức đánh giá nhiều lần chạy, không
-    phải một job huấn luyện đơn lẻ, nên không liệt kê ở đây.
-
-    Bỏ qua split có valid_for_research=false: train_tcn.py sẽ từ chối chúng ở
-    _enforce_research_preconditions, nên hiện ra chỉ để người dùng chọn rồi
-    thất bại là vô ích.
-    """
-    versions_dir = WORKSPACE_ROOT / "processed" / "splits" / "versions"
-    if not versions_dir.is_dir():
-        return []
-
-    def _describe(d: Path, name: str, protocol: Optional[str]) -> Optional[Dict[str, Any]]:
-        meta_path = d / "split_metadata.json"
-        if not (d / "train.csv").exists() or not meta_path.exists():
-            return None
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning("[SPLITS] bỏ qua %s: metadata không đọc được (%s)", name, exc)
-            return None
-        if not meta.get("valid_for_research"):
-            return None
-        checksum = str(meta.get("dataset_manifest_checksum") or "").strip()
-        if not checksum:
-            return None
-
-        # dataset_version suy ra từ tên manifest: .../dataset_manifest_isds2026_v5.csv
-        stem = Path(str(meta.get("dataset_manifest") or "")).stem
-        dataset_version = stem[len("dataset_manifest_"):] if stem.startswith("dataset_manifest_") else ""
-
-        counts = meta.get("counts") or {}
-        signers = meta.get("signers") or {}
-        return {
-            "split_version": name,
-            "dataset_version": dataset_version,
-            "recognition_profile": str(meta.get("recognition_profile") or ""),
-            "split_mode": str(meta.get("split_mode") or ""),
-            "num_classes": meta.get("num_classes"),
-            "counts": {k: counts.get(k) for k in ("train", "val", "test")},
-            "seed": meta.get("seed"),
-            "dataset_manifest_checksum": checksum,
-            "protocol": protocol,
-            "held_out": sorted(signers.get("test") or []),
-            "n_train_signers": len(signers.get("train") or []),
-        }
-
-    out: List[Dict[str, Any]] = []
-    for d in sorted(versions_dir.iterdir()):
-        if not d.is_dir():
-            continue
-
-        flat = _describe(d, d.name, None)
-        if flat is not None:
-            out.append(flat)
-            continue
-
-        # A fold of a multi-run protocol is still one train/val/test partition,
-        # so a single job can run it. Withholding them was costing more than it
-        # saved: the only flat alphabet split puts a signer in validation and so
-        # trains on four signers, while every fold here trains on five. On the
-        # identical held-out test set that difference is 0.596 against 0.956,
-        # and each fold result is a published per-performer column, so a run
-        # started from the web can now be checked against the report.
-        for sub in sorted(d.iterdir()):
-            if not sub.is_dir():
-                continue
-            fold = _describe(sub, f"{d.name}/{sub.name}", d.name)
-            if fold is not None:
-                out.append(fold)
-    return out
+    return research_catalog.research_splits(WORKSPACE_ROOT)
 
 
 def _evaluation_protocols() -> List[Dict[str, Any]]:
-    """Multi-fold evaluation protocols, e.g. leave-one-signer-out fold sets.
-
-    `_research_splits` deliberately withholds these: a fold set is not something
-    a single training job can run, so offering it there would only let a user
-    pick it and fail. But the thesis tables are means over exactly these folds,
-    so a run started from the web can never reproduce a published figure while
-    they are invisible. Listing them separately keeps both properties: one job
-    still means one split, and the protocol behind a published number is
-    discoverable instead of living only in a shell script.
-    """
-    versions_dir = WORKSPACE_ROOT / "processed" / "splits" / "versions"
-    if not versions_dir.is_dir():
-        return []
-
-    out: List[Dict[str, Any]] = []
-    for d in sorted(versions_dir.iterdir()):
-        if not d.is_dir() or (d / "train.csv").exists():
-            continue  # flat split -> belongs to /splits, not here
-
-        folds = []
-        for sub in sorted(d.iterdir()):
-            if not sub.is_dir():
-                continue
-            if not ((sub / "train.csv").exists() and (sub / "test.csv").exists()):
-                continue
-            meta_path = sub / "split_metadata.json"
-            meta: Dict[str, Any] = {}
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-            folds.append({
-                "fold": sub.name,
-                "split_mode": meta.get("split_mode"),
-                "num_classes": meta.get("num_classes"),
-                "counts": meta.get("counts") or {},
-                "held_out": sorted((meta.get("signers") or {}).get("test") or []),
-            })
-
-        if len(folds) < 2:
-            continue
-
-        modes = {f["split_mode"] for f in folds if f["split_mode"]}
-        out.append({
-            "protocol": d.name,
-            "n_folds": len(folds),
-            "split_mode": sorted(modes)[0] if len(modes) == 1 else "mixed",
-            "num_classes": folds[0].get("num_classes"),
-            "folds": folds,
-        })
-    return out
+    return research_catalog.evaluation_protocols(WORKSPACE_ROOT)
 
 
 def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
