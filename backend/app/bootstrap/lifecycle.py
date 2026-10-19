@@ -2,8 +2,9 @@ import asyncio
 import logging
 import time
 
+from app.bootstrap.admin import bootstrap_admin_user
+from app.bootstrap.database import init_db
 from app.config import redact_db_url, settings
-from app.db import init_db
 from app.routers import realtime_proxy, training
 from app.services.tts_prewarm import prewarm_tts_cache
 from app.services.tts_service import close_tts, init_tts
@@ -35,8 +36,6 @@ async def startup() -> None:
     db_ready = init_db()
 
     if db_ready:
-        from app.db import bootstrap_admin_user
-
         bootstrap_admin_user()
 
     logger.info(
