@@ -141,3 +141,7 @@ processed/mobile/artifacts/
 !processed/mobile/requirements-executorch.txt
 
 .codegraph
+
+# Documentation and reports are maintained in a separate repository.
+/docs/
+/reports/
