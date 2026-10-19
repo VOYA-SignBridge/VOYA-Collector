@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from app.infrastructure.redis.connection import get_redis_client
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import preparation_service
-from app.modules.training import inference_service, job_service, submission_service
+from app.modules.training import inference_service, job_service, progress_service, submission_service
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
     _import_models_registry,
@@ -900,39 +900,12 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
 
     await websocket.accept()
 
-    # Training chạy trong container trainer và ghi tiến độ vào Postgres —
-    # backend poll DB mỗi 2s và đẩy phần MỚI cho client (message shape giữ
-    # nguyên như cũ nên FE không cần đổi).
     try:
-        from app.storage.metadata_db import list_training_metrics
-
-        last_epoch = 0
-        last_status: Optional[str] = None
-
-        while True:
-            job_info = await _ensure_job_loaded(job_id)
-            if not job_info:
-                break
-            job = job_info["job"]
-
-            try:
-                rows = await asyncio.to_thread(list_training_metrics, job_id)
-                for metric in _metrics_from_db_rows(rows):
-                    if metric.epoch > last_epoch:
-                        await websocket.send_json({"type": "metric", "data": metric.dict()})
-                        last_epoch = metric.epoch
-            except Exception as e:
-                logger.warning("WS metrics poll failed for %s: %s", job_id, e)
-
-            if job.status != last_status:
-                await websocket.send_json({"type": "status", "data": job.dict()})
-                last_status = job.status
-
-            if job.status in TERMINAL_STATUSES:
-                break
-
-            await asyncio.sleep(2)
-
+        await progress_service.stream_job_progress(
+            job_id,
+            websocket.send_json,
+            ensure_job=_ensure_job_loaded,
+        )
     except WebSocketDisconnect:
         pass
     except Exception as e:
