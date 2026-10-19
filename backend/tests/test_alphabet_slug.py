@@ -16,7 +16,7 @@ import unicodedata
 import pytest
 
 from app.processing.class_registry import slugify as registry_slugify
-from app.dataset_manager import slugify as manager_slugify
+from app.modules.dataset.catalog import slugify as manager_slugify
 
 # letter -> expected telex-style slug
 DIACRITICS = {
@@ -32,7 +32,7 @@ DIACRITICS = {
 BASE_LETTERS = {"A": "a", "D": "d", "E": "e", "O": "o", "U": "u"}
 
 SLUGIFIERS = pytest.mark.parametrize(
-    "slugify", [registry_slugify, manager_slugify], ids=["class_registry", "dataset_manager"]
+    "slugify", [registry_slugify, manager_slugify], ids=["class_registry", "dataset_catalog"]
 )
 
 

@@ -27,7 +27,7 @@ from app.cookie_auth import (
     generate_csrf_token,
     set_auth_cookies,
 )
-from app.email_service import send_password_reset_email
+from app.services.email import send_password_reset_email
 from app.modules.security.rate_limits import (
     check_login_allowed,
     client_ip,

@@ -40,9 +40,9 @@ def sync_missing_data_on_startup():
     Ensures Foreign Key safety by inserting parents first, and Idempotency
     by using ON CONFLICT DO UPDATE which preserves deleted_at.
     """
-    from app.dataset_manager import load_labels
-    from app.dataset_samples import list_samples
-    from app.raw_uploads import list_raw_uploads
+    from app.modules.dataset.catalog import load_labels
+    from app.modules.dataset.samples import list_samples
+    from app.modules.dataset.raw_uploads import list_raw_uploads
     from app.storage.metadata_db import _fetch_all, upsert_class, upsert_sample, upsert_raw_upload
     
     try:

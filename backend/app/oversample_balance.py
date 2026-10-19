@@ -4,14 +4,14 @@ import numpy as np
 from pathlib import Path
 from typing import List
 from app.balancer import build_balance_plan
-from app.dataset_manager import ClassMetadata, load_labels
-from app.dataset_samples import save_sequence_npz
+from app.modules.dataset.catalog import ClassMetadata, load_labels
+from app.modules.dataset.samples import save_sequence_npz
 from app.processing.augmenter import generate_augmented_sequences
 
 def get_class_dirs() -> dict[str, Path]:
     rows = load_labels()
     out = {}
-    from app.dataset_manager import ClassMetadata
+    from app.modules.dataset.catalog import ClassMetadata
     for r in rows:
         meta = ClassMetadata(
             class_uid=r['class_uid'], slug=r['slug'], label_original=r['label_original'],

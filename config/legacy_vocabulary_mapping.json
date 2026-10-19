@@ -1,5 +1,5 @@
 {
-  "_comment": "dialect -> cac o vocabulary-schema-v2 ma mot lop MOI trong phuong ngu do phai duoc sinh ra kem theo. Chi entry co status='confirmed' moi gan gia tri; dialect khong co trong file nay se de o trong va roi vao bao cao can ra soat. Doc boi backend/app/dataset_manager.py::_vocabulary_mapping va scripts/migrate_legacy_vocabulary_schema.py.",
+  "_comment": "dialect -> cac o vocabulary-schema-v2 ma mot lop MOI trong phuong ngu do phai duoc sinh ra kem theo. Chi entry co status='confirmed' moi gan gia tri; dialect khong co trong file nay se de o trong va roi vao bao cao can ra soat. Doc boi backend/app/modules/dataset/catalog.py::_vocabulary_mapping va scripts/migrate_legacy_vocabulary_schema.py.",
 
   "_provenance": "File goc DA MAT (khong bao gio duoc track vi luat '*.json' trong .gitignore, cung nguyen nhan lam mat config/legacy_signer_mapping.json). Dung lai ngay 2026-07-31 tu KET QUA ma chinh no da ghi vao dataset/labels.csv: theo migrate_legacy_vocabulary_schema.py, chi status='confirmed' moi lam vocabulary_scope khac rong, va chi status='unassign' moi dat recognition_profile='legacy_unassigned' voi scope rong. Nen cac entry duoi day la doc nguoc tu du lieu that, khong phai suy doan. Hai dialect 'bang-chu-cai' va 'hoa-de' con duoc doi chieu doc lap voi backend/tests/test_class_vocabulary_defaults.py.",
 

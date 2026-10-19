@@ -23,9 +23,9 @@ from pathlib import Path
 import numpy as np
 
 from app.config import settings
-from app import dataset_samples
-from app import dataset_manager
-from app.dataset_manager import ClassMetadata
+from app.modules.dataset import samples as dataset_samples
+from app.modules.dataset import catalog as dataset_manager
+from app.modules.dataset.catalog import ClassMetadata
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []

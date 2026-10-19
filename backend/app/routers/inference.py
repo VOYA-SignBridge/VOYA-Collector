@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query
-from app.inference_loader import load_inference_classes, build_class_map
+from app.modules.dataset.inference import load_inference_classes, build_class_map
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 

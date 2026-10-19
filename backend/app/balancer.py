@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Dict
 from collections import defaultdict
-from app.dataset_samples import list_samples
-from app.dataset_manager import load_labels, ClassMetadata
+from app.modules.dataset.samples import list_samples
+from app.modules.dataset.catalog import load_labels, ClassMetadata
 
 def count_samples_per_class() -> Dict[str, int]:
     samples = list_samples()

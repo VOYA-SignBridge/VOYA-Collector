@@ -15,8 +15,8 @@ router = APIRouter()
 @router.get("/data-report")
 def get_data_report(current_user: Dict[str, Any] = Depends(require_admin)):
     """Return dataset totals, breakdowns, contributors, and recent samples."""
-    from app.dataset_manager import list_classes
-    from app.dataset_samples import list_samples
+    from app.modules.dataset.catalog import list_classes
+    from app.modules.dataset.samples import list_samples
 
     metas = list_classes()
     samples = list_samples()

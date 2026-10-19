@@ -122,7 +122,7 @@ def _sync_catalog_snapshots_sync(labels_csv: Path, samples_csv: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Public API — called by dataset_samples.py and dataset_manager.py after writes
+# Public API — called by dataset domain modules after catalog writes
 #
 # DESIGN DECISION (per user review):
 # These functions NO LONGER spawn daemon threads or call Google APIs directly.

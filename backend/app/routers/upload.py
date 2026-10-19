@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
 from app.processing import storage_utils as su
-from app.dataset_manager import (
+from app.modules.dataset.catalog import (
     get_or_register_class,
     normalize_dialect,
     parse_hands_required,
@@ -24,8 +24,8 @@ from app.processing.quality import (
     qc_threshold_snapshot,
     record_quality_attempt,
 )
-from app.dataset_samples import save_sequence_npz
-from app.raw_uploads import (
+from app.modules.dataset.samples import save_sequence_npz
+from app.modules.dataset.raw_uploads import (
     append_raw_upload_row,
     find_raw_upload,
     find_raw_uploads_by_class,
@@ -510,7 +510,7 @@ async def upload_camera(
         # rejected data ever entering the dataset. This log is deliberately
         # separate from samples.csv and is never read by the manifest builder.
         try:
-            from app.signers import resolve_signer_for_user
+            from app.modules.dataset.signers import resolve_signer_for_user
             _signer = resolve_signer_for_user(current_user)
         except Exception:
             _signer = ""
@@ -548,7 +548,7 @@ async def upload_camera(
     # provenance + preprocess contract. Class-level v2 fields ride along so
     # samples are self-describing even before the class is fully migrated.
     try:
-        from app.signers import resolve_signer_for_user
+        from app.modules.dataset.signers import resolve_signer_for_user
         signer_id = resolve_signer_for_user(current_user)
     except Exception as exc:
         log.warning("[SIGNER] resolution failed (sample saved without signer_id): %s", exc)

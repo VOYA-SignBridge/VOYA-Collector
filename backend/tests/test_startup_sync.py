@@ -42,9 +42,9 @@ def fake_fetch_all(query, params=None):
     return original_fetch_all(query, params)
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.dataset_manager.load_labels")
-@patch("app.dataset_samples.list_samples")
-@patch("app.raw_uploads.list_raw_uploads")
+@patch("app.modules.dataset.catalog.load_labels")
+@patch("app.modules.dataset.samples.list_samples")
+@patch("app.modules.dataset.raw_uploads.list_raw_uploads")
 def test_sync_on_empty_db(mock_raw, mock_samples, mock_labels, mock_fetch):
     """Test 1: When DB is missing records, it should insert them."""
     mock_labels.return_value = [MOCK_CLASS]
@@ -60,9 +60,9 @@ def test_sync_on_empty_db(mock_raw, mock_samples, mock_labels, mock_fetch):
     assert rows[0]["slug"] == "test-slug"
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.dataset_manager.load_labels")
-@patch("app.dataset_samples.list_samples")
-@patch("app.raw_uploads.list_raw_uploads")
+@patch("app.modules.dataset.catalog.load_labels")
+@patch("app.modules.dataset.samples.list_samples")
+@patch("app.modules.dataset.raw_uploads.list_raw_uploads")
 def test_sync_idempotency(mock_raw, mock_samples, mock_labels, mock_fetch):
     """Test 2: Running multiple times shouldn't duplicate or throw errors."""
     mock_labels.return_value = [MOCK_CLASS]
@@ -79,9 +79,9 @@ def test_sync_idempotency(mock_raw, mock_samples, mock_labels, mock_fetch):
     assert len(rows) == 1
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.dataset_manager.load_labels")
-@patch("app.dataset_samples.list_samples")
-@patch("app.raw_uploads.list_raw_uploads")
+@patch("app.modules.dataset.catalog.load_labels")
+@patch("app.modules.dataset.samples.list_samples")
+@patch("app.modules.dataset.raw_uploads.list_raw_uploads")
 def test_sync_soft_delete_safety(mock_raw, mock_samples, mock_labels, mock_fetch):
     """Test 3: Sync shouldn't overwrite deleted_at for existing records."""
     mock_labels.return_value = [MOCK_CLASS]

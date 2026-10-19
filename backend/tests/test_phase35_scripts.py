@@ -98,7 +98,7 @@ def test_pilot_validation(ws: Path):
                         left_hand_valid_mask=np.any(seq[:, :63] != 0.0, axis=1),
                         right_hand_valid_mask=np.any(seq[:, 63:] != 0.0, axis=1))
     # Mirrors exactly what the camera path writes: routers/upload.py builds the
-    # QC + provenance meta and dataset_samples.save_sequence_npz stamps
+    # QC + provenance meta and the dataset samples module stamps
     # storage_contract_version.
     good.with_suffix(".json").write_text(json.dumps({
         "signer_id": "S001", "session_id": "sess-1", "collection_campaign": "pilot_t",

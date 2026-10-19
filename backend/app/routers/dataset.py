@@ -8,10 +8,10 @@ from pathlib import Path
 import numpy as np
 
 from app.config import settings
-from app.dataset_manager import load_labels, ClassMetadata
-from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
+from app.modules.dataset.catalog import load_labels, ClassMetadata
+from app.modules.dataset.samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
-from app.catalog_sync import (
+from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,
@@ -117,7 +117,7 @@ def create_label(
 
     Creates/returns a class entry in the new hierarchy while keeping the old response shape.
     """
-    from app.dataset_manager import get_or_register_class
+    from app.modules.dataset.catalog import get_or_register_class
 
     meta = get_or_register_class(
         label_original=label,

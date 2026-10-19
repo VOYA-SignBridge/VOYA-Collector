@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def dataset_storage_key(local_path: Path, *, dataset_root: Path | None = None) -> str | None:
     """Return a dataset-relative POSIX path suitable for Google Drive."""
     if dataset_root is None:
-        from app.dataset_manager import DATASET_ROOT
+        from app.modules.dataset.catalog import DATASET_ROOT
 
         dataset_root = DATASET_ROOT
     try:

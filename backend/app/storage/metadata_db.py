@@ -586,7 +586,7 @@ def insert_sample(row: Dict[str, Any]):
 
 
 def upsert_sample(row: Dict[str, Any]):
-    # backward-compatible name expected by catalog_sync
+    # Backward-compatible name expected by the dataset catalog transaction module.
     insert_sample(row)
 
 
@@ -755,7 +755,7 @@ def delete_training_job(job_id: str) -> None:
 
 
 def upsert_raw_upload(row: Dict[str, Any]):
-    # backward-compatible name expected by catalog_sync
+    # Backward-compatible name expected by the dataset catalog transaction module.
     insert_raw_upload(row)
 
 

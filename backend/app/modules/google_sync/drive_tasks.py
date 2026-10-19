@@ -27,9 +27,9 @@ def mirror_catalog_csvs_to_drive(self):
     keep pointing at fresh content.
     """
     from app.storage.catalog_mirror import _mirror_csv_to_gdrive_sync
-    from app.dataset_samples import SAMPLES_CSV
-    from app.dataset_manager import MASTER_LABELS
-    from app.raw_uploads import RAW_UPLOADS_CSV
+    from app.modules.dataset.samples import SAMPLES_CSV
+    from app.modules.dataset.catalog import MASTER_LABELS
+    from app.modules.dataset.raw_uploads import RAW_UPLOADS_CSV
 
     if not getattr(settings, "use_google_drive", False):
         return {"status": "skipped", "reason": "gdrive_disabled"}
@@ -144,7 +144,7 @@ def upload_raw_video_to_gdrive_task(
     """
     from app.storage.gdrive_client import upload_to_gdrive
     from app.storage.metadata_db import update_raw_upload_gdrive_url
-    from app.raw_uploads import update_raw_upload_row
+    from app.modules.dataset.raw_uploads import update_raw_upload_row
     import os
 
     try:
@@ -185,7 +185,7 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
     from app.storage.gdrive_client import upload_to_gdrive
     from app.processing.utils import atomic_write_json
     from app.storage.metadata_db import update_sample_gdrive_url
-    from app.dataset_samples import update_sample_row
+    from app.modules.dataset.samples import update_sample_row
     import json
     import os
 
@@ -250,7 +250,7 @@ def upload_npz_batch_to_gdrive_task(self, items: list):
     from app.storage.gdrive_client import upload_to_gdrive
     from app.processing.utils import atomic_write_json
     from app.storage.metadata_db import update_sample_gdrive_url
-    from app.dataset_samples import update_sample_rows_bulk
+    from app.modules.dataset.samples import update_sample_rows_bulk
     import json
     import os
 

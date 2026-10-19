@@ -6,8 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from app.dataset_manager import load_labels, register_class, ClassMetadata, MASTER_LABELS, LABEL_FIELDS, regenerate_label_indexes
-from app.dataset_samples import SAMPLES_CSV, SAMPLE_FIELDS
+from app.modules.dataset.catalog import load_labels, register_class, ClassMetadata, MASTER_LABELS, LABEL_FIELDS, regenerate_label_indexes
+from app.modules.dataset.samples import SAMPLES_CSV, SAMPLE_FIELDS
 from filelock import FileLock
 
 def _resolve_mapping_path(path: str) -> Path:

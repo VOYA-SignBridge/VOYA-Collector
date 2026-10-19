@@ -4,7 +4,7 @@ import argparse
 import numpy as np
 from collections import defaultdict
 
-from app.dataset_manager import load_labels, ClassMetadata
+from app.modules.dataset.catalog import load_labels, ClassMetadata
 from app.config import settings
 
 SEQ_LEN = int(getattr(settings, 'seq_len', 60))

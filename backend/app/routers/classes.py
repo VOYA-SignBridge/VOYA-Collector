@@ -4,12 +4,12 @@ import unicodedata
 from pathlib import Path
 from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from app.dataset_manager import get_or_register_class, list_classes, normalize_dialect
+from app.modules.dataset.catalog import get_or_register_class, list_classes, normalize_dialect
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
-from app.dataset_samples import list_samples
+from app.modules.dataset.samples import list_samples
 from app.balancer import build_balance_plan
 from app.api_validation import validate_label, validate_language, validate_dialect
-from app.catalog_sync import (
+from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,

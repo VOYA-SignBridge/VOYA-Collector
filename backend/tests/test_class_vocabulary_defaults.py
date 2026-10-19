@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from app.dataset_manager import (
+from app.modules.dataset.catalog import (
     _semantic_label_from_slug,
     vocabulary_defaults_for_dialect,
 )
@@ -74,7 +74,7 @@ def test_every_key_a_class_needs_is_returned():
 
 def test_mapping_file_stays_readable_and_confirms_the_two_active_dialects():
     """Guards the config the defaults are read from, not just the reader."""
-    from app.dataset_manager import _vocabulary_mapping
+    from app.modules.dataset.catalog import _vocabulary_mapping
 
     mapping = _vocabulary_mapping()
     assert isinstance(mapping, dict)

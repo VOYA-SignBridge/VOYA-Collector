@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, shutil
 from collections import defaultdict
 
-from app.dataset_manager import load_labels, register_class, ClassMetadata
+from app.modules.dataset.catalog import load_labels, register_class, ClassMetadata
 
 def find_multi_language_slugs(min_languages: int = 2):
     rows = load_labels()

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 )
 def export_samples_to_sheets(self):
     """Mirror ``samples.csv`` to Google Sheets via full replacement."""
-    from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
+    from app.modules.dataset.samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
 
     try:
         spreadsheet_id = str(getattr(settings, "google_sheets_samples_spreadsheet_id", "")).strip()
@@ -81,7 +81,7 @@ def export_labels_to_sheets(self):
             logger.debug("[EXPORT] Labels Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        from app.dataset_manager import LABEL_FIELDS, load_labels
+        from app.modules.dataset.catalog import LABEL_FIELDS, load_labels
 
         rows = load_labels()
         if not rows:

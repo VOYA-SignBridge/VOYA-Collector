@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 from filelock import FileLock
 
 from app.config import settings
-from app.dataset_manager import (
+from app.modules.dataset.catalog import (
     ClassMetadata,
     LABEL_FIELDS,
     MASTER_LABELS,
@@ -24,7 +24,7 @@ from app.dataset_manager import (
     normalize_dialect,
     parse_bool,
 )
-from app.dataset_samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
+from app.modules.dataset.samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
 from app.logging_utils import get_logger as get_structured_logger, OperationStatus, OperationType
 from app.modules.google_sync.catalog import (
     dispatch_catalog_refresh,
@@ -32,7 +32,7 @@ from app.modules.google_sync.catalog import (
     dispatch_drive_folder_move,
 )
 from app.processing.utils import atomic_write_json
-from app.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
+from app.modules.dataset.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
 from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
@@ -275,7 +275,7 @@ def _write_samples_csv(rows: Sequence[Dict[str, Any]]) -> None:
     """Rewrite samples.csv using its REAL on-disk header (may be wider than
     SAMPLE_FIELDS). Writing with SAMPLE_FIELDS (19 cols) into the 23-col file
     silently misaligns every row, so honour the actual header instead."""
-    from app.dataset_samples import _samples_fieldnames
+    from app.modules.dataset.samples import _samples_fieldnames
 
     _write_csv(SAMPLES_CSV, _samples_fieldnames(), rows)
 
@@ -766,7 +766,7 @@ def _db_class_row_to_label_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _db_sample_row_to_csv_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
-    from app.dataset_samples import _samples_fieldnames
+    from app.modules.dataset.samples import _samples_fieldnames
 
     hdr = _samples_fieldnames()
     return {f: (dbrow.get(f) if dbrow.get(f) is not None else "") for f in hdr}
