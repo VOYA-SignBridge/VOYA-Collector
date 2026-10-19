@@ -9,15 +9,14 @@ import asyncio
 import csv
 import json
 import logging
-import os
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import redis
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 
+from app.infrastructure.redis.connection import get_redis_client
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import preparation_service
 from app.modules.training import inference_service, submission_service
@@ -78,20 +77,9 @@ router = APIRouter(prefix="/training", tags=["training"])
 # job execution đi qua Celery queue "training")
 # ============================================================================
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-
-try:
-    redis_client = redis.from_url(
-        REDIS_URL,
-        decode_responses=True,
-        socket_connect_timeout=2,
-        socket_timeout=5,
-    )
-    redis_client.ping()
-    logger.info("Redis connected")
-except Exception as e:
-    logger.warning("Redis connection failed: %s", e)
-    redis_client = None
+# Compatibility injection point for tests/legacy callers. Runtime code falls
+# back to the shared lazy infrastructure client instead of owning a connection.
+redis_client = None
 
 # Đường dẫn dataset - tính từ docker volume mount
 # In Docker: . mounts to /workspace (root directory)
@@ -820,10 +808,11 @@ async def cancel_training_job(
     logger.info("job=%s cancel requested by user=%s", job_id, current_user.get("username"))
 
     # Signal the trainer (works for both queued — pre-start check — and running)
-    if redis_client:
+    cancel_client = redis_client or get_redis_client()
+    if cancel_client:
         try:
             await asyncio.to_thread(
-                redis_client.set, f"training:cancel:{job_id}", "1", ex=86400
+                cancel_client.set, f"training:cancel:{job_id}", "1", ex=86400
             )
         except Exception as e:
             logger.warning("job=%s cancel signal to Redis failed: %s", job_id, e)
