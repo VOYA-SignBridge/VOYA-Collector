@@ -1,8 +1,5 @@
 from typing import Optional, Dict, Any
-import json
 import unicodedata
-from pathlib import Path
-from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from app.modules.dataset.catalog import get_or_register_class, list_classes, normalize_dialect
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
@@ -20,38 +17,10 @@ from app.modules.dataset.catalog_sync import (
     bulk_purge_classes,
     empty_class_trash,
 )
-from app.config import settings
-from app.modules.identity import get_current_user, require_admin
+from app.modules.identity import require_admin
+from app.services import preferences
 
 router = APIRouter(prefix="/classes", tags=["classes"])
-
-# ---------------------------------------------------------------------------
-# Preferences file (replaces localStorage on frontend)
-# ---------------------------------------------------------------------------
-_PREFS_PATH = Path(settings.dataset_root) / "user_preferences.json"
-_PREFS_LOCK = str(_PREFS_PATH) + ".lock"
-
-
-def _load_prefs() -> dict:
-    if not _PREFS_PATH.exists():
-        return {}
-    try:
-        with open(_PREFS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_prefs(data: dict) -> None:
-    # Callers MUST already hold the prefs FileLock (set_preference does). This
-    # helper deliberately does NOT re-acquire it: FileLock is not reentrant
-    # across instances in the same process, so a nested acquire self-deadlocks
-    # (the request hangs forever, leaking a thread-pool worker + poisoning the
-    # lock for every later preference write).
-    _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_PREFS_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 # ---------------------------------------------------------------------------
 # Text normalization for prefix matching (remove diacritics)
@@ -201,9 +170,7 @@ def search_collectors(
 @router.get("/preferences")
 def get_preference(key: str = Query(..., description="Preference key")):
     """Get a user preference value by key."""
-    prefs = _load_prefs()
-    value = prefs.get(key)
-    return {"key": key, "value": value}
+    return {"key": key, "value": preferences.get_value(key)}
 
 
 @router.post("/preferences")
@@ -214,11 +181,7 @@ def set_preference(payload: dict = Body(...)):
     if not key:
         raise HTTPException(status_code=400, detail="Key is required")
 
-    lock = FileLock(_PREFS_LOCK)
-    with lock:
-        prefs = _load_prefs()
-        prefs[key] = value
-        _save_prefs(prefs)
+    preferences.set_value(key, value)
 
     return {"success": True, "key": key, "value": value}
 
