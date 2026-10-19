@@ -41,16 +41,12 @@ def _request(*headers):
     })
 
 
-def test_rate_limit_facade_and_identity_exports_component_callables():
-    from app import rate_limit
+def test_identity_exports_rate_limit_component_callables():
     from app.infrastructure.redis import connection
     from app.modules.identity import api as identity_api
     from app.modules.security import rate_limits
 
     assert connection.get_activity_client is connection.get_redis_client
-    assert rate_limit._client is connection.get_redis_client
-    assert rate_limit.check_login_allowed is rate_limits.check_login_allowed
-    assert rate_limit.enforce_ip_limit is rate_limits.enforce_ip_limit
     assert identity_api.check_login_allowed is rate_limits.check_login_allowed
     assert identity_api.reset_login_attempts is rate_limits.reset_login_attempts
 

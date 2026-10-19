@@ -29,3 +29,11 @@ def test_upload_limit_removes_partial_file(tmp_path: Path) -> None:
 def test_obsolete_processing_storage_utils_is_removed() -> None:
     app_root = Path(__file__).resolve().parents[1] / "app"
     assert not (app_root / "processing" / "storage_utils.py").exists()
+
+
+def test_retired_unreferenced_modules_are_removed() -> None:
+    app_root = Path(__file__).resolve().parents[1] / "app"
+
+    assert not (app_root / "rate_limit.py").exists()
+    assert not (app_root / "processing" / "feature_writer.py").exists()
+    assert not (app_root / "storage" / "experiment_tracking_db.py").exists()

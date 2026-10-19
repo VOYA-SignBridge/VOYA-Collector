@@ -5,10 +5,6 @@ from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
-from app.config import settings
-    
-def ensure_dir(path):
-    os.makedirs(path, exist_ok=True)
 
 def atomic_write_json(path: Union[str, Path], obj: Any, *, indent: int = 2):
     """Atomically write JSON to disk (temp file + replace).
@@ -32,30 +28,6 @@ def atomic_write_json(path: Union[str, Path], obj: Any, *, indent: int = 2):
                 os.remove(tmp)
             except Exception:
                 pass
-
-
-def save_json_to_storage(obj, path):
-    # Backward-compatible wrapper
-    atomic_write_json(path, obj, indent=2)
-
-def save_npz_feature(sequence_array, label_folder, filename, meta=None):
-    ensure_dir(label_folder)
-    outpath = os.path.join(label_folder, filename)
-    seq, info = normalize_sequence(sequence_array, expected_T=int(getattr(settings, "seq_len", 60)), expected_D=int(getattr(settings, "feature_dim", 126)))
-    # atomic write
-    fd, tmp = tempfile.mkstemp(prefix="npztmp_", suffix=".npz", dir=label_folder)
-    os.close(fd)
-    try:
-        with open(tmp, "wb") as f:
-            np.savez_compressed(f, sequence=seq.astype(np.float32), meta=meta or {})
-            f.flush(); os.fsync(f.fileno())
-        os.replace(tmp, outpath)
-    finally:
-        if os.path.exists(tmp):
-            try: os.remove(tmp)
-            except Exception: pass
-    return outpath
-
 
 def normalize_sequence(sequence, expected_T: int = 60, expected_D: int = 126):
     """Normalize/pad/truncate a sequence to (expected_T, expected_D).
@@ -97,18 +69,6 @@ def normalize_sequence(sequence, expected_T: int = 60, expected_D: int = 126):
         normalized = True
     info = {"original_shape": original_shape, "normalized": bool(normalized)}
     return seq, info
-
-def ema_smooth_sequence(sequence_array: np.ndarray, alpha: float = 0.2) -> np.ndarray:
-    """
-    Apply exponential moving average smoothing per time step.
-    sequence_array: shape (T, D)
-    """
-    if not isinstance(sequence_array, np.ndarray) or sequence_array.ndim != 2:
-        return sequence_array
-    out = sequence_array.astype(np.float32).copy()
-    for t in range(1, out.shape[0]):
-        out[t] = alpha * out[t] + (1.0 - alpha) * out[t - 1]
-    return out
 
 def normalize_single_hand(hand: np.ndarray) -> np.ndarray:
     """
