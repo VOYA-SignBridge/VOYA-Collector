@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 import httpx
+
+from app.modules.training.schemas import PromoteResponse
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,22 @@ class DeploymentResult:
 
 class CheckpointCopyError(RuntimeError):
     """Raised when a trained checkpoint cannot be copied into deployment."""
+
+
+class PromotionNotFoundError(LookupError):
+    pass
+
+
+class PromotionConflictError(RuntimeError):
+    pass
+
+
+class PromotionValidationError(ValueError):
+    pass
+
+
+class PromotionStorageError(RuntimeError):
+    pass
 
 
 def _copy_checkpoint_to_deployment(
@@ -228,4 +247,100 @@ def deploy_checkpoint(
         registry_updated=registry_updated,
         realtime_reloaded=realtime_reloaded,
         message=message,
+    )
+
+
+async def promote_job(
+    job_id: str,
+    *,
+    ensure_job,
+    persist_job: Callable[..., Awaitable[None]],
+    load_checkpoint,
+    model_name_map: Dict[str, str],
+    copy_checkpoint: Callable[..., Optional[str]] = _copy_checkpoint_to_deployment,
+    registry_display_name: Callable[[str], str] = _registry_display_name,
+    update_registry: Callable[..., bool] = _update_registry,
+    notify_reload: Callable[..., bool] = _notify_realtime_service_reload,
+    checkpoints_dir: Path = REALTIME_CHECKPOINTS_DIR,
+    container_checkpoints_dir: str = REALTIME_CONTAINER_CHECKPOINTS,
+) -> PromoteResponse:
+    """Validate and deploy a completed training job to the realtime service."""
+    job_info = await ensure_job(job_id)
+    if not job_info:
+        raise PromotionNotFoundError(f"Training job {job_id} không tìm thấy")
+
+    job = job_info["job"]
+    if job.status != "completed":
+        raise PromotionConflictError(
+            f"Chỉ promote được job đã hoàn thành (trạng thái hiện tại: {job.status})"
+        )
+    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
+        raise PromotionNotFoundError("Không tìm thấy checkpoint của job này")
+
+    source = Path(job.checkpoint_path)
+    try:
+        checkpoint = await asyncio.to_thread(load_checkpoint, source)
+    except Exception as exc:
+        raise PromotionStorageError(f"Không đọc được checkpoint: {exc}") from exc
+
+    model_type = str(checkpoint.get("model_type", "TCN")).replace(" (legacy)", "").strip()
+    if model_type.lower() not in model_name_map:
+        raise PromotionValidationError(
+            f"Không nhận ra kiến trúc '{model_type}' — realtime service hỗ trợ: "
+            f"{', '.join(sorted(set(model_name_map.values())))}. "
+            "Model vẫn dùng được qua nút Test Model ở Step 7."
+        )
+
+    dialect = job.config.dialects[0] if job.config.dialects else "multi"
+    language = job.config.languages[0] if job.config.languages else "vn"
+    try:
+        deployment = await asyncio.to_thread(
+            deploy_checkpoint,
+            src_path=source,
+            job_id=job_id,
+            model_type=model_type,
+            dialect=dialect,
+            language=language,
+            ckpt=checkpoint,
+            copy_checkpoint=copy_checkpoint,
+            registry_display_name=registry_display_name,
+            update_registry=update_registry,
+            notify_reload=notify_reload,
+            checkpoints_dir=checkpoints_dir,
+            container_checkpoints_dir=container_checkpoints_dir,
+        )
+    except CheckpointCopyError as exc:
+        raise PromotionStorageError(str(exc)) from exc
+
+    job.promoted_at = datetime.now().isoformat()
+    job.checkpoint_path = deployment.deployed_path
+    await persist_job(job)
+
+    try:
+        from app.training_tasks import backup_promoted_checkpoint_task
+
+        backup_promoted_checkpoint_task.delay(
+            job_id=job_id,
+            checkpoint_path=deployment.deployed_path,
+            model_id=deployment.model_id,
+            display_name=deployment.display_name,
+            dialect=dialect,
+            language=language,
+            promoted_at=job.promoted_at,
+        )
+        logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
+    except Exception as exc:
+        logger.warning(
+            "job=%s GDrive backup dispatch failed (promotion vẫn OK): %s",
+            job_id,
+            exc,
+        )
+
+    return PromoteResponse(
+        job=job,
+        model_id=deployment.model_id,
+        deployed_checkpoint=deployment.deployed_path,
+        registry_updated=deployment.registry_updated,
+        realtime_reloaded=deployment.realtime_reloaded,
+        message=deployment.message,
     )

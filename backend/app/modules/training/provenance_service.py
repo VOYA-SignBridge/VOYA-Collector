@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import asyncio
 import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+class ProvenanceJobNotFoundError(LookupError):
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -153,3 +158,26 @@ def build_provenance_report(
         "checks": checks,
         "reproducible": all(check["ok"] for check in checks),
     }
+
+
+async def load_job_provenance(
+    job_id: str,
+    *,
+    ensure_job,
+    load_checkpoint,
+    workspace_root: Path,
+) -> Dict[str, Any]:
+    job_info = await ensure_job(job_id)
+    if not job_info:
+        raise ProvenanceJobNotFoundError(f"Training job {job_id} không tìm thấy")
+    job = job_info["job"]
+    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
+        return {"available": False, "job_id": job_id}
+    try:
+        checkpoint = await asyncio.to_thread(load_checkpoint, job.checkpoint_path)
+    except Exception as exc:
+        logger.warning("job=%s không đọc được provenance: %s", job_id, exc)
+        return {"available": False, "job_id": job_id}
+    if not isinstance(checkpoint, dict) or "git_commit" not in checkpoint:
+        return {"available": False, "job_id": job_id}
+    return build_provenance_report(job_id, checkpoint, workspace_root)

@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,7 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from app.infrastructure.redis.connection import get_redis_client
 from app.modules.identity import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance, research_catalog
-from app.modules.training import inference_service, job_service, progress_service, submission_service
+from app.modules.training import (
+    inference_service,
+    job_service,
+    progress_service,
+    promotion_service,
+    provenance_service,
+    submission_service,
+)
 from app.modules.training.inference_service import (
     _MODEL_NAME_TO_REGISTRY_KEY,
     _import_models_registry,
@@ -322,27 +328,15 @@ async def get_job_provenance(
     lập được. Trả {"available": false} cho job cũ chưa ghi provenance, giống
     cách endpoint evaluation xử lý.
     """
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
-    job = job_info["job"]
-    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
-        return {"available": False, "job_id": job_id}
-
     try:
-        ckpt = await asyncio.to_thread(
-            inference_service.load_checkpoint, job.checkpoint_path
+        return await provenance_service.load_job_provenance(
+            job_id,
+            ensure_job=_ensure_job_loaded,
+            load_checkpoint=inference_service.load_checkpoint,
+            workspace_root=WORKSPACE_ROOT,
         )
-    except Exception as e:
-        logger.warning("job=%s không đọc được provenance: %s", job_id, e)
-        return {"available": False, "job_id": job_id}
-
-    if not isinstance(ckpt, dict) or "git_commit" not in ckpt:
-        # Checkpoint có trước khi provenance được ghi — nói rõ thay vì hiện ô trống.
-        return {"available": False, "job_id": job_id}
-
-    return build_provenance_report(job_id, ckpt, WORKSPACE_ROOT)
+    except provenance_service.ProvenanceJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/queue/status")
@@ -414,55 +408,13 @@ async def promote_training_job(
     service → ghi entry vào models.json (bền qua restart) → gọi /reload để
     hot-swap → ghi promoted_at vào DB.
     """
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
-
-    job = job_info["job"]
-
-    if job.status != "completed":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Chỉ promote được job đã hoàn thành (trạng thái hiện tại: {job.status})",
-        )
-
-    if not job.checkpoint_path or not Path(job.checkpoint_path).exists():
-        raise HTTPException(status_code=404, detail="Không tìm thấy checkpoint của job này")
-
-    # Load checkpoint để validate model type. Realtime service dựng kiến trúc
-    # ngoài TCN từ chính registry đã huấn luyện nó, nên chỉ cần chặn những
-    # model_type không nhận ra — /reload vẫn validate + warmup trước khi swap.
-    src_path = Path(job.checkpoint_path)
     try:
-        ckpt = await asyncio.to_thread(inference_service.load_checkpoint, src_path)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không đọc được checkpoint: {e}")
-
-    model_type = str(ckpt.get("model_type", "TCN")).replace(" (legacy)", "").strip()
-    if model_type.lower() not in _MODEL_NAME_TO_REGISTRY_KEY:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Không nhận ra kiến trúc '{model_type}' — realtime service hỗ trợ: "
-                f"{', '.join(sorted(set(_MODEL_NAME_TO_REGISTRY_KEY.values())))}. "
-                "Model vẫn dùng được qua nút Test Model ở Step 7."
-            ),
-        )
-
-    # Slot realtime được đánh khóa theo dialect (giống lúc startup load từ DB):
-    # promote model mới cho "hoa-de" sẽ thay model "hoa-de" đang chạy, không
-    # thêm một lựa chọn trùng vào tab nhận diện.
-    dialect = (job.config.dialects[0] if job.config.dialects else "multi")
-    language = (job.config.languages[0] if job.config.languages else "vn")
-    try:
-        deployment = await asyncio.to_thread(
-            deploy_checkpoint,
-            src_path=src_path,
-            job_id=job_id,
-            model_type=model_type,
-            dialect=dialect,
-            language=language,
-            ckpt=ckpt,
+        response = await promotion_service.promote_job(
+            job_id,
+            ensure_job=_ensure_job_loaded,
+            persist_job=_persist_job,
+            load_checkpoint=inference_service.load_checkpoint,
+            model_name_map=_MODEL_NAME_TO_REGISTRY_KEY,
             copy_checkpoint=_copy_checkpoint_to_deployment,
             registry_display_name=_registry_display_name,
             update_registry=_update_registry,
@@ -470,50 +422,17 @@ async def promote_training_job(
             checkpoints_dir=REALTIME_CHECKPOINTS_DIR,
             container_checkpoints_dir=REALTIME_CONTAINER_CHECKPOINTS,
         )
-    except CheckpointCopyError as exc:
+    except promotion_service.PromotionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except promotion_service.PromotionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except promotion_service.PromotionValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except promotion_service.PromotionStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # 4. Ghi nhận promotion. checkpoint_path trỏ sang bản deployed để:
-    #    - retention sweep dọn outputs/ không thể phá model đã promote
-    #    - Step 7 test modal vẫn hoạt động sau khi outputs/ bị dọn
-    job.promoted_at = datetime.now().isoformat()
-    job.checkpoint_path = deployment.deployed_path
-    await _persist_job(job)
-
-    # 5. Publish bản promoted lên Google Drive (background, best-effort):
-    #    models/<tên model>/Deploy <thời điểm>/ gồm checkpoint + manifest inference
-    try:
-        from app.training_tasks import backup_promoted_checkpoint_task
-
-        backup_promoted_checkpoint_task.delay(
-            job_id=job_id,
-            checkpoint_path=deployment.deployed_path,
-            model_id=deployment.model_id,
-            display_name=deployment.display_name,
-            dialect=dialect,
-            language=language,
-            promoted_at=job.promoted_at,
-        )
-        logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
-    except Exception as e:
-        logger.warning("job=%s GDrive backup dispatch failed (promotion vẫn OK): %s", job_id, e)
-
-    logger.info(
-        "job=%s promoted by admin=%s registry=%s reload=%s",
-        job_id,
-        current_user.get("username"),
-        deployment.registry_updated,
-        deployment.realtime_reloaded,
-    )
-
-    return PromoteResponse(
-        job=job,
-        model_id=deployment.model_id,
-        deployed_checkpoint=deployment.deployed_path,
-        registry_updated=deployment.registry_updated,
-        realtime_reloaded=deployment.realtime_reloaded,
-        message=deployment.message,
-    )
+    logger.info("job=%s promoted by admin=%s", job_id, current_user.get("username"))
+    return response
 
 
 @router.websocket("/ws/{job_id}")
