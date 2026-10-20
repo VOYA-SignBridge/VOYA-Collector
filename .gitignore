@@ -239,6 +239,7 @@ processed/mobile/artifacts/
 # Documentation and reports are maintained in a separate repository.
 /docs/
 /reports/
+/Extra_docs/
 
 # ---------------------------------------------------------------------------
 # Working-tree residue. None of this is source; all of it appeared while
