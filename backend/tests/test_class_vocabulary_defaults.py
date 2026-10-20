@@ -37,6 +37,9 @@ CONFIRMED = {
 @pytest.mark.parametrize("dialect,expected", sorted(CONFIRMED.items()))
 def test_confirmed_dialect_yields_its_profile(dialect, expected):
     got = vocabulary_defaults_for_dialect(dialect)
+    # Mọi khẳng định nằm trong vòng lặp, nên một mục `expected` rỗng trong
+    # CONFIRMED sẽ cho ca đó xanh mà không so trường nào.
+    assert expected, f"{dialect}: CONFIRMED không nêu trường nào để đối chiếu"
     for key, value in expected.items():
         assert got[key] == value, f"{dialect}.{key}"
 

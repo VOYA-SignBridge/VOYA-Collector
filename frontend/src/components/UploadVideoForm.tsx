@@ -1,11 +1,21 @@
+/**
+ * Tải video lên theo lô.
+ *
+ * @i18n-key-table — câu lỗi trong `validateFile` và nhãn trạng thái trong
+ * `getStatusBadge` là KHOÁ từ điển, dịch tại chỗ dựng.
+ */
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { uploadVideo } from "../api/upload";
+import { getClassesList } from "../api/dataset";
+import { pollJobUntilDone } from "../api/jobs";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
-import { AlertTriangleIcon } from "./ui/Icons";
-import { useToast } from "../hooks/useToast";
+import CreateLabelModal from "./CreateLabelModal";
+import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
+import { AlertTriangleIcon, LightbulbIcon } from "./ui/Icons";
+import { Trans, useI18n } from "../i18n";
 
 // ============================================================================
 // TYPES
@@ -33,39 +43,59 @@ type ValidationError = {
 type Props = {
   onError?: (msg: string) => void;
   onSuccess?: (results: Array<{ fileId: string; uploadedId: string | number }>) => void;
+  initialLabel?: string;
+  initialClassUid?: string;
 };
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
-  const { toast } = useToast();
+export default function UploadVideoFormV2({ onError, onSuccess, initialLabel = "", initialClassUid }: Props) {
+  const { t } = useI18n();
   // ========== STATE ==========
   const [files, setFiles] = useState<FileItem[]>([]);
-  const [defaultLabel, setDefaultLabel] = useState("");
-  const [defaultClassUid, setDefaultClassUid] = useState<string | undefined>(undefined);
+  const [defaultLabel, setDefaultLabel] = useState(initialLabel);
+  const [defaultClassUid, setDefaultClassUid] = useState<string | undefined>(initialClassUid);
+  const [showCreateLabelModal, setShowCreateLabelModal] = useState(false);
+  const [visibility, setVisibility] = useState<"private" | "tenant" | "community">("private");
+  const [catalog, setCatalog] = useState<Array<{ class_uid: string; label_original: string }>>([]);
   const [defaultUser, setDefaultUser] = useState(() => localStorage.getItem('lastUser') || '');
-  const [defaultDialect, setDefaultDialect] = useState<string>(() =>
-    localStorage.getItem('dialectSelected') || 'Miền Bắc'
-  );
-  const [dialectList, setDialectList] = useState<string[]>(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem('dialectList') || 'null');
-      if (Array.isArray(stored) && stored.length > 0) {
-        // Auto-merge new dialects into existing list
-        const merged = Array.from(new Set([...stored, 'Cần Thơ']));
-        // Save merged list back to localStorage
-        localStorage.setItem('dialectList', JSON.stringify(merged));
-        return merged;
-      }
-    } catch (err) {
-      void err;
-    }
-    const defaultList = ['Bảng chữ cái', 'Miền Bắc', 'Miền Trung', 'Miền Nam', 'Hòa Đê'];
-    localStorage.setItem('dialectList', JSON.stringify(defaultList));
-    return defaultList;
+  // The value picked here is sent verbatim as the `dialect` field of the
+  // upload. It must therefore be a dialect ID ("bac"), never a display name.
+  //
+  // It used to be seeded from a hardcoded list of DISPLAY NAMES ('Miền Bắc',
+  // 'Bảng chữ cái', …) which was also cached in localStorage, so a video could
+  // be filed under a dialect string that exists nowhere in the registry. The
+  // list now comes from GET /vocabulary/registry, and any stale display-name
+  // cache is discarded below rather than merged forward.
+  const [defaultDialect, setDefaultDialect] = useState<string>(() => {
+    const stored = localStorage.getItem('dialectSelected') || '';
+    return /^[a-z0-9-]+$/.test(stored) ? stored : '';
   });
+  const { dialects: registryDialects, refresh: refreshRegistry } = useVocabularyRegistry();
+  const dialectList = useMemo(
+    () => registryDialects.filter((d) => d.is_active !== false).map((d) => d.dialect_id),
+    [registryDialects]
+  );
+
+  useEffect(() => {
+    getClassesList("vn", "").then((res) => {
+      if (res.ok) setCatalog(res.data.items.map((c) => ({ class_uid: c.class_uid, label_original: c.label_original })));
+    }).catch(() => undefined);
+  }, []);
+
+  // Once the registry lands, adopt a valid default if the remembered one is
+  // gone (or was one of the old display names).
+  useEffect(() => {
+    if (dialectList.length === 0) return;
+    setDefaultDialect((prev) => {
+      if (prev && dialectList.includes(prev) && prev !== "bang-chu-cai") return prev;
+      return dialectList.includes("common")
+        ? "common"
+        : (dialectList.find((item) => item !== "bang-chu-cai") || dialectList[0]);
+    });
+  }, [dialectList]);
   
   const [uploadingAll, setUploadingAll] = useState(false);
   const [concurrency, setConcurrency] = useState(3);
@@ -167,19 +197,19 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         });
       
       if (newFiles.length === 0) {
-        toast.warning(`Bỏ qua ${videoFiles.length} file trùng lặp`);
+        onError?.(t("Bỏ qua {length} file trùng lặp", { length: videoFiles.length }));
       } else {
         // Xóa CSV mapping sau khi đã áp dụng
         const appliedCount = newFiles.filter(f => csvMapping[f.file.name]).length;
         if (appliedCount > 0) {
-          toast.success(`Thêm ${newFiles.length} file, trong đó ${appliedCount} file đã áp dụng CSV mapping`);
+          onError?.(t("Đã thêm {length} file, trong đó {appliedCount} file đã áp dụng CSV mapping", { length: newFiles.length, appliedCount }));
           localStorage.removeItem('csvMapping');
         }
       }
       
       return [...prev, ...newFiles];
     });
-  }, [defaultLabel, defaultUser, defaultDialect, defaultClassUid, onError, toast]);
+  }, [defaultLabel, defaultUser, defaultDialect, defaultClassUid, onError]);
 
   // Listen for global selectClass events dispatched by LabelsPage
   useEffect(() => {
@@ -192,7 +222,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           if (d.label) setDefaultLabel(String(d.label));
           if (d.class_uid) setDefaultClassUid(String(d.class_uid));
           // provide quick feedback
-          toast.success(`Chọn nhãn: ${d.label} (${d.class_uid ?? d.class_idx ?? ''})`);
+          onError?.(t("Chọn nhãn: {nhan} ({ma})", { nhan: d.label, ma: d.class_uid ?? d.class_idx ?? "" }));
         }
       } catch (err) {
         // ignore
@@ -200,7 +230,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     };
     window.addEventListener('selectClass', handler);
     return () => window.removeEventListener('selectClass', handler);
-  }, [onError, toast]);
+  }, [onError]);
   
   const removeFile = useCallback((id: string) => {
     setFiles(prev => prev.filter(f => f.id !== id));
@@ -254,7 +284,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         return obj;
       });
       
-      console.log('📊 CSV Debug Info:');
+      console.log('CSV Debug Info:');
       console.log('Headers:', header);
       console.log('Rows parsed:', rows);
       
@@ -272,13 +302,13 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           }
         });
         localStorage.setItem('csvMapping', JSON.stringify(mapping));
-        toast.success(`Đã lưu ${Object.keys(mapping).length} mapping từ CSV. Thêm video vào là tự động áp dụng.`);
-        console.log('💾 Saved CSV mapping:', mapping);
+        onError?.(t("Đã lưu {p1} mapping từ CSV. Bây giờ hãy thêm video để tự động áp dụng!", { p1: Object.keys(mapping).length }));
+        console.log('Saved CSV mapping:', mapping);
         return;
       }
       
       // Nếu đã có file, áp dụng mapping ngay
-      console.log('📁 Current files:', files.map(f => f.file.name));
+      console.log('Current files:', files.map(f => f.file.name));
       
       let matchedCount = 0;
       const matchDetails: string[] = [];
@@ -288,7 +318,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           const csvFilename = r.filename || r.file || r.name;
           const matched = csvFilename === item.file.name;
           if (matched) {
-            matchDetails.push(`${item.file.name} -> ${r.label || 'N/A'}`);
+            matchDetails.push(`${item.file.name} → ${r.label || 'N/A'}`);
           }
           return matched;
         });
@@ -305,31 +335,31 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         return item;
       }));
       
-      console.log('🎯 Match results:', matchDetails);
+      console.log('Match results:', matchDetails);
       
       if (matchedCount > 0) {
         const unmatchedCount = files.length - matchedCount;
         if (unmatchedCount > 0) {
-          toast.success(`Đã ánh xạ ${matchedCount}/${files.length} file từ CSV. ${unmatchedCount} file không có trong CSV sẽ dùng giá trị mặc định.`);
+          onError?.(t("Đã ánh xạ {matchedCount}/{length} file từ CSV. {unmatchedCount} file không tìm thấy trong CSV sẽ dùng giá trị mặc định.", { matchedCount, length: files.length, unmatchedCount }));
         } else {
-          toast.success(`Đã ánh xạ ${matchedCount}/${files.length} file từ CSV`);
+          onError?.(t("Đã ánh xạ {matchedCount}/{length} file từ CSV", { matchedCount, length: files.length }));
         }
       } else {
         // Không có file nào match
         const csvFilenames = rows.map(r => r.filename || r.file || r.name).filter(Boolean);
         const currentFilenames = files.map(f => f.file.name);
         
-        console.warn('❌ No matches found!');
+        console.warn('No matches found!');
         console.log('CSV filenames:', csvFilenames);
         console.log('Current filenames:', currentFilenames);
         
-        onError?.(`Không tìm thấy file nào khớp với CSV. Kiểm tra tên file trong CSV có trùng với tên file đã chọn không.`);
+        onError?.(`Không tìm thấy file nào khớp với CSV.\n\nGợi ý: Kiểm tra tên file trong CSV có khớp với tên file đã chọn không. Mở Console (F12) để xem chi tiết danh sách.`);
       }
     } catch (err) {
       console.error('CSV parsing error:', err);
-      onError?.('Không đọc được file CSV. Định dạng cần có: filename,label,user,dialect');
+      onError?.('Không thể đọc file CSV. Đảm bảo format: filename,label,user,dialect');
     }
-  }, [files, onError, toast]);
+  }, [files, onError]);
   
   // ========== UPLOAD ==========
   const uploadSingle = useCallback(async (item: FileItem): Promise<boolean> => {
@@ -347,20 +377,51 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     try {
       const res = await uploadVideo(item.file, item.user, item.label, item.dialect, (pct) => {
         updateFile(item.id, { progress: pct });
-      });
-      const result = res as { ok?: boolean; data?: { id?: string | number }; error?: string };
+      }, { class_uid: item.class_uid, visibility });
+      const result = res as {
+        ok?: boolean;
+        data?: { id?: string | number; job_id?: string | null };
+        error?: string;
+      };
       if (result.ok) {
-        updateFile(item.id, { 
-          status: 'done', 
+        // Tệp đã lưu; máy chủ đã xếp hàng trích xuất khung tay. Theo dõi tới
+        // khi xong để người tải biết video có thành mẫu hay không — trước đây
+        // "Thành công" chỉ nghĩa là tệp đã tới nơi, còn mẫu thì không ai làm.
+        const jobId = result.data?.job_id;
+        updateFile(item.id, {
+          status: 'uploading',
           progress: 100,
-          message: 'Thành công',
-          uploadedId: result.data?.id
+          message: jobId ? t('Đã tải lên, đang trích xuất mẫu…') : t('Đã tải lên'),
+          uploadedId: result.data?.id,
         });
+        if (jobId) {
+          const job = await pollJobUntilDone(jobId, { intervalMs: 3000 });
+          if (!job.ok) {
+            updateFile(item.id, { status: 'error', message: job.error });
+            return false;
+          }
+          if (job.data.status !== 'SUCCESS') {
+            updateFile(item.id, { status: 'error', message: job.data.error || t('Trích xuất mẫu thất bại') });
+            return false;
+          }
+          const inner = (job.data.result ?? {}) as { result?: { saved?: unknown[]; status?: string; message?: string } };
+          const saved = inner.result?.saved?.length ?? 0;
+          if (saved === 0) {
+            updateFile(item.id, {
+              status: 'error',
+              message: inner.result?.message || t('Không nhận diện được bàn tay trong video — hãy quay rõ tay, đủ sáng.'),
+            });
+            return false;
+          }
+          updateFile(item.id, { status: 'done', message: t('Đã tạo {n} mẫu', { n: saved }) });
+          return true;
+        }
+        updateFile(item.id, { status: 'done', message: t('Đã tải lên') });
         return true;
       } else {
         updateFile(item.id, { 
           status: 'error', 
-          message: result.error || 'Upload thất bại'
+          message: result.error || t('Tải lên thất bại')
         });
         return false;
       }
@@ -369,7 +430,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       updateFile(item.id, { status: 'error', message: msg });
       return false;
     }
-  }, [validateFile, updateFile]);
+  }, [validateFile, updateFile, t, visibility]);
   
   const uploadAll = useCallback(async () => {
     const pendingFiles = files.filter(f => f.status === 'pending');
@@ -380,7 +441,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     
     const validationErrors = validateAllFiles();
     if (validationErrors.length > 0) {
-      onError?.(`Có ${validationErrors.length} lỗi cần sửa trước khi upload`);
+      onError?.(t("Có {length} lỗi cần sửa trước khi upload", { length: validationErrors.length }));
       return;
     }
     
@@ -472,6 +533,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       done: { variant: 'success' as const, text: 'Hoàn thành' },
       error: { variant: 'danger' as const, text: 'Lỗi' },
     };
+    // Nhãn ở đây là KHOÁ; chỗ dựng gọi `t(badge.text)`.
     return variants[status];
   };
   
@@ -520,17 +582,27 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               </svg>
             </div>
             <div>
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Tải video</h2>
-              <p className="text-sm text-gray-600">Quản lý và tải nhiều video cùng lúc</p>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{t("Tải video")}</h2>
+              <p className="text-sm text-gray-600">{t("Quản lý và tải nhiều video cùng lúc")}</p>
             </div>
           </div>
           
           {stats.total > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              {stats.pending > 0 && <Badge variant="default">{stats.pending} chờ</Badge>}
-              {stats.uploading > 0 && <Badge variant="warning">{stats.uploading} đang tải</Badge>}
-              {stats.done > 0 && <Badge variant="success">{stats.done} xong</Badge>}
-              {stats.error > 0 && <Badge variant="danger">{stats.error} lỗi</Badge>}
+              {stats.pending > 0 && (
+                <Badge variant="default">{t("{n} chờ", { n: stats.pending })}</Badge>
+              )}
+              {stats.uploading > 0 && (
+                <Badge variant="warning">
+                  {t("{n} đang tải", { n: stats.uploading })}
+                </Badge>
+              )}
+              {stats.done > 0 && (
+                <Badge variant="success">{t("{n} xong", { n: stats.done })}</Badge>
+              )}
+              {stats.error > 0 && (
+                <Badge variant="danger">{t("{n} lỗi", { n: stats.error })}</Badge>
+              )}
             </div>
           )}
         </div>
@@ -542,44 +614,52 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            Giá trị mặc định (áp dụng cho file mới)
+            {t("Giá trị mặc định (áp dụng cho file mới)")}
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Nhãn mặc định</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t("Nhãn mặc định")}</label>
               <div className="flex items-center space-x-2">
                 <input
                   type="text"
                   value={defaultLabel}
-                  onChange={(e) => setDefaultLabel(e.target.value)}
-                  placeholder="ví dụ: đi bộ"
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setDefaultLabel(next);
+                    setDefaultClassUid(catalog.find((c) => c.label_original === next)?.class_uid);
+                  }}
+                  placeholder={t("ví dụ: đi bộ")}
+                  list="upload-label-catalog"
                   className="input text-sm flex-1"
                 />
+                <button type="button" onClick={() => setShowCreateLabelModal(true)} className="shrink-0 rounded-lg border border-ctu-blue px-2 py-2 text-xs font-medium text-ctu-blue hover:bg-ctu-blue/10">
+                  {t("Tạo nhãn mới")}
+                </button>
                 <SpeechInputButton
-                  onText={(text) => setDefaultLabel(text)}
-                  title="Dùng giọng nói để điền nhãn mặc định"
+                  onText={(text) => { setDefaultLabel(text); setDefaultClassUid(catalog.find((c) => c.label_original === text)?.class_uid); }}
+                  title={t("Dùng giọng nói để điền nhãn mặc định")}
                 />
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Người ký hiệu</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t("Người ký hiệu")}</label>
               <div className="flex items-center space-x-2">
                 <input
                   type="text"
                   value={defaultUser}
                   onChange={(e) => setDefaultUser(e.target.value)}
-                  placeholder="ví dụ: Trân"
+                  placeholder={t("ví dụ: Trân")}
                   className="input text-sm flex-1"
                   onBlur={() => rememberUser(defaultUser)}
                 />
                 <SpeechInputButton
                   onText={(text) => setDefaultUser(text)}
-                  title="Dùng giọng nói để điền tên người ký hiệu"
+                  title={t("Dùng giọng nói để điền tên người ký hiệu")}
                 />
               </div>
               {recentUsers.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-blue-700">
-                  <span className="text-blue-500">Gợi ý:</span>
+                  <span className="text-blue-500">{t("Gợi ý:")}</span>
                   {recentUsers.map((name) => (
                     <button
                       type="button"
@@ -594,7 +674,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               )}
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Bộ ngôn ngữ</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t("Bộ ngôn ngữ")}</label>
               <select
                 value={defaultDialect}
                 onChange={(e) => {
@@ -603,25 +683,51 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                     setShowAddDialectModal(true);
                   } else {
                     setDefaultDialect(v);
+                    setDefaultClassUid(undefined);
                   }
                 }}
                 className="input text-sm"
               >
                 {dialectList.map(d => <option key={d} value={d}>{d}</option>)}
-                <option value="__add_new__">+ Thêm mới...</option>
+                <option value="__add_new__">{t("+ Thêm mới...")}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t("Phạm vi dữ liệu")}</label>
+              <select className="input text-sm" value={visibility} onChange={(e) => setVisibility(e.target.value as typeof visibility)}>
+                <option value="private">{t("Riêng tư")}</option>
+                <option value="tenant">{t("Cả tổ chức")}</option>
+                <option value="community">{t("Cộng đồng")}</option>
               </select>
             </div>
           </div>
         </div>
 
+        <datalist id="upload-label-catalog">
+          {catalog.map((c) => <option key={c.class_uid} value={c.label_original} />)}
+        </datalist>
+
+        <CreateLabelModal
+          isOpen={showCreateLabelModal}
+          onClose={() => setShowCreateLabelModal(false)}
+          initialDialect={defaultDialect || "common"}
+          onCreated={(row) => {
+            setDefaultLabel(row.label_original);
+            setDefaultClassUid(row.class_uid);
+            setDefaultDialect(row.dialect || defaultDialect || "common");
+            setCatalog((prev) => [{ class_uid: row.class_uid, label_original: row.label_original }, ...prev.filter((c) => c.class_uid !== row.class_uid)]);
+          }}
+        />
+
         <AddDialectModal
           isOpen={showAddDialectModal}
           onClose={() => setShowAddDialectModal(false)}
-          onAdd={(name) => {
-            const updated = Array.from(new Set([...dialectList, name]));
-            setDialectList(updated);
-            setDefaultDialect(name);
-            localStorage.setItem('dialectList', JSON.stringify(updated));
+          onAdd={(dialectId) => {
+            // The server accepted the proposal (status pending) and the modal
+            // hands back the SLUG. Refresh the registry so the picker — which
+            // is now derived from it — includes the new entry.
+            setDefaultDialect(dialectId);
+            void refreshRegistry();
           }}
         />
         
@@ -653,28 +759,28 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
             </div>
             
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              Kéo thả video vào đây
+              {t("Kéo thả video vào đây")}
             </h3>
-            <p className="text-sm text-gray-600 mb-6">hoặc chọn từ máy tính</p>
+            <p className="text-sm text-gray-600 mb-6">{t("hoặc chọn từ máy tính")}</p>
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 mb-4">
               <Button onClick={() => triggerFilePicker(false)} variant="primary" className="shadow-md w-full sm:w-auto">
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
-                Chọn file
+                {t("Chọn file")}
               </Button>
               <Button onClick={() => triggerFilePicker(true)} variant="secondary" className="shadow-md w-full sm:w-auto">
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                 </svg>
-                Chọn thư mục
+                {t("Chọn thư mục")}
               </Button>
               <Button
                 onClick={() => csvInputRef.current?.click()}
                 variant="secondary"
                 className="shadow-md w-full sm:w-auto"
-                title="Import CSV để ánh xạ label hàng loạt. Format: filename,label,user,dialect"
+                title={t("Import CSV để ánh xạ label hàng loạt. Format: filename,label,user,dialect")}
               >
                 <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -692,11 +798,12 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
             
             <div className="flex flex-col sm:flex-row items-center justify-center gap-2 text-xs text-gray-500 text-center sm:text-left">
               <p>
-                Hỗ trợ: MP4, MOV, AVI, WMV, MKV, WebM • Tối đa 100MB/file
+                {t("Hỗ trợ: MP4, MOV, AVI, WMV, MKV, WebM • Tối đa 100MB/file")}
               </p>
               <span className="text-gray-400 hidden sm:inline">•</span>
               <p className="text-ctu-blue font-medium">
-                Có thể import CSV trước hoặc sau đều được
+                <LightbulbIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" />
+                {t("Có thể import CSV trước hoặc sau đều được")}
               </p>
             </div>
           </div>
@@ -708,25 +815,27 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
         <div className="card card-compact">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">
-              Danh sách file ({files.length})
+              {t("Danh sách file ({n})", { n: files.length })}
             </h3>
             <div className="flex flex-wrap items-center gap-2">
               {selectedIds.size > 0 ? (
                 <>
-                  <span className="text-sm text-gray-600">{selectedIds.size} đã chọn</span>
+                  <span className="text-sm text-gray-600">
+                    {t("{n} đã chọn", { n: selectedIds.size })}
+                  </span>
                   <Button onClick={() => setShowBulkEdit(!showBulkEdit)} variant="secondary" className="text-xs">
-                    Sửa hàng loạt
+                    {t("Sửa hàng loạt")}
                   </Button>
                   <Button onClick={removeSelected} variant="danger" className="text-xs">
-                    Xóa đã chọn
+                    {t("Xóa đã chọn")}
                   </Button>
                   <Button onClick={deselectAll} variant="secondary" className="text-xs">
-                    Bỏ chọn
+                    {t("Bỏ chọn")}
                   </Button>
                 </>
               ) : (
                 <Button onClick={selectAll} variant="secondary" className="text-xs">
-                  Chọn tất cả
+                  {t("Chọn tất cả")}
                 </Button>
               )}
             </div>
@@ -736,15 +845,15 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           {showBulkEdit && selectedIds.size > 0 && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
               <h4 className="text-sm font-semibold text-gray-900 mb-3">
-                Áp dụng cho {selectedIds.size} file đã chọn:
+                {t("Áp dụng cho {n} tệp đã chọn:", { n: selectedIds.size })}
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Nhãn</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{t("Nhãn")}</label>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
-                      placeholder="Nhập nhãn mới"
+                      placeholder={t("Nhập nhãn mới")}
                       className="input text-sm flex-1"
                       id="bulk-label-input"
                     />
@@ -756,16 +865,16 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       variant="primary"
                       className="text-xs"
                     >
-                      Áp dụng
+                      {t("Áp dụng")}
                     </Button>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Người ký hiệu</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{t("Người ký hiệu")}</label>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
-                      placeholder="Nhập tên người ký hiệu"
+                      placeholder={t("Nhập tên người ký hiệu")}
                       className="input text-sm flex-1"
                       id="bulk-user-input"
                     />
@@ -777,12 +886,12 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       variant="primary"
                       className="text-xs"
                     >
-                      Áp dụng
+                      {t("Áp dụng")}
                     </Button>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Bộ ngôn ngữ</label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">{t("Bộ ngôn ngữ")}</label>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <select className="input text-sm flex-1" id="bulk-dialect-select">
                       {dialectList.map(d => <option key={d} value={d}>{d}</option>)}
@@ -795,7 +904,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       variant="primary"
                       className="text-xs"
                     >
-                      Áp dụng
+                      {t("Áp dụng")}
                     </Button>
                   </div>
                 </div>
@@ -807,18 +916,18 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           {stats.validationErrors.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
               <h4 className="text-sm font-semibold text-red-900 mb-2">
-                <AlertTriangleIcon className="mr-1 inline-block h-4 w-4 align-text-bottom" />
-            Có {stats.validationErrors.length} lỗi cần sửa trước khi upload:
+                <AlertTriangleIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" />
+                {t("Có {n} lỗi cần sửa trước khi upload:", { n: stats.validationErrors.length })}
               </h4>
               <ul className="text-xs text-red-800 space-y-1">
                 {stats.validationErrors.slice(0, 5).map((err, idx) => (
                   <li key={idx}>
-                    • File "{files.find(f => f.id === err.fileId)?.file.name}": {err.message}
+                    • File "{files.find(f => f.id === err.fileId)?.file.name}": {t(err.message)}
                   </li>
                 ))}
                 {stats.validationErrors.length > 5 && (
                   <li className="text-red-600 font-medium">
-                    ... và {stats.validationErrors.length - 5} lỗi khác
+                    {t("... và {n} lỗi khác", { n: stats.validationErrors.length - 5 })}
                   </li>
                 )}
               </ul>
@@ -838,12 +947,12 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       className="rounded"
                     />
                   </th>
-                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">File</th>
-                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Nhãn</th>
-                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Người ký hiệu</th>
-                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Bộ ngôn ngữ</th>
-                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">Trạng thái</th>
-                  <th className="px-2 sm:px-3 py-2 text-right text-xs font-medium text-gray-700 whitespace-nowrap">Thao tác</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">{t("Tệp")}</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">{t("Nhãn")}</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">{t("Người ký hiệu")}</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">{t("Bộ ngôn ngữ")}</th>
+                  <th className="px-2 sm:px-3 py-2 text-left text-xs font-medium text-gray-700 whitespace-nowrap">{t("Trạng thái")}</th>
+                  <th className="px-2 sm:px-3 py-2 text-right text-xs font-medium text-gray-700 whitespace-nowrap">{t("Thao tác")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -895,7 +1004,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           type="text"
                           value={item.label}
                           onChange={(e) => updateFile(item.id, { label: e.target.value })}
-                          placeholder="Nhãn..."
+                          placeholder={t("Nhãn...")}
                           className={`input text-sm w-full ${hasError && !item.label ? 'border-red-300 bg-red-50' : ''}`}
                           disabled={item.status === 'uploading' || item.status === 'done'}
                         />
@@ -905,7 +1014,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                           type="text"
                           value={item.user}
                           onChange={(e) => updateFile(item.id, { user: e.target.value })}
-                          placeholder="Tên người ký hiệu..."
+                          placeholder={t("Tên người ký hiệu...")}
                           className={`input text-sm w-full ${hasError && !item.user ? 'border-red-300 bg-red-50' : ''}`}
                           disabled={item.status === 'uploading' || item.status === 'done'}
                         />
@@ -923,11 +1032,11 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       <td className="px-2 sm:px-3 py-2">
                         <div className="flex flex-col space-y-1">
                           <Badge variant={badge.variant} size="sm">
-                            {badge.text}
+                            {t(badge.text)}
                           </Badge>
                           {item.message && (
-                            <span className="text-xs text-gray-600 truncate" title={item.message}>
-                              {item.message}
+                            <span className="text-xs text-gray-600 truncate" title={t(item.message)}>
+                              {t(item.message)}
                             </span>
                           )}
                           {item.status === 'uploading' && item.progress !== undefined && (
@@ -947,7 +1056,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                               onClick={() => uploadSingle(item)}
                               className="text-xs text-ctu-blue hover:text-ctu-navy font-medium"
                             >
-                              Thử lại
+                              {t("Thử lại")}
                             </button>
                           )}
                           {item.status !== 'uploading' && (
@@ -955,7 +1064,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                               onClick={() => removeFile(item.id)}
                               className="text-xs text-red-600 hover:text-red-700 font-medium"
                             >
-                              Xóa
+                              {t("Xóa")}
                             </button>
                           )}
                         </div>
@@ -971,12 +1080,12 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
           <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pt-4 border-t border-gray-200">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
               <div className="text-sm text-gray-600">
-                <span className="font-medium">{stats.pending}</span> file chờ upload
+                <span className="font-medium">{stats.pending}</span> {t("file chờ upload")}
               </div>
               {stats.validationErrors.length > 0 && (
                 <div className="text-sm text-red-600 font-medium">
-                  <AlertTriangleIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" />
-                {stats.validationErrors.length} lỗi
+                  <AlertTriangleIcon className="inline h-4 w-4 mr-1 -mt-0.5"  aria-hidden="true" />
+                  {t("{n} lỗi", { n: stats.validationErrors.length })}
                 </div>
               )}
             </div>
@@ -985,7 +1094,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               {stats.total > 0 && (
                 <Button
                   onClick={() => {
-                    if (window.confirm(`Xóa tất cả ${files.length} file?`)) {
+                    if (window.confirm(t("Xóa tất cả {length} file?", { length: files.length }))) {
                       setFiles([]);
                       setSelectedIds(new Set());
                     }
@@ -994,7 +1103,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                   disabled={uploadingAll}
                   className="w-full sm:w-auto"
                 >
-                  Xóa tất cả
+                  {t("Xóa tất cả")}
                 </Button>
               )}
               <Button
@@ -1010,7 +1119,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Đang upload ({stats.uploading}/{stats.total})
+                    {t("Đang upload ({dang}/{tong})", { dang: stats.uploading, tong: stats.total })}
                   </>
                 ) : (
                   <>
@@ -1038,14 +1147,14 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-              Cài đặt nâng cao
+              {t("Cài đặt nâng cao")}
             </button>
             
             {showAdvanced && (
               <div className="mt-3 bg-gray-50 rounded-lg p-3 sm:p-4">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                   <label className="text-sm font-medium text-gray-700">
-                    Số luồng upload đồng thời:
+                    {t("Số luồng upload đồng thời:")}
                   </label>
                   <input
                     type="range"
@@ -1060,7 +1169,10 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                   </span>
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
-                  Tăng số luồng để upload nhanh hơn (khuyến nghị: 3-5). Quá cao có thể gây lỗi server.
+                  <Trans
+                    k="Trong mạng nội bộ: 3-5 luồng cho nhanh. Qua tên miền công khai (tunnel/proxy): để {so} — băng thông tải lên không tăng theo số luồng, chỉ bị chia nhỏ, nên mỗi file lâu hơn và dễ bị proxy ngắt giữa chừng."
+                    vars={{ so: <strong>1</strong> }}
+                  />
                 </p>
               </div>
             )}

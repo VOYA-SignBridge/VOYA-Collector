@@ -38,10 +38,15 @@ def _load(name: str):
         return list(csv.DictReader(f))
 
 
+#: Xem `test_research_suites.EXIT_SKIP`. Trả 0 ở đây là nói "đã kiểm và đạt"
+#: trong khi thật ra chưa kiểm gì — bảng kết quả không phân biệt được.
+EXIT_SKIP = 77
+
+
 def main() -> int:
     if not SPLIT_DIR.exists():
         print(f"SKIP: {SPLIT_DIR} not generated (run make_splits --dataset_manifest ... first)")
-        return 0
+        return EXIT_SKIP
 
     train, val, test = _load("train"), _load("val"), _load("test")
     print("[P1 subset semantics on real split]")
@@ -85,3 +90,39 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# Vỏ pytest, và ĐÍNH CHÍNH cho bản đầu của chú thích này.
+#
+# Bản đầu viết rằng tệp này "chưa từng được kiểm trong CI". SAI. Nó nằm trong
+# `conftest.STANDALONE_SUITES` từ trước, và `test_research_suites.py` chạy nó
+# như một TIẾN TRÌNH CON, lấy mã thoát làm phán quyết. Phép quét AST chỉ đo
+# được "pytest thu 0 hàm test_* từ tệp này" — đúng, nhưng KHÔNG đồng nghĩa với
+# "không chạy", vì bộ chạy nằm ở chỗ khác.
+#
+# Vỏ này vẫn có ích, chỉ là vì lý do khiêm tốn hơn: gọi thẳng
+# `pytest <tệp này>` giờ chạy được thay vì thu 0 ca. Bộ chạy thật vẫn là
+# `test_research_suites.py`.
+#
+# Chốt `assert PASSED or FAILED` thì đáng giữ, và nó đã bắt được một ca thật:
+# một kịch bản in "SKIP:" rồi `return 0` sẽ thành XANH ở CẢ HAI đường.
+# ---------------------------------------------------------------------------
+
+def test_toan_bo_kich_ban() -> None:
+    # `main()` in "SKIP:" rồi TRẢ VỀ 0 khi split chưa được dựng. Với mã thoát
+    # thì 0 là đạt, nên nối thẳng vào pytest sẽ biến "chưa kiểm gì" thành một
+    # ca xanh — đúng thứ vỏ bọc này sinh ra để chấm dứt. Bỏ qua thật thì hiện
+    # ra là BỎ QUA, và người đọc bảng kết quả biết mình đang thiếu gì.
+    if not SPLIT_DIR.exists():
+        import pytest
+
+        pytest.skip(
+            f"chưa dựng split {SPLIT_DIR.name} trên máy này — dựng bằng "
+            f"`make_splits.py --dataset_manifest ... --output_version "
+            f"{SPLIT_DIR.name}` rồi chạy lại")
+
+    ma = main()
+    assert PASSED or FAILED, (
+        "không ca nào chạy — kịch bản trả về xanh mà chưa kiểm gì cả")
+    assert ma == 0, "; ".join(f"{n}: {d}" for n, d in FAILED)

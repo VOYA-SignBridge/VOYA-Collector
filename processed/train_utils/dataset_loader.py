@@ -36,6 +36,8 @@ try:
 except Exception:  # pragma: no cover - v1 runs must not depend on this
     _fv2 = None  # type: ignore
 
+from . import signer_identity as _signer_identity
+
 _DEFAULT_FEATURE_VERSION = os.environ.get("VOYA_FEATURE_VERSION", "v1").strip() or "v1"
 
 
@@ -68,6 +70,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         feature_key_priority: Optional[List[str]] = None,
         dtype: str = "float32",
         augment_fn: Optional[Any] = None,
+        class_uid_to_target_idx: Optional[Dict[str, int]] = None,
         feature_version: Optional[str] = None,
     ) -> None:
         self.feature_version = (feature_version or _DEFAULT_FEATURE_VERSION)
@@ -85,7 +88,36 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             _EXPECTED_FEATURE_DIM if self.feature_version == "v1"
             else _fv2.feature_dim(self.feature_version)
         )
+
+        # `class_uid_to_target_idx` BẬT chế độ VẬN HÀNH, và nó thay đổi hẳn
+        # cách một hàng thành nhãn: `row['class_uid']` tra thẳng vào ánh xạ do
+        # split KHAI BÁO. Không nhìn `label_key`, không nhìn `class_idx`, không
+        # đọc `labels.csv`.
+        #
+        # Vì sao phải cắt cả ba: mỗi cái là một nguồn sự thật cạnh tranh, và
+        # cả ba đều sai theo cách im lặng.
+        #   `label_key`   = `vn/<dialect>/<slug>` — KHÔNG chứa region, trong khi
+        #                   CSDL cho phép `ăn|bac` và `ăn|nam` cùng dialect. Hai
+        #                   lớp hợp lệ gộp làm một, không lỗi, không cảnh báo.
+        #   `class_idx-1` = định danh danh mục TOÀN CỤC và THƯA. `{17,103,812}`
+        #                   thành `{16,102,811}` trong khi `num_classes = 3`.
+        #   `labels.csv`  = từ vựng HIỆN TẠI, không phải từ vựng lúc huấn luyện.
+        #                   Một checkpoint cũ sẽ bị giải mã bằng danh mục mới.
+        #
+        # `None` giữ nguyên toàn bộ hành vi cũ cho đường nghiên cứu/legacy —
+        # các hiện vật đã đóng băng cần đúng hành vi lịch sử để tái lập được.
+        self._declared_mapping: Optional[Dict[str, int]] = (
+            dict(class_uid_to_target_idx) if class_uid_to_target_idx else None
+        )
         self.csv_path = Path(csv_path)
+        # Whether the caller NAMED a features root, as opposed to us guessing one.
+        # An explicit root has to outrank the `file_path` column (see
+        # _resolve_feature_path): a split CSV carries the path the features had
+        # when the split was made, so any experiment that swaps the feature tree
+        # — a preprocessing ablation, a rebuilt corpus, a restored backup — was
+        # silently reading the ORIGINAL tree while believing otherwise, and both
+        # arms came out identical for the most convincing possible reason.
+        self.root_is_explicit = bool(root)
         if root:
             self.root = Path(root)
         else:
@@ -120,14 +152,12 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         # mục không đổi trong một lần chạy nên nhớ luôn kết quả theo chỉ số dòng.
         self._path_cache: Dict[int, Path] = {}
 
-        self._legacy_signer_map: Dict[str, str] = {}
-        try:
-            mapping_path = Path(__file__).resolve().parents[2] / 'config' / 'legacy_signer_mapping.json'
-            raw_map = json.loads(mapping_path.read_text(encoding='utf-8'))
-            self._legacy_signer_map = dict(raw_map.get('legacy_name_to_signer_id') or {})
-        except Exception:
-            # Không có bảng gộp thì giữ nguyên tên thô — hành vi như trước.
-            self._legacy_signer_map = {}
+        # Bảng gộp nạp qua `signer_identity`, KHÔNG đọc lại tệp ở đây.
+        # `routers/training` hỏi cùng câu hỏi "ai ký hàng này" để nói cho người
+        # dùng biết con số họ sắp đọc đo trên ai; hai bản cài đặt của cùng một
+        # định nghĩa thì trôi lệch được, và khi lệch thì giao diện nói một đằng
+        # còn mô hình học một nẻo mà không có gì đỏ.
+        self._legacy_signer_map: Dict[str, str] = _signer_identity.load_legacy_signer_map()
         self.feature_key_priority = feature_key_priority or [
             'sequence',
             'features', 'x', 'data', 'arr_0'
@@ -137,61 +167,72 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         self.label_to_index: Dict[str, int] = {}
         self.index_to_label: Dict[int, Dict[str, str]] = {}
         self._class_idx_to_label: Dict[int, Dict[str, str]] = {}
-        if label_to_index_json:
-            l2i_path = Path(label_to_index_json)
+        if self._declared_mapping is not None:
+            # CHẾ ĐỘ VẬN HÀNH: ánh xạ đã được resolve ở tầng trên và truyền
+            # thẳng vào đây. Không đi tìm ở đâu nữa — mỗi chỗ tìm là một
+            # nguồn sự thật cạnh tranh. Xem chú thích ở __init__.
+            self.label_to_index = dict(self._declared_mapping)
+            self.index_to_label = {
+                int(v): {'label_key': k, 'class_uid': k, 'label_slug': '',
+                         'label_original': '', 'language': 'vn', 'dialect': ''}
+                for k, v in self._declared_mapping.items()
+            }
         else:
+            if label_to_index_json:
+                l2i_path = Path(label_to_index_json)
+            else:
+                try:
+                    from train_model.dataset_versioning import get_analysis_dir
+                    l2i_path = get_analysis_dir() / 'label_to_index.json'
+                except Exception:
+                    l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
+            i2l_path = l2i_path.with_name('index_to_label.json')
             try:
-                from train_model.dataset_versioning import get_analysis_dir
-                l2i_path = get_analysis_dir() / 'label_to_index.json'
+                self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))
             except Exception:
-                l2i_path = Path(__file__).resolve().parents[1] / 'analysis' / 'label_to_index.json'
-        i2l_path = l2i_path.with_name('index_to_label.json')
-        try:
-            self.label_to_index = json.loads(l2i_path.read_text(encoding='utf-8'))
-        except Exception:
-            self.label_to_index = {}
-        try:
-            raw = json.loads(i2l_path.read_text(encoding='utf-8'))
-            # keys may be strings in json; convert to int
-            self.index_to_label = {int(k): v for k, v in raw.items()}
-        except Exception:
-            self.index_to_label = {}
+                self.label_to_index = {}
+            try:
+                raw = json.loads(i2l_path.read_text(encoding='utf-8'))
+                # keys may be strings in json; convert to int
+                self.index_to_label = {int(k): v for k, v in raw.items()}
+            except Exception:
+                self.index_to_label = {}
 
-        # fallback to labels.csv if mapping JSON is missing or empty
-        if not self.label_to_index:
-            try:
-                from train_model.dataset_versioning import get_labels_csv, get_data_root
-                labels_csv = get_labels_csv(get_data_root())
-            except Exception:
-                labels_csv = Path(__file__).resolve().parents[1].parent / 'dataset' / 'labels.csv'
-            if labels_csv.exists():
-                with labels_csv.open('r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for r in reader:
-                        try:
-                            class_idx = int((r.get('class_idx') or '').strip())
-                        except Exception:
-                            continue
-                        slug = (r.get('slug') or '').strip()
-                        language = (r.get('language') or 'vn').strip()
-                        dialect = (r.get('dialect') or '').strip()
-                        label_key = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
-                        self.label_to_index[label_key] = class_idx - 1
-                        self._class_idx_to_label[class_idx] = {
-                            'label_key': label_key,
-                            'label_slug': slug,
-                            'label_original': (r.get('label_original') or '').strip(),
-                            'language': language,
-                            'dialect': dialect,
-                        }
-                if self.label_to_index:
-                    self.index_to_label = {v: {
-                        'label_key': k,
-                        'label_slug': (self._class_idx_to_label.get(v + 1, {}).get('label_slug') or ''),
-                        'label_original': (self._class_idx_to_label.get(v + 1, {}).get('label_original') or ''),
-                        'language': (self._class_idx_to_label.get(v + 1, {}).get('language') or 'vn'),
-                        'dialect': (self._class_idx_to_label.get(v + 1, {}).get('dialect') or ''),
-                    } for k, v in self.label_to_index.items()}
+            # fallback to labels.csv if mapping JSON is missing or empty
+            if not self.label_to_index:
+                try:
+                    from train_model.dataset_versioning import get_labels_csv, get_data_root
+                    labels_csv = get_labels_csv(get_data_root())
+                except Exception:
+                    labels_csv = Path(__file__).resolve().parents[1].parent / 'dataset' / 'labels.csv'
+                if labels_csv.exists():
+                    with labels_csv.open('r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for r in reader:
+                            try:
+                                class_idx = int((r.get('class_idx') or '').strip())
+                            except Exception:
+                                continue
+                            slug = (r.get('slug') or '').strip()
+                            language = (r.get('language') or 'vn').strip()
+                            dialect = (r.get('dialect') or '').strip()
+                            label_key = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
+                            self.label_to_index[label_key] = class_idx - 1
+                            self._class_idx_to_label[class_idx] = {
+                                'label_key': label_key,
+                                'label_slug': slug,
+                                'label_original': (r.get('label_original') or '').strip(),
+                                'language': language,
+                                'dialect': dialect,
+                            }
+                    if self.label_to_index:
+                        self.index_to_label = {v: {
+                            'label_key': k,
+                            'label_slug': (self._class_idx_to_label.get(v + 1, {}).get('label_slug') or ''),
+                            'label_original': (self._class_idx_to_label.get(v + 1, {}).get('label_original') or ''),
+                            'language': (self._class_idx_to_label.get(v + 1, {}).get('language') or 'vn'),
+                            'dialect': (self._class_idx_to_label.get(v + 1, {}).get('dialect') or ''),
+                        } for k, v in self.label_to_index.items()}
 
         # load CSV rows
         with self.csv_path.open('r', encoding='utf-8') as f:
@@ -230,6 +271,12 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
 
         # normalize labels to 0-based if inputs are 1-based
         self._label_offset = 0
+        if self._declared_mapping is not None:
+            # Ánh xạ đã khai LUÔN là 0..K-1 (`consume_declared` từ chối nếu
+            # không). Suy đoán offset ở đây sẽ là một phép sửa lên một giá trị
+            # đã đúng — và nếu suy sai thì mọi nhãn lệch đi một, âm thầm.
+            self._label_offset = 0
+            return
         try:
             if self.label_to_index:
                 vals = list(self.label_to_index.values())
@@ -254,6 +301,27 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         return len(self.rows)
 
     def _resolve_target(self, row: Dict[str, str]) -> int:
+        # CHẾ ĐỘ VẬN HÀNH: một đường, không có đường thứ hai.
+        #
+        # Cố ý KHÔNG rơi sang `label_key`, `class_idx` hay `labels.csv` khi tra
+        # trượt. Rơi sang được nghĩa là một hàng lạ vẫn học được dưới một nhãn
+        # đoán ra — và đó chính là cách ba nguồn sự thật cũ cùng tồn tại mà
+        # không ai phát hiện.
+        if self._declared_mapping is not None:
+            uid = (row.get('class_uid') or '').strip()
+            if not uid:
+                raise ValueError(
+                    "hàng không có `class_uid` trong khi split khai chế độ vận "
+                    "hành — danh tính lớp phải là class_uid, không suy từ "
+                    "slug/dialect/region")
+            idx = self._declared_mapping.get(uid)
+            if idx is None:
+                raise ValueError(
+                    f"class_uid {uid!r} không nằm trong ánh xạ đã khai của split. "
+                    f"Không đoán nhãn thay: hãy chia lại split, hoặc bỏ hàng này "
+                    f"khỏi split một cách tường minh.")
+            return int(idx)
+
         # Prefer explicit label_key (language/dialect/slug) via mapping.
         label_key = (row.get('label_key') or '').strip()
         if label_key and self.label_to_index:
@@ -296,7 +364,35 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
             return (parts[0], '')
         return (default_language, '')
 
+    def _root_relative_candidate(self, row: Dict[str, str]) -> Optional[Path]:
+        """Where this row's file would live under an explicitly named root."""
+        folder_name = (row.get('folder_name') or '').strip()
+        file_name = (row.get('file') or '').strip()
+        if not folder_name or not file_name:
+            return None
+        language = (row.get('language') or 'vn').strip() or 'vn'
+        dialect = (row.get('dialect') or '').strip()
+        if not dialect:
+            lk = (row.get('label_key') or '').strip()
+            _, inferred = self._infer_language_dialect_from_label_key(lk, default_language=language)
+            dialect = (inferred or '').strip()
+        return self.root / language / (dialect or 'common') / folder_name / file_name
+
     def _resolve_feature_path(self, row: Dict[str, str]) -> Path:
+        # An explicitly requested root wins over the CSV's remembered path.
+        # Without this, `--features_root` is accepted, reported in the run
+        # config, and then ignored for every row whose `file_path` still
+        # resolves — which is every row of a freshly built split.
+        if getattr(self, 'root_is_explicit', False):
+            relative = Path((row.get('file_path') or '').strip().replace('\\', '/'))
+            if str(relative) != '.' and not relative.is_absolute():
+                portable = (self.root / relative).resolve()
+                if portable.is_relative_to(self.root.resolve()) and portable.is_file():
+                    return portable
+            cand = self._root_relative_candidate(row)
+            if cand is not None and cand.exists():
+                return cand
+
         file_path = (row.get('file_path') or '').strip()
         if file_path:
             candidate = Path(file_path)
@@ -329,6 +425,19 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         else:
             # dialect missing: try language/common
             candidates.append(self.root / language / 'common' / folder_name / file_name)
+        # Mẫu của tenant khác tenant khởi tạo: `file_path` tương đối tính từ gốc
+        # dataset (`features/_tenants/<tenant>/...`), hoặc dựng lại từ tenant_id.
+        # Cùng thứ tự với `_tenant_feature_candidates` trong train_tcn.py — bộ
+        # lọc ở đó giữ dòng nào thì ở đây phải mở được đúng tệp ấy.
+        rel = file_path.replace('\\', '/')
+        if rel and not rel.startswith('/'):
+            dataset_root = self.root.parent.resolve()
+            portable = (dataset_root / rel).resolve()
+            if portable.is_relative_to(dataset_root):
+                candidates.append(portable)
+        tenant = (row.get('tenant_id') or '').strip()
+        if tenant and tenant != 'default' and '/' not in tenant and dialect:
+            candidates.append(self.root / '_tenants' / tenant / language / dialect / folder_name / file_name)
 
         for cand in candidates:
             if cand.exists():
@@ -382,10 +491,7 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
         `user_id` ghi tên người ký thật, còn biến thể chính tả thì đã có bảng gộp
         được chủ dữ liệu xác nhận (xem scripts/migration/apply_signer_merges.py).
         """
-        raw = (row.get('user_id') or '').strip()
-        if raw:
-            return self._legacy_signer_map.get(raw, raw)
-        return (row.get('signer_id') or '').strip()
+        return _signer_identity.canonical_signer(row, self._legacy_signer_map)
 
     def _feature_path_for(self, idx: int, row: Dict[str, str]) -> Path:
         """_resolve_feature_path có nhớ kết quả — tránh stat() lại mỗi epoch."""
@@ -479,7 +585,25 @@ class NPZSignDataset(Dataset):  # type: ignore[misc]
                 )
 
         if self.feature_version != "v1" and _fv2.has_geometry(self.feature_version):
-            x = _fv2.append_geometry(x)
+            x = _fv2.append_geometry(x, self.feature_version)
+
+        # Chiều rộng CUỐI CÙNG, sau khi hình học đã nối thêm.
+        #
+        # `self.expected_feature_dim` từng LÀ phép kiểm shape ở `__getitem__`.
+        # Khi hình học được chuyển ra sau augmentation, hai phép kiểm ấy phải
+        # đổi sang hằng 126 (lúc đó mảng chưa nối hình học) — và thuộc tính này
+        # thành mã chết: được tính ra, không ai đọc. Nghĩa là không còn gì đối
+        # chiếu chiều rộng SAU cùng với phiên bản đặc trưng đã khai.
+        #
+        # `train_tcn` có kiểm ở dòng ~1709, nhưng chỉ trên lô đầu tiên và chỉ
+        # khi đi qua trainer. Loader còn được dùng ở chỗ khác — suy luận,
+        # `compute_pooled_confusion.py` — và ở đó không có gì cả.
+        if tuple(x.shape) != (_EXPECTED_SEQ_LEN, self.expected_feature_dim):
+            raise ValueError(
+                f"feature_version={self.feature_version} phải cho "
+                f"({_EXPECTED_SEQ_LEN}, {self.expected_feature_dim}) "
+                f"nhưng nhận {tuple(x.shape)} từ {path}"
+            )
 
         x = np.ascontiguousarray( x, dtype=np.float32 )
 

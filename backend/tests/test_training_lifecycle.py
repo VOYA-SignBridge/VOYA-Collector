@@ -21,18 +21,17 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.modules.identity import get_current_user, require_admin
+from app.auth import get_current_user, require_admin
 from app.routers import training as training_module
-from app.routers.training import (
-    SplitProvenance,
-    TrainingConfig,
-    TrainingJob,
-    router,
-    training_jobs,
-)
+from app.routers.training import TrainingConfig, TrainingJob, router, training_jobs
 
-USER = {"id": "u-1", "username": "researcher", "role": "user"}
-ADMIN = {"id": "a-1", "username": "boss", "role": "admin"}
+#: `tenant_id` bắt buộc từ nhóm B: `quota_deps.tenant_of` fail-closed khi bản
+#: ghi tài khoản không nói người gọi thuộc tổ chức nào. Trước đó `_row_to_user`
+#: bịa ra một tenant, nên một người dùng giả thiếu trường này vẫn đi lọt.
+USER = {"id": "u-1", "username": "researcher", "role": "user",
+        "tenant_id": "iso_a"}
+ADMIN = {"id": "a-1", "username": "boss", "role": "admin",
+         "tenant_id": "iso_a"}
 
 
 @pytest.fixture
@@ -50,21 +49,34 @@ def client(monkeypatch):
     monkeypatch.setattr(training_module, "_persist_job", _no_db_persist)
     # Every dialect is trainable unless a test says otherwise.
     monkeypatch.setattr(
-        training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 7}
+        training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 7}
     )
-    # Submission also fails closed on a split with no train/test samples
-    # (training.py's exploratory-path guard); stub a split with data so that
-    # guard doesn't fire on whatever's on disk in the test environment.
+    # Cổng sàn số mẫu đếm lớp trong phạm vi tenant ĐANG chạy. Trước khi fixture
+    # này đặt phạm vi, nó chạy ngoài mọi phạm vi và đếm ra một con số — bộ ca
+    # vẫn xanh mà không ai chọn tenant nào. Giờ phạm vi là `iso_a`, một tổ chức
+    # trống, nên phải nói rõ ý định thay vì dựa vào một lượt đếm không phạm vi.
     monkeypatch.setattr(
-        training_module,
-        "_effective_split_provenance",
-        lambda dialect=None: SplitProvenance(counts={"train": 100, "val": 20, "test": 20}),
+        training_module, "_eligible_class_counts",
+        lambda dialects, nguong: {d: 7 for d in dialects}
     )
 
+    # Đứng thay `TenantScopeMiddleware`, bằng CHÍNH hàm mà middleware gọi.
+    #
+    # Không phải mô phỏng: `bind_request_scope` là cơ chế thật, chỉ khác nguồn
+    # danh tính — ở đây là người dùng giả của bộ ca thay vì một token thật. Bộ
+    # ca này kiểm vòng đời job, không kiểm phân giải danh tính; chỗ kiểm điều
+    # đó là `test_c3_job_read_confinement.py`, và nó dùng tài khoản + token
+    # thật.
+    from app.tenant_context import bind_request_scope, unbind_request_scope
+
     training_jobs.clear()
-    with TestClient(app) as c:
-        yield c
-    training_jobs.clear()
+    tokens = bind_request_scope(USER["tenant_id"])
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        unbind_request_scope(tokens)
+        training_jobs.clear()
 
 
 def _config(**overrides) -> dict:
@@ -89,7 +101,14 @@ def _seed_job(job_id: str, status: str, **fields) -> TrainingJob:
         total_epochs=5,
         **fields,
     )
-    training_jobs[job_id] = {"job": job, "progress": []}
+    # ★ C3 — mục cache phải mang CHỦ SỞ HỮU.
+    #
+    # `_ensure_job_loaded` từ chối phục vụ một mục không thuộc phạm vi đang
+    # chạy, vì `training_jobs` là bộ nhớ chung của tiến trình và RLS không với
+    # tới nó. Một mục thiếu `tenant_id` bị coi như không có — cố ý: bản cũ để
+    # lại mục không chủ, và tin chúng là mở lại đúng lỗ vừa vá.
+    training_jobs[job_id] = {"job": job, "progress": [],
+                             "tenant_id": USER["tenant_id"]}
     return job
 
 
@@ -101,7 +120,7 @@ def test_submit_queues_job_and_dispatches_to_the_training_queue(client):
     with patch("app.training_tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config())
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body["status"] == "queued"
     assert body["id"]
@@ -150,7 +169,7 @@ def test_submit_marks_job_failed_when_the_queue_is_down(client, monkeypatch):
 
 def test_submit_rejects_dialects_without_enough_data(client, monkeypatch):
     """Caught up front — otherwise the trainer subprocess fails later with rc=1."""
-    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 1})
+    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 1})
 
     with patch("app.training_tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config(dialects=["hoa-de"]))
@@ -231,7 +250,7 @@ def test_research_mode_pins_provenance_from_the_chosen_split(client, monkeypatch
 def test_research_mode_skips_the_dialect_data_check(client, monkeypatch):
     """The split defines the data, so an unrelated empty dialect must not block it."""
     monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
-    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda: {"hoa-de": 1})
+    monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 1})
 
     with patch("app.training_tasks.run_training_job"):
         response = client.post(
@@ -257,6 +276,7 @@ def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
             "languages": ["vn"],
         },
         "metrics.jsonl",
+        tenant_id="iso_a",
     )
 
     assert "--run-purpose=research" in cmd
@@ -275,7 +295,8 @@ def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
 def test_exploratory_command_keeps_dialect_filters_and_stays_smoke_test():
     from app.training_tasks import _build_cmd
 
-    cmd = _build_cmd({"model_type": "tcn", "dialects": ["hoa-de"], "languages": ["vn"]}, "m.jsonl")
+    cmd = _build_cmd({"model_type": "tcn", "dialects": ["hoa-de"], "languages": ["vn"]},
+                     "m.jsonl", tenant_id="iso_a")
 
     assert "--dialect=hoa-de" in cmd
     assert not any(a.startswith("--run-purpose") for a in cmd)
@@ -353,6 +374,21 @@ def test_promote_rejects_a_missing_checkpoint(client):
     assert client.post("/training/jobs/j-done/promote").status_code == 404
 
 
+@pytest.fixture(autouse=True)
+def _tmp_path_is_a_trusted_checkpoint_root(tmp_path, monkeypatch):
+    """Let these fixtures write checkpoints where the loader will accept them.
+
+    Since B1, `checkpoint_io.load_checkpoint` refuses a path that resolves
+    outside the configured checkpoint roots — `torch.load` unpickles, so loading
+    a file from an arbitrary location is running code from it. Real jobs write to
+    OUTPUTS_DIR (verified against training_jobs on the deploy: every
+    checkpoint_path sits under /workspace/processed/train_utils/outputs), so
+    pointing that root at tmp_path keeps these tests inside the same trust
+    boundary production uses instead of switching the check off.
+    """
+    monkeypatch.setattr(training_module, "OUTPUTS_DIR", tmp_path)
+
+
 def _promotable_job(tmp_path: Path, job_id: str) -> Path:
     ckpt = tmp_path / f"{job_id}.pt"
     ckpt.write_bytes(b"not-a-real-checkpoint")
@@ -363,32 +399,14 @@ def _promotable_job(tmp_path: Path, job_id: str) -> Path:
 def test_promote_rejects_an_unrecognized_architecture(client, tmp_path):
     _promotable_job(tmp_path, "j-alien")
 
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value={"model_type": "Transformer"}):
+    with patch.object(training_module, "load_checkpoint", return_value={"model_type": "Transformer"}):
         response = client.post("/training/jobs/j-alien/promote")
 
     assert response.status_code == 400
     assert "Transformer" in response.json()["detail"]
 
 
-_REPRO_LABEL_KEYS = [
-    "vn/hoa_de/cat-dau-ca",
-    "vn/hoa_de/cat-ky",
-    "vn/hoa_de/danh-vay-ca",
-    "vn/hoa_de/lot-da-ca",
-    "vn/hoa_de/lot-vo-tom",
-    "vn/hoa_de/rang-muoi",
-    "vn/hoa_de/tom",
-]
-
-
 def _reproducible_ckpt(**overrides) -> dict:
-    """A checkpoint that satisfies all 14 criteria of evaluate_checkpoint().
-
-    C5/C6/C7/C12 read real files (manifest + split_metadata.json), so this
-    anchors dataset_version/split_version to hoa_de_strict_v22 — a real,
-    currently-frozen split verified intact by test_frozen_artifacts.py —
-    rather than a value evaluate_checkpoint() can't resolve on disk.
-    """
     ckpt = {
         "git_commit": "0475b78cabc9c35b3ab9345097a774f8b78818be",
         "seed": 42,
@@ -400,26 +418,11 @@ def _reproducible_ckpt(**overrides) -> dict:
             "deterministic_algorithms": True,
             "warnings": [],
         },
+        "dataset_version": "isds2026_v6",
+        "split_version": "hoa_de_loso_v5/test_S001",
+        "dataset_manifest_checksum": "a95bc6d1ed3b",
         "model_type": "TCN",
-        "recognition_profile": "hoa_de",
-        "include_common": False,
-        "dataset_version": "VSL2026_v22",
-        "split_version": "hoa_de_strict_v22",
-        "vocabulary_schema_version": "v2",
-        "normalization_version": "v2",
-        "seq_len": 60,
-        "feature_dim": 126,
         "num_classes": 7,
-        "preprocess_contract_version": "v2",
-        "storage_contract_version": "v2",
-        "motion_types_present": ["static", "dynamic"],
-        "dataset_manifest_checksum": (
-            "9f893cdc8ad8649902dfe09afa0133331f9106b967435a3cee2b1cad086ca13f"
-        ),
-        "label_to_idx": {key: i for i, key in enumerate(_REPRO_LABEL_KEYS)},
-        "idx_to_label": {i: {"label_key": key} for i, key in enumerate(_REPRO_LABEL_KEYS)},
-        "common_labels": [],
-        "profile_specific_labels": list(_REPRO_LABEL_KEYS),
         "runtime_env": {
             "python_version": "3.11.15",
             "pytorch_version": "2.0.0+cu117",
@@ -430,15 +433,6 @@ def _reproducible_ckpt(**overrides) -> dict:
             "criterion": "val_macro_f1",
             "restored_best_state": True,
             "best_epoch": 10,
-        },
-        "training_config": {
-            "augmentation": {
-                "augmentation_contract_version": "v2_wrist_centered_mirror",
-                "enabled": True,
-                "profile": "standard",
-                "mirror_prob": 0.5,
-                "p": 0.5,
-            },
         },
     }
     ckpt.update(overrides)
@@ -454,20 +448,20 @@ def test_provenance_is_unavailable_without_a_checkpoint(client):
 def test_provenance_is_unavailable_for_a_pre_provenance_checkpoint(client, tmp_path):
     """Older checkpoints predate provenance recording — say so, don't show blanks."""
     _promotable_job(tmp_path, "j-legacy")
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value={"model_type": "TCN"}):
+    with patch.object(training_module, "load_checkpoint", return_value={"model_type": "TCN"}):
         body = client.get("/training/jobs/j-legacy/provenance").json()
     assert body["available"] is False
 
 
 def test_provenance_reports_a_fully_reproducible_run(client, tmp_path):
     _promotable_job(tmp_path, "j-good")
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value=_reproducible_ckpt()):
+    with patch.object(training_module, "load_checkpoint", return_value=_reproducible_ckpt()):
         body = client.get("/training/jobs/j-good/provenance").json()
 
     assert body["available"] is True
     assert body["reproducible"] is True
     assert body["code"]["seed"] == 42
-    assert body["data"]["dataset_version"] == "VSL2026_v22"
+    assert body["data"]["dataset_version"] == "isds2026_v6"
     assert all(check["ok"] for check in body["checks"])
 
 
@@ -476,7 +470,7 @@ def test_provenance_flags_a_smoke_test_run_as_not_reproducible(client, tmp_path)
     _promotable_job(tmp_path, "j-smoke")
     ckpt = _reproducible_ckpt(run_purpose="smoke_test", dataset_manifest_checksum="")
 
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value=ckpt):
+    with patch.object(training_module, "load_checkpoint", return_value=ckpt):
         body = client.get("/training/jobs/j-smoke/provenance").json()
 
     assert body["reproducible"] is False
@@ -488,7 +482,7 @@ def test_provenance_values_are_scalars_the_ui_can_render(client, tmp_path):
     """Regression: determinism is a dict in the checkpoint and rendered as
     '[object Object]' if passed through untouched."""
     _promotable_job(tmp_path, "j-scalar")
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value=_reproducible_ckpt()):
+    with patch.object(training_module, "load_checkpoint", return_value=_reproducible_ckpt()):
         body = client.get("/training/jobs/j-scalar/provenance").json()
 
     for group in ("code", "data", "model"):
@@ -503,7 +497,7 @@ def test_provenance_summarizes_partial_determinism_with_warnings(client, tmp_pat
         determinism={"cudnn_deterministic": True, "deterministic_algorithms": False,
                      "warnings": ["cublas workspace unset"]}
     )
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value=ckpt):
+    with patch.object(training_module, "load_checkpoint", return_value=ckpt):
         body = client.get("/training/jobs/j-partial/provenance").json()
 
     assert body["code"]["determinism"] == "một phần (1 cảnh báo)"
@@ -528,7 +522,7 @@ def test_promote_accepts_every_trained_architecture(client, tmp_path, monkeypatc
         training_module, "_notify_realtime_service_reload", lambda *a, **k: True
     )
 
-    with patch.object(training_module.inference_service, "load_checkpoint", return_value={"model_type": model_type}), \
+    with patch.object(training_module, "load_checkpoint", return_value={"model_type": model_type}), \
          patch("app.training_tasks.backup_promoted_checkpoint_task"):
         response = client.post(f"/training/jobs/{job_id}/promote")
 

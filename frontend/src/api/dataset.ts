@@ -1,3 +1,5 @@
+import { tr } from "../i18n";
+import { friendlyError } from "../lib/errors";
 import axiosClient from "./axiosClient";
 import { validateLabels, validateSessions, validateLabel } from "./validators";
 import type { Result } from "./validators";
@@ -151,7 +153,7 @@ export const getClassesList = async (language?: string, dialect?: string): Promi
   }
 };
 
-export const registerClass = async (payload: { label: string; language?: string; dialect?: string; is_common_global?: boolean; is_common_language?: boolean; }): Promise<Result<ClassRow>> => {
+export const registerClass = async (payload: { label: string; language?: string; dialect?: string; is_common_global?: boolean; is_common_language?: boolean; region?: string; }): Promise<Result<ClassRow>> => {
   const res = await axiosClient.post('/classes/register', payload);
   const raw = res.data;
   // Try to normalize the returned registration into a ClassRow
@@ -228,7 +230,7 @@ export const updateClass = async (
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Unknown error",
+      error: err instanceof Error ? err.message : tr("Thao tác không thành công."),
     };
   }
 };
@@ -264,27 +266,27 @@ export const getClassTrash = async (): Promise<Result<TrashClass[]>> => {
     const items = Array.isArray(res.data?.items) ? (res.data.items as TrashClass[]) : [];
     return { ok: true, data: items };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Không đọc được thùng rác" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Không đọc được thùng rác") };
   }
 };
 
 export const restoreClass = async (classUid: string): Promise<Result<null>> => {
   try {
     const res = await axiosClient.post(`/classes/${classUid}/restore`);
-    if (res.data?.success === false) return { ok: false, error: res.data?.message || "Lỗi khôi phục" };
+    if (res.data?.success === false) return { ok: false, error: res.data?.message || tr("Lỗi khôi phục") };
     return { ok: true, data: null };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Lỗi khôi phục" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Lỗi khôi phục") };
   }
 };
 
 export const purgeClass = async (classUid: string): Promise<Result<null>> => {
   try {
     const res = await axiosClient.delete(`/classes/${classUid}/purge`);
-    if (res.data?.success === false) return { ok: false, error: res.data?.message || "Lỗi xóa vĩnh viễn" };
+    if (res.data?.success === false) return { ok: false, error: res.data?.message || tr("Lỗi xóa vĩnh viễn") };
     return { ok: true, data: null };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Lỗi xóa vĩnh viễn" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Lỗi xóa vĩnh viễn") };
   }
 };
 
@@ -295,7 +297,7 @@ const bulkCall = async (url: string, body: Record<string, unknown>): Promise<Res
     const res = await axiosClient.post(url, body);
     return { ok: true, data: { ok_count: res.data?.ok_count ?? 0, failed_count: res.data?.failed_count ?? 0 } };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Thao tác thất bại" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Thao tác thất bại") };
   }
 };
 
@@ -312,7 +314,7 @@ export const getSampleTrash = async (): Promise<Result<TrashSample[]>> => {
     const items = Array.isArray(res.data?.items) ? (res.data.items as TrashSample[]) : [];
     return { ok: true, data: items };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Không đọc được thùng rác mẫu" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Không đọc được thùng rác mẫu") };
   }
 };
 
@@ -321,7 +323,7 @@ export const restoreSample = async (sampleId: string): Promise<Result<null>> => 
     await axiosClient.post(`/dataset/samples/${sampleId}/restore`);
     return { ok: true, data: null };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Lỗi khôi phục mẫu" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Lỗi khôi phục mẫu") };
   }
 };
 
@@ -330,7 +332,7 @@ export const purgeSample = async (sampleId: string): Promise<Result<null>> => {
     await axiosClient.delete(`/dataset/samples/${sampleId}/purge`);
     return { ok: true, data: null };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Lỗi xóa vĩnh viễn mẫu" };
+    return { ok: false, error: err instanceof Error ? err.message : tr("Lỗi xóa vĩnh viễn mẫu") };
   }
 };
 
@@ -343,7 +345,7 @@ export const deleteClass = async (classRef: string): Promise<Result<{ message: s
       return {
         ok: true,
         data: {
-          message: data.message || "Nhãn được xóa thành công",
+          message: data.message || tr("Nhãn được xóa thành công"),
           deleted: true,
           class_uid: data.class_uid || "",
           class_idx: data.class_idx || 0,
@@ -357,10 +359,25 @@ export const deleteClass = async (classRef: string): Promise<Result<{ message: s
 
     return { ok: false, error: data.message || data.error || res.statusText };
   } catch (err) {
-    const errMessage = err instanceof Error ? err.message : "Unknown error";
+    const errMessage = err instanceof Error ? err.message : tr("Thao tác không thành công.");
     return {
       ok: false,
       error: errMessage,
     };
+  }
+};
+
+/** Contributor-safe label creation used by collection screens. */
+export const requestClass = async (payload: { label: string; language?: string; dialect?: string; is_common_language?: boolean; region?: string; }): Promise<Result<ClassRow>> => {
+  try {
+    const res = await axiosClient.post('/classes/request', payload);
+    const raw = res.data;
+    if (raw && typeof raw === 'object') return { ok: true, data: raw as ClassRow };
+    return { ok: false, error: 'Invalid request class response' } as Result<ClassRow>;
+  } catch (err) {
+    // `friendlyError`, không phải `err.message`: axios chỉ cho "Request failed
+    // with status code 422" và nuốt mất câu giải thích máy chủ đã soạn (vd. phương
+    // ngữ đã được gộp vào bảng chữ cái nên nhãn phải là một chữ cái).
+    return { ok: false, error: friendlyError(err, tr('Không thể tạo nhãn.')) };
   }
 };

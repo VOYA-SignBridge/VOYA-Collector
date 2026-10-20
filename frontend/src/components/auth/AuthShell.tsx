@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useI18n } from "../../i18n";
 
 interface AuthShellProps {
   title: string;
@@ -11,11 +12,12 @@ interface AuthShellProps {
  * centered glass card carrying the real CTU seal.
  */
 export default function AuthShell({ title, children, footer }: AuthShellProps) {
+  const { t } = useI18n();
   return (
     <div className="relative min-h-dvh bg-ctu-navy font-display">
       <div className="absolute inset-0 overflow-hidden">
         <img
-          src="/background.png"
+          src="background.png"
           alt=""
           aria-hidden="true"
           className="h-full w-full scale-105 object-cover blur-[2px] saturate-[1.05]"
@@ -29,18 +31,18 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
             <div className="px-6 pb-5 pt-7 sm:px-10 sm:pb-6 sm:pt-8">
               <div className="flex flex-col items-center text-center">
                 <img
-                  src="/logo.png"
-                  alt="Đại học Cần Thơ"
+                  src="logo.png"
+                  alt={t("Đại học Cần Thơ")}
                   className="h-16 w-16 sm:h-20 sm:w-20 object-contain drop-shadow-sm"
                 />
                 <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-ctu-blue">
-                  Đại học Cần Thơ
+                  {t("Đại học Cần Thơ")}
                 </p>
                 <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-ctu-blue sm:text-[1.75rem]">
                   CTU<span className="text-ctu-blue-light">.SignBridge</span>
                 </h1>
                 <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-                  Nền tảng AI về Ngôn ngữ Ký hiệu Việt Nam
+                  {t("Nền tảng AI về Ngôn ngữ Ký hiệu Việt Nam")}
                 </p>
 
                 <h2 className="mt-4 text-lg font-semibold text-slate-900 sm:text-xl">{title}</h2>
@@ -53,7 +55,7 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
           </div>
 
           <p className="mt-6 text-center text-xs text-white/70">
-            © {new Date().getFullYear()} Đại học Cần Thơ · CTU.SignBridge
+            {t("© {nam} Đại học Cần Thơ · CTU.SignBridge", { nam: new Date().getFullYear() })}
           </p>
         </div>
       </div>

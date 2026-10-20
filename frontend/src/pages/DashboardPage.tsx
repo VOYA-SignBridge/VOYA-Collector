@@ -5,6 +5,8 @@ import CommunityStatsSection from "../components/dashboard/CommunityStatsSection
 import MyContributionSection from "../components/dashboard/MyContributionSection";
 import QuickActionsSection from "../components/dashboard/QuickActionsSection";
 import LandingHowItWorksSection from "../components/dashboard/LandingHowItWorksSection";
+import LandingAboutSection from "../components/dashboard/LandingAboutSection";
+import LandingCTASection from "../components/dashboard/LandingCTASection";
 
 export default function DashboardPage() {
   const { user, loading } = useAuth();
@@ -37,8 +39,16 @@ export default function DashboardPage() {
         <CommunityStatsSection />
       </Suspense>
 
-      {/* 5. How It Works - Giải thích quy trình */}
+      {/* 5. About - Dự án này là gì (đặt trước How It Works: biết LÀ GÌ
+          rồi mới quan tâm LÀM SAO) */}
+      <LandingAboutSection />
+
+      {/* 6. How It Works - Giải thích quy trình */}
       <LandingHowItWorksSection />
+
+      {/* 7. CTA - chỉ hiện với khách. Nút chính của nó điều hướng tới
+          /register, nên với người đã đăng nhập thì vừa thừa vừa vô lý. */}
+      {!user && <LandingCTASection />}
     </div>
   );
 }

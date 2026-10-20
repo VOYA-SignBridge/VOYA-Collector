@@ -4,7 +4,8 @@ import argparse
 import numpy as np
 from collections import defaultdict
 
-from app.modules.dataset.catalog import load_labels, ClassMetadata
+from app.modules.dataset.catalog import _load_all_labels_unscoped, ClassMetadata
+from app.tenancy import tenant_id_of
 from app.config import settings
 
 SEQ_LEN = int(getattr(settings, 'seq_len', 60))
@@ -12,7 +13,9 @@ FEATURE_DIM = int(getattr(settings, 'feature_dim', 126))
 
 
 def load_class_meta(language: str | None, dialect: str | None):
-    rows = load_labels()
+    # Bộ soát dữ liệu chạy từ dòng lệnh, CHỈ ĐỌC, và mục đích của nó là soi
+    # toàn kho. Đây là một trong số ít đường đọc-tất-cả hợp lệ.
+    rows = _load_all_labels_unscoped()
     out = []
     for r in rows:
         if language and r['language'] != language:
@@ -27,6 +30,10 @@ def load_class_meta(language: str | None, dialect: str | None):
             dialect=r['dialect'],
             is_common_global=bool(int(r['is_common_global'])),
             is_common_language=bool(int(r['is_common_language'])),
+            # validate_class() checks `hierarchy_path().exists()`; without the
+            # owner every class of every non-bootstrap tenant is reported as
+            # `missing_folder`.
+            tenant_id=tenant_id_of(r),
         ))
     return out
 

@@ -16,6 +16,7 @@ from processed.shared.vocabulary import (  # noqa: E402
     LEGACY_UNASSIGNED,
     RECOGNITION_PROFILES,
     check_label_collisions,
+    trainable_profiles,
     label_key_v2,
     select_rows_for_profile,
     semantic_label_from_slug,
@@ -28,12 +29,28 @@ FAILED: list = []
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
+    """Ghi nhan ket qua, VA nem khi sai.
+
+    Cau `raise` la bat buoc, khong phai trang tri. Tep nay von la script chay
+    tay: verdict nam o `sys.exit(1 if FAILED else 0)` cuoi `main()`, nen
+    `check` chi can ghi vao danh sach. Nhung pytest KHONG goi `main()` - no
+    thu tung ham `test_*` mot. Khong co `raise` thi moi ham o day xanh vo
+    dieu kien, ke ca khi moi phep kiem ben trong deu sai.
+
+    Da do, khong phai suy doan: sua mot dieu kien thanh hang sai roi chay
+    `pytest ...::test_config_defaults` van ra "1 passed".
+
+    `main()` boc try/except quanh tung test nen che do chay tay van nguyen;
+    khac biet duy nhat la no dung o phep kiem sai DAU TIEN trong mot ham thay
+    vi gom het - dung cach pytest van bao loi.
+    """
     if cond:
         PASSED.append(name)
         print(f"  PASS  {name}")
-    else:
-        FAILED.append((name, str(detail)))
-        print(f"  FAIL  {name}  -> {detail}")
+        return
+    FAILED.append((name, str(detail)))
+    print(f"  FAIL  {name}  -> {detail}")
+    raise AssertionError(f"{name}" + (f"  -> {detail}" if detail else ""))
 
 
 def test_scope_profile_rules():
@@ -52,7 +69,12 @@ def test_scope_profile_rules():
     check("common + profile: INVALID", len(errs) == 1, errs)
     errs = validate_label_v2({"vocabulary_scope": "profile_specific", "recognition_profile": ""})
     check("profile_specific without profile: INVALID", len(errs) == 1, errs)
-    for p in RECOGNITION_PROFILES:
+    # TRAINABLE, not merely registered: legacy_unassigned is a registered
+    # profile whose whole job is to mark rows nobody has classified, so
+    # "profile_specific + legacy_unassigned" must stay invalid (asserted next).
+    # The two sets were identical only while this list was a hardcoded 5-tuple
+    # that happened to omit the sentinel.
+    for p in trainable_profiles():
         check(f"profile_specific + {p}: valid",
               validate_label_v2({"vocabulary_scope": "profile_specific", "recognition_profile": p}) == [])
     errs = validate_label_v2({"vocabulary_scope": "profile_specific", "recognition_profile": LEGACY_UNASSIGNED})

@@ -2,3 +2,36 @@
 # line endings break that shebang and Docker reports it as the script itself
 # being "not found". Force LF regardless of core.autocrlf on Windows checkouts.
 *.sh text eol=lf
+
+# Other Linux-container assets that are line-ending sensitive.
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# Bằng chứng PDM v8 và các câu truy vấn dựng ra nó. Chúng được sinh bởi psql
+# trong container Linux (LF) rồi so BYTE với bản đã cam kết — đó là cách Phụ lục
+# C chứng minh mình dựng lại được. Với core.autocrlf=true trên Windows, một bản
+# clone mới sẽ nhận CRLF và phép so byte ấy hỏng cho mọi người trừ máy đã sinh ra
+# chúng. Ghim LF để lượt tái lập cho cùng kết quả ở mọi nơi.
+docs/02-data/db/evidence/*.csv text eol=lf
+docs/02-data/db/pdm_tools/*.sql text eol=lf
+docs/02-data/db/pdm_tools/groups.txt text eol=lf
+# Ba tai lieu do generator sinh ra. Ghim luon dau RA, khong chi dau VAO: mot
+# clone Windows checkout chung thanh CRLF thi lan sinh lai ke tiep tao diff gia,
+# va menh de 'byte y het' chi con dung tren may da sinh ra chung.
+docs/02-data/db/PDM_V8_TABLES.md text eol=lf
+docs/02-data/db/PDM_V8_RELATIONSHIPS.md text eol=lf
+docs/02-data/db/PDM_V8_DATA_DICTIONARY.md text eol=lf
+docs/02-data/db/voya_erd.drawio text eol=lf
+docs/02-data/db/erd_groups/*.drawio text eol=lf
+docs/02-data/db/erd_layout_v8.json text eol=lf
+
+# Windows launchers for the server move (scripts/chuyen_server). cmd.exe needs CRLF.
+*.bat text eol=crlf
+
+# Frozen research splits: FROZEN_RESEARCH_SPLITS.json records their sha256 over the
+# CRLF bytes a Windows checkout produced. A Linux checkout (CI) gets LF, the hash no
+# longer matches, and the freeze check fails though nothing changed. Pin CRLF on
+# every platform so the checked-out bytes are the frozen bytes.
+processed/splits/train.csv text eol=crlf
+processed/splits/val.csv text eol=crlf
+processed/splits/test.csv text eol=crlf

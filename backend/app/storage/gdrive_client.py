@@ -6,6 +6,7 @@ import pickle
 import shutil
 import tempfile
 import threading
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Dict, Iterable, List, Optional, Union
 import httplib2
@@ -24,6 +25,56 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/spreadsheets',
 ]
+
+FOLDER_MIME = 'application/vnd.google-apps.folder'
+#: Prefix of the Redis keys that serialise folder creation across processes.
+FOLDER_LOCK_PREFIX = 'voya:gdrive:mkdir:'
+#: Longest a creation may hold the lock (a create + two listings, with retries).
+FOLDER_LOCK_TIMEOUT_SECONDS = int(os.getenv('GOOGLE_DRIVE_FOLDER_LOCK_TIMEOUT', '120'))
+
+_lock_redis = None
+
+
+def _drive_query_literal(value: str) -> str:
+    """Escape a value for a Drive `q` string literal (backslash and quote)."""
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+@contextmanager
+def _folder_creation_lock(parent_id: str, folder_name: str):
+    """Cross-process lock on (parent, name) through the Celery Redis.
+
+    Best effort: if Redis is unreachable or the wait runs out we go ahead
+    unlocked — the re-listing in `_get_or_create_folder` still converges on one
+    folder. It only narrows the window, which is all a lock can do anyway
+    against the other machines that write the same Drive.
+    """
+    global _lock_redis
+    import hashlib
+
+    lock = None
+    try:
+        import redis
+
+        if _lock_redis is None:
+            _lock_redis = redis.from_url(settings.broker_url, socket_timeout=5, socket_connect_timeout=2)
+        digest = hashlib.sha1(f"{parent_id}/{folder_name}".encode('utf-8')).hexdigest()
+        lock = _lock_redis.lock(FOLDER_LOCK_PREFIX + digest, timeout=FOLDER_LOCK_TIMEOUT_SECONDS,
+                                blocking_timeout=FOLDER_LOCK_TIMEOUT_SECONDS)
+        if not lock.acquire():
+            logger.warning("[GDrive] folder lock wait ran out for %r; creating unlocked", folder_name)
+            lock = None
+    except Exception as exc:
+        logger.warning("[GDrive] folder lock unavailable (%s); creating unlocked", exc)
+        lock = None
+    try:
+        yield
+    finally:
+        if lock is not None:
+            try:
+                lock.release()
+            except Exception:
+                pass  # expired: someone else may hold it now; nothing to undo
 
 
 def _apply_suffix_to_filename(filename: str, suffix: str) -> str:
@@ -86,7 +137,13 @@ class GoogleDriveClient:
         self.credentials_path = credentials_path
         self.token_path = token_path
         self.root_folder_id = root_folder_id
-        self.timeout_seconds = max(30, int(timeout_seconds or 120))
+        # Sàn 1 giây, KHÔNG phải 30. Sàn 30 giây cũ nuốt im lặng mọi cấu hình
+        # thấp hơn nó — kể cả trần chờ 5 giây mà môi trường kiểm thử đặt riêng
+        # để bộ kiểm thử không treo khi gọi ra ngoài không tới đích. Biện pháp
+        # giảm thiểu đã ghi trong tài liệu, đặt đúng biến môi trường, mà vẫn
+        # không có tác dụng nào: đó là kiểu hỏng tệ nhất, vì nó trông như đã
+        # được xử lý. Ai cần trần cao thì cấu hình trần cao.
+        self.timeout_seconds = max(1, int(timeout_seconds or 120))
         self.num_retries = max(0, int(num_retries or 0))
         self.chunk_size_bytes = max(1, int(chunk_mb or 1)) * 1024 * 1024
         self.download_chunk_size_bytes = max(1, int(download_chunk_mb or 1)) * 1024 * 1024
@@ -332,58 +389,94 @@ class GoogleDriveClient:
                 f"Configured Google Drive root folder ID is not accessible or not shared: {root_folder_id}"
             ) from e
 
+    def _list_child_folders(self, folder_name: str, parent_id: str) -> List[Dict[str, Any]]:
+        """Every non-trashed folder called `folder_name` under `parent_id`, OLDEST first.
+
+        Oldest-first is what makes duplicates harmless: every process, on every
+        machine, picks the same folder out of the same list.
+        """
+        query = (f"name='{_drive_query_literal(folder_name)}' "
+                 f"and mimeType='{FOLDER_MIME}' and trashed=false")
+        if parent_id != 'root':
+            query += f" and '{parent_id}' in parents"
+        results = self.service.files().list(
+            q=query,
+            spaces='drive',
+            orderBy='createdTime',
+            fields='files(id, name, createdTime)',
+        ).execute(num_retries=self.num_retries)
+        # So lại đúng từng ký tự: `tenants` (bố cục cũ) và `Tenants` (bố cục mới)
+        # có thể cùng tồn tại một lúc, và không được nhầm cái này thành cái kia.
+        return [f for f in results.get('files', []) if f.get('name') == folder_name]
+
     def _get_or_create_folder(self, folder_name: str, parent_id: str) -> str:
-        """Get existing folder or create new one."""
+        """Get existing folder or create new one — at most one per (parent, name).
+
+        Drive does not enforce unique names, and before 18/10/2026 two workers
+        that uploaded into a new class at the same moment each found nothing and
+        each created the folder (`class_giai-thich_246947e9` twice, samples split
+        between them). Now: re-check under a cross-process lock, and after
+        creating, list again — if another machine (which our Redis cannot lock)
+        created one too, everybody uses the oldest and the newer one, empty
+        because nobody uploaded into it yet, goes to Trash.
+        """
         cache_key = f"{parent_id}/{folder_name}"
         if cache_key in self._folder_cache:
             return self._folder_cache[cache_key]
 
-        # Search for existing folder
-        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        if parent_id != 'root':
-            query += f" and '{parent_id}' in parents"
-        
-        results = self.service.files().list(
-            q=query,
-            spaces='drive',
-            fields='files(id, name)'
-        ).execute(num_retries=self.num_retries)
-        
-        files = results.get('files', [])
-        
-        if files:
-            logger.debug(f"[GDrive] Found existing folder: {folder_name} (ID: {files[0]['id']})")
-            self._folder_cache[cache_key] = files[0]['id']
-            return files[0]['id']
-        
-        # Create new folder
-        file_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [parent_id] if parent_id != 'root' else []
-        }
-        
-        file = self.service.files().create(body=file_metadata, fields='id').execute(num_retries=self.num_retries)
-        logger.info(f"[GDrive] Created folder: {folder_name} (ID: {file.get('id')})")
-        self._folder_cache[cache_key] = file.get('id')
-        return file.get('id')
+        files = self._list_child_folders(folder_name, parent_id)
+        if not files:
+            with _folder_creation_lock(parent_id, folder_name):
+                files = self._list_child_folders(folder_name, parent_id)
+                if not files:
+                    file_metadata = {
+                        'name': folder_name,
+                        'mimeType': FOLDER_MIME,
+                        'parents': [parent_id] if parent_id != 'root' else []
+                    }
+                    created = self.service.files().create(
+                        body=file_metadata, fields='id').execute(num_retries=self.num_retries)
+                    logger.info(f"[GDrive] Created folder: {folder_name} (ID: {created.get('id')})")
+                    files = self._list_child_folders(folder_name, parent_id)
+                    if created['id'] not in {f['id'] for f in files}:
+                        files.append(created)  # listing lags behind create
+                    files = self._drop_own_duplicate(created['id'], files)
+
+        if len(files) > 1:
+            logger.warning(
+                "[GDrive] %d folders named %r under %s; using the oldest %s",
+                len(files), folder_name, parent_id, files[0]['id'])
+        folder_id = files[0]['id']
+        self._folder_cache[cache_key] = folder_id
+        return folder_id
+
+    def _drop_own_duplicate(self, created_id: str, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Trash the folder WE just created if an older twin exists and ours is empty."""
+        if not files or files[0]['id'] == created_id:
+            return files
+        try:
+            children = self.service.files().list(
+                q=f"'{created_id}' in parents and trashed=false",
+                fields='files(id)', pageSize=1,
+            ).execute(num_retries=self.num_retries).get('files', [])
+            if children:
+                return files
+            self.service.files().update(
+                fileId=created_id, body={'trashed': True}, fields='id',
+            ).execute(num_retries=self.num_retries)
+            logger.info("[GDrive] Trashed duplicate folder %s (kept older %s)", created_id, files[0]['id'])
+            return [f for f in files if f['id'] != created_id]
+        except Exception as exc:  # the older one is used either way
+            logger.warning("[GDrive] could not trash duplicate folder %s: %s", created_id, exc)
+            return files
 
     def _get_folder_id(self, folder_name: str, parent_id: str) -> Optional[str]:
-        """Return a child folder ID without creating it."""
+        """Return a child folder ID without creating it (the oldest, if several)."""
         cache_key = f"{parent_id}/{folder_name}"
         if cache_key in self._folder_cache:
             return self._folder_cache[cache_key]
 
-        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-        if parent_id != 'root':
-            query += f" and '{parent_id}' in parents"
-
-        results = self.service.files().list(
-            q=query,
-            spaces='drive',
-            fields='files(id, name)'
-        ).execute(num_retries=self.num_retries)
-        files = results.get('files', [])
+        files = self._list_child_folders(folder_name, parent_id)
         if files:
             self._folder_cache[cache_key] = files[0]['id']
             return files[0]['id']
@@ -780,15 +873,31 @@ class GoogleDriveClient:
                         pass
 
     def _find_file_by_name(self, folder_id: str, filename: str) -> Optional[str]:
-        """Find file by name in folder."""
-        query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+        """Find a file by name in a folder; return the first match or None.
+
+        Google Drive allows MULTIPLE files with the same name in one folder, so a
+        duplicate makes this lookup (and anything built on it, e.g. the SOT reader)
+        non-deterministic. Log a warning when that happens so the extras get
+        cleaned up rather than silently serving an arbitrary copy.
+        """
+        # Escape backslashes and single quotes so a name containing ' can't break
+        # out of — or inject into — the Drive query string.
+        safe = filename.replace("\\", "\\\\").replace("'", "\\'")
+        query = f"name='{safe}' and '{folder_id}' in parents and trashed=false"
         results = self.service.files().list(
             q=query,
             spaces='drive',
-            fields='files(id, name)'
+            fields='files(id, name)',
+            pageSize=10,
         ).execute(num_retries=self.num_retries)
-        
+
         files = results.get('files', [])
+        if len(files) > 1:
+            logger.warning(
+                "[GDrive] %d files named %r in folder %s (ids=%s) — using the first; "
+                "duplicate names make lookups non-deterministic, remove the extras.",
+                len(files), filename, folder_id, [f.get('id') for f in files],
+            )
         return files[0]['id'] if files else None
 
     def download_file(self, file_id_or_url: str, local_path: str) -> str:

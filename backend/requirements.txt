@@ -22,8 +22,16 @@ google-auth-oauthlib==1.4.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-jose[cryptography]==3.3.0
+# Engine phan quyen. Ten goi tren PyPI la `casbin` (khong phai `pycasbin` —
+# do la ten du an tren GitHub va tro toi mot goi khac). `simpleeval` la phu
+# thuoc duy nhat cua no.
+casbin==1.36.0
 httpx==0.27.2
 edge-tts==7.2.8
-torch==2.0.0
+torch==2.7.1
 scikit-learn==1.3.2
 matplotlib==3.8.2
+structlog==24.4.0
+prometheus-client==0.20.0
+asgi-correlation-id==4.3.1
+gunicorn

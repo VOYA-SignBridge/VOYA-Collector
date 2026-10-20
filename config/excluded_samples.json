@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Samples deliberately left OUT of new dataset manifests, with the reason.",
+    "Read by scripts/create_dataset_manifest.py (load_excluded_ids).",
+    "",
+    "Excluding here rather than deleting the .npz is intentional: a manifest is",
+    "a versioned VIEW of the feature tree, so a new version can drop a sample",
+    "while every already-published split that references it still resolves on",
+    "disk. Deleting the file would retroactively break those splits.",
+    "",
+    "'exclude'    = never enters a new manifest.",
+    "'quarantine' = same effect, but flags that the sample is still under review."
+  ],
+  "files": [
+    {
+      "path": "dataset/features/vn/hoa-de/class_tom_7246af3c/sample_d6ef358990(1).npz",
+      "decision": "exclude",
+      "reason": "Byte-identical duplicate of sample_d6ef358990.npz (same sha256 95d696e197c18bb5, same 28077 bytes) — a Windows '(1)' copy. Keeping both is exact-duplicate leakage: the original and its copy can land in train and test, so the model would be scored on a recording it memorised. It is also the only sample whose signer could not be resolved, because no samples.csv row exists for the copied filename.",
+      "detected_at": "2026-08-06",
+      "detected_by": "duplicate file_checksum in dataset_manifest_ctu_20260806_v1"
+    }
+  ]
+}

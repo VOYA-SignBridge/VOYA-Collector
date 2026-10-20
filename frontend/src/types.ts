@@ -73,6 +73,8 @@ export interface CameraUploadPayload {
   label: string;
   dialect?: string;
   language?: string;
+  class_uid?: string;
+  visibility?: "private" | "tenant" | "community";
   session_id: string;
   /** 1 | 2 — persisted on the class at first capture (first-capture-wins). */
   hands_required?: number;
@@ -104,15 +106,36 @@ export interface QualityInfo {
   confidenceSummary?: { min?: number; max?: number; avg?: number };
 }
 
+/**
+ * Shape returned by GET /jobs/{job_id} (backend/app/routers/jobs.py).
+ *
+ * These are raw Celery states, not a custom vocabulary. The previous type here
+ * declared jobId/progress/message/startTime/endTime — none of which the
+ * endpoint has ever returned; it was written against an imagined API.
+ */
+export type CeleryJobState =
+  | "PENDING"
+  | "STARTED"
+  | "SUCCESS"
+  | "FAILURE"
+  | "RETRY"
+  | "REVOKED";
+
 export type JobStatus = {
-  jobId?: string;
-  status?: string;
-  progress?: number;
-  message?: string;
-  startTime?: string;
-  endTime?: string;
+  job_id: string;
+  status: CeleryJobState | string;
+  /** Task return value; only populated once status is SUCCESS. */
+  result?: unknown;
+  /** Present only on FAILURE. */
+  traceback?: string | null;
+  error?: string | null;
   [k: string]: unknown;
 };
+
+/** True once the job will not change again — stop polling. */
+export function isJobFinished(status: string | undefined): boolean {
+  return status === "SUCCESS" || status === "FAILURE" || status === "REVOKED";
+}
 
 export interface Session {
   session_id: string;
@@ -136,6 +159,12 @@ export interface ClassRow {
   created_at?: string;
   migrated_at?: string | null;
   hands_required?: number | string | null; // BE returns ""/"1"/"2" strings, FE normalizes
+  /** Vùng miền của ký hiệu — trục RIÊNG với `dialect`.
+   *
+   * Hai nhãn cùng `slug` + `language` + `dialect` mà khác `region` là hai lớp
+   * hợp lệ, khác nhau (khoá duy nhất ở cơ sở dữ liệu gồm cả năm cột). Bỏ qua
+   * trường này là hiện ra hai dòng trông giống hệt nhau. */
+  region?: string;
 }
 
 export interface ClassesListResponse {

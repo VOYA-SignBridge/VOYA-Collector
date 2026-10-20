@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useI18n } from "../i18n";
 
 /**
  * Friendly, professional 403 shown when a signed-in but non-admin user reaches
@@ -7,6 +8,7 @@ import { useNavigate } from "react-router-dom";
  * button and auto-returns to the dashboard after 5 seconds.
  */
 export default function NotAuthorizedPage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [count, setCount] = useState(5);
 
@@ -31,12 +33,12 @@ export default function NotAuthorizedPage() {
           </svg>
         </div>
 
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">Khu vực dành cho quản trị viên</h1>
+        <h1 className="text-2xl font-bold text-slate-900 mb-2">{t("Khu vực dành cho quản trị viên")}</h1>
         <p className="text-slate-600 mb-1">
-          Tài khoản của bạn hiện không có quyền truy cập trang này.
+          {t("Tài khoản của bạn hiện không có quyền truy cập trang này.")}
         </p>
         <p className="text-sm text-slate-400 mb-6">
-          Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ quản trị viên để được hỗ trợ.
+          {t("Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ quản trị viên để được hỗ trợ.")}
         </p>
 
         <button
@@ -48,11 +50,11 @@ export default function NotAuthorizedPage() {
             <path d="M4 11.5 12 4l8 7.5" />
             <path d="M6 10v9.5a1 1 0 0 0 1 1h3.5v-6h3v6H17a1 1 0 0 0 1-1V10" />
           </svg>
-          Về trang chủ
+          {t("Về trang chủ")}
         </button>
 
         <p className="mt-5 text-xs text-slate-400">
-          Tự động chuyển về trang chủ sau <span className="font-semibold text-slate-500">{count}</span> giây…
+          {t("Tự động chuyển về trang chủ sau")} <span className="font-semibold text-slate-500">{count}</span> {t("giây…")}
         </p>
       </div>
     </div>

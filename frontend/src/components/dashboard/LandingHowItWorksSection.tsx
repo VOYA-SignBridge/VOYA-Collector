@@ -1,4 +1,11 @@
+/**
+ * Khối "Cách hoạt động" trên trang giới thiệu.
+ *
+ * @i18n-key-table — `title`/`description` trong `steps` là KHOÁ từ điển.
+ */
+import { useI18n } from "../../i18n";
 export default function LandingHowItWorksSection() {
+  const { t } = useI18n();
   const steps = [
     {
       step: "01",
@@ -46,13 +53,13 @@ export default function LandingHowItWorksSection() {
     <section className="py-16 sm:py-24">
       <div className="text-center mb-12 sm:mb-16">
         <span className="inline-block px-4 py-1.5 rounded-full bg-ctu-navy/10 text-ctu-navy text-sm font-semibold mb-4 tracking-wide uppercase">
-          Quy trình
+          {t("Quy trình")}
         </span>
         <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 mb-6">
-          Cách hoạt động
+          {t("Cách hoạt động")}
         </h2>
         <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-          Chỉ cần 4 bước đơn giản để bắt đầu đóng góp cho cộng đồng người khiếm thính Việt Nam.
+          {t("Chỉ cần 4 bước đơn giản để bắt đầu đóng góp cho cộng đồng người khiếm thính Việt Nam.")}
         </p>
       </div>
 
@@ -73,9 +80,9 @@ export default function LandingHowItWorksSection() {
                 </div>
               </div>
 
-              <h3 className="text-lg font-bold text-slate-900 mb-3">{item.title}</h3>
+              <h3 className="text-lg font-bold text-slate-900 mb-3">{t(item.title)}</h3>
               <p className="text-sm text-slate-600 leading-relaxed max-w-xs mx-auto">
-                {item.description}
+                {t(item.description)}
               </p>
             </div>
           ))}

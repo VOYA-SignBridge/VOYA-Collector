@@ -12,7 +12,10 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.modules.dataset.catalog import load_labels, register_class, ClassMetadata, MASTER_LABELS, LABEL_FIELDS, regenerate_label_indexes
+from app.modules.dataset.catalog import (_load_all_labels_unscoped, register_class,
+                                         ClassMetadata, MASTER_LABELS, LABEL_FIELDS,
+                                         regenerate_label_indexes)
+from app.tenancy import tenant_id_of
 from app.modules.dataset.samples import SAMPLES_CSV, SAMPLE_FIELDS
 from filelock import FileLock
 
@@ -76,7 +79,9 @@ def find_label(rows: List[Dict[str,str]], language: str, label_original: str, sl
     return None
 
 def reclassify(mapping_csv: str, apply: bool = False, remove_old: bool = False, default_language: str = 'vn') -> Dict:
-    label_rows = load_labels()
+    # Công cụ bảo trì chạy từ dòng lệnh, phân loại lại phương ngữ trên
+    # TOÀN kho. Đây là một trong số ít đường đọc-tất-cả hợp lệ.
+    label_rows = _load_all_labels_unscoped()
     samples = load_samples()
     mapping = read_mapping(mapping_csv)
     changes = []
@@ -110,7 +115,10 @@ def reclassify(mapping_csv: str, apply: bool = False, remove_old: bool = False, 
             class_uid=existing['class_uid'], slug=existing['slug'], label_original=existing['label_original'],
             language=existing['language'], dialect=existing['dialect'],
             is_common_global=bool(int(existing['is_common_global'])),
-            is_common_language=bool(int(existing['is_common_language']))
+            is_common_language=bool(int(existing['is_common_language'])),
+            # Source directory is derived from this; without it the move reads
+            # from the bootstrap tenant's tree no matter who owns the class.
+            tenant_id=tenant_id_of(existing),
         )
         src_dir = source_meta.hierarchy_path()
         dst_dir = new_meta.hierarchy_path()

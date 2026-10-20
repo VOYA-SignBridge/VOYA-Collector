@@ -2,6 +2,9 @@
 
 Sign language data collection and processing system for Vietnamese Sign Language.
 
+> **Vận hành:** bấm đúp `VOYA.bat` (menu) hoặc gõ `VOYA status`, `VOYA logs`, `VOYA backup`, `VOYA help`.
+> Bản đồ các script: [scripts/README.md](scripts/README.md).
+
 ---
 
 ## Architecture Diagram
@@ -87,6 +90,20 @@ cp .env.example .env
 # 2. Build and start
 docker compose -f docker-compose.prod.yml up --build -d
 ```
+
+#### After every deploy: check that what runs is what you built
+
+```bash
+python scripts/check_deploy_freshness.py     # exit 0 = running code == working tree
+```
+
+`docker compose ps` answers "is the process alive", not "is it the process you
+just built". A frontend image once sat five hours behind its source while all
+13 containers reported healthy — the site loaded perfectly, serving the previous
+bundle. The script compares each image against the files its Dockerfile actually
+copies, and each container against the image tag, so it separates the three
+cases that have three different fixes: rebuild, force-recreate, or restart
+(`realtime_service` bind-mounts its code, so rebuilding it does nothing).
 
 Before going live, make sure `.env` has:
 - Real `SECRET_KEY` / `AUTH_TOKEN_SECRET_KEY` (`python -c "import secrets; print(secrets.token_hex(32))"`)
@@ -184,6 +201,34 @@ MAX_SAMPLES_PER_CLASS=2000
 - **Local filesystem** (default)
 - **Google Drive** (when `USE_GOOGLE_DRIVE=1`)
 ```
+
+### Changing the public URL (tunnels, new domain)
+
+The stack is host-agnostic: nginx has no `server_name`, there is no trusted-host
+middleware, session cookies are host-only and the SPA calls relative paths. So
+serving the same deployment at a new hostname — an ngrok/cloudflared tunnel that
+gets a fresh name on every restart, a new domain — needs **no rebuild and no
+container restart**. `CORS_ALLOWED_ORIGINS` is not involved either: the SPA and
+the API share one origin through nginx, so the browser never runs a CORS check.
+
+The one thing that has to follow the hostname is the password-reset link that
+goes out by email. List the hostname in `deploy/public_hosts.txt` (copy it from
+`deploy/public_hosts.example.txt`); the backend re-reads that file on each
+request, so the change is live immediately. With ngrok, let the script do it:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\sync-public-host.ps1
+# ...or leave it running so a restarted tunnel needs no action at all:
+powershell -ExecutionPolicy Bypass -File scripts\sync-public-host.ps1 -Watch
+```
+
+A host that is not listed falls back to `FRONTEND_BASE_URL`. That fallback is
+the security boundary, not a convenience: `Host` is set by the caller, so
+without the allowlist an attacker could trigger a reset for your account and
+have the email carry a real token pointing at their server. `COOKIE_SECURE`
+likewise no longer needs to be flipped per environment — cookies are marked
+`Secure` on the requests that actually arrive over HTTPS, so an HTTPS tunnel and
+plain-HTTP localhost can serve from one stack at the same time.
 
 ---
 

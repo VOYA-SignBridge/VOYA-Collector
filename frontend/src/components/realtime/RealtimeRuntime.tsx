@@ -6,7 +6,7 @@
  *  ❌ Raw <button> with full inline Tailwind string (lines ~503, ~532)
  *     → Use: import Button from "../ui/Button"
  *
- *  ❌ Raw <w-2 h-2 rounded-full bg-green-500> status dots (lines ~550–555)
+ *  ❌ Raw <w-2 h-2 rounded-full bg-sky-600> status dots (lines ~550–555)
  *     → Use: import Badge from "../ui/Badge" with variant="success"|"warning"|etc.
  *
  *  ❌ Inline bg-amber-50 / bg-red-50 error divs (lines ~465–480)
@@ -43,7 +43,7 @@ import {
 import { fetchTTSAudio, prewarmTTS } from "../../api/tts";
 import PageHeader from "../ui/PageHeader";
 import Button from "../ui/Button";
-import { dialectName } from "../../config/dialectLabels";
+import { useI18n } from "../../i18n";
 import { languageName } from "../../config/languageLabels";
 
 type Props = {
@@ -69,6 +69,7 @@ const parseBoolEnv = (value: unknown, fallback: boolean) => {
 
 // Server-side TTS voice options
 const TTS_VOICES = [
+  // @i18n-key-table — `label` là KHOÁ, dịch ở chỗ dựng `t(voice.label)`.
   { id: "vi-VN-HoaiMyNeural", label: "HoaiMy (Nữ)", gender: "female" as const },
   { id: "vi-VN-NamMinhNeural", label: "NamMinh (Nam)", gender: "male" as const },
 ] as const;
@@ -106,8 +107,14 @@ const TTS_DEBOUNCE_MS = 200;
 export default function RealtimeRuntime({
   mirrorPreview = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true),
   autoStart = true,
-  debounceMs = 100,
+  // Measured (bench_latency.py, hoa-de, CPU): server_total p50 5.6 ms, client
+  // -observed p50 21 ms / p95 25 ms. At 60 ms the next trigger still fires well
+  // after the previous reply, so the scheduler's single-in-flight guard almost
+  // never has to skip — and the smoother (historySize 2) settles a label in
+  // ~2 cycles, i.e. ~170 ms instead of ~250 ms at the old 100 ms.
+  debounceMs = 60,
 }: Props) {
+  const { t } = useI18n();
   // DOM refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -530,7 +537,7 @@ export default function RealtimeRuntime({
       if (cancelled) return;
 
       if (res.ok) {
-        console.log("[realtime] ✅ Models loaded successfully:", res.data.length, "models", res.data);
+        console.log("[realtime] Models loaded successfully:", res.data.length, "models", res.data);
         setModels(res.data);
 
         // Check if previously selected model still exists
@@ -561,7 +568,7 @@ export default function RealtimeRuntime({
 
         setIsLoadingModels(false);
       } else {
-        console.error("[realtime] ❌ Models fetch FAILED:", res.error);
+        console.error("[realtime] Models fetch FAILED:", res.error);
         setModelsError(res.error);
         setIsLoadingModels(false);
       }
@@ -589,7 +596,7 @@ export default function RealtimeRuntime({
 
     const video = videoRef.current;
     if (!video) {
-      setError("Video element not ready");
+      setError(t("Chưa mở được khung hình camera. Hãy thử lại."));
       setRunning(false);
       return;
     }
@@ -604,6 +611,7 @@ export default function RealtimeRuntime({
     smootherRef.current = new PredictionSmoother({ historySize: 2, emaAlpha: 0.7 });
     frameScratchRef.current = new Float32Array(126);
     handAnchorsRef.current = {};
+
     noHandStreakRef.current = 0;
 
     // MediaPipe Hands is created once for the component's lifetime (see the
@@ -611,7 +619,7 @@ export default function RealtimeRuntime({
     // the time `running` first turns true, since that effect runs first.
     if (!handsRef.current) {
       // Defensive fallback only; should not happen in practice.
-      setError("Hand tracker not ready");
+      setError(t("Bộ theo dõi bàn tay chưa sẵn sàng. Hãy tải lại trang."));
       setRunning(false);
       startingRef.current = false;
       setIsStarting(false);
@@ -636,7 +644,7 @@ export default function RealtimeRuntime({
         const modelId = selectedModelIdRef.current;
 
         if (!modelId) {
-          throw new Error("No model selected");
+          throw new Error(t("Chưa chọn mô hình nhận dạng."));
         }
 
         // Fire request
@@ -731,7 +739,7 @@ export default function RealtimeRuntime({
         startingRef.current = false;
         setIsStarting(false);
         const msg = e instanceof Error ? e.message : String(e);
-        setError(`Camera start failed: ${msg}`);
+        setError(t("Không khởi động được camera: {msg}", { msg }));
         setRunning(false);
       });
 
@@ -769,7 +777,7 @@ export default function RealtimeRuntime({
   const handleModelSelect = useCallback((modelId: string) => {
     // ✅ SAFETY CHECK: Verify we can switch before proceeding
     if (!canSwitchModel()) {
-      setSelectionWarning("Không thể thay đổi bộ nhận diện khi đang xử lý. Vui lòng chờ đến khi xong.");
+      setSelectionWarning(t("Không thể thay đổi bộ nhận diện khi đang xử lý. Vui lòng chờ đến khi xong."));
       return;
     }
 
@@ -830,8 +838,8 @@ export default function RealtimeRuntime({
 
   // Map scheduler status to user-friendly Vietnamese message
   const getFriendlyStatusMessage = (): string => {
-    if (!running) return "Chưa bắt đầu";
-    if (isStarting) return "Đang khởi động...";
+    if (!running) return t("Chưa bắt đầu");
+    if (isStarting) return t("Đang khởi động...");
     switch (status) {
       case "idle":
         return "Đang chờ...";
@@ -844,36 +852,33 @@ export default function RealtimeRuntime({
     }
   };
 
-  // Map errors to user-friendly Vietnamese messages (memoized to prevent recomputation).
+  // Map errors to user-friendly messages (memoized to prevent recomputation).
   // Quan trọng: PHẢI luôn trả về một câu. Trước đây nhánh cuối trả null, nên mọi
   // lỗi không khớp mẫu (500, mất mạng, lỗi model...) bị nuốt sạch — màn hình đứng
   // ở "Đang chờ..." mà không báo gì, trông y như hệ thống treo.
   const friendlyError = useMemo(() => {
     if (!error) return null;
-    if (error.includes("Camera")) return "Không truy cập được camera. Vui lòng cấp quyền camera cho trang này rồi bấm Bắt đầu lại.";
-    if (error.includes("timeout") || error.includes("504")) return "Máy chủ phản hồi chậm, vui lòng thử lại.";
-    if (error.includes("503") || error.includes("unavailable")) return "Không thể kết nối hệ thống nhận diện. Vui lòng thử lại sau ít phút.";
-    if (error.includes("404") || error.includes("not found")) return "Bộ nhận diện không tồn tại. Hãy chọn lại bộ nhận diện khác.";
-    if (error.includes("Failed to fetch") || error.includes("Network")) return "Mất kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.";
-    if (error.includes("401") || error.includes("403")) return "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.";
-    return "Đã xảy ra lỗi khi nhận diện. Vui lòng dừng và bắt đầu lại.";
-  }, [error]);
+    if (error.includes("Camera") || error.includes("camera")) return t("Không truy cập được camera. Hãy cấp quyền camera cho trang này rồi bấm Bắt đầu lại.");
+    if (error.includes("timeout") || error.includes("504")) return t("Máy chủ phản hồi chậm, vui lòng thử lại.");
+    if (error.includes("503") || error.includes("unavailable")) return t("Không thể kết nối hệ thống nhận diện. Vui lòng thử lại sau ít phút.");
+    if (error.includes("404") || error.includes("not found")) return t("Bộ nhận diện không tồn tại. Hãy chọn bộ nhận diện khác.");
+    if (error.includes("Failed to fetch") || error.includes("Network")) return t("Mất kết nối tới máy chủ. Kiểm tra mạng rồi thử lại.");
+    if (error.includes("401") || error.includes("403")) return t("Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.");
+    return t("Đã xảy ra lỗi khi nhận diện. Hãy dừng rồi bắt đầu lại.");
+  }, [error, t]);
 
   return (
-    // Layout đã bọc <main> bằng max-w-7xl + padding responsive. Bọc thêm
-    // max-w-6xl + p-* ở đây làm trang này hẹp hơn và thụt sâu hơn mọi trang
-    // khác — chỉ giữ khoảng cách dọc giữa các khối.
-    <div className="w-full space-y-4 sm:space-y-6">
+    <div className="w-full max-w-6xl mx-auto space-y-2.5 sm:space-y-4 p-2.5 sm:p-4 lg:p-5">
       {/* Header */}
       <PageHeader
-        title="Nhận dạng ngôn ngữ ký hiệu"
-        subtitle="Nhận dạng ngôn ngữ ký hiệu Việt Nam theo thời gian thực"
-        breadcrumb={["Trang chủ", "Nhận dạng realtime"]}
+        title={t("Nhận diện ngôn ngữ kí hiệu")}
+        subtitle={t("Ứng dụng nhận diện ngôn ngữ kí hiệu theo thời gian thực")}
+        breadcrumb={[{ label: "Dashboard", href: "/" }, t("Nhận dạng realtime")]}
       />
 
       {/* Model Selection */}
       <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-4 space-y-2 sm:space-y-3 shadow-sm">
-        <h2 className="text-xs sm:text-sm font-semibold text-slate-900">Cấu hình nhận diện</h2>
+        <h2 className="text-xs sm:text-sm font-semibold text-slate-900">{t("Cấu hình nhận diện")}</h2>
 
         {/* Selection Warning */}
         {selectionWarning && (
@@ -885,7 +890,7 @@ export default function RealtimeRuntime({
         {/* Error State */}
         {modelsError && (
           <div className="space-y-2">
-            <div className="text-sm text-red-700">Không thể tải danh sách bộ nhận diện</div>
+            <div className="text-sm text-red-700">{t("Không thể tải danh sách bộ nhận diện")}</div>
             <Button
               size="sm"
               variant="secondary"
@@ -911,19 +916,19 @@ export default function RealtimeRuntime({
               }}
               type="button"
             >
-              Thử lại
+              {t("Thử lại")}
             </Button>
           </div>
         )}
 
         {/* Loading State */}
         {isLoadingModels && (
-          <div className="text-sm text-slate-600">Đang tải bộ nhận diện...</div>
+          <div className="text-sm text-slate-600">{t("Đang tải bộ nhận diện...")}</div>
         )}
 
         {/* Empty State */}
         {!isLoadingModels && !modelsError && models.length === 0 && (
-          <div className="text-sm text-slate-600">Không có bộ nhận diện khả dụng</div>
+          <div className="text-sm text-slate-600">{t("Không có bộ nhận diện khả dụng")}</div>
         )}
 
         {/* Language + Model Selectors */}
@@ -931,7 +936,7 @@ export default function RealtimeRuntime({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 sm:gap-4">
             {/* Language Selector */}
             <div>
-              <label className="block text-[11px] font-medium text-slate-700 mb-1.5">Ngôn ngữ</label>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1.5">{t("Ngôn ngữ")}</label>
               <select
                 className={`w-full px-2.5 py-2 rounded-lg border text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${running && (isStarting || !canSwitchModel())
                   ? "bg-slate-100 border-slate-300 text-slate-500 cursor-not-allowed opacity-60"
@@ -940,12 +945,12 @@ export default function RealtimeRuntime({
                 value={selectedLanguage || ""}
                 onChange={(e) => handleLanguageSelect(e.target.value)}
                 disabled={running && (isStarting || !canSwitchModel())}
-                title={running && !canSwitchModel() ? "Không thể thay đổi khi đang xử lý" : ""}
+                title={running && !canSwitchModel() ? t("Không thể thay đổi khi đang xử lý") : ""}
               >
-                <option value="">-- Chọn ngôn ngữ --</option>
+                <option value="">{t("-- Chọn ngôn ngữ --")}</option>
                 {languages.map((lang) => (
                   <option key={lang} value={lang}>
-                    {languageName(lang)}
+                    {t(languageName(lang))}
                   </option>
                 ))}
               </select>
@@ -953,14 +958,14 @@ export default function RealtimeRuntime({
 
             {/* Model Selector (Filtered by Language) */}
             <div>
-              <label className="block text-[11px] font-medium text-slate-700 mb-1.5">Bộ nhận diện</label>
+              <label className="block text-[11px] font-medium text-slate-700 mb-1.5">{t("Bộ nhận diện")}</label>
               {!selectedLanguage ? (
                 <div className="px-2.5 py-2 rounded-lg text-xs sm:text-sm text-slate-500 bg-slate-50">
-                  Chọn ngôn ngữ trước
+                  {t("Chọn ngôn ngữ trước")}
                 </div>
               ) : filteredModels.length === 0 ? (
                 <div className="px-2.5 py-2 rounded-lg text-xs sm:text-sm text-slate-500 bg-slate-50">
-                  Không có bộ nhận diện cho ngôn ngữ này
+                  {t("Không có bộ nhận diện cho ngôn ngữ này")}
                 </div>
               ) : (
                 <select
@@ -971,13 +976,13 @@ export default function RealtimeRuntime({
                   value={selectedModelId || ""}
                   onChange={(e) => handleModelSelect(e.target.value)}
                   disabled={running && (isStarting || !canSwitchModel())}
-                  title={running && !canSwitchModel() ? "Không thể thay đổi khi đang xử lý" : ""}
+                  title={running && !canSwitchModel() ? t("Không thể thay đổi khi đang xử lý") : ""}
                 >
-                  <option value="">-- Chọn bộ nhận diện --</option>
+                  <option value="">{t("-- Chọn bộ nhận diện --")}</option>
                   {filteredModels.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name}
-                      {model.dialect && model.dialect !== model.name && ` (${dialectName(model.dialect)})`}
+                      {model.dialect && model.dialect !== model.name && ` (${model.dialect})`}
                     </option>
                   ))}
                 </select>
@@ -1018,7 +1023,7 @@ export default function RealtimeRuntime({
           {/* Status + Start/Stop: the primary controls live right under the video so
               they're reachable without scrolling past the result panel on mobile. */}
           <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5 sm:p-3 shadow-sm">
-            <div className={`w-2 h-2 rounded-full shrink-0 ${running && status === "in_flight" ? "bg-green-500" :
+            <div className={`w-2 h-2 rounded-full shrink-0 ${running && status === "in_flight" ? "bg-sky-600" :
               running && status === "debouncing" ? "bg-yellow-500" :
                 running ? "bg-ctu-blue" : "bg-slate-300"
               }`} />
@@ -1030,13 +1035,13 @@ export default function RealtimeRuntime({
               "w-full py-2.5 rounded-xl text-sm sm:text-base font-semibold border transition-all " +
               (running
                 ? "bg-red-600 text-white border-red-600 hover:bg-red-700 active:scale-95"
-                : "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 active:scale-95")
+                : "bg-sky-600 text-white border-sky-600 hover:bg-sky-700 active:scale-95")
             }
             onClick={handleStartStop}
             type="button"
             disabled={isStarting}
           >
-            {running ? "Dừng nhận diện" : isStarting ? "Đang khởi động..." : "Bắt đầu nhận diện"}
+            {running ? t("Dừng nhận diện") : isStarting ? t("Đang khởi động...") : t("Bắt đầu nhận diện")}
           </button>
 
           {/* Error Message (if any) — only show when error stable */}
@@ -1052,7 +1057,7 @@ export default function RealtimeRuntime({
           {/* Prediction Display (detail) */}
           <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-ctu-blue/5 to-white p-3 sm:p-6 shadow-sm">
             <div className="text-[11px] sm:text-xs font-medium text-slate-600 uppercase tracking-wide mb-2 sm:mb-3">
-              Kết quả nhận diện
+              {t("Kết quả nhận diện")}
             </div>
             <div className="min-h-[88px] sm:min-h-[112px] flex flex-col justify-center">
               {prediction ? (
@@ -1062,11 +1067,11 @@ export default function RealtimeRuntime({
                   </div>
                   <div className="space-y-2 text-center">
                     <div className="text-[11px] sm:text-sm text-slate-600">
-                      Độ tin cậy: <span className="font-semibold text-slate-900">{Math.round(prediction.confidence * 100)}%</span>
+                      {t("Độ tin cậy:")} <span className="font-semibold text-slate-900">{Math.round(prediction.confidence * 100)}%</span>
                     </div>
                     {import.meta.env.DEV && (
                       <div className="text-xs text-slate-500">
-                        {prediction.samples} mẫu
+                        {t("{n} mẫu", { n: prediction.samples })}
                       </div>
                     )}
                   </div>
@@ -1075,22 +1080,22 @@ export default function RealtimeRuntime({
                 <div className="text-center">
                   <div className="text-4xl text-slate-300 mb-2">–</div>
                   <div className="text-sm text-slate-500">
-                    {running ? "Chờ dữ liệu..." : "Chưa bắt đầu"}
+                    {running ? t("Chờ dữ liệu...") : t("Chưa bắt đầu")}
                   </div>
                 </div>
               )}
             </div>
             <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2">
               <div className="min-w-0">
-                <div className="text-xs font-medium text-slate-700">Đọc kết quả thành tiếng</div>
+                <div className="text-xs font-medium text-slate-700">{t("Đọc kết quả thành tiếng")}</div>
               </div>
               <button
                 type="button"
                 onClick={() => setSpeechEnabled((prev) => !prev)}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${speechEnabled ? "bg-emerald-500" : "bg-slate-300"
+                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${speechEnabled ? "bg-sky-600" : "bg-slate-300"
                   }`}
                 aria-pressed={speechEnabled}
-                aria-label={speechEnabled ? "Tắt đọc kết quả thành tiếng" : "Bật đọc kết quả thành tiếng"}
+                aria-label={speechEnabled ? t("Tắt đọc kết quả thành tiếng") : t("Bật đọc kết quả thành tiếng")}
               >
                 <span
                   className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${speechEnabled ? "translate-x-7" : "translate-x-1"
@@ -1101,7 +1106,7 @@ export default function RealtimeRuntime({
 
             {speechEnabled && (
               <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <label className="mb-1.5 block text-[11px] font-medium text-slate-700">Giọng đọc</label>
+                <label className="mb-1.5 block text-[11px] font-medium text-slate-700">{t("Giọng đọc")}</label>
                 <div className="flex gap-2">
                   {TTS_VOICES.map((voice) => (
                     <button
@@ -1117,7 +1122,7 @@ export default function RealtimeRuntime({
                         }`}
                     >
                       <div className="flex items-center justify-center gap-1.5">
-                        <span>{voice.label}</span>
+                        <span>{t(voice.label)}</span>
                       </div>
                     </button>
                   ))}
@@ -1135,7 +1140,7 @@ export default function RealtimeRuntime({
               onClick={() => setShowDebug(!showDebug)}
               type="button"
             >
-              {showDebug ? "Ẩn thông tin kỹ thuật" : "Hiện thông tin kỹ thuật"}
+              {showDebug ? t("Ẩn thông tin kỹ thuật") : t("Hiện thông tin kỹ thuật")}
             </Button>
           )}
         </div>
@@ -1144,15 +1149,17 @@ export default function RealtimeRuntime({
       {/* Debug Panel (DEV mode, collapsible) */}
       {import.meta.env.DEV && showDebug && (
         <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 sm:p-4 space-y-2 text-[11px] sm:text-xs font-mono text-slate-700">
-          <div className="text-xs font-semibold text-slate-900 mb-2">Thông tin kỹ thuật</div>
-          <div>Status: <span className="text-slate-600">{status}</span></div>
-          <div>Model ID: <span className="text-slate-600">{selectedModelId ?? "none"}</span></div>
-          <div>Generation: <span className="text-slate-600">{activeGenerationRef.current}</span></div>
+          <div className="text-xs font-semibold text-slate-900 mb-2">{t("Thông tin kỹ thuật")}</div>
+          <div>{t("Trạng thái:")} <span className="text-slate-600">{status}</span></div>
+          <div>{t("Mã mô hình:")} <span className="text-slate-600">{selectedModelId ?? t("chưa chọn")}</span></div>
+          <div>{t("Thế hệ:")} <span className="text-slate-600">{activeGenerationRef.current}</span></div>
           {prediction && (
-            <div>Label Key: <span className="text-slate-600 font-normal">{prediction.labelKey}</span></div>
+            <div>{t("Khoá nhãn:")} <span className="text-slate-600 font-normal">{prediction.labelKey}</span></div>
           )}
           {error && (
-            <div className="mt-2 text-red-600">Raw Error: {error}</div>
+            <div className="mt-2 text-red-600">
+              {t("Lỗi kỹ thuật: {chi_tiet}", { chi_tiet: error })}
+            </div>
           )}
         </div>
       )}

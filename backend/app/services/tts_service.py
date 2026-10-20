@@ -40,13 +40,13 @@ ALLOWED_VOICES: List[Dict[str, str]] = [
         "id": "vi-VN-HoaiMyNeural",
         "name": "HoaiMy",
         "gender": "female",
-        "description": "Giọng nữ miền Bắc — tự nhiên",
+        "description": "Giọng nữ ",
     },
     {
         "id": "vi-VN-NamMinhNeural",
         "name": "NamMinh",
         "gender": "male",
-        "description": "Giọng nam miền Bắc",
+        "description": "Giọng nam ",
     },
 ]
 
@@ -89,7 +89,16 @@ async def close_tts() -> None:
     """Gracefully close Redis pool."""
     global _redis_pool
     if _redis_pool is not None:
-        await _redis_pool.aclose()
+        # redis-py renamed the async close to aclose() in 5.0.1; the pinned
+        # 4.5.1 only exposes close(). Prefer aclose() so a future bump keeps
+        # working, but fall back so shutdown never raises AttributeError
+        # ("Application shutdown failed. Exiting.").
+        closer = getattr(_redis_pool, "aclose", None) or getattr(_redis_pool, "close", None)
+        try:
+            if closer is not None:
+                await closer()
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            logger.warning("[TTS] Redis pool close failed: %s", exc)
         _redis_pool = None
     logger.info("[TTS] Redis pool closed")
 

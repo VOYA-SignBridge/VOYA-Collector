@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from filelock import FileLock
 
 from app.config import settings
+from app.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN, tenant_id_of
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,11 @@ RAW_UPLOAD_FIELDS = [
     "storage_url",
     "created_at",
     "updated_at",
+    # Owning tenant, appended last. raw_uploads is the third table the startup
+    # sync writes and the third table A3 puts under RLS; leaving it out would
+    # keep the tenant-less-rebuild hole alive in exactly one of the three.
+    TENANT_COLUMN,
+    "visibility",
 ]
 
 
@@ -51,6 +57,52 @@ def _ensure_raw_uploads_file() -> None:
                 with open(RAW_UPLOADS_CSV, "w", newline="", encoding="utf-8") as f:
                     writer = csv.DictWriter(f, fieldnames=RAW_UPLOAD_FIELDS)
                     writer.writeheader()
+        return
+    _upgrade_raw_uploads_header()
+
+
+def _upgrade_raw_uploads_header() -> bool:
+    """Add any missing RAW_UPLOAD_FIELDS column to an existing uploads.csv.
+
+    Needed because append_raw_upload_row() writes with `fieldnames=
+    RAW_UPLOAD_FIELDS` but only emits a header for an empty file — so appending
+    a 16-column row to a file whose header still has 15 would put every value
+    one column left of its name, silently.
+
+    Existing rows get the bootstrap tenant for the same reason samples.csv does:
+    they were written before tenants existed and provably belong to it.
+    """
+    lock = FileLock(str(RAW_UPLOADS_CSV) + ".lock")
+    with lock:
+        with open(RAW_UPLOADS_CSV, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            on_disk = list(reader.fieldnames or [])
+            if all(col in on_disk for col in RAW_UPLOAD_FIELDS):
+                return False
+            rows = list(reader)
+        for row in rows:
+            row[TENANT_COLUMN] = tenant_id_of(row)
+            # Dòng có trước cột `visibility`: KÍN, cùng mặc định với cột DB
+            # (`DEFAULT 'private'`). Để trống thì CSV không nói gì, và một bản
+            # đọc nào đó đoán khác đi là đủ mở rộng phạm vi chia sẻ.
+            if not (row.get("visibility") or "").strip():
+                row["visibility"] = "private"
+        tmp = str(RAW_UPLOADS_CSV) + ".tmp"
+        with open(tmp, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=RAW_UPLOAD_FIELDS, extrasaction="ignore", restval=""
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, RAW_UPLOADS_CSV)
+    logger.info(
+        "[RAW_UPLOADS] uploads.csv: nâng header lên %d cột (%d dòng giữ nguyên, "
+        "tenant cũ điền '%s')",
+        len(RAW_UPLOAD_FIELDS), len(rows), DEFAULT_TENANT_ID,
+    )
+    return True
 
 
 def list_raw_uploads() -> List[Dict[str, str]]:
@@ -62,6 +114,9 @@ def list_raw_uploads() -> List[Dict[str, str]]:
 
 
 def append_raw_upload_row(row: Dict[str, Any]) -> None:
+    # DictWriter's restval is "", so an omitted key writes an empty cell rather
+    # than defaulting. Copy, don't mutate the caller's dict.
+    row = {**row, TENANT_COLUMN: tenant_id_of(row)}
     _ensure_raw_uploads_file()
     lock = FileLock(str(RAW_UPLOADS_CSV) + ".lock")
     with lock:

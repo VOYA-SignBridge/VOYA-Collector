@@ -1,14 +1,18 @@
 import { useState, Suspense, lazy, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import UploadVideoForm from "../components/UploadVideoForm";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
+import Tabs, { useUrlTab } from "../components/ui/Tabs";
+import CollectionSessionsPage from "./CollectionSessionsPage";
+import MyDataDownloadsPanel from "./MyDataDownloadsPanel";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import LoadingScreen from "../components/LoadingScreen";
 import { useAuth } from "../hooks/useAuth";
+import { LightbulbIcon, TagIcon } from "../components/ui/Icons";
+import { useI18n } from "../i18n";
 const CaptureCamera = lazy(() => import("../components/CaptureCamera"));
-import { TagIcon } from "../components/ui/Icons";
 
 type Feedback = {
   type: 'error' | 'warning' | 'info' | 'success';
@@ -16,9 +20,21 @@ type Feedback = {
 };
 
 export default function UploadPage() {
+  const { t } = useI18n();
+  const UPLOAD_TABS = [
+    { id: "capture", label: t("Ghi hình & tải lên") },
+    { id: "history", label: t("Lịch sử thu") },
+    { id: "downloads", label: t("Tải dữ liệu của tôi") },
+  ] as const;
+  const [pageTab, setPageTab] = useUrlTab("tab", UPLOAD_TABS, "capture");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialLabel = searchParams.get("label") || "";
+  const initialClassUid = searchParams.get("class_uid") || undefined;
   const { loading: authLoading, isAuthenticated } = useAuth();
-  const [tab, setTab] = useState<"video" | "camera">("camera"); // Start with camera for faster data collection
+  const initialMethod = searchParams.get("method") === "video" ? "video" : "camera";
+  const [tab, setTab] = useState<"video" | "camera">(initialMethod);
+  // Start with camera for faster data collection
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [quickLabels] = useState([
@@ -41,11 +57,22 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader 
-        title="Trung tâm Thu thập Dữ liệu"
-        subtitle="Quy trình gọn nhẹ để tạo bộ dữ liệu hiệu quả"
+    // `space-y-4`, không phải 6: trang này có ba khối xếp dọc cộng một khung
+    // máy ảnh cao, và khoảng cách 6 đẩy chính cái khung ấy xuống dưới mép màn
+    // hình — tức đẩy thứ người ta vào đây để dùng ra khỏi tầm nhìn.
+    <div className="space-y-4">
+      <PageHeader
+        title={t("Đóng góp dữ liệu")}
+        subtitle={t("Ghi hình một ký hiệu hoặc tải video lên. Mỗi lần thu được ghi lại ở Lịch sử thu.")}
       />
+
+      <Tabs tabs={UPLOAD_TABS} value={pageTab} onChange={setPageTab} label={t("Mục của trang đóng góp")}>
+      {pageTab === "history" ? (
+        <CollectionSessionsPage embedded />
+      ) : pageTab === "downloads" ? (
+        <MyDataDownloadsPanel />
+      ) : (
+      <div className="space-y-4">
 
       {error && (
         <ErrorBanner 
@@ -67,7 +94,7 @@ export default function UploadPage() {
       )}
 
       {/* Method Selection with Quick Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div
           className={`card card-compact cursor-pointer transition-all duration-200 ${
             tab === "camera"
@@ -84,8 +111,8 @@ export default function UploadPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Ghi hình trực tiếp</h3>
-                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Thu thập nhanh theo lô với phản hồi tức thì</p>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">{t("Ghi hình trực tiếp")}</h3>
+                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">{t("Thu thập nhanh theo lô với phản hồi tức thì")}</p>
               </div>
             </div>
             {tab === "camera" && (
@@ -114,8 +141,8 @@ export default function UploadPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-semibold text-gray-900">Tải video lên</h3>
-                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">Xử lý các tệp video có sẵn</p>
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900">{t("Tải video lên")}</h3>
+                <p className="text-gray-600 text-xs sm:text-sm leading-relaxed">{t("Xử lý các tệp video có sẵn")}</p>
               </div>
             </div>
             {tab === "video" && (
@@ -133,11 +160,14 @@ export default function UploadPage() {
       {SHOW_QUICK_LABELS && tab === "camera" && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="flex items-center gap-1.5 text-sm font-medium text-gray-700"><TagIcon className="h-4 w-4" /> Gợi ý nhãn nhanh</h3>
+            <h3 className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                <TagIcon className="h-4 w-4"  aria-hidden="true" />
+                {t("Gợi ý nhãn nhanh")}
+              </h3>
             <div className="flex items-center gap-2 text-xs text-gray-500">
-              <span>Được dùng nhiều hôm nay:</span>
-              <Badge variant="info" size="sm">walking (12)</Badge>
-              <Badge variant="success" size="sm">sitting (8)</Badge>
+              <span>{t("Được dùng nhiều hôm nay:")}</span>
+              <Badge variant="info" size="sm">{t("xin chào (12)")}</Badge>
+              <Badge variant="success" size="sm">{t("cảm ơn (8)")}</Badge>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -159,7 +189,8 @@ export default function UploadPage() {
             ))}
           </div>
           <div className="mt-2 text-xs text-gray-500">
-            Nhấp để tự động điền nhãn giúp thu dữ liệu nhanh hơn
+            <LightbulbIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5"  aria-hidden="true" />
+            {t("Nhấp để tự động điền nhãn giúp thu dữ liệu nhanh hơn")}
           </div>
         </div>
       )}
@@ -167,39 +198,44 @@ export default function UploadPage() {
       {/* Content Area */}
       {!isAuthenticated && (
         <div className="card p-6 text-center">
-          <h2 className="text-xl font-semibold mb-4">Cần đăng nhập để tải lên</h2>
+          <h2 className="text-xl font-semibold mb-4">{t("Cần đăng nhập để tải lên")}</h2>
           <p className="text-gray-600 mb-6">
-            Vui lòng đăng nhập bằng tài khoản của bạn để bắt đầu gửi dữ liệu ký hiệu tay.
+            {t("Vui lòng đăng nhập bằng tài khoản của bạn để bắt đầu gửi dữ liệu ký hiệu tay.")}
           </p>
           <Button
             variant="primary"
             onClick={() => navigate('/login')}
           >
-            Đăng nhập
+            {t("Đăng nhập")}
           </Button>
         </div>
       )}
 
       {isAuthenticated && (
         <>
-          {tab === "video" && <UploadVideoForm onError={(m) => setError(m)} />}
+          {tab === "video" && <UploadVideoForm onError={(m) => setError(m)} initialLabel={initialLabel} initialClassUid={initialClassUid} />}
           {tab === "camera" && (
             <Suspense fallback={
               <div className="card">
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="ml-3 text-gray-600">Đang tải giao diện camera...</span>
+                  <span className="ml-3 text-gray-600">{t("Đang tải giao diện camera...")}</span>
                 </div>
               </div>
             }>
               <CaptureCamera
                 onError={(m: string) => setError(m)}
                 onSuccess={(m: string) => setFeedback({ type: 'success', message: m })}
+                initialLabel={initialLabel}
+                initialClassUid={initialClassUid}
               />
             </Suspense>
           )}
         </>
       )}
+      </div>
+      )}
+      </Tabs>
     </div>
   );
 }

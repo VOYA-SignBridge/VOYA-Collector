@@ -104,6 +104,11 @@ def main() -> int:
     ap.add_argument("--skip-pilot", action="store_true",
                     help="skip pilot validation (only when it already passed for this campaign)")
     ap.add_argument("--dry-run", action="store_true", help="print the chain without running it")
+    ap.add_argument("--consent-snapshot", type=Path,
+                    default=REPO_ROOT / "dataset" / "consent_snapshot.json",
+                    help="Ảnh chụp đồng thuận. Kiểm ở đây, TRƯỚC khi chuỗi chạy.")
+    ap.add_argument("--skip-consent-gate", action="store_true",
+                    help="Bỏ qua cổng đồng thuận trên toàn chuỗi phát hành.")
     args = ap.parse_args()
 
     manifest_dir = REPO_ROOT / "dataset" / "manifests"
@@ -124,6 +129,32 @@ def main() -> int:
         if d.exists() and any(d.iterdir()):
             preflight.append(f"split version already exists: {d} — split versions "
                              f"are immutable, choose a new --manifest-version")
+    # Cổng đồng thuận kiểm Ở ĐÂY, trước khi chuỗi chạy — dù bước 3 (dựng
+    # manifest) cũng tự kiểm. Lý do: chuỗi này có bảy bước và bước tốn thời gian
+    # nhất nằm TRƯỚC bước dựng manifest. Để nó chạy xong xác thực pilot rồi mới
+    # báo "ảnh chụp đồng thuận quá hạn" là bắt người ta chờ để nhận một câu lẽ
+    # ra nói được ngay giây đầu.
+    if args.skip_consent_gate:
+        print("[WARN] cong dong thuan BI BO QUA tren toan chuoi phat hanh")
+    else:
+        import sys as _s
+        if str(REPO_ROOT / "backend") not in _s.path:
+            _s.path.insert(0, str(REPO_ROOT / "backend"))
+        try:
+            from app.consent_gate import SnapshotUnusable, load_snapshot
+
+            consents, _al, meta = load_snapshot(args.consent_snapshot)
+            live = sum(1 for c in consents.values() if c.highest_live_rank is not None)
+            print(f"[consent] anh chup ok: {len(consents)} nguoi ky, {live} con hieu luc, "
+                  f"tao luc {meta.get('generated_at')}")
+            if live == 0:
+                preflight.append(
+                    "khong co dong thuan nao con hieu luc — moi split muc "
+                    "'research_release' se RONG. Thu dong thuan truoc, hoac chay "
+                    "voi --skip-consent-gate neu that su muon.")
+        except SnapshotUnusable as exc:
+            preflight.append(f"cong dong thuan: {exc}")
+
     if preflight:
         print("[ABORT] pre-flight checks failed:")
         for p in preflight:

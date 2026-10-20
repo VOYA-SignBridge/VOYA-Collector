@@ -323,6 +323,18 @@ def main() -> int:
                     help='so lop bat buoc phai con lai sau khi chon. Khac la dung '
                          'ngay. Dat bang con so trong bai bao thi mot snapshot du '
                          'lieu thieu nguoi ky khong the am tham cho ra bang khac.')
+    # --- cong dong thuan -------------------------------------------------
+    #
+    # Mac dinh 'research_release' chu khong phai 'internal_training': dau ra cua
+    # script nay la artifact cua bai bao, va bang so lieu trong bai la mot hinh
+    # thuc cong bo du lieu. Mau khong truy duoc nguoi ky bi loai o day, va do la
+    # y dinh — khong chung minh duoc da xin phep ai thi khong dua vao bai.
+    ap.add_argument('--consent-scope', default='research_release',
+                    choices=['internal_training', 'research_release', 'public_library'])
+    ap.add_argument('--consent-snapshot', type=Path,
+                    default=REPO / 'dataset' / 'consent_snapshot.json')
+    ap.add_argument('--skip-consent-gate', action='store_true',
+                    help='Bo qua cong dong thuan. Ghi vao performer_map.json.')
     args = ap.parse_args()
 
     alias = {}
@@ -342,6 +354,42 @@ def main() -> int:
                             features, alias, args.fold_case)
     if not rows:
         raise SystemExit('Khong con mau nao sau khi loc — kiem tra --dialect/--recognition_profile.')
+
+    consent_note: dict = {'scope': args.consent_scope}
+    if args.skip_consent_gate:
+        consent_note.update({'enforced': False, 'reason': '--skip-consent-gate'})
+        print('[consent] BI BO QUA theo yeu cau — ghi vao performer_map.json')
+    else:
+        import sys as _s
+        if str(REPO / 'backend') not in _s.path:
+            _s.path.insert(0, str(REPO / 'backend'))
+        from app.consent_gate import (  # noqa: E402
+            SnapshotUnusable, filter_rows, load_snapshot,
+        )
+        try:
+            consents, aliases_map, snap_meta = load_snapshot(args.consent_snapshot)
+        except SnapshotUnusable as exc:
+            raise SystemExit(
+                f'[consent] {exc}\n'
+                f'          Neu that su muon chia split KHONG loc thi truyen '
+                f'--skip-consent-gate.') from None
+        gated = filter_rows(rows, scope=args.consent_scope,
+                            consents=consents, aliases=aliases_map)
+        print(f'[consent] {gated.summary()}')
+        consent_note.update({
+            'enforced': True,
+            'snapshot_hash': snap_meta.get('content_hash'),
+            'kept': len(gated.kept),
+            'withheld': len(gated.withheld),
+            'withheld_reasons': gated.reasons,
+        })
+        rows = gated.kept
+        stats['after_consent_gate'] = len(rows)
+        if not rows:
+            raise SystemExit(
+                f"[consent] khong con mau nao du dieu kien cho muc "
+                f"'{args.consent_scope}'. Day la hanh vi dung khi chua thu dong "
+                f"thuan, nhung khong chia split duoc.")
     print(f'[data] manifest {stats["manifest_rows"]} rows -> {stats["resolved"]} resolved '
           f'({stats["dropped_no_npz"]} khong tim thay .npz)')
 
@@ -382,6 +430,10 @@ def main() -> int:
         'note': 'Chua ten that. KHONG phat hanh kem artifact.',
         'pseudonym_to_source': {v: k for k, v in pseudo.items()},
         'eligible_folds': [pseudo[p] for p in eligible],
+        # Di theo artifact: sau nay doc lai mot bang so lieu, cau hoi "tap nay
+        # da qua cong dong thuan chua, o muc nao" phai tra loi duoc tu chinh
+        # artifact chu khong phai tu tri nho cua nguoi chay lenh.
+        'consent_gate': consent_note,
     }, ensure_ascii=False, indent=2), encoding='utf-8')
 
     reports = {}
@@ -391,7 +443,13 @@ def main() -> int:
         others = [r for r in rows if r['_performer'] != p]
         base_meta = {
             'split_mode': 'leave_one_performer_out',
-            'recognition_profile': args.recognition_profile or args.dialect or 'all',
+            # Only the real thing, never args.dialect as a stand-in: dialect is
+            # a storage directory, recognition_profile decides which model gets
+            # trained, and the two are not interchangeable. Writing one into the
+            # other put the non-existent profile "spa" on 7 classes. A manifest
+            # that leaves this empty is honest; one that guesses describes an
+            # experiment that never ran.
+            'recognition_profile': args.recognition_profile or '',
             # Trainer can cai nay de dung label map rieng cua fold. Thieu no thi
             # dataset_loader roi ve labels.csv toan cuc va model mo ra 42 lop cho
             # mot fold 7 lop: accuracy van dep, macro-F1 bi 35 lop vang mat keo

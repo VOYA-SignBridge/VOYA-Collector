@@ -6,8 +6,9 @@ from app.config import settings
 from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
-from app.modules.dataset.catalog import get_or_register_class
-from app.modules.dataset.samples import save_sequence_npz, count_samples_for_class
+from app.modules.dataset.catalog import get_or_register_class, list_classes
+from app.tenant_context import current_tenant
+from app.modules.dataset.samples import save_sequence_npz, count_samples_for_class, COORD_SPACE_IMAGE
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def _window_activity_mean_abs_diff(seq_arr: np.ndarray) -> float:
     diffs = np.diff(seq_arr.astype(np.float32, copy=False), axis=0)
     return float(np.mean(np.abs(diffs)))
 
-def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn", user_id: str = ""):
+def process_video_job(video_path: str, user: str, label: str, session_id: str, dialect: str = "common", language: str = "vn", user_id: str = "", class_uid: str = "", visibility: str = "private"):
     """
     Synchronous function to process video without Celery decorator.
     This is called by the Celery task in tasks.py
@@ -60,7 +61,16 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
         speed_variants = temporal_speed_variants(video_path, speeds=settings.speed_variants)
         
         # Resolve / register class metadata in new hierarchy
-        class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
+        if class_uid:
+            tenant = current_tenant()
+            class_meta = next(
+                (m for m in list_classes(tenant_id=tenant) if m.class_uid == class_uid),
+                None,
+            ) if tenant else None
+            if class_meta is None:
+                raise ValueError("class_uid does not belong to the active tenant")
+        else:
+            class_meta = get_or_register_class(label_original=label, language=language, dialect=dialect or "")
 
         # Enforce a global per-class cap across the whole dataset (not just per upload job).
         # Set MAX_SAMPLES_PER_CLASS <= 0 to disable the cap.
@@ -175,7 +185,16 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
 
                     window_meta = {
                         "user": user,
-                        "user_id": user_id,
+                        # Mirror the camera path: user_id holds the DISPLAY name (for
+                        # the samples.csv user_id column) and auth_user_id holds the
+                        # authenticated UUID — persisted to samples.auth_user_id so the
+                        # recording AND its augmentations are owned by the uploader.
+                        # Previously user_id carried the UUID and auth_user_id was never
+                        # set, so every video/augmented sample landed auth_user_id=NULL
+                        # (invisible to the owner's Trash / reassign / delete).
+                        "user_id": user,
+                        "auth_user_id": user_id,
+                        "visibility": visibility if visibility in ("private", "tenant", "community") else "private",
                         "session_id": session_id,
                         "fps_original": fps_target,
                         "fps_processed": fps_target,
@@ -206,7 +225,14 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                             # under a file lock for a video that yields many samples.
                             if max_per_class > 0 and (existing_total + saved_total) >= max_per_class:
                                 break
-                            path = save_sequence_npz(class_meta, aseq, meta=window_meta, augment_id=aug_id, source_type="video", upload_collector=upload_items)
+                            # This path never normalizes: extract_sequence_stream
+                            # yields MediaPipe image coordinates straight into
+                            # the window, and nothing between here and disk moves
+                            # them. Saying so is not bookkeeping — a viewer that
+                            # assumes wrist-centred data splits the two hands into
+                            # separate columns, and these hands are already in
+                            # their true relative positions.
+                            path = save_sequence_npz(class_meta, aseq, meta=window_meta, augment_id=aug_id, source_type="video", upload_collector=upload_items, coordinate_space=COORD_SPACE_IMAGE)
                             saved_paths.append(path)
                             saved_total += 1
                             if remaining_quota is not None and saved_total >= remaining_quota:
@@ -280,7 +306,7 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                     meta["rescue_fill"] = True
                     meta["rescue_from_completeness"] = float(round(best_comp, 4))
                     meta["rescue_from_activity"] = float(round(best_act, 6))
-                    path = save_sequence_npz(class_meta, aseq, meta=meta, augment_id=base_aug_id + i, source_type="video", upload_collector=upload_items)
+                    path = save_sequence_npz(class_meta, aseq, meta=meta, augment_id=base_aug_id + i, source_type="video", upload_collector=upload_items, coordinate_space=COORD_SPACE_IMAGE)
                     all_saved_paths.append(path)
                     saved_total += 1
 

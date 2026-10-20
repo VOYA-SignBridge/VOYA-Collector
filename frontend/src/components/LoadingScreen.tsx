@@ -5,7 +5,12 @@
  *
  * Used for app boot, lazy-route Suspense, and the auth gate.
  */
-export default function LoadingScreen({ label = "Đang tải…" }: { label?: string }) {
+import { useI18n } from "../i18n";
+
+export default function LoadingScreen({ label }: { label?: string }) {
+  const { t } = useI18n();
+  // Mặc định nằm trong thân hàm: `t` đến từ hook, chưa có lúc tính tham số.
+  const text = label ?? t("Đang tải…");
   return (
     <div className="fixed inset-0 z-[9990] flex flex-col items-center justify-center gap-8 bg-white">
       {/* Wave line bars */}
@@ -23,7 +28,7 @@ export default function LoadingScreen({ label = "Đang tải…" }: { label?: st
         ))}
       </div>
 
-      <span className="text-sm font-medium tracking-wide text-ctu-blue/70">{label}</span>
+      <span className="text-sm font-medium tracking-wide text-ctu-blue/70">{text}</span>
     </div>
   );
 }

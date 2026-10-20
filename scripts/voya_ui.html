@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOYA — Bảng điều khiển máy chủ</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #ffffff; --line: #e3e7ee; --text: #1b2230; --muted: #5d6677; --faint: #8b93a3;
+    --accent: #0b5cad; --accent-bg: #e7f0fb; --ok: #0b5cad; --ok-bg: #e7f0fb;
+    --warn: #8a5a00; --warn-bg: #fdf3dc; --bad: #a32020; --bad-bg: #fbe9e9; --mono: ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #10141b; --card: #171c25; --line: #283040; --text: #e6eaf1; --muted: #a3acbb; --faint: #7d8696;
+            --accent: #6aa6ff; --accent-bg: #16253b; --ok: #6aa6ff; --ok-bg: #16253b;
+            --warn: #f2c56b; --warn-bg: #3a2d10; --bad: #ff8f8f; --bad-bg: #3d1717; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
+  header h1 { font-size: 17px; font-weight: 600; margin: 0; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .p-safe { background: var(--ok-bg); color: var(--ok); }
+  .p-confirm { background: var(--warn-bg); color: var(--warn); }
+  .p-danger { background: var(--bad-bg); color: var(--bad); }
+  .muted { color: var(--muted); } .faint { color: var(--faint); font-size: 12px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px 20px 40px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .stat .k { font-size: 12px; color: var(--muted); } .stat .v { font-size: 20px; font-weight: 600; }
+  .v.ok { color: var(--ok); } .v.warn { color: var(--warn); } .v.bad { color: var(--bad); }
+  .alert { background: var(--bad-bg); color: var(--bad); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+  .alert.info { background: var(--warn-bg); color: var(--warn); }
+  .layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .group-title { font-size: 13px; font-weight: 600; color: var(--muted); padding: 12px 14px 4px; }
+  .cmd { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line); }
+  .cmd:first-of-type { border-top: none; }
+  .cmd .t { font-weight: 500; } .cmd .d { font-size: 12px; color: var(--muted); }
+  .cmd .grow { flex: 1; min-width: 0; }
+  .cmd input { width: 150px; font: 12px var(--mono); padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+  button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .log { font: 12px/1.55 var(--mono); background: var(--bg); border-radius: 0 0 12px 12px; padding: 10px 12px; height: 430px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .loghead { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-top: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; border-top: none; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; padding: 16px; }
+  .backdrop.on { display: flex; }
+  .modal { background: var(--card); border-radius: 12px; padding: 20px; width: 100%; max-width: 440px; }
+  .modal h2 { font-size: 16px; margin: 0 0 8px; }
+  .modal input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--text); font: inherit; margin: 8px 0 4px; }
+  .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  .err { color: var(--bad); font-size: 13px; min-height: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Bảng điều khiển máy chủ VOYA</h1>
+    <div class="faint" id="gitline">…</div>
+  </div>
+  <span class="pill p-safe" title="Chỉ mở được trên chính máy này (127.0.0.1)">Chỉ máy này</span>
+</header>
+<main>
+  <div id="alerts"></div>
+  <div class="stats" id="stats"></div>
+  <div class="layout">
+    <div class="card" id="commands"></div>
+    <div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="loghead"><strong id="jobtitle">Nhật ký lệnh</strong>
+          <button id="cancel" style="display:none">Dừng lệnh</button></div>
+        <div class="log" id="log">Chọn một lệnh ở bên trái để chạy. Mỗi lúc chỉ chạy một lệnh.</div>
+      </div>
+      <div class="card">
+        <div class="loghead"><strong>Thao tác quan trọng gần đây</strong></div>
+        <div style="max-height:260px;overflow:auto"><table><thead><tr><th>Lúc</th><th>Lệnh</th><th>Kết quả</th><th>Ai</th></tr></thead>
+          <tbody id="actions"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="backdrop" id="dlg"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlgtitle">
+  <h2 id="dlgtitle"></h2>
+  <div class="muted" id="dlgtext"></div>
+  <div id="dlgtype"><div style="margin-top:10px">Gõ <code id="dlgword"></code> để xác nhận:</div>
+    <input id="dlginput" autocomplete="off"></div>
+  <div class="err" id="dlgerr"></div>
+  <div class="row"><button id="dlgno">Huỷ</button><button class="primary" id="dlgyes">Chạy</button></div>
+</div></div>
+
+<script>
+const TOKEN = "__VOYA_TOKEN__";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const RISK = { safe: ["An toàn", "p-safe"], confirm: ["Xác nhận", "p-confirm"], danger: ["Nguy hiểm", "p-danger"] };
+
+let offline = false;
+const OFFLINE_MSG = "Bảng điều khiển đã tắt (cửa sổ VOYA_UI đã đóng hoặc máy vừa khởi động lại). "
+  + "Bấm đúp VOYA_UI.bat để mở lại — mỗi lần mở có một link mới, tab này không dùng lại được.";
+
+function goOffline(why) {
+  if (offline) return;
+  offline = true;
+  $("alerts").innerHTML = `<div class="alert">${esc(why)}</div>`;
+  document.querySelectorAll("button[data-key]").forEach((b) => (b.disabled = true));
+  document.querySelectorAll(".stat").forEach((el) => (el.style.opacity = ".5"));
+  $("gitline").textContent = "Đã mất kết nối — số liệu bên dưới là lần đọc cuối.";
+}
+
+async function api(path, body) {
+  if (offline) throw new Error(OFFLINE_MSG);
+  const opt = { headers: { "X-VOYA-Token": TOKEN } };
+  if (body !== undefined) { opt.method = "POST"; opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  let r;
+  try { r = await fetch(path, opt); }
+  catch (e) { goOffline(OFFLINE_MSG); throw new Error(OFFLINE_MSG); }   // server không còn chạy
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 403 && data.error === "token") {
+    // Server đã được mở lại (token mới): tab cũ này hết hiệu lực.
+    goOffline("Bảng điều khiển vừa được mở lại ở một link khác. Đóng tab này và dùng tab mới.");
+    throw new Error("token");
+  }
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+let commands = [], since = 0, polling = null, pending = null;
+
+function stat(k, v, cls, sub) {
+  return `<div class="stat"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${esc(v)}</div>${sub ? `<div class="faint">${esc(sub)}</div>` : ""}</div>`;
+}
+
+async function loadStatus() {
+  let s;
+  try { s = await api("/api/status"); }
+  catch (e) { if (!offline) $("alerts").innerHTML = `<div class="alert">Không đọc được tình trạng: ${esc(e.message)}</div>`; return; }
+  const bad = s.containers_bad || [];
+  const disk = (s.disk || []).map((d) => `${d.drive} ${d.free_gb} GB (${d.free_pct}%)`).join(" · ");
+  const minDisk = Math.min(...(s.disk || [{ free_gb: 999 }]).map((d) => d.free_gb));
+  $("stats").innerHTML =
+    stat("Container", s.containers_total ? `${s.containers_total - bad.length}/${s.containers_total}` : "đang tắt", bad.length || !s.containers_total ? "bad" : "ok", bad.length ? "chưa ổn: " + bad.join(", ") : "") +
+    stat("API trên máy", s.health, s.health === "200" ? "ok" : "bad") +
+    stat("Sao lưu gần nhất", s.backup_hours == null ? "chưa có" : `${Math.round(s.backup_hours)} giờ trước`, s.backup_hours == null || s.backup_hours > 26 ? "warn" : "ok") +
+    stat("Ổ đĩa trống (ít nhất)", `${minDisk} GB`, minDisk < 20 ? "bad" : minDisk < 50 ? "warn" : "ok", disk) +
+    stat("Triển khai gần nhất", s.last_deploy.time ? s.last_deploy.time.replace("T", " ").slice(5, 16) : "chưa ghi", "", s.last_deploy.label ? `${s.last_deploy.label} · ${s.last_deploy.git || ""}` : "");
+  const alerts = [];
+  if (s.maintenance) alerts.push(`<div class="alert info">Trang bảo trì đang BẬT — người dùng không vào được. Tắt: lệnh "Trang bảo trì" với đối số <code>off</code>.</div>`);
+  if ((s.stopped || {}).time) alerts.push(`<div class="alert info">Stack đang được DỪNG CÓ CHỦ Ý từ ${esc(s.stopped.time.replace("T", " "))} (${esc(s.stopped.reason)}, ${esc(s.stopped.by)}) — canh gác sẽ không tự bật lại. Bật lại: "Khởi động / áp dụng .env".</div>`);
+  if ((s.deploy_running || {}).pid) alerts.push(`<div class="alert info">Đang có lượt "${esc(s.deploy_running.what)}" chạy từ ${esc(s.deploy_running.time.replace("T", " "))} — đợi xong trước khi cập nhật hay quay lui.</div>`);
+  const w = s.last_watch || {};
+  if ((w.problems || []).length) alerts.push(`<div class="alert">Lượt canh gác ${esc((w.time || "").replace("T", " "))}: ${(w.problems || []).map(esc).join("; ")}</div>`);
+  $("alerts").innerHTML = alerts.join("");
+  $("gitline").textContent = `Nhánh ${s.git.branch} · ${s.git.modified ? s.git.modified + " tệp đã sửa chưa commit" : "không có thay đổi chưa commit"}`;
+}
+
+function renderCommands() {
+  let html = "", group = null;
+  for (const c of commands) {
+    if (c.group !== group) { if (group !== null) html += "</div>"; html += `<div><div class="group-title">${esc(c.group)}</div>`; group = c.group; }
+    const [rl, rc] = RISK[c.risk];
+    html += `<div class="cmd"><div class="grow"><div class="t">${esc(c.title)}</div><div class="d">${esc(c.desc)}</div></div>
+      ${c.hint ? `<input id="arg-${c.key}" placeholder="${esc(c.hint)}" aria-label="Đối số cho ${esc(c.title)}">` : ""}
+      <span class="pill ${rc}">${rl}</span><button data-key="${esc(c.key)}">Chạy</button></div>`;
+  }
+  $("commands").innerHTML = html + "</div>";
+  $("commands").querySelectorAll("button[data-key]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.key)));
+}
+
+function ask(key) {
+  const c = commands.find((x) => x.key === key);
+  const args = ($("arg-" + key)?.value || "").trim();
+  if (c.args_required && !args) { alert(`Lệnh này cần đối số: ${c.hint}`); return; }
+  if (c.risk === "safe") { run(key, args, ""); return; }
+  pending = { key, args, word: c.word, risk: c.risk };
+  $("dlgtitle").textContent = c.title + (args ? ` (${args})` : "");
+  $("dlgtext").textContent = c.desc + (c.risk === "danger" ? ". Thao tác nguy hiểm." : ".");
+  $("dlgtype").style.display = c.risk === "danger" ? "" : "none";
+  $("dlgword").textContent = c.word; $("dlginput").value = ""; $("dlgerr").textContent = "";
+  $("dlg").classList.add("on");
+  if (c.risk === "danger") $("dlginput").focus(); else $("dlgyes").focus();
+}
+$("dlgno").onclick = () => $("dlg").classList.remove("on");
+$("dlginput").oninput = () => { $("dlgerr").textContent = ""; };
+$("dlgyes").onclick = () => {
+  const p = pending;
+  if (p.risk === "danger" && $("dlginput").value.trim().toLowerCase() !== p.word) { $("dlgerr").textContent = `Gõ đúng "${p.word}" để chạy.`; return; }
+  $("dlg").classList.remove("on");
+  run(p.key, p.args, p.word);
+};
+
+async function run(key, args, confirm) {
+  try { await api("/api/run", { key, args, confirm }); }
+  catch (e) { $("log").textContent = "Không chạy được: " + e.message; return; }
+  since = 0; $("log").textContent = ""; poll();
+}
+
+async function poll() {
+  clearTimeout(polling);
+  let j;
+  try { j = await api("/api/job?since=" + since); } catch (e) { if (!offline) polling = setTimeout(poll, 3000); return; }
+  if (j.key) {
+    const c = commands.find((x) => x.key === j.key);
+    $("jobtitle").textContent = (c ? c.title : j.key) + (j.running ? " — đang chạy…" : j.exit === 0 ? " — xong" : ` — lỗi (mã ${j.exit})`);
+  }
+  if (j.lines.length) {
+    const box = $("log"), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+    box.textContent += (box.textContent ? "\n" : "") + j.lines.join("\n");
+    since = j.total;
+    if (atEnd) box.scrollTop = box.scrollHeight;
+  }
+  $("cancel").style.display = j.running ? "" : "none";
+  document.querySelectorAll("button[data-key]").forEach((b) => (b.disabled = j.running || offline));
+  if (j.running) polling = setTimeout(poll, 1000);
+  else { loadStatus(); loadActions(); }
+}
+$("cancel").onclick = async () => {
+  if (!confirm("Dừng lệnh đang chạy? Nếu đang cập nhật, trang bảo trì có thể vẫn bật — kiểm lại sau khi dừng.")) return;
+  await api("/api/cancel", {}); poll();
+};
+
+async function loadActions() {
+  const { actions } = await api("/api/actions").catch(() => ({ actions: [] }));
+  const label = { ok: "xong", loi: "LỖI", huy: "huỷ" };
+  $("actions").innerHTML = actions.map((a) => `<tr><td>${esc(a.time.replace("T", " ").slice(5, 16))}</td>
+    <td><code>${esc(a.command)}${a.args.length ? " " + esc(a.args.join(" ")) : ""}</code></td>
+    <td style="color:${a.result === "loi" ? "var(--bad)" : "inherit"}">${label[a.result] || esc(a.result)} · ${a.seconds}s</td><td class="faint">${esc(a.by)}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="muted">Chưa có thao tác nào.</td></tr>`;
+}
+
+(async () => {
+  commands = (await api("/api/meta")).commands;
+  renderCommands();
+  loadStatus(); loadActions(); poll();
+  setInterval(loadStatus, 60000);
+})();
+</script>
+</body>
+</html>

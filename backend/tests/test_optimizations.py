@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.config import settings
 from app.modules.dataset import samples as dataset_samples
@@ -33,12 +34,28 @@ SKIPPED: list[tuple[str, str]] = []
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
+    """Ghi nhan ket qua, VA nem khi sai.
+
+    Cau `raise` la bat buoc, khong phai trang tri. Tep nay von la script chay
+    tay: verdict nam o `sys.exit(1 if FAILED else 0)` cuoi `main()`, nen
+    `check` chi can ghi vao danh sach. Nhung pytest KHONG goi `main()` - no
+    thu tung ham `test_*` mot. Khong co `raise` thi moi ham o day xanh vo
+    dieu kien, ke ca khi moi phep kiem ben trong deu sai.
+
+    Da do, khong phai suy doan: sua mot dieu kien thanh hang sai roi chay
+    `pytest ...::test_config_defaults` van ra "1 passed".
+
+    `main()` boc try/except quanh tung test nen che do chay tay van nguyen;
+    khac biet duy nhat la no dung o phep kiem sai DAU TIEN trong mot ham thay
+    vi gom het - dung cach pytest van bao loi.
+    """
     if cond:
         PASSED.append(name)
         print(f"  PASS  {name}")
-    else:
-        FAILED.append((name, str(detail)))
-        print(f"  FAIL  {name}  -> {detail}")
+        return
+    FAILED.append((name, str(detail)))
+    print(f"  FAIL  {name}  -> {detail}")
+    raise AssertionError(f"{name}" + (f"  -> {detail}" if detail else ""))
 
 
 # --------------------------------------------------------------------------- #
@@ -63,8 +80,20 @@ def test_no_double_serialization():
     print("[test_no_double_serialization]")
     src = inspect.getsource(dataset_samples.save_sequence_npz)
     check("save_sequence_npz has no BytesIO", "BytesIO" not in src, "BytesIO still referenced")
-    check("save_sequence_npz compresses exactly once", src.count("savez_compressed") == 1,
-          f"savez_compressed count = {src.count('savez_compressed')}")
+
+    # Phep kiem nay soi MA NGUON, nen no lac hau theo moi lan tach ham. Da xay
+    # ra: ban truoc dem `savez_compressed` trong than `save_sequence_npz`, roi
+    # duong ghi duoc tach ra `_atomic_write_npz` va so dem tut ve 0. Neu luc do
+    # `check` con nem, no da bao ngay; vi no khong nem nen phep kiem nay im
+    # lang mat tac dung, khong ai biet.
+    #
+    # Nen kiem CA HAI: uy quyen dung cho ai, va noi do nen dung mot lan.
+    check("save_sequence_npz uy quyen cho _atomic_write_npz",
+          "_atomic_write_npz" in src, "khong con goi _atomic_write_npz")
+    writer = inspect.getsource(dataset_samples._atomic_write_npz)
+    check("_atomic_write_npz compresses exactly once",
+          writer.count("savez_compressed") == 1,
+          f"savez_compressed count = {writer.count('savez_compressed')}")
 
 
 def test_download_chunk_configurable():
@@ -83,6 +112,38 @@ def _make_meta() -> ClassMetadata:
         class_uid="testuid123456", slug="xin-chao", label_original="xin chao",
         language="vn", dialect="bac", is_common_global=False, is_common_language=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _restore_module_roots():
+    """Undo `_patch_dataset_root` after every test in this module.
+
+    It assigns module attributes directly rather than through monkeypatch, so
+    without this the redirected roots survive the test and every later test in
+    the same process sees a `dataset/` that points at a deleted temp directory.
+    That leak is invisible here — these tests set the values they need — and
+    only shows up as an unrelated failure somewhere further down the run order,
+    which is the most expensive kind of test defect to track down.
+
+    Restoring is done here rather than by rewriting the seven call sites, which
+    take a plain `tmp` string inside `with tempfile...` blocks and have no
+    monkeypatch fixture to hand.
+    """
+    saved = (
+        dataset_manager.FEATURES_ROOT,
+        dataset_samples.DATASET_ROOT,
+        dataset_samples.SAMPLES_DIR,
+        dataset_samples.SAMPLES_CSV,
+    )
+    try:
+        yield
+    finally:
+        (
+            dataset_manager.FEATURES_ROOT,
+            dataset_samples.DATASET_ROOT,
+            dataset_samples.SAMPLES_DIR,
+            dataset_samples.SAMPLES_CSV,
+        ) = saved
 
 
 def _patch_dataset_root(tmp: str) -> None:
@@ -327,8 +388,11 @@ def test_batch_upload_task():
             calls["up"] += 1
             return f"https://drive/{key}"
 
-        def fake_db(uid, url):
+        def fake_db(uid, url, storage_key=None):
+            # `storage_key` đi cùng URL từ 17/09/2026 (DB từng là nơi duy nhất
+            # không nhận khoá này). Kiểm luôn rằng nó THẬT SỰ được truyền.
             calls["db"] += 1
+            calls.setdefault("keys", []).append(storage_key)
 
         gc.upload_to_gdrive = fake_up
         mdb.update_sample_gdrive_url = fake_db
@@ -337,6 +401,7 @@ def test_batch_upload_task():
         check("batch task: uploaded=2", res.get("uploaded") == 2, res)
         check("batch task: upload called 2x", calls["up"] == 2, calls["up"])
         check("batch task: db updated 2x", calls["db"] == 2, calls["db"])
+        check("batch task: db got storage_key", all(calls.get("keys") or [None]), calls.get("keys"))
         rows = _read_samples_csv()
         check("batch task: csv x1 url set", rows["x1"]["storage_url"] == "https://drive/features/x1.npz", rows["x1"]["storage_url"])
         check("batch task: csv x2 url set", rows["x2"]["storage_url"].startswith("https://drive/"))

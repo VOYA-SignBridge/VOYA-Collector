@@ -386,13 +386,54 @@ def _sorted_idx_items(raw_idx_to_label: Any) -> List[Tuple[Any, Any]]:
     raise TypeError("idx_to_label must be a list or dict")
 
 
-def _label_lookup_by_key(label_lookup: Optional[Dict[str, Dict[str, Any]]], label_key: str) -> Dict[str, Any]:
+def _label_lookup_by_key(
+    label_lookup: Optional[Dict[str, Dict[str, Any]]],
+    label_key: str,
+    *,
+    language: str = "",
+    dialect: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Tra một nhãn, chấp nhận CẢ HAI không gian tên khoá.
+
+    Kho này có hai cách gọi tên cùng một lớp, và chúng không trùng nhau:
+
+        vn/bang-chu-cai/y    khoá theo PHƯƠNG NGỮ — `export_labels.py` dựng
+                             `f"{language}/{dialect}/{slug}"`, và đó là thứ nằm
+                             trong `index_to_label.json`
+        vn/alphabet/y        khoá theo PROFILE — `label_key_v2()` dựng
+                             `f"{lang}/{profile}/{slug}"`, và đó là thứ nằm
+                             trong checkpoint huấn luyện theo lược đồ v2
+
+    Ánh xạ thật giữa hai bên: `bang-chu-cai -> alphabet`, `hoa-de -> hoa_de`.
+    Chú ý cả dấu gạch: phương ngữ dùng gạch NỐI, profile dùng gạch DƯỚI.
+
+    Hệ quả khi chỉ tra một không gian: mọi checkpoint v2 đều trượt, và
+    `normalize_idx_to_label` lùi về chính `label_key`. Giao diện khi ấy hiện
+    "vn/alphabet/y" ở chỗ đáng lẽ là "Y" — đúng thứ người dùng báo lại. Không
+    có gì đỏ ở bất kỳ tầng nào: mô hình đoán đúng lớp, độ tin cậy đúng, chỉ
+    riêng cái tên là thô.
+
+    Vì sao lùi về `(dialect, slug)` chứ không về riêng `slug`: slug KHÔNG duy
+    nhất — `dia-chi` có ở cả `bac` lẫn `nam`, hai lớp khác nhau. Cặp
+    `(dialect, slug)` thì duy nhất (đã đối chiếu trên toàn bảng tra), và
+    `dialect` ở đây đến từ bản khai của chính mô hình trong `models.json`, nên
+    đây là một phép DỊCH có thẩm quyền chứ không phải một phép đoán.
+    """
     if not label_lookup:
         return {}
 
     value = label_lookup.get(label_key)
     if isinstance(value, dict):
         return value
+
+    # Không gian tên thứ hai: dựng lại khoá theo phương ngữ mà mô hình đã khai.
+    if dialect:
+        slug = label_key.rsplit("/", 1)[-1].strip()
+        if slug:
+            lang = (language or label_key.split("/", 1)[0] or "vn").strip()
+            value = label_lookup.get(f"{lang}/{dialect}/{slug}")
+            if isinstance(value, dict):
+                return value
     return {}
 
 
@@ -420,14 +461,19 @@ def normalize_idx_to_label(
             dialect = None if dialect_raw is None else str(dialect_raw).strip() or None
         else:
             label_key = str(raw_value or "").strip()
-            lookup = _label_lookup_by_key(label_lookup, label_key)
+            lookup = _label_lookup_by_key(
+                label_lookup, label_key,
+                language=default_language, dialect=default_dialect)
             label_original = str(lookup.get("label_original") or label_key).strip()
             label_slug = str(lookup.get("slug") or label_key.rsplit("/", 1)[-1]).strip()
             language = str(lookup.get("language") or default_language).strip()
             dialect_raw = lookup.get("dialect", default_dialect)
             dialect = None if dialect_raw is None else str(dialect_raw).strip() or None
 
-        lookup = _label_lookup_by_key(label_lookup, label_key)
+        lookup = _label_lookup_by_key(
+            label_lookup, label_key,
+            language=language or default_language,
+            dialect=dialect or default_dialect)
         if lookup:
             label_original = str(lookup.get("label_original") or label_original).strip()
             label_slug = str(lookup.get("slug") or label_slug).strip()

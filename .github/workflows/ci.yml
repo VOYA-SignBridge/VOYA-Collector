@@ -1,0 +1,401 @@
+# Cổng kiểm cho mỗi pull request: lint kiểu, dựng frontend, chạy cả hai bộ test.
+#
+# Vì sao tách khỏi `build_docker.yml`
+# -----------------------------------
+# Workflow kia chạy trên pull request và **đẩy ảnh `latest` lên Docker Hub** —
+# tức một PR bất kỳ, chưa ai duyệt, ghi đè ảnh mà máy sản xuất đang kéo về. Đó
+# là việc phải sửa ở chính tệp kia (chuyển sang `on: push: branches: [main]`).
+# Tệp này không đẩy gì cả: nó chỉ trả lời "mã này có chạy được không".
+#
+# Vì sao có bước cấp vai — và vì sao thiếu nó thì mọi thứ đỏ
+# ---------------------------------------------------------
+# Bộ test chạy dưới vai `voya_app`, KHÔNG phải `postgres`/`admin`: vai
+# superuser được miễn row-level security vô điều kiện, nên chạy suite bằng nó
+# sẽ làm mọi test cô lập tenant xanh một cách vô nghĩa.
+#
+# Nhưng `ensure_tables()` dựng bảng bằng vai DDL (`MIGRATION_DATABASE_URL`), và
+# Postgres KHÔNG tự cấp quyền trên bảng mới cho vai khác. Thiếu bước GRANT thì
+# mọi test chết với `permission denied for table users` — một thông báo trỏ
+# thẳng vào mã ứng dụng trong khi nguyên nhân nằm ở phân quyền. Đo 2026-08-10:
+# thiếu GRANT → 41 lỗi chỉ trong 3 tệp; có GRANT → 0.
+#
+# Vì sao chạy trên CSDL TRỐNG là điều đáng làm, không phải điều phải né
+# ---------------------------------------------------------------------
+# Suốt từ trước, bộ test luôn chạy trên một BẢN SAO của cơ sở dữ liệu sản xuất.
+# Lần đầu chạy nó trên một CSDL dựng từ số không (chính là điều CI buộc phải
+# làm) cho ra **22 test đỏ**, và không cái nào là lỗi của test: `ensure_tables()`
+# dựng ra một lược đồ thiếu 2 bảng, 3 khoá ngoại và 14 cột so với máy đang chạy.
+# Nghĩa là mọi máy triển khai MỚI đều nhận một lược đồ yếu hơn, im lặng. Đã vá
+# ở `storage/metadata_db.py`; job này là thứ giữ cho nó không tái diễn.
+
+name: CI
+
+# Kích hoạt: `main` KHÔNG đủ, và đó là lý do tệp này nằm im 253 commit.
+#
+# Bản trước chỉ gác `main`. Nhưng công việc thật của kho này chưa bao giờ đi
+# qua `main`: nó nằm trên nhánh `deploy_ctu_*`, và tính tới 11/09/2026 nhánh
+# đang chạy đi trước `main` đúng 253 commit — bốn tháng mã sản xuất mà cổng
+# kiểm chưa soi một dòng nào. Một cổng không bao giờ kích hoạt thì không phải
+# là cổng lỏng, nó là cổng KHÔNG TỒN TẠI, và tệ hơn ở chỗ nhìn vào kho thì
+# tưởng là có.
+#
+# Nên gác cả hai: `main` (đích của mọi PR) và `deploy_ctu_**` (nơi mã thật sự
+# được viết). `**` khớp cả `deploy_ctu_ver-2.2.1` lẫn các nhánh phát hành sau.
+on:
+  pull_request:
+    branches: [main, 'deploy_ctu_**']
+  # Push releases run this workflow through build_docker.yml's required checks
+  # job, avoiding two complete test runs for the same push.
+  # Chạy lại bằng tay khi cần xác nhận một commit cũ vẫn xanh.
+  workflow_dispatch:
+  workflow_call:
+
+# Một PR đẩy liên tiếp vài commit thì chỉ lượt cuối cần chạy.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend — kiểu, test, dựng
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      # `npm run typecheck`, KHÔNG phải `npx tsc --noEmit`. Lệnh sau chạy một
+      # tsconfig khác và kiểm **không tệp nào** — nó từng báo sạch trong khi
+      # `npm run build` hỏng, và giấu 14 lỗi kiểu.
+      - name: Kiểm kiểu
+        run: npm run typecheck
+
+      # Cổng i18n, và cổng tự chứng minh mình trước.
+      #
+      # `--self-test` gieo một chuỗi tiếng Việt còn trần rồi đòi chính cổng ấy
+      # phải ĐỎ. Nghe thừa, nhưng bản đầu của cổng này báo ĐẠT trong khi có
+      # chuỗi trần thật: nó đọc `perFile` như một map trong khi công cụ trả về
+      # một mảng, nên tổng luôn bằng 0. Không có bước này thì cổng i18n sẽ nằm
+      # trong workflow suốt nhiều tháng, luôn xanh, và không gác gì cả — đúng
+      # cái cách mà con số "đã phủ 100%" đã sai hai lần trước đây.
+      #
+      # Ngưỡng là 0 tuyệt đối chứ không phải phần trăm: với 2188 chuỗi đã dịch,
+      # một chuỗi trần mới vẫn in ra "100.0%" sau khi làm tròn.
+      - name: Cổng i18n tự kiểm
+        run: node scripts/i18n-gate.mjs --self-test
+
+      - name: Cổng i18n — không hồi quy
+        run: node scripts/i18n-gate.mjs
+
+      - name: Test
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-frontend.xml
+
+      # Dựng thật. `tsc -b` bắt được lớp lỗi mà `typecheck` không bắt (ví dụ
+      # "parameter property" dưới `erasableSyntaxOnly`), và kho này đã từng ở
+      # trạng thái dựng-không-được trong khi kiểm kiểu vẫn xanh.
+      - name: Dựng
+        run: npm run build
+
+      # Lint chạy nhưng KHÔNG chặn, và đó là một lựa chọn tạm thời có hạn dùng.
+      #
+      # Đo 11/09/2026: 85 lỗi + 55 cảnh báo. Bật chặn ngay hôm nay thì mọi PR
+      # đỏ vì nợ có sẵn, và phản ứng tất yếu của người đang vội là tắt cổng —
+      # mất luôn cả những cổng đang có ích. Để nó chạy và hiện số ra là bước
+      # duy nhất khiến con số ấy giảm được một cách có kiểm chứng.
+      #
+      # Ba lỗi `rules-of-hooks` trong `DataSplitVisualization.tsx` là lỗi thật
+      # (hook gọi sau early-return), không phải chuyện văn phong. Sửa xong
+      # nhóm đó thì đổi `continue-on-error` thành `false`.
+      - name: Lint (tư vấn, chưa chặn)
+        continue-on-error: true
+        run: npm run lint
+
+      - name: Nộp báo cáo test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-frontend
+          path: frontend/junit-frontend.xml
+
+  backend:
+    name: Backend — pytest trên CSDL dựng mới
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          # Tên phải qua cổng của tests/conftest.py (signdb_test | tiền tố signdb_pytest_).
+          # `signdb_ci` KHÔNG qua: từ 13/08/2026 pytest tự dừng với mã 3 trước khi chạy
+          # ca nào, nên job này đỏ ở bước Test suốt hai tháng mà không kiểm được gì.
+          # Đổi tên ở đây, đừng nới danh sách cho phép trong conftest.
+          POSTGRES_DB: signdb_pytest_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U admin"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+
+    env:
+      # Vai ứng dụng, không phải superuser — xem chú thích đầu tệp.
+      #
+      # Mat khau dai 16+ ky tu vi `provision_db_roles` TU CHOI mat khau ngan hon
+      # (vai nay doc duoc kho cua moi tenant, va Postgres mo voi moi container
+      # trong mang compose). Ban truoc dung `ci_password` — 11 ky tu — nen lenh
+      # cap vai that se thoat 2 ngay lap tuc.
+      DATABASE_URL: postgresql://voya_app:ci_password_16_chars_min@localhost:5432/signdb_pytest_ci
+      MIGRATION_DATABASE_URL: postgresql://admin:admin@localhost:5432/signdb_pytest_ci
+      VOYA_APP_DB_PASSWORD: ci_password_16_chars_min
+
+      # Vai DIEU KHIEN, tach khoi vai ung dung va BAT BUOC khac mat khau.
+      # `test_rls_covers_every_tenant_table` kiem dung ranh gioi nay: vai ung
+      # dung khong duoc co quyen truc tiep tren `tenant_purges`.
+      VOYA_CONTROL_DB_PASSWORD: ci_control_password_16_min
+      CONTROL_DATABASE_URL: postgresql://voya_control:ci_control_password_16_min@localhost:5432/signdb_pytest_ci
+      REDIS_URL: redis://localhost:6379/12
+      CELERY_BROKER_URL: redis://localhost:6379/12
+      CELERY_RESULT_BACKEND: redis://localhost:6379/12
+      TTS_REDIS_URL: redis://localhost:6379/12
+      PYTHONPATH: ${{ github.workspace }}/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Cài phụ thuộc
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # `app.cli.migrate`, KHÔNG phải `ensure_tables()`.
+      #
+      # Từ 12/08/2026 `ensure_tables()` chỉ còn THÊM: phần một chiều (bỏ bảng
+      # cũ, chép dữ liệu sang `memberships`, bỏ chỉ mục toàn cục) chỉ chạy dưới
+      # lệnh migration. Một máy CI dựng từ số không cần đúng phần đó — gọi
+      # `ensure_tables()` ở đây sẽ để lại `tenant_members` là BẢNG chứ không
+      # phải view, và bộ test sẽ đỏ theo cách không nói ra nguyên nhân.
+      #
+      # `EXPECTED_DATABASE` bắt buộc, và ở đây nó cũng có ích thật: nếu ai đó
+      # đổi DSN trong workflow mà quên đổi chỗ này, lệnh huỷ thay vì migrate
+      # nhầm cơ sở dữ liệu.
+      #
+      # Phiên bản đích hỏi chính MÃ chứ không viết cứng ở đây, giống hệt
+      # `scripts/deploy.sh` hỏi ảnh. Một con số trong tệp workflow sẽ trôi khỏi
+      # `APP_SCHEMA_VERSION` đúng vào lần bump đầu tiên, và nó trôi trong im
+      # lặng cho tới khi ai đó đọc log CI.
+      - name: Dựng lược đồ (lệnh migration rõ ràng)
+        working-directory: backend
+        env:
+          EXPECTED_DATABASE: signdb_pytest_ci
+        run: |
+          target=$(python -c "from app.storage.schema_version import APP_SCHEMA_VERSION; print(APP_SCHEMA_VERSION)")
+          echo "luoc do dich: v$target"
+          python -m app.cli.migrate --to "$target"
+
+      # Cap vai bang CHINH lenh ma san xuat dung, khong phai GRANT viet tay.
+      #
+      # Ban truoc tu `CREATE ROLE voya_app` roi `GRANT SELECT, INSERT, UPDATE,
+      # DELETE ON ALL TABLES`. No lam bo test chay duoc, va no cung lang le pha
+      # mot thu ma bo test co nhiem vu canh: `tenant_purges` thuoc mat phang
+      # DIEU KHIEN, va `test_vai_ung_dung_khong_cham_duoc_bang_dieu_khien` doi
+      # vai ung dung KHONG co quyen truc tiep tren no. Mot cau GRANT quet sach
+      # moi bang thi cap luon ca bang do.
+      #
+      # Do 11/09/2026 tren may: dung test ay do voi thong bao "vai ung dung VAN
+      # co quyen truc tiep tren bang dieu khien: {'voya_app.tenant_purges': [...]}"
+      # va no xanh tro lai ngay sau khi chay duong cap vai that. Neu de nguyen
+      # khoi GRANT, CI se do o dung cho ay — va cach "sua" hien nhien nhat (cap
+      # them quyen) chinh la cach xoa mat ranh gioi.
+      #
+      # Nguyen tac rong hon tep nay: moi truong CI phai dung bang cung duong ma
+      # san xuat dung. Mot loi tat trong CI khong chi kiem thieu — no kiem mot
+      # he thong KHAC.
+      #
+      # Chay SAU migration: lenh nay cap quyen tren cac bang dang co, va dat
+      # `ALTER DEFAULT PRIVILEGES` cho bang sinh them ve sau.
+      - name: Cấp vai ứng dụng và vai điều khiển (đường của sản xuất)
+        working-directory: backend
+        run: python -m app.cli.provision_db_roles
+
+      - name: Đối chiếu lại tư thế quyền
+        working-directory: backend
+        run: python -m app.cli.provision_db_roles --check
+
+      # Cổng thật, và cố ý đứng TRƯỚC pytest: nó bắt đúng lớp lỗi mà 22 test đỏ
+      # hôm 10/08 đã phơi ra — lược đồ dựng mới khác lược đồ máy đang chạy — và
+      # bắt bằng một thông báo nói thẳng ra cái thiếu, thay vì bằng hai chục
+      # test đỏ rải rác mà mỗi cái nói về một triệu chứng khác nhau.
+      #
+      # Chạy SAU bước GRANT, không phải chung với bước dựng lược đồ: hàm này
+      # đọc qua `DATABASE_URL` (vai `voya_app`), và vai đó chưa có quyền gì cho
+      # tới khi GRANT chạy xong.
+      - name: Kiểm nợ lược đồ
+        working-directory: backend
+        run: |
+          python -c "
+          from app.storage.metadata_db import schema_debt
+          from app.tenant_context import system_scope
+          with system_scope('ci: kiem no luoc do'):
+              debt = schema_debt()
+          print('schema_debt:', debt)
+          assert not any(debt.values()), f'luoc do dung moi con no: {debt}'
+          "
+
+      # `VOYA_TEST_VIDEO` cố ý KHÔNG đặt: kho clip 2,7 GB không có trên runner,
+      # nên test trích npz từ video sẽ skip. Đó là lần skip DUY NHẤT được chấp
+      # nhận ở đây, và nó hiện ra trong báo cáo chứ không biến mất.
+      # Máy cài mới gieo danh mục hệ thống (phương ngữ, profile từ config/*.seed.csv)
+      # lúc backend khởi động, qua `init_db` -> `seed_from_csv`. CI không khởi động
+      # backend, nên tenant `default` không có phương ngữ nào và `create_tenant`
+      # của fixture không có gì để nhân bản. Gọi đúng hàm đó, cùng vai ứng dụng.
+      - name: Gieo danh mục hệ thống (như lúc khởi động)
+        working-directory: backend
+        run: |
+          python -c "
+          from app.tenant_context import system_scope
+          from app.vocabulary_registry import seed_from_csv
+          with system_scope('ci: gieo danh muc he thong'):
+              print('dialects:', seed_from_csv())
+          "
+
+      # Cùng đường với máy dev (`scripts/run_tests.sh`): suite chạy bằng BA VAI
+      # TEST, không phải `voya_app`/`admin`. `test_db_role_isolation` và
+      # `test_control_plane` khẳng định đúng điều đó (13 ca đỏ trước 18/10/2026),
+      # và chạy bằng vai sản xuất thì các phép đo RLS đo nhầm chủ thể.
+      - name: Cấp vai test (cùng script với máy dev)
+        env:
+          VOYA_PG_CONTAINER: "-"
+          VOYA_TEST_DATABASE: signdb_pytest_ci
+          PGPASSWORD: admin
+          VOYA_TEST_OWNER_PASSWORD: ci_test_owner_password_16
+          VOYA_TEST_APP_PASSWORD: ci_test_app_password_16_x
+          VOYA_TEST_CONTROL_PASSWORD: ci_test_control_password_16
+        run: bash scripts/provision_test_db_roles.sh
+
+      # Hai tenant đối kháng `iso_a`/`iso_b` cùng người dùng và một lớp mỗi bên.
+      # CSDL dựng mới không có tenant nào ngoài `default`, nên ~30 ca ghi job /
+      # người dùng cho `iso_a` đổ khoá ngoại `fk_*_tenant` trước khi kiểm được gì.
+      - name: Gieo fixture cách ly
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://voya_test_app:ci_test_app_password_16_x@localhost:5432/signdb_pytest_ci
+          MIGRATION_DATABASE_URL: postgresql://voya_test_owner:ci_test_owner_password_16@localhost:5432/signdb_pytest_ci
+          CONTROL_DATABASE_URL: postgresql://voya_test_control:ci_test_control_password_16@localhost:5432/signdb_pytest_ci
+        run: python ../scripts/seed_isolation_fixture.py
+
+      - name: Test
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://voya_test_app:ci_test_app_password_16_x@localhost:5432/signdb_pytest_ci
+          MIGRATION_DATABASE_URL: postgresql://voya_test_owner:ci_test_owner_password_16@localhost:5432/signdb_pytest_ci
+          CONTROL_DATABASE_URL: postgresql://voya_test_control:ci_test_control_password_16@localhost:5432/signdb_pytest_ci
+          VOYA_TEST_OWNER_PASSWORD: ci_test_owner_password_16
+          VOYA_TEST_APP_PASSWORD: ci_test_app_password_16_x
+          VOYA_TEST_CONTROL_PASSWORD: ci_test_control_password_16
+          SMTP_HOST: smtp.test.invalid
+          # `run_tests.sh` đặt biến này; ca đối chứng dương của test_db_role_isolation
+          # đọc nó để biết CSDL test tên gì.
+          POSTGRES_DB: signdb_pytest_ci
+        run: python -m pytest -q --junitxml=junit-backend.xml
+
+      - name: Nộp báo cáo test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-backend
+          path: backend/junit-backend.xml
+
+  hygiene:
+    name: Vệ sinh kho — thứ mà test không bao giờ bắt được
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sự cố CRLF, 27/08/2026. `core.autocrlf=true` trên Windows làm
+      # `docker-entrypoint.sh` được cam kết với đầu dòng CRLF; shebang
+      # `#!/bin/sh\r` không phải đường dẫn nào cả, và Docker báo lỗi là
+      # "exec: no such file or directory" — trỏ vào chính tệp đang tồn tại.
+      # Frontend crash-loop, và không có bài test nào ở bất kỳ tầng nào bắt
+      # được: tệp đúng, mã đúng, chỉ có hai byte vô hình là sai.
+      #
+      # `.gitattributes` đã ghim `*.sh text eol=lf`. Bước này kiểm rằng cái ghim
+      # đó thật sự có hiệu lực trên NHỮNG BYTE ĐÃ CAM KẾT, vì một tệp đã vào
+      # kho trước khi có luật thì luật không hồi tố cho nó.
+      - name: Script shell phải là LF
+        run: |
+          # `git ls-files --eol` chu KHONG phai `grep` tren thu muc lam viec.
+          #
+          # Hai ly do, ca hai deu la loi that da mac phai khi viet buoc nay:
+          #
+          # 1. Thu muc lam viec KHONG phai thu can kiem. Tren Windows, cung mot
+          #    blob LF duoc checkout ra CRLF; doc thu muc lam viec la hoi may
+          #    cua nguoi chay chu khong hoi kho. `i/` la byte da cam ket.
+          #
+          # 2. Mot phep kiem bang `grep` tim ky tu CR khong dang tin qua cac
+          #    tang shell: o mot so moi truong chuoi ANSI-C khong duoc dien giai
+          #    va grep di tim CHU CAI 'r' — khop gan nhu moi tep, nen phep kiem
+          #    do khong bao gio dung.
+          #    `git ls-files --eol` tra ve `i/crlf` hoac `i/lf`, khong co cho
+          #    cho hieu nham.
+          bad=$(git ls-files --eol -- '*.sh' 'Dockerfile*' '**/Dockerfile*'                 | grep -E '^i/crlf' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Cac tep sau duoc CAM KET voi dau dong CRLF, se hong trong container Linux:"
+            echo "$bad" | sed 's/^/  /'
+            echo "Sua: git add --renormalize . && git commit"
+            exit 1
+          fi
+          echo "Tat ca script shell va Dockerfile deu duoc cam ket la LF."
+
+      # `.env` của kho này chứa mật khẩu cơ sở dữ liệu, khoá SMTP và
+      # `AUTH_TOKEN_SECRET_KEY` thật. Nó đang được gitignore, nhưng gitignore
+      # chỉ ngăn `git add` vô ý — nó KHÔNG ngăn `git add -f`, và không nói gì
+      # về một tệp đã lỡ vào kho từ trước.
+      - name: Không có bí mật nào bị cam kết
+        run: |
+          leaked=$(git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(prod|production|local)$' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::Tep bi mat da vao kho:"
+            echo "$leaked" | sed 's/^/  - /'
+            exit 1
+          fi
+          echo "Khong co .env nao bi theo doi."
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Lớp phủ registry phải phủ HẾT service tự dựng ảnh. Thêm một service mới
+      # mà quên nó thì không có gì hỏng lúc triển khai — service ấy lặng lẽ
+      # chạy ảnh cục bộ giữa một stack đã ghim tag, và vẫn báo "healthy". Đó là
+      # cùng lớp lỗi với lần quên `celery-beat` trong một danh sách viết tay.
+      - name: Lớp phủ registry không được bỏ sót service
+        run: |
+          python -m pip install --quiet pyyaml
+          python scripts/check_registry_overlay.py
+
+      - name: Backup / deploy contract and safety tests
+        run: python -m unittest discover -s scripts/ops/tests -v
+
+      - name: Real isolated PostgreSQL backup / restore drill
+        run: python scripts/ops/tests/restore_drill.py

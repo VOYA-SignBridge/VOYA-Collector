@@ -1,4 +1,5 @@
 import csv
+import itertools
 import random
 import argparse
 from pathlib import Path
@@ -180,6 +181,10 @@ def _labels_lookup():
                 'label_original': r.get('label_original', ''),
                 'language': r.get('language', 'vn'),
                 'dialect': r.get('dialect', ''),
+                # `region` là nửa còn lại của khoá duy nhất trong CSDL
+                # `(tenant_id, slug, language, dialect, region)`. Không mang nó
+                # theo thì `ăn|bac` và `ăn|nam` trông y hệt nhau trong split.
+                'region': r.get('region', ''),
             }
     return by_idx
 
@@ -628,12 +633,324 @@ def coverage_preserving_group_split(rows, group_col='user', seed=42):
     return train, val, test, diagnostics
 
 
+#: Sàn mặc định khi `--min_samples_per_class` không được truyền: 0 = tắt.
+#: Giá trị dùng thật nằm ở `MIN_SAMPLES_PER_CLASS_FOR_TRAINING` phía backend
+#: (mặc định 25 ≈ 5 lần quay live-capture). Chủ ý KHÔNG đọc biến môi trường đó
+#: ở đây: split là hiện vật, và sàn nó đã dùng phải nằm trong chính hiện vật
+#: chứ không phụ thuộc vào môi trường của lần chạy sau.
+DEFAULT_MIN_SAMPLES_PER_CLASS = 0
+
+
+def _class_key(r: dict) -> str:
+    """Định danh lớp bền nhất có trong hàng: class_uid, rồi mới tới class_idx."""
+    return (r.get('class_uid') or '').strip() or (r.get('class_idx') or '').strip()
+
+
+def filter_classes_below_floor(rows, floor: int, *, key_fn=_class_key):
+    """Loại HẲN các lớp có ít hơn `floor` mẫu. Trả về (rows_giữ_lại, đã_loại).
+
+    Vì sao lọc ở ĐÂY chứ không ở lúc huấn luyện: `_consent_preflight` phía
+    backend đã chốt nguyên tắc này rồi, và nó đúng cho cả hai trường hợp — một
+    checkpoint huấn luyện trên tập nhỏ hơn tệp split khai báo là một checkpoint
+    NÓI DỐI về nguồn gốc của nó. Split là đầu vào đã đóng băng; ai muốn đổi tập
+    lớp thì dựng lại split, không lọc lén lúc chạy.
+
+    Loại cả lớp chứ không cắt bớt mẫu, và đó là chủ ý: một lớp 5 mẫu chia
+    70/15/15 còn 3 mẫu huấn luyện. Nó không học được, nhưng nó vẫn chiếm một
+    chiều trong tầng softmax và vẫn hiện ra ở danh sách lớp thời gian thực —
+    tức là kéo tụt số đo mà không đóng góp gì. Giữ nó lại chỉ để bảng tổng kết
+    trông nhiều lớp hơn là tự lừa mình.
+
+    `floor <= 0` là TẮT, và khi tắt thì không loại gì cả — để lượt chạy cũ và
+    các đường gọi chưa khai báo sàn giữ nguyên hành vi.
+    """
+    if floor <= 0:
+        return list(rows), []
+
+    dem = Counter()
+    nhan = {}
+    for r in rows:
+        k = key_fn(r)
+        if not k:
+            continue
+        dem[k] += 1
+        nhan.setdefault(k, (r.get('label_original') or r.get('label_slug')
+                            or r.get('slug') or '').strip())
+
+    loai = {k for k, n in dem.items() if n < floor}
+    da_loai = sorted(
+        ({'class': k, 'label': nhan.get(k, ''), 'samples': dem[k]} for k in loai),
+        key=lambda d: (-d['samples'], d['class']),
+    )
+    giu = [r for r in rows if key_fn(r) not in loai]
+    return giu, da_loai
+
+
+def enforce_min_classes(class_keys, min_classes: int, *, ten_tap: str = '',
+                        so_ung_vien: int = 0, da_loai=()) -> None:
+    """Dừng hẳn nếu sau khi lọc còn quá ít lớp. KHÔNG ghi split.
+
+    Vì sao cổng này phải nằm ở ĐÂY chứ không chỉ ở API tạo phiên huấn luyện:
+    `make_splits.py` chạy được thẳng từ dòng lệnh, ngoài mọi cổng của backend.
+    Một cổng chỉ bảo vệ được đường đi qua nó.
+
+    Ca thật ngày 14/08: `can-tho` có 8 lớp, sàn 25 mẫu loại 7, còn ĐÚNG MỘT.
+    Ghi ra một tập chia một lớp là ghi ra một hiện vật vô nghĩa mà mọi thứ phía
+    sau sẽ đối xử như thật.
+    """
+    if min_classes <= 0:
+        return
+    n = len(set(class_keys))
+    if n >= min_classes:
+        return
+    boi_canh = f" cho {ten_tap}" if ten_tap else ''
+    chi_tiet = ''
+    if da_loai:
+        vi_du = ', '.join(f"{d.get('label') or d.get('class')} ({d['samples']} mẫu)"
+                          for d in list(da_loai)[:5])
+        chi_tiet = f" Đã loại vì chưa đủ mẫu: {vi_du}."
+    raise SystemExit(
+        f"Không đủ lớp để chia{boi_canh}: còn {n} lớp, cần ≥{min_classes}."
+        f"{chi_tiet}"
+        f" {so_ung_vien or n} lớp ứng viên ban đầu."
+        f" KHÔNG ghi tập chia — một tập chia dưới hai lớp không có bài toán "
+        f"phân loại nào để học, nhưng mọi thứ phía sau sẽ đối xử với nó như thật."
+    )
+
+
+def _report_floor(floor: int, da_loai, con_lai_lop: int) -> None:
+    if floor <= 0:
+        return
+    if not da_loai:
+        print(f"[floor] min_samples_per_class={floor}: mọi lớp đều đạt "
+              f"({con_lai_lop} lớp giữ nguyên).")
+        return
+    print(f"[floor] min_samples_per_class={floor}: loại {len(da_loai)} lớp "
+          f"chưa đủ mẫu, còn {con_lai_lop} lớp.")
+    for d in da_loai[:20]:
+        ten = f" {d['label']}" if d['label'] else ''
+        print(f"         - {d['class']}{ten}: {d['samples']} mẫu")
+    if len(da_loai) > 20:
+        print(f"         … và {len(da_loai) - 20} lớp nữa")
+
+
+#: Số lớp tối thiểu để một tập chia có nghĩa. Dưới hai lớp thì không có bài
+#: toán phân loại nào để học. Đây là CHÍNH SÁCH, nên nó phải nằm trong hiện vật
+#: cùng với sàn số mẫu — xem `write_legacy_snapshot`.
+DEFAULT_MIN_CLASSES = 2
+
+
+def class_set_checksum(class_keys) -> str:
+    """Băm TẬP lớp — không phụ thuộc thứ tự.
+
+    Chuẩn hoá trước khi băm: bỏ trùng, bỏ khoảng trắng thừa, SẮP XẾP, nối bằng
+    xuống dòng. Nhờ vậy `[A, B, C]` và `[C, A, B]` cho cùng một mã, đúng nghĩa
+    "tập lớp". Không chuẩn hoá thì mã sẽ băm cả thứ tự trả về ngẫu nhiên của
+    CSDL và mất hết ý nghĩa.
+    """
+    import hashlib
+
+    canon = '\n'.join(sorted({str(k).strip() for k in class_keys if str(k).strip()}))
+    return hashlib.sha256(canon.encode('utf-8')).hexdigest()
+
+
+def class_mapping_checksum(mapping) -> str:
+    """Băm ÁNH XẠ lớp→chỉ số. Khác hẳn `class_set_checksum`, và cần cả hai.
+
+    `A→0 B→1 C→2` và `A→2 B→0 C→1` có CÙNG tập lớp nhưng KHÔNG cùng ánh xạ
+    nhãn. Một checkpoint dùng ánh xạ thứ hai mà đọc nhãn theo ánh xạ thứ nhất
+    sẽ đoán sai toàn bộ, âm thầm, với độ chính xác báo cáo vẫn đẹp.
+
+    Chuyện này không phải giả định: `_build_subset_label_maps` trong
+    `train_tcn.py` dựng `label_to_index` bằng `enumerate` trên các nhãn gom
+    theo THỨ TỰ HÀNG XUẤT HIỆN trong CSV. Nghĩa là lớp 0 của mô hình hiện nay
+    là "nhãn nào nằm ở dòng đầu tiên", và không có gì ghim nó lại. Mã băm này
+    là thứ để phát hiện khi nó trượt.
+
+    `mapping` là dãy cặp `(class_key, idx)`. Sắp theo `class_key` trước khi
+    băm, nên thứ tự đưa vào không đổi kết quả.
+
+    UỶ QUYỀN cho `label_mapping.canonical_mapping_hash`, và đó là điểm chính.
+    Bản trước tự băm `k=i`, trong khi bên tiêu thụ băm `k<TAB>i`. Hai bản cài
+    đặt của cùng một quy ước, lệch nhau đúng một ký tự phân tách, nên MỌI hiện
+    vật do `make_splits` ghi ra đều bị `consume_declared` từ chối với thông báo
+    "hiện vật đã bị sửa sau khi ghi" — trong khi không ai sửa gì cả.
+
+    Bộ kiểm không thấy được vì cả hai phía đều được kiểm bằng CHÍNH hàm của
+    mình (`rep[...] == class_mapping_checksum(...)`), và fixture của smoke tự
+    tính metadata bằng `canonical_mapping_hash` thay vì chạy qua `make_splits`.
+    Một quy ước chỉ có một định nghĩa thì không có gì để lệch.
+    """
+    # Chạy như script thì sys.path[0] là processed/splits/, không phải gốc repo:
+    # không có đoạn này, `processed` chỉ import được khi người gọi tự đặt PYTHONPATH.
+    import sys as _sys
+    _repo_root = Path(__file__).resolve().parents[2]
+    if str(_repo_root) not in _sys.path:
+        _sys.path.insert(0, str(_repo_root))
+    from processed.train_utils.label_mapping import canonical_mapping_hash
+
+    return canonical_mapping_hash({str(k): int(i) for k, i in mapping})
+
+
+def assign_target_indices(class_keys):
+    """{class_key: target_idx} liên tục 0..K-1, thứ tự TẤT ĐỊNH theo khoá.
+
+    Vì sao là một trường RIÊNG chứ không ghi đè `class_idx`: hai thứ đó là hai
+    khái niệm khác nhau và trộn chúng là một lỗi đắt.
+
+      `class_idx`   ĐỊNH DANH toàn cục, lấy từ `labels.csv`, bền qua mọi lượt
+                    chia. Một nhãn giữ nguyên số này kể cả khi nó không nằm
+                    trong tập chia nào. Đây là thứ không được để trống.
+      `target_idx`  vị trí trong tầng đầu ra CỦA RIÊNG lượt chia này, luôn
+                    0..K-1 không thủng lỗ. Loại một lớp thì mọi lớp sau nó
+                    dịch xuống — nên nó KHÔNG phải định danh.
+
+    Ghi đè `class_idx` thành 0..K-1 sẽ làm mọi hiện vật trỏ vào nó (mẫu, npz,
+    checkpoint cũ) trỏ nhầm chỗ ở lần chia kế tiếp.
+    """
+    return {k: i for i, k in enumerate(sorted(class_keys))}
+
+
 def write_split(name, rows, fieldnames):
+    # `mkdir` ở ĐÂY chứ không lúc phân giải `OUT_DIR`: các cổng (sàn số mẫu,
+    # số lớp tối thiểu) chạy trước khi có gì được ghi, và một lượt bị cổng
+    # chặn không được để lại thư mục nào. Thư mục rỗng vẫn là một hiện vật với
+    # người đọc sau — nó qua được phép kiểm "chỉ-tạo-mới" (rỗng nên không coi
+    # là đã tồn tại) và làm resolver báo "có hiện vật nhưng thiếu bản khai".
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / f'{name}.csv'
     with path.open('w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+    return path
+
+
+#: Tên tệp khai báo của split legacy. Chế độ manifest đã có
+#: `versions/<tên>/split_metadata.json` riêng; đường legacy trước đây KHÔNG khai
+#: báo gì cả, nên không ai kiểm được một checkpoint đã huấn luyện trên tập lớp
+#: nào. Đây là chỗ vá khoảng trống đó.
+LEGACY_SNAPSHOT_NAME = 'split_metadata.json'
+
+
+def write_legacy_snapshot(out_dir: Path, *, class_keys, floor: int, excluded,
+                          mode: str, seed: int, counts: dict,
+                          min_classes: int = DEFAULT_MIN_CLASSES,
+                          sample_counts=None, split_id=None, extra=None,
+                          class_meta=None, tenant_id=None) -> Path:
+    """Ghi HỢP ĐỒNG của tập chia cạnh train/val/test.csv.
+
+    Hợp đồng chứ không phải ghi chú, và khác biệt nằm ở chỗ có ai ĐỌC nó rồi
+    hành động hay không: cổng huấn luyện đọc tệp này, đối chiếu với nội dung
+    CSV thật, và từ chối chạy khi hai thứ không khớp.
+
+    Ba thứ bắt buộc, không được lược:
+
+      `policy`              sàn số mẫu VÀ số lớp tối thiểu. Ghi mỗi con số 25
+                            là chưa đủ — người đọc sau sẽ không biết tập chia
+                            này đã được kiểm điều kiện thứ hai hay chưa.
+      `classes`             ánh xạ ĐẦY ĐỦ class_uid → target_idx. Thiếu nó thì
+                            không ai dựng lại được ý nghĩa của tầng đầu ra.
+      `*_hash`              hai mã băm, xem `class_mapping_checksum` để biết vì
+                            sao một cái là không đủ.
+
+    `sample_counts` là {class_key: số mẫu TRƯỚC khi chia} — chứng cứ để đối
+    chiếu về sau, và là thứ cho biết một lớp đạt sàn sát nút hay dư dả.
+
+    `class_meta` là {class_key: {class_idx, slug, dialect, region, ...}} — nhãn
+    ĐỌC, không phải định danh. Chúng đi kèm vì `build_checkpoint_mapping` chép
+    chúng vào checkpoint và giao diện thời gian thực dựng tên hiển thị từ đó;
+    thiếu chúng thì màn hình hiện `class_uid` thô, vì `normalize_idx_to_label`
+    tra từ vựng theo `label_key` mà UID không khớp gì cả. Không trường nào
+    trong đây tham gia quyết định `target_idx`.
+    """
+    from datetime import datetime, timezone
+
+    keys = sorted(set(class_keys))
+    mapping = assign_target_indices(keys)
+    dem = dict(sample_counts or {})
+    mo_ta = dict(class_meta or {})
+
+    payload = {
+        'schema_version': 2,
+        # Hiện vật phải TỰ KHAI nó thuộc hợp đồng nào. Chính vì hai hợp đồng bị
+        # nhập làm một mà ba tệp `processed/splits/*.csv` vừa là mốc nghiên cứu
+        # đóng băng vừa là đầu vào vận hành. `train_tcn.py` chỉ đi đường
+        # `class_uid → target_idx` khi đọc thấy đúng chữ này; thiếu nó thì mọi
+        # thứ giữ nguyên hành vi cũ.
+        'purpose': 'operational',
+        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'split_mode': mode,
+        'seed': seed,
+        'ratios': {'train': TRAIN_RATIO, 'val': VAL_RATIO,
+                   'test': round(1.0 - TRAIN_RATIO - VAL_RATIO, 10)},
+        'policy': {
+            'min_samples_per_class': int(floor),
+            'min_classes': int(min_classes),
+        },
+        'num_classes': len(keys),
+        'classes': [
+            {'class_uid': k, 'target_idx': mapping[k],
+             'sample_count_before_split': int(dem.get(k, 0)),
+             **{c: v for c, v in (mo_ta.get(k) or {}).items() if v not in (None, '')}}
+            for k in keys
+        ],
+        'class_set_hash': class_set_checksum(keys),
+        'class_mapping_hash': class_mapping_checksum(mapping.items()),
+        'excluded_below_floor': excluded,
+        'counts': counts,
+        # Giữ tên cũ để bản đọc trước đó không vỡ. `schema_version` mới là thứ
+        # người đọc nên nhìn.
+        'min_samples_per_class': int(floor),
+        'class_set': keys,
+        'class_set_checksum': class_set_checksum(keys),
+    }
+    if split_id:
+        # `split_id` nằm TRONG bản khai, không chỉ ở tên thư mục: chép ba CSV
+        # từ hiện vật Y vào một thư mục đặt tên X phải bị phát hiện.
+        payload['split_id'] = str(split_id)
+        # Mã băm từng tệp, tính SAU khi ba CSV đã ghi xong. Đây là thứ biến
+        # "tìm được tệp" thành "đã xác minh hiện vật".
+        from processed.train_utils.split_artifact import (
+            OWNER_BINDING_KEY, OWNER_KEY, file_hashes, owner_binding)
+
+        # ★ C2b — hiện vật vận hành PHẢI có chủ, và chủ chỉ do bên tạo đặt.
+        #
+        # Điều kiện là `split_id`, tức "tôi đang ghi một hiện vật vận hành CÓ
+        # ĐỊA CHỈ" — thứ mà `resolve_operational` có thể trả về cho một lượt
+        # huấn luyện. Bản khai ở gốc `processed/splits/` và ở nhánh
+        # `--by_language` cũng mang `purpose: operational`, nhưng chúng không có
+        # `split_id` nên không hiện vật nào phân giải tới được; ở đó chữ
+        # `operational` đang làm nhiệm vụ khác — cờ báo cho `train_tcn.py` biết
+        # đi đường `class_uid → target_idx`. Hai nghĩa chồng lên một trường là
+        # nợ kỹ thuật có thật, ghi ở docs/10-issues/KNOWN_ISSUES.md.
+        chu = str(tenant_id or '').strip()
+        if not chu:
+            raise ValueError(
+                f'hiện vật vận hành {split_id!r} không có `{OWNER_KEY}`. Chủ sở '
+                f'hữu phải đến từ ngữ cảnh tạo, và không có ngữ cảnh thì DỪNG — '
+                f'không lấy tenant của lượt huấn luyện đầu tiên muốn dùng nó, '
+                f'không rơi về tenant khởi tạo. Truyền --tenant_id=<ID>.')
+        # Kiểm hợp đồng TRƯỚC khi làm việc — cùng khuôn đã dùng ở C1. Đặt sau
+        # `file_hashes` thì một hiện vật thiếu chủ sẽ nổ bằng FileNotFoundError
+        # của tệp CSV, và người đọc log sẽ đi sửa nhầm chỗ.
+        payload['files'] = file_hashes(out_dir)
+        payload[OWNER_KEY] = chu
+        payload[OWNER_BINDING_KEY] = owner_binding(
+            split_id=str(split_id), tenant_id=chu, files=payload['files'])
+    elif str(tenant_id or '').strip():
+        # Bản khai không-có-địa-chỉ mà lại mang chủ sở hữu là một lời khai không
+        # ai cưỡng chế được: `resolve_operational` không bao giờ chạm tới nó.
+        # Ghi vào chỉ tạo cảm giác an toàn giả.
+        raise ValueError(
+            'tenant_id chỉ có nghĩa với hiện vật vận hành có `split_id`. '
+            'Bản khai ở gốc splits/ hoặc theo ngôn ngữ không phải hiện vật có '
+            'địa chỉ, nên không mang quyền sở hữu.')
+    if extra:
+        payload.update(extra)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / LEGACY_SNAPSHOT_NAME
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
     return path
 
 
@@ -679,6 +996,63 @@ def _load_manifest_rows(manifest_path: Path):
         return list(reader), list(reader.fieldnames or [])
 
 
+#: Above this many distinct groups the exhaustive search is skipped. 3**14 is
+#: ~4.8M partitions, already a few seconds; real signer counts are far smaller.
+_EXACT_PARTITION_MAX_GROUPS = 13
+
+
+def _exact_group_partition(rows, group_col: str):
+    """Best coverage-complete group partition, or None if none exists.
+
+    stratified_group_split_by only matches per-class SAMPLE COUNTS; it has no
+    notion of class coverage, so with a few dominant signers it happily empties
+    a whole split. That is how hoa_de_signer_disjoint_v1/_v3 reached disk with
+    val=0/test=0, and it is why alphabet failed here at first: 7 signers, of
+    which S001 (987 samples) and S002 (708) dominate, and the count-matching
+    objective put none of them in val.
+
+    A valid partition did exist. With a handful of groups the assignment space
+    is tiny (3**7 = 2187), so search it exactly instead of hoping a greedy pass
+    lands on it: keep only partitions where every class appears in all three
+    splits, then pick the one closest to the 70/15/15 sample ratio.
+
+    Returns (train, val, test) row lists, or None when no valid partition
+    exists (genuinely too few groups) or there are too many groups to enumerate
+    — the caller then falls back to the greedy path and the validity gate still
+    refuses to write an unusable split.
+    """
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r.get(group_col) or '').strip()].append(r)
+    names = sorted(groups)
+    if not names or len(names) > _EXACT_PARTITION_MAX_GROUPS:
+        return None
+
+    classes_of = {n: {r['label_key'] for r in groups[n]} for n in names}
+    size_of = {n: len(groups[n]) for n in names}
+    all_classes = set().union(*classes_of.values())
+    total = sum(size_of.values()) or 1
+    want = (TRAIN_RATIO, VAL_RATIO, 1.0 - TRAIN_RATIO - VAL_RATIO)
+
+    best = None
+    for assign in itertools.product(range(3), repeat=len(names)):
+        parts = [[n for n, a in zip(names, assign) if a == i] for i in range(3)]
+        if any(not p for p in parts):
+            continue
+        if any(all_classes - set().union(*(classes_of[n] for n in p)) for p in parts):
+            continue
+        sizes = [sum(size_of[n] for n in p) for p in parts]
+        score = sum(abs(s / total - w) for s, w in zip(sizes, want))
+        # `assign` breaks ties so the result never depends on dict ordering.
+        if best is None or (score, assign) < (best[0], best[1]):
+            best = (score, assign, parts)
+
+    if best is None:
+        return None
+    parts = best[2]
+    return tuple([r for n in p for r in groups[n]] for p in parts)
+
+
 def _assert_signer_disjoint(train, val, test, group_col='signer_id'):
     """Hard requirement for strict_signer_disjoint mode."""
     def _g(rows_):
@@ -701,6 +1075,8 @@ def split_from_manifest(
     group_col: str = 'signer_id',
     fail_on_missing_eval: bool | None = None,
     exclude_unresolved_signers: bool = False,
+    min_samples_per_class: int = DEFAULT_MIN_SAMPLES_PER_CLASS,
+    min_classes: int = DEFAULT_MIN_CLASSES,
 ):
     """Profile-filtered split over an immutable dataset manifest.
 
@@ -753,10 +1129,41 @@ def split_from_manifest(
             r['sample_id'] = (r.get('sample_uid') or '').strip()
         if not (r.get('label_slug') or '').strip():
             r['label_slug'] = (r.get('slug') or '').strip()
+    # Sàn số mẫu, áp NGAY SAU khi có label_key và TRƯỚC khi đánh chỉ số: đánh số
+    # trước rồi loại sau sẽ để lại lỗ trong dãy.
+    #
+    # ĐÍNH CHÍNH cho bản trước của chú thích này: trainer KHÔNG lấy số lớp bằng
+    # `max(class_idx)`. `_build_subset_label_maps` (train_tcn.py) tự dựng
+    # `label_to_index` bằng `enumerate(unique_keys)` với `unique_keys` gom theo
+    # THỨ TỰ HÀNG XUẤT HIỆN trong CSV. Điều đó nguy hơn cái tôi đã tưởng: lớp 0
+    # của mô hình là "nhãn nào nằm ở dòng đầu", nên cùng một tập lớp mà thứ tự
+    # hàng khác nhau sẽ cho ánh xạ nhãn khác nhau — và không có gì hiện nay ghim
+    # nó lại. Đó là lý do `class_mapping_hash` phải tồn tại, không chỉ
+    # `class_set_hash`.
+    rows, excluded_below_floor = filter_classes_below_floor(
+        rows, min_samples_per_class, key_fn=lambda r: r.get('label_key') or '')
+    _report_floor(min_samples_per_class, excluded_below_floor,
+                  len({r['label_key'] for r in rows}))
+    if not rows:
+        raise SystemExit(
+            f"Sàn {min_samples_per_class} mẫu/lớp loại hết mọi lớp của tập con này "
+            f"— không còn gì để chia.")
+
     unique_keys = sorted({r['label_key'] for r in rows})
+    enforce_min_classes(unique_keys, min_classes,
+                        ten_tap=(recognition_profile or 'tập con này'),
+                        da_loai=excluded_below_floor)
+
+    # `class_idx` giữ nguyên quy ước 1-based đã có, vì các split đã versioned
+    # trên đĩa được ghi bằng nó và chúng là hiện vật BẤT BIẾN. `target_idx` là
+    # trường mới, 0-based liên tục, và là thứ tầng đầu ra nên dùng. Xem
+    # `assign_target_indices` để biết vì sao hai trường chứ không một.
     key_to_idx = {k: i + 1 for i, k in enumerate(unique_keys)}
+    target_idx = assign_target_indices(unique_keys)
+    sample_counts = Counter(r['label_key'] for r in rows)
     for r in rows:
         r['class_idx'] = str(key_to_idx[r['label_key']])
+        r['target_idx'] = str(target_idx[r['label_key']])
 
     # 3. Split
     excluded_unresolved = []
@@ -773,7 +1180,16 @@ def split_from_manifest(
                 f"splitting is impossible until signer migration resolves them "
                 f"(or pass --exclude_unresolved_signers to drop them explicitly). "
                 f"Examples: {unresolved[:5]}")
-        train, val, test = stratified_group_split_by(rows, group_col)
+        # Exact first: the greedy below optimises sample counts only and will
+        # empty a split rather than lose count accuracy. Falls back to it when
+        # there are too many groups to enumerate or no valid partition exists.
+        exact = _exact_group_partition(rows, group_col)
+        if exact is not None:
+            train, val, test = exact
+            print(f"[split] exact {group_col}-disjoint partition found "
+                  f"({len({(r.get(group_col) or '').strip() for r in rows})} groups)")
+        else:
+            train, val, test = stratified_group_split_by(rows, group_col)
         train_s, val_s, test_s = _assert_signer_disjoint(train, val, test, group_col)
     elif split_mode == 'sample':
         train, val, test = stratified_split(rows)
@@ -862,6 +1278,21 @@ def split_from_manifest(
         'invalid_reasons': invalid_reasons,
         'num_classes': len(unique_keys),
         'label_keys': unique_keys,
+        'class_set_hash': class_set_checksum(unique_keys),
+        'class_mapping_hash': class_mapping_checksum(target_idx.items()),
+        'policy': {
+            'min_samples_per_class': int(min_samples_per_class),
+            'min_classes': int(min_classes),
+        },
+        'classes': [
+            {'class_uid': k, 'class_idx': key_to_idx[k], 'target_idx': target_idx[k],
+             'sample_count_before_split': int(sample_counts.get(k, 0))}
+            for k in unique_keys
+        ],
+        'excluded_below_floor': excluded_below_floor,
+        # Tên cũ, giữ cho bản đọc trước đó không vỡ.
+        'class_set_checksum': class_set_checksum(unique_keys),
+        'min_samples_per_class': int(min_samples_per_class),
         'counts': {'train': len(train), 'val': len(val), 'test': len(test)},
         'sample_counts': {'train': len(train), 'val': len(val), 'test': len(test),
                           'total': len(rows)},
@@ -887,7 +1318,22 @@ def run_manifest_mode(args) -> None:
     global RANDOM_SEED
     RANDOM_SEED = args.seed
     manifest_rows, fieldnames = _load_manifest_rows(args.dataset_manifest)
-    for col in ('sample_id', 'class_idx', 'label_key', 'label_slug'):
+    # `target_idx` nằm trong danh sách này vì `split_from_manifest` GẮN nó vào
+    # từng hàng (xem chỗ `r['target_idx'] = ...`). Thiếu tên ở đây thì
+    # `csv.DictWriter` ném ngay lúc ghi:
+    #
+    #     ValueError: dict contains fields not in fieldnames: 'target_idx'
+    #
+    # và cả chế độ manifest không sinh nổi một split nào. Đường vận hành ở
+    # `main()` đã có phép bảo vệ tương đương (`if 'target_idx' not in
+    # fieldnames`), nhưng đường này thì không — nên trường mới được thêm vào
+    # một nửa hệ thống.
+    #
+    # Hậu quả đo được: `processed/splits/versions/hoa_de_sample_v1` chưa bao
+    # giờ dựng được, nên `test_profile_training_prep.py` bỏ qua vĩnh viễn —
+    # và chính thông báo bỏ qua bảo người đọc "chạy make_splits trước", một
+    # lệnh không chạy được. Bộ kiểm nói đúng triệu chứng và chỉ sai chỗ sửa.
+    for col in ('sample_id', 'class_idx', 'label_key', 'label_slug', 'target_idx'):
         if col not in fieldnames:
             fieldnames.append(col)
 
@@ -904,6 +1350,8 @@ def run_manifest_mode(args) -> None:
         fail_on_missing_eval=(False if args.allow_invalid_split
                               else (True if args.fail_on_missing_eval else None)),
         exclude_unresolved_signers=args.exclude_unresolved_signers,
+        min_samples_per_class=args.min_samples_per_class,
+        min_classes=args.min_classes,
     )
 
     out_dir = OUT_DIR / 'versions' / args.output_version
@@ -984,10 +1432,61 @@ def main():
     parser.add_argument('--exclude_unresolved_signers', action='store_true',
                         help='Explicitly drop samples whose signer_id is unresolved '
                              '(otherwise strict mode fails). Exclusions are recorded in split_metadata.json')
+    parser.add_argument('--min_samples_per_class', type=int,
+                        default=DEFAULT_MIN_SAMPLES_PER_CLASS,
+                        help='Loại HẲN khỏi split những lớp có ít hơn N mẫu (0 = tắt). '
+                             'Đặt bằng MIN_SAMPLES_PER_CLASS_FOR_TRAINING của backend '
+                             '(mặc định 25 ≈ 5 lần quay) để split khớp với cổng huấn '
+                             'luyện; lệch nhau thì backend từ chối lượt chạy và yêu '
+                             'cầu chia lại.')
+    parser.add_argument('--operational_split_id', type=str, default='',
+                        help='Dựng HIỆN VẬT VẬN HÀNH bất biến tại '
+                             'processed/splits/operational/<ID>/ thay vì ghi đè ba '
+                             'tệp nghiên cứu đóng băng ở gốc. Chỉ-tạo-mới: thư mục '
+                             'đã tồn tại thì DỪNG. Không có khái niệm "split mới '
+                             'nhất" — một lượt chạy ghim đúng một ID.')
+    parser.add_argument('--tenant_id', type=str, default='',
+                        help='Tổ chức SỞ HỮU hiện vật vận hành. BẮT BUỘC cùng '
+                             '--operational_split_id. Giá trị này đến từ ngữ '
+                             'cảnh tạo split và được ghim vào bản khai; nó '
+                             'KHÔNG suy ra được về sau từ lượt huấn luyện đầu '
+                             'tiên muốn dùng hiện vật, vì như vậy là ai hỏi '
+                             'trước thì thành chủ. Không có mặc định.')
+    parser.add_argument('--min_classes', type=int, default=DEFAULT_MIN_CLASSES,
+                        help=f'Số lớp tối thiểu SAU khi lọc; dưới ngưỡng thì DỪNG và '
+                             f'không ghi split (mặc định {DEFAULT_MIN_CLASSES}, 0 = tắt). '
+                             f'Cổng này nằm trong chính CLI vì make_splits chạy được '
+                             f'ngoài API — một cổng chỉ bảo vệ đường đi qua nó.')
+    parser.add_argument('--dialects', type=str, default='',
+                        help='Chỉ giữ các phương ngữ này (phân tách bằng dấu '
+                             'phẩy), áp TRƯỚC sàn số mẫu. Bắt buộc khi dựng '
+                             'hiện vật vận hành cho một phương ngữ: bản khai '
+                             'của hiện vật phải chứa ĐÚNG tập lớp mà trainer '
+                             'sẽ đọc, vì `num_classes` lấy thẳng từ bản khai.')
     parser.add_argument('--by_language', action='store_true', help='Write separate split CSVs per language under splits/<language>/')
     parser.add_argument('--languages', type=str, default='', help='Optional comma-separated whitelist of languages when using --by_language')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
+
+    # ★ C2b — cổng này đứng TRƯỚC mọi lượt ghi, và vị trí của nó là nội dung.
+    #
+    # `write_legacy_snapshot` cũng từ chối hiện vật không chủ, nhưng nó chạy SAU
+    # khi ba tệp CSV đã nằm trên đĩa: đỏ ở đó để lại một thư mục có ba CSV và
+    # không có bản khai — một hiện vật nửa chừng, mà quy tắc chỉ-tạo-mới lại
+    # khiến không ai ghi đè lên nó được nữa. Chặn ở đây thì không byte nào được
+    # ghi. Cổng kia là lưới thứ hai, cho người gọi hàm trực tiếp.
+    if args.operational_split_id and not str(args.tenant_id or '').strip():
+        raise SystemExit(
+            'Hiện vật vận hành phải có chủ: thiếu --tenant_id.\n'
+            'Chủ sở hữu đến từ ngữ cảnh tạo split. Không tìm được ngữ cảnh thì '
+            'DỪNG — không dùng tenant khởi tạo, không dùng tenant của lượt '
+            'huấn luyện sẽ tiêu thụ nó.')
+    if str(args.tenant_id or '').strip() and not args.operational_split_id:
+        raise SystemExit(
+            '--tenant_id chỉ dùng với --operational_split_id. Bản khai ở gốc '
+            'processed/splits/ không phải hiện vật có địa chỉ nên không mang '
+            'được quyền sở hữu, và ghi một trường không ai cưỡng chế vào đó chỉ '
+            'tạo cảm giác an toàn giả.')
 
     # v2 manifest mode: fully separate path; never touches legacy split files.
     if args.dataset_manifest is not None:
@@ -1000,8 +1499,18 @@ def main():
     if args.split_mode == 'strict_signer_disjoint':
         raise SystemExit('strict_signer_disjoint requires --dataset_manifest (v2 mode).')
 
-    global RANDOM_SEED
+    global RANDOM_SEED, OUT_DIR
     RANDOM_SEED = args.seed
+    if args.operational_split_id:
+        # KHÔNG đụng ba tệp ở gốc. Bất biến, chỉ-tạo-mới: ghi đè một hiện
+        # vật đã có sẽ làm mọi checkpoint trỏ vào nó nói sai nguồn gốc,
+        # trong khi split_id trong checkpoint vẫn trông hợp lệ.
+        OUT_DIR = OUT_DIR / 'operational' / args.operational_split_id
+        if OUT_DIR.exists() and any(OUT_DIR.iterdir()):
+            raise SystemExit(
+                f'Hiện vật vận hành đã tồn tại: {OUT_DIR}. Hiện vật là BẤT '
+                f'BIẾN — chọn --operational_split_id khác, đừng ghi đè.')
+        # KHÔNG tạo thư mục ở đây — xem `write_split`.
     rows, fieldnames = read_samples()
     # enrich rows with label info
     lookup = _labels_lookup()
@@ -1013,13 +1522,16 @@ def main():
         fieldnames = fieldnames + ['dialect']
     if 'label_key' not in fieldnames:
         fieldnames = fieldnames + ['label_key']
+    if 'region' not in fieldnames:
+        fieldnames = fieldnames + ['region']
     enriched = []
     for r in rows:
         try:
             idx = int(r['class_idx'])
         except Exception:
             idx = None
-        meta = lookup.get(idx, {'slug': '', 'label_original': '', 'language': 'vn', 'dialect': ''})
+        meta = lookup.get(idx, {'slug': '', 'label_original': '', 'language': 'vn',
+                                'dialect': '', 'region': ''})
         r = dict(r)
         r['label_slug'] = meta['slug']
         r['label_original'] = meta['label_original']
@@ -1028,9 +1540,135 @@ def main():
         slug = (meta.get('slug') or '').strip()
         r['language'] = language
         r['dialect'] = dialect
+        r['region'] = (meta.get('region') or '').strip()
         r['label_key'] = f"{language}/{dialect}/{slug}" if dialect else f"{language}/{slug}"
         enriched.append(r)
     rows = enriched
+
+    # Cổng TỔ CHỨC: hiện vật vận hành có chủ thì chỉ chứa mẫu của đúng chủ ấy.
+    #
+    # `samples.csv` là MỘT tệp chung cho mọi tenant. Trước 17/10/2026 cờ
+    # `--tenant_id` chỉ được đóng dấu vào bản khai, còn dòng thì không lọc: kiểm
+    # chứng hai tenant cho thấy split của B chứa 60 mẫu của B CỘNG 60 mẫu của A —
+    # cách ly ở API đúng, nhưng dữ liệu của A vẫn chảy vào mô hình của B qua đây.
+    # Ô trống là dữ liệu có từ trước đa tenant, thuộc tenant khởi tạo.
+    if str(args.tenant_id or '').strip():
+        try:
+            from app.tenancy import normalize_tenant_id, tenant_id_of
+        except ImportError as exc:            # pragma: no cover - lỗi cấu hình
+            raise SystemExit(f"Khong import duoc app.tenancy nen khong loc duoc theo to chuc: {exc}")
+        # `tenant_id_of` — cùng bộ đọc ô tenant với mọi bên đọc CSV khác.
+        _chu = normalize_tenant_id(str(args.tenant_id).strip())
+        _truoc = len(rows)
+        rows = [r for r in rows if tenant_id_of(r) == _chu]
+        print(f'[TENANT] {_chu}: giữ {len(rows)}/{_truoc} mẫu của đúng tổ chức này')
+
+    # Cổng KIỂM DUYỆT, áp trước mọi bộ lọc khác.
+    #
+    # Vì sao ở ĐÂY chứ không ở trainer
+    # ---------------------------------
+    # Trainer đọc split CSV, và split CSV có 25 cột — KHÔNG mang `review_status`
+    # cũng không mang `auth_user_id`. Lọc ở đó sẽ đọc mọi dòng thành "chưa
+    # duyệt" và loại sạch dữ liệu. Chỗ dữ liệu thật sự được CHỌN là đây: từ
+    # `samples.csv` vào split.
+    #
+    # Vì sao trước sàn số mẫu
+    # ------------------------
+    # Cùng lý do đã ghi cho bộ lọc phương ngữ ngay dưới: sàn phải tính trên
+    # đúng tập con sẽ được dùng. Loại mẫu chưa duyệt SAU khi sàn chạy nghĩa là
+    # một lớp có 12 mẫu — 9 đã duyệt, 3 đang chờ — vượt sàn 10 rồi mới rụng
+    # xuống 9, và split được dựng trên một lớp không đủ điều kiện.
+    #
+    # KHÔNG có người xem
+    # -------------------
+    # Dựng split là bước đóng gói dữ liệu cho một lượt huấn luyện hoặc một bản
+    # phát hành — nó rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ.
+    # Chỉ `approved` đi tiếp.
+    try:
+        from app.moderation import filter_rows as _loc_kiem_duyet
+    except ImportError as exc:            # pragma: no cover - lỗi cấu hình
+        # Hỏng-thì-ĐÓNG. Nuốt lỗi ở đây và chạy tiếp nghĩa là dựng một split
+        # KHÔNG qua kiểm duyệt mà không ai biết — đúng thứ cổng này sinh ra để
+        # chặn. Thà không chạy được còn hơn chạy mà bỏ cổng.
+        raise SystemExit(
+            "Khong import duoc app.moderation nen khong ap duoc cong kiem duyet. "
+            "Chay script nay o noi `app` import duoc (container trainer/backend). "
+            f"Chi tiet: {exc}")
+
+    _kq_kd = _loc_kiem_duyet(rows, viewer_id=None)
+    if _kq_kd.withheld:
+        print(f"[kiem-duyet] {_kq_kd.summary()}")
+    rows = _kq_kd.kept
+    if not rows:
+        raise SystemExit(
+            "Khong con mau nao sau cong kiem duyet. Moi mau deu dang cho duyet "
+            "hoac da bi tu choi — duyet chung truoc khi dung split.")
+
+    # Bộ lọc phương ngữ, áp TRƯỚC sàn — và thứ tự đó là bắt buộc.
+    #
+    # Trainer nhận `--dialect` và tự lọc lại lúc chạy, nên thoạt nhìn lọc ở đây
+    # là thừa. Không thừa: `consume_declared` lấy `num_classes` từ mục `classes`
+    # của bản khai, còn `partitions_agree` chỉ từ chối class_uid LẠ chứ không
+    # đòi mọi lớp đã khai phải có mặt. Một hiện vật khai 60 lớp mà trainer chỉ
+    # đọc 7 sẽ dựng tầng đầu ra 60 chiều với 53 chiều không bao giờ thấy một
+    # mẫu nào — chạy trót lọt, không cảnh báo, và checkpoint nói dối về tập lớp
+    # nó đã học.
+    #
+    # Áp trước sàn vì sàn phải tính trên đúng tập con: `can-tho` có 1 lớp đạt
+    # trên 9, nhưng nếu sàn chạy trên toàn bộ 60 lớp rồi mới cắt phương ngữ thì
+    # `enforce_min_classes` đếm 41 lớp và cho qua.
+    pn_muon = [x.strip() for x in str(args.dialects or '').split(',') if x.strip()]
+    if pn_muon:
+        co_that = sorted({(r.get('dialect') or '').strip() for r in rows
+                          if (r.get('dialect') or '').strip()})
+        khong_co = [d for d in pn_muon if d not in co_that]
+        if khong_co:
+            raise SystemExit(
+                f"Không có phương ngữ {khong_co} trong dữ liệu. "
+                f"Hiện có: {co_that}. Gõ sai tên phương ngữ mà vẫn chạy tiếp sẽ "
+                f"cho ra một hiện vật rỗng hoặc một tập con ngoài ý muốn.")
+        rows = [r for r in rows if (r.get('dialect') or '').strip() in pn_muon]
+        print(f"[scope] dialects={pn_muon}: giữ {len(rows)} mẫu, "
+              f"{len({_class_key(r) for r in rows if _class_key(r)})} lớp.")
+
+    # Sàn số mẫu, áp TRƯỚC khi chia. Sau khi chia là quá muộn: tỉ lệ 70/15/15
+    # tính trên từng lớp, nên loại một lớp sau đó sẽ làm ba tập lệch tỉ lệ.
+    truoc = len({_class_key(r) for r in rows if _class_key(r)})
+    rows, da_loai = filter_classes_below_floor(rows, args.min_samples_per_class)
+    tap_lop = sorted({_class_key(r) for r in rows if _class_key(r)})
+    _report_floor(args.min_samples_per_class, da_loai, len(tap_lop))
+    enforce_min_classes(tap_lop, args.min_classes,
+                        ten_tap=('+'.join(pn_muon) if pn_muon else ''),
+                        so_ung_vien=truoc, da_loai=da_loai)
+
+    # Số mẫu TRƯỚC khi chia, và `target_idx` gắn vào từng hàng. Gắn ở đây —
+    # trước khi chia — nên cả ba tệp mang cùng một ánh xạ; tính lại ở mỗi tệp
+    # là ba cơ hội để chúng lệch nhau.
+    dem_mau = Counter(_class_key(r) for r in rows if _class_key(r))
+    # Nhãn ĐỌC cho từng lớp, gom từ chính các hàng sẽ được ghi ra. Lấy ở đây
+    # thay vì tra `labels.csv` lúc nạp checkpoint, vì từ vựng đổi được sau khi
+    # huấn luyện xong và không có gì báo — đúng lỗi thứ ba đã tìm ra 14/08.
+    mo_ta_lop: dict = {}
+    for r in rows:
+        k = _class_key(r)
+        if not k or k in mo_ta_lop:
+            continue
+        mo_ta_lop[k] = {
+            'class_idx': (r.get('class_idx') or '').strip(),
+            'slug': (r.get('label_slug') or r.get('slug') or '').strip(),
+            'label_original': (r.get('label_original') or '').strip(),
+            'language': (r.get('language') or '').strip(),
+            'dialect': (r.get('dialect') or '').strip(),
+            'region': (r.get('region') or '').strip(),
+        }
+    anh_xa = assign_target_indices(tap_lop)
+    for r in rows:
+        k = _class_key(r)
+        if k in anh_xa:
+            r['target_idx'] = str(anh_xa[k])
+    if 'target_idx' not in fieldnames:
+        fieldnames = fieldnames + ['target_idx']
+
     def _active_mode():
         # --user_disjoint is the legacy flag; it maps to strict_user_disjoint
         # but only if --split_mode was not explicitly set away from 'sample'.
@@ -1081,11 +1719,25 @@ def main():
             'val': summarize(val, 'val'),
             'test': summarize(test, 'test'),
         }
+        snap = write_legacy_snapshot(
+            OUT_DIR, class_keys=tap_lop, floor=args.min_samples_per_class,
+            excluded=da_loai, mode=_active_mode(), seed=RANDOM_SEED,
+            counts={'train': len(train), 'val': len(val), 'test': len(test)},
+            min_classes=args.min_classes, sample_counts=dem_mau,
+            class_meta=mo_ta_lop,
+            split_id=args.operational_split_id or None,
+            tenant_id=args.tenant_id or None,
+            # Phạm vi phải nằm TRONG hiện vật: đọc lại sau ba tháng, "7 lớp"
+            # một mình không nói được đây là 7 lớp của hoa-de hay 7 lớp còn
+            # sót của toàn bộ từ vựng.
+            extra={'scope': {'dialects': pn_muon}} if pn_muon else None,
+        )
         print('Split summary:')
         for k, v in summary.items():
             print(k, v)
         for k, p in paths.items():
             print(f'{k} file -> {p}')
+        print(f'class-set snapshot -> {snap}')
         return
 
     # Per-language mode: write splits into OUT_DIR/<language>/*.csv
@@ -1123,10 +1775,29 @@ def main():
             'val': summarize(val, 'val'),
             'test': summarize(test, 'test'),
         }
+        lop_l = sorted({_class_key(r) for r in rows_l if _class_key(r)})
+        enforce_min_classes(lop_l, args.min_classes, ten_tap=f"ngôn ngữ {lang}",
+                            so_ung_vien=len(lop_l), da_loai=da_loai)
+        write_legacy_snapshot(
+            out_dir, class_keys=lop_l, floor=args.min_samples_per_class,
+            min_classes=args.min_classes,
+            sample_counts=Counter(_class_key(r) for r in rows_l if _class_key(r)),
+            # `da_loai` là danh sách toàn cục: sàn đã áp trước khi tách ngôn
+            # ngữ, nên một lớp bị loại thuộc về đúng một ngôn ngữ và lọc lại
+            # theo ngôn ngữ ở đây sẽ cần tra ngược thông tin đã bỏ. Ghi cả danh
+            # sách và nói rõ phạm vi còn thật thà hơn là ghi một tập con đoán mò.
+            excluded=da_loai, mode=_active_mode(), seed=RANDOM_SEED,
+            counts={'train': len(train), 'val': len(val), 'test': len(test)},
+            extra={'language': lang, 'excluded_scope': 'toàn bộ split, mọi ngôn ngữ'},
+        )
         manifest['languages'][lang] = {
             'total_rows': len(rows_l),
             'paths': {k: str(p) for k, p in paths.items()},
             'summary': summary,
+            'class_set_hash': class_set_checksum(lop_l),
+            'class_mapping_hash': class_mapping_checksum(
+                assign_target_indices(lop_l).items()),
+            'num_classes': len(lop_l),
         }
         print(f'Language={lang} summary:')
         for k, v in summary.items():
@@ -1142,3 +1813,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+import numpy as np
 
+from app import audit
 from app.config import settings
-from app.modules.dataset.catalog import load_labels
-from app.modules.dataset.samples import list_samples as list_samples_v2
-from app.modules.dataset import sample_service
-from app.modules.dataset.catalog_sync import (
+from app.dataset_manager import load_labels, ClassMetadata
+from app.tenancy import tenant_id_of
+from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
+from app.storage.gdrive_client import materialize_sample_artifacts
+from app.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,
@@ -18,14 +21,85 @@ from app.modules.dataset.catalog_sync import (
     sync_restore_sample,
     sync_purge_sample,
     list_trash_samples,
+    list_trash_samples_for_user,
     bulk_restore_samples,
     bulk_purge_samples,
     empty_sample_trash,
 )
-from app.modules.identity import get_current_user, get_current_user_optional, require_admin
+from app import moderation
+from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.tenant_context import require_tenant
+from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
+from app.sample_access import can_manage_tenant_samples, readable_sample_uids
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
+
+def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
+    """Raise 403 if current_user is not the owner of the sample and is not admin.
+
+    Legacy samples with auth_user_id=NULL (guest uploads) can only be deleted by admin.
+    """
+    if current_user.get("is_admin"):
+        return  # Admin bypass
+    owner_id = get_sample_owner(sample_id)
+    if owner_id is None:
+        # Guest sample or sample not found in DB — only admin can touch
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ admin mới có thể xóa mẫu không có chủ sở hữu",
+        )
+    if str(owner_id) != str(current_user["id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn không có quyền thực hiện thao tác này trên mẫu này",
+        )
+
+
+_SKIP_REASONS = {
+    "foreign": "thuộc về tài khoản khác",
+    "unowned": "chưa gắn chủ sở hữu (dữ liệu cũ) — cần admin",
+    "missing": "không có trong cơ sở dữ liệu",
+}
+
+
+def _actionable_uids(
+    uids: List[str], current_user: Dict[str, Any]
+) -> tuple[List[str], Dict[str, Any]]:
+    """Keep only the uids this caller may act on, and explain the rest.
+
+    Admin acts on everything. For anyone else this is ONE query for the whole
+    batch (partition_sample_ownership), not one per uid — a 200-sample
+    selection used to mean 200 round-trips.
+
+    The second return value is merged into the response so the UI can say WHY
+    something was left out. Silently shrinking the batch is the failure mode
+    worth avoiding: selecting 10 and being told "đã khôi phục 7" with no
+    mention of the other 3 reads as data loss.
+    """
+    uids = [str(u).strip() for u in (uids or []) if str(u or "").strip()]
+    if current_user.get("is_admin"):
+        return uids, {"skipped_count": 0, "skipped": {}}
+
+    split = partition_sample_ownership(uids, str(current_user.get("id") or ""))
+    skipped: Dict[str, Any] = {}
+    for bucket in ("foreign", "unowned", "missing"):
+        items = getattr(split, bucket)
+        if items:
+            skipped[bucket] = {
+                "count": len(items),
+                "reason": _SKIP_REASONS[bucket],
+                "sample_uids": items[:20],
+            }
+    return list(split.owned), {"skipped_count": len(split.skipped), "skipped": skipped}
+
+
+def _skip_note(info: Dict[str, Any]) -> str:
+    n = int(info.get("skipped_count") or 0)
+    if not n:
+        return ""
+    parts = [f"{d['count']} {d['reason']}" for d in info.get("skipped", {}).values()]
+    return f" Bỏ qua {n} mẫu: " + "; ".join(parts) + "."
 
 # ---- Models ----
 class LabelOut(BaseModel):
@@ -53,12 +127,43 @@ class SampleOut(BaseModel):
 # ---- Endpoints ----
 
 def _labels_rows() -> List[Dict[str, str]]:
-    return load_labels()
+    """Nhãn MÀ NGƯỜI GỌI ĐƯỢC THẤY.
+
+    Phạm vi đặt ở HELPER chứ không ở từng chỗ gọi: bốn endpoint dùng chung
+    hàm này, và một chỗ quên truyền phạm vi là một lỗ. Đặt ở đây thì không
+    có chỗ nào để quên.
+
+    `require_tenant()` ném lỗi khi không có ngữ cảnh — đóng, không mở.
+    """
+    return load_labels(require_tenant())
 
 
 def _class_uid_to_label_row_map() -> Dict[str, Dict[str, str]]:
     rows = _labels_rows()
     return {r.get("class_uid"): r for r in rows if r.get("class_uid")}
+
+
+def _class_idx_to_meta() -> Dict[int, ClassMetadata]:
+    out: Dict[int, ClassMetadata] = {}
+    for r in _labels_rows():
+        try:
+            idx = int(r.get("class_idx") or 0)
+        except Exception:
+            continue
+        if idx <= 0:
+            continue
+        out[idx] = ClassMetadata(
+            class_uid=r["class_uid"],
+            slug=r["slug"],
+            label_original=r["label_original"],
+            language=r["language"],
+            dialect=r["dialect"],
+            is_common_global=bool(int(r.get("is_common_global") or 0)),
+            is_common_language=bool(int(r.get("is_common_language") or 0)),
+            class_idx=idx,
+            tenant_id=tenant_id_of(r),
+        )
+    return out
 
 
 @router.post("/labels", response_model=LabelOut)
@@ -73,7 +178,7 @@ def create_label(
 
     Creates/returns a class entry in the new hierarchy while keeping the old response shape.
     """
-    from app.modules.dataset.catalog import get_or_register_class
+    from app.dataset_manager import get_or_register_class
 
     meta = get_or_register_class(
         label_original=label,
@@ -130,7 +235,7 @@ def update_label(
     admin_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
-        result = sync_update_class(class_ref, {"label_original": label})
+        result = sync_update_class(class_ref, {"label_original": label}, tenant_id=require_tenant())
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
@@ -139,18 +244,52 @@ def update_label(
 @router.delete("/labels/{class_ref}")
 def delete_label(
     class_ref: str,
+    request: Request,
     admin_user: Dict[str, Any] = Depends(require_admin),
 ):
     try:
-        result = sync_soft_delete_class(class_ref)
+        result = sync_soft_delete_class(class_ref, tenant_id=require_tenant())
+        audit.record("data.class.soft_delete", actor=admin_user, request=request,
+                     target_type="class", target_id=result.get("class_uid") or class_ref,
+                     detail={"sample_count": result.get("sample_count"), "via": "labels"})
         return {"success": True, "op_id": result.get("op_id"), "operation_logs": result.get("operation_logs"), **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"error": str(exc), "operation_logs": getattr(exc, "logs", None)}) from exc
 
 
+# Requires login, unlike the sibling /labels listing. /labels backs the public
+# LabelsPage (that route is deliberately outside ProtectedRoute), but this one
+# returns a `user` UUID per sample — i.e. who contributed what — and nothing in
+# the repo calls it: the frontend only ever uses the /samples/{id}/... subpaths.
+# It was reachable anonymously purely by omission.
 @router.get("/samples", response_model=List[SampleOut])
-def list_samples():
-    samples = list_samples_v2()
+def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
+    # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
+    # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
+    # `sample_id` không tồn tại. Không có phép kiểm tenant nào sau khi tra cứu,
+    # nên cũng không có kênh phụ nào giữa hai câu trả lời.
+    #
+    # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
+    # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
+    # vi. Trước 16/08/2026 đường này đọc toàn kho.
+    tenant = require_tenant()
+    samples = list_samples_v2(tenant)
+    readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in samples], tenant)
+    samples = [s for s in samples if s.get("sample_uid") in readable]
+    # Cổng kiểm duyệt, với NGƯỜI XEM là chính người gọi.
+    #
+    # Đây là chỗ hợp đồng "chưa duyệt thì chỉ chủ dùng được" hiện ra với người
+    # dùng: họ thấy ngay mẫu mình vừa thu, và KHÔNG thấy mẫu chưa duyệt của
+    # người khác. Cùng một danh sách, hai người thấy hai tập khác nhau — đó là
+    # ý định, không phải rò rỉ.
+    #
+    # Lọc SAU khi đã phân giải theo phạm vi tenant: hai cổng độc lập, và cổng
+    # tenant vẫn là cổng đứng trước.
+    # Admin/editor của tenant được miễn: họ là người duyệt, phải thấy thứ đang
+    # chờ duyệt (cùng ngoại lệ với `GET /samples/{id}/data`).
+    if not can_manage_tenant_samples(current_user, tenant):
+        samples = moderation.filter_rows(
+            samples, viewer_id=str(current_user.get("id") or "")).kept
     labels_by_uid = _class_uid_to_label_row_map()
     out: List[Dict[str, Any]] = []
     for s in samples:
@@ -177,25 +316,67 @@ def list_samples():
     return out
 
 @router.get("/samples/{sample_id}/data")
-def get_sample_data(sample_id: str):
+def get_sample_data(sample_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Trả về file npz/json của sample_id
     """
-    try:
-        path = sample_service.resolve_sample_artifact(sample_id)
-    except (
-        sample_service.SampleNotFoundError,
-        sample_service.SampleArtifactMissingError,
-    ) as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return FileResponse(str(path), media_type="application/octet-stream")
+    # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
+    # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
+    # `sample_id` không tồn tại. Không có phép kiểm tenant nào sau khi tra cứu,
+    # nên cũng không có kênh phụ nào giữa hai câu trả lời.
+    #
+    # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
+    # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
+    # vi. Trước 16/08/2026 đường này đọc toàn kho.
+    samples = list_samples_v2(require_tenant())
+    match = next((s for s in samples if (s.get("sample_uid") == sample_id)), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Sample not found")
+    if sample_id not in readable_sample_uids(current_user, [sample_id], require_tenant()):
+        raise HTTPException(status_code=404, detail="Sample not found")
+    # Cùng cổng kiểm duyệt với `GET /samples`: chia sẻ ra tenant mới là ĐĂNG KÝ
+    # dùng chung, chưa duyệt thì chỉ chủ dùng được. Danh sách đã ẩn các mẫu này,
+    # nhưng đường tải theo id thì không — ai có `sample_id` vẫn lấy được tệp
+    # trước khi admin duyệt. Người duyệt của CHÍNH tenant này vẫn tải được: họ
+    # phải xem được thứ mình sắp duyệt. Cùng 404 như mẫu không tồn tại.
+    if not moderation.filter_rows([match], viewer_id=str(current_user.get("id") or "")).kept:
+        from app.moderation_admin import can_moderate
+
+        if not (can_moderate(current_user, require_tenant())
+                or can_manage_tenant_samples(current_user, require_tenant())):
+            raise HTTPException(status_code=404, detail="Sample not found")
+    file_path = match.get("file_path") or ""
+    if file_path and Path(file_path).exists():
+        return FileResponse(file_path, media_type="application/octet-stream", headers={"Cache-Control": "private, no-store"})
+
+    cache_dir = Path(settings.dataset_root) / "cache" / "sample_downloads"
+    resolved = materialize_sample_artifacts([match], cache_dir)
+    if not resolved:
+        raise HTTPException(status_code=404, detail="Sample file missing on disk")
+    return FileResponse(str(resolved[0]), media_type="application/octet-stream", headers={"Cache-Control": "private, no-store"})
+
+
+def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
+    """Lô mà KHÔNG mục nào thành công là lỗi, không phải "đã khôi phục 0 mẫu".
+    Xem cùng tên ở routers/classes.py cho câu chuyện phía sau."""
+    if not result.get("ok") and result.get("failed"):
+        first = result["failed"][0]
+        raise HTTPException(status_code=400, detail=f"{first.get('id')}: {first.get('error')}")
 
 
 @router.get("/samples/trash")
-def list_sample_trash(current_user: Dict[str, Any] = Depends(require_admin)):
-    """List soft-deleted samples (whose class is still active). Admin only."""
+def list_sample_trash(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """List soft-deleted samples (whose class is still active). A tenant
+    admin/editor sees the tenant's whole sample trash; a contributor sees ONLY
+    their own (by auth_user_id)."""
     try:
-        items = list_trash_samples()
+        tenant = require_tenant()
+        if can_manage_tenant_samples(current_user, tenant):
+            items = list_trash_samples()
+        else:
+            items = list_trash_samples_for_user(str(current_user["id"]))
+        readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in items], tenant, include_deleted=True)
+        items = [s for s in items if s.get("sample_uid") in readable]
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Không đọc được thùng rác mẫu: {exc}")
@@ -204,25 +385,49 @@ def list_sample_trash(current_user: Dict[str, Any] = Depends(require_admin)):
 @router.post("/samples/trash/restore")
 def bulk_restore_samples_endpoint(
     payload: dict = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """Restore several soft-deleted samples. Body: {sample_uids: [...]}."""
-    result = bulk_restore_samples(payload.get("sample_uids") or [])
-    return {"success": True, "message": f"Đã khôi phục {result['ok_count']} mẫu.", **result}
+    """Restore several soft-deleted samples. Body: {sample_uids: [...]}. A
+    non-admin may only restore samples they own; the rest are reported back in
+    `skipped` with a reason instead of vanishing from the count."""
+    uids, skip_info = _actionable_uids(payload.get("sample_uids") or [], current_user)
+    result = bulk_restore_samples(uids)
+    _reject_if_nothing_done(result)
+    message = f"Đã khôi phục {result['ok_count']} mẫu." + _skip_note(skip_info)
+    return {"success": True, "message": message, **result, **skip_info}
 
 
 @router.post("/samples/trash/purge")
 def bulk_purge_samples_endpoint(
+    request: Request,
     payload: dict = Body(default={}),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete samples. Body: {sample_uids: [...]} for a selection, or
-    {all: true} to empty the whole sample trash. Irreversible."""
+    {all: true} to empty the trash. Irreversible. A non-admin acts ONLY on their
+    own samples: {all: true} empties just their trash; anything else is reported
+    in `skipped` with a reason."""
+    is_admin = bool(current_user.get("is_admin"))
+    skip_info: Dict[str, Any] = {"skipped_count": 0, "skipped": {}}
     if payload.get("all"):
-        result = empty_sample_trash()
+        if is_admin:
+            result = empty_sample_trash()
+        else:
+            own = [s["sample_uid"] for s in list_trash_samples_for_user(str(current_user["id"]))]
+            result = bulk_purge_samples(own)
     else:
-        result = bulk_purge_samples(payload.get("sample_uids") or [])
-    return {"success": True, "message": f"Đã xóa vĩnh viễn {result['ok_count']} mẫu.", **result}
+        uids, skip_info = _actionable_uids(payload.get("sample_uids") or [], current_user)
+        result = bulk_purge_samples(uids)
+    _reject_if_nothing_done(result)
+    audit.record("data.sample.purge.bulk", actor=current_user, request=request,
+                 target_type="sample", detail={
+                     "all": bool(payload.get("all")),
+                     "as_admin": is_admin,
+                     "ok_count": result.get("ok_count"),
+                     "skipped_count": skip_info.get("skipped_count"),
+                 })
+    message = f"Đã xóa vĩnh viễn {result['ok_count']} mẫu." + _skip_note(skip_info)
+    return {"success": True, "message": message, **result, **skip_info}
 
 
 @router.delete("/samples/{sample_id}")
@@ -231,12 +436,9 @@ def delete_sample(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Soft-delete a sample to Trash (restorable)."""
+    _check_sample_ownership(sample_id, current_user)
     try:
-        sample_service.ensure_sample_access(sample_id, current_user)
-    except sample_service.SampleAccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    try:
-        result = sync_soft_delete_sample(sample_id)
+        result = sync_soft_delete_sample(sample_id, tenant_id=require_tenant())
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -248,12 +450,9 @@ def restore_sample_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Restore a soft-deleted sample from Trash."""
+    _check_sample_ownership(sample_id, current_user)
     try:
-        sample_service.ensure_sample_access(sample_id, current_user)
-    except sample_service.SampleAccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    try:
-        result = sync_restore_sample(sample_id)
+        result = sync_restore_sample(sample_id, tenant_id=require_tenant())
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -262,15 +461,16 @@ def restore_sample_endpoint(
 @router.delete("/samples/{sample_id}/purge")
 def purge_sample_endpoint(
     sample_id: str,
+    request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete a sample (file + Drive + DB). Irreversible."""
+    _check_sample_ownership(sample_id, current_user)
     try:
-        sample_service.ensure_sample_access(sample_id, current_user)
-    except sample_service.SampleAccessDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    try:
-        result = sync_purge_sample(sample_id)
+        result = sync_purge_sample(sample_id, tenant_id=require_tenant())
+        audit.record("data.sample.purge", actor=current_user, request=request,
+                     target_type="sample", target_id=sample_id,
+                     detail={"class_uid": result.get("class_uid")})
         return {"success": True, **result}
     except CatalogSyncError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -286,29 +486,56 @@ def add_sample(
     file: UploadFile = File(...),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
+    idx_to_meta = _class_idx_to_meta()
+    meta = idx_to_meta.get(int(class_idx))
+    if not meta:
+        raise HTTPException(status_code=404, detail="label not found (class_idx)")
+    if not file.filename.endswith(".npz"):
+        raise HTTPException(status_code=400, detail="Only .npz uploads are supported")
+
     try:
-        saved = sample_service.save_uploaded_npz(
-            class_idx=class_idx,
-            filename=file.filename,
-            file_object=file.file,
-            current_user=current_user,
-            user=user,
-            session_id=session_id,
-            frames=frames,
-            duration=duration,
-            source=source,
-        )
-    except sample_service.SampleLabelNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except sample_service.InvalidSampleUploadError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        data = np.load(file.file, allow_pickle=False)
+        seq = data.get("sequence")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid npz")
+    if seq is None or not isinstance(seq, np.ndarray) or seq.ndim != 2:
+        raise HTTPException(status_code=400, detail="npz must contain 2D 'sequence'")
+
+    saved = save_sequence_npz(
+        meta,
+        seq.astype(np.float32),
+        meta={
+            "user": user or current_user.get("username", ""),
+            "user_id": current_user["id"],
+            "auth_user_id": current_user["id"],
+            "session_id": session_id,
+            "fps_original": "",
+            "fps_processed": "",
+            "completeness": "",
+            "frames": int(frames or seq.shape[0]),
+            "duration": str(duration or ""),
+            "source": source,
+        },
+        augment_id=0,
+        source_type=source or "upload",
+    )
     return {"status": "ok", "path": saved}
 
 @router.get("/sessions")
 @router.get("/dataset/sessions")
-def list_sessions(user: str = "", session_id: str = ""):
+def list_sessions(user: str = "", session_id: str = "", current_user: Dict[str, Any] = Depends(get_current_user)):
     """List capture sessions from the unified samples CSV."""
-    samples = list_samples_v2()
+    # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
+    # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
+    # `sample_id` không tồn tại. Không có phép kiểm tenant nào sau khi tra cứu,
+    # nên cũng không có kênh phụ nào giữa hai câu trả lời.
+    #
+    # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
+    # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
+    # vi. Trước 16/08/2026 đường này đọc toàn kho.
+    samples = list_samples_v2(require_tenant())
+    readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in samples], require_tenant())
+    samples = [s for s in samples if s.get("sample_uid") in readable]
     # lightweight grouping without pandas
     sessions: Dict[str, Dict[str, Any]] = {}
     for s in samples:

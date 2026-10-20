@@ -16,35 +16,38 @@ from app.config import settings
 from app.modules.dataset.catalog import (
     ClassMetadata,
     LABEL_FIELDS,
+    class_storage_dir,
+    raw_class_dir,
     MASTER_LABELS,
     DATASET_ROOT,
+    _load_all_labels_unscoped,
     load_labels,
     regenerate_label_indexes,
     slugify,
     normalize_dialect,
+    normalize_region,
     parse_bool,
 )
-from app.modules.dataset.samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
-from app.core.operation_logging import (
-    OperationStatus,
-    OperationType,
-    get_logger as get_structured_logger,
+from app.modules.dataset.samples import (
+    SAMPLE_FIELDS,
+    SAMPLES_CSV,
+    _load_all_samples_unscoped,
+    list_samples,
 )
-from app.modules.google_sync.catalog import (
-    dispatch_catalog_refresh,
-    dispatch_drive_folder_delete,
-    dispatch_drive_folder_move,
-)
+from app.core.operation_logging import get_logger as get_structured_logger, OperationStatus, OperationType
 from app.processing.utils import atomic_write_json
 from app.modules.dataset.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
+from app.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
 from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
+    delete_capture_sessions_by_class as db_delete_capture_sessions_by_class,
+    count_training_jobs_using_class as db_count_training_jobs_using_class,
     delete_raw_upload as db_delete_raw_upload,
     delete_raw_uploads_by_class as db_delete_raw_uploads_by_class,
     delete_sample as db_delete_sample,
     delete_samples_by_class as db_delete_samples_by_class,
-    ensure_tables,
+    ensure_tables as _db_ensure_tables,
     upsert_class as db_upsert_class,
     upsert_raw_upload as db_upsert_raw_upload,
     upsert_sample as db_upsert_sample,
@@ -62,6 +65,30 @@ from app.storage.metadata_db import (
     list_deleted_samples as db_list_deleted_samples,
     get_deleted_sample as db_get_deleted_sample,
 )
+
+_SCHEMA_ENSURED = False
+
+
+def ensure_tables() -> None:
+    """Bảo đảm lược đồ MỘT LẦN mỗi tiến trình, không phải mỗi thao tác.
+
+    Mười bốn đường ghi/đọc của danh mục (xoá mềm, khôi phục, thùng rác, đổi
+    nhãn...) đều mở đầu bằng `ensure_tables()`. Bản gốc gọi thẳng
+    `metadata_db.ensure_tables()`, tức là chạy TOÀN BỘ DDL bổ khuyết + các bước
+    dữ liệu v5/v6 (~0,5 s, đo 15/09/2026) cho mỗi lời gọi — mở thùng rác là
+    hai lần, xoá một lần quay 12 mẫu là mười hai lần. Backend đã chạy đúng
+    việc này lúc khởi động; ở đây chỉ cần chắc rằng tiến trình hiện tại
+    (worker, trainer, test) đã làm nó một lần.
+
+    Bản trong `metadata_db` cố ý KHÔNG ghi nhớ: test thả bảng rồi gọi lại nó
+    để dựng lại. Nên nhớ ở lớp này, chỗ chỉ phục vụ đường yêu cầu.
+    """
+    global _SCHEMA_ENSURED
+    if _SCHEMA_ENSURED:
+        return
+    _db_ensure_tables()
+    _SCHEMA_ENSURED = True
+
 
 logger = logging.getLogger(__name__)
 slog = get_structured_logger("catalog.sync")
@@ -161,6 +188,28 @@ def _replace_prefix(value: Any, old_prefix: str, new_prefix: str) -> Any:
     return value
 
 
+def _purge_raw_archive(sample_file: Optional[Path], sample_uid: str) -> None:
+    """Delete a purged sample's raw recording along with its features file.
+
+    Contract v3 stores the recording in a parallel tree, and a purge that only
+    removed the features half would leave the landmarks — the actual record of a
+    person signing — on disk after the sample was destroyed at the contributor's
+    request. Purge is the hard-delete path; soft delete does not reach here and
+    keeps both halves, which is what makes Trash restorable.
+    """
+    if sample_file is None:
+        return
+    try:
+        from app.modules.dataset.samples import raw_archive_path
+
+        archived = raw_archive_path(sample_file)
+        if archived.exists():
+            archived.unlink()
+            logger.info("[CATALOG] purged raw archive for %s", sample_uid)
+    except Exception as exc:
+        logger.warning("[CATALOG] raw archive purge failed for %s: %s", sample_uid, exc)
+
+
 def _resolve_sample_file_path(row: Dict[str, Any]) -> Optional[Path]:
     file_path = row.get("file_path") or ""
     if not file_path:
@@ -190,6 +239,10 @@ def _build_class_meta_from_row(row: Dict[str, Any]) -> ClassMetadata:
         is_common_global=parse_bool(row.get("is_common_global")),
         is_common_language=parse_bool(row.get("is_common_language")),
         folder_override=row.get("folder_name") or None,
+        # `hierarchy_path()` is derived from this. Dropping it makes every
+        # class-move, rename and trash/restore in this module read and write the
+        # bootstrap tenant's directory tree regardless of who owns the class.
+        tenant_id=tenant_id_of(row),
     )
 
 
@@ -227,11 +280,25 @@ def _build_updated_class_meta(row: Dict[str, Any], payload: Dict[str, Any]) -> C
     else:
         dialect = normalize_dialect(str(dialect_input)) or str(dialect_input).strip().lower()
 
+    # `region` phải được MANG THEO, không được để rơi về mặc định.
+    #
+    # `ClassMetadata.region` mặc định là `unclassified`, nên dựng lại object mà
+    # không truyền trường này biến MỌI lần sửa nhãn thành một lần xoá vùng:
+    # đổi chính tả của `ăn [bac]` là nó thành `ăn [unclassified]`, im lặng, và
+    # bản ghi không còn phân biệt được với biến thể miền Nam. Với dữ liệu QIPEDC
+    # — nơi hàng trăm từ chỉ khác nhau ở đúng trường này — đó là mất dữ liệu chứ
+    # không phải phiền toái.
+    #
+    # Người gọi ĐƯỢC đổi vùng, nhưng phải nói ra; im lặng nghĩa là giữ nguyên.
+    region = normalize_region(
+        payload["region"] if "region" in payload else row.get("region"))
+
     slug = slugify(label_original)
     class_uid = row["class_uid"]
     class_idx = int(row["class_idx"]) if str(row.get("class_idx") or "").strip() else None
     folder_override = f"class_{slug}_{class_uid[:8]}"
     return ClassMetadata(
+        region=region,
         class_uid=class_uid,
         class_idx=class_idx,
         slug=slug,
@@ -241,6 +308,9 @@ def _build_updated_class_meta(row: Dict[str, Any], payload: Dict[str, Any]) -> C
         is_common_global=is_common_global,
         is_common_language=is_common_language and not is_common_global,
         folder_override=folder_override,
+        # The retarget keeps the class with its owner: a move must not be able
+        # to relocate a class into another tenant's tree.
+        tenant_id=tenant_id_of(row),
     )
 
 
@@ -260,19 +330,134 @@ def _raw_new_path(old_path: Path, old_root: Path, new_root: Path) -> Path:
         return new_root / old_path.name
 
 
-def _sync_drive_and_sheets_versioned_tables(
-    _label_rows: Sequence[Dict[str, Any]] | None = None,
-    _sample_rows: Sequence[Dict[str, Any]] | None = None,
-) -> None:
-    dispatch_catalog_refresh(_label_rows, _sample_rows)
+def _dataset_storage_key(local_path: Path) -> Optional[str]:
+    relative = _relative_to_dataset(local_path)
+    if relative is None:
+        return None
+    return relative.as_posix()
 
 
-def _dispatch_gdrive_folder_delete(paths: Sequence[Path]) -> None:
-    dispatch_drive_folder_delete(paths, dataset_root=DATASET_ROOT)
+def _google_drive_configured() -> bool:
+    if not getattr(settings, "use_google_drive", False):
+        return False
+    credentials_path = Path(str(getattr(settings, "google_drive_credentials", "")))
+    return credentials_path.exists()
 
 
-def _dispatch_gdrive_folder_move(pairs: Sequence[tuple[Path, Path]]) -> None:
-    dispatch_drive_folder_move(pairs, dataset_root=DATASET_ROOT)
+def _drive_relative_path(local_path: Path, tenant_id: Optional[str] = None) -> Optional[str]:
+    """Đường dẫn Drive của một đường dẫn cục bộ, theo bố cục Drive đang chọn.
+
+    `tenant_id` bắt buộc cho thư mục `raw_videos/` ở bố cục `tenant` (cây đó
+    không phân vùng trên đĩa); với `features/` tenant đọc được từ chính đường dẫn.
+    Ném ValueError khi không ánh xạ được — người gọi best-effort tự bắt.
+    """
+    from app.storage.drive_layout import drive_path_for
+
+    key = _dataset_storage_key(local_path)
+    if key is None:
+        return None
+    return drive_path_for(key, tenant_id)
+
+
+def _drive_relative_path_or_skip(local_path: Path, tenant_id: Optional[str]) -> Optional[str]:
+    """Như `_drive_relative_path` nhưng ghi log và bỏ qua thay vì ném: đổi tên/xoá
+    lớp đã commit cục bộ, phần Drive phía sau không được làm hỏng nó."""
+    try:
+        return _drive_relative_path(local_path, tenant_id)
+    except (ValueError, TypeError) as exc:
+        logger.warning("[CATALOG][GDRIVE] bỏ qua %s: không ánh xạ được sang Drive (%s)", local_path, exc)
+        return None
+
+
+def _sync_drive_catalog_csv(local_path: Path, remote_name: str) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] csv sync skipped: google drive not configured for %s", remote_name)
+        return
+
+    try:
+        from app.storage.gdrive_client import apply_gdrive_suffix_to_remote_path, upload_to_gdrive
+
+        remote_path = apply_gdrive_suffix_to_remote_path(remote_name)
+        logger.info("[CATALOG][GDRIVE] csv sync begin: local=%s remote=%s", local_path, remote_path)
+        upload_to_gdrive(
+            str(local_path),
+            remote_path,
+            content_type="text/csv",
+            make_public=False,
+            replace_existing=True,
+        )
+        logger.info("[CATALOG][GDRIVE] csv sync done: local=%s remote=%s", local_path, remote_path)
+    except Exception as exc:
+        logger.warning("[CATALOG][GDRIVE] csv sync failed for %s: %s", remote_name, exc)
+
+
+def _sync_drive_catalog_snapshots() -> None:
+    _sync_drive_catalog_csv(MASTER_LABELS, "labels.csv")
+    _sync_drive_catalog_csv(SAMPLES_CSV, "samples.csv")
+    _sync_drive_catalog_csv(RAW_UPLOADS_CSV, "raw_uploads.csv")
+
+
+def _sync_drive_and_sheets_versioned_tables(label_rows: Sequence[Dict[str, Any]] | None = None,
+                                            sample_rows: Sequence[Dict[str, Any]] | None = None) -> None:
+    """Không còn phái gì (18/10/2026).
+
+    Trước đây mỗi lần sửa danh mục phái ba task: tải ba tệp .csv lên gốc Drive
+    và viết lại hai Sheet chung. Sheet Lookup list theo tổ chức
+    (`export_tasks.sync_lookup_lists`) tự thấy thay đổi qua dấu vân tay trong DB
+    ở lượt beat kế tiếp và gộp cả đợt sửa vào một lần ghi — phái thêm ở đây chỉ
+    làm nó chạy sớm khi dữ liệu còn đang ghi dở. Giữ tên hàm vì mười chỗ gọi.
+    """
+    logger.debug("[CATALOG] catalog changed; Lookup list sheets pick it up on the next sync")
+
+
+def _dispatch_gdrive_folder_delete(paths: Sequence[Path], tenant_id: Optional[str] = None) -> None:
+    """Queue Drive folder deletion (async cleanup) for the given local paths."""
+    rel_paths = [rel for rel in (_drive_relative_path_or_skip(p, tenant_id) for p in paths) if rel]
+    if not rel_paths:
+        return
+    try:
+        from app.export_tasks import delete_gdrive_paths_task
+
+        delete_gdrive_paths_task.delay(rel_paths=rel_paths)
+    except Exception as exc:
+        logger.warning("[CATALOG] Drive folder delete dispatch failed for %s: %s", rel_paths, exc)
+
+
+def _dispatch_gdrive_folder_move(pairs: Sequence[tuple[Path, Path]], tenant_id: Optional[str] = None) -> None:
+    """Queue Drive folder moves (async) for (old_local, new_local) path pairs."""
+    rel_pairs = []
+    for old_path, new_path in pairs:
+        old_rel = _drive_relative_path_or_skip(old_path, tenant_id)
+        new_rel = _drive_relative_path_or_skip(new_path, tenant_id)
+        if old_rel and new_rel and old_rel != new_rel:
+            rel_pairs.append([old_rel, new_rel])
+    if not rel_pairs:
+        return
+    try:
+        from app.export_tasks import move_gdrive_paths_task
+
+        move_gdrive_paths_task.delay(pairs=rel_pairs)
+    except Exception as exc:
+        logger.warning("[CATALOG] Drive folder move dispatch failed for %s: %s", rel_pairs, exc)
+
+
+def _doi_pham_vi(tenant_id: Any) -> None:
+    """Từ chối khi người gọi không mang phạm vi tenant. Không có đường lùi.
+
+    Kiểm THAM SỐ THÔ, và phải gọi TRƯỚC `normalize_tenant_id()`. Hàm chuẩn hoá
+    có `fallback=DEFAULT_TENANT_ID`, nên `""` và `None` đều trả về `"default"` —
+    cố ý, vì nó phục vụ các hàng CSV có trước khi tenant tồn tại. Nhưng ở đường
+    ghi theo yêu cầu, "trống" mang nghĩa NGƯỢC LẠI: không xác định được người
+    gọi thuộc tenant nào.
+
+    Kiểm sau khi chuẩn hoá thì `if not scope` là mã chết và một lượt gọi thiếu
+    phạm vi chạy lặng lẽ với toàn quyền của tenant khởi tạo — tenant mặc định
+    trở thành siêu tenant ngầm. `sync_reassign_sample` mắc đúng lỗi này và chỉ
+    bị bắt bởi một ca kiểm `tenant_id=""` ngày 16/08/2026.
+    """
+    if not str(tenant_id or "").strip():
+        raise CatalogSyncError("Thieu tenant context", status_code=400,
+                               error_code="TENANT_SCOPE_REQUIRED")
 
 
 def _write_samples_csv(rows: Sequence[Dict[str, Any]]) -> None:
@@ -294,6 +479,109 @@ def _invalidate_tts_cache(label_text: str) -> None:
         invalidate_text_cache_sync(label_text)
     except Exception as exc:
         logger.debug("[CATALOG] TTS cache invalidate skipped for '%s': %s", label_text, exc)
+
+
+def _rows_to_matrix(fieldnames: Sequence[str], rows: Sequence[Dict[str, Any]]) -> List[List[Any]]:
+    matrix: List[List[Any]] = [list(fieldnames)]
+    for row in rows:
+        matrix.append([row.get(field, "") for field in fieldnames])
+    return matrix
+
+
+def _google_sheets_configured() -> bool:
+    return bool(
+        getattr(settings, "google_sheets_labels_spreadsheet_id", "")
+        and int(getattr(settings, "google_sheets_labels_sheet_gid", 0) or 0)
+        and getattr(settings, "google_sheets_samples_spreadsheet_id", "")
+        and int(getattr(settings, "google_sheets_samples_sheet_gid", 0) or 0)
+    )
+
+
+def _sync_drive_move_folder_pairs(pairs: Sequence[tuple[Path, Path]]) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] move skipped: google drive not configured")
+        return
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    moved_pairs: List[tuple[str, str]] = []
+    try:
+        for old_path, new_path in pairs:
+            old_rel = _drive_relative_path(old_path)
+            new_rel = _drive_relative_path(new_path)
+            if not old_rel or not new_rel or old_rel == new_rel:
+                logger.debug(
+                    "[CATALOG][GDRIVE] move skipped: old=%s new=%s old_rel=%s new_rel=%s",
+                    old_path,
+                    new_path,
+                    old_rel,
+                    new_rel,
+                )
+                continue
+            logger.info("[CATALOG][GDRIVE] move begin: %s -> %s", old_rel, new_rel)
+            client.move_folder_path(old_rel, new_rel)
+            moved_pairs.append((old_rel, new_rel))
+            logger.info("[CATALOG][GDRIVE] move done: %s -> %s", old_rel, new_rel)
+    except Exception:
+        logger.warning("[CATALOG][GDRIVE] move failed; starting rollback for %s moved pair(s)", len(moved_pairs))
+        for old_rel, new_rel in reversed(moved_pairs):
+            try:
+                logger.info("[CATALOG][GDRIVE] move rollback begin: %s -> %s", new_rel, old_rel)
+                client.move_folder_path(new_rel, old_rel)
+                logger.info("[CATALOG][GDRIVE] move rollback done: %s -> %s", new_rel, old_rel)
+            except Exception as rollback_exc:
+                logger.error(
+                    "[CATALOG][ROLLBACK][GDRIVE] Failed to move folder back %s -> %s: %s",
+                    new_rel,
+                    old_rel,
+                    rollback_exc,
+                )
+        raise
+
+
+def _sync_drive_delete_folder_pairs(pairs: Sequence[Path]) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] delete skipped: google drive not configured")
+        return
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    for path in pairs:
+        rel = _drive_relative_path(path)
+        if not rel:
+            logger.debug("[CATALOG][GDRIVE] delete skipped: cannot build relative path for %s", path)
+            continue
+        logger.info("[CATALOG][GDRIVE] delete begin: %s", rel)
+        client.delete_path(rel)
+        logger.info("[CATALOG][GDRIVE] delete done: %s", rel)
+
+
+def _restore_drive_from_backup(backup_root: Path, remote_root: Path) -> None:
+    if not _google_drive_configured():
+        logger.info("[CATALOG][GDRIVE] restore skipped: google drive not configured")
+        return
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    backup_root = Path(backup_root)
+    remote_root = Path(remote_root)
+    if not backup_root.exists():
+        logger.debug("[CATALOG][GDRIVE] restore skipped: backup not found=%s", backup_root)
+        return
+    logger.info(
+        "[CATALOG][GDRIVE] restore begin: backup=%s remote=%s",
+        backup_root,
+        _drive_relative_path(remote_root) or remote_root.as_posix(),
+    )
+    client.upload_folder_tree(str(backup_root), _drive_relative_path(remote_root) or remote_root.as_posix(), make_public=False, replace_existing=True)
+    logger.info(
+        "[CATALOG][GDRIVE] restore done: backup=%s remote=%s",
+        backup_root,
+        _drive_relative_path(remote_root) or remote_root.as_posix(),
+    )
 
 
 def _update_sample_metadata_json(sample_path: Path, new_meta: ClassMetadata) -> None:
@@ -352,15 +640,23 @@ def _sync_db_raw_uploads(rows: Sequence[Dict[str, Any]]) -> None:
         db_upsert_raw_upload(row)
 
 
-def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def sync_update_class(class_idx: int | str, payload: Dict[str, Any], *,
+                      tenant_id: str) -> Dict[str, Any]:
+    """Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_update_{class_idx}"
     slog.start_operation(op_id)
     op_logs: List[str] = []
 
     with _catalog_lock():
-        rows = load_labels()
-        target_row = _find_class_row_by_ref(rows, class_idx)
+        # TUẦN TỰ HOÁ: `_write_csv(MASTER_LABELS, ...)` phía dưới ghi lại TOÀN
+        # BỘ labels.csv từ `rows`. Lọc nó theo tenant sẽ xoá trắng lớp của mọi
+        # tenant khác — im lặng, trong một thao tác mang tên 'sửa một lớp'.
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: người gọi chỉ chạm được lớp trong phạm vi của mình.
+        target_row = _find_class_row_by_ref(load_labels(scope), class_idx)
 
         if target_row is None:
             slog.log_operation(
@@ -421,10 +717,10 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
 
         snapshot_root = Path(tempfile.mkdtemp(prefix="catalog_sync_"))
         backup_feature_dir = _backup_tree(old_meta.hierarchy_path(), snapshot_root)
-        old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
+        old_raw_dir = raw_class_dir(old_meta)
         backup_raw_dir = _backup_tree(old_raw_dir, snapshot_root)
 
-        all_samples_before = list_samples()
+        all_samples_before = _load_all_samples_unscoped()
         all_raw_before = list_raw_uploads()
         sample_rows_before = [row for row in all_samples_before if row.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [row for row in all_raw_before if row.get("class_uid") == old_meta.class_uid]
@@ -454,8 +750,8 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
 
         old_feature_dir = old_meta.hierarchy_path()
         new_feature_dir = new_meta.hierarchy_path()
-        old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
-        new_raw_dir = Path(settings.dataset_root) / "raw_videos" / new_meta.language / new_meta.dialect / new_meta.folder_name()
+        old_raw_dir = raw_class_dir(old_meta)
+        new_raw_dir = raw_class_dir(new_meta)
         try:
             if old_feature_dir.exists() and old_feature_dir != new_feature_dir:
                 new_feature_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -580,7 +876,10 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
                 [
                     (old_feature_dir, new_feature_dir),
                     (old_raw_dir, new_raw_dir),
-                ]
+                ],
+                # Lớp không đổi chủ khi đổi tên (xem `_retarget_meta`); raw_videos/
+                # không phân vùng trên đĩa nên tenant phải đi kèm.
+                tenant_id=old_meta.tenant_id,
             )
             _sync_drive_and_sheets_versioned_tables(updated_label_rows, sample_rows_after)
             op_logs.append("dispatched async Drive folder move + catalog mirror")
@@ -640,16 +939,23 @@ def sync_update_class(class_idx: int | str, payload: Dict[str, Any]) -> Dict[str
             shutil.rmtree(snapshot_root, ignore_errors=True)
 
 
-def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
+def sync_delete_class(class_idx: int | str, *, tenant_id: str) -> Dict[str, Any]:
+    """Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_delete_{class_idx}"
     slog.start_operation(op_id)
 
     op_logs: List[str] = []
 
     with _catalog_lock():
-        rows = load_labels()
-        target_row = _find_class_row_by_ref(rows, class_idx)
+        # TUẦN TỰ HOÁ: `_write_csv(MASTER_LABELS, ...)` phía dưới ghi lại TOÀN
+        # BỘ labels.csv từ `rows`. Lọc nó theo tenant sẽ xoá trắng lớp của mọi
+        # tenant khác — im lặng, trong một thao tác mang tên 'sửa một lớp'.
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: người gọi chỉ chạm được lớp trong phạm vi của mình.
+        target_row = _find_class_row_by_ref(load_labels(scope), class_idx)
 
         if target_row is None:
             slog.log_operation(
@@ -662,12 +968,12 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
             raise CatalogSyncError(f"Class {class_idx} not found", status_code=404, error_code="CLASS_NOT_FOUND")
 
         old_meta = _build_class_meta_from_row(target_row)
-        all_samples_before = list_samples()
+        all_samples_before = _load_all_samples_unscoped()
         all_raw_before = list_raw_uploads()
         sample_rows_before = [row for row in all_samples_before if row.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [row for row in all_raw_before if row.get("class_uid") == old_meta.class_uid]
         old_feature_dir = old_meta.hierarchy_path()
-        old_raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
+        old_raw_dir = raw_class_dir(old_meta)
         snapshot_root = Path(tempfile.mkdtemp(prefix="catalog_sync_"))
         backup_feature_dir = _backup_tree(old_feature_dir, snapshot_root)
         backup_raw_dir = _backup_tree(old_raw_dir, snapshot_root)
@@ -693,16 +999,22 @@ def sync_delete_class(class_idx: int | str) -> Dict[str, Any]:
             _write_samples_csv(remaining_sample_rows)
             _write_csv(RAW_UPLOADS_CSV, RAW_UPLOAD_FIELDS, remaining_raw_rows)
 
-            db_delete_class(old_meta.class_uid)
+            # Children BEFORE the parent. The reverse order left samples whose
+            # class_uid pointed at a row that no longer existed whenever the
+            # sample delete failed after the class delete succeeded — 39 such
+            # orphans accumulated in production, invisible to every class-scoped
+            # query. samples.class_uid now has a FK to classes, so the reverse
+            # order would also be rejected outright.
             db_delete_samples_by_class(old_meta.class_uid)
             db_delete_raw_uploads_by_class(old_meta.class_uid)
+            db_delete_class(old_meta.class_uid)
 
             # The label is gone — drop its cached TTS audio.
             _invalidate_tts_cache(old_meta.label_original)
 
             # Async, best-effort Drive cleanup + catalog mirror (never blocks
             # or fails the delete the user just confirmed).
-            _dispatch_gdrive_folder_delete([old_feature_dir, old_raw_dir])
+            _dispatch_gdrive_folder_delete([old_feature_dir, old_raw_dir], tenant_id=old_meta.tenant_id)
             _sync_drive_and_sheets_versioned_tables(remaining_label_rows, remaining_sample_rows)
             op_logs.append("dispatched async Drive folder delete + catalog mirror")
 
@@ -766,6 +1078,10 @@ def _db_class_row_to_label_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
     row["class_idx"] = "" if dbrow.get("class_idx") in (None, "") else str(dbrow.get("class_idx"))
     row["is_common_global"] = str(int(bool(dbrow.get("is_common_global"))))
     row["is_common_language"] = str(int(bool(dbrow.get("is_common_language"))))
+    # This projection fills "" for anything the DB row lacks, and it feeds the
+    # restore-from-trash path — so a query that forgets tenant_id would write an
+    # unassigned class back into the source of truth. Force a concrete owner.
+    row[TENANT_COLUMN] = tenant_id_of(row)
     return row
 
 
@@ -773,22 +1089,35 @@ def _db_sample_row_to_csv_row(dbrow: Dict[str, Any]) -> Dict[str, Any]:
     from app.modules.dataset.samples import _samples_fieldnames
 
     hdr = _samples_fieldnames()
-    return {f: (dbrow.get(f) if dbrow.get(f) is not None else "") for f in hdr}
+    row = {f: (dbrow.get(f) if dbrow.get(f) is not None else "") for f in hdr}
+    # Same reason as _db_class_row_to_label_row: restoring a soft-deleted sample
+    # must not put a tenant-less row back into samples.csv. Only stamp when the
+    # on-disk header actually has the column — before the migration runs it does
+    # not, and adding a key the header lacks would raise in csv.DictWriter.
+    if TENANT_COLUMN in hdr:
+        row[TENANT_COLUMN] = tenant_id_of(row)
+    return row
 
 
-def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
+def sync_soft_delete_class(class_idx: int | str, *, tenant_id: str) -> Dict[str, Any]:
     """Move a class to Trash: hide it from the active catalog (labels/samples/
     raw CSVs) and set deleted_at in the DB. Local files + Drive content are KEPT
     so it can be restored; a later purge removes them permanently. Fast: no
     inline Google I/O (the catalog mirror is dispatched async)."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_soft_delete_{class_idx}"
     slog.start_operation(op_id)
     op_logs: List[str] = []
 
     with _catalog_lock():
-        rows = load_labels()
-        target_row = _find_class_row_by_ref(rows, class_idx)
+        # TUẦN TỰ HOÁ: `_write_csv(MASTER_LABELS, ...)` phía dưới ghi lại TOÀN
+        # BỘ labels.csv từ `rows`. Lọc nó theo tenant sẽ xoá trắng lớp của mọi
+        # tenant khác — im lặng, trong một thao tác mang tên 'sửa một lớp'.
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: người gọi chỉ chạm được lớp trong phạm vi của mình.
+        target_row = _find_class_row_by_ref(load_labels(scope), class_idx)
         if target_row is None:
             slog.log_operation(
                 OperationType.CLASS_DELETE, OperationStatus.FAILURE,
@@ -798,7 +1127,7 @@ def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
             raise CatalogSyncError(f"Class {class_idx} not found", status_code=404, error_code="CLASS_NOT_FOUND")
 
         old_meta = _build_class_meta_from_row(target_row)
-        all_samples_before = list_samples()
+        all_samples_before = _load_all_samples_unscoped()
         all_raw_before = list_raw_uploads()
         sample_rows_before = [r for r in all_samples_before if r.get("class_uid") == old_meta.class_uid]
         raw_rows_before = [r for r in all_raw_before if r.get("class_uid") == old_meta.class_uid]
@@ -854,17 +1183,21 @@ def sync_soft_delete_class(class_idx: int | str) -> Dict[str, Any]:
                                    error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED"), logs=op_logs) from exc
 
 
-def sync_restore_class(class_uid: str) -> Dict[str, Any]:
+def sync_restore_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Restore a soft-deleted class from Trash: clear deleted_at in the DB and
     rebuild its labels.csv + samples.csv rows from the DB records."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_restore_{class_uid}"
     slog.start_operation(op_id)
 
     with _catalog_lock():
         dbrow = db_get_deleted_class(class_uid)
-        rows = load_labels()
-        already = any(r.get("class_uid") == class_uid for r in rows)
+        # `rows` ghi lại cả labels.csv -> toàn cục. `already` là câu hỏi THẨM
+        # QUYỀN ("lớp này đã sống trong tenant của người gọi chưa") -> phạm vi.
+        rows = _load_all_labels_unscoped()
+        already = any(r.get("class_uid") == class_uid for r in load_labels(scope))
         if dbrow is None and not already:
             raise CatalogSyncError(f"Deleted class {class_uid} not found in trash", status_code=404, error_code="CLASS_NOT_FOUND")
 
@@ -879,7 +1212,9 @@ def sync_restore_class(class_uid: str) -> Dict[str, Any]:
             regenerate_label_indexes()
 
             # Rebuild samples.csv rows from DB (dedupe against existing).
-            existing = list_samples()
+            # TUẦN TỰ HOÁ: `existing + restored` được ghi đè lên cả tệp, nên
+            # `existing` phải chứa hàng của MỌI tenant.
+            existing = _load_all_samples_unscoped()
             existing_uids = {r.get("sample_uid") for r in existing}
             db_samples = db_list_samples_by_class(class_uid, include_deleted=True)
             restored = [_db_sample_row_to_csv_row(s) for s in db_samples
@@ -895,29 +1230,44 @@ def sync_restore_class(class_uid: str) -> Dict[str, Any]:
         return {"restored": True, "class_uid": class_uid, "op_id": op_id}
 
 
-def sync_purge_class(class_uid: str) -> Dict[str, Any]:
+def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Permanently delete a class (from Trash or active): remove local files,
     hard-delete DB rows, dispatch async Drive folder deletion. Irreversible."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"class_purge_{class_uid}"
     slog.start_operation(op_id)
 
     with _catalog_lock():
-        rows = load_labels()
-        active_row = next((r for r in rows if r.get("class_uid") == class_uid), None)
+        rows = _load_all_labels_unscoped()
+        # THẨM QUYỀN: chỉ xoá vĩnh viễn được lớp trong phạm vi người gọi.
+        active_row = next((r for r in load_labels(scope)
+                           if r.get("class_uid") == class_uid), None)
         meta_row = active_row or db_get_deleted_class(class_uid)
         if meta_row is None:
             raise CatalogSyncError(f"Class {class_uid} not found", status_code=404, error_code="CLASS_NOT_FOUND")
 
         old_meta = _build_class_meta_from_row(meta_row)
         feature_dir = old_meta.hierarchy_path()
-        raw_dir = Path(settings.dataset_root) / "raw_videos" / old_meta.language / old_meta.dialect / old_meta.folder_name()
+        raw_dir = raw_class_dir(old_meta)
+
+        # Kiểm mọi ràng buộc TRƯỚC khi đụng tệp. Thứ tự cũ gỡ thư mục rồi mới
+        # DELETE ở DB; câu DELETE vướng khoá ngoại thì tệp đã mất mà dòng còn —
+        # lớp thành "ma": không hiện, không khôi phục, không xoá được.
+        n_jobs = db_count_training_jobs_using_class(class_uid)
+        if n_jobs:
+            raise CatalogSyncError(
+                f"Nhãn này đã dùng trong {n_jobs} lượt huấn luyện nên không xoá vĩnh viễn "
+                f"được (giữ để truy vết mô hình). Để nó trong thùng rác là đủ.",
+                status_code=409, error_code="CLASS_REFERENCED_BY_TRAINING")
 
         # If still in the active catalog, drop it from the CSVs too.
         if active_row is not None:
             _write_csv(MASTER_LABELS, LABEL_FIELDS, [r for r in rows if r.get("class_uid") != class_uid])
             regenerate_label_indexes()
-            _write_samples_csv([r for r in list_samples() if r.get("class_uid") != class_uid])
+            _write_samples_csv([r for r in _load_all_samples_unscoped()
+                                if r.get("class_uid") != class_uid])
             _write_csv(RAW_UPLOADS_CSV, RAW_UPLOAD_FIELDS,
                        [r for r in list_raw_uploads() if r.get("class_uid") != class_uid])
 
@@ -926,11 +1276,12 @@ def sync_purge_class(class_uid: str) -> Dict[str, Any]:
 
         db_delete_samples_by_class(class_uid)
         db_delete_raw_uploads_by_class(class_uid)
+        db_delete_capture_sessions_by_class(class_uid)  # sau samples (samples trỏ tới phiên thu)
         db_delete_class(class_uid)
 
         _invalidate_tts_cache(old_meta.label_original)
 
-        _dispatch_gdrive_folder_delete([feature_dir, raw_dir])
+        _dispatch_gdrive_folder_delete([feature_dir, raw_dir], tenant_id=old_meta.tenant_id)
         _sync_drive_and_sheets_versioned_tables(None, None)
 
         slog.log_operation(
@@ -949,17 +1300,38 @@ def list_trash_classes() -> List[Dict[str, Any]]:
 # Trash: soft delete / restore / purge (samples)
 # ===========================================================================
 
-def sync_soft_delete_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_soft_delete_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Move a single sample to Trash: remove it from samples.csv and set
-    deleted_at in the DB. The .npz file + Drive copy are kept for restore."""
+    deleted_at in the DB. The .npz file + Drive copy are kept for restore.
+
+    HAI LƯỢT ĐỌC, HAI VAI TRÒ KHÁC NHAU — 16/08/2026
+    ================================================
+    Bản trước dùng MỘT lượt `list_samples()` cho cả hai việc, và đó là lý do
+    không thể chỉ đổi nó thành `list_samples(scope)`:
+
+        THẨM QUYỀN      "người gọi được xoá mẫu nào"      -> PHẢI theo phạm vi
+        TUẦN TỰ HOÁ     "ghi lại toàn bộ samples.csv"     -> PHẢI là toàn cục
+
+    Lọc theo tenant rồi đưa vào `_write_samples_csv()` sẽ ghi đè cả tệp bằng
+    riêng phần của một tenant — tức là XOÁ TRẮNG hàng của mọi tenant khác, im
+    lặng, trong một thao tác mang tên "xoá mềm một mẫu". Một bản vá an ninh làm
+    mất dữ liệu thì tệ hơn lỗ hổng nó vá.
+
+    Nên: phân giải trong `_theo_pham_vi`, tuần tự hoá từ `_toan_bo`.
+    """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_soft_delete_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
-        rows = list_samples()
-        target = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
+        # THẨM QUYỀN: chỉ thấy mẫu trong phạm vi người gọi.
+        target = next((r for r in list_samples(scope)
+                       if r.get("sample_uid") == sample_uid), None)
         if target is None:
             raise CatalogSyncError(f"Sample {sample_uid} not found", status_code=404, error_code="SAMPLE_NOT_FOUND")
+        # TUẦN TỰ HOÁ: toàn bộ tệp, giữ nguyên hàng của mọi tenant khác.
+        rows = _load_all_samples_unscoped()
         try:
             _write_samples_csv([r for r in rows if r.get("sample_uid") != sample_uid])
             db_upsert_sample(target)  # ensure DB row exists before marking deleted
@@ -980,16 +1352,122 @@ def sync_soft_delete_sample(sample_uid: str) -> Dict[str, Any]:
         return {"deleted": True, "soft": True, "sample_uid": sample_uid}
 
 
-def sync_restore_sample(sample_uid: str) -> Dict[str, Any]:
-    """Restore a soft-deleted sample: clear deleted_at and re-add its samples.csv
-    row from the DB record."""
+def sync_set_review_status(
+    capture_session_id: str,
+    status: str,
+    *,
+    tenant_id: str,
+    reviewed_by: str = "",
+    note: str = "",
+) -> Dict[str, Any]:
+    """Đóng dấu trạng thái kiểm duyệt lên MỌI mẫu của một phiên thu.
+
+    Vì sao hàm này ở ĐÂY chứ không ở `moderation_admin`
+    ----------------------------------------------------
+    Mô-đun này sở hữu `samples.csv`: khoá tệp, thứ tự ghi, và phép hoàn nguyên
+    khi hỏng đều nằm ở đây. Bản đầu tôi viết phần ghi tệp thẳng trong
+    `moderation_admin`, và `test_file_backed_tenant_isolation` bắt được — nó
+    liệt kê tường minh những mô-đun được phép đọc TOÀN KHO, kèm tiêu chí
+    "không bao giờ là một đường phục vụ request".
+
+    Bài kiểm ấy đúng, và cách sửa không phải là nới danh sách: một đường request
+    không nên tự đi đọc cả kho. Nó nên gọi mô-đun đã có trách nhiệm ấy, nơi
+    logic tuần tự hoá chỉ tồn tại một bản.
+
+    Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`
+    ---------------------------------------------------------
+    `thuoc_phien` hỏi trong PHẠM VI: người gọi được quyết định trên phiên nào.
+    `tat_ca` dùng để ghi lại toàn bộ tệp nên phải TOÀN CỤC — ghi từ một danh
+    sách đã lọc theo tenant sẽ xoá trắng hàng của mọi tenant khác.
+    """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
+    sid = str(capture_session_id or "").strip()
+
+    from app.storage.metadata_db import _fetch_all
+
+    with _catalog_lock():
+        # THẨM QUYỀN, hỏi POSTGRES chứ không hỏi CSV.
+        #
+        # `capture_session_id` là cột chỉ có ở cơ sở dữ liệu — nó KHÔNG nằm
+        # trong 34 cột của `samples.csv`. Hàng đợi kiểm duyệt cũng dựng từ đó.
+        # Hỏi CSV ở đây thì không tìm thấy phiên nào, và hai màn hình sẽ nói hai
+        # chuyện về cùng một phiên.
+        #
+        # Mệnh đề `tenant_id` là hàng rào: một phiên của tổ chức khác trả 404
+        # giống hệt một phiên không tồn tại.
+        thuoc_phien = _fetch_all(
+            "SELECT sample_uid, auth_user_id::text AS auth_user_id, label_original "
+            "  FROM samples "
+            " WHERE capture_session_id = %s AND tenant_id = %s AND deleted_at IS NULL",
+            (sid, scope),
+        )
+        uids = {str(r["sample_uid"]) for r in thuoc_phien}
+        if not uids:
+            raise CatalogSyncError(
+                f"Khong tim thay phien thu {sid}", status_code=404,
+                error_code="CAPTURE_SESSION_NOT_FOUND")
+
+        # TUẦN TỰ HOÁ.
+        tat_ca = _load_all_samples_unscoped()
+        truoc = [dict(r) for r in tat_ca]
+        cham_csv = 0
+        for r in tat_ca:
+            if str(r.get("sample_uid") or "") in uids:
+                r["review_status"] = status
+                cham_csv += 1
+
+        # Lệch giữa hai bên là chuyện PHẢI KÊU, không phải chuyện bỏ qua.
+        #
+        # `samples.csv` là nguồn sự thật. Một mẫu có trong Postgres mà không có
+        # trong tệp nghĩa là quyết định vừa ghi sẽ bị lượt đồng bộ kế tiếp xoá
+        # đi — im lặng, và người kiểm duyệt tưởng mình đã làm xong. Ghi WARNING
+        # để chuyện đó để lại dấu vết thay vì biến mất.
+        if cham_csv != len(uids):
+            logger.warning(
+                "[MODERATION] phien %s: %d/%d mau co trong samples.csv. "
+                "Nhung mau thieu se mat trang thai duyet o luot dong bo sau.",
+                sid, cham_csv, len(uids))
+
+        from app.storage.metadata_db import _execute
+
+        try:
+            _write_samples_csv(tat_ca)
+            _execute(
+                "UPDATE samples SET review_status = %s, reviewed_by = %s, "
+                "       reviewed_at = NOW(), review_note = %s "
+                " WHERE capture_session_id = %s AND tenant_id = %s "
+                "   AND deleted_at IS NULL",
+                (status, reviewed_by or None, (note or "").strip(), sid, scope),
+            )
+        except Exception:
+            # Hoàn tệp về nguyên trạng. Postgres là BẢN SAO nên một lượt ghi
+            # hỏng ở đó tự lành ở lượt đồng bộ sau; tệp thì không.
+            _write_samples_csv(truoc)
+            raise
+
+    return {"capture_session_id": sid, "review_status": status,
+            "sample_count": len(uids), "rows": thuoc_phien}
+
+
+def sync_restore_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
+    """Restore a soft-deleted sample: clear deleted_at and re-add its samples.csv
+    row from the DB record.
+
+    Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`. `already` hỏi
+    trong PHẠM VI (mẫu này đã sống trong tenant của người gọi chưa), còn `rows`
+    dùng để ghi lại toàn bộ tệp nên phải toàn cục.
+    """
+    ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_restore_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
         dbrow = db_get_deleted_sample(sample_uid)
-        rows = list_samples()
-        already = any(r.get("sample_uid") == sample_uid for r in rows)
+        already = any(r.get("sample_uid") == sample_uid for r in list_samples(scope))
+        rows = _load_all_samples_unscoped()
         if dbrow is None and not already:
             raise CatalogSyncError(f"Deleted sample {sample_uid} not found in trash", status_code=404, error_code="SAMPLE_NOT_FOUND")
         db_restore_sample(sample_uid)
@@ -1003,9 +1481,232 @@ def sync_restore_sample(sample_uid: str) -> Dict[str, Any]:
         return {"restored": True, "sample_uid": sample_uid}
 
 
+def sync_reassign_sample(sample_uid: str, target_class_ref: int | str,
+                         *, tenant_id: str) -> Dict[str, Any]:
+    """Move ONE sample to a different EXISTING class (it was recorded under the
+    wrong label). Moves the local .npz (+ sidecar) into the target class folder,
+    relabels the samples.csv + Postgres row, and re-mirrors to Drive (upload the
+    moved file to its new path, then delete the old Drive copy). The caller
+    enforces ownership.
+
+    If the .npz is Drive-only (not materialized locally) it is downloaded from
+    Drive FIRST, then moved + re-uploaded like any local sample. If it cannot be
+    materialized (no local copy and no Drive copy to fetch), the reassign is
+    REFUSED rather than committed — the previous behaviour deleted the old Drive
+    file and never re-uploaded it, silently losing the sample.
+
+    HAI LỖI ĐÃ SỬA Ở ĐÂY, 16/08/2026 — độc lập với nhau
+    ===================================================
+    **P0-A — phân giải xuyên tenant.** Bản trước tìm cả mẫu lẫn lớp đích trong
+    TOÀN BỘ kho (`load_labels()`, `list_samples()` khi hai hàm ấy còn không có
+    tham số tenant). Endpoint gọi nó chỉ kiểm QUYỀN SỞ HỮU (`auth_user_id`), và
+    KHÔNG kiểm gì với `target_class_ref`. Đo được trên bộ dựng lại phép đo:
+
+        iso_user_a, mẫu CỦA CHÍNH MÌNH, target_class_ref = lớp của iso_b
+        -> lớp của iso_b được phân giải thành công
+
+    Nay cả hai phép phân giải chạy BÊN TRONG phạm vi tenant, và một lớp thuộc
+    tenant khác không phân biệt được với một lớp không tồn tại.
+
+    **P0-B — ghi hai mặt phẳng không nguyên tử.** Đây là lỗi KHÁC, không phải
+    chi tiết của lỗi trên: nó xảy ra cả khi mẫu và lớp cùng một tenant. Thứ tự
+    cũ là
+
+        di chuyển tệp -> ghi samples.csv -> ghi PostgreSQL
+
+    và khối `except` chỉ hoàn nguyên phần TỆP. Nên khi PostgreSQL từ chối —
+    trong lượt đo là `fk_samples_class_tenant` — kết quả là:
+
+        HTTP 400          người gọi thấy "thất bại"
+        PostgreSQL        không đổi
+        samples.csv       ĐÃ ĐỔI, không hoàn nguyên
+        tệp .npz          đã về chỗ cũ  -> file_path treo
+
+    Và vì đường đọc lấy từ CSV, tenant B nhìn thấy mẫu của A trong lớp của B —
+    do một request đã báo lỗi.
+
+    Nay PostgreSQL ghi TRƯỚC: nó là nơi ràng buộc được cưỡng chế, nên nó phải là
+    cửa ải. CSV chỉ được ghi sau khi ràng buộc đã qua.
+
+    Điều này CHƯA phải nguyên tử đầy đủ: một lượt ghi CSV hỏng sau khi
+    PostgreSQL đã commit vẫn để lại lệch theo chiều ngược lại. Đóng hẳn khoảng
+    đó cần staging/bù trừ hoặc một nguồn chân lý duy nhất — mở riêng, không gộp
+    vào P0 này. Xem docs/10-issues/.
+    """
+    ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
+    op_id = f"sample_reassign_{sample_uid}"
+    slog.start_operation(op_id)
+    with _catalog_lock():
+        # Phân giải TRONG phạm vi, trước mọi tác dụng phụ. Không tìm toàn cục
+        # rồi mới so `tenant_id`: mọi thứ xảy ra ở giữa là một kênh phụ trả lời
+        # "đối tượng này có thật không".
+        target_row = _find_class_row_by_ref(load_labels(scope), target_class_ref)
+        if target_row is None:
+            slog.end_operation(op_id)
+            # Cùng thông điệp với một lớp không tồn tại. Nói "lớp này thuộc
+            # tenant khác" là tự dựng lại phép thử tồn tại vừa gỡ.
+            raise CatalogSyncError(f"Target class {target_class_ref} not found",
+                                   status_code=404, error_code="CLASS_NOT_FOUND")
+        target_meta = _build_class_meta_from_row(target_row)
+
+        rows = list_samples(scope)
+        sample_row = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
+        if sample_row is None:
+            slog.end_operation(op_id)
+            raise CatalogSyncError(f"Sample {sample_uid} not found",
+                                   status_code=404, error_code="SAMPLE_NOT_FOUND")
+
+        if sample_row.get("class_uid") == target_meta.class_uid:
+            slog.end_operation(op_id)
+            return {"changed": False, "sample_uid": sample_uid, "class_uid": target_meta.class_uid}
+
+        old_storage_key = str(sample_row.get("storage_key") or "").strip()
+        old_storage_url = str(sample_row.get("storage_url") or "").strip()
+        old_file = _resolve_sample_file_path(sample_row)
+        if old_file is not None and not old_file.is_absolute():
+            old_file = Path(settings.dataset_root) / old_file
+
+        target_dir = target_meta.hierarchy_path()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        filename = old_file.name if old_file else f"sample_{sample_uid}.npz"
+        new_file = target_dir / filename
+        new_sidecar = new_file.with_suffix(".json")
+        old_sidecar = old_file.with_suffix(".json") if old_file else None
+
+        moved_main = False
+        moved_side = False
+        try:
+            # Drive-only sample (not materialized on this machine): fetch it from
+            # Drive FIRST so the move + re-upload below runs the exact same path
+            # as a local sample. Without this, the Drive block deleted the old
+            # file but skipped the upload (new_file never existed) — losing the .npz.
+            if old_file is not None and not old_file.exists() and _google_drive_configured():
+                dl_ref = (old_storage_url
+                          if old_storage_url.startswith(("gdrive://", "https://drive.google.com"))
+                          else "")
+                if dl_ref:
+                    try:
+                        get_gdrive_client().download_file(dl_ref, str(old_file))
+                    except Exception as exc:
+                        logger.warning("[CATALOG] reassign: materialize from Drive failed for %s: %s", sample_uid, exc)
+
+            # Refuse rather than relabel a row whose file we cannot relocate: the
+            # old code would delete the Drive copy and never re-upload it.
+            if old_file is not None and not old_file.exists():
+                raise CatalogSyncError(
+                    "Mẫu chưa có bản .npz trên máy để di chuyển; hãy đồng bộ (pull) file "
+                    "từ Drive rồi đổi nhãn lại.",
+                    status_code=409, error_code="SAMPLE_NOT_MATERIALIZED")
+
+            if old_file is not None and old_file.exists():
+                if new_file.exists():
+                    raise CatalogSyncError(f"Target file already exists: {new_file}",
+                                           status_code=409, error_code="SAMPLE_PATH_CONFLICT")
+                shutil.move(str(old_file), str(new_file))
+                moved_main = True
+                if old_sidecar and old_sidecar.exists():
+                    shutil.move(str(old_sidecar), str(new_sidecar))
+                    moved_side = True
+                _update_sample_metadata_json(new_file, target_meta)
+
+            new_key = _dataset_storage_key(new_file) or (
+                f"{class_storage_dir(target_meta)}/{filename}")
+
+            updated = dict(sample_row)
+            updated.update({
+                "class_uid": target_meta.class_uid,
+                "slug": target_meta.slug,
+                "label_original": target_meta.label_original,
+                "language": target_meta.language,
+                "dialect": target_meta.dialect,
+                "file_path": str(_relative_to_dataset(new_file) or new_file),
+                "storage_key": new_key,
+                # The old Drive URL is stale after the move; the re-upload task
+                # below rewrites it. Meanwhile keep the local path (same shape as
+                # a fresh upload before its Drive mirror completes).
+                "storage_url": str(new_file),
+            })
+            # PostgreSQL TRƯỚC, CSV SAU. Đây là nửa P0-B của bản vá 16/08/2026.
+            #
+            # Ràng buộc được cưỡng chế ở cơ sở dữ liệu, không ở đây — trong lượt
+            # đo, `fk_samples_class_tenant` là thứ duy nhất chặn được lượt ghi
+            # xuyên tenant. Nên nó phải là CỬA ẢI, không phải bước cuối.
+            #
+            # Thứ tự cũ ghi CSV trước, và khối `except` bên dưới chỉ hoàn nguyên
+            # phần TỆP. Một lượt PostgreSQL từ chối để lại `samples.csv` đã đổi
+            # trong khi HTTP trả lỗi — và vì đường đọc lấy từ CSV, thay đổi ấy
+            # nhìn thấy được với người dùng.
+            #
+            # Đọc lại `rows` từ đĩa: `db_upsert_sample` có thể chạy lâu, và bản
+            # chụp trước đó đã cũ. Ghi đè bằng bản cũ sẽ nuốt mất lượt ghi song
+            # song — `_catalog_lock()` che phần lớn, nhưng đọc lại thì rẻ.
+            db_upsert_sample(updated)
+            _write_samples_csv([
+                updated if r.get("sample_uid") == sample_uid else r
+                for r in _load_all_samples_unscoped()
+            ])
+
+            # Drive: delete the old file, upload the moved one to its new path.
+            # Reuses existing tasks — no new Drive primitive — and is best-effort:
+            # the local catalog is already the source of truth.
+            # Drive re-mirror: upload the moved file to its new path, and delete
+            # the old Drive copy ONLY when we actually have the new file to upload
+            # — pairing the two so a reassign can never delete without re-uploading.
+            if _google_drive_configured() and new_file.exists():
+                try:
+                    from app.export_tasks import delete_gdrive_files_task, upload_npz_to_gdrive_task
+
+                    upload_npz_to_gdrive_task.delay(
+                        sample_uid=sample_uid, local_path=str(new_file),
+                        storage_key=new_key, sidecar_path=str(new_sidecar))
+                    old_ref = old_storage_key or (
+                        old_storage_url
+                        if old_storage_url.startswith(("gdrive://", "https://drive.google.com"))
+                        else "")
+                    if old_ref and old_ref != new_key:
+                        delete_gdrive_files_task.delay(refs=[old_ref])
+                except Exception as exc:
+                    logger.warning("[CATALOG] reassign Drive re-mirror dispatch failed for %s: %s", sample_uid, exc)
+
+            _sync_drive_and_sheets_versioned_tables(None, None)
+            slog.log_operation(
+                OperationType.SAMPLE_UPDATE, OperationStatus.SUCCESS,
+                {"sample_uid": sample_uid, "class_uid": target_meta.class_uid,
+                 "slug": target_meta.slug, "reassigned": True},
+                duration_ms=slog.end_operation(op_id),
+            )
+            return {
+                "changed": True, "sample_uid": sample_uid,
+                "class_uid": target_meta.class_uid,
+                "label_original": target_meta.label_original,
+                "slug": target_meta.slug,
+            }
+        except Exception as exc:
+            try:  # roll the local move back so the file isn't stranded
+                if moved_side and new_sidecar.exists() and old_sidecar is not None:
+                    shutil.move(str(new_sidecar), str(old_sidecar))
+                if moved_main and new_file.exists() and old_file is not None:
+                    shutil.move(str(new_file), str(old_file))
+            except Exception as rb:
+                logger.error("[CATALOG][ROLLBACK] reassign restore failed for %s: %s", sample_uid, rb)
+            slog.end_operation(op_id)
+            raise CatalogSyncError(str(exc), status_code=getattr(exc, "status_code", 500),
+                                   error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED")) from exc
+
+
 def list_trash_samples() -> List[Dict[str, Any]]:
     ensure_tables()
     return db_list_deleted_samples()
+
+
+def list_trash_samples_for_user(auth_user_id: str) -> List[Dict[str, Any]]:
+    """A single contributor's own soft-deleted samples (ownership by UUID)."""
+    ensure_tables()
+    from app.storage.metadata_db import list_deleted_samples_for_user as _db_for_user
+
+    return _db_for_user(auth_user_id)
 
 
 # ===========================================================================
@@ -1013,11 +1714,22 @@ def list_trash_samples() -> List[Dict[str, Any]]:
 # ===========================================================================
 
 def _bulk(fn, ids: Sequence[str]) -> Dict[str, Any]:
+    """Áp `fn` lên từng id, gom kết quả; một id hỏng không chặn các id khác.
+
+    `tenant_id` lấy từ phạm vi của request — cùng phạm vi mà mọi `sync_*` một
+    mẫu đang dùng. Từ 16/08/2026 (khi các `sync_*` bắt buộc `tenant_id`) tới
+    15/09/2026 hàm này vẫn gọi `fn(i)` trần, nên MỌI thao tác thùng rác theo
+    lô — khôi phục, xoá vĩnh viễn, dọn thùng — đều ném TypeError, bị nuốt ở
+    `except` bên dưới, và trả về "Đã khôi phục 0 mẫu" với success=True.
+    """
+    from app.tenant_context import require_tenant
+
+    scope = require_tenant()
     ok: List[str] = []
     failed: List[Dict[str, str]] = []
     for i in ids or []:
         try:
-            fn(i)
+            fn(i, tenant_id=scope)
             ok.append(i)
         except Exception as exc:
             logger.warning("[CATALOG][BULK] %s(%s) failed: %s", getattr(fn, "__name__", fn), i, exc)
@@ -1051,16 +1763,25 @@ def empty_sample_trash() -> Dict[str, Any]:
     return bulk_purge_samples([s["sample_uid"] for s in list_trash_samples()])
 
 
-def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_purge_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
     """Permanently delete a soft-deleted sample: remove the .npz (+ sidecar),
-    hard-delete the DB row, and delete the Drive copy. Irreversible."""
+    hard-delete the DB row, and delete the Drive copy. Irreversible.
+
+    Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`. Thao tác này
+    KHÔNG hoàn tác được, nên cổng phạm vi ở đây là chỗ ít được phép sai nhất
+    trong cả tệp.
+    """
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_purge_{sample_uid}"
     slog.start_operation(op_id)
     with _catalog_lock():
         # Prefer the samples.csv row (active) else the soft-deleted DB row.
-        rows = list_samples()
-        target = next((r for r in rows if r.get("sample_uid") == sample_uid), None)
+        # THẨM QUYỀN theo phạm vi; `rows` toàn cục chỉ để ghi lại cả tệp.
+        target = next((r for r in list_samples(scope)
+                       if r.get("sample_uid") == sample_uid), None)
+        rows = _load_all_samples_unscoped()
         dbrow = db_get_deleted_sample(sample_uid) if target is None else None
         source = target or dbrow
         if source is None:
@@ -1069,19 +1790,53 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
         sample_file = _resolve_sample_file_path(source)
         if sample_file and not sample_file.is_absolute():
             sample_file = Path(settings.dataset_root) / sample_file
+        # Đo TRƯỚC khi gỡ. Sau khi gỡ thì không còn gì để `stat()`, và đoán lại
+        # kích thước từ siêu dữ liệu là bịa. Ba tệp, vì một mẫu là ba tệp: đặc
+        # trưng, kho raw, sidecar. Xem
+        # docs/07-business/BILLABLE_STORAGE_INVENTORY.md.
+        da_giai_phong = 0
+        if sample_file:
+            from app.modules.dataset.samples import raw_archive_path
+
+            for _t in (sample_file, sample_file.with_suffix(".json"),
+                       raw_archive_path(sample_file)):
+                try:
+                    da_giai_phong += _t.stat().st_size
+                except OSError:
+                    continue
+
         try:
             if sample_file and sample_file.exists():
                 sample_file.unlink()
                 sidecar = sample_file.with_suffix(".json")
                 if sidecar.exists():
                     sidecar.unlink()
+            _purge_raw_archive(sample_file, sample_uid)
         except Exception as exc:
             logger.warning("[CATALOG] purge sample file remove failed for %s: %s", sample_uid, exc)
+            da_giai_phong = 0   # không chắc đã gỡ được gì thì đừng trừ
+
+        # Trừ ở lượt dọn Thùng rác, KHÔNG ở lượt xoá mềm: xoá mềm giữ tệp lại,
+        # nên trừ sớm là tặng không dung lượng cho dữ liệu vẫn đang chiếm đĩa.
+        if da_giai_phong:
+            try:
+                from app import storage_quota
+
+                storage_quota.uncharge(scope, da_giai_phong)
+            except Exception as exc:
+                # Lượt đối chiếu hằng ngày sẽ sửa; đây chỉ là để người vừa dọn
+                # thấy dung lượng giảm ngay thay vì phải chờ tới hôm sau.
+                logger.warning("[CATALOG] khong tru duoc bo dem dung luong (%s)", exc)
 
         if target is not None:
             _write_samples_csv([r for r in rows if r.get("sample_uid") != sample_uid])
         db_delete_sample(sample_uid)
 
+        # Purging a sample removes a single .npz FILE from Drive. Route through
+        # delete_gdrive_files_task (-> gdrive_client.delete_file), which handles a
+        # relative file path, a Drive URL, a gdrive:// ref, or a file ID. The old
+        # delete_gdrive_paths_task only resolved FOLDERS, so the file ref never
+        # matched and the .npz was orphaned on Drive after every purge.
         drive_ref = str(source.get("storage_key") or "").strip()
         if not drive_ref:
             storage_url = str(source.get("storage_url") or "").strip()
@@ -1089,9 +1844,9 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
                 drive_ref = storage_url
         if drive_ref:
             try:
-                from app.export_tasks import delete_gdrive_paths_task
+                from app.export_tasks import delete_gdrive_files_task
 
-                delete_gdrive_paths_task.delay(rel_paths=[drive_ref])
+                delete_gdrive_files_task.delay(refs=[drive_ref])
             except Exception as exc:
                 logger.warning("[CATALOG] purge sample Drive delete dispatch failed for %s: %s", sample_uid, exc)
 
@@ -1103,15 +1858,19 @@ def sync_purge_sample(sample_uid: str) -> Dict[str, Any]:
         return {"purged": True, "sample_uid": sample_uid}
 
 
-def sync_delete_sample(sample_uid: str) -> Dict[str, Any]:
+def sync_delete_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
+    """Hai lượt đọc, hai vai trò — xem `sync_soft_delete_sample`."""
     ensure_tables()
+    _doi_pham_vi(tenant_id)
+    scope = normalize_tenant_id(tenant_id)
     op_id = f"sample_delete_{sample_uid}"
     slog.start_operation(op_id)
 
     with _catalog_lock():
-        rows = list_samples()
+        # THẨM QUYỀN theo phạm vi; `rows` toàn cục chỉ để ghi lại cả tệp.
+        rows = _load_all_samples_unscoped()
         target_row = None
-        for row in rows:
+        for row in list_samples(scope):
             if row.get("sample_uid") == sample_uid:
                 target_row = row
                 break
@@ -1148,6 +1907,7 @@ def sync_delete_sample(sample_uid: str) -> Dict[str, Any]:
             sample_json = sample_file.with_suffix(".json") if sample_file else None
             if sample_json and sample_json.exists():
                 sample_json.unlink()
+            _purge_raw_archive(sample_file, sample_uid)
 
             remaining_rows = [row for row in rows if row.get("sample_uid") != sample_uid]
             _write_samples_csv(remaining_rows)

@@ -180,6 +180,7 @@ def main() -> int:
     else:
         worst_ratio = 0.0
         worst_max = 0.0
+        worst_shift = 0.0
         for f in feats:
             with np.load(f, allow_pickle=True) as z:
                 if "sequence" not in z:
@@ -198,9 +199,21 @@ def main() -> int:
                     if sa > 1e-6:
                         worst_ratio = max(worst_ratio, abs(sb / sa - 1.0))
                     worst_max = max(worst_max, float(np.abs(dst_h[:, 0]).max()))
+                    worst_shift = max(worst_shift, abs(float(np.abs(dst_h[:, 0]).max())
+                                                       - float(np.abs(src_h[:, 0]).max())))
         check("real samples: x-span unchanged by mirror", worst_ratio < 1e-4, worst_ratio)
-        check("real samples: |x| stays in the wrist-centered range (<1.0)",
-              worst_max < 1.0, worst_max)
+        # Bất biến đúng của phép lật là x -> -x: max |x| KHÔNG đổi. Phép lật cũ
+        # x -> 1-x dịch tay thêm +1 nên làm max |x| nhảy lên cỡ 1.
+        #
+        # Trước 17/10/2026 ở đây là "|x| < 1.0", tức giả định mọi mẫu đã chuẩn
+        # hoá nằm trong [-1, 1]. Giả định ấy sai: `normalize_single_hand` chia
+        # cho khoảng x/y của các điểm KHÁC 0, nên chính cổ tay (đã dời về gốc)
+        # không tính vào khoảng — tay nằm hẳn về một phía cổ tay cho |x| > 1, và
+        # bản augment còn nhân tỉ lệ tới 1.1. Quét cả kho: 771/4.213 tệp có
+        # |x| >= 1, lớn nhất 1.64. Ngưỡng cũ chỉ "đạt" nhờ 40 tệp đầu tình cờ nhỏ.
+        check("real samples: mirror keeps max |x| (no x -> 1-x shift)",
+              worst_shift < 1e-4, worst_shift)
+        check("real samples: |x| stays bounded (<2.0)", worst_max < 2.0, worst_max)
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     for n, d in FAILED:
@@ -210,3 +223,27 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# Vỏ pytest, và ĐÍNH CHÍNH cho bản đầu của chú thích này.
+#
+# Bản đầu viết rằng tệp này "chưa từng được kiểm trong CI". SAI. Nó nằm trong
+# `conftest.STANDALONE_SUITES` từ trước, và `test_research_suites.py` chạy nó
+# như một TIẾN TRÌNH CON, lấy mã thoát làm phán quyết. Phép quét AST chỉ đo
+# được "pytest thu 0 hàm test_* từ tệp này" — đúng, nhưng KHÔNG đồng nghĩa với
+# "không chạy", vì bộ chạy nằm ở chỗ khác.
+#
+# Vỏ này vẫn có ích, chỉ là vì lý do khiêm tốn hơn: gọi thẳng
+# `pytest <tệp này>` giờ chạy được thay vì thu 0 ca. Bộ chạy thật vẫn là
+# `test_research_suites.py`.
+#
+# Chốt `assert PASSED or FAILED` thì đáng giữ, và nó đã bắt được một ca thật:
+# một kịch bản in "SKIP:" rồi `return 0` sẽ thành XANH ở CẢ HAI đường.
+# ---------------------------------------------------------------------------
+
+def test_toan_bo_kich_ban() -> None:
+    ma = main()
+    assert PASSED or FAILED, (
+        "không ca nào chạy — kịch bản trả về xanh mà chưa kiểm gì cả")
+    assert ma == 0, "; ".join(f"{n}: {d}" for n, d in FAILED)

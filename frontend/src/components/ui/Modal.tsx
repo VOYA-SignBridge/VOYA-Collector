@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { ReactNode } from "react";
 import { XIcon } from "./Icons";
+import { useI18n } from "../../i18n";
 
 interface ModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface ModalProps {
 }
 
 export default function Modal({ isOpen, onClose, title, children, size = "md" }: ModalProps) {
+  const { t } = useI18n();
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
@@ -55,9 +57,9 @@ export default function Modal({ isOpen, onClose, title, children, size = "md" }:
               <button
                 onClick={onClose}
                 className="btn btn-ghost p-2 rounded-full"
-                aria-label="Đóng hộp thoại"
+                aria-label={t("Đóng hộp thoại")}
               >
-                <XIcon className="h-4 w-4" />
+                <XIcon className="h-4 w-4"  aria-hidden="true" />
               </button>
             </div>
           )}

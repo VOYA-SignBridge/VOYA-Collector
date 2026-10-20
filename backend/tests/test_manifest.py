@@ -65,6 +65,18 @@ def _mk_dataset(ws: Path):
 
 
 def _create(ws: Path, version: str, *extra):
+    """Dựng manifest trong một thư mục tạm.
+
+    `--skip-consent-gate` mặc định ở HÀM TRỢ GIÚP, không phải ở từng lời gọi:
+    bộ này kiểm việc dựng manifest, và cổng đồng thuận cần một ảnh chụp lấy từ
+    cơ sở dữ liệu mà bộ này cố tình không có. Bản thân cái cổng có bộ test
+    riêng (`tests/test_consent_gate.py`) và một trường hợp ngay dưới đây kiểm
+    rằng nó THẬT SỰ chặn khi không truyền cờ — nếu không thì cờ này sẽ lặng lẽ
+    biến cả bộ thành bộ không bao giờ chạm tới cổng.
+    """
+    if not any(str(a).startswith("--consent") or a == "--skip-consent-gate"
+               for a in extra):
+        extra = ("--skip-consent-gate", *extra)
     return subprocess.run(
         [sys.executable, str(CREATE), "--version", version,
          "--features-root", str(ws / "features"),
@@ -126,6 +138,28 @@ def main() -> int:
         mpath.write_text(mpath.read_text(encoding="utf-8") + "\n", encoding="utf-8")
         r = _validate(ws, "test_v1")
         check("tampered manifest detected", "manifest was modified" in r.stdout, r.stdout[-300:])
+
+        print("[MF5 cong dong thuan]")
+        # KHÔNG truyền `--skip-consent-gate`: đây là chỗ duy nhất trong bộ này
+        # để cái cờ ở `_create` không âm thầm biến cổng thành thứ không ai chạm
+        # tới. Không có ảnh chụp → phải TỪ CHỐI, không được lặng lẽ dựng một
+        # manifest chưa lọc.
+        r = _create(ws, "test_gate", "--consent-scope", "research_release",
+                    "--consent-snapshot", str(ws / "khong-co.json"))
+        check("thieu anh chup -> tu choi (exit 4)", r.returncode == 4,
+              f"exit={r.returncode} {r.stdout[-300:]}")
+        check("khong ghi manifest nao",
+              not (ws / "manifests" / "dataset_manifest_test_gate.csv").exists())
+        check("noi ro cach sua", "consent_snapshot" in r.stdout, r.stdout[-300:])
+
+        # Bỏ qua có chủ ý thì được chạy, và việc bỏ qua phải ĐI THEO phiên bản.
+        r = _create(ws, "test_skip")
+        check("skip-consent-gate chay duoc", r.returncode == 0, r.stdout[-300:])
+        stats = json.loads((ws / "manifests" / "dataset_stats_test_skip.json")
+                           .read_text(encoding="utf-8"))
+        check("viec bo qua duoc ghi vao stats",
+              stats.get("consent_gate", {}).get("enforced") is False,
+              stats.get("consent_gate"))
     finally:
         shutil.rmtree(ws, ignore_errors=True)
 
@@ -137,3 +171,27 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# Vỏ pytest, và ĐÍNH CHÍNH cho bản đầu của chú thích này.
+#
+# Bản đầu viết rằng tệp này "chưa từng được kiểm trong CI". SAI. Nó nằm trong
+# `conftest.STANDALONE_SUITES` từ trước, và `test_research_suites.py` chạy nó
+# như một TIẾN TRÌNH CON, lấy mã thoát làm phán quyết. Phép quét AST chỉ đo
+# được "pytest thu 0 hàm test_* từ tệp này" — đúng, nhưng KHÔNG đồng nghĩa với
+# "không chạy", vì bộ chạy nằm ở chỗ khác.
+#
+# Vỏ này vẫn có ích, chỉ là vì lý do khiêm tốn hơn: gọi thẳng
+# `pytest <tệp này>` giờ chạy được thay vì thu 0 ca. Bộ chạy thật vẫn là
+# `test_research_suites.py`.
+#
+# Chốt `assert PASSED or FAILED` thì đáng giữ, và nó đã bắt được một ca thật:
+# một kịch bản in "SKIP:" rồi `return 0` sẽ thành XANH ở CẢ HAI đường.
+# ---------------------------------------------------------------------------
+
+def test_toan_bo_kich_ban() -> None:
+    ma = main()
+    assert PASSED or FAILED, (
+        "không ca nào chạy — kịch bản trả về xanh mà chưa kiểm gì cả")
+    assert ma == 0, "; ".join(f"{n}: {d}" for n, d in FAILED)

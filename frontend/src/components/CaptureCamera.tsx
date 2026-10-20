@@ -9,17 +9,20 @@ import FullscreenCaptureModal from "./FullscreenCaptureModal";
 import Button from "./ui/Button";
 import { TARGET_FRAMES, CAPTURE_COUNT } from "../config/capture";
 import { createSessionId, NEW_SESSION_EVENT } from "../utils/session";
-import { useAuth } from "../hooks/useAuth";
+import { me } from "../api/auth";
+import { useI18n } from "../i18n";
 
 type Props = {
   onError?: (msg: string) => void;
   onSuccess?: (msg: string) => void;
+  initialLabel?: string;
+  initialClassUid?: string;
 };
 
-export default function CaptureCamera({ onError, onSuccess }: Props) {
-  const { user: authUser } = useAuth();
+export default function CaptureCamera({ onError, onSuccess, initialLabel = "", initialClassUid = "" }: Props) {
+  const { t } = useI18n();
   // Removed frames state - now using only fullscreen capture
-  const [label, setLabel] = useState("");
+  const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState("");
   const [showGuide, setShowGuide] = useState(false);
   // Removed preview state - using fullscreen capture only
@@ -72,7 +75,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   // Mất kết nối mạng ở cấp trình duyệt cũng được coi là sự cố — chặn thu tiếp
   // để tránh mất dữ liệu đã ghi.
   useEffect(() => {
-    const handleOffline = () => setConnectionIssue("Mất kết nối mạng.");
+    const handleOffline = () => setConnectionIssue(t("Mất kết nối mạng."));
     const handleOnline = () => setConnectionIssue(null);
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
@@ -93,14 +96,25 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       .join(" ")
       .trim();
 
-  // Tên người thu lấy từ AuthProvider (đã fetch /auth/me một lần cho cả app)
-  // thay vì gọi lại ở đây. Nếu chưa đăng nhập thì để trống cho nhập tay.
   useEffect(() => {
-    const candidate = sanitizeCollectorName(authUser?.username || "");
-    if (candidate) {
-      setUser(candidate);
-    }
-  }, [authUser?.username]);
+    let active = true;
+
+    me()
+      .then((currentUser) => {
+        if (!active) return;
+        const candidate = sanitizeCollectorName(currentUser.username || "");
+        if (candidate) {
+          setUser(candidate);
+        }
+      })
+      .catch(() => {
+        // Keep manual entry available when auth lookup fails.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Toggle to temporarily hide advanced/session UI without deleting it
   const SHOW_ADVANCED = false;
@@ -137,7 +151,13 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
   const handleFullscreenCapture = async (capturedFrames: Array<{
     left_hand: MediaPipeLandmark[];
     right_hand: MediaPipeLandmark[];
-  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string; language?: string; hands_used?: number | null }) => {
+    // Declared so the whole frame object reaching the API is described by its
+    // type. It is forwarded verbatim as `landmarks`, so an undeclared field
+    // would still travel — but silently, which is how a payload field ends up
+    // with nobody able to say where it came from.
+    left_hand_world?: MediaPipeLandmark[];
+    right_hand_world?: MediaPipeLandmark[];
+  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string; language?: string; hands_used?: number | null; class_uid?: string; visibility?: "private" | "tenant" | "community" }) => {
     console.log(`Parent received capture: ${capturedLabel} with ${capturedFrames.length} frames`);
 
     // Don't set uploading state to avoid blocking the modal
@@ -154,6 +174,8 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       };
       if (meta?.dialect) payload.dialect = meta.dialect;
       if (meta?.language) payload.language = meta.language;
+      if (meta?.class_uid) payload.class_uid = meta.class_uid;
+      if (meta?.visibility) payload.visibility = meta.visibility;
       if (meta?.hands_used === 1 || meta?.hands_used === 2) payload.hands_required = meta.hands_used;
       if (meta?.quality_info) payload.quality_info = meta.quality_info;
 
@@ -184,7 +206,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
             const message = qcMessage(warning.code, warning.detail);
             setQualityNotice(prev => ({ kind: "warning", message, key: (prev?.key ?? 0) + 1 }));
           } else {
-            onSuccess?.(`Đã tải lên mẫu "${capturedLabel}" thành công.`);
+            onSuccess?.(t("Đã tải lên mẫu \"{capturedLabel}\" thành công.", { capturedLabel }));
           }
 
           console.log(`Sample "${capturedLabel}" (${capturedFrames.length} frames) uploaded successfully! Total samples: ${samples.length + 1}`);
@@ -195,16 +217,16 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           const message = qcMessage(result.errorCode);
           setQualityNotice(prev => ({ kind: "error", message, key: (prev?.key ?? 0) + 1 }));
         } else {
-          const errorMsg = result.ok ? (result.data.message || 'Không thể lưu mẫu lên máy chủ.') : result.error;
+          const errorMsg = result.ok ? (result.data.message || t('Không thể lưu mẫu lên máy chủ.')) : result.error;
           console.error('Upload failed:', errorMsg);
-          setConnectionIssue(errorMsg || 'Không thể lưu mẫu lên máy chủ.');
+          setConnectionIssue(errorMsg || t('Không thể lưu mẫu lên máy chủ.'));
           if (onError) {
             onError(errorMsg || 'Upload failed. Please try again.');
           }
         }
       }).catch((error) => {
         console.error('Upload failed:', error);
-        setConnectionIssue('Không thể lưu mẫu lên máy chủ. Vui lòng kiểm tra kết nối.');
+        setConnectionIssue(t('Không thể lưu mẫu lên máy chủ. Vui lòng kiểm tra kết nối.'));
         if (onError) {
           onError('Upload failed. Please try again.');
         }
@@ -233,9 +255,9 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
             </svg>
           </div>
           
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3">Ghi chuyển động chuyên nghiệp</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-3">{t("Ghi chuyển động chuyên nghiệp")}</h2>
           <p className="text-sm sm:text-base text-gray-600 mb-6 sm:mb-8 max-w-2xl mx-auto leading-relaxed">
-            Mở giao diện chụp toàn màn hình để thu dữ liệu tư thế không bị phân tâm. Tối ưu cho tốc độ và độ chính xác.
+            {t("Mở giao diện chụp toàn màn hình để thu dữ liệu tư thế không bị phân tâm. Tối ưu cho tốc độ và độ chính xác.")}
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center items-stretch sm:items-center mb-5 sm:mb-6">
@@ -247,7 +269,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
               <svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
               </svg>
-              Mở chế độ Toàn màn hình
+              {t("Mở chế độ Toàn màn hình")}
             </Button>
             
             <Button
@@ -258,7 +280,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              Xem hướng dẫn
+              {t("Xem hướng dẫn")}
             </Button>
           </div>
         </div>
@@ -268,7 +290,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       {SHOW_ADVANCED && (
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Tiến trình thu thập</h3>
+            <h3 className="text-lg font-semibold text-gray-900">{t("Tiến trình thu thập")}</h3>
             <div className="flex items-center space-x-2">
                 <button
                   onClick={() => {
@@ -278,7 +300,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
                   }}
                   className="btn btn-ghost text-sm"
                 >
-                Mẫu tiếp theo
+                {t("Mẫu tiếp theo")}
                 </button>
             </div>
           </div>
@@ -286,44 +308,44 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center p-3 bg-ctu-blue/10 rounded-lg">
               <div className="text-2xl font-bold text-ctu-blue">{samples.length}</div>
-              <div className="text-xs text-ctu-blue">Số mẫu hôm nay</div>
+              <div className="text-xs text-ctu-blue">{t("Số mẫu hôm nay")}</div>
             </div>
             <div className="text-center p-3 bg-ctu-navy/10 rounded-lg">
               <div className="text-2xl font-bold text-ctu-navy">
                 {samples.length > 0 ? Math.round((samples.length / 60) * 100) / 100 : 0}
               </div>
-              <div className="text-xs text-ctu-navy">Mẫu/phút</div>
+              <div className="text-xs text-ctu-navy">{t("Mẫu/phút")}</div>
             </div>
             <div className="text-center p-3 bg-ctu-yellow/15 rounded-lg">
               <div className="text-2xl font-bold text-ctu-navy">
                 {samples.reduce((sum, s) => sum + (s.frames || 0), 0)}
               </div>
-              <div className="text-xs text-ctu-navy">Tổng khung hình</div>
+              <div className="text-xs text-ctu-navy">{t("Tổng khung hình")}</div>
             </div>
             <div className="text-center p-3 bg-ctu-blue/10 rounded-lg">
               <div className="text-2xl font-bold text-ctu-blue">
                 {new Set(samples.map(s => s.label)).size}
               </div>
-              <div className="text-xs text-ctu-blue">Nhãn khác nhau</div>
+              <div className="text-xs text-ctu-blue">{t("Nhãn khác nhau")}</div>
             </div>
           </div>
 
           {/* Quick Actions for Efficiency */}
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">Hành động nhanh</span>
+              <span className="text-sm font-medium text-gray-700">{t("Hành động nhanh")}</span>
               <div className="flex space-x-2">
                 <button
                   onClick={() => {
                     // Clear all samples
-                    if (confirm('Xóa tất cả mẫu trong phiên này?')) {
+                    if (confirm(t('Xóa tất cả mẫu trong phiên này?'))) {
                       setSamples([]);
                       setSampleCounter(1);
                     }
                   }}
                   className="btn btn-ghost text-xs text-red-600"
                 >
-                  Xóa phiên
+                  {t("Xóa phiên")}
                 </button>
                 <button
                   onClick={() => {
@@ -336,7 +358,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
                   className="btn btn-ghost text-xs"
                   disabled={samples.length === 0}
                 >
-                  Lặp lại mẫu trước
+                  {t("Lặp lại mẫu trước")}
                 </button>
               </div>
             </div>
@@ -360,6 +382,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           onClose={() => setShowFullscreen(false)}
           onSampleCapture={handleFullscreenCapture}
           initialLabel={label}
+          initialClassUid={initialClassUid}
           initialUser={user}
           targetFrames={targetFrames}
           captureCount={captureCount}
@@ -386,28 +409,28 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       {/* Simple collection statistics (always shown for public UI) */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-gray-700">Thống kê thu thập đơn giản</h3>
-          <div className="text-xs text-gray-500">Cập nhật trực tiếp</div>
+          <h3 className="text-sm font-medium text-gray-700">{t("Thống kê thu thập đơn giản")}</h3>
+          <div className="text-xs text-gray-500">{t("Cập nhật trực tiếp")}</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
           <div className="p-3 bg-ctu-blue/10 rounded-lg text-center">
             <div className="text-lg font-bold text-ctu-blue">{samples.length}</div>
-            <div className="text-xs text-gray-600">Tổng lượt thu</div>
+            <div className="text-xs text-gray-600">{t("Tổng lượt thu")}</div>
           </div>
           <div className="p-3 bg-ctu-yellow/15 rounded-lg text-center">
             <div className="text-lg font-bold text-ctu-navy">{new Set(samples.map(s => s.label)).size}</div>
-            <div className="text-xs text-gray-600">Số từ thu được</div>
+            <div className="text-xs text-gray-600">{t("Số từ thu được")}</div>
           </div>
           <div className="p-3 bg-ctu-navy/10 rounded-lg text-center">
             <div className="text-lg font-bold text-ctu-navy">{samples.reduce((sum, s) => sum + (s.frames || 0), 0)}</div>
-            <div className="text-xs text-gray-600">Tổng khung hình</div>
+            <div className="text-xs text-gray-600">{t("Tổng khung hình")}</div>
           </div>
         </div>
 
         <div className="text-sm text-gray-700">
-          <div className="font-medium mb-2">Số lần thu theo từ</div>
+          <div className="font-medium mb-2">{t("Số lần thu theo từ")}</div>
           {samples.length === 0 ? (
-            <div className="text-xs text-gray-500">Chưa có thu nào</div>
+            <div className="text-xs text-gray-500">{t("Chưa có thu nào")}</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {Object.entries(samples.reduce((acc: Record<string, number>, s) => {

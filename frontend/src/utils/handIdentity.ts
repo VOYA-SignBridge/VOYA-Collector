@@ -28,6 +28,17 @@ export type HandAnchor = { x: number; y: number; t: number };
  */
 export type HandDetection = {
   landmarks: MediaPipeLandmark[];
+  /**
+   * MediaPipe's `world_landmarks` for this same hand, when the caller read
+   * them. Metric 3D in metres about the hand's geometric centre, as opposed to
+   * `landmarks`, whose z is a relative depth regression with no metric meaning.
+   *
+   * Carried here rather than resolved separately because handedness is decided
+   * ONCE, by this resolver: reconciling world landmarks against slots on their
+   * own could disagree with the assignment and put a left hand's shape in the
+   * right hand's slot.
+   */
+  world?: MediaPipeLandmark[];
   label?: string;
   score: number;
 };
@@ -97,6 +108,25 @@ export const wristOf = (lms: MediaPipeLandmark[]) => ({
 
 const wristDistance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y);
+
+/**
+ * The detection a resolved slot came from, or undefined.
+ *
+ * `assignHandSlots` returns the winning detection's `landmarks` array BY
+ * REFERENCE — every one of its return paths passes the array through
+ * untouched, never a copy — so identity is what links a slot back to its
+ * source. That invariant is what makes it safe to read any other field of the
+ * detection (notably `world`) for a slot, and it is pinned by a test rather
+ * than left as folklore: a future refactor that maps or slices the array on
+ * the way out would silently detach world landmarks from their hand.
+ */
+export function sourceOf(
+  detections: HandDetection[],
+  landmarks: MediaPipeLandmark[] | undefined,
+): HandDetection | undefined {
+  if (!landmarks) return undefined;
+  return detections.find((d) => d.landmarks === landmarks);
+}
 
 /** Resolve detections into anatomical left/right slots. */
 export function assignHandSlots(

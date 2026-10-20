@@ -114,6 +114,46 @@ def main() -> int:
     check("default excludes common (2 hoa_de classes only)",
           rep_def["num_classes"] == 2, rep_def["label_keys"])
 
+    print("[S5 dominant signers must not empty a split]")
+    # Regression: the count-matching greedy assigns whole signers to whichever
+    # split keeps per-class sample counts closest to target, with no notion of
+    # coverage. Given two signers that hold most of the data it emptied val
+    # entirely — real alphabet data (S001=987, S002=708 of 2482) hit exactly
+    # this, and hoa_de_signer_disjoint_v1/_v3 had already reached disk with
+    # val=0/test=0 the same way. A valid partition existed in every case.
+    rng = random.Random(11)
+    lopsided = []
+    n = 0
+    # 4 signers, 5 classes, all covered by all signers, but wildly uneven sizes.
+    for slug in ("alpha", "beta", "gamma", "delta", "epsilon"):
+        for signer, reps in (("S001", 40), ("S002", 30), ("S003", 4), ("S004", 3)):
+            for _ in range(reps + rng.randint(0, 2)):
+                n += 1
+                lopsided.append({
+                    "sample_id": f"lop{n:05d}", "slug": slug, "label_slug": slug,
+                    "language": "vn", "vocabulary_scope": "profile_specific",
+                    "recognition_profile": "alphabet",
+                    "signer_id": signer, "session_id": "x", "file_path": f"l{n}.npz",
+                })
+    tr, va, te, rep5 = split_from_manifest(
+        lopsided, split_mode="strict_signer_disjoint",
+        recognition_profile="alphabet", seed=42)
+    check("no split is empty", min(len(tr), len(va), len(te)) > 0, rep5["counts"])
+    check("every class present in all three splits",
+          rep5["class_coverage"] == {"train": 1.0, "val": 1.0, "test": 1.0},
+          rep5["class_coverage"])
+    check("stamped valid_for_research", rep5["valid_for_research"] is True,
+          rep5.get("invalid_reasons"))
+    s5 = (set(rep5["signers"]["train"]), set(rep5["signers"]["val"]), set(rep5["signers"]["test"]))
+    check("signers still disjoint",
+          s5[0].isdisjoint(s5[1]) and s5[0].isdisjoint(s5[2]) and s5[1].isdisjoint(s5[2]), s5)
+    # Determinism: the exact search must not depend on dict iteration order.
+    _, _, _, rep5b = split_from_manifest(
+        list(reversed(lopsided)), split_mode="strict_signer_disjoint",
+        recognition_profile="alphabet", seed=42)
+    check("partition is order-independent",
+          rep5b["signers"] == rep5["signers"], (rep5["signers"], rep5b["signers"]))
+
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     for n, d in FAILED:
         print(f"  FAILED: {n}: {d}")
@@ -122,3 +162,27 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# Vỏ pytest, và ĐÍNH CHÍNH cho bản đầu của chú thích này.
+#
+# Bản đầu viết rằng tệp này "chưa từng được kiểm trong CI". SAI. Nó nằm trong
+# `conftest.STANDALONE_SUITES` từ trước, và `test_research_suites.py` chạy nó
+# như một TIẾN TRÌNH CON, lấy mã thoát làm phán quyết. Phép quét AST chỉ đo
+# được "pytest thu 0 hàm test_* từ tệp này" — đúng, nhưng KHÔNG đồng nghĩa với
+# "không chạy", vì bộ chạy nằm ở chỗ khác.
+#
+# Vỏ này vẫn có ích, chỉ là vì lý do khiêm tốn hơn: gọi thẳng
+# `pytest <tệp này>` giờ chạy được thay vì thu 0 ca. Bộ chạy thật vẫn là
+# `test_research_suites.py`.
+#
+# Chốt `assert PASSED or FAILED` thì đáng giữ, và nó đã bắt được một ca thật:
+# một kịch bản in "SKIP:" rồi `return 0` sẽ thành XANH ở CẢ HAI đường.
+# ---------------------------------------------------------------------------
+
+def test_toan_bo_kich_ban() -> None:
+    ma = main()
+    assert PASSED or FAILED, (
+        "không ca nào chạy — kịch bản trả về xanh mà chưa kiểm gì cả")
+    assert ma == 0, "; ".join(f"{n}: {d}" for n, d in FAILED)

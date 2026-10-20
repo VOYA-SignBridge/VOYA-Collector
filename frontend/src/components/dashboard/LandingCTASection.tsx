@@ -1,7 +1,9 @@
 import { useNavigate } from "react-router-dom";
 import Button from "../ui/Button";
+import { useI18n } from "../../i18n";
 
 export default function LandingCTASection() {
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   return (
@@ -15,13 +17,12 @@ export default function LandingCTASection() {
 
         <div className="relative z-10">
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-6 leading-tight">
-            Sẵn sàng đóng góp cho
+            {t("Sẵn sàng đóng góp cho")}
             <br />
-            <span className="text-ctu-yellow">cộng đồng người khiếm thính?</span>
+            <span className="text-ctu-yellow">{t("cộng đồng người khiếm thính?")}</span>
           </h2>
           <p className="text-lg sm:text-xl text-white/80 mb-10 max-w-2xl mx-auto leading-relaxed">
-            Hàng triệu người khiếm thính tại Việt Nam cần sự hỗ trợ của bạn.
-            Mỗi mẫu dữ liệu bạn đóng góp giúp AI hiểu tốt hơn Ngôn ngữ Ký hiệu Việt Nam.
+            {t("Hàng triệu người khiếm thính tại Việt Nam cần sự hỗ trợ của bạn. Mỗi mẫu dữ liệu bạn đóng góp giúp AI hiểu tốt hơn Ngôn ngữ Ký hiệu Việt Nam.")}
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -29,19 +30,19 @@ export default function LandingCTASection() {
               onClick={() => navigate("/register")}
               className="justify-center px-8 py-4 text-lg font-bold bg-ctu-yellow hover:bg-amber-400 text-ctu-navy shadow-xl hover:shadow-2xl transition-all hover:-translate-y-0.5"
             >
-              Bắt đầu ngay — Miễn phí →
+              {t("Bắt đầu ngay — Miễn phí →")}
             </Button>
             <Button
               onClick={() => navigate("/realtime")}
               variant="ghost"
               className="justify-center px-8 py-4 text-lg font-bold text-white border-2 border-white/30 hover:bg-white/10 hover:border-white/50"
             >
-              Thử nhận dạng trước
+              {t("Thử nhận dạng trước")}
             </Button>
           </div>
 
           <p className="mt-6 text-sm text-white/50">
-            Không cần cài đặt • Hoàn toàn miễn phí • Dữ liệu được bảo mật
+            {t("Không cần cài đặt • Hoàn toàn miễn phí • Dữ liệu được bảo mật")}
           </p>
         </div>
       </div>

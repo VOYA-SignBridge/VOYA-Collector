@@ -12,8 +12,8 @@ import {
 import { PredictionSmoother } from '../../../utils/predictionSmoother';
 import { HAND_TRACKING_OPTIONS, MP_HANDS_VERSION } from '../../../config/handTracking';
 import type { HandAnchors } from '../../../utils/handIdentity';
-import type { MediaPipeLandmark } from '../../../types';
-import { FlaskIcon, XIcon } from '../../../components/ui/Icons';
+import { XIcon } from '../../../components/ui/Icons';
+import { useI18n } from "../../../i18n";
 
 interface TestTrainedModelModalProps {
   isOpen: boolean;
@@ -26,6 +26,7 @@ export default function TestTrainedModelModal({
   onClose,
   modelId,
 }: TestTrainedModelModalProps) {
+  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const handsRef = useRef<Hands | null>(null);
@@ -110,7 +111,7 @@ export default function TestTrainedModelModal({
 
     const video = videoRef.current;
     if (!video) {
-      setError('Video element not ready');
+      setError(t('Chưa mở được khung hình camera. Hãy thử lại.'));
       setRunning(false);
       return;
     }
@@ -156,7 +157,7 @@ export default function TestTrainedModelModal({
               const w = canvas.width;
               const h = canvas.height;
 
-              mpResults.multiHandLandmarks.forEach((landmarks: MediaPipeLandmark[]) => {
+              mpResults.multiHandLandmarks.forEach((landmarks: any[]) => {
                 // Draw connections (skeleton)
                 const connections = [
                   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -183,7 +184,7 @@ export default function TestTrainedModelModal({
 
                 // Draw joints
                 ctx.fillStyle = '#00ff00';
-                landmarks.forEach((lm: MediaPipeLandmark) => {
+                landmarks.forEach((lm: any) => {
                   const x = lm.x * w;
                   const y = lm.y * h;
                   ctx.beginPath();
@@ -349,10 +350,7 @@ export default function TestTrainedModelModal({
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-            <FlaskIcon className="h-5 w-5 text-ctu-blue" />
-            Thử mô hình bằng camera
-          </h2>
+          <h2 className="text-lg font-semibold text-slate-900">{t("Thử mô hình theo thời gian thực")}</h2>
           <button
             onClick={() => {
               setRunning(false);
@@ -360,7 +358,7 @@ export default function TestTrainedModelModal({
             }}
             className="text-slate-400 hover:text-slate-600 text-2xl leading-none"
           >
-            <XIcon className="h-5 w-5" />
+            <XIcon className="h-4 w-4"  aria-hidden="true" />
           </button>
         </div>
 
@@ -384,7 +382,7 @@ export default function TestTrainedModelModal({
           {/* Prediction Display */}
           <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-ctu-blue/10 to-white p-4">
             <div className="text-xs font-medium text-slate-600 uppercase tracking-wide mb-3">
-              Kết quả nhận diện
+              {t("Kết quả nhận diện")}
             </div>
             {prediction ? (
               <div className="space-y-2">
@@ -392,14 +390,14 @@ export default function TestTrainedModelModal({
                   {prediction.label}
                 </div>
                 <div className="text-sm text-slate-600">
-                  Độ tin cậy: <span className="font-semibold">{Math.round(prediction.confidence * 100)}%</span>
+                  {t("Độ tin cậy:")} <span className="font-semibold">{Math.round(prediction.confidence * 100)}%</span>
                 </div>
               </div>
             ) : (
               <div className="text-center py-4">
                 <div className="text-2xl text-slate-300 mb-2">–</div>
                 <div className="text-sm text-slate-500">
-                  {running ? 'Chờ dữ liệu...' : 'Chưa bắt đầu'}
+                  {running ? t('Chờ dữ liệu...') : t('Chưa bắt đầu')}
                 </div>
               </div>
             )}
@@ -410,7 +408,7 @@ export default function TestTrainedModelModal({
             <div
               className={`w-2 h-2 rounded-full ${
                 running && status === 'in_flight'
-                  ? 'bg-green-500'
+                  ? 'bg-sky-600'
                   : running && status === 'debouncing'
                     ? 'bg-yellow-500'
                     : running
@@ -419,7 +417,7 @@ export default function TestTrainedModelModal({
               }`}
             />
             <div className="text-xs text-slate-600">
-              {!running ? 'Chưa bắt đầu' : isStarting ? 'Đang khởi động...' : 'Đang xử lý...'}
+              {!running ? t('Chưa bắt đầu') : isStarting ? t('Đang khởi động...') : t('Đang xử lý...')}
             </div>
           </div>
 
@@ -438,10 +436,10 @@ export default function TestTrainedModelModal({
             className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
               running
                 ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                : 'bg-sky-600 text-white hover:bg-sky-700'
             }`}
           >
-            {running ? 'Dừng' : 'Bắt đầu'}
+            {running ? t('Dừng') : t('Bắt đầu')}
           </button>
           <button
             onClick={() => {
@@ -450,7 +448,7 @@ export default function TestTrainedModelModal({
             }}
             className="flex-1 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors font-medium"
           >
-            Đóng
+            {t("Đóng")}
           </button>
         </div>
       </div>

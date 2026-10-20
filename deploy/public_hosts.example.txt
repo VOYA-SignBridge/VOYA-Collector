@@ -1,0 +1,32 @@
+# Hosts allowed to DEFINE the links this backend emails (password reset).
+#
+# Copy to public_hosts.txt (that name is gitignored — it is per-machine, like
+# .env) and list the hostnames this deployment is reachable at.
+#
+# Read at REQUEST time: edit the file and the next request already sees it, no
+# container restart. That is the whole point — a running container's environment
+# cannot be changed, so a tunnel hostname that moves on every restart used to
+# force `docker compose up -d --force-recreate backend` just to fix the link in
+# the reset-password email.
+#
+# Syntax: one entry per line, "#" starts a comment.
+#     app.example.com        exact hostname (recommended)
+#     .example.com           any sub-domain under example.com
+#
+# WHY AN ALLOWLIST AT ALL: the Host header comes from the caller. Without this
+# list, an attacker posts /auth/forgot-password with `Host: evil.example` for
+# YOUR account, and the mail you receive carries a valid reset token pointing at
+# their server — click it and the account is theirs. A host that is not listed
+# here falls back to FRONTEND_BASE_URL, so the worst case is a stale link, never
+# a leaked token.
+#
+# DO NOT list a shared public suffix such as ".ngrok-free.dev" or
+# ".trycloudflare.com" unless you accept that EVERY other user of that service
+# can then aim your reset links at their own tunnel. Name the exact hostname —
+# scripts/sync-public-host.ps1 keeps it in sync with the running ngrok agent.
+
+localhost
+127.0.0.1
+
+# Tunnel hostname for this machine, e.g.
+#frolic-fifteen-debating.ngrok-free.dev

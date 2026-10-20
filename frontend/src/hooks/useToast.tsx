@@ -44,12 +44,19 @@ export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error("useToast must be used inside <ToastProvider>");
 
+  // `toast` PHẢI ổn định theo `addToast`, không theo `ctx`.
+  //
+  // Sự cố TEN-02 (13/09/2026): bản trước dựng object `toast` mới ở MỖI render.
+  // `ctx` đổi mỗi khi danh sách toast đổi, nên một trang viết
+  //
+  //     const load = useCallback(async () => { ... toast.error(...) }, [toast]);
+  //     useEffect(() => { load(); }, [load]);
+  //
+  // rơi vào vòng: API lỗi → toast.error → ctx đổi → toast đổi → load đổi →
+  // effect chạy lại → API lỗi → … Khi mất kết nối, trang gọi API liên tục và
+  // xếp thông báo vô hạn. Có 23 chỗ trên 7 trang đưa `toast` vào deps; sửa ở
+  // đây thì cả lớp lỗi hết, không phải đi vá từng chỗ.
   const { addToast } = ctx;
-
-  // Giữ nguyên identity giữa các lần render. Trước đây object này được tạo mới
-  // mỗi render, nên component nào gọi toast bên trong useCallback/useEffect
-  // buộc phải bỏ nó khỏi dependency array (sai) hoặc chịu callback tái tạo liên
-  // tục. addToast đã là useCallback ổn định nên memo theo nó là đủ.
   const toast = useMemo(
     () => ({
       success: (message: string) => addToast(message, "success"),
@@ -57,12 +64,8 @@ export function useToast() {
       warning: (message: string) => addToast(message, "warning"),
       info: (message: string) => addToast(message, "info"),
     }),
-    [addToast]
+    [addToast],
   );
 
-  return {
-    toasts: ctx.toasts,
-    removeToast: ctx.removeToast,
-    toast,
-  };
+  return { toasts: ctx.toasts, removeToast: ctx.removeToast, toast };
 }

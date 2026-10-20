@@ -16,14 +16,22 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false, // shares one login session / one GPU trainer slot
-  retries: 0,
+  // One retry: the two camera specs fetch MediaPipe's ~10 MB WASM from a CDN
+  // inside their 90 s budget and occasionally miss it on a slow link — a
+  // network flake, not a regression. Anything that fails twice is real.
+  retries: 1,
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   use: {
-    // NGINX_HTTP_PORT in .env — 80 now that the port-80 Windows service
-    // (IIS) that used to squat it is disabled.
-    baseURL: process.env.E2E_BASE_URL || "http://localhost",
+    // nginx publishes on 8080 in this deployment (NGINX_HTTP_PORT in .env);
+    // host port 80 belongs to an unrelated Windows service, not this stack.
+    baseURL: process.env.E2E_BASE_URL || "http://localhost:8080",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // The UI picks its language from navigator.language when nothing is
+    // saved (src/i18n/index.tsx). Playwright's default context is en-US,
+    // which since the i18n rollout rendered every label in English and made
+    // all five Vietnamese selectors below time out on the login page.
+    locale: "vi-VN",
   },
   projects: [
     {

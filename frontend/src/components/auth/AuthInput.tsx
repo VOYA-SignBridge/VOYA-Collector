@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode } from "react";
+import { useId, type InputHTMLAttributes, type ReactNode } from "react";
 
 export function UserIcon() {
   return (
@@ -34,24 +34,39 @@ interface AuthInputProps extends InputHTMLAttributes<HTMLInputElement> {
   trailing?: ReactNode;
 }
 
-export default function AuthInput({ label, icon, error, trailing, className, ...rest }: AuthInputProps) {
+export default function AuthInput({ label, icon, error, trailing, className, id, ...rest }: AuthInputProps) {
+  // Nhãn nối bằng `htmlFor`, không bọc `<input>` bên trong `<label>`. Kiểu bọc
+  // làm dòng lỗi — vốn nằm trong cùng thẻ — bị tính vào TÊN của ô, nên khi có
+  // lỗi thì trình đọc màn hình đọc "Mật khẩu Mật khẩu phải có ít nhất 8 ký tự"
+  // như một cái tên. Lỗi thuộc về `aria-describedby`, được đọc sau tên.
+  const auto = useId();
+  const inputId = id ?? auto;
+  const errorId = `${inputId}-error`;
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
+    <div className="block">
+      <label htmlFor={inputId} className="mb-1.5 block text-sm font-medium text-slate-700">
+        {label}
+      </label>
       <div className="relative">
         <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-ctu-blue/70">
           {icon}
         </span>
         <input
           {...rest}
+          id={inputId}
           aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
           className={`w-full rounded-xl border bg-white py-3 pl-11 text-slate-900 shadow-sm outline-none transition focus:border-ctu-blue focus:ring-4 focus:ring-ctu-blue/15 ${
             trailing ? "pr-16" : "pr-4"
           } ${error ? "border-red-300" : "border-slate-200"} ${className ?? ""}`}
         />
         {trailing ? <span className="absolute inset-y-0 right-2 flex items-center">{trailing}</span> : null}
       </div>
-      {error ? <span className="mt-1.5 block text-sm text-red-600">{error}</span> : null}
-    </label>
+      {error ? (
+        <span id={errorId} className="mt-1.5 block text-sm text-red-600">
+          {error}
+        </span>
+      ) : null}
+    </div>
   );
 }

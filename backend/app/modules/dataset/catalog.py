@@ -25,11 +25,22 @@ from app.processing.class_registry import (
 )
 
 from app.config import settings
+from app.tenancy import (
+    DEFAULT_TENANT_ID,
+    TENANT_COLUMN,
+    normalize_tenant_id,
+    tenant_id_of,
+)
 
 logger = logging.getLogger(__name__)
 
 DATASET_ROOT = settings.dataset_root
 FEATURES_ROOT = DATASET_ROOT / "features"
+# Directory under FEATURES_ROOT holding one subtree per non-bootstrap tenant.
+# Named once because two places must agree on it: `tenant_features_root` builds
+# paths with it, `iter_tenant_feature_files` prunes it. If those two ever drift,
+# the bootstrap tenant silently reads its neighbours' files again.
+TENANT_PARTITION_DIRNAME = "_tenants"
 LABELS_DIR = DATASET_ROOT / "labels"
 MASTER_LABELS = DATASET_ROOT / "labels.csv"
 LANGUAGE_LABELS = LABELS_DIR / "labels_language.csv"
@@ -39,7 +50,7 @@ DIALECT_LABELS = LABELS_DIR / "labels_dialect.csv"
 # NOTE: `dialect` is DEPRECATED as a semantic field (it conflated region /
 # vocabulary domain / collection campaign). It is kept because it still names
 # the physical storage directory. New code must use the vocabulary schema v2
-# columns below (see processed/shared/vocabulary.py + docs/VOCABULARY_SCHEMA_V2.md).
+# columns below (see processed/shared/vocabulary.py + docs/02-data/VOCABULARY_SCHEMA_V2.md).
 LABEL_FIELDS = [
     "class_uid",
     "class_idx",
@@ -61,7 +72,58 @@ LABEL_FIELDS = [
     "collection_campaign",
     "is_active",
     "motion_type",  # static | dynamic | mixed | "" (unknown)
+    # Owning tenant. Appended LAST so the Sheets mirror's column positions are
+    # unchanged. See app/tenancy.py for why the value is a constant and not a
+    # setting, and docs/11-worklog/BACKEND_WORK_PLAN.md item A1 for why the SOT
+    # needs the column at all when Postgres already has it.
+    TENANT_COLUMN,
+    # Vùng miền địa lý của KÝ HIỆU — trục riêng, không phải `dialect`.
+    #
+    # `dialect` trước đây gánh cả ba nghĩa (xem chú thích ở đầu LABEL_FIELDS);
+    # ba lớp dùng nó để chứa vùng miền đã được gỡ ngày 14/08/2026, xem
+    # E:\CTU_ProjectOutside\voya_lop_vung_2026-08-14\. Cột này tách nghĩa đó ra
+    # để `dialect` chỉ còn là tên thư mục lưu trữ.
+    #
+    # Giá trị chuẩn hoá: "bac" | "trung" | "nam" | "" (chưa biết).
+    # KHÔNG dùng "" như "vùng chung" — chưa biết thì để trống, đừng suy từ nơi
+    # thu hay từ người ký. Vùng của NGƯỜI KÝ là cột khác: signers.regional_group.
+    #
+    # Đặt sau TENANT_COLUMN nên vị trí các cột cũ trên bản chiếu Sheets không đổi.
+    "region",
 ]
+
+# Giá trị hợp lệ cho `region`. Định dạng: chữ thường, không dấu, không khoảng
+# trắng — cùng quy ước với dialect_id và profile_id.
+#: Mã vùng chưa qua phân loại. KHÁC `common`, và khác biệt đó là cả điểm của
+#: thiết kế: `unclassified` nghĩa là "chưa ai xác minh", `common` nghĩa là "đã
+#: xác minh rằng không cần phân biệt vùng". Gộp hai thứ này thì không bao giờ
+#: trả lời được "còn bao nhiêu nhãn đang chờ phân loại".
+#:
+#: Chọn `unclassified` chứ không `unknown`: "unknown" đọc lên như một sự thật
+#: vĩnh viễn, còn đây là một BƯỚC trong quy trình — nhãn đã vào hệ thống nhưng
+#: chưa qua khâu phân loại vùng, và sẽ có người xử lý.
+REGION_UNCLASSIFIED = "unclassified"
+
+#: Nguồn sự thật là bảng `regions` (theo tenant). Tuple này chỉ là bộ lọc đầu
+#: vào ở tầng ứng dụng cho năm mã của nền tảng — nó KHÔNG được phép là nơi
+#: định nghĩa tập giá trị, vì tenant thêm được vùng riêng (`tay-nguyen`,
+#: `tay-nam-bo`) mà không sửa mã.
+VALID_REGIONS = (REGION_UNCLASSIFIED, "common", "bac", "trung", "nam")
+
+
+def normalize_region(value: Any) -> str:
+    """Chuẩn hoá về một mã vùng; giá trị lạ hoặc rỗng thành `unclassified`.
+
+    Không bao giờ trả NULL hay chuỗi rỗng: cột `classes.region` là NOT NULL kể
+    từ v3.19, và "chưa biết" đã có một mã riêng để nói. Giá trị lạ KHÔNG bị
+    đoán thành một vùng cụ thể — nó rơi về `unclassified` để người phân loại
+    còn thấy mà xử lý, thay vì biến mất thành một vùng nào đó.
+    """
+    v = (str(value or "")).strip().lower()
+    v = {"bắc": "bac", "trung bộ": "trung", "nam bộ": "nam",
+         "north": "bac", "central": "trung", "south": "nam",
+         "chung": "common", "": REGION_UNCLASSIFIED}.get(v, v)
+    return v if v in VALID_REGIONS else REGION_UNCLASSIFIED
 
 
 @lru_cache(maxsize=1)
@@ -123,6 +185,157 @@ def vocabulary_defaults_for_dialect(dialect: str) -> Dict[str, str]:
     }
 
 
+def ambient_tenant() -> str:
+    """The tenant a newly created class belongs to.
+
+    Falls back to the bootstrap tenant when nothing is scoped, which is the same
+    answer `app.tenancy` gives for an absent value everywhere else: platform work
+    (the CSV import, a CLI) creates rows that provably predate multi-tenancy, and
+    those belong to the bootstrap tenant.
+
+    This is the WRITE side only. It never widens what a caller can read — that is
+    decided by the database policy, not by this function.
+    """
+    from app.tenant_context import current_tenant
+
+    return current_tenant() or DEFAULT_TENANT_ID
+
+
+def tenant_features_root(tenant_id: str) -> Path:
+    """Storage root for one tenant — the second isolation plane.
+
+    The bootstrap tenant keeps the historical layout; every other tenant gets its
+    own subtree. Two layouts coexist, split by TENANT rather than by time, and
+    that distinction is what makes this cheap:
+
+      * `ClassMetadata.hierarchy_path()` has twenty callers — previews, class
+        rename/move, the validator, oversampling, the reclassifier. Had the
+        bootstrap tenant's path changed, all twenty would need a new-then-legacy
+        fallback, and all 8.784 existing `.npz` files would sit behind that
+        fallback forever.
+      * Splitting by tenant instead gives each tenant exactly ONE layout. No read
+        path needs a fallback, no file moves, and every tenant created from here
+        on is partitioned from its first byte — the property actually claimed.
+
+    Moving the bootstrap tenant under `_tenants/default/` later is a rename of one
+    directory plus a `file_path` rewrite; nothing depends on the asymmetry.
+
+    `_tenants` is underscore-prefixed for the same reason `_profiles` and
+    `_versions` are in the registry: it namespaces a directory holding partitions
+    rather than data, and it cannot collide with a language code. Path traversal
+    is not a concern because `is_valid_tenant_id` excludes `/`, `\\` and `.` —
+    that restricted alphabet exists for exactly this reason.
+    """
+    tenant = normalize_tenant_id(tenant_id)
+    if tenant == DEFAULT_TENANT_ID:
+        return FEATURES_ROOT
+    return FEATURES_ROOT / TENANT_PARTITION_DIRNAME / tenant
+
+
+def ambient_tenant_features_root() -> Path:
+    """Storage root for the calling tenant."""
+    return tenant_features_root(ambient_tenant())
+
+
+def iter_tenant_feature_files(tenant_id: str):
+    """Every feature file BELONGING TO one tenant. Use this, not `root.rglob('*')`.
+
+    Why this exists
+    ---------------
+    `tenant_features_root` is deliberately asymmetric, and the asymmetry has a
+    consequence every tree-walking caller inherits:
+
+        tenant_features_root('iso_a').is_relative_to(tenant_features_root('default'))
+
+    is TRUE, because `_tenants/` lives INSIDE the bootstrap tenant's root. So a
+    walk rooted at the bootstrap tenant's directory descends into every other
+    tenant's data. The scope was passed correctly and the caller received the
+    right tenant — one tenant's scope simply contains all the others'.
+
+    That is not a hypothetical. Measured 17\\08\\2026 on three callers:
+
+    ```
+    _remove_tenant_files  (delete)     guarded, and its docstring names this exact trap
+    _add_feature_files    (export)     UNGUARDED -> `default-export.zip` carried
+                                       every other tenant's .npz files
+    tenant_storage_mb     (accounting) UNGUARDED -> bootstrap tenant billed 7 MB
+                                       where it owned 1 MB
+    ```
+
+    The asymmetry was understood once, on the destructive path, and not carried
+    to the two read paths. Hence one shared helper rather than a third copy of
+    the same `if` — a guard written per caller is a guard the fourth caller will
+    not know exists. `backend/tests/test_c5_export_confinement.py` fails if a new
+    caller walks the root directly.
+
+    Pruning happens during the walk, at the top level only. `_tenants` is
+    underscore-prefixed precisely so it cannot collide with a language code, so
+    excluding it at the root costs the bootstrap tenant nothing; a non-bootstrap
+    tenant is never pruned, because a `_tenants` directory inside its own subtree
+    would be its own data.
+    """
+    root = tenant_features_root(tenant_id)
+    if not root.exists():
+        return
+    la_goc = normalize_tenant_id(tenant_id) == DEFAULT_TENANT_ID
+    for thu_muc, con, tep in os.walk(root):
+        if la_goc and Path(thu_muc) == root:
+            con[:] = [d for d in con if d != TENANT_PARTITION_DIRNAME]
+        for ten in tep:
+            yield Path(thu_muc) / ten
+
+
+def class_storage_dir(meta: "ClassMetadata") -> str:
+    """Khoá lưu trữ (tương đối gốc dataset) của thư mục một lớp — NGUỒN DUY NHẤT.
+
+    Suy từ `hierarchy_path()`, nên luôn trùng vị trí tệp thật: gồm `_tenants/<id>/`,
+    `<lang>/common/` và `global_common/`. Đừng ghép tay `features/<lang>/<dialect>/…`
+    ở nơi khác — bản ghép tay trong `save_sequence_npz` từng gán khoá sai cho mẫu
+    của lớp tenant khác và lớp dùng chung (18/10/2026).
+    """
+    h = meta.hierarchy_path()
+    try:
+        rel = h.relative_to(FEATURES_ROOT)
+    except ValueError:
+        # Thư mục lớp không nằm dưới gốc dataset ĐANG cấu hình (gốc dataset đã
+        # dời, hoặc kho tạm của test): khoá vẫn là phần sau đoạn `features` cuối
+        # cùng — cùng cấu trúc, chỉ khác gốc. Không có đoạn đó thì không suy được.
+        name = FEATURES_ROOT.name
+        if name not in h.parts:
+            raise
+        i = len(h.parts) - 1 - h.parts[::-1].index(name)
+        rel = Path(*h.parts[i + 1:])
+    return (Path(FEATURES_ROOT.name) / rel).as_posix()
+
+
+def raw_class_dir(meta: "ClassMetadata") -> Path:
+    """Thư mục video thô của một lớp trên đĩa — NGUỒN DUY NHẤT.
+
+    `raw_videos/` không phân vùng theo tenant trên đĩa (tên tệp mang `upload_uid`
+    duy nhất); tenant của video nằm ở dòng `raw_uploads` và đi theo lớp. Đọc
+    `settings.dataset_root` lúc GỌI chứ không lúc nạp module, để test dời gốc
+    dataset được. Trước 18/10/2026 đường này được ghép tay ở sáu nơi.
+    """
+    from app.storage.drive_layout import RAW_VIDEOS_TREE
+
+    return (Path(settings.dataset_root) / RAW_VIDEOS_TREE / meta.language / meta.dialect
+            / meta.folder_name())
+
+
+def drive_class_folder(meta: "ClassMetadata") -> str:
+    """Thư mục Drive của một lớp, theo bố cục Drive đang chọn.
+
+    Suy từ `hierarchy_path()` — đúng cây trên đĩa, gồm `_tenants/<id>/`,
+    `global_common/` và `<lang>/common/` — rồi qua `drive_path_for`. Trước
+    18/10/2026 đường này viết cứng `features/<lang>/<dialect>/<lớp>`: lớp của
+    tenant khác được tạo thư mục Drive nằm trong cây của tenant gốc, và lớp dùng
+    chung được tạo dưới phương ngữ thay vì `common/`.
+    """
+    from app.storage.drive_layout import drive_path_for
+
+    return drive_path_for(class_storage_dir(meta))
+
+
 def slugify(text: str, maxlen: int = 40, preserve_vn_letters: bool = False) -> str:
     """ASCII slug. preserve_vn_letters keeps Ă/Â/Đ/Ê/Ô/Ơ/Ư distinct from their
     base letter for the fingerspelling alphabet (see class_registry.slugify)."""
@@ -170,54 +383,74 @@ def parse_bool(value) -> bool:
         return False
 
 
-def normalize_dialect(dialect: Optional[str]) -> str:
-    """ASCII-safe normalization for dialect values received from the API.
+# Ways people TYPE an existing dialect — not identities of their own. Keys are
+# already slugified ("Miền Bắc" arrives here as "mien-bac"). Adding a NEW
+# dialect belongs in the registry, never here.
+_INPUT_ALIASES = {
+    "mien-bac": "bac", "north": "bac",
+    "mien-trung": "trung", "central": "trung",
+    "mien-nam": "nam", "south": "nam",
+    "hoade": "hoa-de",
+    "cantho": "can-tho",
+    "chung": "common",
+}
 
-    (A second, older normalize_dialect + DIALECT_MAPPING used to sit above this
-    one and was silently shadowed — removed 2026-07-19; this is the only
-    implementation.)
+
+def _assert_known_dialect(dialect_id: str) -> None:
+    """Refuse to create a class in a dialect nobody registered.
+
+    This is the door that should have been shut: a sync script wrote the
+    non-existent recognition_profile "spa" into 7 classes and nothing objected,
+    because every layer accepted whatever string it was handed. Empty stays
+    allowed — an unset field shows up in the review report and gets fixed; a
+    plausible-looking wrong value never gets looked at again.
+
+    Fails OPEN when the registry is unreachable: a database blip must not stop
+    people collecting data. The FK on classes.dialect is the hard guarantee.
     """
-    if not dialect:
+    if not dialect_id:
+        return
+    try:
+        from app.vocabulary_registry import known_dialect_ids
+
+        known = known_dialect_ids()
+    except Exception as exc:
+        logger.warning("[VOCAB] không kiểm được dialect '%s' (registry lỗi: %s)", dialect_id, exc)
+        return
+    if known and dialect_id not in known:
+        raise ValueError(
+            f"Phương ngữ '{dialect_id}' chưa có trong danh mục. "
+            f"Tạo nó ở Thư viện nhãn trước, đừng gõ thẳng vào đây."
+        )
+
+
+def normalize_dialect(dialect: Optional[str], tenant_id: Optional[str] = None) -> str:
+    """Free-text dialect from the API -> a registered dialect_id.
+
+    Two near-identical copies of this function used to sit here, the second
+    silently shadowing the first (and missing "bang-chu-cai"). Both carried a
+    hand-maintained table that drifted from the data — "spa" was in neither.
+    The registry in Postgres is the list now; what stays here is only the
+    handful of INPUT SPELLINGS that are not identities: "Miền Bắc", "north" and
+    "bac" are three ways to type one dialect, not three dialects.
+
+    Unknown input passes through as its slug rather than raising: this runs on
+    every upload, and refusing here would reject data over a naming question.
+    The write-time guard in register_class is what actually blocks unknown
+    dialects, and it can explain itself.
+    """
+    from app.vocabulary_registry import resolve_dialect, slugify_dialect
+
+    slug = slugify_dialect(dialect)
+    if not slug:
         return ""
-
-    raw = str(dialect).strip()
-    if not raw:
-        return ""
-
-    lowered = raw.lower().replace("\u0111", "d")
-    ascii_base = unicodedata.normalize("NFKD", lowered)
-    ascii_base = "".join(c for c in ascii_base if not unicodedata.combining(c))
-    ascii_base = re.sub(r"[^a-z0-9]+", " ", ascii_base).strip()
-    compact = re.sub(r"\s+", " ", ascii_base)
-    slug = compact.replace(" ", "-")
-
-    robust_mapping = {
-        "bac": "bac",
-        "mien bac": "bac",
-        "trung": "trung",
-        "mien trung": "trung",
-        "nam": "nam",
-        "mien nam": "nam",
-        "north": "bac",
-        "central": "trung",
-        "south": "nam",
-        "hoa de": "hoa-de",
-        "hoade": "hoa-de",
-        "hoa-de": "hoa-de",
-        "can tho": "can-tho",
-        "cantho": "can-tho",
-        "can-tho": "can-tho",
-        "bang chu cai": "bang-chu-cai",
-        "bang-chu-cai": "bang-chu-cai",
-        "chung": "common",
-        "common": "common",
-    }
-
-    for candidate in (compact, slug):
-        if candidate in robust_mapping:
-            return robust_mapping[candidate]
-
-    return slug
+    slug = _INPUT_ALIASES.get(slug, slug)
+    try:
+        # Alias tables are tenant-owned. Falling back to the registry default
+        # here can turn a normal word label into the fingerspelling dialect.
+        return resolve_dialect(slug, tenant_id=tenant_id or ambient_tenant())
+    except Exception:
+        return slug                     # DB unreachable: never block a capture
 
 
 @dataclass
@@ -240,6 +473,18 @@ class ClassMetadata:
     collection_campaign: str = ""
     is_active: bool = True
     motion_type: str = ""  # static | dynamic | mixed | "" (unknown)
+    region: str = REGION_UNCLASSIFIED   # xem VALID_REGIONS / bảng `regions`
+    # Owning tenant. Last field and defaulted, so every existing positional and
+    # keyword construction keeps working unchanged. Defaulting here (rather than
+    # at each call site) is what makes it impossible to register a class with no
+    # tenant: there is one constructor and it always has an answer.
+    tenant_id: str = DEFAULT_TENANT_ID
+    # Mốc tạo THẬT đọc từ labels.csv. Trống = lớp mới, `to_label_row` mới được
+    # đóng dấu "bây giờ". Trước 17/09/2026 `to_label_row` luôn ghi now_str(),
+    # nên mỗi lần thu mẫu vào lớp cũ (đường camera gọi upsert_class) mốc tạo
+    # trong Postgres — và từ đó gói SOT — nhảy về thời điểm thu.
+    created_at: str = ""
+    migrated_at: str = ""
 
     def folder_name(self) -> str:
         if self.folder_override:
@@ -249,12 +494,18 @@ class ClassMetadata:
         return f"class_{self.slug}_{short_uid}"
 
     def hierarchy_path(self) -> Path:
+        """Directory holding this class's samples, partitioned by tenant.
+
+        See `tenant_features_root` for why the bootstrap tenant keeps the
+        historical layout while every other tenant gets its own subtree.
+        """
+        root = tenant_features_root(self.tenant_id)
         if self.is_common_global:
-            return FEATURES_ROOT / "global_common" / self.folder_name()
+            return root / "global_common" / self.folder_name()
         if self.is_common_language:
-            return FEATURES_ROOT / self.language / "common" / self.folder_name()
+            return root / self.language / "common" / self.folder_name()
         # dialect-specific
-        return FEATURES_ROOT / self.language / self.dialect / self.folder_name()
+        return root / self.language / self.dialect / self.folder_name()
 
     def to_label_row(self) -> Dict[str, Any]:
         return {
@@ -267,8 +518,8 @@ class ClassMetadata:
             "is_common_global": str(int(self.is_common_global)),
             "is_common_language": str(int(self.is_common_language)),
             "folder_name": self.folder_name(),
-            "created_at": now_str(),
-            "migrated_at": now_str(),
+            "created_at": self.created_at or now_str(),
+            "migrated_at": self.migrated_at or self.created_at or now_str(),
             "hands_required": str(self.hands_required or ""),
             "semantic_label": self.semantic_label or "",
             "vocabulary_scope": self.vocabulary_scope or "",
@@ -277,6 +528,8 @@ class ClassMetadata:
             "collection_campaign": self.collection_campaign or "",
             "is_active": "1" if self.is_active else "0",
             "motion_type": self.motion_type or "",
+            TENANT_COLUMN: normalize_tenant_id(self.tenant_id),
+            "region": normalize_region(self.region),
         }
 
     def write_metadata_json(self):
@@ -302,13 +555,18 @@ def _upgrade_labels_header_locked():
     header is missing columns. MUST be called while holding the MASTER_LABELS
     lock. All label writers use LABEL_FIELDS directly, so appending new-schema
     rows to an old-header file would silently misalign columns.
-    Old rows get "" for the new columns (DictReader restval)."""
+    Old rows get "" for the new columns (DictReader restval) — except tenant_id,
+    which is stamped with the bootstrap tenant because an empty tenant cell in
+    the source of truth means "unassigned", and every pre-A1 class provably
+    belongs to that tenant."""
     with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f, restval="")
         on_disk = reader.fieldnames or []
         if all(col in on_disk for col in LABEL_FIELDS):
             return
         rows = list(reader)
+    for row in rows:
+        row[TENANT_COLUMN] = tenant_id_of(row)
     tmp = MASTER_LABELS.with_suffix(".csv.tmp")
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS, extrasaction="ignore", restval="")
@@ -362,14 +620,44 @@ def _ensure_labels_file():
                 writer.writeheader()
 
 
-def load_labels() -> List[Dict[str, str]]:
+def _load_all_labels_unscoped() -> List[Dict[str, str]]:
+    """MỌI lớp của mọi tenant. Vượt qua ranh giới cách ly — dùng đúng chỗ.
+
+    Xem chú thích dài ở `dataset_samples._load_all_samples_unscoped()`: đây là
+    nửa còn lại của cùng một lỗ, đo được ngày 15/08/2026. Đường đọc lớp không đi
+    qua PostgreSQL nên RLS không bảo vệ gì; `labels.csv` có cột `tenant_id` mà
+    không đường nào hỏi tới.
+
+    Chỉ đường ĐỒNG BỘ / BẢO TRÌ được gọi. Danh sách được cưỡng chế bằng phép
+    kiểm kiến trúc, không bằng quy ước.
+    """
     _ensure_labels_file()
     with open(MASTER_LABELS, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
-def find_existing(language: str, dialect: str, slug: str) -> Optional[Dict[str, str]]:
-    rows = load_labels()
+def load_labels(tenant_id: Optional[str] = None) -> List[Dict[str, str]]:
+    """Hàng lớp MÀ TENANT NÀY ĐƯỢC THẤY. `tenant_id` bắt buộc.
+
+    `None` ném lỗi chứ không rơi về toàn cục, và cũng không rơi về `default`.
+    Xem `dataset_samples.list_samples()` về vì sao không có đường lùi.
+    """
+    from app.dataset_samples import TenantScopeRequired
+
+    if not (tenant_id or "").strip():
+        raise TenantScopeRequired(
+            "load_labels() can tenant_id. Duong bao tri doc toan bo kho phai "
+            "goi _load_all_labels_unscoped() — ten do la co y.")
+    scope = normalize_tenant_id(tenant_id)
+    return [r for r in _load_all_labels_unscoped() if tenant_id_of(r) == scope]
+
+
+def find_existing(tenant_id: str, language: str, dialect: str,
+                  slug: str) -> Optional[Dict[str, str]]:
+    # `tenant_id` đứng ĐẦU và bắt buộc: hàm này trả lời "lớp này đã tồn
+    # tại chưa", và câu trả lời chỉ có nghĩa bên trong một phạm vi. Đọc
+    # toàn kho sẽ báo "đã tồn tại" cho một lớp thuộc tổ chức khác.
+    rows = load_labels(tenant_id)
     for r in rows:
         if r["language"] == language and r["dialect"] == dialect and r["slug"] == slug:
             return r
@@ -409,6 +697,10 @@ def _load_labels_locked() -> List[Dict[str, str]]:
 
 def append_label_row(row: Dict[str, Any]):
     """Append a label row with TOCTOU-safe Check → Lock → Write."""
+    # DictWriter's restval defaults to "", so a row dict that omits tenant_id is
+    # written as an empty cell rather than rejected. Stamp it first. Copied, not
+    # mutated — callers reuse the dict after this returns.
+    row = {**row, TENANT_COLUMN: tenant_id_of(row)}
     _ensure_labels_file()
 
     lock = FileLock(str(MASTER_LABELS) + ".lock")
@@ -444,7 +736,10 @@ def sync_master_labels_to_gdrive() -> None:
 
 
 def regenerate_label_indexes():
-    rows = load_labels()
+    # Đường BẢO TRÌ, đọc toàn kho một cách hợp lệ: tệp chỉ mục nhãn là
+    # hiện vật CHUNG của cả cài đặt, không phải của một tổ chức. Gọi
+    # biến thể có tên dài để ý định lộ ra ngay tại chỗ đọc.
+    rows = _load_all_labels_unscoped()
     # language-level common summary
     lang_rows = []
     dialect_rows = []
@@ -563,6 +858,16 @@ def _build_meta_from_row(existing: Dict[str, str]) -> ClassMetadata:
         collection_campaign=(existing.get("collection_campaign") or "").strip(),
         is_active=parse_bool(existing.get("is_active", "1")) if str(existing.get("is_active") or "").strip() else True,
         motion_type=(existing.get("motion_type") or "").strip(),
+        region=normalize_region(existing.get("region")),
+        created_at=(existing.get("created_at") or "").strip(),
+        migrated_at=(existing.get("migrated_at") or "").strip(),
+        # Without this every class read back from labels.csv would come out as
+        # the bootstrap tenant, and since A4 derives the storage directory from
+        # this field, tenant B's samples would be written into tenant A's tree —
+        # the exact cross-tenant leak the partition exists to prevent. Blank
+        # means "written before tenants existed", which `tenant_id_of` resolves
+        # to the bootstrap tenant.
+        tenant_id=tenant_id_of(existing),
     )
 
 
@@ -585,6 +890,7 @@ def register_class(
     dialect: str,
     is_common_global: bool = False,
     is_common_language: bool = False,
+    region: str | None = None,
 ) -> ClassMetadata:
     """Register or fetch existing class with TOCTOU-safe locking.
 
@@ -598,7 +904,8 @@ def register_class(
     """
     _ensure_labels_file()
     language = language.lower().strip()
-    dialect = dialect.lower().strip()
+    dialect = normalize_dialect(dialect)
+    _assert_known_dialect(dialect)
 
     slug = slugify(label_original, preserve_vn_letters=is_alphabet_dialect(dialect))
 
@@ -616,16 +923,98 @@ def register_class(
     with lock:
         # 1. CHECK — read fresh state from disk while holding lock
         rows = _load_labels_locked()
-        for r in rows:
-            if (
-                r.get("language") == language_key
-                and r.get("dialect") == dialect_key
-                and r.get("slug") == slug
-            ):
-                # Class already exists — return it
-                meta = _build_meta_from_row(r)
-                # Release lock before triggering sync
-                break
+
+        # `region=None` (KHÔNG nói ra) khác `region='unclassified'` (nói rõ).
+        #
+        # Phân biệt này sinh ra từ một hồi quy đã lên sản xuất ngày 15/08/2026.
+        # Khi `region` bước vào phép tìm, `unclassified` trở thành một giá trị
+        # CỤ THỂ phải khớp — nhưng mọi đường thu mẫu (`upload.py` video và
+        # camera, `processing/pipeline.py`) gọi hàm này mà không truyền vùng,
+        # nên chúng mặc nhiên đi tìm `region='unclassified'`.
+        #
+        # Sản xuất có 60/60 nhãn mang `region='nam'`. Phép tìm không khớp cái
+        # nào, và hàm đi thẳng xuống nhánh TẠO. Đo được: thu một mẫu cho nhãn
+        # `tom` đã tồn tại thì sinh ra lớp `tom` thứ hai với
+        # `region='unclassified'`, mẫu rơi vào lớp ma đó. Im lặng, API trả 200,
+        # và khoá duy nhất năm cột KHÔNG chặn vì hai vùng là hai lớp hợp lệ.
+        #
+        # Nên: không nói ra vùng nghĩa là "nhãn nào cũng được, miễn không mơ
+        # hồ" — chứ không phải "vùng phải là unclassified".
+        region_given = region is not None
+        region_key = normalize_region(region)
+
+        cung_nhan = [
+            r for r in rows
+            if r.get("language") == language_key
+            and r.get("dialect") == dialect_key
+            and r.get("slug") == slug
+        ]
+        if region_given:
+            # Nói rõ vùng nào thì so khớp CHÍNH XÁC vùng ấy, không nới.
+            khop = [r for r in cung_nhan
+                    if normalize_region(r.get("region")) == region_key]
+        else:
+            # Không nói ra vùng: KHÔNG so khớp chính xác trước.
+            #
+            # Bản đầu vẫn lọc theo `region_key` (= `unclassified` khi bỏ trống)
+            # rồi mới xét mơ hồ nếu không khớp gì. Nghe hợp lý và SAI: khi một
+            # trong các biến thể tình cờ LÀ `unclassified`, phép lọc khớp ngay
+            # và nhánh kiểm mơ hồ không bao giờ chạy — hệ thống lặng lẽ chọn
+            # bản `unclassified` thay vì từ chối.
+            #
+            # Bộ kiểm không bắt được vì nó dựng `bac` + `nam`; smoke sau triển
+            # khai 15/08 bắt được, vì nó dựng đúng tổ hợp `nam` + `unclassified`
+            # do chính bước trước sinh ra. Bài học: hai biến thể "khác vùng"
+            # phải bao gồm cả trường hợp một trong hai là giá trị MẶC ĐỊNH.
+            khop = cung_nhan
+            if len(cung_nhan) > 1:
+                # Fail-closed, và đây đúng là chỗ phải đóng. Từ điển quốc gia có
+                # 483 từ mang biến thể miền; khi `ăn|bac` và `ăn|nam` cùng tồn
+                # tại thì một yêu cầu chỉ nói "ăn" là MƠ HỒ. Đoán một trong hai
+                # là ghi dữ liệu vào lớp sai — hỏng nặng hơn hẳn việc từ chối.
+                co_vung = ", ".join(sorted(
+                    normalize_region(r.get("region")) for r in cung_nhan))
+                raise ValueError(
+                    f"Nhãn '{slug}' ({language_key}/{dialect_key}) có nhiều biến "
+                    f"thể vùng: {co_vung}. Phải nói rõ vùng nào, hoặc gọi bằng "
+                    f"class_uid.")
+            # Đúng một biến thể: nhãn đã có, người gọi chỉ không nhắc tới vùng.
+            # Trả về lớp đang có thay vì đẻ thêm một bản sao `unclassified`.
+            #
+            # ĐÂY LÀ ĐƯỜNG TƯƠNG THÍCH CŨ, KHÔNG PHẢI CÁCH CHỌN LỚP.
+            # ---------------------------------------------------------------
+            # Nhánh này tồn tại để cứu một thế giới mà mỗi nhãn chỉ có ĐÚNG MỘT
+            # biến thể đang tồn tại — tức là sản xuất hôm nay, 60 nhãn đều
+            # `region='nam'`, và các client cũ gửi lên nhãn dạng chuỗi. Nó
+            # KHÔNG phải hợp đồng lâu dài.
+            #
+            # Cách đúng để gắn mẫu vào một lớp ĐÃ TỒN TẠI là `class_uid`. Ngay
+            # khi `ăn|bac` và `ăn|nam` cùng có mặt, `upload("ăn")` PHẢI thất
+            # bại — hệ thống không được đoán — và nhánh trên sẽ ném lỗi. Lúc đó
+            # đường đi đúng là: giao diện chọn lớp cụ thể → `class_uid` →
+            # attach vào đúng lớp ấy. Không phải label + dialect + region rồi
+            # tìm lại lớp.
+            #
+            # Viết dài dòng ở đây vì một lý do cụ thể: nhánh này TIỆN, và cái
+            # tiện thì được sao chép. Nếu không nói rõ nó là đường tạm, vài
+            # tháng nữa sẽ có API mới dựng quanh nó, và `class_uid` sẽ không
+            # bao giờ thành định danh thật ở phía GHI.
+
+        # `region` nằm TRONG phép so ở trên, không đứng ngoài.
+        #
+        # Thiếu nó thì phép tìm dùng khoá (slug, language, dialect) trong khi cơ
+        # sở dữ liệu định danh lớp bằng (…, region) — hai định nghĩa khác nhau
+        # về "lớp nào". Hệ quả đo được: tạo `ăn|pho-thong|bac` rồi tạo
+        # `ăn|pho-thong|nam` thì lần thứ hai KHÔNG tạo gì cả, nó trả về lớp
+        # `bac` — cùng `class_uid`, cùng `region='bac'`. Người dùng tưởng đã có
+        # biến thể miền Nam, và mọi mẫu thu sau đó rơi vào lớp miền Bắc.
+        #
+        # Im lặng hoàn toàn: không lỗi, không cảnh báo, API trả 200 kèm một lớp
+        # trông hợp lệ. Với 483 từ có biến thể miền trong từ điển quốc gia, đây
+        # là đường nhập QIPEDC gộp sạch chúng lại.
+        if khop:
+            # Class already exists — return it
+            meta = _build_meta_from_row(khop[0])
         else:
             # 2. ALLOCATE — compute next class_idx safely inside lock
             indices = _collect_indices(rows)
@@ -654,6 +1043,16 @@ def register_class(
                 vocabulary_group=v2["vocabulary_group"],
                 motion_type=v2["motion_type"],
                 collection_campaign=v2["collection_campaign"],
+                # Vùng do người tạo chọn; bỏ trống thì `unclassified` — và đó
+                # là một trạng thái CÓ NGHĨA, không phải chỗ trống: "đã vào hệ
+                # thống, chưa qua khâu phân loại vùng". Nó cố ý KHÔNG đoán
+                # thành một vùng cụ thể, để người phân loại còn thấy mà xử lý.
+                region=normalize_region(region),
+                # Owner of the new class. Without this every class created
+                # through the app would be born under the bootstrap tenant no
+                # matter who created it, and the storage partition — which is
+                # derived from this field — would never engage.
+                tenant_id=ambient_tenant(),
             )
 
             # 3. WRITE — append immediately after allocate
@@ -671,6 +1070,25 @@ def register_class(
 
     # --- Post-lock work (safe to do outside lock) ---
 
+    # Mirror the new class into Postgres NOW, not at the next boot.
+    #
+    # labels.csv is the source of truth and `sync_missing_data_on_startup`
+    # heals the DB from it — but only at boot. Between a registration and the
+    # next restart the class did not exist in `classes`, so every row that
+    # references it failed its foreign key: `raw_uploads` for a video upload
+    # (swallowed at debug level), then every sample the worker extracted from
+    # that video (73 rows on 15/09/2026, visible in the CSV, absent from the
+    # DB — no owner lookup, no trash, no moderation). The camera path only
+    # worked by accident: it calls `set_class_hands_required`, which happens
+    # to upsert the class. Same best-effort contract as that function.
+    try:
+        from app.storage.metadata_db import upsert_class as _db_upsert_class
+
+        _db_upsert_class(meta.to_label_row())
+    except Exception as exc:
+        logger.warning("[CLASS] DB mirror of new class %s failed (CSV is authoritative; "
+                       "boot sync will retry): %s", meta.class_uid, exc)
+
     # Regenerate derived index files
     regenerate_label_indexes()
 
@@ -681,7 +1099,7 @@ def register_class(
         try:
             from app.storage.gdrive_client import get_gdrive_client
 
-            drive_folder_path = f"features/{meta.language}/{meta.dialect}/{meta.folder_name()}"
+            drive_folder_path = drive_class_folder(meta)
             get_gdrive_client().ensure_path(drive_folder_path)
             logger.info("[CLASS] Ensured Drive folder path=%s", drive_folder_path)
         except Exception as exc:
@@ -701,9 +1119,16 @@ def register_class(
 
 
 def list_classes(
-    language: Optional[str] = None, dialect: Optional[str] = None
+    language: Optional[str] = None, dialect: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> List[ClassMetadata]:
-    rows = load_labels()
+    """Lớp MÀ TENANT NÀY ĐƯỢC THẤY. `tenant_id` bắt buộc — xem `load_labels()`.
+
+    `tenant_id` đứng SAU hai tham số lọc cũ để không đổi thứ tự vị trí của
+    caller hiện có; nhưng nó không có mặc định dùng được, nên caller nào quên
+    truyền sẽ hỏng ồn ào chứ không lặng lẽ đọc toàn kho.
+    """
+    rows = load_labels(tenant_id)
     out: List[ClassMetadata] = []
     for r in rows:
         if language and r["language"] != language:
@@ -721,6 +1146,25 @@ def list_classes(
                 is_common_global=parse_bool(r.get("is_common_global")),
                 is_common_language=parse_bool(r.get("is_common_language")),
                 hands_required=parse_hands_required(r.get("hands_required")),
+                # `region` phải đi theo, không được để rơi về mặc định.
+                #
+                # Thiếu dòng này thì `list_classes()` trả về `unclassified` cho
+                # MỌI lớp, và `/classes/list` — thứ giao diện dựng danh sách từ
+                # đó — không phân biệt nổi hai biến thể miền của cùng một từ.
+                # Hai dòng `ăn` sẽ hiện ra giống hệt nhau. Với 483 từ có biến
+                # thể miền trong từ điển quốc gia, đó là hỏng ngay ở lối vào.
+                region=normalize_region(r.get("region")),
+                # Same reason as in `_build_meta_from_row`: `hierarchy_path()`
+                # is derived from this, so dropping it points every listed class
+                # at the bootstrap tenant's directory tree.
+                #
+                # This is a second, partial copy of `_build_meta_from_row` that
+                # has already drifted from it (no folder_override, none of the
+                # vocabulary-v2 cells). Collapsing the two is the right fix but
+                # changes `folder_name()` for every caller of `list_classes`,
+                # which is more than this change should carry — recorded in
+                # BACKEND_WORK_PROGRESS.md §9.5 instead of done in passing.
+                tenant_id=tenant_id_of(r),
             )
         )
     return out
@@ -749,6 +1193,7 @@ def get_or_register_class(
     dialect: str = "",
     is_common_global: bool = False,
     is_common_language: bool = False,
+    region: str | None = None,
 ) -> ClassMetadata:
     """Convenience wrapper used by pipelines & routes.
     If class exists returns metadata, else registers.
@@ -781,13 +1226,19 @@ def get_or_register_class(
             return None
         return None
 
+    # Scoped to the CALLING tenant's subtree, not to FEATURES_ROOT. Searching
+    # the shared root would let tenant B adopt a directory belonging to the
+    # bootstrap tenant whenever their slugs collide — and slug collisions are
+    # the normal case here, since two deployments collecting Vietnamese sign
+    # language will both have a folder for "cam-on".
+    tenant_root = ambient_tenant_features_root()
     base_dir = None
     if is_common_global:
-        base_dir = FEATURES_ROOT / "global_common"
+        base_dir = tenant_root / "global_common"
     elif is_common_language or dia == "common":
-        base_dir = FEATURES_ROOT / lang / "common"
+        base_dir = tenant_root / lang / "common"
     elif dia:
-        base_dir = FEATURES_ROOT / lang / dia
+        base_dir = tenant_root / lang / dia
 
     if base_dir is not None:
         legacy_folder = _find_legacy_folder(base_dir)
@@ -819,6 +1270,10 @@ def get_or_register_class(
                 and not is_common_global,
                 folder_override=legacy_folder,
                 class_idx=cls_idx_val,
+                region=normalize_region(region),
+                # The folder was found under this tenant's own subtree (see
+                # `tenant_root` above), so it belongs to this tenant.
+                tenant_id=ambient_tenant(),
             )
             # ensure metadata.json exists for this class
             try:
@@ -834,6 +1289,7 @@ def get_or_register_class(
         dialect=dia,
         is_common_global=is_common_global,
         is_common_language=is_common_language,
+        region=region,
     )
 
 

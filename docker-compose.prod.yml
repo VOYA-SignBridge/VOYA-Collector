@@ -6,7 +6,7 @@ services:
       - VITE_BASE_PATH=${VITE_BASE_PATH:-/}
       - VITE_API_URL=${VITE_API_URL:-}
     image: voya_frontend:latest
-    container_name: voya_frontend
+    container_name: ${CONTAINER_PREFIX:-voya}_frontend
     mem_limit: 128m
     expose:
       - "80"
@@ -28,8 +28,8 @@ services:
   realtime_service:
     build: ./backend/realtime_service
     image: voya_realtime_service:latest
-    container_name: voya_realtime_service
-    mem_limit: 800m
+    container_name: ${CONTAINER_PREFIX:-voya}_realtime_service
+    mem_limit: ${REALTIME_MEM:-800m}
     stop_grace_period: 20s
     expose:
       - "8010"
@@ -66,8 +66,12 @@ services:
   backend:
     build: ./backend
     image: voya_backend:latest
-    container_name: voya_backend
-    mem_limit: 1200m
+    container_name: ${CONTAINER_PREFIX:-voya}_backend
+    # Measured 917 MB resident at idle (mediapipe + torch + matplotlib imports
+    # dominate, and it stays flat there after TTS prewarm). At the old 1200m
+    # that was 76% consumed before serving a single request, leaving too little
+    # for concurrent uploads. 1500m keeps ~40% free at rest.
+    mem_limit: ${BACKEND_MEM:-1500m}
     # Drain in-flight HTTP requests on SIGTERM before SIGKILL — an update never
     # cuts off an active user mid-request (uvicorn shuts down gracefully).
     stop_grace_period: 30s
@@ -107,10 +111,18 @@ services:
 
   worker:
     image: voya_backend:latest
-    container_name: voya_worker
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
+    container_name: ${CONTAINER_PREFIX:-voya}_worker
     # Hard RAM ceiling: isolates the video worker so a leak/spike can never
     # starve the parallel GPU trainer or the DB (12GB host budget).
-    mem_limit: 2500m
+    mem_limit: ${WORKER_MEM:-2500m}
     # Celery warm shutdown: finish the current video task before exiting so an
     # update doesn't discard in-progress processing.
     stop_grace_period: 60s
@@ -139,11 +151,16 @@ services:
       --max-memory-per-child=1200000
       --loglevel=${LOG_LEVEL:-INFO}
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=8 >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 12s
+      # Measured at 10.3s on an IDLE host against the old 12s timeout — the cost
+      # is importing the whole app (mediapipe/torch) in a fresh interpreter, not
+      # the ping itself. Any real load pushed it over and marked a perfectly
+      # healthy worker unhealthy. It also burned ~10s of CPU every 30s forever.
+      # 60s interval halves that waste; 30s timeout gives 3x margin.
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=15 >/dev/null 2>&1 || exit 1"]
+      interval: 60s
+      timeout: 30s
       retries: 5
-      start_period: 60s
+      start_period: 90s
     depends_on:
       redis:
         condition: service_healthy
@@ -166,11 +183,24 @@ services:
   # before relying on it. Remove this block to fall back to CPU-only.
   trainer:
     image: voya_backend:latest
-    container_name: voya_trainer
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
+    container_name: ${CONTAINER_PREFIX:-voya}_trainer
     # Largest RAM slice: dataset (.npz features) is materialized into host RAM
     # for training. GPU holds the model/activations; host RAM holds the data.
     # Threads left at default — training data loading benefits from them.
-    mem_limit: 3500m
+    #
+    # Raised from 3500m: a real 8-epoch TCN run over the current 1002-sample /
+    # 40-class dataset sat flat at 3.05 GiB — 89% of the old cap — for its whole
+    # duration. It survived, but the headroom scales with the dataset and an
+    # OOM-kill here loses the entire training job, so give it room to grow.
+    mem_limit: ${TRAINER_MEM:-4000m}
     # A training job can run for many minutes; don't kill it on a stray stop.
     # Best practice: only update the trainer when no job is running (jobs are
     # serialized, so the admin can drain it first). This grace covers cleanup.
@@ -187,13 +217,18 @@ services:
       - ./dataset:/dataset
       - ./gdrive:/gdrive
       - .:/workspace
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # GPU reservation lives in docker-compose.gpu.yml, not here.
+    #
+    # `driver: nvidia` is not a hint — Docker resolves it at container-create
+    # time, so on any host without the NVIDIA Container Toolkit this service
+    # died immediately with `could not select device driver "nvidia" with
+    # capabilities: [[gpu]]`, taking the deploy with it. That is every laptop and
+    # every CPU-only server, i.e. exactly the machines used for a demo.
+    #
+    # train_tcn.py already selects CUDA via torch.cuda.is_available(), so the
+    # CPU fallback needs no code change. On a GPU host, add the extra file:
+    #   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+    #                  -f docker-compose.gpu.yml up -d --build
     # --max-tasks-per-child=1: recycle the supervisor child after every training
     # job so any memory it touched is returned to the OS immediately ("trả liền").
     # The GPU is already freed by the training subprocess exiting; this covers the
@@ -203,11 +238,16 @@ services:
     # runs in a subprocess), so a long job won't flap this. Health never triggers
     # a restart in plain Compose, so it can't kill a running job either.
     healthcheck:
-      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=8 >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 12s
+      # Measured at 10.3s on an IDLE host against the old 12s timeout — the cost
+      # is importing the whole app (mediapipe/torch) in a fresh interpreter, not
+      # the ping itself. Any real load pushed it over and marked a perfectly
+      # healthy worker unhealthy. It also burned ~10s of CPU every 30s forever.
+      # 60s interval halves that waste; 30s timeout gives 3x margin.
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=15 >/dev/null 2>&1 || exit 1"]
+      interval: 60s
+      timeout: 30s
       retries: 5
-      start_period: 60s
+      start_period: 90s
     depends_on:
       redis:
         condition: service_healthy
@@ -219,7 +259,15 @@ services:
 
   celery-beat:
     image: voya_backend:latest
-    container_name: voya_celery_beat
+    # Same build as `backend`: these four run the identical image, just with a
+    # different command. Without a build section Compose can only try to PULL
+    # voya_backend:latest — which exists nowhere — so a machine that has never
+    # built it fails with "pull access denied for voya_backend". It worked on
+    # machines where an earlier build had left the tag in the local image cache,
+    # which is exactly why it slipped through. Compose builds a shared
+    # context+tag once and the rest reuse it, so this costs nothing.
+    build: ./backend
+    container_name: ${CONTAINER_PREFIX:-voya}_celery_beat
     mem_limit: 256m
     env_file:
       - .env
@@ -251,8 +299,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: voya_redis
-    mem_limit: 512m
+    container_name: ${CONTAINER_PREFIX:-voya}_redis
+    mem_limit: ${REDIS_MEM:-512m}
     # Bound Redis memory. volatile-lru evicts only keys WITH a TTL (TTS cache,
     # expiring task results) — broker queue keys have no TTL and are never
     # dropped, so queued Celery tasks are not lost under memory pressure.
@@ -271,8 +319,8 @@ services:
 
   postgres:
     image: postgres:17
-    container_name: voya_postgres
-    mem_limit: 768m
+    container_name: ${CONTAINER_PREFIX:-voya}_postgres
+    mem_limit: ${POSTGRES_MEM:-768m}
     # Give Postgres time for a clean shutdown (flush + checkpoint) before
     # SIGKILL — protects data integrity on stop/update.
     stop_grace_period: 60s
@@ -296,13 +344,22 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: voya_nginx
+    container_name: ${CONTAINER_PREFIX:-voya}_nginx
     mem_limit: 128m
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
-      - "8000:8000"
-      - "8001:8001"
+      # NOTE: no :443 mapping. The TLS vhost added in 8c21320 is no longer in
+      # nginx.conf (nothing inside the container listens on 443) and certs/ is
+      # empty, so the mapping only served to make the container fail to start
+      # wherever 443 was already taken — which is the normal case on a shared
+      # host. TLS is terminated by the campus proxy in front of this gateway.
+      # To serve TLS here again: restore the `listen 443 ssl` server block,
+      # generate certs/ , then add "${NGINX_HTTPS_PORT:-443}:443" back.
+      # Loopback-only: see the note in docker-compose.yml. On the CTU host these
+      # two would otherwise be reachable from the campus network and would skip
+      # every limit_req zone the :80 gateway applies.
+      - "${DEBUG_BIND_HOST:-127.0.0.1}:${NGINX_BACKEND_PORT:-8000}:8000"
+      - "${DEBUG_BIND_HOST:-127.0.0.1}:${NGINX_HEALTH_PORT:-8001}:8001"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro

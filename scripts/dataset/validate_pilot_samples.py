@@ -47,7 +47,47 @@ sys.path.insert(0, str(REPO_ROOT))
 from processed.shared.normalization import normalize_hands_vector_126  # noqa: E402
 from processed.shared.vocabulary import RECOGNITION_PROFILES, validate_label_v2  # noqa: E402
 
-EXPECTED_STORAGE_CONTRACT = "npz_v2"
+def raw_archive_path(npz_path: Path) -> Path:
+    """dataset/features/<...>/x.npz -> dataset/raw/<...>/x.npz
+
+    Mirrors app.dataset_samples.raw_archive_path, which is the definition. It
+    is restated here rather than imported because this gate runs standalone and
+    the backend package is not importable from a bare checkout — the backend
+    container carries its own copy of the normalizer for the same reason.
+    """
+    parts = list(npz_path.resolve().parts)
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i] == "features":
+            parts[i] = "raw"
+            return Path(*parts)
+    return npz_path.parent / "raw" / npz_path.name
+
+
+def load_raw_landmarks(npz_path: Path, keys: set, z):
+    """The recording, from wherever this sample's era put it.
+
+    Contract v2 kept it inline; v3 moved it to its own archive so the file the
+    training loader opens every epoch holds only what the model reads. Both are
+    valid on disk and neither is rewritten, so the gate accepts both.
+    """
+    if "landmarks_raw" in keys:
+        return np.asarray(z["landmarks_raw"], dtype=np.float32), None
+    archived = raw_archive_path(npz_path)
+    if not archived.is_file():
+        return None, "landmarks_raw absent from npz and no raw archive alongside it"
+    try:
+        with np.load(archived, allow_pickle=True) as rz:
+            if "landmarks_raw" not in rz:
+                return None, f"raw archive {archived.name} has no landmarks_raw"
+            return np.asarray(rz["landmarks_raw"], dtype=np.float32), None
+    except Exception as exc:
+        return None, f"raw archive unreadable: {exc}"
+
+
+# v2 kept raw inline; v3 splits it into dataset/raw/. Both satisfy the pilot
+# contract — what the gate actually requires is that the raw recording EXISTS
+# and reproduces the normalized array, not which file holds it.
+EXPECTED_STORAGE_CONTRACT = {"npz_v2", "npz_v3_split_raw"}
 EXPECTED_NORMALIZATION = "hands126_v1"
 VALID_QUALITY_STATUS = {"ok", "flagged"}
 # QC metrics the collection path attaches; a pilot sample without them cannot
@@ -91,14 +131,16 @@ def validate_sample(npz_path: Path, labels_by_folder: dict, active_signers: set,
         # required nor desirable here.
         with np.load(npz_path, allow_pickle=False) as z:
             keys = set(z.keys())
-            required = {"sequence", "landmarks_normalized", "landmarks_raw",
+            required = {"sequence", "landmarks_normalized",
                         "frame_valid_mask", "left_hand_valid_mask", "right_hand_valid_mask"}
             missing = required - keys
+            raw, raw_err = load_raw_landmarks(npz_path, keys, z)
+            if raw_err:
+                errors.append(raw_err)
             if missing:
                 errors.append(f"npz missing keys: {sorted(missing)}")
-            else:
+            elif raw is not None:
                 norm = z["landmarks_normalized"]
-                raw = z["landmarks_raw"]
                 fm = z["frame_valid_mask"]
                 lm = z["left_hand_valid_mask"]
                 rm = z["right_hand_valid_mask"]
@@ -167,8 +209,9 @@ def validate_sample(npz_path: Path, labels_by_folder: dict, active_signers: set,
     if norm_ver and norm_ver != EXPECTED_NORMALIZATION:
         errors.append(f"normalization_version '{norm_ver}' != '{EXPECTED_NORMALIZATION}'")
     store_ver = str(side.get("storage_contract_version") or "").strip()
-    if store_ver and store_ver != EXPECTED_STORAGE_CONTRACT:
-        errors.append(f"storage_contract_version '{store_ver}' != '{EXPECTED_STORAGE_CONTRACT}'")
+    if store_ver and store_ver not in EXPECTED_STORAGE_CONTRACT:
+        errors.append(
+            f"storage_contract_version '{store_ver}' not in {sorted(EXPECTED_STORAGE_CONTRACT)}")
 
     # QC status must be recorded, otherwise no quality-filtered experiment can
     # ever be run over this campaign.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Hands, HAND_CONNECTIONS } from "@mediapipe/hands";
 import { Camera } from "@mediapipe/camera_utils";
 import * as drawing from "@mediapipe/drawing_utils";
@@ -14,30 +14,41 @@ import {
   clampCaptureCount,
 } from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
-import {
-  AlertTriangleIcon,
-  BanIcon,
-  ChartBarIcon,
-  CheckCircleIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ClipboardListIcon,
-  EyeIcon,
-  EyeOffIcon,
-  FolderIcon,
-  LightbulbIcon,
-  PauseCircleIcon,
-  TargetIcon,
-  VideoIcon,
-  XIcon,
-} from "./ui/Icons";
 import AddDialectModal from "./AddDialectModal";
+import CreateLabelModal from "./CreateLabelModal";
 import { getClassesList, getClassesStats } from "../api/dataset";
 import { fetchLabelSuggestions, fetchCollectorSuggestions, getPreference, setPreference } from "../api/preferences";
-import { assignHandSlots, wristOf } from "../utils/handIdentity";
+import { useBackClosesOverlay } from "../hooks/useBackClosesOverlay";
+import { assignHandSlots, sourceOf, wristOf } from "../utils/handIdentity";
 import type { HandAnchor, HandDetection } from "../utils/handIdentity";
 import { HAND_TRACKING_OPTIONS, MP_HANDS_VERSION } from "../config/handTracking";
 import { formatSessionLabel } from "../utils/session";
+import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
+import { Trans, tr, useI18n } from "../i18n";
+import {
+  AlertTriangleIcon,
+  BanIcon,
+  BoltIcon,
+  CheckCircleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ClipboardIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FilmIcon,
+  FolderIcon,
+  HandIcon,
+  LightbulbIcon,
+  LinkIcon,
+  PauseIcon,
+  PencilIcon,
+  RepeatIcon,
+  SparkleIcon,
+  TargetIcon,
+  UserIcon,
+  ChartBarIcon,
+  XIcon,
+} from "./ui/Icons";
 
 // ---------------------------------------------------------------------------
 // Module-level constants — stable across renders, safe in hook dep arrays.
@@ -49,6 +60,19 @@ const FIXED_TARGET_FRAMES = TARGET_FRAMES;
 type CaptureFrame = {
   left_hand: MediaPipeLandmark[];
   right_hand: MediaPipeLandmark[];
+  /**
+   * MediaPipe `world_landmarks` — metres about the hand's geometric centre.
+   *
+   * Stored for DISPLAY only. The model is trained on left_hand/right_hand and
+   * never sees these, so adding them changes no feature the network reads.
+   * They exist because the image-space z in left_hand/right_hand is a relative
+   * depth regression, not a measurement: measured on this corpus it spans only
+   * ~20% of a hand's own width, which no renderer can undo.
+   *
+   * Absent when MediaPipe returned none for that hand.
+   */
+  left_hand_world?: MediaPipeLandmark[];
+  right_hand_world?: MediaPipeLandmark[];
   timestamp_ms?: number;
   fallback_used?: boolean;
   confidence?: number;
@@ -69,10 +93,8 @@ const MIRROR_PREVIEW = parseBoolEnv(import.meta.env.VITE_MIRROR_PREVIEW, true);
 // frames to MediaPipe Hands, the model — which was trained on mirrored selfie
 // images — returns handedness labels from the CAMERA's perspective, which is
 // the OPPOSITE of the person's:
-//
 //   MediaPipe "Left"  → user's actual RIGHT hand  (for front/mirrored camera)
 //   MediaPipe "Right" → user's actual LEFT hand
-//
 // We must swap the labels so `left_hand` / `right_hand` in saved data matches
 // the person's anatomy.  Set VITE_SWAP_HANDEDNESS=0 to disable if your setup
 // sends pre-mirrored frames to MediaPipe (e.g., a rear-facing camera).
@@ -96,20 +118,14 @@ const RENDER_SNAP_DISTANCE = 0.12;
 // Thứ tự khớp recognition profiles v2: Bảng chữ cái là nhóm độc lập, các miền
 // hiển thị đầy đủ "Miền ..." cho rõ nghĩa. Danh sách này chỉ là fallback khi
 // chưa tải được catalog từ server.
-const DEFAULT_DIALECTS = ["Bảng chữ cái", "Miền Bắc", "Miền Trung", "Miền Nam", "Hòa Đê"];
+// Dialects come from GET /vocabulary/registry, not from a list in this file.
+// The previous constant held DISPLAY NAMES ("Miền Bắc") while serverDialects
+// below holds SLUGS ("bac"), so merging the two produced a picker with the same
+// dialect listed twice under two spellings. There is no hardcoded fallback on
+// purpose: an empty picker is a visible failure, a stale hardcoded one is not.
 const DEFAULT_LANGUAGES = ["vn", "en"];
 
-const DIALECT_LABELS: Record<string, string> = {
-  common: "Chung",
-  "bang-chu-cai": "Bảng chữ cái",
-  bac: "Miền Bắc",
-  trung: "Miền Trung",
-  nam: "Miền Nam",
-  "hoa-de": "Hòa Đê",
-  "can-tho": "Cần Thơ",
-  spa: "Spa",
-};
-
+// @i18n-key-table — tên ngôn ngữ là KHOÁ, dịch ở `languageLabel()` bên dưới.
 const LANGUAGE_LABELS: Record<string, string> = {
   vn: "Tiếng Việt",
   vi: "Tiếng Việt",
@@ -165,40 +181,27 @@ const normalizeDialectKey = (value?: string) => {
   const normalized = normalizeText(value || "");
   if (!normalized) return "";
 
-  const compact = normalized.replace(/\s+/g, " ");
-  const slug = compact.replace(/\s+/g, "-");
-
-  const mappings: Record<string, string> = {
-    bac: "bac",
-    "mien bac": "bac",
-    trung: "trung",
-    "mien trung": "trung",
-    nam: "nam",
-    "mien nam": "nam",
-    "hoa de": "hoa-de",
-    hoade: "hoa-de",
-    "hoa-de": "hoa-de",
-    "can tho": "can-tho",
-    cantho: "can-tho",
-    "can-tho": "can-tho",
-    "bang chu cai": "bang-chu-cai",
-    "bang-chu-cai": "bang-chu-cai",
-    chung: "common",
-    common: "common",
-  };
-
-  return mappings[compact] || mappings[slug] || slug;
+  // Slugify only. The variant table that used to sit here ('mien bac' -> 'bac',
+  // 'hoade' -> 'hoa-de', 'chung' -> 'common', …) dated from when a dialect could
+  // be typed by hand. Every picker now offers ids straight from
+  // GET /vocabulary/registry, so the input is already an id — and the table
+  // could never have recognised a newly approved dialect, which is exactly the
+  // case the registry exists to support.
+  // Registry ids pass through unchanged ("hoa-de" -> "hoa-de"), and no non-slug
+  // dialect exists in classes, samples, raw_uploads or dataset/samples.csv —
+  // checked before removing it.
+  return normalized.replace(/\s+/g, "-");
 };
 
+// The slug is the label — see config/dialectLabels.ts for why.
 const displayDialectLabel = (value?: string) => {
   const key = normalizeDialectKey(value);
-  if (key && DIALECT_LABELS[key]) return DIALECT_LABELS[key];
-  return value?.trim() || "";
+  return key || value?.trim() || "";
 };
 
 const displayLanguageLabel = (value?: string) => {
   const key = normalizeLanguageKey(value);
-  if (key && LANGUAGE_LABELS[key]) return LANGUAGE_LABELS[key];
+  if (key && LANGUAGE_LABELS[key]) return tr(LANGUAGE_LABELS[key]);
   return value?.trim() || "";
 };
 
@@ -227,7 +230,8 @@ function getCameraErrorMessage(error: unknown): string {
   if (errorMessage.toLowerCase().includes("no video input device"))
     return "Không có thiết bị camera nào được tìm thấy. Vui lòng kiểm tra kết nối phần cứng.";
 
-  return `Lỗi camera: ${errorMessage}`;
+  // Hàm thuần ở mức module: `tr`, không phải `t`.
+  return tr("Lỗi camera: {loi}", { loi: errorMessage });
 }
 
 function getFrameDimensions(source: HTMLImageElement | HTMLVideoElement): { width: number; height: number } {
@@ -260,6 +264,7 @@ function SearchableSelect({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -304,14 +309,14 @@ function SearchableSelect({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Tìm..."
+              placeholder={t("Tìm...")}
               className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-xs placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
               onMouseDown={(e) => e.stopPropagation()}
             />
           </div>
           <div className="max-h-32 overflow-y-auto">
             {filtered.length === 0 ? (
-              <div className="px-2 py-1.5 text-[10px] text-gray-400 text-center">Không tìm thấy</div>
+              <div className="px-2 py-1.5 text-[10px] text-gray-400 text-center">{t("Không tìm thấy")}</div>
             ) : (
               filtered.map((opt) => (
                 <button
@@ -337,6 +342,7 @@ function SearchableSelect({
 // session; expands on click so it never eats screen space by default.
 // ---------------------------------------------------------------------------
 function CapturedWordsSummary({ summary }: { summary: Record<string, number> }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const entries = Object.entries(summary).sort((a, b) => b[1] - a[1]);
   const total = entries.reduce((sum, [, count]) => sum + count, 0);
@@ -349,17 +355,22 @@ function CapturedWordsSummary({ summary }: { summary: Record<string, number> }) 
         className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-gray-200 hover:bg-gray-700/50 transition-colors"
       >
         <span className="flex items-center gap-2 text-xs sm:text-sm font-medium truncate">
-          <ClipboardListIcon className="h-4 w-4 shrink-0" />
-          <span className="truncate">Đã lưu phiên này: {total} mẫu · {entries.length} từ</span>
+          <ClipboardIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            {t("Đã lưu phiên này: {mau} mẫu · {tu} từ", {
+              mau: total,
+              tu: entries.length,
+            })}
+          </span>
         </span>
-        <ChevronDownIcon
-          className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
-        />
+        <span className="text-gray-400 flex-shrink-0" aria-hidden="true">
+          {open ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+        </span>
       </button>
       {open && (
         <div className="max-h-32 sm:max-h-40 overflow-y-auto border-t border-gray-700">
           {entries.length === 0 ? (
-            <div className="px-3 py-3 text-xs text-gray-500 text-center">Chưa có mẫu nào được lưu</div>
+            <div className="px-3 py-3 text-xs text-gray-500 text-center">{t("Chưa có mẫu nào được lưu")}</div>
           ) : (
             <ul className="divide-y divide-gray-800">
               {entries.map(([word, count]) => (
@@ -393,9 +404,12 @@ interface FullscreenCaptureModalProps {
       language?: string;
       /** Số tay dùng khi thu: lựa chọn thủ công 1/2, hoặc số suy ra từ warmup ở chế độ Auto. */
       hands_used?: number | null;
+      class_uid?: string;
+      visibility?: "private" | "tenant" | "community";
     }
   ) => void;
   initialLabel?: string;
+  initialClassUid?: string;
   initialUser?: string;
   targetFrames?: number;
   captureCount?: number;
@@ -406,9 +420,7 @@ interface FullscreenCaptureModalProps {
   /** Số mẫu đã thu trong phiên hiện tại. */
   sessionSampleCount?: number;
   /** Bắt đầu phiên mới. Bỏ trống thì khối thông tin phiên bị ẩn. */
-  onNewSession?: () => void;
-  /** Số mẫu đã lưu thành công lên server trong phiên hiện tại, theo từng từ. */
-  capturedSummary?: Record<string, number>;
+  onNewSession?: () => void; /** Số mẫu đã lưu thành công lên server trong phiên hiện tại, theo từng từ. */ capturedSummary?: Record<string, number>;
   /** Thông báo lỗi kết nối/lưu server hiện tại; khi có giá trị, tạm chặn bắt đầu thu mới. */
   connectionIssue?: string | null;
   /**
@@ -417,6 +429,7 @@ interface FullscreenCaptureModalProps {
    * che toàn bộ ToastContainer global. `key` tăng dần để re-trigger auto-dismiss.
    */
   qualityNotice?: { kind: "warning" | "error"; message: string; key: number } | null;
+  visibility?: "private" | "tenant" | "community";
 }
 
 // ---------------------------------------------------------------------------
@@ -427,6 +440,7 @@ export default function FullscreenCaptureModal({
   onClose,
   onSampleCapture,
   initialLabel = "",
+  initialClassUid = "",
   initialUser = "",
   targetFrames = 60,
   captureCount = 1,
@@ -437,7 +451,9 @@ export default function FullscreenCaptureModal({
   capturedSummary = {},
   connectionIssue = null,
   qualityNotice = null,
+  visibility: initialVisibility = "private",
 }: FullscreenCaptureModalProps) {
+  const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<Camera | null>(null);
@@ -448,12 +464,24 @@ export default function FullscreenCaptureModal({
   const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState(initialUser);
   const [language, setLanguage] = useState<string>("vn");
-  const [dialect, setDialect] = useState<string>("Miền Bắc");
+  // Empty until the registry answers — the old default was the display name
+  // "Miền Bắc", which is not a dialect id and so never matched anything.
+  const [dialect, setDialect] = useState<string>("");
   const [languageList, setLanguageList] = useState<string[]>(DEFAULT_LANGUAGES);
-  const [dialectList, setDialectList] = useState<string[]>(DEFAULT_DIALECTS);
+  const [dialectList, setDialectList] = useState<string[]>([]);
   const [catalogRows, setCatalogRows] = useState<ClassRow[]>([]);
   const [catalogStatsByUid, setCatalogStatsByUid] = useState<Record<string, number>>({});
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedClassUid, setSelectedClassUid] = useState("");
+  const [visibility, setVisibility] = useState<"private" | "tenant" | "community">(initialVisibility);
+
+  // Source of truth for which dialects exist. Includes ones an admin approved
+  // but that have no samples yet, which the class catalog alone cannot know.
+  const { dialects: registryDialects, refresh: refreshRegistry } = useVocabularyRegistry();
+  const registryDialectIds = useMemo(
+    () => registryDialects.filter((d) => d.is_active !== false).map((d) => d.dialect_id),
+    [registryDialects]
+  );
   const [catalogError, setCatalogError] = useState<string>("");
   const [countdown, setCountdown] = useState(0);
   const [isReady, setIsReady] = useState(false);
@@ -514,6 +542,7 @@ export default function FullscreenCaptureModal({
   const [mode, setMode] = useState<"IDLE" | "COUNTDOWN" | "RECORD">("IDLE");
   const [handsVisible, setHandsVisible] = useState(false);
   const [showAddDialectModal, setShowAddDialectModal] = useState(false);
+  const [showCreateLabelModal, setShowCreateLabelModal] = useState(false);
 
   // --- Debounced label suggestions from server ---
   const [serverLabelSuggestions, setServerLabelSuggestions] = useState<string[]>([]);
@@ -539,6 +568,8 @@ export default function FullscreenCaptureModal({
   const userRef = useRef(user);
   const dialectRef = useRef(dialect);
   const languageRef = useRef(language);
+  const classUidRef = useRef(selectedClassUid);
+  const visibilityRef = useRef(visibility);
   const targetFramesRef = useRef(targetFrames);
   const onSampleCaptureRef = useRef(onSampleCapture);
   const connectionIssueRef = useRef(connectionIssue);
@@ -556,7 +587,8 @@ export default function FullscreenCaptureModal({
   // =========================================================================
   const initializationCompleteRef = useRef(false);
   const initFrameCountRef = useRef(0);
-  const detectionHistoryRef = useRef<number[]>([0, 0, 0, 0, 0, 0, 0]); // Ring buffer for hand counts
+  const detectionHistoryRef = useRef<number[]>([0, 0, 0, 0, 0, 0, 0]);
+  // Ring buffer for hand counts
   const historyIndexRef = useRef(0);
   const graceCounterRef = useRef(0);           // Counts CONSECUTIVE hand-count mismatches
   const isRecoveringRef = useRef(false);       // True when in recovery state
@@ -572,6 +604,8 @@ export default function FullscreenCaptureModal({
   useEffect(() => { labelRef.current = label; }, [label]);
   useEffect(() => { dialectRef.current = dialect; }, [dialect]);
   useEffect(() => { languageRef.current = language; }, [language]);
+  useEffect(() => { classUidRef.current = selectedClassUid; }, [selectedClassUid]);
+  useEffect(() => { visibilityRef.current = visibility; }, [visibility]);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
@@ -583,7 +617,9 @@ export default function FullscreenCaptureModal({
     if (!isOpen) return;
     setLabel(initialLabel);
     setUser(sanitizeCollectorName(initialUser));
-  }, [isOpen, initialLabel, initialUser]);
+    setSelectedClassUid(initialClassUid);
+    setVisibility(initialVisibility);
+  }, [isOpen, initialLabel, initialClassUid, initialUser, initialVisibility]);
 
   // PHASE 1A: Reset temporal stabilization refs when recording starts
   useEffect(() => {
@@ -868,7 +904,7 @@ export default function FullscreenCaptureModal({
   const handleClose = useCallback(() => {
     const partialFrames = framesRef.current?.length || 0;
     if (recordingRef.current || (partialFrames > 0 && partialFrames < targetFramesRef.current)) {
-      const ok = window.confirm(`Capture chưa hoàn tất (${partialFrames}/${targetFramesRef.current}) — bạn có muốn thoát và bỏ dữ liệu này không?`);
+      const ok = window.confirm(t("Capture chưa hoàn tất ({partialFrames}/{current}) — bạn có muốn thoát và bỏ dữ liệu này không?", { partialFrames, current: targetFramesRef.current }));
       if (!ok) return;
     }
     setRecording(false); setMode("IDLE"); setFrames([]);
@@ -880,6 +916,11 @@ export default function FullscreenCaptureModal({
   }, [onClose, stopCameraResources]);
 
   useEffect(() => { handleCloseRef.current = handleClose; }, [handleClose]);
+
+  // Nút QUAY LẠI đóng modal thay vì rời khỏi /upload. Đi qua `handleClose`
+  // nên nó vẫn hỏi lại khi đang thu dở và vẫn tắt camera — cùng đường với nút
+  // X và phím Esc, không phải một lối thoát thứ hai bỏ qua các bước đó.
+  useBackClosesOverlay(isOpen, handleClose);
 
   // -------------------------------------------------------------------------
   // Fullscreen
@@ -940,10 +981,15 @@ export default function FullscreenCaptureModal({
           )
         );
 
-        const mergedDialects = Array.from(new Set([
-          ...serverDialects,
-          ...DEFAULT_DIALECTS,
-        ]));
+        // Registry là nguồn sự thật: nó có cả phương ngữ đã duyệt mà chưa có
+        // mẫu, và KHÔNG có phương ngữ đã bị gộp/từ chối. Danh mục lớp chỉ được
+        // dùng để bù khi registry trống (mất kết nối) — gộp cả hai như trước
+        // thì một phương ngữ đã gộp (vd `test` → `bang-chu-cai`, 22/08) vẫn
+        // hiện trong dropdown vì lớp cũ còn mang tên nó; người thu chọn vào,
+        // máy chủ đưa sang bảng chữ cái và từ chối nhãn nhiều chữ (lỗi 16/09).
+        const mergedDialects = registryDialectIds.length > 0
+          ? [...registryDialectIds]
+          : serverDialects;
         const mergedLanguages = Array.from(new Set([
           ...serverLanguages,
           ...DEFAULT_LANGUAGES,
@@ -975,13 +1021,16 @@ export default function FullscreenCaptureModal({
               .map((row) => displayDialectLabel(row.dialect))
               .filter((item): item is string => Boolean(item))
           )
-        );
+        ).filter((d) => mergedDialects.includes(d)); // lớp cũ của phương ngữ đã gộp không kéo nó trở lại
 
+        const preferredWordDialect = availableDialectsForLanguage.includes("common")
+          ? "common"
+          : (availableDialectsForLanguage.find((item) => !ALPHABET_DIALECT_KEYS.has(item)) || "");
         const nextDialect = storedSel && mergedDialects.includes(storedSel) && (
           availableDialectsForLanguage.length === 0 || availableDialectsForLanguage.includes(storedSel)
         )
           ? storedSel
-          : (availableDialectsForLanguage[0] || mergedDialects[0] || DEFAULT_DIALECTS[0]);
+          : (preferredWordDialect || mergedDialects.find((item) => !ALPHABET_DIALECT_KEYS.has(item)) || mergedDialects[0] || "");
 
         setLanguage(nextLanguage);
         setDialect(nextDialect);
@@ -991,12 +1040,14 @@ export default function FullscreenCaptureModal({
         setPreference("dialectSelected", nextDialect);
 
         if (!classesRes.ok && !statsRes.ok) {
-          setCatalogError("Không tải được danh sách bộ ngôn ngữ từ máy chủ.");
+          setCatalogError(t("Không tải được danh sách bộ ngôn ngữ từ máy chủ."));
         }
       } catch {
         if (!active) return;
-        setCatalogError("Không tải được dữ liệu bộ ngôn ngữ.");
-        setDialectList((prev) => prev.length > 0 ? prev : DEFAULT_DIALECTS);
+        setCatalogError(t("Không tải được dữ liệu bộ ngôn ngữ."));
+        // Keep whatever the registry already gave us; do not substitute a
+        // hardcoded list, which would silently mask the outage.
+        setDialectList((prev) => (prev.length > 0 ? prev : registryDialectIds));
       } finally {
         if (active) setCatalogLoading(false);
       }
@@ -1007,7 +1058,9 @@ export default function FullscreenCaptureModal({
     return () => {
       active = false;
     };
-  }, [isOpen]);
+    // registryDialectIds re-runs the merge once the registry lands, so a
+    // dialect with no samples yet still shows up in the picker.
+  }, [isOpen, registryDialectIds]);
 
   const selectedLanguageKey = normalizeLanguageKey(language);
   const selectedDialectKey = normalizeDialectKey(dialect);
@@ -1021,20 +1074,30 @@ export default function FullscreenCaptureModal({
   // Use server-side suggestions instead of client-side filter
   const labelSuggestions = serverLabelSuggestions;
   const matchingCatalogRow = normalizedLabel
-    ? selectedDialectRows.find((row) => matchLabelText(row.label_original) === normalizedLabel)
-    : undefined;
-  const labelExists = Boolean(matchingCatalogRow);
-  const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0;
-  const currentCatalogLabelCount = selectedDialectRows.length;
+    ? selectedDialectRows.find((row) => matchLabelText(row.label_original) === normalizedLabel) : undefined; const labelExists = Boolean(matchingCatalogRow); const labelSamplesCount = matchingCatalogRow ? (catalogStatsByUid[matchingCatalogRow.class_uid] ?? 0) : 0; const currentCatalogLabelCount = selectedDialectRows.length;
+    // `hands_required` chỉ là gợi ý từ catalog, không được khóa cứng vì cùng
+    // một nhãn có thể xuất hiện 1 tay ở đầu và 2 tay ở đoạn sau.
+    const suggestedHands = typeof matchingCatalogRow?.hands_required === "number" ? matchingCatalogRow.hands_required : null;
 
-  // `hands_required` chỉ là gợi ý từ catalog, không được khóa cứng vì cùng
-  // một nhãn có thể xuất hiện 1 tay ở đầu và 2 tay ở đoạn sau.
-  const suggestedHands = typeof matchingCatalogRow?.hands_required === "number"
-    ? matchingCatalogRow.hands_required
-    : null;
+  // Label text is only a display value; class_uid is the identity sent to the
+  // API. Restore it whenever a typed/pasted label matches this tenant's
+  // catalog, otherwise a stale dialect preference can route a word label into
+  // the fingerspelling validation path.
+  useEffect(() => {
+    if (catalogLoading || catalogError) return;
+    if (initialClassUid && label === initialLabel && !matchingCatalogRow) {
+      // A deep link already carries the canonical identity. Keep it while the
+      // catalog is filtered by a stale dialect preference; changing the label
+      // still clears the UID in the input handler below.
+      setSelectedClassUid((current) => current === initialClassUid ? current : initialClassUid);
+      return;
+    }
+    const nextUid = matchingCatalogRow?.class_uid || "";
+    setSelectedClassUid((current) => current === nextUid ? current : nextUid);
+  }, [catalogLoading, catalogError, initialClassUid, initialLabel, label, matchingCatalogRow?.class_uid]);
 
-  // In-modal QC toast: auto-dismiss sau 5s, re-trigger theo notice.key
-  const [visibleNotice, setVisibleNotice] = useState<typeof qualityNotice>(null);
+    // In-modal QC toast: auto-dismiss sau 5s, re-trigger theo notice.key
+    const [visibleNotice, setVisibleNotice] = useState<typeof qualityNotice>(null);
   useEffect(() => {
     if (!qualityNotice) return;
     setVisibleNotice(qualityNotice);
@@ -1076,7 +1139,7 @@ export default function FullscreenCaptureModal({
     const collected = framesRef.current.length || 0;
     const required = targetFramesRef.current || 0;
     if (collected < required) {
-      window.alert(`Bạn chưa thu đủ khung hình: ${collected}/${required}. Vui lòng tiếp tục quay cho đến khi đủ.`);
+      window.alert(t("Bạn chưa thu đủ khung hình: {collected}/{required}. Vui lòng tiếp tục quay cho đến khi đủ.", { collected, required }));
       return;
     }
     setRecording(false); recordingRef.current = false;
@@ -1088,6 +1151,8 @@ export default function FullscreenCaptureModal({
         dialect: dialectRef.current,
         language: languageRef.current,
         hands_used: expectedHandsOptionRef.current ?? expectedHandsRef.current,
+        class_uid: classUidRef.current || undefined,
+        visibility: visibilityRef.current,
       });
       setFrames([]); framesRef.current = [];
       expectedHandsRef.current = expectedHandsOptionRef.current;
@@ -1096,12 +1161,10 @@ export default function FullscreenCaptureModal({
 
   // -------------------------------------------------------------------------
   // FIX (training data): Mirror helper for x-coordinates.
-  //
   // When MIRROR_PREVIEW=true the canvas is drawn flipped horizontally.
   // The model will receive mirrored frames at inference time.  To keep
   // training data consistent with inference-time input we also mirror the
   // x-coordinate: x_mirrored = 1 - x_raw.
-  //
   // This does NOT touch y/z/visibility — those are already correct.
   // IMPORTANT: Only apply this transform to data saved for training.
   //            The render path continues to use raw coordinates.
@@ -1112,15 +1175,32 @@ export default function FullscreenCaptureModal({
     []
   );
 
+  /**
+   * The same mirror for WORLD landmarks — and it is a different formula.
+   *
+   * `1 - x` is a reflection about x = 0.5, which is the middle of the image and
+   * therefore the correct axis for image coordinates in [0,1]. World landmarks
+   * are metres about the hand's own geometric centre, so x already straddles
+   * zero and the reflection axis is x = 0: the right form is `-x`.
+   *
+   * Using the image form here would translate every hand by a full metre and
+   * put it somewhere no hand has ever been. This is the same class of mistake
+   * `_mirror_handedness` in augmentation.py documents from the other
+   * direction, where the image-space form was applied to wrist-centred data.
+   */
+  const mirrorWorldLandmarkX = useCallback(
+    (lm: MediaPipeLandmark): MediaPipeLandmark =>
+      MIRROR_PREVIEW ? { ...lm, x: -(lm.x ?? 0) } : { ...lm },
+    []
+  );
+
   // -------------------------------------------------------------------------
   // Main MediaPipe + Camera effect
-  //
   // FIX (deps): Removed `expectedHandsOption` — it caused the entire
   // MediaPipe model and Camera to be torn down and re-initialized every time
   // the user toggled the 1/2/Auto hands selector.  The callback already reads
   // `expectedHandsOptionRef.current` which stays in sync via the sync effect
   // above, so no restart is needed.
-  //
   // FIX (deps): Removed `filterLandmarks` — it was listed as a dep but is
   // never called inside this effect (training uploads use raw landmarks).
   // -------------------------------------------------------------------------
@@ -1139,29 +1219,32 @@ export default function FullscreenCaptureModal({
     hands.onResults((results: unknown) => {
       const r = results as {
         multiHandLandmarks?: MediaPipeLandmark[][];
+        // MediaPipe's metric 3D output, parallel to multiHandLandmarks and
+        // indexed identically. Present in @mediapipe/hands 0.4.x and declared
+        // in its own typings; it was simply never read, which is why every
+        // stored sample carries only the 2.5D image-space z and why 3D hands
+        // render flat no matter what the viewer does with them.
+        multiHandWorldLandmarks?: MediaPipeLandmark[][];
         multiHandedness?: Array<{ label?: string; score?: number }>;
         image?: HTMLImageElement | HTMLVideoElement;
       };
 
       const detected = r.multiHandLandmarks || [];
+      const detectedWorld = r.multiHandWorldLandmarks || [];
       const handednessData = r.multiHandedness || [];
 
       // FIX (handedness): MediaPipe Hands was trained on MIRRORED selfie
       // images but receives the RAW (unflipped) frame from the camera
       // utility.  As a result its labels are from the camera's point of
       // view, not the person's:
-      //
       //   MP "Left"  → user's actual RIGHT hand  (raw frame, front camera)
       //   MP "Right" → user's actual LEFT hand
-      //
       // SWAP_HANDEDNESS defaults to true when MIRROR_PREVIEW is active,
       // correcting the labels so that `leftHandLandmarks` contains the
       // person's left hand landmarks (and vice-versa).
-      //
       // Previously this was documented incorrectly and defaulted to false,
       // so every saved sample had left/right swapped — this is the primary
       // fix for wrong hand recognition in the trained model.
-      //
       // The raw label is only the STARTING point — assignHandSlots reconciles it
       // against each slot's last known wrist position so that two same-labelled
       // hands can no longer collapse into one slot, and a mid-clip label flip no
@@ -1175,6 +1258,10 @@ export default function FullscreenCaptureModal({
         }
         return {
           landmarks,
+          // Same index i — MediaPipe emits the two arrays in lockstep. Riding
+          // on the detection means the slot resolver's decision governs both,
+          // so a hand's shape can never land in the other hand's slot.
+          world: detectedWorld[i],
           label: effectiveLabel,
           score: typeof handednessData[i]?.score === "number" ? (handednessData[i].score as number) : 0,
         };
@@ -1189,8 +1276,7 @@ export default function FullscreenCaptureModal({
         // Declared one-handed: never let a bystander hand fill the second slot.
         // The frame would then resolve to two hands, fail the expected-count
         // check, and stall the capture without ever producing the single-hand
-        // frame the pin is waiting for.
-        forceSingle: oneHandedClip,
+        // frame the pin is waiting for. forceSingle: oneHandedClip,
       });
       const leftHandLandmarks = assignment.left;
       const rightHandLandmarks = assignment.right;
@@ -1461,9 +1547,18 @@ export default function FullscreenCaptureModal({
           ? (performance as Performance).timeOrigin + (performance as Performance).now()
           : Date.now();
 
+      // World landmarks follow whichever slot the resolver chose for their own
+      // detection — never re-derived, so the two arrays cannot disagree.
+      const leftWorld = sourceOf(detections, rawLeft)?.world;
+      const rightWorld = sourceOf(detections, rawRight)?.world;
+
       const frameEntry: CaptureFrame = {
         left_hand: rawLeft ? rawLeft.map(mirrorLandmarkX) : [],
         right_hand: rawRight ? rawRight.map(mirrorLandmarkX) : [],
+        // Omitted rather than sent empty when MediaPipe gave nothing, so the
+        // backend can tell "not recorded" from "recorded as zero".
+        ...(leftWorld ? { left_hand_world: leftWorld.map(mirrorWorldLandmarkX) } : {}),
+        ...(rightWorld ? { right_hand_world: rightWorld.map(mirrorWorldLandmarkX) } : {}),
         timestamp_ms,
         fallback_used: false,
         confidence: typeof confidence === "number" ? confidence : undefined,
@@ -1490,6 +1585,8 @@ export default function FullscreenCaptureModal({
           dialect: dialectRef.current,
           language: languageRef.current,
           hands_used: deriveHandsUsed(capturedFrames),
+          class_uid: classUidRef.current || undefined,
+          visibility: visibilityRef.current,
         });
 
         completedCapturesRef.current = newCompleted;
@@ -1549,10 +1646,11 @@ export default function FullscreenCaptureModal({
     const canvas = canvasRef.current;
     if (canvas) { canvas.width = CAPTURE_FRAME_WIDTH; canvas.height = CAPTURE_FRAME_HEIGHT; }
 
-    // Đã bỏ hai listener "loadedmetadata"/"canplay": chúng chỉ console.log và
-    // không strip được khỏi bundle production (console.log là thân arrow
-    // function nên giá trị trả về bị coi là có dùng), làm console đầy log mỗi
-    // lần mở camera.
+    const video = videoRef.current;
+    const onLoadedMetadata = () => console.log("Video metadata loaded:", { w: video.videoWidth, h: video.videoHeight });
+    const onCanPlay = () => console.log("Video can play");
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("canplay", onCanPlay);
 
     // FIX (redundant getUserMedia): The previous code called getUserMedia,
     // immediately stopped the resulting stream, then started Camera() which
@@ -1577,13 +1675,15 @@ export default function FullscreenCaptureModal({
       });
 
     return () => {
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("canplay", onCanPlay);
       hands.close();
       stopCameraResources();
     };
     // FIX: `expectedHandsOption` removed — would restart MediaPipe on every
     //       hands-mode toggle.  Use `expectedHandsOptionRef` inside callback.
     // FIX: `filterLandmarks` removed — it is not used inside this effect.
-  }, [isOpen, renderLandmarks, computeQuality, deriveHandsUsed, getRenderLandmarks, resetRenderGroup, mirrorLandmarkX, stopCameraResources]);
+  }, [isOpen, renderLandmarks, computeQuality, deriveHandsUsed, getRenderLandmarks, resetRenderGroup, mirrorLandmarkX, mirrorWorldLandmarkX, stopCameraResources]);
 
   // -------------------------------------------------------------------------
   // Countdown effect
@@ -1658,7 +1758,7 @@ export default function FullscreenCaptureModal({
           const collected = framesRef.current.length || 0;
           const required = targetFramesRef.current || 0;
           if (collected < required) {
-            window.alert(`Bạn chưa thu đủ khung hình: ${collected}/${required}. Vui lòng tiếp tục quay cho đến khi đủ.`);
+            window.alert(t("Bạn chưa thu đủ khung hình: {collected}/{required}. Vui lòng tiếp tục quay cho đến khi đủ.", { collected, required }));
           } else {
             setRecording(false); recordingRef.current = false;
             if (framesRef.current.length > 0) {
@@ -1667,6 +1767,9 @@ export default function FullscreenCaptureModal({
                 quality_info: quality,
                 dialect: dialectRef.current,
                 hands_used: deriveHandsUsed(framesRef.current),
+                language: languageRef.current,
+                class_uid: classUidRef.current || undefined,
+                visibility: visibilityRef.current,
               });
               setFrames([]); framesRef.current = [];
               expectedHandsRef.current = expectedHandsOptionRef.current;
@@ -1730,18 +1833,18 @@ export default function FullscreenCaptureModal({
             aria-live="polite"
           >
             <div className="flex items-start gap-2">
-              {visibleNotice.kind === "error" ? (
-                <BanIcon className="mt-0.5 h-4 w-4 shrink-0" />
-              ) : (
-                <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
-              )}
+              <span aria-hidden="true">
+                {visibleNotice.kind === "error"
+                  ? <BanIcon className="h-4 w-4" />
+                  : <AlertTriangleIcon className="h-4 w-4" />}
+              </span>
               <span className="leading-snug">{visibleNotice.message}</span>
               <button
                 onClick={() => setVisibleNotice(null)}
                 className="ml-auto -mr-1 -mt-1 p-1 opacity-70 hover:opacity-100"
-                aria-label="Đóng thông báo"
+                aria-label={t("Đóng thông báo")}
               >
-                <XIcon className="h-4 w-4" />
+                <XIcon className="h-4 w-4"  aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -1754,13 +1857,13 @@ export default function FullscreenCaptureModal({
             <svg className="w-16 h-16 mx-auto mb-4 text-red-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4v.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <h3 className="text-xl font-bold text-white mb-3">Lỗi Camera</h3>
+            <h3 className="text-xl font-bold text-white mb-3">{t("Lỗi Camera")}</h3>
             <p className="text-red-100 mb-6 leading-relaxed">{cameraError}</p>
             <div className="flex gap-3 flex-col sm:flex-row">
-              <button onClick={() => { setCameraError(null); window.location.reload(); }} className="flex-1 bg-ctu-blue hover:bg-ctu-navy-mid text-white font-semibold py-3 px-4 rounded-lg transition-colors">Làm mới Trang</button>
-              <button onClick={handleClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors">Thoát</button>
+              <button onClick={() => { setCameraError(null); window.location.reload(); }} className="flex-1 bg-ctu-blue hover:bg-ctu-navy-mid text-white font-semibold py-3 px-4 rounded-lg transition-colors">{t("Làm mới Trang")}</button>
+              <button onClick={handleClose} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg transition-colors">{t("Thoát")}</button>
             </div>
-            <p className="text-xs text-red-200/70 mt-4">Nếu vấn đề tiếp tục, vui lòng kiểm tra quyền truy cập camera trong cài đặt trình duyệt.</p>
+            <p className="text-xs text-red-200/70 mt-4">{t("Nếu vấn đề tiếp tục, vui lòng kiểm tra quyền truy cập camera trong cài đặt trình duyệt.")}</p>
           </div>
         </div>
       )}
@@ -1770,16 +1873,16 @@ export default function FullscreenCaptureModal({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="flex items-center gap-2 text-xl font-semibold text-white">
-              <VideoIcon className="h-5 w-5" />
-              Ghi toàn màn hình
+              <FilmIcon className="h-5 w-5" aria-hidden="true" />
+              {t("Ghi toàn màn hình")}
             </h2>
             {isReady && (
               <Badge variant="success">
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse mr-2"></span>Camera sẵn sàng
+                <span className="w-2 h-2 bg-sky-400 rounded-full animate-pulse mr-2"></span>{t("Camera sẵn sàng")}
               </Badge>
             )}
             <div className="ml-3 hidden sm:flex items-center space-x-2">
-              <div className="text-sm text-gray-300">Hands:</div>
+              <div className="text-sm text-gray-300">{t("Số tay:")}</div>
               <div className="inline-flex bg-gray-800 rounded-md overflow-hidden">
                 {([null, 1, 2] as const).map((v) => (
                   <button
@@ -1793,20 +1896,27 @@ export default function FullscreenCaptureModal({
                 ))}
               </div>
               {suggestedHands !== null && (
-                <span className="text-xs text-ctu-yellow" title="Nhãn này có số tay gợi ý từ catalog, nhưng vẫn cho phép thu linh hoạt 1 hoặc 2 tay.">
-                  Gợi ý catalog: {suggestedHands} tay
+                <span className="text-xs text-ctu-yellow" title={t("Nhãn này có số tay gợi ý từ catalog, nhưng vẫn cho phép thu linh hoạt 1 hoặc 2 tay.")}>
+                  {t("Gợi ý catalog: {n} tay", { n: suggestedHands })}
                 </span>
               )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <div className="text-white text-sm hidden sm:block">
-              Nhấn <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Enter</kbd> để chụp •{" "}
-              <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Esc</kbd> để thoát
+              <Trans
+                k="Nhấn {enter} để chụp • {esc} để thoát"
+                vars={{
+                  enter: <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Enter</kbd>,
+                  esc: <kbd className="px-2 py-1 bg-gray-700 rounded text-xs">Esc</kbd>,
+                }}
+              />
             </div>
             <button onClick={() => setShowGuide(!showGuide)} className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center space-x-2">
-              {showGuide ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
-              <span>{showGuide ? "Ẩn hướng dẫn" : "Hiển thị hướng dẫn"}</span>
+              <span aria-hidden="true">
+                {showGuide ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />}
+              </span>
+              <span>{showGuide ? t("Ẩn hướng dẫn") : t("Hiển thị hướng dẫn")}</span>
             </button>
             <button onClick={handleClose} className="text-white hover:text-gray-300 p-2">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1833,13 +1943,13 @@ export default function FullscreenCaptureModal({
           {recording && !handsVisible && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="bg-black/70 text-yellow-300 px-4 py-2 rounded-lg text-center">
-                <div className="font-semibold">Không thấy tay — vui lòng hiển thị cả hai tay</div>
-                <div className="text-xs mt-1">Hệ thống sẽ chỉ lưu khung khi tay được phát hiện</div>
+                <div className="font-semibold">{t("Không thấy tay — vui lòng hiển thị cả hai tay")}</div>
+                <div className="text-xs mt-1">{t("Hệ thống sẽ chỉ lưu khung khi tay được phát hiện")}</div>
               </div>
             </div>
           )}
 
-          <button onClick={handleClose} className="sm:hidden absolute top-3 right-3 z-20 bg-black/60 hover:bg-black/70 text-white rounded-full p-2" aria-label="Thoát toàn màn hình">
+          <button onClick={handleClose} className="sm:hidden absolute top-3 right-3 z-20 bg-black/60 hover:bg-black/70 text-white rounded-full p-2" aria-label={t("Thoát toàn màn hình")}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -1849,13 +1959,13 @@ export default function FullscreenCaptureModal({
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="relative">
                 <div className="relative w-56 h-56 sm:w-80 sm:h-80">
-                  <div className="absolute top-0 left-0 w-8 h-8 border-l-4 border-t-4 border-green-400/80 rounded-tl-xl"></div>
-                  <div className="absolute top-0 right-0 w-8 h-8 border-r-4 border-t-4 border-green-400/80 rounded-tr-xl"></div>
-                  <div className="absolute bottom-0 left-0 w-8 h-8 border-l-4 border-b-4 border-green-400/80 rounded-bl-xl"></div>
-                  <div className="absolute bottom-0 right-0 w-8 h-8 border-r-4 border-b-4 border-green-400/80 rounded-br-xl"></div>
+                  <div className="absolute top-0 left-0 w-8 h-8 border-l-4 border-t-4 border-sky-400/80 rounded-tl-xl"></div>
+                  <div className="absolute top-0 right-0 w-8 h-8 border-r-4 border-t-4 border-sky-400/80 rounded-tr-xl"></div>
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-l-4 border-b-4 border-sky-400/80 rounded-bl-xl"></div>
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-r-4 border-b-4 border-sky-400/80 rounded-br-xl"></div>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-1 h-8 bg-green-400/60 rounded-full"></div>
-                    <div className="absolute w-8 h-1 bg-green-400/60 rounded-full"></div>
+                    <div className="w-1 h-8 bg-sky-400/60 rounded-full"></div>
+                    <div className="absolute w-8 h-1 bg-sky-400/60 rounded-full"></div>
                   </div>
                   {/* Labels now match corrected handedness: orange=Left, teal=Right */}
                   <div className="absolute top-16 -left-6 w-8 h-8 border border-orange-400/60 rounded-full bg-orange-400/10 flex items-center justify-center">
@@ -1865,8 +1975,11 @@ export default function FullscreenCaptureModal({
                     <span className="text-teal-400 text-xs">R</span>
                   </div>
                 </div>
-                <div className="absolute -top-10 sm:-top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium"><TargetIcon className="mr-1 inline-block h-3.5 w-3.5 align-text-bottom" /> Đặt vị trí vào khung</div>
-                <div className="absolute -bottom-7 sm:-bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-[11px] sm:text-xs text-center">Thấy phần trên cơ thể và hai tay</div>
+                <div className="absolute -top-10 sm:-top-12 left-1/2 transform -translate-x-1/2 bg-gray-800/80 backdrop-blur-sm text-white px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium">
+                  <TargetIcon className="inline h-4 w-4 mr-1 -mt-0.5" aria-hidden="true" />
+                  {t("Đặt vị trí vào khung")}
+                </div>
+                <div className="absolute -bottom-7 sm:-bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800/70 backdrop-blur-sm text-white px-3 py-1 rounded-lg text-[11px] sm:text-xs text-center">{t("Thấy phần trên cơ thể và hai tay")}</div>
               </div>
             </div>
           )}
@@ -1875,10 +1988,15 @@ export default function FullscreenCaptureModal({
             <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="text-center text-white">
                 <div className="text-8xl font-bold mb-4 animate-pulse">{countdown}</div>
-                <div className="text-2xl mb-2">Chuẩn bị thực hiện:</div>
-                <div className="text-3xl font-semibold text-green-400">{label}</div>
+                <div className="text-2xl mb-2">{t("Chuẩn bị thực hiện:")}</div>
+                <div className="text-3xl font-semibold text-sky-400">{label}</div>
                 {captureCount > 1 && (
-                  <div className="text-lg mt-4 text-gray-300">Lần chụp {currentCaptureIndex + 1} / {captureCount}</div>
+                  <div className="text-lg mt-4 text-gray-300">
+                    {t("Lần chụp {i} / {tong}", {
+                      i: currentCaptureIndex + 1,
+                      tong: captureCount,
+                    })}
+                  </div>
                 )}
               </div>
             </div>
@@ -1888,12 +2006,12 @@ export default function FullscreenCaptureModal({
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-20">
               <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 sm:p-8 w-full max-w-[calc(100vw-2rem)] sm:max-w-lg">
                 <div className="text-center">
-                  <PauseCircleIcon className="mx-auto mb-4 h-16 w-16 text-yellow-400" />
-                  <h3 className="text-3xl font-bold text-white mb-2">Đã tạm dừng</h3>
-                  <p className="text-gray-300 mb-6">Bạn muốn làm gì với dữ liệu hiện tại?</p>
+                  <PauseIcon className="mx-auto mb-4 h-14 w-14" aria-hidden="true" />
+                  <h3 className="text-3xl font-bold text-white mb-2">{t("Đã tạm dừng")}</h3>
+                  <p className="text-gray-300 mb-6">{t("Bạn muốn làm gì với dữ liệu hiện tại?")}</p>
                   <div className="bg-gray-800 rounded-lg p-4 mb-6">
                     <div className="flex justify-between text-sm mb-2">
-                      <span className="text-gray-400">Tiến độ:</span>
+                      <span className="text-gray-400">{t("Tiến độ:")}</span>
                       <span className="text-white font-medium">{frames.length} / {FIXED_TARGET_FRAMES} khung</span>
                     </div>
                     <div className="w-full bg-gray-700 rounded-full h-2">
@@ -1901,18 +2019,18 @@ export default function FullscreenCaptureModal({
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <button onClick={handleResume} className="w-full px-4 py-3 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
+                    <button onClick={handleResume} className="w-full px-4 py-3 bg-sky-600 hover:bg-sky-600 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                      <span>Tiếp tục thu (giữ {frames.length} khung)</span>
+                      <span>{t("Tiếp tục thu (giữ {n} khung)", { n: frames.length })}</span>
                     </button>
                     <button onClick={handleRestart} className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                      <span>Bắt đầu lại từ đầu (xóa dữ liệu)</span>
+                      <span>{t("Bắt đầu lại từ đầu (xóa dữ liệu)")}</span>
                     </button>
                     {frames.length >= FIXED_TARGET_FRAMES && (
                       <button onClick={() => { setPaused(false); pausedRef.current = false; handleStop(); }} className="w-full px-4 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                        <span>Hoàn tất và lưu</span>
+                        <span>{t("Hoàn tất và lưu")}</span>
                       </button>
                     )}
                   </div>
@@ -1924,12 +2042,16 @@ export default function FullscreenCaptureModal({
           {!recording && !countdown && completedCaptures > 0 && completedCaptures < captureCount && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm">
               <div className="text-center text-white">
-                <CheckCircleIcon className="mx-auto mb-4 h-12 w-12 text-green-400" />
-                <div className="text-2xl font-bold mb-2 text-green-400">Đã chụp {completedCaptures} mẫu!</div>
-                <div className="text-xl mb-4">Chuẩn bị chụp tiếp...</div>
-                <div className="text-lg text-gray-300">Tiến độ: {completedCaptures} / {captureCount}</div>
+                <SparkleIcon className="mx-auto mb-4 h-10 w-10" aria-hidden="true" />
+                <div className="text-2xl font-bold mb-2 text-sky-400">
+                  {t("Đã chụp {n} mẫu!", { n: completedCaptures })}
+                </div>
+                <div className="text-xl mb-4">{t("Chuẩn bị chụp tiếp...")}</div>
+                <div className="text-lg text-gray-300">
+                  {t("Tiến độ: {da} / {tong}", { da: completedCaptures, tong: captureCount })}
+                </div>
                 <div className="w-64 bg-gray-700 rounded-full h-3 mt-4 mx-auto">
-                  <div className="bg-green-500 h-3 rounded-full transition-all duration-500" style={{ width: `${(completedCaptures / captureCount) * 100}%` }} />
+                  <div className="bg-sky-600 h-3 rounded-full transition-all duration-500" style={{ width: `${(completedCaptures / captureCount) * 100}%` }} />
                 </div>
               </div>
             </div>
@@ -1938,10 +2060,15 @@ export default function FullscreenCaptureModal({
           {!recording && !countdown && completedCaptures > 0 && completedCaptures >= captureCount && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm">
               <div className="text-center text-white">
-                <CheckCircleIcon className="mx-auto mb-4 h-16 w-16 text-green-400" />
-                <div className="text-3xl font-bold mb-2 text-green-400">Hoàn tất tất cả lần chụp!</div>
-                <div className="text-xl mb-4">Đã chụp {completedCaptures} mẫu cho "{label}"</div>
-                <div className="text-lg text-gray-300">Sẵn sàng chụp tiếp — nhập nhãn mới và nhấn nút Bắt đầu chụp</div>
+                <CheckCircleIcon className="mx-auto mb-4 h-14 w-14" aria-hidden="true" />
+                <div className="text-3xl font-bold mb-2 text-sky-400">{t("Hoàn tất tất cả lần chụp!")}</div>
+                <div className="text-xl mb-4">
+                  {t('Đã chụp {n} mẫu cho "{nhan}"', {
+                    n: completedCaptures,
+                    nhan: label,
+                  })}
+                </div>
+                <div className="text-lg text-gray-300">{t("Sẵn sàng chụp tiếp — nhập nhãn mới và nhấn nút Bắt đầu chụp")}</div>
               </div>
             </div>
           )}
@@ -1949,17 +2076,17 @@ export default function FullscreenCaptureModal({
           {recording && (
             <div className="absolute top-20 sm:top-24 left-3 sm:left-6 flex items-center space-x-3 bg-red-500 text-white px-3 sm:px-4 py-2 rounded-full shadow-lg">
               <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-              <span className="font-medium">ĐANG GHI</span>
+              <span className="font-medium">{t("ĐANG GHI")}</span>
               {captureCount > 1 && <span className="text-sm">({completedCaptures + 1}/{captureCount})</span>}
             </div>
           )}
 
           {recording && (
             <div className="absolute bottom-3 sm:bottom-6 left-1/2 transform -translate-x-1/2 bg-black/50 backdrop-blur-sm rounded-full px-4 sm:px-6 py-2 max-w-[calc(100vw-2rem)]">
-              <div className="flex items-center gap-1.5 text-sm text-white">
-                <ChartBarIcon className="h-4 w-4" />
-                {frames.length} khung đã chụp
-              </div>
+              <div className="flex items-center gap-1.5 text-white text-sm">
+                    <ChartBarIcon className="h-4 w-4" aria-hidden="true" />
+                    {t("{n} khung đã chụp", { n: frames.length })}
+                  </div>
             </div>
           )}
         </div>
@@ -1970,10 +2097,13 @@ export default function FullscreenCaptureModal({
             {/* Connectivity / save warning — blocks new captures while shown */}
             {connectionIssue && (
               <div className="flex items-start gap-2 bg-red-900/40 border border-red-500/50 rounded-lg px-3 py-2 text-xs sm:text-sm text-red-100">
-                <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                <AlertTriangleIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <div>
-                  <div className="font-semibold">Kết nối/lưu server đang gặp sự cố</div>
-                  <div className="text-red-200/90 mt-0.5">{connectionIssue} Vui lòng tạm ngưng thu để tránh mất dữ liệu.</div>
+                  <div className="font-semibold">{t("Kết nối/lưu server đang gặp sự cố")}</div>
+                  <div className="text-red-200/90 mt-0.5">
+                    {connectionIssue}{" "}
+                    {t("Vui lòng tạm ngưng thu để tránh mất dữ liệu.")}
+                  </div>
                 </div>
               </div>
             )}
@@ -1985,12 +2115,18 @@ export default function FullscreenCaptureModal({
             <div className="bg-gradient-to-br from-blue-900/20 to-purple-900/20 rounded-xl p-2.5 sm:p-4 border border-blue-500/20 space-y-2 sm:space-y-3">
               {/* Label input */}
               <div>
-                <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">📝 Nhãn *</label>
-                <div className="relative">
-                  <input type="text" value={label} onChange={(e) => { setLabel(e.target.value); setLabelConfirmed(false); }} onFocus={() => setLabelFocused(true)} onBlur={() => setTimeout(() => setLabelFocused(false), 150)} placeholder="vd: xin chào, cảm ơn" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">
+                <PencilIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />
+                {t("Nhãn *")}
+              </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                  <input type="text" value={label} onChange={(e) => { setLabel(e.target.value); setSelectedClassUid(""); setLabelConfirmed(false); }} onFocus={() => setLabelFocused(true)} onBlur={() => setTimeout(() => setLabelFocused(false), 150)} placeholder={t("vd: xin chào, cảm ơn")} className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
                   <div className="absolute inset-y-0 right-1.5 flex items-center">
-                    <SpeechInputButton onText={(text) => setLabel(text)} title="Giọng nói" className="h-7 w-7" />
+                    <SpeechInputButton onText={(text) => setLabel(text)} title={t("Giọng nói")} className="h-7 w-7" />
                   </div>
+                </div>
+                  <button type="button" onClick={() => setShowCreateLabelModal(true)} disabled={recording || countdown > 0} className="shrink-0 self-start rounded-lg border border-blue-400/60 px-2 py-2 text-[10px] font-medium text-blue-200 hover:bg-blue-900/60 disabled:opacity-40">{t("Tạo nhãn mới")}</button>
                 </div>
                 {labelFocused && !catalogLoading && !catalogError && labelSuggestions.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -2002,20 +2138,29 @@ export default function FullscreenCaptureModal({
                 {normalizedLabel && !catalogLoading && !catalogError && (
                   <div className="mt-1 text-[10px] sm:text-xs text-blue-200/80">
                     {labelExists ? (
-                      <span className="inline-flex items-center gap-1 text-green-300"><CheckIcon className="h-3 w-3" /> Đã có {labelSamplesCount} mẫu</span>
+                      <span className="inline-flex items-center gap-1 text-sky-300">
+                    <CheckCircleIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("Đã có {n} mẫu", { n: labelSamplesCount })}
+                  </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-yellow-300"><AlertTriangleIcon className="h-3 w-3" /> Nhãn mới ({currentCatalogLabelCount} nhãn hiện có)</span>
+                      <span className="inline-flex items-center gap-1 text-yellow-300">
+                    <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("Nhãn mới ({n} nhãn hiện có)", { n: currentCatalogLabelCount })}
+                  </span>
                     )}
                   </div>
                 )}
               </div>
               {/* User input */}
               <div>
-                <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">👤 Người thực hiện *</label>
+                <label className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">
+                <UserIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />
+                {t("Người thực hiện *")}
+              </label>
                 <div className="relative">
-                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder="Ví dụ: Trân" className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                  <input type="text" value={user} onChange={(e) => { setUser(sanitizeCollectorName(e.target.value)); setCollectorConfirmed(false); }} onFocus={() => setCollectorFocused(true)} onBlur={() => setTimeout(() => setCollectorFocused(false), 150)} placeholder={t("Ví dụ: Trân")} className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
                   <div className="absolute inset-y-0 right-1.5 flex items-center">
-                    <SpeechInputButton onText={(text) => setUser(text)} title="Giọng nói" className="h-7 w-7" />
+                    <SpeechInputButton onText={(text) => setUser(text)} title={t("Giọng nói")} className="h-7 w-7" />
                   </div>
                 </div>
                 {collectorFocused && collectorSuggestions.length > 0 && (
@@ -2029,7 +2174,7 @@ export default function FullscreenCaptureModal({
               {/* Language / Dialect — searchable compact dropdowns */}
               <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
                 <SearchableSelect
-                  label="Ngôn ngữ"
+                  label={t("Ngôn ngữ")}
                   value={language}
                   options={languageList}
                   displayFn={displayLanguageLabel}
@@ -2044,9 +2189,11 @@ export default function FullscreenCaptureModal({
                           .map((row) => displayDialectLabel(row.dialect))
                           .filter((item): item is string => Boolean(item))
                       )
-                    );
+                    ).filter((d) => dialectList.includes(d));
                     if (availableDialectsForLanguage.length > 0 && !availableDialectsForLanguage.includes(dialect)) {
-                      const fallbackDialect = availableDialectsForLanguage[0];
+                      const fallbackDialect = availableDialectsForLanguage.includes("common")
+                        ? "common"
+                        : (availableDialectsForLanguage.find((item) => !ALPHABET_DIALECT_KEYS.has(item)) || availableDialectsForLanguage[0]);
                       setDialect(fallbackDialect);
                       setPreference("dialectSelected", fallbackDialect);
                     }
@@ -2054,7 +2201,7 @@ export default function FullscreenCaptureModal({
                   disabled={recording || countdown > 0}
                 />
                 <SearchableSelect
-                  label="Phương ngữ"
+                  label={t("Phương ngữ")}
                   value={dialect}
                   options={[...dialectList, "Khác (+)"]}
                   displayFn={(v) => v}
@@ -2064,9 +2211,17 @@ export default function FullscreenCaptureModal({
                   }}
                   disabled={recording || countdown > 0}
                 />
+                <label className="text-[11px] sm:text-xs font-medium text-blue-300">
+                  {t("Phạm vi dữ liệu")}
+                  <select value={visibility} onChange={(e) => setVisibility(e.target.value as typeof visibility)} disabled={recording || countdown > 0} className="mt-1 w-full rounded-lg border border-gray-600 bg-gray-800/80 px-2 py-1.5 text-xs text-white">
+                    <option value="private">{t("Riêng tư")}</option>
+                    <option value="tenant">{t("Cả tổ chức")}</option>
+                    <option value="community">{t("Cộng đồng")}</option>
+                  </select>
+                </label>
               </div>
               <div className="text-[10px] text-blue-200/60">
-                {catalogLoading ? "Đang tải..." : `${displayLanguageLabel(language)} / ${displayDialectLabel(dialect)} • ${currentCatalogLabelCount} nhãn`}
+                {catalogLoading ? t("Đang tải...") : t("{p1} / {p2} • {currentCatalogLabelCount} nhãn", { p1: displayLanguageLabel(language), p2: displayDialectLabel(dialect), currentCatalogLabelCount })}
               </div>
 
               {/* Phiên thu hiện tại */}
@@ -2074,9 +2229,12 @@ export default function FullscreenCaptureModal({
                 <div className="rounded-lg border border-blue-500/20 bg-gray-900/40 px-2.5 py-2 sm:px-3">
                   <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-blue-300 sm:text-xs"><FolderIcon className="h-3.5 w-3.5" /> Phiên thu</div>
+                      <div className="flex items-center gap-1 text-[11px] sm:text-xs font-medium text-blue-300">
+                  <FolderIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t("Phiên thu")}
+                </div>
                       <div className="mt-0.5 truncate text-[11px] text-blue-100/80" title={sessionId}>
-                        Bắt đầu {formatSessionLabel(sessionId)} · {sessionSampleCount} mẫu
+                        {t("Bắt đầu {luc} · {n} mẫu", { luc: formatSessionLabel(sessionId), n: sessionSampleCount })}
                       </div>
                     </div>
                     <button
@@ -2085,15 +2243,17 @@ export default function FullscreenCaptureModal({
                       disabled={recording || countdown > 0}
                       className="shrink-0 rounded-lg border border-blue-500/40 bg-blue-950/60 px-2.5 py-1.5 text-[11px] font-medium text-blue-100 transition hover:bg-blue-900/70 disabled:cursor-not-allowed disabled:opacity-40 sm:text-xs"
                     >
-                      Phiên mới
+                      {t("Phiên mới")}
                     </button>
                   </div>
                   {signerChangedMidSession && (
                     <div className="mt-1.5 flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-950/40 px-2 py-1 text-[10px] leading-relaxed text-amber-200">
-                      <AlertTriangleIcon className="mt-px h-3 w-3 shrink-0" aria-hidden />
+                      <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
                       <span>
-                        Người thực hiện đã đổi từ <b>{sessionSigner}</b>. Hãy bắt đầu phiên
-                        mới để mẫu của hai người không bị gộp chung một nhóm.
+                        <Trans
+                          k="Người thực hiện đã đổi từ {nguoi}. Hãy bắt đầu phiên mới để mẫu của hai người không bị gộp chung một nhóm."
+                          vars={{ nguoi: <b>{sessionSigner}</b> }}
+                        />
                       </span>
                     </div>
                   )}
@@ -2104,14 +2264,15 @@ export default function FullscreenCaptureModal({
               {onCaptureCountChange && (
                 <div>
                   <label htmlFor="capture-count" className="block text-[11px] sm:text-xs font-medium text-blue-300 mb-1">
-                    Số lượt thu
+                    <RepeatIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />
+                {t("Số lượt thu")}
                   </label>
                   <div className="flex items-stretch gap-1.5">
                     <button
                       type="button"
                       onClick={() => stepCaptureCount(-1)}
                       disabled={recording || countdown > 0 || captureCount <= MIN_CAPTURE_COUNT}
-                      aria-label="Giảm số lượt thu"
+                      aria-label={t("Giảm số lượt thu")}
                       className="w-9 shrink-0 rounded-lg border border-gray-600 bg-gray-800/80 text-lg leading-none text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       −
@@ -2136,7 +2297,7 @@ export default function FullscreenCaptureModal({
                       type="button"
                       onClick={() => stepCaptureCount(1)}
                       disabled={recording || countdown > 0 || captureCount >= MAX_CAPTURE_COUNT}
-                      aria-label="Tăng số lượt thu"
+                      aria-label={t("Tăng số lượt thu")}
                       className="w-9 shrink-0 rounded-lg border border-gray-600 bg-gray-800/80 text-lg leading-none text-white transition hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       +
@@ -2146,25 +2307,44 @@ export default function FullscreenCaptureModal({
               )}
             </div>
 
-            <AddDialectModal isOpen={showAddDialectModal} onClose={() => setShowAddDialectModal(false)} onAdd={(name) => {
-              const updated = Array.from(new Set([...dialectList, name]));
-              setDialectList(updated); setDialect(name);
-              setPreference("dialectSelected", name);
+            <AddDialectModal isOpen={showAddDialectModal} onClose={() => setShowAddDialectModal(false)} onAdd={(dialectId) => {
+              // The server has accepted it (status pending); pull the registry
+              // again so every other picker on the page sees it too.
+              const updated = Array.from(new Set([...dialectList, dialectId]));
+              setDialectList(updated); setDialect(dialectId);
+              setPreference("dialectSelected", dialectId);
+              void refreshRegistry();
             }} />
+            <CreateLabelModal
+              isOpen={showCreateLabelModal}
+              onClose={() => setShowCreateLabelModal(false)}
+              initialLanguage={language}
+              initialDialect={dialect || "common"}
+              onCreated={(row) => {
+                setLabel(row.label_original);
+                setSelectedClassUid(row.class_uid);
+                setLanguage(row.language || language);
+                setDialect(row.dialect || dialect || "common");
+                setCatalogRows((prev) => [row, ...prev.filter((r) => r.class_uid !== row.class_uid)]);
+                setLabelConfirmed(true);
+              }}
+            />
 
             {/* Status — desktop only */}
             <div className="bg-gray-800 rounded-lg p-3 hidden sm:block">
               <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between text-gray-400"><span>Lần chụp:</span><span className="text-white">{currentCaptureIndex + 1}/{captureCount}</span></div>
+                <div className="flex justify-between text-gray-400"><span>{t("Lần chụp:")}</span><span className="text-white">
+                    {currentCaptureIndex + 1}/{captureCount}
+                  </span></div>
                 {frames.length > 0 && (
                   <div className="w-full bg-gray-700 rounded-full h-1.5">
                     <div className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" style={{ width: `${Math.min((frames.length / FIXED_TARGET_FRAMES) * 100, 100)}%` }} />
                   </div>
                 )}
                 <div className="flex justify-between text-gray-400">
-                  <span>Trạng thái:</span>
+                  <span>{t("Trạng thái:")}</span>
                   <Badge variant={recording ? "danger" : isReady ? "success" : "warning"} size="sm">
-                    {recording ? "Đang ghi" : isReady ? "Sẵn sàng" : "Đang tải"}
+                    {recording ? t("Đang ghi") : isReady ? t("Sẵn sàng") : t("Đang tải")}
                   </Badge>
                 </div>
               </div>
@@ -2174,58 +2354,63 @@ export default function FullscreenCaptureModal({
           {/* Action Buttons */}
           <div className="p-3 sm:p-4 lg:p-6 border-t border-gray-700 space-y-2 sm:space-y-3 bg-gray-900/95">
             {countdown > 0 ? (
-              <div className="w-full py-3 bg-yellow-600 text-white rounded-lg text-center font-medium text-sm sm:text-base">Bắt đầu sau {countdown}...</div>
+              <div className="w-full py-3 bg-yellow-600 text-white rounded-lg text-center font-medium text-sm sm:text-base">
+                {t("Bắt đầu sau {giay}...", { giay: countdown })}
+              </div>
             ) : !recording ? (
               <Button
                 onClick={handleQuickCapture}
                 disabled={!label || !user || !isReady || !!connectionIssue}
                 className="w-full py-3 sm:py-4 text-sm sm:text-base font-medium"
                 variant="primary"
-                title={connectionIssue ? "Đang gặp sự cố kết nối/lưu server — tạm ngưng thu" : undefined}
+                title={connectionIssue ? t("Đang gặp sự cố kết nối/lưu server — tạm ngưng thu") : undefined}
               >
                 <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                {captureCount > 1 ? `Bắt đầu chụp (${captureCount}x)` : "Bắt đầu chụp"} (Enter)
+                {captureCount > 1
+                  ? t("Bắt đầu chụp ({n}x)", { n: captureCount })
+                  : t("Bắt đầu chụp")}{" "}
+                (Enter)
               </Button>
             ) : paused ? (
               <div className="text-center py-3 text-gray-400 text-sm">
-                <span className="inline-flex items-center gap-1.5 font-medium text-yellow-500"><PauseCircleIcon className="h-4 w-4" /> Đã tạm dừng</span>
-                <p className="text-sm mt-1">Xem các tùy chọn trên màn hình</p>
+                <span className="text-yellow-500 font-medium">{t("⏸ Đã tạm dừng")}</span>
+                <p className="text-sm mt-1">{t("Xem các tùy chọn trên màn hình")}</p>
               </div>
             ) : (
               <>
                 <Button onClick={handlePause} className="w-full py-3 sm:py-4 text-sm sm:text-base font-medium bg-yellow-600 hover:bg-yellow-500" variant="secondary">
                   <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  Tạm dừng (Space)
+                  {t("Tạm dừng (Space)")}
                 </Button>
-                <Button onClick={handleStop} className="w-full py-3 text-sm sm:text-base" variant="danger" disabled={frames.length < FIXED_TARGET_FRAMES} title={frames.length < FIXED_TARGET_FRAMES ? `Cần ${FIXED_TARGET_FRAMES} khung trước khi dừng` : undefined}>
+                <Button onClick={handleStop} className="w-full py-3 text-sm sm:text-base" variant="danger" disabled={frames.length < FIXED_TARGET_FRAMES} title={frames.length < FIXED_TARGET_FRAMES ? t("Cần {FIXED_TARGET_FRAMES} khung trước khi dừng", { FIXED_TARGET_FRAMES }) : undefined}>
                   <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" /></svg>
-                  Dừng và lưu
+                  {t("Dừng và lưu")}
                 </Button>
               </>
             )}
-            <Button onClick={handleClose} className="w-full py-3 text-sm sm:text-base" variant="secondary">Thoát toàn màn hình</Button>
+            <Button onClick={handleClose} className="w-full py-3 text-sm sm:text-base" variant="secondary">{t("Thoát toàn màn hình")}</Button>
           </div>
 
           {/* Tips */}
           <div className="hidden sm:block bg-gray-800 border-t border-gray-700 p-4">
             <button onClick={() => setShowTips(!showTips)} className="w-full flex items-center justify-between text-sm font-medium text-gray-300 hover:text-white transition-colors">
-              <span className="flex items-center gap-2">
-                <LightbulbIcon className="h-4 w-4" />
-                Mẹo nhanh để có kết quả tốt
-              </span>
-              <ChevronDownIcon
-                className={`h-4 w-4 transition-transform ${showTips ? "rotate-180" : ""}`}
-              />
+              <span className="inline-flex items-center gap-1.5">
+            <LightbulbIcon className="h-4 w-4" aria-hidden="true" />
+            {t("Mẹo nhanh để có kết quả tốt")}
+          </span>
+              <span aria-hidden="true">
+            {showTips ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronRightIcon className="h-4 w-4" />}
+          </span>
             </button>
             {showTips && (
-              <ul className="mt-3 grid list-disc grid-cols-2 gap-x-4 gap-y-1 pl-4 text-xs text-gray-400 marker:text-gray-600">
-                <li>Đủ sáng, nền đơn giản</li>
-                <li>Giữ tay trong khung, ngón tay duỗi</li>
-                <li>Bật "Hiển thị hướng dẫn" để căn vị trí</li>
-                <li>Nhìn khung xương tay để biết máy có bám đúng không</li>
-                <li>Đứng giữa khung hình</li>
-                <li>Ra dấu tự nhiên, không gấp</li>
-              </ul>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                <div className="flex items-start gap-1.5"><SparkleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{t("Đảm bảo ánh sáng tốt và nền rõ ràng")}</div>
+                <div className="flex items-start gap-1.5"><HandIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{t("Giữ tay hiển thị và ngón tay duỗi")}</div>
+                <div className="flex items-start gap-1.5"><EyeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{t('Dùng nút "Hiển thị hướng dẫn" để hỗ trợ định vị')}</div>
+                <div className="flex items-start gap-1.5"><LinkIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{t("Quan sát kết nối giữa các bộ phận tay để theo dõi tốt hơn")}</div>
+                <div className="flex items-start gap-1.5"><TargetIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{t("Giữ ở giữa khung hình")}</div>
+                <div className="flex items-start gap-1.5"><BoltIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{t("Di chuyển tự nhiên để có kết quả tốt nhất")}</div>
+              </div>
             )}
           </div>
         </div>

@@ -6,6 +6,7 @@
  * cách đọc. Mã lạ trả về chính nó thay vì chuỗi rỗng.
  */
 
+// @i18n-key-table — giá trị là KHOÁ, dịch tại chỗ dựng (`t(languageName(x))`).
 const LANGUAGE_LABELS: Record<string, string> = {
   vn: 'Tiếng Việt',
   vi: 'Tiếng Việt',

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   assignHandSlots,
+  sourceOf,
   HAND_ANCHOR_MAX_AGE_MS,
   type HandDetection,
 } from "./handIdentity";
@@ -278,5 +279,48 @@ describe("assignHandSlots", () => {
 
       expect(result).toEqual({ right: real.landmarks });
     });
+  });
+});
+
+/**
+ * World landmarks ride on the detection, and reading them back for a resolved
+ * slot depends on one thing: that the resolver hands the caller the SAME array
+ * object it was given, not a copy. That is currently true of every return path,
+ * but nothing was stopping a later refactor from mapping or slicing on the way
+ * out — which would detach each hand's metric 3D shape from its hand silently,
+ * with left/right swapped and no error anywhere.
+ */
+describe("sourceOf — truy ngược khe về đúng bàn tay đã phát hiện", () => {
+  it("giữ nguyên tham chiếu mảng landmarks qua assignHandSlots", () => {
+    const left = detection(0.3, 0.5, "Left");
+    const right = detection(0.7, 0.5, "Right");
+    const out = assignHandSlots([left, right], {}, NOW);
+    // Đẳng thức tham chiếu, không phải đẳng thức giá trị — đó mới là điều
+    // khiến sourceOf dùng được.
+    expect(out.left).toBe(left.landmarks);
+    expect(out.right).toBe(right.landmarks);
+  });
+
+  it("trả về đúng detection mang world landmarks của khe đó", () => {
+    const left = { ...detection(0.3, 0.5, "Left"), world: handAt(0.01, 0.02) };
+    const right = { ...detection(0.7, 0.5, "Right"), world: handAt(0.03, 0.04) };
+    const out = assignHandSlots([left, right], {}, NOW);
+    expect(sourceOf([left, right], out.left)?.world).toBe(left.world);
+    expect(sourceOf([left, right], out.right)?.world).toBe(right.world);
+  });
+
+  it("đi theo khe khi nhãn bị đảo, không đi theo thứ tự MediaPipe", () => {
+    // MediaPipe gán nhãn "Right" cho detection tự tin hơn, nên nó về khe phải;
+    // world landmarks phải đi cùng nó chứ không ở lại chỉ số 0.
+    const first = { ...detection(0.7, 0.5, "Right"), score: 0.9, world: handAt(0.05, 0.06) };
+    const second = { ...detection(0.3, 0.5, "Right"), score: 0.4, world: handAt(0.07, 0.08) };
+    const out = assignHandSlots([first, second], {}, NOW);
+    expect(out.right).toBe(first.landmarks);
+    expect(sourceOf([first, second], out.right)?.world).toBe(first.world);
+    expect(sourceOf([first, second], out.left)?.world).toBe(second.world);
+  });
+
+  it("trả undefined khi khe rỗng", () => {
+    expect(sourceOf([], undefined)).toBeUndefined();
   });
 });

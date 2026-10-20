@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 from app.storage.metadata_db import _execute, _fetch_all, ensure_tables
 
 MOCK_CLASS_UID = "test-schema-class-001"
-MOCK_SAMPLE_UID = "test-schema-sample-001"
+# Must satisfy samples_uid_is_hex10: a real sample_uid is uuid4().hex[:10], and
+# the CHECK enforcing that is what stops a spreadsheet round-trip from turning a
+# uid like "7690373e04" into the float 7.69E+10. This test is about default
+# column backfill, so any valid-shaped uid does; it just may not be prose.
+MOCK_SAMPLE_UID = "dead0beef1"
 
 @pytest.fixture(autouse=True)
 def setup_and_teardown():
@@ -15,17 +19,28 @@ def setup_and_teardown():
     _execute("DELETE FROM samples WHERE sample_uid = %s", (MOCK_SAMPLE_UID,))
     _execute("DELETE FROM classes WHERE class_uid = %s", (MOCK_CLASS_UID,))
     
+    # classes.dialect có FK composite (tenant_id, dialect) -> dialects. Cặp
+    # en/us là dữ liệu tổng hợp cố ý (không đụng dữ liệu thật) nên nó KHÔNG nằm
+    # trong registry — thiếu bước này thì INSERT dưới đây chết vì FK ngay ở
+    # setup, và cả ba test báo ERROR chứ không phải FAIL.
+    _execute("""
+        INSERT INTO dialects(tenant_id, dialect_id, display_name, language, status)
+        VALUES('default', 'us', 'Test (en/us)', 'en', 'approved')
+        ON CONFLICT (tenant_id, dialect_id) DO NOTHING
+    """)
+
     # Tạo Parent data (Class) để không bị lỗi Foreign Key khi insert Sample
     _execute("""
         INSERT INTO classes(class_uid, class_idx, slug, label_original, language, dialect, folder_name)
         VALUES(%s, %s, %s, %s, %s, %s, %s)
     """, (MOCK_CLASS_UID, 9999, "test-slug", "Test Label", "en", "us", "test_folder"))
-    
+
     yield
-    
-    # Dọn dẹp sạch sẽ (sau)
+
+    # Dọn dẹp sạch sẽ (sau) — con trước, dialect mà chúng tham chiếu sau.
     _execute("DELETE FROM samples WHERE sample_uid = %s", (MOCK_SAMPLE_UID,))
     _execute("DELETE FROM classes WHERE class_uid = %s", (MOCK_CLASS_UID,))
+    _execute("DELETE FROM dialects WHERE tenant_id = 'default' AND dialect_id = 'us'")
 
 def test_backward_compatibility_defaults():
     """TC 1.1: Insert data cũ (thiếu các cột mới) -> DB phải tự động fill Default Constraints."""
