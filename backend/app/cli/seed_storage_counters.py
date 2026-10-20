@@ -34,9 +34,9 @@ import sys
 
 def _bao_cao() -> int:
     """In bộ đếm hiện tại so với số trên đĩa. KHÔNG ghi gì."""
-    from app import storage_quota as sq
+    from app.modules.saas import storage_quota as sq
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("cli: doi chieu thu bo dem dung luong"):
         rows = _fetch_all(
@@ -70,7 +70,7 @@ def main(argv=None) -> int:
     if args.check:
         return _bao_cao()
 
-    from app import storage_quota as sq
+    from app.modules.saas import storage_quota as sq
 
     ket = sq.reconcile()
     print(f"đã xét {ket['da_xet']} tenant, sửa {ket['lech']}, lỗi {ket['loi']}, "

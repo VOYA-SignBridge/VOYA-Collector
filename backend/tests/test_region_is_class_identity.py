@@ -70,7 +70,7 @@ def phuong_ngu_that():
     cờ có gì", không phải bất biến nó tuyên bố.
     """
     from app.storage.metadata_db import _execute, _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test: dựng phương ngữ"):
         da_co = _fetch_all(
@@ -131,7 +131,7 @@ def kho_tam(monkeypatch, tmp_path):
 def _don_lop_test_trong_db():
     """Chỉ xoá lớp mang `SLUG` của tệp này — không đụng lớp nào khác."""
     from app.storage.metadata_db import _execute
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: an-vung-test"):
         _execute("DELETE FROM classes WHERE tenant_id = 'default' AND slug = %s",

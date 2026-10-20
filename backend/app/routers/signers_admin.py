@@ -26,10 +26,10 @@ from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
 from app import activity, signers as signer_registry
 from app.auth import require_tenant_editor
-from app.consent_gate import SCOPE_LADDER, load_consents
+from app.modules.security.consent_gate import SCOPE_LADDER, load_consents
 from app.dataset_samples import list_samples
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 

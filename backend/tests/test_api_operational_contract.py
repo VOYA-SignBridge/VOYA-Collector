@@ -169,7 +169,7 @@ def client(monkeypatch):
     app.include_router(router)
     # Router huấn luyện đọc tổ chức từ PHẠM VI REQUEST (18/10/2026), nên app con
     # cần đúng middleware đặt phạm vi đó — người dùng ở đây làm việc tại nhà.
-    import app.tenant_middleware as tm
+    import app.modules.saas.tenant_middleware as tm
     monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: TENANT)
     app.add_middleware(tm.TenantScopeMiddleware)
     app.dependency_overrides[get_current_user] = lambda: USER

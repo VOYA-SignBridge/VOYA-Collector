@@ -13,9 +13,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import api_keys, webhooks
+from app.modules.saas import webhooks
+from app.modules.security import api_keys
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -25,7 +26,7 @@ def _ensure_schema():
 
 @pytest.fixture
 def two_tenants():
-    from app import plans, tenant_admin
+    from app.modules.saas import plans, tenant_admin
     from conftest import purge_tenant
 
     ids = []
@@ -147,7 +148,7 @@ class TestKeyAuthorisation:
         là MỌI hành động qua khoá API biến mất khỏi nhật ký mà không ai thấy.
         Dòng phải được ghi, với nhãn còn nói được ai đã làm.
         """
-        from app import audit
+        from app.modules.security import audit
         from app.auth import _user_from_api_key
 
         created = api_keys.create_key(two_tenants[0], scopes="write")

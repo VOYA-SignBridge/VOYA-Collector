@@ -13,7 +13,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.modules.dataset.balancing import build_balance_plan
 from app.modules.dataset.catalog import ClassMetadata, load_labels
-from app.tenancy import tenant_id_of
+from app.modules.saas.tenancy import tenant_id_of
 from app.modules.dataset.samples import save_sequence_npz
 from app.processing.augmenter import generate_augmented_sequences
 

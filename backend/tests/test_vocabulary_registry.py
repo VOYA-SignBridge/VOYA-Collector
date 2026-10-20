@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from app.vocabulary_registry import slugify_dialect
+from app.modules.dataset.vocabulary_registry import slugify_dialect
 
 REPO = Path(__file__).resolve().parents[2]
 DATASET = REPO / "dataset"

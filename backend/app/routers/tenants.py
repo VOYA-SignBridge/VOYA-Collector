@@ -14,7 +14,7 @@ tenant A* eventually grants something in tenant B: the check passes, and
 nothing at the call site shows which authority satisfied it.
 
 This module contains no `system_scope` call. The cross-tenant work lives in
-`app.tenant_admin`, and `test_tenant_isolation.py` asserts that no router
+`app.modules.saas.tenant_admin`, and `test_tenant_isolation.py` asserts that no router
 except `sot_admin` crosses the boundary — a request handler running as every
 tenant is the shape most likely to grow a hole later.
 """
@@ -29,10 +29,11 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from app import audit, tenant_admin
+from app.modules.saas import tenant_admin
+from app.modules.security import audit
 from app.auth import get_current_user, require_admin
-from app.rate_limit_deps import limit_catalog
-from app.sudo_mode import require_sudo
+from app.modules.security.rate_limit_deps import limit_catalog
+from app.modules.security.sudo_mode import require_sudo
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ def require_tenant_admin(
     only admin left. That is an escape hatch, and it is the ONLY place the two
     authorities meet — written once, here, rather than re-derived per endpoint.
     """
-    from app.vocabulary_registry import tenant_role
+    from app.modules.dataset.vocabulary_registry import tenant_role
 
     if user.get("is_admin"):
         return user
@@ -402,7 +403,7 @@ def get_my_tenant(
     người gọi. Không danh sách thành viên, không thư điện tử, không lời mời —
     những thứ đó vẫn thuộc về quản trị tenant.
     """
-    from app.tenant_context import require_tenant
+    from app.modules.saas.tenant_context import require_tenant
 
     scope = require_tenant()
     try:
@@ -648,7 +649,7 @@ def create_invitation(
     the promise this field exists to avoid making — a worker that is down would
     report success and deliver nothing.
     """
-    from app import public_url
+    from app.core import public_url
     from app.config import settings
 
     # Người mời gõ TÊN ĐĂNG NHẬP hay ĐỊA CHỈ THƯ đều được.
@@ -765,7 +766,7 @@ def read_subscription(
     gói của mình sắp hết hạn chưa. Trước đây thông tin này chỉ đọc được bằng
     một câu SQL, nên trên thực tế không ai đọc.
     """
-    from app.subscription_lifecycle import describe
+    from app.modules.saas.subscription_lifecycle import describe
 
     return describe(tenant_id)
 
@@ -786,7 +787,7 @@ def set_subscription_auto_renew(
     sai nhất của mọi luồng huỷ, và làm sai theo hướng đó là lấy đi phần khách
     hàng đã trả tiền.
     """
-    from app.subscription_lifecycle import SubscriptionError, describe, set_auto_renew
+    from app.modules.saas.subscription_lifecycle import SubscriptionError, describe, set_auto_renew
 
     try:
         set_auto_renew(tenant_id, payload.enabled)
@@ -844,7 +845,8 @@ def request_export(
     người gọi đã đọc cam kết sử dụng trước khi tác vụ nền bắt đầu — ghi bằng
     `audit.record`, không chỉ bằng việc bấm nút thành công.
     """
-    from app import audit, tenant_lifecycle
+    from app.modules.saas import tenant_lifecycle
+    from app.modules.security import audit
 
     if not agree:
         raise HTTPException(
@@ -870,7 +872,7 @@ def request_export(
     )
 
     try:
-        from app.saas_tasks import run_tenant_export
+        from app.modules.saas.saas_tasks import run_tenant_export
 
         run_tenant_export.delay(job["export_id"])
     except Exception as exc:
@@ -891,7 +893,7 @@ def list_exports(
     tenant_id: str,
     _: Dict[str, Any] = Depends(require_tenant_admin),
 ) -> List[Dict[str, Any]]:
-    from app import tenant_lifecycle
+    from app.modules.saas import tenant_lifecycle
 
     return tenant_lifecycle.list_exports(tenant_id)
 
@@ -910,7 +912,8 @@ def download_export(
     """
     from fastapi.responses import FileResponse
 
-    from app import audit, tenant_lifecycle
+    from app.modules.saas import tenant_lifecycle
+    from app.modules.security import audit
 
     try:
         path = tenant_lifecycle.export_file(tenant_id, export_id, viewer_id=str(requester.get("id") or "") or None)
@@ -932,7 +935,7 @@ def purge_preview(
     _: Dict[str, Any] = Depends(require_admin),
 ) -> Dict[str, Any]:
     """Sẽ xoá những gì, và đã đủ điều kiện chưa. Không thay đổi gì cả."""
-    from app import tenant_lifecycle
+    from app.modules.saas import tenant_lifecycle
 
     try:
         return tenant_lifecycle.purge_preview(tenant_id)
@@ -948,7 +951,8 @@ def purge_tenant(
     operator: Dict[str, Any] = Depends(require_sudo),
 ) -> Dict[str, Any]:
     """Xoá vĩnh viễn một tổ chức. Không hoàn tác được."""
-    from app import audit, tenant_lifecycle
+    from app.modules.saas import tenant_lifecycle
+    from app.modules.security import audit
 
     try:
         result = tenant_lifecycle.purge_tenant(

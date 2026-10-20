@@ -5,7 +5,7 @@ from fastapi import (
 from pydantic import BaseModel
 
 from app.auth import get_current_user, require_admin, require_tenant_editor
-from app.sudo_mode import require_sudo
+from app.modules.security.sudo_mode import require_sudo
 from app.sync_tasks import download_missing_files_to_local
 from app.monitoring import collect_resources
 from app import activity
@@ -33,7 +33,7 @@ def elevate_privileges(
     current_user: Dict[str, Any] = Depends(require_admin),
 ) -> Dict[str, Any]:
     """Xác thực lại bằng mật khẩu để mở cửa sổ nâng quyền 5 phút."""
-    from app import audit, sudo_mode
+    from app.modules.security import audit, sudo_mode
 
     try:
         ttl = sudo_mode.elevate(current_user, payload.password)
@@ -60,7 +60,7 @@ def drop_privileges(
     cách duy nhất là chờ hết 5 phút — và người vận hành cẩn thận sẽ không có
     cách nào dọn sau khi xong việc.
     """
-    from app import audit, sudo_mode
+    from app.modules.security import audit, sudo_mode
 
     sudo_mode.revoke(str(current_user["id"]))
     audit.record("sudo.revoke", actor=current_user, request=request)
@@ -77,7 +77,8 @@ def read_settings(
     đổi gì, và bắt nâng quyền để xem sẽ khiến người ta nâng quyền theo thói quen
     — đúng thứ làm cho bước xác thực lại mất ý nghĩa.
     """
-    from app import platform_settings, sudo_mode
+    from app.modules.admin import platform_settings
+    from app.modules.security import sudo_mode
 
     return {
         "settings": platform_settings.current(),
@@ -98,7 +99,8 @@ def write_setting(
     tự phụ thuộc `require_admin` và khai báo cả hai sẽ chạy phép kiểm quản trị
     hai lần — vô hại nhưng khó đọc, và dễ khiến người sau bỏ một trong hai đi.
     """
-    from app import audit, platform_settings, sudo_mode
+    from app.modules.admin import platform_settings
+    from app.modules.security import audit, sudo_mode
 
     if sudo_mode.seconds_remaining(str(current_user["id"])) <= 0:
         raise HTTPException(
@@ -206,7 +208,7 @@ def update_user_role(
     gì cả — một tài khoản có thể được nâng lên quản trị nền tảng mà không ai
     tra lại được ai đã cấp, lúc nào.
     """
-    from app import audit
+    from app.modules.security import audit
 
     # Không cho phép tự gỡ quyền admin của chính mình
     if str(user_id) == str(current_user["id"]) and not payload.is_admin:
@@ -266,8 +268,8 @@ def get_attention(current_user: Dict[str, Any] = Depends(require_admin)):
     phiếu hỗ trợ của tổ chức khác không phải việc của họ, và nội dung phiếu là
     dữ liệu của tenant kia.
     """
-    from app.admin_attention import collect
-    from app.tenant_context import current_tenant
+    from app.modules.admin.admin_attention import collect
+    from app.modules.saas.tenant_context import current_tenant
 
     return {"counts": collect(current_tenant() or current_user.get("tenant_id") or "")}
 
@@ -398,10 +400,11 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
        người tố cáo — và người duy nhất có thể tố cáo lại chính là người không
        được báo.
     """
-    from app import audit, notifications, two_factor
+    from app.modules.security import audit, two_factor
+    from app.modules.support import notifications
     from app.auth import request_password_reset
     from app.email_service import send_password_reset_email
-    from app.public_url import resolve_frontend_base_url
+    from app.core.public_url import resolve_frontend_base_url
     from app.storage.metadata_db import _fetch_all
 
     action = (payload.action or "").strip()
@@ -501,7 +504,7 @@ def get_audit_log(
     xem `test_no_router_crosses_the_boundary_except_the_documented_one`.
     """
     from app.storage import metadata_db as db
-    from app.tenant_context import current_tenant
+    from app.modules.saas.tenant_context import current_tenant
 
     rows = db.list_audit_log(limit=limit, action_prefix=action_prefix or None)
     # Nói ra phạm vi thay vì để người đọc suy đoán. Dòng tầng nền tảng
@@ -547,7 +550,7 @@ def get_data_report(current_user: Dict[str, Any] = Depends(require_tenant_editor
     from collections import Counter
     from app.dataset_manager import list_classes
     from app.dataset_samples import list_samples
-    from app.tenant_context import require_tenant
+    from app.modules.saas.tenant_context import require_tenant
 
     # PHÂN LOẠI (16/08/2026): TENANT_ADMIN + DISPLAY/AGGREGATION -> theo phạm vi.
     #

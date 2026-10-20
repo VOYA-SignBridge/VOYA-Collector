@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 def _report_coverage() -> int:
     """In ra bảng số đo đang phủ tới đâu. Không ghi gì."""
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("cli: report usage coverage"):
         rows = _fetch_all(
@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--days phải ≥ 1", file=sys.stderr)
         return 2
 
-    from app.usage import backfill
+    from app.modules.saas.usage import backfill
 
     since = (datetime.now(timezone.utc) - timedelta(days=args.days)).date()
     print(f"Đang gộp số đo từ {since} tới hôm nay ({args.days} ngày)...")

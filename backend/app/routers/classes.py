@@ -4,8 +4,8 @@ import unicodedata
 from pathlib import Path
 from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from app import audit
-from app.rate_limit_deps import limit_catalog
+from app.modules.security import audit
+from app.modules.security.rate_limit_deps import limit_catalog
 from app.dataset_manager import (
     get_or_register_class,
     list_classes,
@@ -29,9 +29,9 @@ from app.catalog_sync import (
 )
 from app.config import settings
 from app.auth import get_current_user, require_admin, require_tenant_editor
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
-from app.webhooks import emit
+from app.modules.saas.webhooks import emit
 
 router = APIRouter(prefix="/classes", tags=["classes"])
 
@@ -177,7 +177,7 @@ def request_class(
     * samples recorded into it still start `pending` and only reach the tenant
       through moderation, exactly like samples of any other label.
     """
-    from app.sample_access import can_manage_tenant_samples
+    from app.modules.dataset.sample_access import can_manage_tenant_samples
 
     tenant = require_tenant()
     manager = can_manage_tenant_samples(current_user, tenant)
@@ -339,7 +339,7 @@ def _prefs_bucket(current_user: Dict[str, Any]) -> str:
     có tenant trong khoá khiến việc xoá sạch một tenant lúc purge thành một
     phép lọc tiền tố thay vì phải dò từng id người dùng.
     """
-    from app.tenancy import normalize_tenant_id
+    from app.modules.saas.tenancy import normalize_tenant_id
 
     tho = (current_user.get("tenant_id") or "").strip()
     if not tho:
@@ -483,7 +483,7 @@ def community_stats():
     #
     # `contributors_count` là chỗ rò rõ nhất: nó đếm người, nên một người vừa
     # gửi mẫu đầu tiên sẽ làm con số nhích lên trước khi có ai duyệt gì.
-    from app import moderation
+    from app.modules.admin import moderation
 
     samples = moderation.filter_rows(list_samples(cong_bo), viewer_id=None).kept
 

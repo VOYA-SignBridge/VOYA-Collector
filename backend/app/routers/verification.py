@@ -26,7 +26,7 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, validator
 
-from app import otp
+from app.modules.security import otp
 from app.auth import _fetch_user_by_login, get_current_user
 from app.config import settings
 from app.rate_limit import enforce_ip_limit
@@ -114,7 +114,7 @@ def _deliver(channel: str, destination: str, code: str, purpose: str) -> None:
     branch — see `sms_service` for why "log it in dev" is refused outright.
     """
     if channel == "sms":
-        from app.sms_service import send_sms
+        from app.services.sms_service import send_sms
 
         send_sms(destination, f"Mã xác minh VOYA-Collector: {code}")
         return
@@ -164,7 +164,7 @@ def verification_status(
 
 
 def _sms_available() -> bool:
-    from app.sms_service import sms_available
+    from app.services.sms_service import sms_available
 
     return bool(sms_available())
 
@@ -183,7 +183,7 @@ def send_verification_code(
         user.get("email") if payload.channel == "email" else ""
     )
 
-    from app.sms_service import SmsNotConfigured, sms_available
+    from app.services.sms_service import SmsNotConfigured, sms_available
 
     if payload.channel == "sms" and not sms_available():
         # Refused before a challenge is minted. Issuing one that can never be
@@ -279,7 +279,7 @@ def start_recovery(payload: RecoverStartRequest, request: Request) -> Dict[str, 
         logger.info("[OTP] recovery requested for an unknown identifier")
         return {"message": _RECOVERY_GENERIC}
 
-    from app.sms_service import sms_available
+    from app.services.sms_service import sms_available
 
     channel = payload.channel
     if channel == "sms" and not sms_available():

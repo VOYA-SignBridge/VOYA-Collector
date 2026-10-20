@@ -18,9 +18,10 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from app import audit, moderation_admin
+from app.modules.admin import moderation_admin
+from app.modules.security import audit
 from app.auth import get_current_user
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/moderation", tags=["moderation"])

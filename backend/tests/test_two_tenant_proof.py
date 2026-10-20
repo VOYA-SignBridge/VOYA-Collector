@@ -20,10 +20,10 @@ import uuid
 
 import pytest
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 @pytest.fixture(scope="module", autouse=True)

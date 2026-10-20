@@ -13,10 +13,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app import audit
-from app import vocabulary_registry as vr
+from app.modules.security import audit
+from app.modules.dataset import vocabulary_registry as vr
 from app.auth import get_current_user, get_current_user_optional, require_admin
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vocabulary", tags=["vocabulary"])
@@ -128,7 +128,7 @@ def reject(
                             detail=f"Phương ngữ đích '{merge_into}' không tồn tại.")
 
     vr.record_merge(dialect_id, merge_into, str(admin.get("id") or ""))
-    from app.catalog_migrations import merge_dialect_task
+    from app.modules.dataset.catalog_migrations import merge_dialect_task
 
     merge_dialect_task.delay(old_id=dialect_id, new_id=merge_into)
 
@@ -382,7 +382,7 @@ def clone_to_tenant(
     # cloned_from_community_version` silently matches zero rows and the
     # provenance is lost. Refuse before writing anything.
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     # Phạm vi của TENANT ĐÍCH — KHÔNG phải `system_scope`.
     #

@@ -277,7 +277,7 @@ class TestDialectMergeDrivePairs:
     missing)'. Bước Drive của gộp phương ngữ chưa từng chạy. Cặp phải tường minh."""
 
     def test_pairs_are_explicit_per_language_and_tree(self, legacy_mode, tmp_path):
-        from app.catalog_migrations import drive_dialect_move_pairs
+        from app.modules.dataset.catalog_migrations import drive_dialect_move_pairs
 
         (tmp_path / "features" / "vn" / "nam").mkdir(parents=True)
         (tmp_path / "features" / "en" / "nam").mkdir(parents=True)
@@ -291,7 +291,7 @@ class TestDialectMergeDrivePairs:
         assert not any("*" in a or "*" in b for a, b in pairs)
 
     def test_tenant_layout_one_raw_pair_per_owning_tenant(self, tenant_mode, tmp_path):
-        from app.catalog_migrations import drive_dialect_move_pairs
+        from app.modules.dataset.catalog_migrations import drive_dialect_move_pairs
 
         (tmp_path / "raw_videos" / "vn" / "nam").mkdir(parents=True)
         pairs = drive_dialect_move_pairs(tmp_path, "mien-nam", "nam", raw_tenants=["default", "truong-b"])
@@ -473,7 +473,7 @@ class TestDialectMergeIsScopedToTheMergingTenant:
     tên của tenant gốc lại bị dời nhầm."""
 
     def test_other_tenant_pairs_come_from_its_own_partition(self, tenant_mode, tmp_path):
-        from app.catalog_migrations import drive_dialect_move_pairs
+        from app.modules.dataset.catalog_migrations import drive_dialect_move_pairs
 
         (tmp_path / "features" / "_tenants" / "truong-b" / "vn" / "nam").mkdir(parents=True)
         # Cây tenant gốc cũng có `vn/nam` — KHÔNG được vào cặp của truong-b.
@@ -482,21 +482,21 @@ class TestDialectMergeIsScopedToTheMergingTenant:
         assert pairs == [("Tenants/truong-b/Samples/vn/mien-nam", "Tenants/truong-b/Samples/vn/nam")]
 
     def test_default_tenant_ignores_other_tenants_partitions(self, tenant_mode, tmp_path):
-        from app.catalog_migrations import drive_dialect_move_pairs
+        from app.modules.dataset.catalog_migrations import drive_dialect_move_pairs
 
         (tmp_path / "features" / "_tenants" / "truong-b" / "vn" / "nam").mkdir(parents=True)
         pairs = drive_dialect_move_pairs(tmp_path, "mien-nam", "nam", raw_tenants=[])
         assert pairs == []
 
     def test_legacy_layout_pair_keeps_the_partition_in_the_path(self, legacy_mode, tmp_path):
-        from app.catalog_migrations import drive_dialect_move_pairs
+        from app.modules.dataset.catalog_migrations import drive_dialect_move_pairs
 
         (tmp_path / "features" / "_tenants" / "truong-b" / "vn" / "nam").mkdir(parents=True)
         pairs = drive_dialect_move_pairs(tmp_path, "mien-nam", "nam", raw_tenants=[], tenant_id="truong-b")
         assert pairs == [("features/_tenants/truong-b/vn/mien-nam", "features/_tenants/truong-b/vn/nam")]
 
     def test_feature_base_is_the_tenants_own_tree(self, tmp_path):
-        from app.catalog_migrations import _feature_base
+        from app.modules.dataset.catalog_migrations import _feature_base
 
         assert _feature_base(tmp_path, "default") == tmp_path / "features"
         assert _feature_base(tmp_path, "truong-b") == tmp_path / "features" / "_tenants" / "truong-b"
@@ -504,7 +504,7 @@ class TestDialectMergeIsScopedToTheMergingTenant:
     def test_default_sidecar_rewrite_leaves_other_tenants_alone(self, tmp_path):
         import json
 
-        from app.catalog_migrations import _rewrite_sidecars
+        from app.modules.dataset.catalog_migrations import _rewrite_sidecars
 
         mine = tmp_path / "vn" / "nam" / "class.json"
         theirs = tmp_path / "_tenants" / "truong-b" / "vn" / "nam" / "class.json"

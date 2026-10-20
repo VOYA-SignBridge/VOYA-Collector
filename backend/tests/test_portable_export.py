@@ -7,7 +7,7 @@ import zipfile
 import numpy as np
 import pytest
 
-from app.portable_export import write_feature_bundle
+from app.modules.export.portable_export import write_feature_bundle
 
 
 def test_export_relocates_into_real_training_loader_and_optimizer(tmp_path):

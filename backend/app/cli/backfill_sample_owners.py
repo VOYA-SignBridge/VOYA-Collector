@@ -59,7 +59,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 logger = logging.getLogger("backfill.owners")
 

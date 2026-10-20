@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Dict
 from app.modules.dataset.catalog import ClassMetadata, load_labels
-from app.tenancy import tenant_id_of
+from app.modules.saas.tenancy import tenant_id_of
 
 def load_inference_classes(tenant_id: str, language: str,
                            dialect: str) -> List[ClassMetadata]:

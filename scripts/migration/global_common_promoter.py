@@ -12,7 +12,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.modules.dataset.catalog import (_load_all_labels_unscoped, register_class,
                                          ClassMetadata)
-from app.tenancy import tenant_id_of
+from app.modules.saas.tenancy import tenant_id_of
 
 def find_multi_language_slugs(min_languages: int = 2):
     # Đề bạt nhãn dùng chung phải so sánh XUYÊN ngôn ngữ trên toàn kho;

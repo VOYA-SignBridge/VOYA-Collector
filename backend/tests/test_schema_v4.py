@@ -157,7 +157,7 @@ class TestSeededPlans:
     def test_the_default_tenant_is_on_the_unlimited_plan(self):
         """Nó giữ dữ liệu thật và không bao giờ nên bị một hạn mức thương mại
         chặn giữa chừng."""
-        from app.tenancy import DEFAULT_TENANT_ID
+        from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
         row = db._fetch_all(
             "SELECT plan_code FROM tenants WHERE tenant_id = %s", (DEFAULT_TENANT_ID,)
@@ -185,13 +185,13 @@ class TestPurgeOrderIsSharedNotCopied:
         thật trên sản xuất, không phải ở đây."""
         from conftest import _TENANT_PURGE_ORDER
 
-        from app.tenant_lifecycle import PURGE_ORDER
+        from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
         assert _TENANT_PURGE_ORDER is PURGE_ORDER
 
     def test_children_come_before_parents(self):
         """Thứ tự LÀ một phần của tính đúng, không phải sở thích."""
-        from app.tenant_lifecycle import PURGE_ORDER
+        from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
         position = {table: i for i, table in enumerate(PURGE_ORDER)}
         rows = db._fetch_all(

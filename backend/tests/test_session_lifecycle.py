@@ -26,7 +26,7 @@ import pytest
 
 from app import auth
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture

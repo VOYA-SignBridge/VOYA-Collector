@@ -25,12 +25,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app import plans as plans_service
-from app import tenant_admin, usage
+from app.modules.saas import plans as plans_service
+from app.modules.saas import tenant_admin, usage
 from app.auth import get_current_user, require_admin
-from app.quota_deps import working_tenant_of
-from app.rate_limit_deps import limit_catalog
-from app.sudo_mode import require_sudo
+from app.modules.security.quota_deps import working_tenant_of
+from app.modules.security.rate_limit_deps import limit_catalog
+from app.modules.security.sudo_mode import require_sudo
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def update_plan(
     Đổi hạn mức tác động tới mọi tenant đang ở gói đó, nên nó đòi sudo và được
     ghi kiểm toán cùng nội dung thay đổi.
     """
-    from app import audit
+    from app.modules.security import audit
 
     try:
         updated = plans_service.update_plan(plan_code, changes)
@@ -163,7 +163,7 @@ def change_tenant_plan(
     Ghi vào nhật ký kiểm toán vì đây là thay đổi có hệ quả thương mại: một
     tranh chấp hoá đơn sẽ hỏi ai đổi, đổi lúc nào, từ gì sang gì.
     """
-    from app import audit
+    from app.modules.security import audit
 
     try:
         before = tenant_admin.get_tenant(tenant_id).get("plan_code")
@@ -194,7 +194,7 @@ def change_tenant_status(
     operator: Dict[str, Any] = Depends(require_sudo),
 ) -> Dict[str, Any]:
     """Treo hoặc mở lại một tổ chức."""
-    from app import audit
+    from app.modules.security import audit
 
     try:
         tenant = tenant_admin.set_billing_status(
@@ -218,7 +218,7 @@ def _emit_plan_changed(tenant_id: str, before: Optional[str], after: str) -> Non
     sự cố ở tầng webhook không được biến câu trả lời thành lỗi.
     """
     try:
-        from app.webhooks import emit
+        from app.modules.saas.webhooks import emit
 
         emit(tenant_id, "tenant.plan_changed", {"from": before, "to": after})
     except Exception as exc:

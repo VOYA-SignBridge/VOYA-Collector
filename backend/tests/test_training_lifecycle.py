@@ -67,7 +67,7 @@ def client(monkeypatch):
     # ca này kiểm vòng đời job, không kiểm phân giải danh tính; chỗ kiểm điều
     # đó là `test_c3_job_read_confinement.py`, và nó dùng tài khoản + token
     # thật.
-    from app.tenant_context import bind_request_scope, unbind_request_scope
+    from app.modules.saas.tenant_context import bind_request_scope, unbind_request_scope
 
     training_jobs.clear()
     tokens = bind_request_scope(USER["tenant_id"])

@@ -19,9 +19,9 @@ import uuid
 
 import pytest
 
-from app import legal, legal_store
+from app.modules.legal import legal, legal_store
 from app.storage.metadata_db import _execute
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 # Một PDF hợp lệ tối thiểu. Dùng byte thật chứ không phải `b"gia bo"`: đường đi

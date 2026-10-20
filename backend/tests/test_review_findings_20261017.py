@@ -35,14 +35,14 @@ def test_dialect_rename_and_retire_use_the_callers_tenant(monkeypatch):
     ({}, "admin", False),
 ])
 def test_who_manages_tenant_samples(monkeypatch, user, role, expected):
-    from app import sample_access, vocabulary_registry
+    from app.modules.dataset import sample_access, vocabulary_registry
 
     monkeypatch.setattr(vocabulary_registry, "tenant_role", lambda t, u: role)
     assert sample_access.can_manage_tenant_samples(user, "truong-b") is expected
 
 
 def test_role_lookup_failure_means_regular_member(monkeypatch):
-    from app import sample_access, vocabulary_registry
+    from app.modules.dataset import sample_access, vocabulary_registry
 
     def boom(t, u):
         raise RuntimeError("db down")
@@ -53,7 +53,7 @@ def test_role_lookup_failure_means_regular_member(monkeypatch):
 
 @pytest.mark.parametrize("manager", [True, False])
 def test_read_gate_passes_manage_all_to_the_query(monkeypatch, manager):
-    from app import sample_access
+    from app.modules.dataset import sample_access
     from app.storage import metadata_db
 
     seen = {}
@@ -71,7 +71,7 @@ def test_read_gate_passes_manage_all_to_the_query(monkeypatch, manager):
 
 def test_capture_session_editor_reads_the_tenant_role_not_a_user_field(monkeypatch):
     """`tenant_role` không có trên current_user ngoài /auth/me — bản cũ luôn False."""
-    from app import vocabulary_registry
+    from app.modules.dataset import vocabulary_registry
     from app.routers import capture_sessions
 
     monkeypatch.setattr(vocabulary_registry, "tenant_role",
@@ -81,7 +81,8 @@ def test_capture_session_editor_reads_the_tenant_role_not_a_user_field(monkeypat
 
 
 def test_tenant_manager_may_export_a_tenant_full_of_private_data(monkeypatch):
-    from app import sample_access, tenant_lifecycle
+    from app.modules.dataset import sample_access
+    from app.modules.saas import tenant_lifecycle
     from app.storage import metadata_db
 
     asked = []
@@ -104,7 +105,7 @@ def test_tenant_manager_may_export_a_tenant_full_of_private_data(monkeypatch):
 # ------------------------------------------------ 3. nhãn từ thành viên, duyệt
 
 def test_private_session_cannot_be_decided_even_by_its_owner(monkeypatch):
-    from app import moderation_admin
+    from app.modules.admin import moderation_admin
     from app.storage import metadata_db
 
     monkeypatch.setattr(metadata_db, "_fetch_all",
@@ -119,7 +120,7 @@ def test_member_label_request_cannot_set_common_language_and_is_audited(
         monkeypatch, manager, expected_common):
     from types import SimpleNamespace
 
-    from app import sample_access
+    from app.modules.dataset import sample_access
     from app.routers import classes
 
     got, audited = {}, []

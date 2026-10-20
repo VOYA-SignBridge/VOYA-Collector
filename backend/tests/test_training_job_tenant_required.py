@@ -41,8 +41,8 @@ import uuid
 import pytest
 
 from app.storage.metadata_db import _migration_cursor, upsert_training_job
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import TenantScopeError, no_scope, system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import TenantScopeError, no_scope, system_scope, tenant_scope
 
 
 def _doc_tenant(job_id: str):

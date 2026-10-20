@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app import learn_catalog
+from app.modules.dataset import learn_catalog
 from app.config import settings
 
 router = APIRouter(prefix="/learn", tags=["learn"])
@@ -37,7 +37,7 @@ def _own_classes_by_slug() -> Dict[str, List[Dict[str, Any]]]:
     tenant = (settings.public_tenant_id or "").strip()
     if not tenant:
         return {}
-    from app import moderation
+    from app.modules.admin import moderation
     from app.dataset_manager import list_classes
     from app.dataset_samples import list_samples
 

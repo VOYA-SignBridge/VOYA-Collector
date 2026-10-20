@@ -23,10 +23,11 @@ import uuid
 
 import pytest
 
-from app import notifications, training_tasks
+from app.modules.support import notifications
+from app import training_tasks
 from app.storage.metadata_db import _execute
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 def _make_account(prefix: str) -> dict:

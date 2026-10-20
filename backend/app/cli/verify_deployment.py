@@ -34,7 +34,7 @@ from __future__ import annotations
 import csv
 import sys
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 results: list[tuple[str, str, str]] = []
@@ -205,7 +205,7 @@ def main() -> int:
         from app.config import settings
         from app.storage.authz_schema import missing_objects
         from app.storage.metadata_db import _cursor, _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with _cursor() as cur:
             missing_authz = missing_objects(cur.connection)
@@ -278,7 +278,7 @@ def main() -> int:
     # thuận nào. Phép kiểm này là chỗ duy nhất tình trạng đó lộ ra trước khi có
     # người hỏi bằng chứng.
     try:
-        from app import legal
+        from app.modules.legal import legal
 
         missing_legal = legal.missing_for_registration()
         record(FAIL if missing_legal else PASS, "van ban phap ly",
@@ -301,9 +301,9 @@ def main() -> int:
     # (di sản v1, hoặc một lần công bố đi vòng qua `register_document`), và
     # thân có mà băm không khớp (bảng đã bị sửa tay).
     try:
-        from app import legal
+        from app.modules.legal import legal
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("verify: kho van ban phap ly"):
             rows = _fetch_all(
@@ -342,9 +342,9 @@ def main() -> int:
     # `dataset/legal`. Bảng đầy đủ, mọi con trỏ đều có, và không đường nào trong
     # ứng dụng phát hiện ra cho tới khi có người bấm vào một tài liệu.
     try:
-        from app import legal_store
+        from app.modules.legal import legal_store
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("verify: kho tai lieu tren dia"):
             docs = _fetch_all(
@@ -684,7 +684,7 @@ def main() -> int:
         from pathlib import Path as _Path
 
         from app.config import settings as _settings
-        from app.consent_gate import SnapshotUnusable, load_snapshot
+        from app.modules.security.consent_gate import SnapshotUnusable, load_snapshot
 
         snap_path = _Path(_settings.dataset_root) / "consent_snapshot.json"
         try:

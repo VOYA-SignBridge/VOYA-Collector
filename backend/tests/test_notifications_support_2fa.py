@@ -11,10 +11,11 @@ import uuid
 
 import pytest
 
-from app import notifications, support, totp, two_factor
+from app.modules.security import totp, two_factor
+from app.modules.support import notifications, support
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 def _make_account(prefix: str) -> dict:
@@ -88,7 +89,7 @@ class TestThongBao:
     def test_khong_co_pham_vi_tenant_thi_KHONG_ghi(self, account):
         """Fail-closed, cùng nguyên tắc với `audit.record()`: một dòng không biết
         mình thuộc tenant nào là dòng mà RLS sẽ giấu khỏi chính người cần đọc."""
-        from app.tenant_context import no_scope
+        from app.modules.saas.tenant_context import no_scope
 
         with no_scope():
             assert notifications.notify(account["id"], "system", "mo coi") is None
@@ -307,7 +308,7 @@ class TestPhieuDenTayNguoiTruc:
         cách một lỗi RLS đội lốt một cấu hình bình thường."""
         import logging
 
-        with caplog.at_level(logging.ERROR, logger="app.support"):
+        with caplog.at_level(logging.ERROR, logger="app.modules.support.support"):
             support._alert_staff("00000000-0000-0000-0000-000000000000",
                                  str(uuid.uuid4()), "chu de", "tieu de", "ai do")
         assert any("khong tim thay quan tri vien" in r.message for r in caplog.records)

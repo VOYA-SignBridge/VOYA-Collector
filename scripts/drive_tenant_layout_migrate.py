@@ -37,9 +37,9 @@ sys.path.insert(0, "/workspace/backend")
 from app.storage import drive_layout as dl  # noqa: E402
 from app.storage.gdrive_client import FOLDER_MIME, get_gdrive_client  # noqa: E402
 from app.storage.metadata_db import _execute, _fetch_all  # noqa: E402
-from app.tenant_admin import TenantError, assert_tenant_name_free  # noqa: E402
-from app.tenancy import DEFAULT_TENANT_ID, is_valid_tenant_id  # noqa: E402
-from app.tenant_context import system_scope  # noqa: E402
+from app.modules.saas.tenant_admin import TenantError, assert_tenant_name_free  # noqa: E402
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID, is_valid_tenant_id  # noqa: E402
+from app.modules.saas.tenant_context import system_scope  # noqa: E402
 
 APPLY = "--apply" in sys.argv
 client = get_gdrive_client()

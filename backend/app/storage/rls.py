@@ -57,7 +57,7 @@ from typing import Any, Dict
 # Module level, not inside apply_scope: that function runs once per database
 # transaction — hundreds of times during a single video upload — and
 # tenant_context is dependency-free precisely so this import is safe here.
-from app.tenant_context import current_tenant, in_system_scope
+from app.modules.saas.tenant_context import current_tenant, in_system_scope
 
 logger = logging.getLogger(__name__)
 
@@ -516,7 +516,7 @@ def apply_scope(cur) -> None:
 
     Called from the two functions in ``storage/metadata_db`` that every metadata
     query goes through, and explicitly from the handful of places that open
-    their own connection. It reads the scope from `app.tenant_context` rather
+    their own connection. It reads the scope from `app.modules.saas.tenant_context` rather
     than taking it as an argument, so no caller can pass a tenant that differs
     from the one the surrounding code believes it is acting for.
     """

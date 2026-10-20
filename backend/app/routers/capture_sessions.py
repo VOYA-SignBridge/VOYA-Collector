@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 from app import activity
 from app.auth import get_current_user
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +88,9 @@ def _is_editor(user: Dict[str, Any], tenant_id: str) -> bool:
 
     Trước 17/10/2026 hàm này đọc `user["tenant_role"]` — trường chỉ được tính ở
     `/auth/me`, nên ở đây nó luôn rỗng và chỉ admin nền tảng được coi là biên
-    tập viên. Giờ hỏi đúng một chỗ với mọi cổng mẫu khác: `app.sample_access`.
+    tập viên. Giờ hỏi đúng một chỗ với mọi cổng mẫu khác: `app.modules.dataset.sample_access`.
     """
-    from app.sample_access import can_manage_tenant_samples
+    from app.modules.dataset.sample_access import can_manage_tenant_samples
 
     return can_manage_tenant_samples(user, tenant_id)
 
@@ -128,7 +128,7 @@ def list_sessions(
     elif editor:
         # Admin/editor của tenant thấy MỌI phiên của tenant, kể cả `private`:
         # `private` là riêng với các thành viên khác, không riêng với người
-        # quản lý tổ chức (xem `app.sample_access`). Không thêm điều kiện nên
+        # quản lý tổ chức (xem `app.modules.dataset.sample_access`). Không thêm điều kiện nên
         # cũng không thêm tham số.
         pass
     else:

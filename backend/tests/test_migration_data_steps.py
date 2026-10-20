@@ -135,7 +135,7 @@ def vocab_meta_vang(cur):
     rồi phục hồi nguyên vẹn — nó là con trỏ tới bản chụp registry đang dùng, và
     một bài kiểm không có quyền tua ngược nó.
     """
-    from app.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
     with _pham_vi_dung_trang_thai(cur):
         cur.execute("SELECT version FROM vocabulary_registry_meta "

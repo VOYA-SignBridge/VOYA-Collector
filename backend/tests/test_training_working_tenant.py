@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import app.routers.training as tr
-import app.tenant_middleware as tm
+import app.modules.saas.tenant_middleware as tm
 from app.auth import get_current_user
 from app.main import app
 
@@ -114,7 +114,7 @@ def test_start_checks_quota_at_home_and_at_the_working_tenant(working_in_voya, m
 
 
 def test_guard_quota_can_target_an_explicit_tenant(monkeypatch):
-    import app.quota_deps as qd
+    import app.modules.security.quota_deps as qd
 
     seen = []
     monkeypatch.setattr(qd, "enforce", lambda tenant_id, metric, adding=1: seen.append(tenant_id))
@@ -131,7 +131,7 @@ def test_progress_websocket_uses_the_working_tenant(monkeypatch):
     nối trước `accept()` -> trình duyệt nhận 403 và màn hình kẹt ở "queued" dù
     trainer đã chạy. Phải dùng cùng nguồn với middleware HTTP (`_tenant_of_user`).
     """
-    from app.tenant_context import current_tenant
+    from app.modules.saas.tenant_context import current_tenant
 
     monkeypatch.setattr(tr, "get_user_from_token",
                         lambda token: {"id": "u-minh67", "username": "Minh67", "tenant_id": HOME})

@@ -367,7 +367,7 @@ class TestRlsDdl:
         acquire cross-tenant read access. Keeping the escape hatch in a different
         GUC makes that unreachable by any tenant value at all.
         """
-        from app.tenancy import is_valid_tenant_id
+        from app.modules.saas.tenancy import is_valid_tenant_id
 
         assert is_valid_tenant_id(rls.SYSTEM_SCOPE_ON), "premise of this test"
         assert rls.SYSTEM_SCOPE_GUC != rls.TENANT_GUC

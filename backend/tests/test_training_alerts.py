@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import training_alerts as ta
+from app.modules.training import training_alerts as ta
 
 
 SYSTEM_MESSAGES = [
@@ -36,7 +36,7 @@ def test_data_messages_classified_data(msg):
 
 
 def test_notify_returns_true_and_increments_counter_for_system(monkeypatch):
-    from app.metrics import training_system_failures_total
+    from app.infrastructure.observability.metrics import training_system_failures_total
 
     before = training_system_failures_total.labels(source="dispatch")._value.get()
     escalated = ta.notify_admins_training_failure(

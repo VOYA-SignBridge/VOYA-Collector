@@ -13,7 +13,7 @@ import hashlib
 
 import pytest
 
-from app import tokens
+from app.modules.security import tokens
 
 
 class TestLinkTokens:

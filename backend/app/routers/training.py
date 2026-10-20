@@ -28,10 +28,10 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.auth import get_current_user, get_user_from_token, require_admin
-from app.checkpoint_io import load_checkpoint
-from app.quota_deps import guard_quota, tenant_of
-from app.rate_limit_deps import limit_predict, limit_training
-from app.vocabulary_registry import assert_can_use_dialect, dialect_owner
+from app.modules.training.checkpoint_io import load_checkpoint
+from app.modules.security.quota_deps import guard_quota, tenant_of
+from app.modules.security.rate_limit_deps import limit_predict, limit_training
+from app.modules.dataset.vocabulary_registry import assert_can_use_dialect, dialect_owner
 from app.cookie_auth import ACCESS_COOKIE
 
 logger = logging.getLogger(__name__)
@@ -685,7 +685,7 @@ async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
     mục và đối chiếu trước khi phục vụ. Một mục không thuộc phạm vi đang chạy
     được coi như không có, đúng cách hàng bị RLS lọc trông như không tồn tại.
     """
-    from app.tenant_context import current_tenant
+    from app.modules.saas.tenant_context import current_tenant
 
     pham_vi = (current_tenant() or "").strip()
     cached = training_jobs.get(job_id)
@@ -736,7 +736,7 @@ def _working_tenant() -> str:
     (tổ chức nhà, để tính hạn mức): hai thứ lệch nhau ngay khi người dùng đổi nơi
     làm việc. Fail-closed — không có phạm vi thì ném, không rơi về `default`.
     """
-    from app.tenant_context import require_tenant
+    from app.modules.saas.tenant_context import require_tenant
 
     return require_tenant()
 
@@ -770,7 +770,7 @@ def _rows_of_tenant(rows: List[Dict], tenant_id: str) -> List[Dict]:
     cho mọi tenant, nên mọi số liệu đọc thẳng từ chúng phải lọc ở đây; ô trống
     là dữ liệu có từ trước đa tenant, thuộc tenant khởi tạo — `tenant_id_of` là
     bộ đọc DUY NHẤT cho câu hỏi ấy, để mọi bên đọc CSV hiểu ô tenant giống nhau."""
-    from app.tenancy import tenant_id_of
+    from app.modules.saas.tenancy import tenant_id_of
 
     return [r for r in rows if tenant_id_of(r) == tenant_id]
 
@@ -1837,7 +1837,7 @@ async def start_training(
             # A dispatch failure is always a system/infra problem (not the user's
             # data) → escalate to admins.
             try:
-                from app.training_alerts import notify_admins_training_failure
+                from app.modules.training.training_alerts import notify_admins_training_failure
 
                 notify_admins_training_failure(
                     job_id=job_id,
@@ -1959,7 +1959,7 @@ def _evaluation_label_names(labels: Sequence[str]) -> Dict[str, str]:
         return {}
     try:
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import require_tenant
+        from app.modules.saas.tenant_context import require_tenant
 
         rows = _fetch_all(
             "SELECT class_uid, label_original, slug FROM classes "
@@ -2458,8 +2458,8 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     # (tổ chức nhà): từ khi job thuộc tổ chức đang làm việc (18/10/2026), người ở
     # nhà B làm việc ở VOYA không tra thấy job của chính mình, kết nối bị đóng
     # trước `accept()` (trình duyệt thấy 403) và màn hình kẹt ở "queued".
-    from app.tenant_context import tenant_scope
-    from app.tenant_middleware import _tenant_of_user
+    from app.modules.saas.tenant_context import tenant_scope
+    from app.modules.saas.tenant_middleware import _tenant_of_user
 
     pham_vi = str((await asyncio.to_thread(_tenant_of_user, str((user or {}).get("id") or "")))
                   or "").strip()

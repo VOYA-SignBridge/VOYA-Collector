@@ -154,7 +154,7 @@ def _membership_active(actor_id: str, context: ScopeContext) -> bool:
         return True
 
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: xac nhan tu cach thanh vien con hieu luc"):
         rows = _fetch_all(
@@ -200,7 +200,7 @@ def _legacy_decision(actor: Mapping[str, Any], permission: str,
         # Quyền tầng nền tảng, mà người này không phải quản trị viên nền tảng.
         return False
 
-    from app.vocabulary_registry import tenant_role
+    from app.modules.dataset.vocabulary_registry import tenant_role
 
     actor_id = _actor_id(actor)
     legacy = tenant_role(context.tenant_id, actor_id) if actor_id else None
@@ -276,12 +276,12 @@ def _record_shadow(actor_id: str, permission: str, legacy: bool, casbin: bool,
     # dừng cho việc chuyển chế độ.
     #
     # Cả phép import lẫn phép đo đều nằm trong `try`, và không phải vì cẩn thận
-    # quá mức: `app.metrics` kéo theo `prometheus_client` và `app.monitoring`,
+    # quá mức: `app.infrastructure.observability.metrics` kéo theo `prometheus_client` và `app.monitoring`,
     # vốn không có mặt ở mọi lối vào (CLI, một số test). Một `ImportError` ở
     # đây sẽ làm hỏng chính phép phân quyền — tức là một chỉ số quan sát làm
     # sập thứ nó đang quan sát.
     try:
-        from app import metrics
+        from app.infrastructure.observability import metrics
 
         metrics.authz_shadow_mismatch.labels(kind=kind, permission=permission).inc()
     except Exception:
@@ -382,7 +382,7 @@ def _audit_denial(actor: Mapping[str, Any], decision: Decision) -> None:
     còn một lần từ chối thì không để lại dấu vết nào khác. Và chuỗi từ chối lặp
     lại là tín hiệu duy nhất phân biệt "cấu hình sai" với "có người đang dò".
     """
-    from app import audit
+    from app.modules.security import audit
 
     audit.record(
         "authz.denied",

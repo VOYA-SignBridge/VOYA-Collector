@@ -20,10 +20,10 @@ from fastapi.testclient import TestClient
 
 from conftest import registration_consents
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -238,7 +238,7 @@ class TestMembership:
         `None` — chứ không phải chuỗi `"None"`, vốn là một vai không tồn tại đi
         thẳng vào bản đồ role cũ.
         """
-        from app.vocabulary_registry import tenant_role
+        from app.modules.dataset.vocabulary_registry import tenant_role
 
         user = account()
         tenant_admin.add_member(tenant, user["id"])

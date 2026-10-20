@@ -14,10 +14,10 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from app import tenant_lifecycle, usage
+from app.modules.saas import tenant_lifecycle, usage
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -32,7 +32,7 @@ def doomed_tenant():
     `clone_catalog=False`: bản sao danh mục tạo hàng trăm dòng và không test
     nào ở đây cần chúng; bỏ qua làm mỗi test nhanh hơn hẳn.
     """
-    from app import plans, tenant_admin
+    from app.modules.saas import plans, tenant_admin
     from conftest import purge_tenant
 
     tenant_id = f"lc{uuid.uuid4().hex[:10]}"
@@ -69,7 +69,8 @@ class TestExport:
         Chúng là thông tin xác thực, không phải dữ liệu của khách hàng; một
         gói gửi qua email không phải chỗ để chúng đi ra ngoài.
         """
-        from app import api_keys, webhooks
+        from app.modules.saas import webhooks
+        from app.modules.security import api_keys
 
         api_keys.create_key(doomed_tenant, name="ci")
         webhooks.create_endpoint(doomed_tenant, url="https://hooks.example.com/x")
@@ -97,7 +98,7 @@ class TestExport:
         path.unlink(missing_ok=True)
 
     def test_one_tenant_cannot_download_anothers_export(self, doomed_tenant):
-        from app import plans, tenant_admin
+        from app.modules.saas import plans, tenant_admin
         from conftest import purge_tenant
 
         stranger = f"lc{uuid.uuid4().hex[:10]}"
@@ -245,7 +246,8 @@ class TestPurgeBrakes:
 
 class TestPurgeExecution:
     def test_a_full_purge_leaves_a_ledger_row_and_no_tenant(self, doomed_tenant):
-        from app import api_keys, webhooks
+        from app.modules.saas import webhooks
+        from app.modules.security import api_keys
 
         api_keys.create_key(doomed_tenant, name="sẽ biến mất")
         webhooks.create_endpoint(doomed_tenant, url="https://hooks.example.com/gone")
@@ -292,7 +294,8 @@ class TestPurgeExecution:
         """Xoá tài khoản của họ vì MỘT tổ chức đóng cửa là lấy mất quyền truy
         cập ở tổ chức kia — và để lại một bản ghi thành viên trỏ tới tài khoản
         không còn tồn tại."""
-        from app import auth, plans, tenant_admin
+        from app.modules.saas import plans, tenant_admin
+        from app import auth
         from conftest import purge_tenant
 
         survivor_tenant = f"lc{uuid.uuid4().hex[:10]}"

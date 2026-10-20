@@ -89,7 +89,7 @@ def _hasher():
 
 def _row(user_id: str) -> Optional[dict]:
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     # Mặt phẳng danh tính: bảng này không chịu RLS (xem chú thích ở
     # `TENANT_SCOPED_AUTHZ_TABLES`), nhưng đọc trong system scope để cùng một
@@ -116,7 +116,7 @@ def set_passcode(user_id: str, passcode: str) -> None:
 
     digest = _hasher().hash(passcode)
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: dat ma hanh dong"), _cursor() as cur:
         cur.execute(
@@ -130,7 +130,7 @@ def set_passcode(user_id: str, passcode: str) -> None:
             (str(user_id), digest),
         )
 
-    from app import audit
+    from app.modules.security import audit
 
     audit.record("authz.passcode.set", actor={"id": user_id}, target_type="user",
                  target_id=str(user_id))
@@ -139,7 +139,7 @@ def set_passcode(user_id: str, passcode: str) -> None:
 def revoke(user_id: str) -> None:
     """Gỡ mã hành động. Mọi quyền đòi mã sẽ không dùng được cho tới khi đặt lại."""
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: go ma hanh dong"), _cursor() as cur:
         cur.execute(
@@ -188,7 +188,7 @@ def _reset_failures(user_id: str, current: int) -> None:
     if not current:
         return
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: reset dem sai ma hanh dong"), _cursor() as cur:
         cur.execute(
@@ -203,7 +203,7 @@ def _reset_failures(user_id: str, current: int) -> None:
 def _count_failure(user_id: str, failed_count: int) -> None:
     lock = _lock_for(failed_count)
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: ghi nhan sai ma hanh dong"), _cursor() as cur:
         cur.execute(
@@ -217,7 +217,7 @@ def _count_failure(user_id: str, failed_count: int) -> None:
             (failed_count, lock, lock, lock, str(user_id)),
         )
 
-    from app import audit
+    from app.modules.security import audit
 
     audit.record(
         "authz.passcode.failed",

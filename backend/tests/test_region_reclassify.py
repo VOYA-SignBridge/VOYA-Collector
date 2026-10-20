@@ -18,8 +18,8 @@ import uuid
 import pytest
 
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
-from app.vocabulary_registry import RegionReclassifyError, reclassify_class_region
+from app.modules.saas.tenant_context import system_scope
+from app.modules.dataset.vocabulary_registry import RegionReclassifyError, reclassify_class_region
 
 TENANT_A = "default"
 TENANT_B = "recl-b"

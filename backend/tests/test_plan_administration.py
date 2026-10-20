@@ -13,9 +13,9 @@ import uuid
 
 import pytest
 
-from app import plans
+from app.modules.saas import plans
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -119,7 +119,7 @@ class TestQuotaFollowsTheEditedPlan:
         """Điểm của cả tính năng: sửa bảng giá phải đổi hành vi chặn NGAY, chứ
         không chờ triển khai lại. Không có khẳng định này thì "sửa được" chỉ
         nghĩa là một hàng trong bảng đã đổi."""
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
         from conftest import purge_tenant
         import uuid
 
@@ -163,9 +163,9 @@ class TestDoiGoiLaMotGiaoDich:
     """
 
     def test_ve_hai_hong_thi_ve_mot_cung_khong_con(self, monkeypatch):
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
         from conftest import purge_tenant
 
         tid = f"atm{uuid.uuid4().hex[:9]}"
@@ -196,9 +196,9 @@ class TestDoiGoiLaMotGiaoDich:
         `uq_tenant_subscriptions_open` sinh ra để canh, và nó là trạng thái
         THIẾU nên chỉ mục ấy im lặng.
         """
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
         from conftest import purge_tenant
 
         tid = f"atm{uuid.uuid4().hex[:9]}"

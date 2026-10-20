@@ -116,11 +116,11 @@ class TestRoute:
         app.dependency_overrides[get_current_user] = lambda: USER
         # Huấn luyện đi theo phạm vi request (tổ chức đang làm việc), không theo
         # `tenant_id` của tài khoản; ở đây hai thứ trùng nhau.
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
         monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: USER["tenant_id"])
         monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
         # Người giả không có grant trong DB; cổng tenant không phải thứ đang kiểm.
-        import app.access_gate as gate
+        import app.modules.security.access_gate as gate
         monkeypatch.setattr(gate, "_has_any_tenant_grant", lambda user: True)
         yield
         app.dependency_overrides.pop(get_current_user, None)

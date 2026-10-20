@@ -139,7 +139,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         return 0
 
-    from app.vocabulary_registry import export_snapshot, registry_version
+    from app.modules.dataset.vocabulary_registry import export_snapshot, registry_version
 
     path = export_snapshot(args.tenant, path=target if args.out else None)
     logger.info("Đã xuất registry tenant '%s' v%s -> %s",

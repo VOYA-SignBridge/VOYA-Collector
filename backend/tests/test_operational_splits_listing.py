@@ -63,7 +63,7 @@ def _as(tenant, monkeypatch):
     Danh sách đi theo phạm vi request (tổ chức đang làm việc) từ 18/10/2026,
     không theo `tenant_id` của tài khoản — xem test_training_working_tenant.py.
     """
-    import app.tenant_middleware as tm
+    import app.modules.saas.tenant_middleware as tm
 
     monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: tenant)
     app.dependency_overrides[get_current_user] = lambda: {

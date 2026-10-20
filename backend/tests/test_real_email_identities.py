@@ -29,7 +29,7 @@ from accounts import (
     username_for,
 )
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 # --------------------------------------------------------------------------- hạ tầng
@@ -207,7 +207,7 @@ class TestTenMienBonCap:
     def test_dung_duoc_lam_dich_cua_ma_xac_minh(self):
         """`verification_codes.destination` là nơi địa chỉ được lưu nguyên văn;
         một chỗ cắt chuỗi ở đây sẽ khiến mã gửi đi không bao giờ khớp lại."""
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         digest = hash_code("123456", purpose="verify_email",
                            subject=EMAIL_UNIVERSITY)
@@ -246,7 +246,7 @@ class TestKhongLoMa:
         """Sáu chữ số chỉ có một triệu khả năng: băm trần là duyệt cạn trong
         một giây. Bảng chỉ được giữ HMAC khoá bằng pepper ngoài cơ sở dữ liệu.
         """
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         moi_kha_nang = {
             hash_code(f"{n:06d}", purpose="verify_email", subject=email)
@@ -271,7 +271,7 @@ class TestMaKhongDungCheo:
     """
 
     def test_ma_gan_chat_voi_dia_chi_nhan(self):
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         ma = "135790"
         cho_gmail = hash_code(ma, purpose="verify_email", subject=EMAIL_GMAIL)
@@ -281,7 +281,7 @@ class TestMaKhongDungCheo:
 
     def test_ma_gan_chat_voi_muc_dich(self):
         """Mã xác minh email không được dùng làm mã đặt lại mật khẩu."""
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         ma = "135790"
         assert (hash_code(ma, purpose="verify_email", subject=EMAIL_OWNER)

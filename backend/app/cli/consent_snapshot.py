@@ -30,10 +30,10 @@ def main(argv: list | None = None) -> int:
                     help="Chỉ kiểm tra ảnh chụp hiện có, không ghi đè")
     args = ap.parse_args(argv)
 
-    from app.consent_gate import (
+    from app.modules.security.consent_gate import (
         SNAPSHOT_MAX_AGE_DAYS, SnapshotUnusable, build_snapshot, load_snapshot,
     )
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     if args.check:
         try:

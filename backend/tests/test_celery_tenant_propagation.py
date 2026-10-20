@@ -26,7 +26,7 @@ import os
 
 import pytest
 
-from app.tenant_context import (
+from app.modules.saas.tenant_context import (
     clear_scope, current_tenant, describe_scope, in_system_scope,
     no_scope, system_scope, tenant_scope,
 )
@@ -264,32 +264,32 @@ class TestTheAggregateTasksStayPlatformWide:
         # chạy; bị giới hạn vào ngữ cảnh của người phái thì chúng chỉ làm được
         # một phần và không báo lỗi — đúng kiểu hỏng mà export_tasks đã ghi lại
         # ("the export succeeds, it is just short").
-        "app.saas_tasks.rollup_usage_daily",
-        "app.saas_tasks.deliver_webhooks",
-        "app.saas_tasks.cleanup_saas_artifacts",
+        "app.modules.saas.saas_tasks.rollup_usage_daily",
+        "app.modules.saas.saas_tasks.deliver_webhooks",
+        "app.modules.saas.saas_tasks.cleanup_saas_artifacts",
         # Chỉ chạm MỘT tenant, nhưng được phái từ một quản trị viên nền tảng
         # đứng ở tenant KHÁC với tenant được xuất — đúng tình huống mà ngữ cảnh
         # của người phái là câu trả lời sai.
-        "app.saas_tasks.run_tenant_export",
+        "app.modules.saas.saas_tasks.run_tenant_export",
         # Lượt quét vòng đời đăng ký. Nó phải xét MỌI tenant — đó chính là công
         # việc của nó, và một lượt quét chỉ thấy tenant của người phái là một
         # lượt quét vô nghĩa. Hơn nữa nó do celery-beat phái, nơi không có
         # người dùng nào để lấy ngữ cảnh.
-        "app.saas_tasks.sweep_subscriptions",
+        "app.modules.saas.saas_tasks.sweep_subscriptions",
         # `refresh_tokens` thuộc mặt phẳng DANH TÍNH — bảng không mang
         # `tenant_id`. Một lượt dọn bị giới hạn theo tenant sẽ không xoá được gì
         # và cũng không báo lỗi, vì RLS lọc hết chứ không từ chối.
-        "app.saas_tasks.cleanup_refresh_tokens",
+        "app.modules.saas.saas_tasks.cleanup_refresh_tokens",
         # Quét tồn đọng hỗ trợ: nó đọc phiếu của MỌI tổ chức để biết tổ chức nào
         # đang có phiếu bị bỏ quên, và nó do celery-beat phái nên không có người
         # dùng nào để lấy ngữ cảnh. Bị giới hạn theo tenant thì RLS trả về 0
         # dòng và lượt quét báo "không có tồn đọng" một cách hoàn hảo, mãi mãi —
         # tức là hỏng đúng theo cái kiểu mà chính nó sinh ra để chống.
-        "app.saas_tasks.sweep_support_backlog",
+        "app.modules.saas.saas_tasks.sweep_support_backlog",
         # Gửi thư báo phiếu mới. Nó tự tra danh sách người nhận theo `tenant_id`
         # được truyền vào, nên nó phải đọc `users` NGOÀI phạm vi của người phái
         # — người phái là người dùng vừa mở phiếu, không phải quản trị viên.
-        "app.saas_tasks.send_support_ticket_emails",
+        "app.modules.saas.saas_tasks.send_support_ticket_emails",
         # Đối chiếu hạn mức dung lượng. Nó đi bộ TOÀN BỘ cây tệp của mọi tenant
         # rồi so với bộ đếm, nên phạm vi của nó đúng bằng cả nền tảng; và nó do
         # celery-beat phái mỗi 86400 giây (`reconcile-storage-quota-daily`),
@@ -300,14 +300,14 @@ class TestTheAggregateTasksStayPlatformWide:
         # chiếu đúng một tổ chức, báo "khớp", và mọi lệch của các tổ chức còn
         # lại nằm ngoài tầm nhìn vĩnh viễn — hỏng đúng theo cái kiểu mà chính
         # nó sinh ra để phát hiện.
-        "app.saas_tasks.reconcile_storage_quota",
+        "app.modules.saas.saas_tasks.reconcile_storage_quota",
     }
 
     def test_exactly_these_tasks_are_platform_wide(self):
         from app.worker import celery_app
 
         import app.export_tasks  # noqa: F401
-        import app.saas_tasks  # noqa: F401
+        import app.modules.saas.saas_tasks  # noqa: F401
         import app.sync_tasks  # noqa: F401
         import app.training_tasks  # noqa: F401
 

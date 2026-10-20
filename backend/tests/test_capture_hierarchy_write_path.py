@@ -25,7 +25,7 @@ import uuid
 import pytest
 
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -65,7 +65,7 @@ def to_chuc():
         # `PURGE_ORDER` là nguồn sự thật duy nhất cho thứ tự lá-trước-gốc, và
         # nó được cập nhật mỗi khi có bảng mới. Một bản sao ở đây sẽ trôi khỏi
         # nó ngay lần thêm bảng kế tiếp.
-        from app.tenant_lifecycle import PURGE_ORDER
+        from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
         with system_scope("test: don to chuc thu nghiem"):
             for bang in PURGE_ORDER:
@@ -189,7 +189,7 @@ def test_ma_phien_trung_nhau_giua_hai_to_chuc_khong_dinh_vao_nhau(to_chuc):
         assert _dem(tid, "collection_sessions") == 1
         assert _dem(tid2, "collection_sessions") == 1
     finally:
-        from app.tenant_lifecycle import PURGE_ORDER
+        from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
         with system_scope("test: don to chuc thu hai"):
             for bang in PURGE_ORDER:

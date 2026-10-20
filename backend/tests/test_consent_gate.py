@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app import consent_gate as cg
+from app.modules.security import consent_gate as cg
 
 
 # --------------------------------------------------------------------------- helpers
@@ -498,7 +498,7 @@ class TestChuoiDayDu:
 
         from app.auth import create_user
         from app.storage.metadata_db import _execute, _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
         from conftest import purge_registered_account
 
         name = f"cg{_uuid.uuid4().hex[:8]}"
@@ -521,9 +521,9 @@ class TestChuoiDayDu:
 
     def test_ky_xong_thi_mau_di_duoc_vao_huan_luyen_noi_bo(self, signer_with_account,
                                                            monkeypatch):
-        from app import legal
+        from app.modules.legal import legal
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         doc = legal.current_document("data_contribution")
         if doc is None:
@@ -549,7 +549,7 @@ class TestChuoiDayDu:
 
     def test_ky_mot_lan_khong_nang_len_muc_phat_hanh(self, signer_with_account,
                                                      monkeypatch):
-        from app import legal
+        from app.modules.legal import legal
 
         doc = legal.current_document("data_contribution")
         if doc is None:
@@ -567,9 +567,9 @@ class TestChuoiDayDu:
     def test_ky_hai_lan_van_mot_dong_va_giu_nguyen_moc_thoi_gian(self,
                                                                  signer_with_account):
         """"Đồng ý rồi thì nó cứ ở đó" — không sinh dòng thứ hai, không dời mốc."""
-        from app import legal
+        from app.modules.legal import legal
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         doc = legal.current_document("data_contribution")
         if doc is None:
@@ -594,7 +594,7 @@ class TestChuoiDayDu:
 
     def test_rut_thi_cong_chan_ngay_o_muc_noi_bo(self, signer_with_account, monkeypatch):
         """Rút phải TỚI ĐƯỢC đường dữ liệu — đúng cái lỗ hổng module này bịt."""
-        from app import legal
+        from app.modules.legal import legal
 
         doc = legal.current_document("data_contribution")
         if doc is None:

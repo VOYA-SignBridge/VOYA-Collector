@@ -24,3 +24,8 @@ celery_app.conf.update(
     worker_max_memory_per_child=int(settings.worker_max_memory_per_child_kb),
     worker_prefetch_multiplier=1,
 )
+
+# Connect tenant-scope propagation signals for every celery_app user (web
+# dispatcher and worker alike) — importing the module registers its
+# before_task_publish / task_prerun / task_postrun handlers.
+from app.infrastructure.celery import tenant as _tenant  # noqa: E402,F401

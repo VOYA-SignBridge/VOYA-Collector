@@ -21,9 +21,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import otp
+from app.modules.security import otp
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)

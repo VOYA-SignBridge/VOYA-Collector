@@ -21,7 +21,7 @@ sys.path.insert(0, "/app")
 import psycopg2  # noqa: E402
 import psycopg2.extras  # noqa: E402
 from app.storage.metadata_db import _execute, _fetch_all, upsert_sample  # noqa: E402
-from app.tenant_context import system_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope  # noqa: E402
 
 APPLY = "--apply" in sys.argv
 OTHER = psycopg2.connect(os.environ["OTHER_DSN"])
@@ -83,7 +83,7 @@ if not APPLY:
     sys.exit(0)
 
 # ---- ghi: tài khoản ------------------------------------------------------------
-from app.tenant_admin import join_community  # noqa: E402
+from app.modules.saas.tenant_admin import join_community  # noqa: E402
 
 with system_scope("gop may kia: tai khoan"):
     for u in to_create:

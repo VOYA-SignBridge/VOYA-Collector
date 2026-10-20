@@ -345,7 +345,7 @@ def _platform_scope():
     case, so the fail-closed behaviour is still asserted directly rather than
     inherited from the ambient state.
     """
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("pytest: suite runs as platform"):
         yield
@@ -437,7 +437,7 @@ def registration_consents() -> dict:
     documents went live: they were written before enforcement existed and
     registration quietly started requiring something they never sent.
     """
-    from app import legal
+    from app.modules.legal import legal
 
     if legal.missing_for_registration():
         return {}
@@ -480,7 +480,7 @@ def registration_consents() -> dict:
 #: đây mà lộ ra lúc xoá tenant thật trên sản xuất. `tenant_lifecycle.PURGE_ORDER`
 #: giờ là nguồn duy nhất; `test_tenant_purge_order_covers_every_tenant_table`
 #: vẫn canh nó khớp `metadata_db.TENANT_SCOPED_TABLES`.
-from app.tenant_lifecycle import PURGE_ORDER as _TENANT_PURGE_ORDER  # noqa: E402
+from app.modules.saas.tenant_lifecycle import PURGE_ORDER as _TENANT_PURGE_ORDER  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +612,7 @@ def _purge_append_only(table: str, key_expr: str, keys: list) -> int:
 def _artifact_snapshot() -> dict:
     """Tập khoá chính của mỗi bảng theo dõi. Bảng chưa tồn tại thì bỏ qua."""
     from app.storage import metadata_db as db
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     out = {}
     with system_scope("test ledger: chup anh truoc/sau suite"):
@@ -939,7 +939,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         return
 
     from app.storage import metadata_db as db
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     # Xoá theo LÔ bằng `= ANY(%s)`, không phải một câu mỗi hàng: một lượt chạy
     # tạo vài trăm hàng thì vài trăm vòng round-trip biến bước dọn thành phần
@@ -1025,8 +1025,8 @@ def corpus_row_to_poke():
     import uuid as _uuid
 
     from app.storage import metadata_db as db
-    from app.tenancy import DEFAULT_TENANT_ID
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test: bảo đảm corpus có dòng để thử ràng buộc"):
         # Hỏi đúng thứ các test cần, không hỏi "bảng có rỗng không": chúng đâm vào
@@ -1098,7 +1098,7 @@ def rollback_cursor():
 
     from app.storage import metadata_db as db
     from app.storage.rls import apply_scope
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     conn = psycopg2.connect(db.settings.database_url)
     conn.autocommit = False
@@ -1115,8 +1115,8 @@ def rollback_cursor():
 def purge_tenant(tenant_id: str) -> None:
     """Remove a throwaway tenant and everything pointing at it."""
     from app.storage import metadata_db as db
-    from app.tenancy import DEFAULT_TENANT_ID
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: remove a throwaway tenant"):
         for table in _TENANT_PURGE_ORDER:
@@ -1160,8 +1160,8 @@ def purge_registered_account(username: str) -> None:
     fixture khác, và xoá nó là dọn sang phần của người khác.
     """
     from app.storage import metadata_db as db
-    from app.tenancy import DEFAULT_TENANT_ID
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: find the account and the tenant it created"):
         rows = db._fetch_all(
@@ -1246,9 +1246,9 @@ def free_legal_kinds():
     con người, và một fixture không được phép quyết định thay họ. Chọn một chỗ
     trống khác thì rẻ hơn và không mất gì.
     """
-    from app import legal
+    from app.modules.legal import legal
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test setup: tim loai van ban con trong"):
         rows = _fetch_all(

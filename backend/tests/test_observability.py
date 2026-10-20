@@ -69,7 +69,7 @@ def test_add_correlation_id_processor():
     correlation_id.set(None)
 
 
-@patch("app.metrics.collect_resources")
+@patch("app.infrastructure.observability.metrics.collect_resources")
 def test_prometheus_metrics_endpoint_standard(mock_collect):
     """Verify that /metrics returns valid Prometheus text format."""
     # Keys phải khớp đúng cái metrics.py đọc: host.get("ram_used_mb") /
@@ -91,8 +91,8 @@ def test_prometheus_metrics_endpoint_standard(mock_collect):
     assert "voya_gpu_usage_percent 80.0" in text
 
 
-@patch("app.metrics.logger")
-@patch("app.metrics.collect_resources")
+@patch("app.infrastructure.observability.metrics.logger")
+@patch("app.infrastructure.observability.metrics.collect_resources")
 def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger):
     """Verify edge case where GPU or Disk are completely unavailable."""
     mock_collect.return_value = {
@@ -143,8 +143,8 @@ def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger
     assert extra["details"] not in ("", None)
     assert all(hint for hint in GPU_ABSENCE_HINTS.values())
 
-@patch("app.metrics.logger")
-@patch("app.metrics.collect_resources")
+@patch("app.infrastructure.observability.metrics.logger")
+@patch("app.infrastructure.observability.metrics.collect_resources")
 def test_prometheus_metrics_endpoint_missing_but_ignored(mock_collect, mock_logger):
     """Verify that ignored missing resources do not spam logs."""
     mock_collect.return_value = {

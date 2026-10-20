@@ -7,7 +7,7 @@ from app.processing.ingest import frame_generator, temporal_speed_variants
 from app.processing.keypoints_adapter import extract_sequence_stream
 from app.processing.augmenter import generate_augmented_sequences
 from app.modules.dataset.catalog import get_or_register_class, list_classes
-from app.tenant_context import current_tenant
+from app.modules.saas.tenant_context import current_tenant
 from app.modules.dataset.samples import save_sequence_npz, count_samples_for_class, COORD_SPACE_IMAGE
 
 logger = logging.getLogger(__name__)

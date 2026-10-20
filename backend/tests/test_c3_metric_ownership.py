@@ -66,8 +66,8 @@ from app.storage.metadata_db import (  # noqa: E402
     list_training_metrics,
     upsert_training_job,
 )
-from app.tenancy import DEFAULT_TENANT_ID  # noqa: E402
-from app.tenant_context import no_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID  # noqa: E402
+from app.modules.saas.tenant_context import no_scope, tenant_scope  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"

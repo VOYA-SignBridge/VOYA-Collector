@@ -159,7 +159,7 @@ def them_du_lieu_cho_B(dsn: str, tenant_b: str, dialect: str) -> dict:
     sys.path.insert(0, "/app")
     sys.path.insert(0, "/src/backend")
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     hs = uuid.uuid4().hex[:6]
     cls = f"read{hs}"

@@ -13,7 +13,7 @@ import traceback
 
 def _seed(barrier, results):
     try:
-        from app.vocabulary_registry import seed_from_csv
+        from app.modules.dataset.vocabulary_registry import seed_from_csv
 
         barrier.wait(timeout=60)
         seed_from_csv()
@@ -35,7 +35,7 @@ def _init(barrier, results):
 
 def _registry_state():
     from app.storage import metadata_db as db
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test: doc registry"):
         rows = db._fetch_all(

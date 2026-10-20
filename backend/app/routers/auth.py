@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status, Depends  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.config import settings
 from app.auth import (
     _fetch_user_by_id,
@@ -30,7 +30,7 @@ from app.cookie_auth import (
     generate_csrf_token,
     set_auth_cookies,
 )
-from app.public_url import resolve_frontend_base_url
+from app.core.public_url import resolve_frontend_base_url
 from app.rate_limit import (
     check_login_allowed,
     check_register_allowed,
@@ -182,7 +182,7 @@ def _with_capabilities(user: dict) -> dict:
     cuối mà giao diện gọi trước mọi thứ khác, và để nó ngã vì một chi tiết
     trang trí là đổi một mục menu thiếu lấy một màn hình trắng.
     """
-    from app.vocabulary_registry import tenant_role
+    from app.modules.dataset.vocabulary_registry import tenant_role
 
     out = dict(user)
     try:
@@ -197,8 +197,8 @@ def _with_capabilities(user: dict) -> dict:
     # thuộc đó, và thêm một lượt đọc bảng vào nó để phục vụ một mục menu là trả
     # giá trên từng request.
     try:
-        from app.moderation_admin import can_moderate
-        from app.tenant_context import current_tenant
+        from app.modules.admin.moderation_admin import can_moderate
+        from app.modules.saas.tenant_context import current_tenant
 
         # Cùng tenant mà `/moderation/*` sẽ kiểm, để mục menu không hiện ra
         # rồi trả 403 ở tenant người dùng không có vai duyệt.
@@ -231,7 +231,7 @@ def _validate_consents(payload: "RegisterRequest") -> dict:
     tầng khác: `verify_deployment` báo ĐỎ khi thiếu văn bản bắt buộc, nên nó lộ
     ra lúc triển khai chứ không lộ ra ở toà.
     """
-    from app import legal
+    from app.modules.legal import legal
 
     if legal.missing_for_registration():
         # Deployment chưa công bố điều khoản. Ghi ở mức WARNING chứ không im
@@ -284,7 +284,7 @@ def _record_consents(user_id: str, consents: dict, request: Request) -> None:
     không", và câu hỏi đó chỉ cần SO SÁNH. Lưu địa chỉ thô là thu thêm dữ liệu
     cá nhân cho một mục đích không đòi hỏi nó.
     """
-    from app import legal
+    from app.modules.legal import legal
     from app.rate_limit import client_ip
 
     ip_hash = hashlib.sha256(
@@ -308,7 +308,7 @@ def _send_welcome_verification(user: dict) -> None:
     dùng sẽ thử đăng ký lại rồi đụng chính username họ vừa chiếm. SMTP hỏng là
     việc của người vận hành, và luôn còn đường `/auth/verify/send`.
     """
-    from app import otp
+    from app.modules.security import otp
     from app.email_service import send_verification_code_email
 
     try:
@@ -637,7 +637,7 @@ def login_two_factor(payload: TwoFactorLoginRequest,
     mất điện thoại mà không có đường vào nào khác thì 2FA đã biến từ lớp bảo vệ
     thành cách tự khoá mình ra ngoài.
     """
-    from app import two_factor
+    from app.modules.security import two_factor
 
     ip = client_ip(request)
     # Cùng bộ đếm với bước một: không có nó, kẻ tấn công đã có mật khẩu chỉ cần
@@ -777,8 +777,8 @@ def update_me(
     `legal_document_events.actor_label` là bằng chứng lịch sử, sửa chúng theo
     tên mới là viết lại lịch sử.
     """
-    from app import audit
-    from app.account_rename import RenameError, rename_user
+    from app.modules.security import audit
+    from app.modules.admin.account_rename import RenameError, rename_user
 
     try:
         result = rename_user(str(current_user["id"]), payload.username)
@@ -885,7 +885,8 @@ def change_password(
     khẩu là "tôi nghi có người vào được tài khoản" — giữ lại các phiên cũ là bỏ
     sót đúng cái mình định đuổi. Giao diện phải nói trước điều này.
     """
-    from app import activity, audit, two_factor
+    from app.modules.security import audit, two_factor
+    from app import activity
     from app.auth import _apply_password_reset, _identity_cursor
 
     # Chặn dò mật khẩu bằng cách gọi thẳng endpoint này với một access token đã
@@ -1029,7 +1030,7 @@ def change_email_start(
     request: Request,
     current_user=Depends(get_current_user),
 ):
-    from app import otp
+    from app.modules.security import otp
     from app.auth import _identity_cursor
     from app.email_service import EmailNotConfigured, send_verification_code_email
 
@@ -1079,7 +1080,9 @@ def change_email_confirm(
     request: Request,
     current_user=Depends(get_current_user),
 ):
-    from app import activity, audit, notifications, otp
+    from app.modules.security import audit, otp
+    from app.modules.support import notifications
+    from app import activity
     from app.auth import _identity_cursor
 
     _guard_email_change(current_user, payload.current_password, request)

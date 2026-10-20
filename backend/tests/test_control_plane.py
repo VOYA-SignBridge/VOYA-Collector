@@ -338,7 +338,7 @@ class TestDuongGhiThat:
     gọi thật vẫn có thể không dùng khuôn ấy. Nên ở đây gọi đúng hàm sản xuất."""
 
     def test_record_purge_ghi_qua_vai_dieu_khien(self, cur_owner):
-        from app import tenant_lifecycle
+        from app.modules.saas import tenant_lifecycle
 
         pid = str(uuid.uuid4())
         try:
@@ -362,7 +362,7 @@ class TestDuongGhiThat:
         đang đi qua kết nối điều khiển, chứ không phải một helper được kiểm
         riêng còn chỗ gọi thì vẫn như cũ.
         """
-        from app import tenant_lifecycle
+        from app.modules.saas import tenant_lifecycle
         from app.storage import control_plane
         from app.storage.metadata_db import _cursor
 
@@ -453,7 +453,7 @@ class TestDuongGhiThat:
         """
         import inspect
 
-        from app import tenant_lifecycle
+        from app.modules.saas import tenant_lifecycle
 
         than = inspect.getsource(tenant_lifecycle._record_purge)
         # Bỏ phần chú thích: chúng nhắc tới `system_scope` để GIẢI THÍCH vì sao
@@ -501,7 +501,7 @@ class TestEndpointHaiChieu:
         `AUTHZ_MODE` hiện là `shadow`, nên đường đang thật sự cưỡng chế là
         `require_sudo` — không giả định Casbin đã là bên cưỡng chế.
         """
-        from app import sudo_mode
+        from app.modules.security import sudo_mode
 
         client, uid = client_quan_tri
         sudo_mode.revoke(uid)          # quản trị viên, nhưng CHƯA nâng quyền
@@ -527,7 +527,7 @@ class TestEndpointHaiChieu:
         dòng nào, vì đường ghi nằm sau các phép kiểm nghiệp vụ.
         """
         from app.main import app
-        from app.sudo_mode import require_sudo
+        from app.modules.security.sudo_mode import require_sudo
 
         client, uid = client_quan_tri
         muc_tieu = f"khong-ton-tai-{uuid.uuid4().hex[:8]}"
@@ -551,7 +551,8 @@ class TestEndpointHaiChieu:
         ứng dụng mất sạch quyền trên sổ cái, một lượt purge hợp lệ vẫn ghi được
         — qua vai điều khiển.
         """
-        from app import plans, sudo_mode, tenant_admin, tenant_lifecycle
+        from app.modules.saas import plans, tenant_admin, tenant_lifecycle
+        from app.modules.security import sudo_mode
         from conftest import purge_tenant as _don
 
         client, uid = client_quan_tri

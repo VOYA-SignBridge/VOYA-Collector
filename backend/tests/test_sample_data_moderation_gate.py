@@ -38,7 +38,7 @@ def mau(tmp_path, monkeypatch):
         calls.append(tenant_id)
         return state["moderator"]
 
-    monkeypatch.setattr("app.moderation_admin.can_moderate", can_moderate)
+    monkeypatch.setattr("app.modules.admin.moderation_admin.can_moderate", can_moderate)
     return state, calls
 
 

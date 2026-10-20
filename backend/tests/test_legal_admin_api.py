@@ -19,9 +19,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app import legal
+from app.modules.legal import legal
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -64,7 +64,7 @@ def client(admin_account):
 
 @pytest.fixture
 def with_sudo(admin_account):
-    from app import sudo_mode
+    from app.modules.security import sudo_mode
 
     sudo_mode.grant(str(admin_account["id"]))
     yield

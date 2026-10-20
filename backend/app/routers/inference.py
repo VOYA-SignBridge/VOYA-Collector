@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 from app.modules.dataset.inference import load_inference_classes, build_class_map
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 

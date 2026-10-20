@@ -37,7 +37,7 @@ from app.modules.dataset.samples import (
 from app.core.operation_logging import get_logger as get_structured_logger, OperationStatus, OperationType
 from app.processing.utils import atomic_write_json
 from app.modules.dataset.raw_uploads import RAW_UPLOAD_FIELDS, RAW_UPLOADS_CSV, list_raw_uploads
-from app.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
+from app.modules.saas.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
 from app.storage.gdrive_client import get_gdrive_client
 from app.storage.metadata_db import (
     delete_class as db_delete_class,
@@ -1722,7 +1722,7 @@ def _bulk(fn, ids: Sequence[str]) -> Dict[str, Any]:
     lô — khôi phục, xoá vĩnh viễn, dọn thùng — đều ném TypeError, bị nuốt ở
     `except` bên dưới, và trả về "Đã khôi phục 0 mẫu" với success=True.
     """
-    from app.tenant_context import require_tenant
+    from app.modules.saas.tenant_context import require_tenant
 
     scope = require_tenant()
     ok: List[str] = []
@@ -1820,7 +1820,7 @@ def sync_purge_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:
         # nên trừ sớm là tặng không dung lượng cho dữ liệu vẫn đang chiếm đĩa.
         if da_giai_phong:
             try:
-                from app import storage_quota
+                from app.modules.saas import storage_quota
 
                 storage_quota.uncharge(scope, da_giai_phong)
             except Exception as exc:

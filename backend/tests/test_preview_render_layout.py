@@ -21,7 +21,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from app.preview_render import (
+from app.modules.dataset.preview_render import (
     CANVAS_SIZE,
     HAND_CONNECTIONS,
     _fit_transform,

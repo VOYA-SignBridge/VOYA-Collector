@@ -231,14 +231,14 @@ class TestVangMatKhacNullTuongMinh:
     def don_dep(self):
         yield
         from app.storage.metadata_db import _execute
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test cleanup"):
             _execute("DELETE FROM classes WHERE class_uid = %s", (self.UID,))
 
     def _tao(self, **them):
         from app.storage.metadata_db import upsert_class
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         hang = {"class_uid": self.UID, "slug": "compat-vung", "label_original": "x",
                 "language": "vn", "dialect": "common"}
@@ -248,7 +248,7 @@ class TestVangMatKhacNullTuongMinh:
 
     def _vung(self):
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test"):
             r = _fetch_all("SELECT region FROM classes WHERE class_uid = %s", (self.UID,))

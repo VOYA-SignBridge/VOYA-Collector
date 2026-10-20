@@ -4,7 +4,7 @@ from typing import Dict
 from collections import defaultdict
 from app.modules.dataset.samples import list_samples
 from app.modules.dataset.catalog import load_labels, ClassMetadata
-from app.tenancy import tenant_id_of
+from app.modules.saas.tenancy import tenant_id_of
 
 def count_samples_per_class(tenant_id: str) -> Dict[str, int]:
     samples = list_samples(tenant_id)

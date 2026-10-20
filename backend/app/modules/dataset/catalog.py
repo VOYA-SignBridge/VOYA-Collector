@@ -25,7 +25,7 @@ from app.processing.class_registry import (
 )
 
 from app.config import settings
-from app.tenancy import (
+from app.modules.saas.tenancy import (
     DEFAULT_TENANT_ID,
     TENANT_COLUMN,
     normalize_tenant_id,
@@ -189,14 +189,14 @@ def ambient_tenant() -> str:
     """The tenant a newly created class belongs to.
 
     Falls back to the bootstrap tenant when nothing is scoped, which is the same
-    answer `app.tenancy` gives for an absent value everywhere else: platform work
+    answer `app.modules.saas.tenancy` gives for an absent value everywhere else: platform work
     (the CSV import, a CLI) creates rows that provably predate multi-tenancy, and
     those belong to the bootstrap tenant.
 
     This is the WRITE side only. It never widens what a caller can read — that is
     decided by the database policy, not by this function.
     """
-    from app.tenant_context import current_tenant
+    from app.modules.saas.tenant_context import current_tenant
 
     return current_tenant() or DEFAULT_TENANT_ID
 
@@ -411,7 +411,7 @@ def _assert_known_dialect(dialect_id: str) -> None:
     if not dialect_id:
         return
     try:
-        from app.vocabulary_registry import known_dialect_ids
+        from app.modules.dataset.vocabulary_registry import known_dialect_ids
 
         known = known_dialect_ids()
     except Exception as exc:
@@ -439,7 +439,7 @@ def normalize_dialect(dialect: Optional[str], tenant_id: Optional[str] = None) -
     The write-time guard in register_class is what actually blocks unknown
     dialects, and it can explain itself.
     """
-    from app.vocabulary_registry import resolve_dialect, slugify_dialect
+    from app.modules.dataset.vocabulary_registry import resolve_dialect, slugify_dialect
 
     slug = slugify_dialect(dialect)
     if not slug:

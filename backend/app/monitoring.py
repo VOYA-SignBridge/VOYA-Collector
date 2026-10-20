@@ -38,7 +38,7 @@ from app.modules.monitoring.snapshots import (
 )
 
 # Human-readable hints for why a GPU snapshot is absent (added in
-# deploy_ctu_ver-2.2.1; consumed by app.metrics). Kept on the facade so the
+# deploy_ctu_ver-2.2.1; consumed by app.infrastructure.observability.metrics). Kept on the facade so the
 # legacy ``from app.monitoring import GPU_ABSENCE_HINTS`` import resolves.
 GPU_ABSENCE_HINTS = {
     "no_device_in_container": (

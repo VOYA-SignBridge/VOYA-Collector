@@ -447,7 +447,7 @@ class _RecordingCursor:
 
 class TestApplicationLayerEmitsScope:
     def test_apply_scope_reads_the_ambient_context(self):
-        from app.tenant_context import system_scope, tenant_scope
+        from app.modules.saas.tenant_context import system_scope, tenant_scope
 
         cur = _RecordingCursor()
         with tenant_scope("truong-b"):
@@ -505,7 +505,7 @@ class TestRequestTenantResolution:
     """
 
     def test_authenticated_user_gets_their_own_tenant(self, monkeypatch):
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
 
         monkeypatch.setattr(tm, "_tenant_of_user", lambda uid: "truong-b")
         monkeypatch.setattr("app.auth._subject_of", lambda token: "user-1")
@@ -515,7 +515,7 @@ class TestRequestTenantResolution:
         """Same precedence as get_current_user_optional. A browser migrated from
         the old localStorage flow can still send a stale Bearer header on every
         request; preferring it would scope the session to the wrong tenant."""
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
 
         seen = []
         monkeypatch.setattr("app.auth._subject_of", lambda token: seen.append(token) or "u")
@@ -524,7 +524,7 @@ class TestRequestTenantResolution:
         assert seen == ["from-cookie"]
 
     def test_anonymous_gets_the_public_tenant(self, monkeypatch):
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
         from app.config import settings
 
         monkeypatch.setattr(settings, "public_tenant_id", "default", raising=False)
@@ -533,7 +533,7 @@ class TestRequestTenantResolution:
     def test_empty_public_tenant_leaves_anonymous_unscoped(self, monkeypatch):
         """The setting for a deployment with no public catalogue: an anonymous
         caller then sees nothing rather than one tenant's rows."""
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
         from app.config import settings
 
         monkeypatch.setattr(settings, "public_tenant_id", "", raising=False)
@@ -542,7 +542,7 @@ class TestRequestTenantResolution:
     def test_invalid_token_degrades_to_anonymous_rather_than_raising(self, monkeypatch):
         """An expired or forged token must not 500 the request here — the route's
         own auth dependency is what returns 401."""
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
         from app.config import settings
 
         monkeypatch.setattr(settings, "public_tenant_id", "default", raising=False)
@@ -550,7 +550,7 @@ class TestRequestTenantResolution:
         assert tm.resolve_tenant("garbage", None) == "default"
 
     def test_database_failure_degrades_to_anonymous(self, monkeypatch):
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
         from app.config import settings
 
         def _boom(uid):
@@ -564,7 +564,7 @@ class TestRequestTenantResolution:
     def test_deactivated_account_does_not_keep_its_tenant(self, monkeypatch):
         """`_tenant_of_user` filters on `is_active`, so a token issued before
         deactivation resolves to nothing and falls through to anonymous."""
-        import app.tenant_middleware as tm
+        import app.modules.saas.tenant_middleware as tm
         from app.config import settings
 
         monkeypatch.setattr(settings, "public_tenant_id", "default", raising=False)
@@ -575,7 +575,7 @@ class TestRequestTenantResolution:
     def test_malformed_tenant_never_reaches_the_guc(self):
         """`bind_request_scope` refuses a malformed id instead of passing it on:
         in the GUC it would behave as an empty partition rather than an error."""
-        from app.tenant_context import (
+        from app.modules.saas.tenant_context import (
             bind_request_scope,
             current_tenant,
             unbind_request_scope,
@@ -856,7 +856,7 @@ class TestRequestTenantResolution:
         credentials only, so there is no channel for one."""
         import inspect
 
-        from app.tenant_middleware import resolve_tenant
+        from app.modules.saas.tenant_middleware import resolve_tenant
 
         assert list(inspect.signature(resolve_tenant).parameters) == [
             "access_cookie", "bearer",

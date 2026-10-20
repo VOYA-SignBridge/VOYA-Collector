@@ -26,11 +26,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from app import api_keys as api_keys_service
-from app import webhooks as webhooks_service
+from app.modules.security import api_keys as api_keys_service
+from app.modules.saas import webhooks as webhooks_service
 from app.auth import require_tenant_editor
-from app.quota_deps import working_tenant_of
-from app.rate_limit_deps import limit_catalog
+from app.modules.security.quota_deps import working_tenant_of
+from app.modules.security.rate_limit_deps import limit_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ def create_api_key(
     current_user: Dict[str, Any] = Depends(require_tenant_editor),
 ) -> Dict[str, Any]:
     """Cấp khoá mới. Trường `key` trong câu trả lời không xuất hiện lần thứ hai."""
-    from app import audit
+    from app.modules.security import audit
 
     expires_at = None
     if payload.expires_in_days:
@@ -115,7 +115,7 @@ def revoke_api_key(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_tenant_editor),
 ) -> Response:
-    from app import audit
+    from app.modules.security import audit
 
     try:
         api_keys_service.revoke_key(
@@ -161,7 +161,7 @@ def create_webhook(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_tenant_editor),
 ) -> Dict[str, Any]:
-    from app import audit
+    from app.modules.security import audit
 
     try:
         result = webhooks_service.create_endpoint(
@@ -192,7 +192,7 @@ def delete_webhook(
     request: Request,
     current_user: Dict[str, Any] = Depends(require_tenant_editor),
 ) -> Response:
-    from app import audit
+    from app.modules.security import audit
 
     try:
         webhooks_service.delete_endpoint(working_tenant_of(current_user), endpoint_id)

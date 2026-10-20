@@ -12,7 +12,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from app import activity, two_factor
+from app.modules.security import two_factor
+from app import activity
 from app.auth import get_current_user, verify_password
 
 router = APIRouter(prefix="/2fa", tags=["two-factor"])

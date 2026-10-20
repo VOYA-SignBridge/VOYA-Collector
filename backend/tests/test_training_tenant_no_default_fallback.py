@@ -64,7 +64,7 @@ CKPT = "/tmp/khong-ton-tai.pt"
 def bat_emit(monkeypatch):
     """Bắt mọi lượt gọi `webhooks.emit` — kể cả lượt KHÔNG được phép xảy ra."""
     goi = []
-    import app.webhooks as wh
+    import app.modules.saas.webhooks as wh
     monkeypatch.setattr(wh, "emit", lambda t, e, p: goi.append((t, e, p)))
     return goi
 
@@ -78,7 +78,7 @@ def bat_ghi_lop(monkeypatch):
         db, "replace_training_job_classes",
         lambda **kw: goi.append(kw))
     monkeypatch.setattr(
-        "app.checkpoint_io.load_checkpoint",
+        "app.modules.training.checkpoint_io.load_checkpoint",
         lambda p: {"idx_to_label": {0: "mot", 1: "hai"}})
     return goi
 

@@ -49,7 +49,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any, Dict, Optional
 
-from app.tenancy import DEFAULT_TENANT_ID, is_valid_tenant_id
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID, is_valid_tenant_id
 
 LEGACY = "legacy"
 TENANT = "tenant"

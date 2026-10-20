@@ -17,10 +17,10 @@ import uuid
 
 import pytest
 
-from app import support, support_bot
+from app.modules.support import support, support_bot
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 def _make_account(prefix: str) -> dict:

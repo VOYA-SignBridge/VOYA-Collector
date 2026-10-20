@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.checkpoint_io import UntrustedCheckpointError, resolve_checkpoint_path
+from app.modules.training.checkpoint_io import UntrustedCheckpointError, resolve_checkpoint_path
 
 
 # ---------------------------------------------------------------------------

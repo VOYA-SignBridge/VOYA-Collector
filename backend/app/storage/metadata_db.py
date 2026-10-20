@@ -9,7 +9,7 @@ import re
 from app.config import settings
 from app.infrastructure.database.connection import get_pooled_conn, put_pooled_conn
 from app.storage.rls import apply_scope
-from app.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN, optional_tenant_id
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN, optional_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -1829,7 +1829,7 @@ MIGRATION_STATEMENTS = [
         deleted_at TIMESTAMP WITH TIME ZONE
     )
     """,
-    # The tenant id is interpolated from app.tenancy.DEFAULT_TENANT_ID rather
+    # The tenant id is interpolated from app.modules.saas.tenancy.DEFAULT_TENANT_ID rather
     # than spelled inline, so the DDL default, the CSV backfill and the upsert
     # payloads provably agree. The constant is validated against a strict
     # alphabet at import, which is what makes this interpolation safe.
@@ -5062,7 +5062,7 @@ ON CONFLICT (sample_uid) DO UPDATE SET
     -- bị gói Ver13 kéo lùi khi dựng lại container).
     --
     -- Quyết định THẬT vẫn lan truyền được: đảo một mẫu đã duyệt là ghi
-    -- 'rejected' (xem `app.moderation`), và vế dưới không chặn đường đó.
+    -- 'rejected' (xem `app.modules.admin.moderation`), và vế dưới không chặn đường đó.
     -- Cái mất duy nhất là đặt-lại-về-chờ-duyệt qua SOT từ máy khác; đổi lại là
     -- không lượt khởi động nào âm thầm xoá kết quả kiểm duyệt.
     review_status = CASE
@@ -5604,7 +5604,7 @@ def upsert_training_job(row: Dict[str, Any]):
     tenant khác tenant mình đang hành động. Chỉ đổi cách xử khi không biết —
     từ "đoán là `default`" thành "từ chối".
     """
-    from app.tenant_context import in_system_scope, require_tenant
+    from app.modules.saas.tenant_context import in_system_scope, require_tenant
 
     payload = dict(row)
     payload.setdefault("evaluation", None)
@@ -6062,7 +6062,7 @@ def get_readable_sample_uids(sample_uids: list, user_id: str, tenant_id: str, *,
                              include_deleted: bool = False, manage_all: bool = False) -> set[str]:
     """Own samples or sessions shared inside this tenant — or, with
     `manage_all`, every sample of this tenant (admin/editor of the tenant; the
-    caller decides that via `app.sample_access`, not this query).
+    caller decides that via `app.modules.dataset.sample_access`, not this query).
 
     Missing session/owner metadata never grants access to a regular member. DB
     failures propagate rather than falling back to the unfiltered CSV catalogue.
@@ -6305,7 +6305,7 @@ def insert_audit_log(
     """Chèn một dòng vào `audit_log`.
 
     Lối vào DUY NHẤT của bảng này, và cố ý không public: gọi qua
-    `app.audit.record()`, chỗ làm sạch `detail` khỏi bí mật. Gọi thẳng vào đây
+    `app.modules.security.audit.record()`, chỗ làm sạch `detail` khỏi bí mật. Gọi thẳng vào đây
     là đi vòng qua bộ lọc đó.
 
     `audit_id` là BIGSERIAL nên không truyền; `created_at` để DEFAULT NOW() vì

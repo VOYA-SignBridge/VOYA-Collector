@@ -41,7 +41,7 @@ import pytest
 
 from app.dataset_manager import load_labels, list_classes
 from app.dataset_samples import TenantScopeRequired, find_sample, list_samples
-from app.tenant_context import no_scope
+from app.modules.saas.tenant_context import no_scope
 
 
 #: Ba dạng "không có phạm vi" mà mã thật sự gặp.

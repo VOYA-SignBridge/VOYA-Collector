@@ -88,7 +88,7 @@ def rls_write_fixture():
     một lượt chạy suite từng để lại 37 tệp trong kho pháp lý thật.
     """
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test: dung du lieu cho cong RLS ghi"), _cursor() as cur:
         # Dọn TRƯỚC, không chỉ sau. Tên cố định nên một lượt chạy trước bị ngắt
@@ -153,7 +153,7 @@ class TestRlsBlocksCrossTenantWrites:
     def test_writing_into_the_current_tenant_succeeds(self, rls_write_fixture):
         """Vế ALLOW. Không có nó, một policy `USING (false)` cũng xanh hết."""
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         f = rls_write_fixture
         with tenant_scope(f["home"]), _cursor() as cur:
@@ -165,7 +165,7 @@ class TestRlsBlocksCrossTenantWrites:
         from psycopg2 import errors
 
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         f = rls_write_fixture
         with pytest.raises(errors.InsufficientPrivilege):
@@ -183,7 +183,7 @@ class TestRlsBlocksCrossTenantWrites:
         from psycopg2 import errors
 
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import no_scope
+        from app.modules.saas.tenant_context import no_scope
 
         f = rls_write_fixture
         with pytest.raises(errors.InsufficientPrivilege):
@@ -200,7 +200,7 @@ class TestRlsBlocksCrossTenantWrites:
         from psycopg2 import errors
 
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         f = rls_write_fixture
         with tenant_scope(f["home"]), _cursor() as cur:
@@ -222,7 +222,7 @@ class TestRlsBlocksCrossTenantWrites:
         from psycopg2 import errors
 
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         f = rls_write_fixture
         with pytest.raises(errors.InsufficientPrivilege):
@@ -238,7 +238,7 @@ class TestRlsBlocksCrossTenantWrites:
         cổng an ninh chỉ kiểm vế DENY sẽ khuyến khích đúng loại "sửa" đó.
         """
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         f = rls_write_fixture
         with system_scope("test: ghi lien tenant hop le"), _cursor() as cur:

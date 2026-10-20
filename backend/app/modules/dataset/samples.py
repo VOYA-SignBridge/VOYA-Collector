@@ -14,7 +14,7 @@ from filelock import FileLock
 from datetime import datetime
 from app.config import settings
 from app.processing.utils import atomic_write_json
-from app.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
+from app.modules.saas.tenancy import TENANT_COLUMN, normalize_tenant_id, tenant_id_of
 
 
 DATASET_ROOT = settings.dataset_root

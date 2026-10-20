@@ -31,7 +31,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 # ---------------------------------------------------------------------------
 # fixture: một tổ chức, hai người (A, B), một lớp, ba phiên thu
@@ -216,7 +216,7 @@ def test_editor_cannot_change_someone_elses_visibility(to_chuc, visibility):
 
 
 def test_tenant_export_cannot_bypass_private(to_chuc):
-    from app import tenant_lifecycle
+    from app.modules.saas import tenant_lifecycle
     with pytest.raises(tenant_lifecycle.LifecycleError) as error:
         tenant_lifecycle.request_export(to_chuc["tid"], requested_by=to_chuc["a"],
                                         scope="full", export_purpose="tenant_portability")
@@ -225,7 +225,7 @@ def test_tenant_export_cannot_bypass_private(to_chuc):
 
 
 def test_private_cannot_enter_moderation_queue_or_be_approved_by_admin(to_chuc):
-    from app import moderation_admin
+    from app.modules.admin import moderation_admin
     tid, sid = to_chuc["tid"], to_chuc["s_b_kin"]
     with tenant_scope(tid):
         db._execute("INSERT INTO samples (sample_uid, tenant_id, class_uid, auth_user_id, capture_session_id, review_status) VALUES (%s,%s,%s,%s,%s,'pending')",
@@ -259,7 +259,7 @@ def test_goi_ca_nhan_chi_chua_dong_va_tep_cua_dung_nguoi_do(to_chuc, tmp_path, m
     """Lõi của tính năng, và là lời hứa trong README của gói: "chỉ dữ liệu bạn
     đã tự đóng góp". Kho mẫu và cây tệp được giả lập để test không chạm
     `dataset/samples.csv` thật — thứ mà `_restore_dataset_files` phải canh."""
-    from app import personal_export
+    from app.modules.export import personal_export
 
     tid, a, b = to_chuc["tid"], to_chuc["a"], to_chuc["b"]
     npz_a, npz_b = f"sample_{uuid.uuid4().hex[:6]}.npz", f"sample_{uuid.uuid4().hex[:6]}.npz"
@@ -298,7 +298,7 @@ def test_nguoi_khac_khong_tai_duoc_va_khong_thay_ban_xuat_khong_phai_cua_minh(
         to_chuc, tmp_path, monkeypatch):
     """Một UUID đoán trúng không được trở thành đường tải dữ liệu của người
     khác — `export_file` khoá theo CẢ tenant, user và export_id."""
-    from app import personal_export
+    from app.modules.export import personal_export
 
     tid, a, b = to_chuc["tid"], to_chuc["a"], to_chuc["b"]
     monkeypatch.setattr("app.dataset_samples.list_samples", lambda tenant: [])
@@ -331,9 +331,10 @@ def client_quan_tri_to_chuc(to_chuc, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from app import auth, saas_tasks
+    from app.modules.saas import saas_tasks
+    from app import auth
     from app.routers.tenants import router
-    from app.tenant_middleware import TenantScopeMiddleware
+    from app.modules.saas.tenant_middleware import TenantScopeMiddleware
 
     tid, a = to_chuc["tid"], to_chuc["a"]
     with system_scope("test: nang A len quan tri to chuc"):
@@ -406,7 +407,7 @@ def test_tim_tai_khoan_khop_mot_phan_va_tu_choi_chuoi_qua_ngan(to_chuc):
     from fastapi.testclient import TestClient
 
     from app.auth import require_admin
-    from app.rate_limit_deps import limit_catalog
+    from app.modules.security.rate_limit_deps import limit_catalog
     from app.routers.tenants import router
 
     app = FastAPI()

@@ -11,9 +11,9 @@ import uuid
 
 import pytest
 
-from app import plans
+from app.modules.saas import plans
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -24,7 +24,7 @@ def _ensure_schema():
 @pytest.fixture
 def throwaway_tenant():
     """Tenant sạch, tự dọn. Không sao chép danh mục cho nhanh."""
-    from app import tenant_admin
+    from app.modules.saas import tenant_admin
     from conftest import purge_tenant
 
     tenant_id = f"qt{uuid.uuid4().hex[:10]}"
@@ -105,7 +105,7 @@ class TestQuotaArithmetic:
 
 class TestSuspensionClosesWrites:
     def test_a_suspended_tenant_cannot_write(self, throwaway_tenant):
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
 
         tenant_admin.set_billing_status(throwaway_tenant, "suspended", reason="thử")
         with pytest.raises(plans.TenantSuspended):
@@ -119,15 +119,15 @@ class TestSuspensionClosesWrites:
         định của người vận hành, không phải hệ quả tự động của một ngày trôi
         qua.
         """
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
 
         tenant_admin.set_billing_status(throwaway_tenant, "past_due")
         plans.assert_writable(throwaway_tenant)  # không ném
 
     def test_the_bootstrap_tenant_cannot_be_suspended(self):
         """Treo nó là tự khoá mình ra khỏi chính API vừa dùng để treo."""
-        from app import tenant_admin
-        from app.tenancy import DEFAULT_TENANT_ID
+        from app.modules.saas import tenant_admin
+        from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
         with pytest.raises(tenant_admin.TenantError) as caught:
             tenant_admin.set_billing_status(DEFAULT_TENANT_ID, "suspended")
@@ -149,7 +149,8 @@ class TestSeats:
         vì lý do tương thích. Bài này canh việc con số ấy KHÔNG được cưỡng chế
         trở lại một cách âm thầm.
         """
-        from app import auth, tenant_admin
+        from app.modules.saas import tenant_admin
+        from app import auth
 
         _set_plan(throwaway_tenant, "free")  # max_seats = 3, nhưng không ai đọc
         created = []
@@ -192,7 +193,8 @@ class TestSeats:
         """Nếu tính đổi vai trò là tiêu ghế, một tổ chức đầy ghế sẽ không sửa
         nổi vai trò của chính thành viên mình — bế tắc không lối ra ngoài việc
         nâng gói."""
-        from app import auth, tenant_admin
+        from app.modules.saas import tenant_admin
+        from app import auth
 
         _set_plan(throwaway_tenant, "free")
         name = f"seat{uuid.uuid4().hex[:9]}"
@@ -227,7 +229,7 @@ class TestPlanChangesAreRecorded:
     ):
         """Chỉ mục duy nhất một phần là thứ ép điều này; test canh rằng thứ tự
         đóng-trước-mở-sau trong `_open_subscription` không bị đảo."""
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
 
         tenant_admin.change_plan(throwaway_tenant, "plus", note="nâng gói")
         tenant_admin.change_plan(throwaway_tenant, "free", note="hạ lại")
@@ -251,7 +253,7 @@ class TestPlanChangesAreRecorded:
         """Hạ gói một tổ chức đang dùng vượt mức mới là hợp lệ (khách ngừng
         trả tiền). Kết quả đúng là họ GIỮ dữ liệu và không thêm được nữa — chứ
         không phải hệ thống từ chối thao tác hạ gói."""
-        from app import tenant_admin
+        from app.modules.saas import tenant_admin
 
         with system_scope("test: pretend the plan is already exceeded"):
             db._execute("UPDATE plans SET max_api_keys = 0 WHERE plan_code = 'free'")

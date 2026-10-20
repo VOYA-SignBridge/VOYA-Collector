@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 from starlette.requests import Request
 
-from app import public_url
+from app.core import public_url
 
 
 def _request(host: str | None, *, proto: str | None = None,

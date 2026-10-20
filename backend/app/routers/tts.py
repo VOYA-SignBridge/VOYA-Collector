@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Query
 from fastapi.responses import Response
 
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 from app.config import settings
 from app.modules.dataset.catalog import list_classes
 from app.services.tts_service import (

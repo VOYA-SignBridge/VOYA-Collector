@@ -80,7 +80,7 @@ def _them_lop_va_mau(goc: Path, tenant: str, dialect: str, nhan: str) -> dict:
     đo chỉ chứng minh được về kho còn lại.
     """
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     uid_lop = f"ctl{uuid.uuid4().hex[:9]}"
     uid_mau = uuid.uuid4().hex[:10]
@@ -135,7 +135,7 @@ def _them_lop_va_mau(goc: Path, tenant: str, dialect: str, nhan: str) -> dict:
 def _don(dt: list[dict], goc: Path) -> None:
     """Gỡ mọi can thiệp. Chạy kể cả khi phép kiểm đã trượt."""
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     for d in reversed(dt):
         try:

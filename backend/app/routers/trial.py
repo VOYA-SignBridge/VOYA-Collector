@@ -16,7 +16,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request, Response
 
-from app import trial
+from app.modules.saas import trial
 from app.rate_limit import enforce_ip_limit
 
 router = APIRouter(prefix="/trial", tags=["trial"])

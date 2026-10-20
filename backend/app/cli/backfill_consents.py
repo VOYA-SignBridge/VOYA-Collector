@@ -42,7 +42,7 @@ import argparse
 import sys
 from typing import Any, Dict, List, Optional
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 
 def _accounts_missing(kind: str, username: Optional[str]) -> List[Dict[str, Any]]:
@@ -53,7 +53,7 @@ def _accounts_missing(kind: str, username: Optional[str]) -> List[Dict[str, Any]
     nên phép nối sẽ nhân bản hàng và đếm sai.
     """
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     sql = """
         SELECT u.id, u.username, u.email, u.created_at
@@ -76,7 +76,7 @@ def _accounts_missing(kind: str, username: Optional[str]) -> List[Dict[str, Any]
 
 @platform_command("cli: ghi hộ chấp thuận cho tài khoản có sẵn")
 def main(argv: List[str] | None = None) -> int:
-    from app import legal
+    from app.modules.legal import legal
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", choices=legal.KINDS, action="append",

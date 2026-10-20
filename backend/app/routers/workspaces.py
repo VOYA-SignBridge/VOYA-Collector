@@ -34,10 +34,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
-from app import workspace_admin
+from app.modules.admin import workspace_admin
 from app.auth import get_current_user
-from app.quota_deps import working_tenant_of
-from app.rate_limit_deps import limit_catalog
+from app.modules.security.quota_deps import working_tenant_of
+from app.modules.security.rate_limit_deps import limit_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +131,8 @@ def require_tenant_admin(
     duy nhất đã rời đi — cùng lối thoát đã viết ở `routers/tenants.py`, và là
     chỗ duy nhất hai thẩm quyền gặp nhau.
     """
-    from app import tenant_admin as tenant_admin_service
-    from app.vocabulary_registry import tenant_role
+    from app.modules.saas import tenant_admin as tenant_admin_service
+    from app.modules.dataset.vocabulary_registry import tenant_role
 
     if user.get("is_admin"):
         return user

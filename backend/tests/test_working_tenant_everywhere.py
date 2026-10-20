@@ -22,11 +22,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-import app.tenant_middleware as tm
-import app.vocabulary_registry as vr
+import app.modules.saas.tenant_middleware as tm
+import app.modules.dataset.vocabulary_registry as vr
 from app.auth import get_current_user, require_tenant_editor
 from app.main import app
-from app.tenant_context import tenant_scope
+from app.modules.saas.tenant_context import tenant_scope
 
 HOME = "truong-b"
 WORKING = "default"
@@ -38,7 +38,7 @@ client = TestClient(app)
 
 @pytest.fixture
 def working_in_voya(monkeypatch):
-    import app.access_gate as gate
+    import app.modules.security.access_gate as gate
 
     monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: WORKING)
     # Người dùng giả không có grant trong DB; cổng truy cập không phải thứ đang kiểm.
@@ -91,7 +91,7 @@ class TestTenantEditorGate:
 
 class TestApiKeyRequestScope:
     def test_a_key_scopes_the_request_to_the_keys_tenant(self, monkeypatch):
-        import app.api_keys as api_keys
+        import app.modules.security.api_keys as api_keys
 
         monkeypatch.setattr(api_keys, "authenticate",
                             lambda raw: {"tenant_id": "iso_b"} if raw == "voya_abc_secret" else None)
@@ -100,7 +100,7 @@ class TestApiKeyRequestScope:
     def test_a_session_cookie_still_wins_over_a_key(self, monkeypatch):
         """Cùng thứ tự với `get_current_user_optional`: có cookie thì người đang
         ngồi trước trình duyệt là danh tính, không phải khoá dán vào curl."""
-        import app.api_keys as api_keys
+        import app.modules.security.api_keys as api_keys
         import app.auth as auth
 
         monkeypatch.setattr(api_keys, "authenticate", lambda raw: {"tenant_id": "iso_b"})

@@ -15,7 +15,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.modules.dataset.catalog import (_load_all_labels_unscoped, register_class,
                                          ClassMetadata, MASTER_LABELS, LABEL_FIELDS,
                                          regenerate_label_indexes)
-from app.tenancy import tenant_id_of
+from app.modules.saas.tenancy import tenant_id_of
 from app.modules.dataset.samples import SAMPLES_CSV, SAMPLE_FIELDS
 from filelock import FileLock
 

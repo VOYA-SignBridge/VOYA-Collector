@@ -363,7 +363,7 @@ def main() -> int:
         import sys as _s
         if str(REPO / 'backend') not in _s.path:
             _s.path.insert(0, str(REPO / 'backend'))
-        from app.consent_gate import (  # noqa: E402
+        from app.modules.security.consent_gate import (  # noqa: E402
             SnapshotUnusable, filter_rows, load_snapshot,
         )
         try:

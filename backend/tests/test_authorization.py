@@ -543,7 +543,7 @@ def authz_fixture():
     chừng để lại thứ nhận ra được bằng mắt.
     """
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     suffix = uuid.uuid4().hex[:8]
     tenant = f"pytest-authz-{suffix}"
@@ -646,7 +646,7 @@ class TestSchemaIsActuallyInstalled:
 
     def test_the_catalogue_in_the_database_matches_the_one_in_code(self):
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: doc danh muc quyen"):
             rows = _fetch_all(
@@ -678,7 +678,7 @@ class TestAdapterFiltersAgainstRealData:
 
     def _grant_tenant_admin(self, fixture):
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: cap role"), _cursor() as cur:
             cur.execute(
@@ -699,7 +699,7 @@ class TestAdapterFiltersAgainstRealData:
     def test_a_revoked_grant_is_never_loaded(self, authz_fixture):
         assignment = self._grant_tenant_admin(authz_fixture)
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: thu hoi role"), _cursor() as cur:
             cur.execute(
@@ -721,7 +721,7 @@ class TestAdapterFiltersAgainstRealData:
         """
         self._grant_tenant_admin(authz_fixture)
         from app.storage.metadata_db import _cursor, _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: go thanh vien"), _cursor() as cur:
             cur.execute(
@@ -779,7 +779,7 @@ class TestAdapterFiltersAgainstRealData:
         import psycopg2
 
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: tao mot vai roi tat no"), _cursor() as cur:
             cur.execute(
@@ -813,7 +813,7 @@ class TestAdapterFiltersAgainstRealData:
                                     PERM.SAMPLE_DELETE), "tien de: dang co quyen"
 
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: tat vai"), _cursor() as cur:
             cur.execute("UPDATE roles SET is_active = FALSE WHERE role_id = %s",
@@ -850,7 +850,7 @@ class TestLegacyAndAdapterAgreeOnMembership:
 
     def _soft_remove(self, tenant, user_id):
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: go mem thanh vien"), _cursor() as cur:
             cur.execute(
@@ -858,13 +858,13 @@ class TestLegacyAndAdapterAgreeOnMembership:
                 " WHERE tenant_id = %s AND user_id = %s", (tenant, user_id))
 
     def test_tenant_role_sees_an_active_member(self, authz_fixture):
-        from app.vocabulary_registry import tenant_role
+        from app.modules.dataset.vocabulary_registry import tenant_role
 
         assert tenant_role(authz_fixture["tenant"], authz_fixture["admin"]) == "admin"
 
     def test_tenant_role_ignores_a_soft_removed_member(self, authz_fixture):
         """Bản vá 11/08. Trước đó hàm này trả 'admin' cho người đã bị gỡ."""
-        from app.vocabulary_registry import can_edit_registry, tenant_role
+        from app.modules.dataset.vocabulary_registry import can_edit_registry, tenant_role
 
         self._soft_remove(authz_fixture["tenant"], authz_fixture["admin"])
         assert tenant_role(authz_fixture["tenant"], authz_fixture["admin"]) is None
@@ -873,8 +873,8 @@ class TestLegacyAndAdapterAgreeOnMembership:
 
     def test_the_adapter_reaches_the_same_conclusion(self, authz_fixture):
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import system_scope
-        from app.vocabulary_registry import tenant_role
+        from app.modules.saas.tenant_context import system_scope
+        from app.modules.dataset.vocabulary_registry import tenant_role
 
         with system_scope("test: cap role"), _cursor() as cur:
             cur.execute(
@@ -913,14 +913,14 @@ class TestTheRolelessWriteGate:
         thành viên chưa có vai không chấp nhận được điều khoản, tức là không bao
         giờ qua nổi cổng đồng thuận để dùng hệ thống.
         """
-        from app.access_gate import _is_self_service_write
+        from app.modules.security.access_gate import _is_self_service_write
 
         for kind in ("terms", "privacy", "data_contribution", "guardian"):
             assert _is_self_service_write(f"/legal/{kind}/accept"), kind
             assert _is_self_service_write(f"/legal/{kind}/withdraw"), kind
 
     def test_the_identity_plane_is_self_service(self):
-        from app.access_gate import _is_self_service_write
+        from app.modules.security.access_gate import _is_self_service_write
 
         for path in ("/auth/logout", "/auth/2fa/enable", "/account/profile",
                      "/verification/email/confirm", "/support/tickets",
@@ -933,7 +933,7 @@ class TestTheRolelessWriteGate:
         Mỗi đường dưới đây ghi vào dữ liệu của tổ chức. Nếu một trong số chúng
         lọt vào danh sách tự phục vụ, cổng thành trang trí.
         """
-        from app.access_gate import _is_self_service_write
+        from app.modules.security.access_gate import _is_self_service_write
 
         for path in ("/upload/video", "/classes/create", "/dataset/samples",
                      "/training/start", "/tenants/abc/invitations",
@@ -957,7 +957,7 @@ class TestTheCompatibilityViewDoesNotBypassRls:
 
     def test_the_view_is_declared_security_invoker(self):
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: doc thuoc tinh cua view"):
             rows = _fetch_all(
@@ -975,7 +975,7 @@ class TestTheCompatibilityViewDoesNotBypassRls:
     def test_the_base_table_carries_the_policy(self):
         """Vế còn lại: policy phải THẬT SỰ ở trên `memberships`."""
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: doc policy cua bang nen"):
             rows = _fetch_all(
@@ -999,7 +999,7 @@ class TestRolesCatalogueRlsIsAsymmetric:
 
     def test_a_tenant_can_read_the_platform_builtin_roles(self, authz_fixture):
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         with tenant_scope(authz_fixture["tenant"]):
             rows = _fetch_all(
@@ -1010,7 +1010,7 @@ class TestRolesCatalogueRlsIsAsymmetric:
     def test_a_tenant_cannot_create_a_platform_role(self, authz_fixture):
         from app.storage.metadata_db import _cursor
         from app.storage.postgres_connection import current_role_privileges
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         # Chính sách RLS không ràng buộc được một role BYPASSRLS, nên với
         # DATABASE_URL trỏ vào superuser thì test này sẽ xanh một cách vô
@@ -1031,7 +1031,7 @@ class TestRolesCatalogueRlsIsAsymmetric:
     def test_a_tenant_can_create_a_role_of_its_own(self, authz_fixture):
         """Nửa còn lại: chính sách chặt nhưng không chặn việc hợp lệ."""
         from app.storage.metadata_db import _cursor
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         with tenant_scope(authz_fixture["tenant"]), _cursor() as cur:
             cur.execute(
@@ -1042,7 +1042,7 @@ class TestRolesCatalogueRlsIsAsymmetric:
             assert cur.fetchone()[0]
         # Dọn: fixture xoá theo tenant_id nên dòng này đi theo `DELETE FROM
         # roles`… mà fixture KHÔNG có. Xoá tại chỗ.
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: don role rieng"), _cursor() as cur:
             cur.execute("DELETE FROM roles WHERE tenant_id = %s", (authz_fixture["tenant"],))

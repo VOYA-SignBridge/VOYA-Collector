@@ -50,7 +50,7 @@ def test_a_drifted_policy_is_reinstalled():
 
 
 def test_isolation_still_enforced_for_the_app_role():
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     with tenant_scope("mot-tenant-khac-0000"):
         assert db._fetch_all("SELECT 1 FROM dialects WHERE tenant_id = 'default' LIMIT 1") == []

@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app import legal, legal_store
+from app.modules.legal import legal, legal_store
 from app.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ def my_consents(current_user: dict = Depends(get_current_user)) -> Dict[str, Any
         và nút bấm phải nói ra ranh giới đó thay vì để người ta suy đoán —
         xem `consent_gate.CONSENT_DOCUMENT_SCOPE`.
     """
-    from app.consent_gate import CONSENT_DOCUMENT_SCOPE
+    from app.modules.security.consent_gate import CONSENT_DOCUMENT_SCOPE
 
     user_id = str(current_user["id"])
     live = legal.live_consents(user_id)

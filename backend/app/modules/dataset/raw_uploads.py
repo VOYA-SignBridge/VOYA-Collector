@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from filelock import FileLock
 
 from app.config import settings
-from app.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN, tenant_id_of
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN, tenant_id_of
 
 logger = logging.getLogger(__name__)
 

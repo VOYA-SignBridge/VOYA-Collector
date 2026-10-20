@@ -1554,9 +1554,9 @@ def main():
     # Ô trống là dữ liệu có từ trước đa tenant, thuộc tenant khởi tạo.
     if str(args.tenant_id or '').strip():
         try:
-            from app.tenancy import normalize_tenant_id, tenant_id_of
+            from app.modules.saas.tenancy import normalize_tenant_id, tenant_id_of
         except ImportError as exc:            # pragma: no cover - lỗi cấu hình
-            raise SystemExit(f"Khong import duoc app.tenancy nen khong loc duoc theo to chuc: {exc}")
+            raise SystemExit(f"Khong import duoc app.modules.saas.tenancy nen khong loc duoc theo to chuc: {exc}")
         # `tenant_id_of` — cùng bộ đọc ô tenant với mọi bên đọc CSV khác.
         _chu = normalize_tenant_id(str(args.tenant_id).strip())
         _truoc = len(rows)
@@ -1585,13 +1585,13 @@ def main():
     # phát hành — nó rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ.
     # Chỉ `approved` đi tiếp.
     try:
-        from app.moderation import filter_rows as _loc_kiem_duyet
+        from app.modules.admin.moderation import filter_rows as _loc_kiem_duyet
     except ImportError as exc:            # pragma: no cover - lỗi cấu hình
         # Hỏng-thì-ĐÓNG. Nuốt lỗi ở đây và chạy tiếp nghĩa là dựng một split
         # KHÔNG qua kiểm duyệt mà không ai biết — đúng thứ cổng này sinh ra để
         # chặn. Thà không chạy được còn hơn chạy mà bỏ cổng.
         raise SystemExit(
-            "Khong import duoc app.moderation nen khong ap duoc cong kiem duyet. "
+            "Khong import duoc app.modules.admin.moderation nen khong ap duoc cong kiem duyet. "
             "Chay script nay o noi `app` import duoc (container trainer/backend). "
             f"Chi tiet: {exc}")
 

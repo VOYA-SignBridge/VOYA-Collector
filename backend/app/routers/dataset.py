@@ -7,10 +7,10 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
 
-from app import audit
+from app.modules.security import audit
 from app.config import settings
 from app.dataset_manager import load_labels, ClassMetadata
-from app.tenancy import tenant_id_of
+from app.modules.saas.tenancy import tenant_id_of
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
 from app.catalog_sync import (
@@ -26,11 +26,11 @@ from app.catalog_sync import (
     bulk_purge_samples,
     empty_sample_trash,
 )
-from app import moderation
+from app.modules.admin import moderation
 from app.auth import get_current_user, get_current_user_optional, require_admin
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
-from app.sample_access import can_manage_tenant_samples, readable_sample_uids
+from app.modules.dataset.sample_access import can_manage_tenant_samples, readable_sample_uids
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -340,7 +340,7 @@ def get_sample_data(sample_id: str, current_user: Dict[str, Any] = Depends(get_c
     # trước khi admin duyệt. Người duyệt của CHÍNH tenant này vẫn tải được: họ
     # phải xem được thứ mình sắp duyệt. Cùng 404 như mẫu không tồn tại.
     if not moderation.filter_rows([match], viewer_id=str(current_user.get("id") or "")).kept:
-        from app.moderation_admin import can_moderate
+        from app.modules.admin.moderation_admin import can_moderate
 
         if not (can_moderate(current_user, require_tenant())
                 or can_manage_tenant_samples(current_user, require_tenant())):

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ValidationError, root_validator, validator
 
 from app.config import settings
-from app.rate_limit_deps import limit_predict
+from app.modules.security.rate_limit_deps import limit_predict
 
 logger = logging.getLogger("realtime_proxy")
 

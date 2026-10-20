@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import totp
+from app.modules.security import totp
 
 #: RFC 4226 Phụ lục D. Bí mật là ASCII "12345678901234567890".
 RFC4226_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"

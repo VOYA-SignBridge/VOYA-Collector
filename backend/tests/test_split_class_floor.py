@@ -41,7 +41,7 @@ from processed.splits.make_splits import (  # noqa: E402
 
 from app.routers import training as tr  # noqa: E402
 from app.storage import metadata_db as db  # noqa: E402
-from app.tenant_context import system_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope  # noqa: E402
 
 
 # --------------------------------------------------------------------------

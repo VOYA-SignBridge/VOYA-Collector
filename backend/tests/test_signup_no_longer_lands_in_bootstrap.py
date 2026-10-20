@@ -42,7 +42,7 @@ import uuid
 import pytest
 
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -157,7 +157,7 @@ def registered_class():
     created: list[str] = []
     yield created
 
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: gỡ lớp vừa đăng ký"):
         for class_uid in reversed(created):
@@ -223,7 +223,7 @@ def _register(anon_client, *, username: str, email: str, org: str | None = None)
     thật. Viết cứng sẽ cho ra 409 `stale_version` và test đỏ vì một lý do
     không liên quan gì tới thứ nó đang kiểm.
     """
-    from app import legal
+    from app.modules.legal import legal
 
     body = {"username": username, "email": email, "password": PW}
     for kind in ("terms", "privacy"):
@@ -251,7 +251,7 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         chốt vế đầu — vào đúng chỗ, và không đẻ ra tổ chức nào.
         """
         from app.storage.authz_schema import COMMUNITY_TENANT_ID
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: dem to chuc truoc"):
             truoc = db._fetch_all("SELECT count(*) AS n FROM tenants")[0]["n"]
@@ -320,8 +320,9 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         biết hoá đơn gửi cho ai.
         """
         from conftest import purge_tenant
-        from app import auth, tenant_admin
-        from app.tenant_context import system_scope
+        from app.modules.saas import tenant_admin
+        from app import auth
+        from app.modules.saas.tenant_context import system_scope
 
         name = _unique("owner")
         user = auth.create_user(username=name, email=f"{name}@example.com",
@@ -365,7 +366,8 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         hoa/thường và dấu.
         """
         from conftest import purge_tenant
-        from app import auth, tenant_admin
+        from app.modules.saas import tenant_admin
+        from app import auth
 
         ten_tk, tao = [], []
         try:
@@ -408,7 +410,7 @@ class TestSignupNeverLandsInTheBootstrapTenant:
 
         assert response.status_code == 403, response.text
 
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: prove the refused signup created nothing"):
             rows = db._fetch_all(

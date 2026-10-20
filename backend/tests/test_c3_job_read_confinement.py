@@ -64,7 +64,7 @@ from app.storage.metadata_db import (  # noqa: E402
     _migration_cursor,
     upsert_training_job,
 )
-from app.tenant_context import system_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope, tenant_scope  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
@@ -121,7 +121,7 @@ def app_client(hai_nguoi_dung):
     tượng nó đang đo. Báo một lỗ hổng sản xuất dựa trên một app thiếu tầng bảo
     vệ của sản xuất là báo sai — và báo sai về bảo mật thì đắt cả hai chiều.
     """
-    from app.tenant_middleware import TenantScopeMiddleware
+    from app.modules.saas.tenant_middleware import TenantScopeMiddleware
 
     app = FastAPI()
     app.include_router(router)

@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pytest
 
-from app.tenancy import (
+from app.modules.saas.tenancy import (
     DEFAULT_TENANT_ID,
     TENANT_COLUMN,
     is_valid_tenant_id,

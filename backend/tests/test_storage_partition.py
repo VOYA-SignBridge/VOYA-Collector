@@ -24,8 +24,8 @@ from app.dataset_manager import (
     ambient_tenant_features_root,
     tenant_features_root,
 )
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import no_scope, system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import no_scope, system_scope, tenant_scope
 
 
 def features_root():
@@ -92,7 +92,7 @@ class TestLayout:
 
     def test_tenant_id_cannot_escape_the_root(self):
         """`../` in a tenant id would write outside the dataset entirely. The
-        restricted alphabet in `app.tenancy` is what prevents it, so this pins
+        restricted alphabet in `app.modules.saas.tenancy` is what prevents it, so this pins
         that the storage layer actually relies on the validator rather than
         constructing the path first and checking later."""
         for bad in ("../etc", "a/b", "..", "a\\b"):
@@ -114,7 +114,7 @@ class TestAmbientTenant:
 
     def test_system_scope_writes_as_the_bootstrap_tenant(self):
         """Platform work — the CSV import, a CLI — creates rows that provably
-        predate multi-tenancy. Same answer `app.tenancy` gives for an absent
+        predate multi-tenancy. Same answer `app.modules.saas.tenancy` gives for an absent
         value everywhere else."""
         with system_scope("test"):
             assert ambient_tenant() == DEFAULT_TENANT_ID
@@ -164,7 +164,7 @@ class TestOwnerSurvivesEveryRoundTrip:
 
     def test_blank_tenant_means_the_bootstrap_tenant(self):
         """Rows written before the column existed. Consistent with every other
-        absent-value decision in `app.tenancy`."""
+        absent-value decision in `app.modules.saas.tenancy`."""
         from app.dataset_manager import _build_meta_from_row
 
         row = dict(self.ROW, tenant_id="")

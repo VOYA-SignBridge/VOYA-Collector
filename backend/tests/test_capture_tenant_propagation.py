@@ -32,7 +32,7 @@ import uuid
 import numpy as np
 import pytest
 
-from app.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN
 
 
 @pytest.fixture

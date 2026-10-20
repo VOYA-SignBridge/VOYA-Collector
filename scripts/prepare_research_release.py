@@ -141,7 +141,7 @@ def main() -> int:
         if str(REPO_ROOT / "backend") not in _s.path:
             _s.path.insert(0, str(REPO_ROOT / "backend"))
         try:
-            from app.consent_gate import SnapshotUnusable, load_snapshot
+            from app.modules.security.consent_gate import SnapshotUnusable, load_snapshot
 
             consents, _al, meta = load_snapshot(args.consent_snapshot)
             live = sum(1 for c in consents.values() if c.highest_live_rank is not None)

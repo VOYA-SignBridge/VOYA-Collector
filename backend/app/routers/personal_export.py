@@ -1,4 +1,4 @@
-"""Mặt giao diện của `app.personal_export` — "cho tôi tệp của chính tôi".
+"""Mặt giao diện của `app.modules.export.personal_export` — "cho tôi tệp của chính tôi".
 
 Mọi thành viên đã đăng nhập gọi được, không cần vai biên tập hay quản trị:
 phạm vi luôn tự khoá vào chính tài khoản đang gọi (`current_user["id"]`), không
@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.auth import get_current_user
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,8 @@ def request_export(
     liệu của NHIỀU người đóng góp, gói này chỉ chứa dữ liệu của chính người
     đang gọi — không có bên thứ ba nào để cam kết bảo vệ.
     """
-    from app import audit, personal_export
+    from app.modules.export import personal_export
+    from app.modules.security import audit
 
     tenant = require_tenant()
     uid = str(current_user.get("id") or "")
@@ -45,7 +46,7 @@ def request_export(
     )
 
     try:
-        from app.saas_tasks import run_personal_export
+        from app.modules.saas.saas_tasks import run_personal_export
 
         run_personal_export.delay(job["export_id"])
     except Exception as exc:
@@ -61,7 +62,7 @@ def request_export(
 
 @router.get("")
 def list_exports(current_user: Dict[str, Any] = Depends(get_current_user)) -> List[Dict[str, Any]]:
-    from app import personal_export
+    from app.modules.export import personal_export
 
     tenant = require_tenant()
     uid = str(current_user.get("id") or "")
@@ -78,7 +79,8 @@ def download_export(
     thời điểm khác nhau."""
     from fastapi.responses import FileResponse
 
-    from app import audit, personal_export
+    from app.modules.export import personal_export
+    from app.modules.security import audit
 
     tenant = require_tenant()
     uid = str(current_user.get("id") or "")

@@ -18,10 +18,10 @@ import uuid
 
 import pytest
 
-from app import legal
+from app.modules.legal import legal
 from app.cli.backfill_consents import main
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)

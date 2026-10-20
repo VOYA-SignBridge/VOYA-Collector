@@ -11,7 +11,7 @@ import uuid
 
 import pytest
 
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 from app.storage import metadata_db as db
 
 

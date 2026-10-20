@@ -29,7 +29,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app.storage.metadata_db as mdb  # noqa: E402
-import app.vocabulary_registry as vr  # noqa: E402
+import app.modules.dataset.vocabulary_registry as vr  # noqa: E402
 from app.cli.export_registry_snapshot import build_bootstrap_snapshot  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]

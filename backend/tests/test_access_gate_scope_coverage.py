@@ -37,10 +37,10 @@ import uuid
 
 import pytest
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.storage import metadata_db as db
-from app.access_gate import _has_any_tenant_grant
-from app.tenant_context import system_scope
+from app.modules.security.access_gate import _has_any_tenant_grant
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)

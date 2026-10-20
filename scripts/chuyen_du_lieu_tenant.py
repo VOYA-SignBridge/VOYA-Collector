@@ -35,12 +35,12 @@ from pathlib import Path
 
 sys.path.insert(0, "/app")
 
-from app import audit  # noqa: E402
+from app.modules.security import audit  # noqa: E402
 from app.catalog_sync import _catalog_lock, _write_csv, _write_samples_csv  # noqa: E402
 from app.dataset_manager import DATASET_ROOT, MASTER_LABELS, tenant_features_root  # noqa: E402
 from app.dataset_samples import SAMPLES_CSV, raw_archive_path  # noqa: E402
 from app.storage.metadata_db import _cursor, _fetch_all  # noqa: E402
-from app.tenant_context import system_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope, tenant_scope  # noqa: E402
 
 ROOT = Path(DATASET_ROOT)
 
@@ -326,7 +326,7 @@ def main():
                      detail={"from": a.source, "classes": a.classes, "signer": a.signer,
                              "samples": [s["sample_uid"] for s in inv["samples"]],
                              "dialect_moved": a.move_dialect or None, "backup": str(backup)})
-    from app import vocabulary_registry as vr
+    from app.modules.dataset import vocabulary_registry as vr
     for t in (a.source, a.target):
         with tenant_scope(t):
             print(f"Registry {t}: v{vr._bump(t, note='chuyen du lieu giua tenant')}")

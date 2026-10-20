@@ -28,11 +28,12 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-from app import notifications, otp
+from app.modules.security import otp
+from app.modules.support import notifications
 from app.routers import auth as auth_router
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 PASSWORD = "correct horse battery"
 

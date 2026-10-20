@@ -21,7 +21,7 @@ from app.auth import require_admin
 from app.sot import catalog_schema, keys
 from app.sot import manifest as m
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 router = APIRouter(prefix="/admin/sot", tags=["admin", "sot"])
 

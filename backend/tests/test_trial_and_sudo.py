@@ -18,9 +18,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import trial
+from app.modules.saas import trial
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -357,7 +357,7 @@ class TestSudoMode:
     def test_wrong_password_does_not_elevate(self, admin_account):
         from fastapi import HTTPException
 
-        from app import sudo_mode
+        from app.modules.security import sudo_mode
 
         with pytest.raises(HTTPException) as exc:
             sudo_mode.elevate(admin_account, "not the password")
@@ -370,13 +370,13 @@ class TestSudoMode:
         `codes_match("", "")` đã trả về True hồi tháng trước."""
         from fastapi import HTTPException
 
-        from app import sudo_mode
+        from app.modules.security import sudo_mode
 
         with pytest.raises(HTTPException):
             sudo_mode.elevate(admin_account, "")
 
     def test_correct_password_elevates_then_expires_on_revoke(self, admin_account):
-        from app import sudo_mode
+        from app.modules.security import sudo_mode
 
         ttl = sudo_mode.elevate(admin_account, "correct horse battery")
         assert ttl == sudo_mode.SUDO_TTL_SECONDS
@@ -387,7 +387,7 @@ class TestSudoMode:
 
     def test_elevation_is_per_user(self, admin_account):
         """Một quản trị viên nâng quyền không nâng quyền cho người khác."""
-        from app import sudo_mode
+        from app.modules.security import sudo_mode
 
         sudo_mode.elevate(admin_account, "correct horse battery")
         assert sudo_mode.seconds_remaining("00000000-0000-0000-0000-000000000000") == 0
@@ -400,7 +400,7 @@ class TestSudoMode:
         """
         from fastapi import HTTPException
 
-        from app import sudo_mode
+        from app.modules.security import sudo_mode
 
         monkeypatch.setattr(sudo_mode, "_client", lambda: None)
         with pytest.raises(HTTPException) as exc:
@@ -475,14 +475,14 @@ class TestRedisFailureDoesNotLatchForever:
 
 class TestRuntimeSetting:
     def test_unknown_key_is_refused(self):
-        from app import platform_settings
+        from app.modules.admin import platform_settings
 
         with pytest.raises(KeyError):
             platform_settings.set_int("khong_ton_tai", 5, updated_by="x")
 
     @pytest.mark.parametrize("bad", [-1, 1441])
     def test_out_of_range_is_refused(self, bad, admin_account):
-        from app import platform_settings
+        from app.modules.admin import platform_settings
 
         with pytest.raises(ValueError):
             platform_settings.set_int(
@@ -491,14 +491,14 @@ class TestRuntimeSetting:
     def test_a_bool_is_not_an_int(self, admin_account):
         """`isinstance(True, int)` là True trong Python. Không chặn riêng thì
         `set_int(..., True)` ghi giá trị 1 mà không ai định thế."""
-        from app import platform_settings
+        from app.modules.admin import platform_settings
 
         with pytest.raises(ValueError):
             platform_settings.set_int(
                 "trial_minutes_per_day", True, updated_by=str(admin_account["id"]))
 
     def test_written_value_takes_effect(self, admin_account):
-        from app import platform_settings
+        from app.modules.admin import platform_settings
         from app.config import settings
 
         platform_settings.set_int(
@@ -507,7 +507,7 @@ class TestRuntimeSetting:
         assert settings.trial_minutes_per_day != 15 or True  # env không bị sửa
 
     def test_falls_back_to_env_when_absent(self, admin_account):
-        from app import platform_settings
+        from app.modules.admin import platform_settings
         from app.config import settings
 
         with system_scope("test cleanup"):
@@ -520,7 +520,7 @@ class TestRuntimeSetting:
     def test_a_corrupt_value_falls_back_rather_than_crashing(self, monkeypatch):
         """Đường suy luận đọc giá trị này 5 lần/giây. Một dòng hỏng trong bảng
         không được phép làm đổ endpoint."""
-        from app import platform_settings
+        from app.modules.admin import platform_settings
         from app.config import settings
 
         monkeypatch.setattr(platform_settings, "_fetch", lambda k: "không phải số")

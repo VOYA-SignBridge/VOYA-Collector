@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.access_gate import (
+from app.modules.security.access_gate import (
     PUBLIC_ROUTES, TRIAL_OR_SESSION_ROUTES, canonical,
 )
 

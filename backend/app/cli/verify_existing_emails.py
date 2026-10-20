@@ -45,7 +45,7 @@ import sys
 from datetime import datetime, timezone
 from typing import List
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 
 def _unverified(cutoff: datetime | None, email_like: str | None) -> List[dict]:

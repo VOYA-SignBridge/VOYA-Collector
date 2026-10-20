@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app import learn_catalog
+from app.modules.dataset import learn_catalog
 
 
 class TestDanhMuc:

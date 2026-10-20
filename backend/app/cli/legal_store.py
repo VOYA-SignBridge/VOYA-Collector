@@ -25,14 +25,14 @@ import argparse
 import sys
 from typing import List
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 
 @platform_command("cli: kho tài liệu pháp lý")
 def main(argv: List[str] | None = None) -> int:
-    from app import legal, legal_store
+    from app.modules.legal import legal, legal_store
     from app.storage.metadata_db import _cursor, _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--status", action="store_true", help="tóm tắt kho")

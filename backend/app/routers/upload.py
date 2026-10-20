@@ -9,7 +9,7 @@ from typing import Dict, Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
-from app.rate_limit_deps import limit_upload
+from app.modules.security.rate_limit_deps import limit_upload
 from app.processing import storage_utils as su
 from app.dataset_manager import (
     get_or_register_class,
@@ -45,10 +45,10 @@ from app.api_validation import (
     save_upload_with_limit,
 )
 from app.auth import get_current_user
-from app.tenant_context import require_tenant
-from app import storage_quota
-from app.quota_deps import guard_storage, storage_full_http
-from app.webhooks import emit
+from app.modules.saas.tenant_context import require_tenant
+from app.modules.saas import storage_quota
+from app.modules.security.quota_deps import guard_storage, storage_full_http
+from app.modules.saas.webhooks import emit
 
 # The limit is declared on the router rather than per endpoint because all three
 # endpoints here are writes, and this is the most expensive path in the system:
@@ -181,7 +181,7 @@ def _alphabet_error_detail(exc: Exception, requested: str, resolved: str) -> str
     sang bảng chữ cái rồi áp luật một chữ cái. Không nói ra bước gộp thì thông
     báo đúng mà vô nghĩa với người đọc.
     """
-    from app.vocabulary_registry import slugify_dialect
+    from app.modules.dataset.vocabulary_registry import slugify_dialect
 
     req = slugify_dialect(requested or "")
     if req and resolved and req != resolved:
@@ -459,7 +459,7 @@ def _in_request_tenant(row: Dict[str, Any], tenant: str) -> bool:
     Lọc ở đây cũng làm task mang đúng header tenant (tenant của request = tenant
     của bản tải lên), nên pipeline tìm được `class_uid` của nó.
     """
-    from app.tenancy import tenant_id_of
+    from app.modules.saas.tenancy import tenant_id_of
 
     return tenant_id_of(row) == tenant
 

@@ -12,7 +12,7 @@ import uuid
 import pytest
 
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -24,7 +24,7 @@ def _ensure_schema():
 def test_audit_redacts_secrets():
     """Người dùng đặt ra quy tắc và nó không có ngoại lệ: không log mã quan
     trọng. `detail` là JSONB tự do nên nó là chỗ dễ rò nhất."""
-    from app import audit
+    from app.modules.security import audit
 
     cleaned = audit._redact({
         "password": "@Minh123456",
@@ -46,7 +46,7 @@ def test_audit_redacts_secrets():
 def test_audit_redaction_stops_recursing():
     """Đệ quy không giới hạn trên dữ liệu do người gọi đưa vào là một cách tự
     treo mình."""
-    from app import audit
+    from app.modules.security import audit
 
     deep: dict = {"a": {}}
     node = deep["a"]
@@ -60,7 +60,7 @@ def test_audit_never_raises_when_the_write_fails(monkeypatch):
     """Xem docstring `app/audit.py`: kiểm toán không được là điểm chết của hệ
     thống. Một trục trặc Postgres không được biến mọi hành động quản trị thành
     lỗi 500."""
-    from app import audit
+    from app.modules.security import audit
 
     def boom(**_kwargs):
         raise RuntimeError("postgres đang chết")
@@ -70,8 +70,8 @@ def test_audit_never_raises_when_the_write_fails(monkeypatch):
 
 
 def test_audit_writes_and_reads_back():
-    from app import audit
-    from app.tenant_context import system_scope
+    from app.modules.security import audit
+    from app.modules.saas.tenant_context import system_scope
 
     action = f"test.schema_v3.{uuid.uuid4().hex[:8]}"
     with system_scope("test: ghi và đọc lại một dòng kiểm toán"):
@@ -85,7 +85,7 @@ def test_audit_writes_and_reads_back():
 
 
 def test_audit_rejects_a_blank_action():
-    from app import audit
+    from app.modules.security import audit
 
     assert audit.record("") is False
 
@@ -98,7 +98,7 @@ def test_audit_writes_a_platform_row_in_system_scope():
     RLS dùng chung, nên một dòng NULL chỉ qua được WITH CHECK khi
     `app.system_scope = 'on'`. Đây là đường mà Celery beat và các CLI đi.
     """
-    from app import audit
+    from app.modules.security import audit
 
     action = f"test.platform.{uuid.uuid4().hex[:8]}"
     with system_scope("test: ghi sự kiện tầng nền tảng"):
@@ -135,8 +135,8 @@ def test_audit_fails_closed_when_there_is_no_scope_at_all():
     Cả bộ test chạy trong system scope (`conftest._platform_scope`), nên phải
     bước ra bằng `no_scope()` — không có nó, test này xanh mà không kiểm gì.
     """
-    from app import audit
-    from app.tenant_context import in_system_scope, no_scope
+    from app.modules.security import audit
+    from app.modules.saas.tenant_context import in_system_scope, no_scope
 
     action = f"test.noscope.{uuid.uuid4().hex[:8]}"
     with no_scope():
@@ -210,8 +210,8 @@ def test_a_broken_durable_write_does_not_break_the_redis_write(monkeypatch):
 def test_a_failed_write_increments_the_prometheus_counter(monkeypatch):
     """`[AUDIT-FAIL]` cho tới nay chỉ nằm trong nhật ký ứng dụng, tức là chỉ
     tìm ra khi có người đi tìm. Một bộ đếm thì báo động được."""
-    from app import audit
-    from app.metrics import audit_write_failures_total
+    from app.modules.security import audit
+    from app.infrastructure.observability.metrics import audit_write_failures_total
 
     def boom(**_kwargs):
         raise RuntimeError("postgres đang chết")
@@ -235,7 +235,8 @@ def test_a_broken_metrics_registry_does_not_break_the_write_path(monkeypatch):
     Hỏng ở tầng `inc()` chứ không thay cả `_count_failure`: bọc bảo vệ nằm bên
     TRONG hàm đó, nên thay cả hàm là bỏ qua đúng thứ đang cần kiểm.
     """
-    from app import audit, metrics
+    from app.infrastructure.observability import metrics
+    from app.modules.security import audit
 
     def boom(**_kwargs):
         raise RuntimeError("postgres đang chết")
@@ -251,7 +252,7 @@ def test_a_broken_metrics_registry_does_not_break_the_write_path(monkeypatch):
 
 
 def test_a_fresh_row_makes_the_age_gauge_small():
-    from app import audit
+    from app.modules.security import audit
 
     action = f"test.tuoi.{uuid.uuid4().hex[:8]}"
     with system_scope("test: ghi một dòng rồi đo tuổi"):
@@ -265,7 +266,7 @@ def test_a_fresh_row_makes_the_age_gauge_small():
 
 
 def test_counting_recent_rows_sees_a_row_just_written():
-    from app import audit
+    from app.modules.security import audit
 
     action = f"test.dem.{uuid.uuid4().hex[:8]}"
     before = audit.count_since(3600)
@@ -286,7 +287,7 @@ def test_an_unreadable_table_reports_minus_one_not_zero(monkeypatch):
     báo trong `logging/alert-rules.yml` loại `-1` ra khỏi biểu thức, nên giá
     trị này là thứ giữ cho chuông không kêu bậy.
     """
-    from app import audit
+    from app.modules.security import audit
     from app.storage import metadata_db
 
     def boom(*_a, **_kw):
@@ -304,7 +305,7 @@ def test_the_metrics_endpoint_publishes_all_three_audit_signals():
     khớp, và Prometheus không phàn nàn gì cả."""
     from prometheus_client import generate_latest
 
-    from app.metrics import _refresh_audit_gauges
+    from app.infrastructure.observability.metrics import _refresh_audit_gauges
 
     _refresh_audit_gauges()
     body = generate_latest().decode("utf-8")

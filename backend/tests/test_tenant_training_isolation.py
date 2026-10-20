@@ -129,7 +129,7 @@ class TestTrainerFindsTenantFiles:
 
 class TestExportRenameOnWindowsMount:
     def test_rename_retries_a_transient_permission_error(self, tmp_path, monkeypatch):
-        from app import tenant_lifecycle as tl
+        from app.modules.saas import tenant_lifecycle as tl
 
         partial, target = tmp_path / "x.zip.part", tmp_path / "x.zip"
         partial.write_bytes(b"zip")
@@ -147,7 +147,7 @@ class TestExportRenameOnWindowsMount:
         assert target.read_bytes() == b"zip" and len(calls) == 3
 
     def test_rename_gives_up_after_the_last_attempt(self, tmp_path, monkeypatch):
-        from app import tenant_lifecycle as tl
+        from app.modules.saas import tenant_lifecycle as tl
 
         def always(self, dst):
             raise PermissionError(13, "Permission denied")
@@ -158,7 +158,7 @@ class TestExportRenameOnWindowsMount:
             tl.finish_partial(tmp_path / "a.part", tmp_path / "a", attempts=3)
 
     def test_cleanup_failure_never_hides_the_failed_status(self, tmp_path, monkeypatch):
-        from app import tenant_lifecycle as tl
+        from app.modules.saas import tenant_lifecycle as tl
 
         def denied(self, missing_ok=False):
             raise PermissionError(13, "Permission denied")

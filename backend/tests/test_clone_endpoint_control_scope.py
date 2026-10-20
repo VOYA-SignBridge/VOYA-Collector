@@ -60,7 +60,7 @@ DUONG_DAN = "/vocabulary/catalog/clone"
 def tenant_dich():
     """Một tenant ĐÍCH có thật, và dọn sạch mọi thứ lượt sao chép sinh ra."""
     from app.storage.metadata_db import _execute
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     tid = f"clone-target-{uuid.uuid4().hex[:8]}"
     with system_scope("test: dựng tenant đích"):

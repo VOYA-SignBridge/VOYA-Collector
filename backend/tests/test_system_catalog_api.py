@@ -27,7 +27,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app import vocabulary_registry as vr
+from app.modules.dataset import vocabulary_registry as vr
 from app.storage import metadata_db as db
 
 
@@ -614,7 +614,7 @@ def test_tenant_moi_nhan_duoc_phuong_ngu_vua_them(client):
     Đây là điều duy nhất thật sự quan trọng: thêm vào khuôn mà tenant mới không
     nhận được thì cửa ghi này vô nghĩa.
     """
-    from app import tenant_admin
+    from app.modules.saas import tenant_admin
     from conftest import purge_tenant
 
     ten = f"Kiem Tra {uuid.uuid4().hex[:6]}"

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from app.webhooks import EVENT_TYPES
+from app.modules.saas.webhooks import EVENT_TYPES
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 

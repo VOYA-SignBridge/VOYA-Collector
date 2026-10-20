@@ -44,7 +44,7 @@ def test_bulk_passes_request_tenant_to_each_call(monkeypatch):
             raise RuntimeError("no ho")
         return {"restored": uid}
 
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     with tenant_scope("truong-b"):
         result = cs._bulk(fake, ["a", "hong", "b"])
@@ -55,7 +55,7 @@ def test_bulk_passes_request_tenant_to_each_call(monkeypatch):
 
 
 def test_bulk_refuses_without_tenant_scope():
-    from app.tenant_context import TenantScopeError
+    from app.modules.saas.tenant_context import TenantScopeError
 
     with pytest.raises(TenantScopeError):
         cs._bulk(lambda uid, *, tenant_id: None, ["a"])

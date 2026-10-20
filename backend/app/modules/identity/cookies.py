@@ -21,7 +21,7 @@ from typing import Optional
 from fastapi import Request, Response
 
 from app.config import settings
-from app.public_url import request_is_https
+from app.core.public_url import request_is_https
 
 ACCESS_COOKIE = "voya_access"
 REFRESH_COOKIE = "voya_refresh"

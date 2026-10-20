@@ -133,7 +133,7 @@ def _run(step: str, cmd: List[str], report: Dict[str, Any], run_id: str) -> bool
     # KẾ THỪA môi trường của worker (DATABASE_URL, REDIS_URL...): make_splits.py
     # đọc cổng kiểm duyệt từ Postgres và cần `app` import được. Bản gốc dựng một
     # env tối giản chỉ có PYTHONPATH=/workspace nên ở đây sẽ đổ ngay câu đầu
-    # ("Khong import duoc app.moderation").
+    # ("Khong import duoc app.modules.admin.moderation").
     env = dict(os.environ)
     env["PYTHONPATH"] = "/app:" + str(WORKSPACE_ROOT)
     env["PYTHONIOENCODING"] = "utf-8"

@@ -18,7 +18,7 @@ from passlib.context import CryptContext
 from app.config import settings
 from app.cookie_auth import ACCESS_COOKIE
 from app.storage.postgres_connection import connect_postgres
-from app.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def _identity_cursor(*, dict_rows: bool = True):
     being true after an unrelated refactor.
     """
     from app.storage.rls import apply_scope
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     factory = RealDictCursor if dict_rows else None
     with system_scope("auth: identity plane, runs before a tenant is known"):
@@ -381,7 +381,7 @@ def create_user(
     reaches SQL. This value ends up naming a storage directory (A4), so an
     unchecked one is a path, not just a string.
     """
-    from app.tenancy import normalize_tenant_id
+    from app.modules.saas.tenancy import normalize_tenant_id
 
     tenant = normalize_tenant_id(tenant_id)
     username_norm = (username or "").strip()
@@ -481,7 +481,7 @@ def _user_from_api_key(raw_key: str) -> Dict[str, Any]:
       không lặng lẽ trả về "không phải thành viên". Hai mặt phẳng danh tính
       khác nhau thì kiểm tra bằng hai đường khác nhau.
     """
-    from app.api_keys import authenticate
+    from app.modules.security.api_keys import authenticate
 
     record = authenticate(raw_key)
     if not record:
@@ -667,8 +667,8 @@ def require_tenant_editor(
     chức NHÀ (`users.tenant_id`): vai biên tập ở trường B mở được danh mục của
     VOYA khi người đó chuyển sang làm việc ở VOYA. Xem `quota_deps.working_tenant_of`.
     """
-    from app.tenancy import normalize_tenant_id
-    from app.vocabulary_registry import can_edit_registry
+    from app.modules.saas.tenancy import normalize_tenant_id
+    from app.modules.dataset.vocabulary_registry import can_edit_registry
 
     # Khoá API là mặt phẳng danh tính KHÁC: nó không có dòng nào trong
     # `tenant_members`, và `id` của nó không phải UUID nên tra bảng đó sẽ lỗi
@@ -685,8 +685,8 @@ def require_tenant_editor(
     # trả `"default"`, nên viết `normalize_tenant_id(...)` thẳng ở đây sẽ đánh
     # giá quyền trên TENANT KHỞI TẠO cho một người gọi mà ta không biết thuộc
     # đâu — đúng phép rơi-về-default đã gỡ khỏi mặt phẳng danh tính 16/08/2026.
-    from app.quota_deps import working_tenant_of
-    from app.tenant_context import TenantScopeError
+    from app.modules.security.quota_deps import working_tenant_of
+    from app.modules.saas.tenant_context import TenantScopeError
 
     try:
         tho = (working_tenant_of(current_user) or "").strip()

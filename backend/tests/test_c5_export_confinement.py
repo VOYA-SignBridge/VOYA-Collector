@@ -55,7 +55,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app import dataset_manager, tenant_lifecycle  # noqa: E402
+from app.modules.saas import tenant_lifecycle
+from app import dataset_manager  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
@@ -187,7 +188,7 @@ def test_c5_5_ke_toan_dung_luong_KHONG_duoc_cong_byte_cua_nguoi_khac(cay_gia, mo
     định: bài đo này hỏi về phép đi bộ trên thư mục, không hỏi về CSDL, và kéo
     theo một CSDL thật sẽ làm ca đỏ vì lý do không liên quan.
     """
-    from app import usage
+    from app.modules.saas import usage
     from app.storage import metadata_db
 
     # Vá vào `metadata_db`, KHÔNG vào `usage`: `tenant_storage_mb` nhập
@@ -240,7 +241,8 @@ def dong_thuan_gia(monkeypatch, cay_gia):
     này hỏi về CHÍNH SÁCH nối giữa mục đích và cổng, không hỏi về cách đọc bảng
     `signer_consents` — phần đó đã có bộ đo riêng.
     """
-    from app import consent_gate, dataset_samples
+    from app.modules.security import consent_gate
+    from app import dataset_samples
 
     thang = consent_gate.scope_rank("research_release")
     monkeypatch.setattr(consent_gate, "load_consents", lambda *a, **k: {

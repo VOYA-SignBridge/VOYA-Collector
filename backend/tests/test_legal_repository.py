@@ -22,9 +22,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app import legal
+from app.modules.legal import legal
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -457,7 +457,7 @@ class TestThePublicReadSurface:
         """Cổng khớp ĐƯỜNG NGUYÊN VĂN, không khớp template. Một `kind` mới thêm
         vào `legal.KINDS` mà quên hai dòng tương ứng sẽ bị 401 — hỏng an toàn,
         nhưng lặng lẽ."""
-        from app.access_gate import PUBLIC_ROUTES
+        from app.modules.security.access_gate import PUBLIC_ROUTES
 
         for kind in legal.KINDS:
             assert ("GET", f"/legal/{kind}") in PUBLIC_ROUTES, kind
@@ -466,7 +466,7 @@ class TestThePublicReadSurface:
     def test_noPublicLegalPath_isParameterised(self):
         """Số hiệu phiên bản phải đi qua tham số TRUY VẤN, không phải một đoạn
         đường: cổng chạy trước định tuyến nên không đọc được template."""
-        from app.access_gate import PUBLIC_ROUTES
+        from app.modules.security.access_gate import PUBLIC_ROUTES
 
         legal_paths = [p for _m, p in PUBLIC_ROUTES if p.startswith("/legal")]
 

@@ -14,9 +14,9 @@ import uuid
 
 import pytest
 
-from app import account_rename as ar
+from app.modules.admin import account_rename as ar
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture
@@ -108,7 +108,7 @@ class TestBangChungLichSuKhongDuocSua:
     def test_dong_kiem_toan_giu_nguyen_ten_cu(self, account, sample_row):
         """Sửa `actor_label` theo tên mới là viết lại lịch sử: dòng kiểm toán cũ
         sẽ mô tả một người không tồn tại vào thời điểm đó."""
-        from app import audit
+        from app.modules.security import audit
 
         old = account["username"]
         audit.record("test.rename.probe", actor={"id": account["id"], "username": old},

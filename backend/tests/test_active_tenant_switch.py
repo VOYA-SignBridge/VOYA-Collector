@@ -19,10 +19,10 @@ import uuid
 
 import pytest
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
-from app.tenant_middleware import _tenant_of_user
+from app.modules.saas.tenant_context import system_scope
+from app.modules.saas.tenant_middleware import _tenant_of_user
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -174,14 +174,14 @@ class TestCongTruyCap:
     def test_duong_chuyen_nam_trong_danh_sach_tu_phuc_vu(self):
         """Không miễn ở cổng thì đây là cái bẫy ngược: người chưa có vai không
         chuyển sang nổi tổ chức nơi họ CÓ vai."""
-        from app.access_gate import _is_self_service_write
+        from app.modules.security.access_gate import _is_self_service_write
 
         assert _is_self_service_write("/tenants/switch") is True
 
     def test_mien_nay_KHONG_lan_sang_duong_quan_tri_tenant(self):
         """Miễn theo ĐƯỜNG NGUYÊN VĂN, không theo tiền tố. Một tiền tố
         `/tenants/` sẽ mở mọi thao tác quản trị tổ chức cho người không vai."""
-        from app.access_gate import _is_self_service_write
+        from app.modules.security.access_gate import _is_self_service_write
 
         assert _is_self_service_write("/tenants/abc/members") is False
         assert _is_self_service_write("/tenants/switch/extra") is False

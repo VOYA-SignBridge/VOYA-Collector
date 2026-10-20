@@ -32,7 +32,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from app import legal, legal_store
+from app.modules.legal import legal, legal_store
 from app.auth import require_admin
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _require_sudo(current_user: Dict[str, Any]) -> None:
     Gọi trong thân hàm chứ không qua `Depends`: nó tự phụ thuộc `require_admin`,
     và khai báo cả hai sẽ chạy phép kiểm quản trị hai lần.
     """
-    from app import sudo_mode
+    from app.modules.security import sudo_mode
 
     if sudo_mode.seconds_remaining(str(current_user["id"])) <= 0:
         raise HTTPException(
@@ -89,7 +89,7 @@ def _notify_reconsent(kind: str, version: str) -> None:
     **Không bao giờ ném.** Bản văn đã công bố xong và đã ghi kiểm toán; làm hỏng
     một thao tác đã thành công vì cái chuông ghi hụt là đánh đổi sai.
     """
-    from app import notifications
+    from app.modules.support import notifications
     from app.storage.metadata_db import _fetch_all
 
     try:
@@ -198,7 +198,7 @@ def publish_document(
     tạo thêm gì. Gửi nội dung KHÁC dưới số hiệu cũ là 409 — xem
     `legal.register_document`.
     """
-    from app import audit
+    from app.modules.security import audit
 
     _require_sudo(current_user)
 
@@ -275,7 +275,7 @@ async def upload_document(
     trị `user_consents` trỏ tới, nên nó phải mô tả đúng thứ đã hiển thị trên màn
     hình người ký — không phải một bản chuyển đổi nào của nó.
     """
-    from app import audit
+    from app.modules.security import audit
 
     _require_sudo(current_user)
 
@@ -464,7 +464,7 @@ def publish_draft(
     current_user: Dict[str, Any] = Depends(require_admin),
 ) -> Dict[str, Any]:
     """Công bố bản nháp đã phê duyệt. **Cần nâng quyền.**"""
-    from app import audit
+    from app.modules.security import audit
 
     _require_sudo(current_user)
     try:

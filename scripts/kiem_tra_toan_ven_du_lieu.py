@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, "/app")
 from app.storage.metadata_db import _fetch_all  # noqa: E402
-from app.tenant_context import system_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope  # noqa: E402
 
 DATASET = Path("/dataset"); WS = Path("/workspace")
 bad = 0

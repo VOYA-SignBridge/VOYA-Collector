@@ -46,7 +46,7 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
-# `backend/` cũng vào đường nhập khẩu: cổng đồng thuận sống ở `app.consent_gate`
+# `backend/` cũng vào đường nhập khẩu: cổng đồng thuận sống ở `app.modules.security.consent_gate`
 # và script này phải dùng CHÍNH nó, không được chép lại quy tắc. Bản sao thứ hai
 # của một quy tắc đạo đức là bản sẽ trôi đi.
 sys.path.insert(0, str(REPO_ROOT / "backend"))
@@ -228,7 +228,7 @@ def load_unapproved_ids(sources) -> dict:
     được `unlabeled` / `unreadable` xử lý, và thêm một luật thứ hai vào cùng chỗ
     sẽ làm một bản phát hành teo lại vì một lý do khác hẳn thứ báo cáo nói.
     """
-    from app.moderation import APPROVED, status_of
+    from app.modules.admin.moderation import APPROVED, status_of
 
     out: dict = {}
     for src in sources:
@@ -461,7 +461,7 @@ def main() -> int:
         consent_note.update({"enforced": False, "reason": "--skip-consent-gate"})
         print("[WARN] cong dong thuan BI BO QUA theo yeu cau — ghi vao dataset_stats")
     else:
-        from app.consent_gate import (  # noqa: E402
+        from app.modules.security.consent_gate import (  # noqa: E402
             SnapshotUnusable, filter_rows, load_snapshot,
         )
 

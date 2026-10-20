@@ -134,8 +134,8 @@ def resolve_signer_for_user(current_user: Dict[str, object]) -> str:
     # còn lại: gọi lại ngay sau khi lập hồ sơ, để chấp thuận đã ký từ trước
     # được áp cho mẫu ĐẦU TIÊN chứ không phải từ mẫu thứ hai trở đi.
     try:
-        from app.consent_gate import CONSENT_DOCUMENT_SCOPE, sync_signer_consent
-        from app.legal import has_consent
+        from app.modules.security.consent_gate import CONSENT_DOCUMENT_SCOPE, sync_signer_consent
+        from app.modules.legal.legal import has_consent
 
         for kind in CONSENT_DOCUMENT_SCOPE:
             if has_consent(external_id, kind):

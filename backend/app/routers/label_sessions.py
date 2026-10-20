@@ -29,8 +29,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.auth import get_current_user
-from app.tenant_context import require_tenant
-from app.preview_render import (
+from app.modules.saas.tenant_context import require_tenant
+from app.modules.dataset.preview_render import (
     find_class_meta,
     list_session_rows,
     pick_original_sample,
@@ -82,7 +82,7 @@ def _owns_all_rows(rows: list, owners: dict, user_id: str) -> bool:
 
 
 def _readable_groups(groups: dict, current_user: Dict[str, Any]) -> dict:
-    from app.sample_access import readable_sample_uids
+    from app.modules.dataset.sample_access import readable_sample_uids
 
     allowed = readable_sample_uids(
         current_user,
@@ -102,7 +102,7 @@ def _require_session_read(rows: list, current_user: Dict[str, Any]) -> None:
 
 def _require_session_owner(rows: list, current_user: Dict[str, Any]) -> None:
     """Chủ của MỌI mẫu trong lần quay, hoặc admin/editor của tenant đang dùng."""
-    from app.sample_access import can_manage_tenant_samples
+    from app.modules.dataset.sample_access import can_manage_tenant_samples
     from app.storage.metadata_db import get_sample_owners
 
     if can_manage_tenant_samples(current_user, require_tenant()):
@@ -128,7 +128,7 @@ def list_label_sessions(
     from app.storage.metadata_db import get_sample_owners
 
     me = str(current_user.get("id") or "")
-    from app.sample_access import can_manage_tenant_samples
+    from app.modules.dataset.sample_access import can_manage_tenant_samples
 
     manager = can_manage_tenant_samples(current_user, require_tenant())
 
@@ -467,7 +467,7 @@ def _dispatch_or_render(class_uid: str, session_id: str) -> str:
     Returns "rendering" (queued) or "ready" (rendered inline).
     """
     try:
-        from app.preview_tasks import render_session_preview_task
+        from app.modules.dataset.preview_tasks import render_session_preview_task
 
         # Phạm vi chốt lúc ĐƯA VÀO HÀNG ĐỢI, khi còn biết ai gọi. Worker
         # chạy trong system_scope và không suy lại được điều này.
