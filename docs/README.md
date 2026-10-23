@@ -5,6 +5,10 @@ giữ trật tự hiển thị, không hàm ý thứ tự đọc. Cấu trúc tr
 [`Extra_docs/`](../Extra_docs/README.md) — tài liệu thiết kế đời đầu nằm ở đó, tài liệu
 đang có hiệu lực nằm ở đây.
 
+> **Mới vào dự án? Đọc [HUONG_DAN_DEV.html](HUONG_DAN_DEV.html) trước** — sổ tay một trang: cài
+> đặt, cấu hình, vận hành, công thức thêm chức năng, bảng tra "sửa chức năng nào ở tệp nào". Các thư
+> mục dưới đây là phần chi tiết và lý do của từng quyết định.
+
 | Thư mục | Trả lời câu hỏi |
 |---|---|
 | [`00-thesis/`](00-thesis/) | Quyển luận văn và bài báo |

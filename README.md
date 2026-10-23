@@ -4,6 +4,10 @@ Sign language data collection and processing system for Vietnamese Sign Language
 
 > **Vận hành:** bấm đúp `VOYA.bat` (menu) hoặc gõ `VOYA status`, `VOYA logs`, `VOYA backup`, `VOYA help`.
 > Bản đồ các script: [scripts/README.md](scripts/README.md).
+>
+> **Dev mới / nhóm nhận bàn giao:** mở [docs/HUONG_DAN_DEV.html](docs/HUONG_DAN_DEV.html) (bấm đúp, hoặc nút
+> "Hướng dẫn cho Dev" trên `VOYA_UI.bat`) — cài đặt, cấu hình `.env`, thêm API/trang/bảng/tác vụ/mô hình,
+> sửa chức năng nào ở tệp nào, kiểm thử, triển khai, lỗi hay gặp. Một số mục bên dưới đã cũ; sổ tay đó là bản đúng.
 
 ---
 

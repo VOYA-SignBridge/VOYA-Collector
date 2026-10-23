@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sổ tay Dev VOYA</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Bố cục: dải đầu trang + hai cột (mục lục dính bên trái, nội dung ~70 ký tự bên phải).
+     Màu lấy từ bảng điều khiển VOYA (xanh CTU) để hai trang trông là một bộ. */
+  :root {
+    --paper: #f5f7fa; --card: #ffffff; --line: #dde3ec; --ink: #17202d; --muted: #566173; --faint: #7c8697;
+    --ctu: #0b5cad; --ctu-soft: #e7f0fb; --ctu-ink: #0a4a8c;
+    --amber: #8a5a00; --amber-soft: #fdf3dc; --red: #a32020; --red-soft: #fbe9e9;
+    --code-bg: #eef2f7; --code-ink: #1d2a3a;
+    --f-body: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --f-mono: "JetBrains Mono", ui-monospace, Consolas, "Cascadia Mono", monospace;
+    --s-1: 13px; --s0: 15px; --s1: 17px; --s2: 21px; --s3: 28px; --s4: 38px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f141b; --card: #161c25; --line: #283040; --ink: #e6eaf1; --muted: #a3acbb; --faint: #7d8696;
+      --ctu: #6aa6ff; --ctu-soft: #16253b; --ctu-ink: #9cc4ff;
+      --amber: #f2c56b; --amber-soft: #3a2d10; --red: #ff8f8f; --red-soft: #3d1717;
+      --code-bg: #10171f; --code-ink: #d6dfeb; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f141b; --card: #161c25; --line: #283040; --ink: #e6eaf1; --muted: #a3acbb; --faint: #7d8696;
+    --ctu: #6aa6ff; --ctu-soft: #16253b; --ctu-ink: #9cc4ff;
+    --amber: #f2c56b; --amber-soft: #3a2d10; --red: #ff8f8f; --red-soft: #3d1717;
+    --code-bg: #10171f; --code-ink: #d6dfeb; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 400 var(--s0)/1.65 var(--f-body); }
+  a { color: var(--ctu); text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--ctu); outline-offset: 2px; border-radius: 4px; }
+  code, kbd { font-family: var(--f-mono); font-size: .86em; background: var(--code-bg); color: var(--code-ink); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  kbd { border: 1px solid var(--line); border-bottom-width: 2px; }
+
+  /* Dải đầu trang */
+  .top { background: var(--card); border-bottom: 1px solid var(--line); }
+  .top-in { max-width: 1240px; margin: 0 auto; padding-block: 28px 22px;
+            padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .eyebrow { font-size: var(--s-1); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  h1 { font-size: var(--s4); line-height: 1.15; margin: 6px 0 10px; font-weight: 700; text-wrap: balance; letter-spacing: -.01em; }
+  .lede { max-width: 68ch; color: var(--muted); font-size: var(--s1); margin: 0; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 16px; font-size: var(--s-1); color: var(--muted); }
+  .facts b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .facts span { display: inline-flex; gap: 6px; align-items: baseline; }
+
+  /* Hai cột */
+  .wrap { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 40px;
+          padding-block: 24px 80px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  aside { position: sticky; top: env(safe-area-inset-top, 0px); align-self: start; max-height: 100vh; overflow-y: auto; padding-top: 4px; padding-bottom: 24px; }
+  .search { width: 100%; font: inherit; font-size: var(--s-1); padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
+  .search-note { font-size: 12px; color: var(--faint); margin: 6px 2px 14px; min-height: 18px; }
+  .toc { list-style: none; margin: 0; padding: 0; font-size: var(--s-1); }
+  .toc a { display: block; padding: 5px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; border-left: 2px solid transparent; }
+  .toc a:hover { color: var(--ink); background: var(--card); }
+  .toc a.on { color: var(--ctu-ink); border-left-color: var(--ctu); background: var(--ctu-soft); font-weight: 500; }
+  .toc .sub a { padding-left: 22px; font-size: 12.5px; }
+  @media (max-width: 920px) {
+    .wrap { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    aside { position: static; max-height: none; overflow: visible; }
+    .toc { columns: 2; column-gap: 12px; }
+    .toc .sub { display: none; }
+  }
+  @media (max-width: 480px) { .toc { columns: 1; } h1 { font-size: var(--s3); } }
+
+  main { min-width: 0; }
+  .sec { padding-top: 8px; margin-bottom: 44px; }
+  .sec > h2 { font-size: var(--s3); line-height: 1.2; margin: 0 0 6px; text-wrap: balance; letter-spacing: -.01em; }
+  .sec > .kicker { color: var(--muted); margin: 0 0 18px; max-width: 70ch; }
+  h3 { font-size: var(--s2); line-height: 1.3; margin: 28px 0 8px; text-wrap: balance; }
+  h4 { font-size: var(--s1); margin: 20px 0 6px; }
+  p, li { max-width: 72ch; }
+  ul, ol { padding-left: 22px; }
+  li + li { margin-top: 4px; }
+  .hidden-by-search { display: none !important; }
+
+  /* Lộ trình */
+  .road > li { padding-bottom: 6px; }
+  .road > li > b:first-child { font-size: var(--s1); }
+  .time { font-size: 12.5px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+
+  /* Danh sách API: mỗi router một dòng gập */
+  .api-group { font-size: 12.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; margin: 18px 0 6px; }
+  details.api { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-top: 6px; }
+  details.api > summary { cursor: pointer; padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; list-style: none; }
+  details.api > summary::-webkit-details-marker { display: none; }
+  details.api > summary::before { content: "▸"; color: var(--faint); width: 10px; }
+  details.api[open] > summary::before { content: "▾"; }
+  details.api > summary code { font-size: 13px; }
+  details.api .d { color: var(--muted); font-size: 14px; flex: 1 1 220px; min-width: 0; }
+  details.api .n { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  details.api .tbl { margin: 0 12px 12px; }
+  details.api td { padding: 5px 10px; font-size: 13px; }
+  .api-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 7px 12px; border-top: 1px solid var(--line); }
+  .api-row:first-of-type { border-top: none; }
+  .api-row .d { color: var(--muted); font-size: 14px; flex: 1 1 220px; min-width: 0; }
+  .api-row .n { font-size: 12px; color: var(--faint); white-space: nowrap; }
+  .api-list { background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  .m { display: inline-block; min-width: 54px; font: 500 11.5px var(--f-mono); padding: 1px 6px; border-radius: 4px; text-align: center; background: var(--code-bg); color: var(--muted); }
+  .m.GET { color: var(--ctu-ink); background: var(--ctu-soft); }
+  .m.DELETE { color: var(--red); background: var(--red-soft); }
+  .m.POST, .m.PUT, .m.PATCH { color: var(--amber); background: var(--amber-soft); }
+
+  /* Ghi chú */
+  .note { border-radius: 8px; padding: 11px 14px; margin: 14px 0; max-width: 78ch; background: var(--ctu-soft); color: var(--ink); }
+  .note.warn { background: var(--amber-soft); }
+  .note.stop { background: var(--red-soft); }
+  .note > b:first-child { display: block; font-size: var(--s-1); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 2px; }
+  .note.info > b:first-child { color: var(--ctu-ink); }
+  .note.warn > b:first-child { color: var(--amber); }
+  .note.stop > b:first-child { color: var(--red); }
+  .note p { margin: 4px 0; }
+
+  /* Mã */
+  .code { position: relative; margin: 10px 0 16px; }
+  pre { margin: 0; background: var(--code-bg); color: var(--code-ink); border: 1px solid var(--line); border-radius: 8px;
+        padding: 12px 14px; overflow-x: auto; font: 400 13px/1.6 var(--f-mono); tab-size: 4; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .code .lab { position: absolute; top: 0; left: 12px; transform: translateY(-50%); font: 500 11px var(--f-mono); color: var(--muted);
+               background: var(--paper); padding: 0 6px; border-radius: 4px; }
+  .copy { position: absolute; top: 6px; right: 6px; font: 500 12px var(--f-body); padding: 3px 9px; border-radius: 6px;
+          border: 1px solid var(--line); background: var(--card); color: var(--muted); cursor: pointer; }
+  .copy:hover { color: var(--ink); border-color: var(--ctu); }
+  pre .c { color: var(--faint); }
+
+  /* Bảng */
+  .tbl { overflow-x: auto; margin: 12px 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-top: 1px solid var(--line); }
+  thead th { border-top: none; font-size: 12.5px; color: var(--muted); font-weight: 600; letter-spacing: .02em; background: var(--paper); white-space: nowrap; }
+  td code { white-space: nowrap; }
+  td.wrap code { white-space: normal; }
+
+  /* Nhãn mức rủi ro — cùng ba mức với bảng điều khiển */
+  .pill { display: inline-block; font-size: 12px; padding: 1px 9px; border-radius: 999px; white-space: nowrap; font-weight: 500; }
+  .p-safe { background: var(--ctu-soft); color: var(--ctu-ink); }
+  .p-confirm { background: var(--amber-soft); color: var(--amber); }
+  .p-danger { background: var(--red-soft); color: var(--red); }
+
+  /* Sơ đồ kiến trúc bằng ô */
+  .arch { display: grid; gap: 10px; margin: 14px 0 6px; padding: 16px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .tier { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 12px; align-items: center; }
+  .tier > .tn { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .boxes { display: flex; flex-wrap: wrap; gap: 8px; }
+  .box { border: 1px solid var(--line); background: var(--paper); border-radius: 7px; padding: 6px 10px; font-size: 13px; line-height: 1.35; }
+  .box b { display: block; font-family: var(--f-mono); font-weight: 500; font-size: 12.5px; color: var(--ink); }
+  .box span { color: var(--muted); font-size: 12px; }
+  .box.hl { border-color: var(--ctu); background: var(--ctu-soft); }
+  .flow { font-size: 12px; color: var(--faint); padding-left: 142px; }
+  @media (max-width: 640px) { .tier { grid-template-columns: minmax(0, 1fr); gap: 4px; } .flow { padding-left: 0; } }
+
+  /* Mục lục công thức */
+  .rindex { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px 14px; padding: 0; list-style: none; margin: 10px 0 20px; }
+  .rindex a { display: flex; gap: 8px; text-decoration: none; padding: 6px 8px; border-radius: 6px; color: var(--ink); font-size: 14px; }
+  .rindex a:hover { background: var(--card); }
+  .rindex .k { font: 500 12px var(--f-mono); color: var(--ctu); min-width: 22px; padding-top: 2px; }
+  .recipe { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 26px; }
+  .recipe > h3 { margin-top: 14px; display: flex; gap: 10px; align-items: baseline; }
+  .recipe > h3 .k { font: 500 13px var(--f-mono); color: var(--ctu); }
+  .recipe .when { color: var(--muted); margin-top: 0; }
+  .steps { counter-reset: s; list-style: none; padding-left: 0; }
+  .steps > li { counter-increment: s; position: relative; padding-left: 34px; margin-top: 10px; max-width: 76ch; }
+  .steps > li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 22px; height: 22px; border-radius: 50%;
+                        background: var(--ctu-soft); color: var(--ctu-ink); font: 600 12px/22px var(--f-body); text-align: center; }
+  .done { font-size: 14px; color: var(--muted); border-left: 2px solid var(--ctu); padding: 2px 0 2px 12px; margin-top: 12px; max-width: 76ch; }
+  .done b { color: var(--ink); }
+
+  /* Câu hỏi thường gặp */
+  .faq { display: grid; gap: 10px; }
+  .q { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .q h4 { margin: 0 0 4px; font-size: var(--s0); }
+  .q p { margin: 4px 0; font-size: 14px; }
+  .q .why { color: var(--muted); }
+
+  .rule-list { list-style: none; padding: 0; display: grid; gap: 8px; }
+  .rule-list li { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--red); border-radius: 6px; padding: 9px 12px; max-width: none; }
+  .rule-list li b { display: block; }
+  .rule-list li span { color: var(--muted); font-size: 14px; }
+
+  footer { color: var(--faint); font-size: var(--s-1); border-top: 1px solid var(--line); padding-top: 16px; }
+  .empty { display: none; padding: 18px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="eyebrow">CTU.SignBridge · kho VOYA-Collector · bàn giao kỹ thuật</div>
+    <h1>Sổ tay Dev VOYA</h1>
+    <p class="lede">Mọi thứ một lập trình viên mới cần để cài, chạy, sửa và thêm chức năng cho hệ thống thu thập và nhận diện Ngôn ngữ Ký hiệu Việt Nam. Viết bằng lời dễ hiểu. Mỗi việc đều chỉ rõ sửa tệp nào và làm theo thứ tự nào.</p>
+    <div class="facts">
+      <span>Cập nhật <b>23/10/2026</b></span>
+      <span>Nhánh triển khai <b><code>deploy_ctu_ver-2.2.1</code></b></span>
+      <span>Lược đồ CSDL <b>v8</b></span>
+      <span>Dịch vụ Docker <b>15</b></span>
+      <span>Một khung hình = <b>126 số</b> (21 điểm mốc × 3 toạ độ × 2 bàn tay)</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <aside>
+    <label for="q" class="eyebrow" style="display:block;margin-bottom:6px">Tìm trong sổ tay</label>
+    <input id="q" class="search" type="search" placeholder="vd: thêm bảng, .env, GPU, i18n" autocomplete="off">
+    <div class="search-note" id="qnote">Gõ để lọc các mục bên phải.</div>
+    <nav aria-label="Mục lục">
+      <ul class="toc" id="toc">
+        <li><a href="#batdau">Bắt đầu: lộ trình 5 bước</a></li>
+        <li><a href="#toancanh">Bức tranh toàn cảnh</a></li>
+        <li><a href="#thumuc">Bản đồ thư mục</a></li>
+        <li><a href="#caidat">Cài đặt máy dev</a></li>
+        <li><a href="#cauhinh">Cấu hình <code>.env</code></a></li>
+        <li><a href="#vanhanh">Vận hành bằng VOYA</a></li>
+        <li><a href="#quytrinh">Vòng làm việc hằng ngày</a></li>
+        <li><a href="#congthuc">Công thức: muốn thêm X</a></li>
+        <li class="sub"><a href="#r-api">API mới</a></li>
+        <li class="sub"><a href="#r-trang">Trang giao diện mới</a></li>
+        <li class="sub"><a href="#r-bang">Bảng CSDL mới</a></li>
+        <li class="sub"><a href="#r-tacvu">Tác vụ nền</a></li>
+        <li class="sub"><a href="#r-mohinh">Kiến trúc mô hình</a></li>
+        <li class="sub"><a href="#r-lenh">Lệnh vận hành</a></li>
+        <li><a href="#tracuu">Tra cứu: sửa chức năng ở đâu</a></li>
+        <li><a href="#api">API, router &amp; cổng</a></li>
+        <li><a href="#kiemthu">Kiểm thử</a></li>
+        <li><a href="#trienkhai">Triển khai &amp; quay lui</a></li>
+        <li><a href="#loi">Lỗi hay gặp</a></li>
+        <li><a href="#luat">Luật không được phá</a></li>
+        <li><a href="#tailieu">Tài liệu đọc thêm</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <div class="empty" id="empty">Không có mục nào khớp. Thử từ khác, hoặc xoá ô tìm kiếm.</div>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="batdau">
+      <h2>Bắt đầu ở đây</h2>
+      <p class="kicker">Hệ thống làm ba việc: <b>thu</b> dữ liệu ký hiệu (camera hoặc video), <b>huấn luyện</b> mô hình nhận diện, và <b>phục vụ</b> nhận diện thời gian thực trên web. Nhiều tổ chức (tenant) dùng chung một máy chủ nhưng dữ liệu tách riêng.</p>
+
+      <h3>Lộ trình cho người mới: 5 bước</h3>
+      <p>Đi lần lượt từ bước 1. Mỗi bước có lệnh gõ sẵn và một dấu hiệu "xong khi" để biết đã qua được. Các mục phía dưới sổ tay là phần tra cứu, chỉ đọc khi một bước cần tới.</p>
+      <ol class="steps road">
+        <li><b>Cài và chạy web trên máy mình</b><span class="time">30–60 phút</span>
+          <div class="code"><pre><code>git clone &lt;địa-chỉ-repo&gt;      <span class="c"># địa chỉ + quyền truy cập: nhận riêng</span>
+cd VOYA-Collector
+copy .env.example .env        <span class="c"># mở .env, điền mật khẩu và khoá bí mật (mục Cấu hình)</span>
+bash scripts/deploy.sh
+VOYA status</code></pre></div>
+          <p class="done"><b>Xong khi:</b> mở <code>http://localhost</code> đăng nhập được bằng <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code> trong <code>.env</code>, và <code>VOYA status</code> không báo container nào hỏng. Vướng thì xem <a href="#caidat">Cài đặt máy dev</a>.</p></li>
+        <li><b>Hiểu hệ thống chạy thế nào</b><span class="time">khoảng 1 giờ, chỉ đọc</span>
+          <p>Đọc ba chỗ: sơ đồ ở <a href="#toancanh">Bức tranh toàn cảnh</a>, bảng "Sửa xong một dịch vụ thì phải làm gì" ngay dưới sơ đồ, và <a href="#thumuc">Bản đồ thư mục</a>. Lướt qua <a href="#api">API, router &amp; cổng</a>.</p>
+          <p class="done"><b>Xong khi:</b> trả lời được hai câu: code trang Nhãn nằm ở đâu (<code>frontend/src/pages/LabelsPage.tsx</code>), và sửa tệp <code>.py</code> xong phải gõ gì (<code>VOYA update-code</code>).</p></li>
+        <li><b>Sửa thử một chỗ nhỏ</b><span class="time">khoảng 1 giờ</span>
+          <p>Bài tập: đổi một dòng chữ trên trang Nhãn và thêm bản dịch tiếng Anh cho nó.</p>
+          <div class="code"><pre><code>cd frontend
+npm install
+npm run dev                   <span class="c"># mở http://localhost:5173</span>
+<span class="c"># sửa một chữ nằm trong t("...") ở src/pages/LabelsPage.tsx</span>
+<span class="c"># thêm dòng "chữ mới": "new text", vào src/i18n/en.ts rồi lưu: trang tự nạp lại</span>
+npm run typecheck
+node scripts/i18n-gate.mjs
+git restore src/pages/LabelsPage.tsx src/i18n/en.ts   <span class="c"># bỏ thay đổi vì chỉ là bài tập</span></code></pre></div>
+          <p class="done"><b>Xong khi:</b> thấy chữ mới trên trang và hai lệnh kiểm không báo lỗi.</p></li>
+        <li><b>Làm chức năng đầu tiên</b><span class="time">nửa ngày đến 1 ngày</span>
+          <p>Mở mục <a href="#congthuc">Công thức</a> và làm đúng thứ tự bước. Phần lớn chức năng là <b>A1 → A2 → A3</b> (API, gọi API, trang). Cần lưu dữ liệu mới thì làm <b>B1</b> trước A1. Làm mô hình thì <b>C1 → C2</b>. Sửa một chức năng đã có thì đọc <a href="#tracuu">Tra cứu</a>.</p>
+          <div class="code"><pre><code>git checkout -b feature/ten-chuc-nang
+VOYA update-code                          <span class="c"># sau mỗi lần sửa tệp .py</span>
+VOYA test backend/tests/test_ten_tep.py   <span class="c"># lần đầu: làm "Chuẩn bị một lần" ở mục Kiểm thử</span></code></pre></div>
+          <p class="done"><b>Xong khi:</b> chức năng chạy được trên máy và test của nó xanh.</p></li>
+        <li><b>Kiểm và đưa lên máy chủ</b><span class="time">khoảng 1 giờ</span>
+          <div class="code"><pre><code>git add &lt;các tệp đã sửa&gt;
+git commit -m "feat(pham-vi): mo ta ngan"
+git push -u origin feature/ten-chuc-nang
+<span class="c"># mở pull request, đợi CI xanh, gộp vào deploy_ctu_ver-2.2.1</span>
+<span class="c"># trên máy chủ:</span>
+VOYA update-git
+VOYA fresh</code></pre></div>
+          <p class="done"><b>Xong khi:</b> <code>VOYA fresh</code> báo code đang chạy là bản mới nhất. Hỏng thì <code>update-git</code> đã tự quay lui; xem <a href="#trienkhai">Triển khai</a>.</p></li>
+      </ol>
+      <p>Người chỉ trực máy chủ: làm bước 1–2, rồi đọc <a href="#vanhanh">Vận hành</a>, <a href="#trienkhai">Triển khai</a> và <a href="#loi">Lỗi hay gặp</a>.</p>
+
+      <div class="note info"><b>Ba điều nên nhớ ngay hôm đầu</b>
+        <p>1. Mọi việc vận hành đi qua <b>một cửa</b>: bấm đúp <code>VOYA.bat</code> (menu chữ) hoặc <code>VOYA_UI.bat</code> (bảng nút bấm trên trình duyệt). Không cần nhớ lệnh Docker.</p>
+        <p>2. Code backend được <b>chép vào image</b>. Sửa tệp <code>.py</code> xong thì phải dựng lại image (<code>VOYA update-code</code>) mới thấy thay đổi.</p>
+        <p>3. Test chạy trên CSDL <code>signdb_test</code>, <b>không bao giờ</b> trên <code>signdb</code> (dữ liệu thật). Dùng <code>VOYA test</code> là an toàn.</p>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="toancanh">
+      <h2>Bức tranh toàn cảnh</h2>
+      <p class="kicker">Mọi thứ chạy trong Docker, khai báo ở <code>docker-compose.yml</code>. Người dùng chỉ chạm vào cổng 80 của nginx; mọi thứ khác nằm trong mạng nội bộ <code>voya_network</code>.</p>
+
+      <div class="arch" role="img" aria-label="Sơ đồ các dịch vụ theo tầng">
+        <div class="tier"><div class="tn">Vào</div><div class="boxes">
+          <div class="box">Trình duyệt<span> · camera + MediaPipe chạy ngay trên máy người dùng</span></div>
+          <div class="box">Cloudflare Tunnel<span> · đưa tên miền về cổng 80</span></div></div></div>
+        <div class="flow">↓ mọi yêu cầu</div>
+        <div class="tier"><div class="tn">Cổng</div><div class="boxes">
+          <div class="box hl"><b>nginx</b><span>:80 công khai · :8000, :8001 chỉ 127.0.0.1</span></div></div></div>
+        <div class="flow">↓ trang web → frontend · <code>/api/…</code> → backend</div>
+        <div class="tier"><div class="tn">Ứng dụng</div><div class="boxes">
+          <div class="box"><b>frontend</b><span>React 19 + Vite, nginx riêng</span></div>
+          <div class="box hl"><b>backend</b><span>FastAPI, gunicorn 4 tiến trình</span></div>
+          <div class="box"><b>realtime_service</b><span>chạy mô hình nhận diện, :8010</span></div></div></div>
+        <div class="flow">↓ việc nặng xếp hàng qua Redis</div>
+        <div class="tier"><div class="tn">Việc nền</div><div class="boxes">
+          <div class="box"><b>worker</b><span>xử lý video, xuất dữ liệu, đồng bộ Drive</span></div>
+          <div class="box"><b>trainer</b><span>chỉ hàng đợi <code>training</code>, dùng GPU</span></div>
+          <div class="box"><b>celery-beat</b><span>hẹn giờ các tác vụ định kỳ</span></div></div></div>
+        <div class="tier"><div class="tn">Lưu trữ</div><div class="boxes">
+          <div class="box hl"><b>postgres</b><span>PostgreSQL 17, CSDL <code>signdb</code></span></div>
+          <div class="box"><b>redis</b><span>hàng đợi Celery, bộ đếm, bộ nhớ đệm</span></div>
+          <div class="box"><b>dataset/</b><span>tệp <code>.npz</code>, video thô, <code>samples.csv</code></span></div>
+          <div class="box"><b>Google Drive</b><span>bản sao dữ liệu + nguồn sự thật (SOT)</span></div></div></div>
+        <div class="tier"><div class="tn">Phụ trợ</div><div class="boxes">
+          <div class="box"><b>sot-init</b><span>chạy 1 lần lúc khởi động</span></div>
+          <div class="box"><b>pg-backup</b><span>sao lưu DB mỗi ngày</span></div>
+          <div class="box"><b>loki · promtail</b><span>gom log</span></div>
+          <div class="box"><b>prometheus · grafana</b><span>số đo + cảnh báo, :3000 chỉ 127.0.0.1</span></div></div></div>
+      </div>
+
+      <h3>Sửa xong một dịch vụ thì phải làm gì</h3>
+      <p>Đây là bảng quan trọng nhất cho người mới: mỗi loại tệp có hiệu lực theo một cách khác nhau.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Bạn sửa</th><th>Chạy ở dịch vụ</th><th>Để có hiệu lực</th></tr></thead>
+        <tbody>
+          <tr><td><code>backend/app/**</code></td><td>backend, worker, trainer, celery-beat, sot-init (cùng 1 image)</td><td><code>VOYA update-code</code> (dựng lại nhanh, ~1–3 phút)</td></tr>
+          <tr><td><code>backend/requirements.txt</code>, <code>backend/Dockerfile</code></td><td>như trên</td><td><code>VOYA update-code --full</code> (tải lại thư viện, lâu)</td></tr>
+          <tr><td><code>frontend/**</code></td><td>frontend</td><td><code>VOYA update-code --frontend</code>; lúc phát triển thì dùng <code>npm run dev</code></td></tr>
+          <tr><td><code>processed/**</code>, <code>scripts/**</code>, <code>config/**</code></td><td>gắn vào container qua <code>/workspace</code></td><td>có hiệu lực ngay, không cần dựng</td></tr>
+          <tr><td><code>backend/realtime_service/**</code></td><td>realtime_service (gắn thẳng mã nguồn)</td><td><code>docker compose restart realtime_service</code></td></tr>
+          <tr><td><code>nginx.conf</code></td><td>nginx</td><td><code>docker compose exec nginx nginx -s reload</code></td></tr>
+          <tr><td><code>.env</code></td><td>mọi dịch vụ</td><td><code>VOYA start</code> (tạo lại container). <b>Không</b> dùng <code>restart</code>: nó không đọc lại <code>.env</code></td></tr>
+          <tr><td><code>docker-compose*.yml</code></td><td>dịch vụ bị sửa</td><td><code>VOYA start</code></td></tr>
+        </tbody></table></div>
+
+      <h3>Đường đi của một mẫu dữ liệu</h3>
+      <ol>
+        <li>Người dùng ký trước camera. MediaPipe Hands chạy <b>trong trình duyệt</b>, rút ra 21 điểm mốc mỗi bàn tay. Hoặc người dùng tải lên video (MP4, MOV).</li>
+        <li>Frontend gửi lên <code>POST /api/v1/upload/camera</code> hoặc <code>/upload/video</code> (<code>backend/app/routers/upload.py</code>).</li>
+        <li>Video được xếp hàng cho <b>worker</b>: <code>backend/app/processing/pipeline.py</code> trích điểm mốc, cắt cửa sổ 60 khung, kiểm chất lượng, tăng cường dữ liệu (augment).</li>
+        <li>Kết quả lưu thành <code>dataset/features/&lt;class_uid&gt;/&lt;uuid&gt;.npz</code>, thêm một dòng vào <code>dataset/samples.csv</code> và vào PostgreSQL, rồi đẩy lên Google Drive.</li>
+        <li><b>trainer</b> đọc các <code>.npz</code> theo một bản chia train/val/test đã ghim, huấn luyện bằng <code>processed/train_utils/train_tcn.py</code>.</li>
+        <li>Quản trị viên bấm <b>đưa vào phục vụ</b> (promote) → <b>realtime_service</b> nạp checkpoint → trang <code>/realtime</code> nhận diện trực tiếp.</li>
+      </ol>
+      <div class="note warn"><b>Chú ý về dữ liệu</b><p><code>dataset/samples.csv</code> ở gốc thư mục <code>dataset/</code> là <b>nguồn sự thật</b> của mẫu. PostgreSQL là bản phản chiếu. Đừng sửa tay một bên mà quên bên kia.</p></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="thumuc">
+      <h2>Bản đồ thư mục</h2>
+      <p class="kicker">Gốc kho có nhiều thư mục, nhưng code bạn sẽ sửa gần như luôn nằm trong bốn chỗ: <code>backend/app</code>, <code>frontend/src</code>, <code>processed</code> và <code>scripts</code>.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Đường dẫn</th><th>Chứa gì</th></tr></thead>
+        <tbody>
+          <tr><td><code>backend/app/main.py</code></td><td>Điểm vào FastAPI: middleware, gắn router, việc lúc khởi động.</td></tr>
+          <tr><td><code>backend/app/routers/</code></td><td>Mỗi tệp một nhóm API (<code>auth.py</code>, <code>upload.py</code>, <code>training.py</code>…). Chỉ nhận yêu cầu và gọi xuống lớp nghiệp vụ.</td></tr>
+          <tr><td><code>backend/app/*.py</code></td><td>Lớp nghiệp vụ, mỗi tệp một chủ đề (<code>notifications.py</code>, <code>tenant_lifecycle.py</code>, <code>plans.py</code>…).</td></tr>
+          <tr><td><code>backend/app/storage/</code></td><td>Kết nối CSDL, lược đồ (<code>metadata_db.py</code>), RLS (<code>rls.py</code>), phiên bản lược đồ, Google Drive.</td></tr>
+          <tr><td><code>backend/app/processing/</code></td><td>Xử lý video và điểm mốc, kiểm chất lượng, tăng cường dữ liệu.</td></tr>
+          <tr><td><code>backend/app/authorization/</code></td><td>Phân quyền bằng Casbin (vai trò, quyền, phạm vi).</td></tr>
+          <tr><td><code>backend/app/sot/</code></td><td>Nguồn sự thật có chữ ký số trên Google Drive.</td></tr>
+          <tr><td><code>backend/app/cli/</code></td><td>Lệnh dòng lệnh: <code>migrate</code>, <code>verify_deployment</code>, <code>provision_db_roles</code>…</td></tr>
+          <tr><td><code>backend/app/worker.py</code>, <code>*_tasks.py</code></td><td>Celery: cấu hình, lịch định kỳ, các tác vụ nền.</td></tr>
+          <tr><td><code>backend/realtime_service/</code></td><td>Dịch vụ nhận diện riêng. Danh sách mô hình ở <code>config/models.json</code>, checkpoint ở <code>config/checkpoints/</code>.</td></tr>
+          <tr><td><code>backend/tests/</code></td><td>Khoảng 200 tệp test pytest.</td></tr>
+          <tr><td><code>frontend/src/pages/</code></td><td>Mỗi trang một tệp; nhóm con: <code>admin/</code>, <code>training/</code>, <code>settings/</code>, <code>org/</code>, <code>learn/</code>.</td></tr>
+          <tr><td><code>frontend/src/api/</code></td><td>Hàm gọi API, tất cả đi qua <code>axiosClient.ts</code>.</td></tr>
+          <tr><td><code>frontend/src/components/</code></td><td>Thành phần dùng chung; <code>ui/</code> là bộ nút, huy hiệu, 70 biểu tượng SVG.</td></tr>
+          <tr><td><code>frontend/src/i18n/</code></td><td>Đa ngôn ngữ: <code>index.tsx</code> (khung), <code>en.ts</code> (bản dịch tiếng Anh).</td></tr>
+          <tr><td><code>processed/train_utils/</code></td><td>Huấn luyện: <code>train_tcn.py</code>, các kiến trúc ở <code>models/</code>.</td></tr>
+          <tr><td><code>processed/shared/</code></td><td>Chuẩn hoá đặc trưng, dùng chung cho huấn luyện và nhận diện.</td></tr>
+          <tr><td><code>scripts/voya.py</code></td><td>Cửa vận hành duy nhất; <code>VOYA help</code> liệt kê mọi lệnh. Phần lớn ~100 script còn lại là công cụ nền hoặc sửa dữ liệu đã chạy một lần: đừng chạy lại khi chưa đọc đầu tệp.</td></tr>
+          <tr><td><code>config/</code></td><td>Dữ liệu gieo: phương ngữ, hồ sơ nhận diện, ánh xạ người ký cũ.</td></tr>
+          <tr><td><code>docs/</code></td><td>Tài liệu thiết kế, chia 13 thư mục theo loại câu hỏi. Mục lục: <a class="doc" href="README.md">docs/README.md</a>.</td></tr>
+          <tr><td><code>logging/</code></td><td>Cấu hình Loki, Promtail, Prometheus, Grafana (bảng số, cảnh báo).</td></tr>
+        </tbody></table></div>
+      <div class="note warn" id="nhanrieng"><b>Nhận riêng từ người bàn giao, không có trong sổ tay hay git</b>
+        <p>Địa chỉ repo và quyền truy cập · tệp <code>.env</code> đã điền (mật khẩu CSDL, khoá bí mật, SMTP) · <code>gdrive/credentials.json</code> và <code>token.json</code> (Google Drive) · tài khoản quản trị web và Grafana · thông tin máy chủ sản xuất (tên máy, thư mục, cách đăng nhập) · tên miền và tunnel · dữ liệu <code>dataset/</code> nếu cần làm việc với dữ liệu thật.</p>
+        <p>Các mục này gửi qua kênh riêng, không dán vào chat nhóm hay issue. <code>deploy/public_hosts.txt</code> thì tự tạo bằng cách chép từ tệp <code>.example</code>.</p></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="caidat">
+      <h2>Cài đặt máy dev lần đầu</h2>
+      <p class="kicker">Khoảng 30–60 phút, phần lớn là thời gian tải image (torch + CUDA khoảng 3 GB). Hướng dẫn viết cho Windows vì máy chủ hiện tại chạy Windows; Linux làm tương tự.</p>
+
+      <h3>Cần cài trước</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Phần mềm</th><th>Phiên bản</th><th>Ghi chú</th></tr></thead>
+        <tbody>
+          <tr><td>Docker Desktop</td><td>bản mới, dùng WSL2</td><td>Đặt thư mục dữ liệu Docker ở ổ còn nhiều chỗ (≥ 60 GB trống).</td></tr>
+          <tr><td>Git for Windows</td><td>kèm Git Bash</td><td>Cần <code>bash</code> để chạy các script <code>.sh</code>.</td></tr>
+          <tr><td>Node.js</td><td>20 trở lên</td><td>Chỉ để phát triển frontend.</td></tr>
+          <tr><td>Python</td><td>3.11</td><td>Chạy <code>VOYA.bat</code> và script. Backend chạy trong Docker nên không cần cài thư viện của nó.</td></tr>
+          <tr><td>Card NVIDIA (tuỳ chọn)</td><td>driver mới + NVIDIA Container Toolkit</td><td>Chỉ để huấn luyện nhanh. Không có thì huấn luyện bằng CPU.</td></tr>
+        </tbody></table></div>
+
+      <h3>Các bước</h3>
+      <ol class="steps">
+        <li><b>Lấy mã nguồn.</b>
+          <div class="code"><pre><code>git clone &lt;địa-chỉ-repo&gt;      <span class="c"># địa chỉ + quyền truy cập: nhận riêng</span>
+cd VOYA-Collector
+git checkout deploy_ctu_ver-2.2.1</code></pre></div>
+          Tệp <code>.gitattributes</code> đã ép <code>*.sh</code> về kết thúc dòng LF. Nếu frontend khởi động lại liên tục với lỗi <code>exec: no such file</code>, xem <a href="#loi">Lỗi hay gặp</a>.</li>
+        <li><b>Tạo <code>.env</code></b> từ mẫu rồi điền giá trị thật (xem mục <a href="#cauhinh">Cấu hình</a>).
+          <div class="code"><pre><code>copy .env.example .env
+<span class="c"># sinh khoá bí mật, chạy 3 lần cho SECRET_KEY, AUTH_TOKEN_SECRET_KEY, OTP_PEPPER</span>
+python -c "import secrets; print(secrets.token_hex(32))"</code></pre></div></li>
+        <li><b>Chép các tệp ngoài git</b> (xem danh sách <a href="#nhanrieng">nhận riêng</a>): <code>gdrive/credentials.json</code>, <code>gdrive/token.json</code>, và <code>copy deploy\public_hosts.example.txt deploy\public_hosts.txt</code>. Thiếu Google Drive thì stack vẫn lên, chỉ là danh mục rỗng.</li>
+        <li><b>Dựng và bật stack</b> bằng Git Bash, một lệnh:
+          <div class="code"><pre><code>bash scripts/deploy.sh</code></pre></div>
+          Script tự kiểm <code>.env</code> trước khi dựng, tự dò GPU, ghi đúng danh sách tệp compose vào <code>COMPOSE_FILE</code> trong <code>.env</code>, chạy migration CSDL rồi mới bật toàn bộ.</li>
+        <li><b>Kiểm tra.</b>
+          <div class="code"><pre><code>VOYA status
+docker exec voya_backend python -m app.cli.verify_deployment</code></pre></div>
+          Mở <a href="http://localhost/">http://localhost/</a>. Đăng nhập bằng <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code> trong <code>.env</code> (tài khoản này được tạo tự động lúc backend khởi động lần đầu).</li>
+        <li><b>Chuẩn bị chạy test</b> (một lần): xem <a href="#kiemthu">Kiểm thử</a>.</li>
+      </ol>
+      <div class="note warn"><b>Máy Windows ít RAM</b><p>Docker Desktop có giới hạn RAM riêng. Kiểm bằng <code>docker info --format "{{.MemTotal}}"</code>. Nếu thấp hơn tổng giới hạn của các container, nâng trong <code>C:\Users\&lt;bạn&gt;\.wslconfig</code> (<code>[wsl2]</code> → <code>memory=16GB</code>), rồi <code>wsl --shutdown</code> và mở lại Docker.</p></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="cauhinh">
+      <h2>Cấu hình <code>.env</code></h2>
+      <p class="kicker">Mọi cấu hình nằm trong một tệp <code>.env</code> ở gốc kho. Tệp mẫu <code>.env.example</code> có chú thích cho từng biến; bảng dưới đây gom các biến theo việc bạn muốn làm.</p>
+
+      <h3>Phải đổi trước khi chạy thật</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Biến</th><th>Ý nghĩa</th></tr></thead>
+        <tbody>
+          <tr><td><code>SECRET_KEY</code>, <code>AUTH_TOKEN_SECRET_KEY</code></td><td>Khoá ký phiên đăng nhập. Chuỗi ngẫu nhiên 64 ký tự. Để giá trị mẫu thì backend <b>từ chối khởi động</b> khi <code>APP_ENV=production</code>.</td></tr>
+          <tr><td><code>POSTGRES_PASSWORD</code>, <code>VOYA_APP_DB_PASSWORD</code>, <code>VOYA_CONTROL_DB_PASSWORD</code></td><td>Ba mật khẩu CSDL, mỗi cái một khác. Nhớ sửa luôn trong <code>DATABASE_URL</code>, <code>MIGRATION_DATABASE_URL</code>, <code>CONTROL_DATABASE_URL</code>.</td></tr>
+          <tr><td><code>ADMIN_USERNAME</code>, <code>ADMIN_PASSWORD</code></td><td>Tài khoản quản trị đầu tiên.</td></tr>
+          <tr><td><code>GRAFANA_ADMIN_PASSWORD</code></td><td>Bắt buộc; để trống thì compose dừng ngay.</td></tr>
+          <tr><td><code>OTP_PEPPER</code></td><td>Bắt buộc trước khi dùng mã xác minh email/SĐT.</td></tr>
+          <tr><td><code>APP_ENV</code></td><td><code>production</code> trên máy chủ, <code>development</code> trên máy dev.</td></tr>
+        </tbody></table></div>
+
+      <h3>Hai vai CSDL, cố ý tách</h3>
+      <p><code>DATABASE_URL</code> dùng vai <code>voya_app</code>: chỉ đọc/ghi dữ liệu, <b>không</b> phải superuser. Nhờ vậy chính sách RLS (mỗi tổ chức chỉ thấy dòng của mình) mới có tác dụng. <code>MIGRATION_DATABASE_URL</code> dùng vai <code>admin</code> để tạo và sửa bảng. Đừng gộp làm một: superuser bỏ qua RLS, và mọi truy vấn sẽ thấy dữ liệu của mọi tổ chức mà không báo lỗi gì.</p>
+
+      <h3>Địa chỉ web và đăng nhập</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Biến</th><th>Khi nào đổi</th></tr></thead>
+        <tbody>
+          <tr><td><code>FRONTEND_BASE_URL</code></td><td>Đặt bằng địa chỉ thật của web. Dùng làm link trong thư đặt lại mật khẩu.</td></tr>
+          <tr><td><code>deploy/public_hosts.txt</code></td><td>Thêm tên miền mới vào đây; backend đọc lại mỗi yêu cầu, không cần khởi động lại.</td></tr>
+          <tr><td><code>VITE_BASE_PATH</code>, <code>VITE_API_URL</code>, <code>COOKIE_PATH_PREFIX</code></td><td>Chỉ khi web chạy dưới đường con (ví dụ <code>/voya</code> trên máy chủ trường). Ba biến phải khớp nhau. Chạy ở gốc thì để trống.</td></tr>
+          <tr><td><code>COOKIE_SECURE</code></td><td><code>0</code> cho <code>http://localhost</code>. Trên HTTPS có thể đặt <code>1</code>.</td></tr>
+          <tr><td><code>CORS_ALLOWED_ORIGINS</code></td><td>Danh sách origin, không dùng <code>*</code>. Bình thường không cần sửa vì web và API cùng origin qua nginx.</td></tr>
+          <tr><td><code>NGINX_HTTP_PORT</code></td><td>Khi cổng 80 trên máy đã bị chiếm.</td></tr>
+        </tbody></table></div>
+
+      <h3>Email, Google Drive, xử lý dữ liệu</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Nhóm</th><th>Biến</th><th>Ghi chú</th></tr></thead>
+        <tbody>
+          <tr><td>Email</td><td class="wrap"><code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>SMTP_FROM</code></td><td>Để <code>SMTP_HOST</code> trống trên máy dev: link đặt lại mật khẩu được ghi vào log thay vì gửi thư.</td></tr>
+          <tr><td>Google Drive</td><td class="wrap"><code>USE_GOOGLE_DRIVE</code>, <code>GOOGLE_DRIVE_ROOT_FOLDER_ID</code>, <code>GDRIVE_LAYOUT</code></td><td><code>USE_GOOGLE_DRIVE=0</code> để máy dev không đụng Drive thật. <code>GDRIVE_LAYOUT</code> đặt giống máy chủ đang chạy; đổi giữa <code>legacy</code> và <code>tenant</code> phải dời dữ liệu trên Drive trước.</td></tr>
+          <tr><td>Xử lý</td><td class="wrap"><code>SEQ_LEN</code> (60), <code>FEATURE_DIM</code> (126), <code>AUG_PER_SEQ</code>, <code>VIDEO_COMPLETENESS</code></td><td>Đổi <code>SEQ_LEN</code>/<code>FEATURE_DIM</code> là đổi hợp đồng dữ liệu: mô hình cũ không dùng được nữa.</td></tr>
+          <tr><td>Phân quyền</td><td><code>AUTHZ_MODE</code></td><td><code>shadow</code> (mặc định): hệ cũ quyết định, Casbin chạy song song để so sánh.</td></tr>
+          <tr><td>Dùng thử</td><td><code>TRIAL_MINUTES_PER_DAY</code></td><td>Số phút khách chưa đăng nhập được dùng nhận diện mỗi ngày. Quản trị viên đổi được lúc chạy.</td></tr>
+          <tr><td>Sao lưu</td><td class="wrap"><code>BACKUP_HOST_DIR</code>, <code>BACKUP_KEEP_DAYS</code>, <code>BACKUP_PASSPHRASE</code>, <code>BACKUP_MIRROR_*</code></td><td>Mặc định lưu ở <code>./backups</code>, giữ 14 ngày, không mã hoá.</td></tr>
+          <tr><td>Bộ nhớ</td><td class="wrap"><code>TRAINER_MEM</code>, <code>WORKER_MEM</code>, <code>BACKEND_MEM</code>…</td><td>Trần RAM mỗi container (đặt trong <code>docker-compose.prod.yml</code>). Mặc định cho máy 12 GB.</td></tr>
+          <tr><td>Bộ tệp compose</td><td><code>COMPOSE_FILE</code></td><td>Do <code>deploy.sh</code> ghi. Đừng sửa tay; nó giữ lớp phủ prod + GPU cho mọi lệnh <code>docker compose</code>.</td></tr>
+        </tbody></table></div>
+      <div class="note stop"><b>Sửa .env xong</b><p>Chạy <code>VOYA start</code> (tạo lại container). <code>VOYA restart</code> <b>không</b> đọc lại <code>.env</code> nên thay đổi sẽ không có tác dụng. Riêng <code>deploy/public_hosts.txt</code> thì có tác dụng ngay.</p></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="vanhanh">
+      <h2>Vận hành bằng VOYA</h2>
+      <p class="kicker">Hai cách, cùng một bộ lệnh. <code>VOYA.bat</code> mở menu đánh số trong cửa sổ đen. <code>VOYA_UI.bat</code> mở bảng điều khiển trên trình duyệt (chỉ mở được trên chính máy chủ, link có mã riêng mỗi lần mở). Từ dòng lệnh: <code>python scripts/voya.py &lt;lệnh&gt;</code>.</p>
+      <p>Mức rủi ro giống trên bảng điều khiển: <span class="pill p-safe">An toàn</span> chạy ngay · <span class="pill p-confirm">Xác nhận</span> hỏi lại · <span class="pill p-danger">Nguy hiểm</span> phải gõ chữ xác nhận.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Lệnh</th><th>Làm gì</th><th>Mức</th></tr></thead>
+        <tbody>
+          <tr><td><code>status</code></td><td>Container, trang web, RAM, ổ đĩa, bản sao lưu mới nhất</td><td><span class="pill p-safe">An toàn</span></td></tr>
+          <tr><td><code>logs [phút]</code></td><td>Chỉ dòng lỗi thật, mặc định 60 phút gần nhất</td><td><span class="pill p-safe">An toàn</span></td></tr>
+          <tr><td><code>watch [--fix]</code></td><td>Kiểm nhanh, báo động khi tình trạng thay đổi</td><td><span class="pill p-safe">An toàn</span></td></tr>
+          <tr><td><code>start</code></td><td>Bật stack và đọc lại <code>.env</code>, compose</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>restart</code></td><td>Khởi động lại, gián đoạn 1–2 phút</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>stop</code></td><td>Dừng toàn bộ, dữ liệu còn nguyên</td><td><span class="pill p-danger">Nguy hiểm</span></td></tr>
+          <tr><td><code>backup</code></td><td>Sao lưu DB ngay vào <code>backups/</code> và kiểm đọc lại được</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>verify</code></td><td>Kiểm lược đồ, phân quyền, dữ liệu, GPU</td><td><span class="pill p-safe">An toàn</span></td></tr>
+          <tr><td><code>update-git [--force]</code></td><td>Kéo code từ GitHub, tự chọn cách dựng, triển khai, hỏng thì tự quay lui</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>update-code [--full|--frontend]</code></td><td>Như trên nhưng dùng code đang có trên máy</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>rollback [mốc]</code></td><td>Đưa image về mốc trước; CSDL không bị đụng</td><td><span class="pill p-danger">Nguy hiểm</span></td></tr>
+          <tr><td><code>maintenance on|off</code></td><td>Bật/tắt trang "đang bảo trì" cho người dùng</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>fresh</code></td><td>Code đang chạy có phải code mới nhất không</td><td><span class="pill p-safe">An toàn</span></td></tr>
+          <tr><td><code>test [tệp]</code></td><td>Chạy test backend trên <code>signdb_test</code></td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>disk [--don|--nen]</code></td><td>Dung lượng Docker; dọn an toàn; nén ổ ảo</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>autostart install|remove</code></td><td>Tự bật stack khi máy khởi động + canh gác 30 phút</td><td><span class="pill p-confirm">Xác nhận</span></td></tr>
+          <tr><td><code>goi-uoc-luong</code>, <code>goi-drive</code>, <code>goi-tao</code>, <code>goi-kiem</code></td><td>Chuyển sang máy chủ khác: ước lượng, chép Drive trước, tạo gói, kiểm gói</td><td><span class="pill p-danger">Nguy hiểm</span> (tạo gói)</td></tr>
+          <tr><td><code>tat-may-cu</code></td><td>Tắt tunnel và stack ở máy cũ sau khi chuyển</td><td><span class="pill p-danger">Nguy hiểm</span></td></tr>
+        </tbody></table></div>
+      <p>Thao tác quan trọng được ghi vào <code>.voya/actions.jsonl</code> (ai, lúc nào, kết quả). Chuyển máy chủ: đọc <a class="doc" href="06-operations/HOST_TRANSFER.md">06-operations/HOST_TRANSFER.md</a>.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="quytrinh">
+      <h2>Vòng làm việc hằng ngày</h2>
+
+      <h3>Nhánh git</h3>
+      <ul>
+        <li><code>deploy_ctu_ver-2.2.1</code>: nhánh đang chạy trên máy chủ. Máy chủ cập nhật bằng <code>VOYA update-git</code>.</li>
+        <li><code>main</code>: nhánh chính để mở pull request.</li>
+        <li>Làm tính năng mới: tạo nhánh riêng (<code>feature/ten-tinh-nang</code>), mở pull request, CI phải xanh.</li>
+        <li>Đặt tên commit theo dạng <code>loại(phạm vi): mô tả</code>, như lịch sử đang dùng: <code>fix(drive): …</code>, <code>feat(training): …</code>, <code>chore: …</code>.</li>
+      </ul>
+      <div class="note warn"><b>Nhánh cũ</b><p>Đừng merge thẳng <code>experiment/feature-v2</code>: đó là ảnh chụp tháng 8, có hàng chục xung đột. Muốn lấy gì thì cherry-pick từng commit.</p></div>
+
+      <h3>Làm frontend: sửa và thấy ngay</h3>
+      <p>Để stack Docker chạy (backend thật), rồi chạy Vite ở chế độ phát triển. Vite chuyển các đường <code>/api</code> sang <code>localhost:8000</code> (cổng nội bộ của nginx), nên trang trên cổng 5173 nói chuyện với backend thật.</p>
+      <div class="code"><pre><code>cd frontend
+npm install
+npm run dev          <span class="c"># http://localhost:5173, tự nạp lại khi lưu tệp</span></code></pre></div>
+
+      <h3>Làm backend: sửa, dựng, xem log</h3>
+      <div class="code"><pre><code>VOYA update-code                      <span class="c"># dựng lại image backend từ code trên máy</span>
+docker compose logs -f backend worker <span class="c"># xem log trực tiếp</span>
+VOYA fresh                            <span class="c"># chắc chắn container đang chạy code mới</span></code></pre></div>
+      <p>Muốn thử nhanh một đoạn Python với kết nối CSDL thật: <code>docker exec -it voya_backend python</code>. Danh sách API tự sinh nằm ở <code>http://localhost:8000/docs</code> (cổng chỉ mở trên máy; đăng nhập ở <code>http://localhost</code> trước, vì trang này cũng đi qua cổng truy cập).</p>
+
+      <h3>Trước khi đẩy code</h3>
+      <div class="code"><pre><code>VOYA test backend/tests/test_ten_tep.py   <span class="c"># test liên quan tới phần bạn sửa</span>
+cd frontend
+npm run typecheck                          <span class="c"># KHÔNG dùng "npx tsc --noEmit": nó kiểm 0 tệp</span>
+npx vitest run
+node scripts/i18n-gate.mjs                 <span class="c"># không được có chữ chưa qua t()</span>
+npm run build</code></pre></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="congthuc">
+      <h2>Công thức: muốn thêm X thì làm gì</h2>
+      <p class="kicker">Mỗi công thức là danh sách bước theo đúng thứ tự, kèm tên tệp cụ thể. Ví dụ xuyên suốt là một tính năng nhỏ tưởng tượng: <b>ghi chú cá nhân trên một nhãn</b> (<code>label_notes</code>).</p>
+      <ul class="rindex">
+        <li><a href="#r-api"><span class="k">A1</span>Thêm API (endpoint) mới</a></li>
+        <li><a href="#r-goi-api"><span class="k">A2</span>Gọi API đó từ frontend</a></li>
+        <li><a href="#r-trang"><span class="k">A3</span>Thêm trang giao diện mới</a></li>
+        <li><a href="#r-admin"><span class="k">A4</span>Thêm mục vào trang quản trị</a></li>
+        <li><a href="#r-chu"><span class="k">A5</span>Thêm chữ hiển thị &amp; bản dịch</a></li>
+        <li><a href="#r-bang"><span class="k">B1</span>Thêm bảng CSDL</a></li>
+        <li><a href="#r-cot-doi"><span class="k">B2</span>Thêm cột, đổi hoặc xoá cấu trúc</a></li>
+        <li><a href="#r-tacvu"><span class="k">B3</span>Thêm tác vụ nền / định kỳ</a></li>
+        <li><a href="#r-cauhinh"><span class="k">B4</span>Thêm biến cấu hình</a></li>
+        <li><a href="#r-quyen"><span class="k">B5</span>Đổi ai được làm gì</a></li>
+        <li><a href="#r-thongbao"><span class="k">B6</span>Gửi thông báo cho người dùng</a></li>
+        <li><a href="#r-mohinh"><span class="k">C1</span>Thêm kiến trúc mô hình</a></li>
+        <li><a href="#r-dua-mohinh"><span class="k">C2</span>Đưa mô hình vào nhận diện</a></li>
+        <li><a href="#r-lenh"><span class="k">D1</span>Thêm lệnh vận hành VOYA</a></li>
+        <li><a href="#r-dichvu"><span class="k">D2</span>Thêm dịch vụ Docker</a></li>
+      </ul>
+
+      <!-- A1 -->
+      <div class="recipe" id="r-api">
+        <h3><span class="k">A1</span>Thêm API (endpoint) mới</h3>
+        <p class="when">Khi frontend hoặc bên ngoài cần gọi một chức năng mới của máy chủ.</p>
+        <ol class="steps">
+          <li><b>Viết phần nghiệp vụ</b> trong một tệp riêng, ví dụ <code>backend/app/label_notes.py</code>. Đọc/ghi CSDL bằng các hàm có sẵn như <code>_fetch_all</code> trong <code>app.storage.metadata_db</code> (xem cách <code>app/notifications.py</code> làm). Router chỉ nên mỏng.</li>
+          <li><b>Tạo router</b> <code>backend/app/routers/label_notes.py</code>:
+            <div class="code"><pre><code>from typing import Any, Dict
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+
+from app import label_notes
+from app.auth import get_current_user
+
+router = APIRouter(prefix="/label-notes", tags=["label-notes"])
+
+
+class NoteIn(BaseModel):
+    class_uid: str
+    text: str = Field(..., max_length=2000)
+
+
+@router.get("")
+def list_notes(current_user: Dict[str, Any] = Depends(get_current_user)):
+    return {"items": label_notes.list_for_user(current_user["id"])}
+
+
+@router.post("")
+def add_note(payload: NoteIn,
+             current_user: Dict[str, Any] = Depends(get_current_user)):
+    return label_notes.add(current_user["id"], payload.class_uid, payload.text)</code></pre></div></li>
+          <li><b>Chọn mức quyền</b> bằng dependency:
+            <ul>
+              <li><code>Depends(get_current_user)</code>: ai đăng nhập cũng được.</li>
+              <li><code>Depends(require_admin)</code> (trong <code>app/auth.py</code>): chỉ quản trị viên nền tảng.</li>
+              <li><code>Depends(require_tenant_editor)</code> (<code>app/auth.py</code>) hoặc <code>require_tenant_admin</code> (<code>app/routers/tenants.py</code>): theo vai trong tổ chức.</li>
+            </ul>
+            Không bao giờ nhận <code>user_id</code> của người khác từ yêu cầu; luôn lấy từ <code>current_user</code>.</li>
+          <li><b>Gắn router</b> trong <code>backend/app/main.py</code>: thêm vào khối <code>from app.routers import (...)</code> và thêm một dòng <code>api_v1.include_router(label_notes.router)</code>. Router mới chỉ gắn dưới <code>/api/v1</code>; các router cũ gắn hai lần là để tương thích ngược.</li>
+          <li><b>Cổng truy cập</b>: mọi endpoint <b>mặc định đóng</b> (phải đăng nhập), do <code>app/access_gate.py</code> chặn trước khi tới router. Chỉ khi endpoint phải mở cho khách chưa đăng nhập mới thêm vào <code>PUBLIC_ROUTES</code>, kèm một dòng giải thích. Đường trong danh sách phải viết nguyên văn, không có <code>{tham_số}</code>.
+            Cổng còn một luật cho yêu cầu <b>ghi</b> (POST/PUT/DELETE): người gọi phải có vai trong tổ chức, nếu không nhận 403 <code>no_tenant_role</code>. Endpoint mà người dùng chỉ thao tác trên dữ liệu của chính mình (như ghi chú cá nhân) thì thêm tiền tố vào <code>SELF_SERVICE_WRITE_PREFIXES</code>, ví dụ <code>"/label-notes/"</code>.</li>
+          <li><b>Viết test</b> ở <code>backend/tests/test_label_notes.py</code> (xem mẫu <code>test_notifications_support_2fa.py</code>), chạy <code>VOYA test backend/tests/test_label_notes.py</code>.</li>
+          <li><b>Dựng lại</b>: <code>VOYA update-code</code>. Thử ở <code>http://localhost:8000/docs</code>.</li>
+        </ol>
+        <p class="done"><b>Xong khi:</b> <code>GET /api/v1/label-notes</code> trả 401 khi chưa đăng nhập và trả dữ liệu khi đã đăng nhập; test xanh.</p>
+        <div class="note info"><b>Dữ liệu theo tổ chức</b><p>Middleware <code>TenantScopeMiddleware</code> tự gắn tổ chức hiện tại vào mọi truy vấn, và RLS lọc dòng theo đó. Khi ghi bảng có cột <code>tenant_id</code>, lấy giá trị bằng <code>current_tenant()</code> trong <code>app/tenant_context.py</code>. Nếu truy vấn trả 0 dòng một cách khó hiểu, gần như chắc chắn là đang chạy ngoài phạm vi tổ chức.</p></div>
+      </div>
+
+      <!-- A2 -->
+      <div class="recipe" id="r-goi-api">
+        <h3><span class="k">A2</span>Gọi API đó từ frontend</h3>
+        <p class="when">Mọi lời gọi API đi qua <code>frontend/src/api/axiosClient.ts</code>. Nó tự gắn tiền tố đường dẫn, cookie đăng nhập và mã chống CSRF (<code>X-CSRF-Token</code>) cho các yêu cầu ghi.</p>
+        <ol class="steps">
+          <li>Tạo <code>frontend/src/api/labelNotes.ts</code>:
+            <div class="code"><pre><code>import axiosClient from "./axiosClient";
+
+const API = "/api/v1/label-notes";
+
+export interface LabelNote {
+  note_id: string;
+  class_uid: string;
+  text: string;
+  created_at: string;
+}
+
+export async function listLabelNotes(): Promise&lt;LabelNote[]&gt; {
+  const res = await axiosClient.get&lt;{ items: LabelNote[] }&gt;(API);
+  return res.data.items;
+}
+
+export async function addLabelNote(class_uid: string, text: string) {
+  const res = await axiosClient.post&lt;LabelNote&gt;(API, { class_uid, text });
+  return res.data;
+}</code></pre></div></li>
+          <li>Đừng dùng <code>fetch</code> trần: bạn sẽ mất mã CSRF và nhận 403 <code>CSRF token missing or invalid</code>.</li>
+          <li>Đổi lỗi máy chủ thành câu dễ đọc bằng các hàm trong <code>src/lib/errors.ts</code>.</li>
+        </ol>
+      </div>
+
+      <!-- A3 -->
+      <div class="recipe" id="r-trang">
+        <h3><span class="k">A3</span>Thêm trang giao diện mới</h3>
+        <ol class="steps">
+          <li>Tạo <code>frontend/src/pages/LabelNotesPage.tsx</code>:
+            <div class="code"><pre><code>import { useEffect, useState } from "react";
+import { useT } from "../i18n";
+import { listLabelNotes, type LabelNote } from "../api/labelNotes";
+
+export default function LabelNotesPage() {
+  const t = useT();
+  const [notes, setNotes] = useState&lt;LabelNote[]&gt;([]);
+
+  useEffect(() =&gt; {
+    listLabelNotes().then(setNotes);
+  }, []);
+
+  return (
+    &lt;main className="mx-auto max-w-3xl p-6"&gt;
+      &lt;h1 className="text-xl font-semibold"&gt;{t("Ghi chú của tôi")}&lt;/h1&gt;
+      {notes.length === 0 &amp;&amp; &lt;p&gt;{t("Bạn chưa có ghi chú nào.")}&lt;/p&gt;}
+      {notes.map((n) =&gt; &lt;p key={n.note_id}&gt;{n.text}&lt;/p&gt;)}
+    &lt;/main&gt;
+  );
+}</code></pre></div></li>
+          <li>Khai báo đường dẫn trong <code>frontend/src/App.tsx</code>: thêm <code>const LabelNotesPage = lazy(() =&gt; import("./pages/LabelNotesPage"));</code> ở đầu tệp, và một <code>&lt;Route&gt;</code>:
+            <div class="code"><pre><code>&lt;Route
+  path="/notes"
+  element={&lt;ProtectedRoute&gt;&lt;LabelNotesPage /&gt;&lt;/ProtectedRoute&gt;}
+/&gt;</code></pre></div>
+            <code>ProtectedRoute</code> bắt đăng nhập; thêm <code>requireAdmin</code> nếu chỉ quản trị viên được xem.</li>
+          <li>Theo hệ thiết kế (<a class="doc" href="05-frontend/UI_DESIGN_SYSTEM.md">05-frontend/UI_DESIGN_SYSTEM.md</a>):
+            <ul>
+              <li>Màu trạng thái lấy từ <code>src/theme/status.ts</code> (<code>toneClasses</code>, <code>toneForStatus</code>). <b>Thành công là xanh dương CTU</b>, không phải xanh lá.</li>
+              <li>Biểu tượng lấy từ <code>src/components/ui/Icons.tsx</code>. <b>Không dùng emoji</b> trong giao diện.</li>
+              <li>Màu không bao giờ đứng một mình: luôn kèm chữ hoặc biểu tượng.</li>
+            </ul></li>
+          <li>Viết test ở <code>src/pages/__tests__/</code> (Vitest + Testing Library), chạy <code>npx vitest run</code>.</li>
+        </ol>
+      </div>
+
+      <!-- A4 -->
+      <div class="recipe" id="r-admin">
+        <h3><span class="k">A4</span>Thêm mục vào trang quản trị</h3>
+        <ol class="steps">
+          <li>Tạo trang trong <code>frontend/src/pages/</code> như A3.</li>
+          <li>Trong <code>App.tsx</code>, thêm <code>&lt;Route path="notes" element={…} /&gt;</code> vào <b>bên trong</b> khối <code>&lt;Route path="/admin"&gt;</code> (đã có sẵn <code>ProtectedRoute requireAdmin</code> bọc ngoài, nên mục mới tự được gác).</li>
+          <li>Thêm một dòng vào mảng <code>ADMIN_NAV</code> trong <code>frontend/src/components/AdminShell.tsx</code>: <code>{ key: "Ghi chú", href: "/admin/notes", icon: &lt;ScrollTextIcon className={ICON} /&gt; }</code>. <code>key</code> là câu tiếng Việt và cũng là khoá dịch.</li>
+          <li>Backend: API cho trang quản trị phải dùng <code>Depends(require_admin)</code>. Giao diện ẩn nút không phải là hàng rào quyền.</li>
+        </ol>
+      </div>
+
+      <!-- A5 -->
+      <div class="recipe" id="r-chu">
+        <h3><span class="k">A5</span>Thêm chữ hiển thị &amp; bản dịch</h3>
+        <p class="when">Tiếng Việt là bản gốc; tiếng Anh là bản dịch. Khoá dịch chính là câu tiếng Việt.</p>
+        <ol class="steps">
+          <li>Trong component: <code>const t = useT();</code> rồi <code>{t("Ghi chú của tôi")}</code>. Ngoài React (tệp <code>api/*.ts</code>, <code>lib/errors.ts</code>): dùng <code>tr("…")</code>.</li>
+          <li>Câu có chỗ in đậm ở giữa: dùng <code>&lt;Trans k="Bạn còn {so} phút" vars={{ so: &lt;b&gt;{n}&lt;/b&gt; }} /&gt;</code>. Không cắt câu thành nhiều mảnh <code>t()</code>.</li>
+          <li>Thêm bản dịch vào <code>frontend/src/i18n/en.ts</code>: <code>"Ghi chú của tôi": "My notes",</code>.</li>
+          <li>Chạy <code>node scripts/i18n-gate.mjs</code> trong thư mục <code>frontend</code>. Ngưỡng là <b>0</b> chuỗi trần và 0 khoá thiếu; CI chặn nếu vượt.</li>
+        </ol>
+        <p>Chi tiết, kể cả các luật bắt chuỗi: <a class="doc" href="05-frontend/I18N.md">05-frontend/I18N.md</a>.</p>
+      </div>
+
+      <!-- B1 -->
+      <div class="recipe" id="r-bang">
+        <h3><span class="k">B1</span>Thêm bảng CSDL</h3>
+        <p class="when">Lược đồ khai báo bằng mã Python, không có tệp migration rời. Lúc backend khởi động, <code>ensure_tables()</code> tự chạy các câu <b>chỉ thêm</b> (<code>CREATE TABLE IF NOT EXISTS</code>, <code>ADD COLUMN IF NOT EXISTS</code>, <code>CREATE INDEX IF NOT EXISTS</code>).</p>
+        <ol class="steps">
+          <li>Mở <code>backend/app/storage/metadata_db.py</code>, tìm danh sách <code>MIGRATION_STATEMENTS</code> và thêm câu tạo bảng cạnh các bảng cùng nhóm (ví dụ ngay sau <code>personal_exports</code>):
+            <div class="code"><pre><code>    """
+    CREATE TABLE IF NOT EXISTS label_notes (
+        note_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id  TEXT NOT NULL,
+        user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        class_uid  TEXT NOT NULL,
+        text       TEXT NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_label_notes_user "
+    "ON label_notes(user_id, created_at DESC)",</code></pre></div></li>
+          <li><b>Bảng có cột <code>tenant_id</code> phải làm thêm 4 việc.</b> Thiếu một việc thì xoá tổ chức hỏng hoặc dữ liệu lộ sang tổ chức khác:
+            <ul>
+              <li>Thêm tên bảng vào <code>TENANT_SCOPED_TABLES</code> (<code>metadata_db.py</code>). Hệ thống tự gắn khoá ngoại <code>tenant_id → tenants</code>.</li>
+              <li>Thêm vào <code>RLS_TABLES</code> (<code>backend/app/storage/rls.py</code>). Hệ thống tự bật RLS và chính sách cô lập.</li>
+              <li>Thêm vào <code>PURGE_ORDER</code> (<code>backend/app/tenant_lifecycle.py</code>) đúng vị trí: bảng con đứng trước bảng cha. Danh sách này cũng quyết định bảng có vào bản xuất dữ liệu tổ chức hay không.</li>
+              <li>Cấp quyền cho vai ứng dụng trên CSDL test (một lần): <code>GRANT SELECT, INSERT, UPDATE, DELETE ON label_notes TO voya_app;</code> chạy trên <code>signdb_test</code>. Trên <code>signdb</code> quyền được cấp tự động.</li>
+            </ul></li>
+          <li><b>Đừng</b> viết <code>tenant_id TEXT REFERENCES tenants(...) ON DELETE CASCADE</code> trong câu tạo bảng. Khoá ngoại tự gắn ở bước 2 là <code>RESTRICT</code>; hai ràng buộc cùng tồn tại và cái chặt hơn thắng.</li>
+          <li>Thêm bảng mới không cần tăng phiên bản lược đồ. Dựng lại backend (<code>VOYA update-code</code>), bảng tự xuất hiện.</li>
+          <li>Kiểm: <code>VOYA test backend/tests/test_rls_covers_every_tenant_table.py backend/tests/test_schema_shape.py backend/tests/test_collection_sessions.py</code>. Các test này bắt đúng những bước hay quên.</li>
+          <li>Cập nhật từ điển dữ liệu nếu cần cho tài liệu: <a class="doc" href="02-data/db/PDM_V8_TABLES.md">02-data/db/PDM_V8_TABLES.md</a> (sinh bằng công cụ trong <code>docs/02-data/db/pdm_tools/</code>).</li>
+        </ol>
+      </div>
+
+      <!-- B2 -->
+      <div class="recipe" id="r-cot-doi">
+        <h3><span class="k">B2</span>Thêm cột, đổi hoặc xoá cấu trúc</h3>
+        <ul>
+          <li><b>Thêm cột</b>: thêm câu <code>ALTER TABLE x ADD COLUMN IF NOT EXISTS y TEXT</code> vào danh sách. Tự chạy lúc khởi động như B1. Nếu cột được ghi bởi worker, vài phút đầu sau khi triển khai có thể có lỗi do worker lên trước migration; tự hết sau khoảng 3 phút.</li>
+          <li><b>Đổi tên, đổi kiểu, xoá, gộp bảng</b> là thay đổi <b>một chiều</b>. Nó không bao giờ chạy lúc khởi động. Phải:
+            <ol>
+              <li>Tăng <code>APP_SCHEMA_VERSION</code> trong <code>backend/app/storage/schema_version.py</code> (đọc chú thích ở đó: chỉ tăng khi mã cũ không đọc đúng được CSDL mới).</li>
+              <li>Chạy lệnh migration rõ ràng, có chỉ định CSDL đích:
+                <div class="code"><pre><code>docker exec -e EXPECTED_DATABASE=signdb voya_backend python -m app.cli.migrate --status
+docker exec -e EXPECTED_DATABASE=signdb voya_backend python -m app.cli.migrate --dry-run --to 9
+docker exec -e EXPECTED_DATABASE=signdb voya_backend python -m app.cli.migrate --to 9</code></pre></div></li>
+            </ol>
+            Backend <b>từ chối khởi động</b> khi phiên bản lược đồ và phiên bản mã không khớp, ở cả hai chiều. Không có migration lùi; muốn quay lại thì khôi phục từ bản sao lưu.</li>
+        </ul>
+        <div class="note stop"><b>Luôn sao lưu trước</b><p><code>VOYA backup</code> trước mọi lệnh migration trên máy chủ thật. Đọc thêm <a class="doc" href="10-issues/INCIDENT_2026-08-12_schema_code_skew.md">sự cố 12/08/2026</a> để hiểu vì sao có các chốt này.</p></div>
+      </div>
+
+      <!-- B3 -->
+      <div class="recipe" id="r-tacvu">
+        <h3><span class="k">B3</span>Thêm tác vụ nền hoặc tác vụ định kỳ</h3>
+        <p class="when">Việc chạy lâu (vài giây trở lên) không được làm trong yêu cầu HTTP. Đẩy nó vào hàng đợi Celery để <b>worker</b> làm.</p>
+        <ol class="steps">
+          <li>Viết tác vụ trong một tệp <code>*_tasks.py</code> có sẵn, hoặc tệp mới:
+            <div class="code"><pre><code># backend/app/label_note_tasks.py
+from app.worker import celery_app
+
+
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=60)
+def summarize_notes(self, user_id: str):
+    ...</code></pre></div></li>
+          <li>Nếu là tệp mới: thêm <code>from app import label_note_tasks  # noqa: F401, E402</code> vào cuối <code>backend/app/worker.py</code> để Celery biết tác vụ.</li>
+          <li>Gọi từ router: <code>summarize_notes.delay(current_user["id"])</code>. Tổ chức của người gọi được tự gắn vào tác vụ, nên trong tác vụ RLS vẫn lọc đúng.</li>
+          <li>Tác vụ cần đọc dữ liệu của <b>mọi</b> tổ chức (báo cáo toàn nền tảng) thì thêm <code>platform_wide=True</code> vào decorator, và thêm tên nó vào danh sách mong đợi trong <code>backend/tests/test_celery_tenant_propagation.py</code> (test này đỏ cho tới khi bạn làm vậy, có chủ ý).</li>
+          <li>Chạy định kỳ: thêm vào <code>beat_schedule</code> trong <code>worker.py</code> với <code>"task": "app.label_note_tasks.summarize_notes"</code> và <code>"schedule"</code> tính bằng giây.</li>
+          <li><code>VOYA update-code</code>: worker, trainer và celery-beat dùng chung image với backend nên cùng được cập nhật.</li>
+        </ol>
+        <p>Theo dõi hàng đợi: trang quản trị <b>Hàng đợi xử lý</b> (<code>/admin/processing</code>), hoặc <code>docker compose logs -f worker</code>.</p>
+      </div>
+
+      <!-- B4 -->
+      <div class="recipe" id="r-cauhinh">
+        <h3><span class="k">B4</span>Thêm biến cấu hình</h3>
+        <ol class="steps">
+          <li>Thêm trường vào class <code>Settings</code> trong <code>backend/app/config.py</code>, theo cùng kiểu với các trường có sẵn: <code>label_notes_max: int = int(os.getenv("LABEL_NOTES_MAX", "100"))</code>.</li>
+          <li>Dùng trong code: <code>from app.config import settings</code> rồi <code>settings.label_notes_max</code>.</li>
+          <li>Thêm vào <code>.env.example</code> với chú thích: biến này làm gì, giá trị mặc định vì sao, đổi thì ảnh hưởng gì.</li>
+          <li>Biến cho frontend: chỉ các biến <code>VITE_*</code> được đưa vào trình duyệt. Không bao giờ đặt bí mật vào biến <code>VITE_*</code>.</li>
+          <li><code>VOYA update-code</code> (code mới) rồi <code>VOYA start</code> (đọc lại <code>.env</code>).</li>
+        </ol>
+      </div>
+
+      <!-- B5 -->
+      <div class="recipe" id="r-quyen">
+        <h3><span class="k">B5</span>Đổi ai được làm gì</h3>
+        <ul>
+          <li>Hiện tại <code>AUTHZ_MODE=shadow</code>: quyết định thật nằm ở các dependency <code>require_admin</code>, <code>require_tenant_editor</code>, <code>require_tenant_admin</code> và ở cổng <code>access_gate.py</code>. Đổi quyền một endpoint là đổi dependency của nó.</li>
+          <li>Casbin chạy song song và ghi lại chỗ bất đồng. Danh mục vai và quyền ở <code>backend/app/authorization/catalog.py</code>; 13 vai, không có vai <code>tenant_viewer</code>.</li>
+          <li>Chỉ chuyển sang <code>AUTHZ_MODE=casbin</code> khi chỉ số <code>voya_authz_shadow_mismatch_total</code> bằng 0.</li>
+          <li>Đọc trước khi sửa: <a class="doc" href="03-security/AUTHORIZATION.md">03-security/AUTHORIZATION.md</a>.</li>
+        </ul>
+      </div>
+
+      <!-- B6 -->
+      <div class="recipe" id="r-thongbao">
+        <h3><span class="k">B6</span>Gửi thông báo cho người dùng</h3>
+        <ul>
+          <li>Trong ứng dụng (cái chuông): <code>from app.notifications import notify</code> rồi <code>notify(user_id, kind="training", title="…", link="/training")</code>. <code>kind</code> phải nằm trong <code>KINDS</code> của <code>app/notifications.py</code>; loại mới phải thêm vào đó kèm lý do người dùng cần biết.</li>
+          <li><code>notify()</code> không bao giờ ném lỗi, nên gọi sau khi việc chính đã xong là an toàn.</li>
+          <li>Thư điện tử: dùng các hàm trong <code>app/email_service.py</code>. Test không gửi thư thật (đã chặn hai lớp).</li>
+        </ul>
+      </div>
+
+      <!-- C1 -->
+      <div class="recipe" id="r-mohinh">
+        <h3><span class="k">C1</span>Thêm kiến trúc mô hình nhận diện</h3>
+        <p class="when">Đầu vào luôn là chuỗi <code>[60, 126]</code>: 60 khung, mỗi khung 126 số. Hiện có TCN, CNN, LSTM, BiGRU + Attention, HandGCN.</p>
+        <ol class="steps">
+          <li>Tạo <code>processed/train_utils/models/ten_moi.py</code>, class kế thừa <code>SignLanguageModel</code> (<code>models/base.py</code>). Làm theo mẫu <code>lstm.py</code>.</li>
+          <li>Đăng ký trong <code>processed/train_utils/models/__init__.py</code>: import class và thêm vào <code>MODEL_REGISTRY</code> (khoá viết thường).</li>
+          <li>Thêm ánh xạ tên vào <b>hai</b> bảng <code>_MODEL_NAME_TO_REGISTRY_KEY</code>: một ở <code>backend/app/routers/training.py</code>, một ở <code>backend/realtime_service/app/model_loader.py</code>. Khoá là kết quả <code>get_model_name()</code> viết thường. Thiếu bảng thứ hai thì huấn luyện được nhưng không nạp được để nhận diện.</li>
+          <li>Giao diện huấn luyện: thêm id vào kiểu <code>ModelType</code> (<code>frontend/src/hooks/useTrainingAPI.ts</code>), vào danh sách chọn trong <code>frontend/src/pages/training/components/TrainingSettings.tsx</code>, và tên hiển thị trong <code>TrainingHistory.tsx</code>. Thêm bản dịch vào <code>en.ts</code>.</li>
+          <li><code>processed/</code> được gắn vào container nên mã mô hình có hiệu lực ngay; phần backend và frontend thì cần <code>VOYA update-code --frontend</code>. Khởi động lại <code>realtime_service</code>.</li>
+          <li>Chạy thử một lượt huấn luyện nhỏ trên trang <code>/training</code> rồi kiểm <code>VOYA test backend/tests/test_realtime_architectures.py</code>.</li>
+        </ol>
+      </div>
+
+      <!-- C2 -->
+      <div class="recipe" id="r-dua-mohinh">
+        <h3><span class="k">C2</span>Đưa mô hình đã huấn luyện vào nhận diện</h3>
+        <ul>
+          <li><b>Cách nên dùng:</b> trên trang Huấn luyện, chọn lượt huấn luyện đã xong và đưa vào phục vụ (promote). Mỗi phương ngữ có một chỗ; mô hình mới thay mô hình cũ, bản cũ được đánh dấu <code>superseded_at</code>.</li>
+          <li><b>Cách thủ công</b> (khi mang checkpoint từ máy khác): chép tệp <code>.pt</code> vào <code>backend/realtime_service/config/checkpoints/</code>, thêm một mục vào <code>config/models.json</code> (id, đường checkpoint, <code>seq_len</code> 60, <code>feature_dim</code> 126, hợp đồng tiền xử lý giống các mục có sẵn), rồi <code>docker compose restart realtime_service</code>.</li>
+          <li>Kiểm: <code>GET /api/v1/realtime/models</code> phải liệt kê mô hình; dịch vụ từ chối khởi động nếu checkpoint không khớp hợp đồng.</li>
+        </ul>
+      </div>
+
+      <!-- D1 -->
+      <div class="recipe" id="r-lenh">
+        <h3><span class="k">D1</span>Thêm lệnh vận hành VOYA</h3>
+        <p class="when">Việc vận hành lặp lại thì đưa vào VOYA, đừng bắt người khác nhớ thêm một script.</p>
+        <ol class="steps">
+          <li>Viết hàm trong <code>scripts/voya.py</code>. Dòng đầu docstring là mô tả hiện trong <code>VOYA help</code>. Hàm chỉ gọi lại script có sẵn:
+            <div class="code"><pre><code>def cmd_check_data(args):
+    """Doi chieu tep, CSV, Postgres va sidecar (chi doc)."""
+    sh([PY, "scripts/kiem_tra_toan_ven_du_lieu.py", *args], check=False)</code></pre></div></li>
+          <li>Thêm một dòng vào <code>COMMANDS</code>: <code>("kiem-du-lieu", "Bao tri | Doi chieu toan ven du lieu", cmd_check_data),</code>. Phần trước dấu <code>|</code> là nhóm trên menu.</li>
+          <li>Lệnh có rủi ro: thêm vào <code>RISK</code> (<code>"confirm"</code> hoặc <code>"danger"</code>), chữ xác nhận riêng vào <code>CONFIRM_WORD</code>. Nhận đối số: thêm gợi ý vào <code>ARGS_HINT</code>. Đổi trạng thái hệ thống: thêm vào <code>IMPORTANT</code> để được ghi nhật ký.</li>
+          <li>Tên và mô tả có dấu cho bảng điều khiển: thêm vào từ điển <code>VI</code> trong <code>scripts/voya_ui.py</code>.</li>
+          <li>Thêm một dòng vào bảng <a href="#vanhanh">Vận hành</a> của sổ tay này.</li>
+          <li>Chạy <code>python -m unittest discover -s scripts/ops/tests</code>; test kiểm mọi lệnh đều có thông tin rủi ro.</li>
+        </ol>
+      </div>
+
+      <!-- D2 -->
+      <div class="recipe" id="r-dichvu">
+        <h3><span class="k">D2</span>Thêm dịch vụ Docker</h3>
+        <ol class="steps">
+          <li>Khai báo trong <code>docker-compose.yml</code>: <code>container_name: ${CONTAINER_PREFIX:-voya}_ten</code>, <code>logging: *default-logging</code>, <code>restart: unless-stopped</code>, <code>networks: [voya_network]</code>.</li>
+          <li>Có healthcheck. Gọi <code>127.0.0.1</code>, không gọi <code>localhost</code> (có thể ra IPv6 và báo lỗi giả). Image không có <code>curl</code> thì dùng <code>python -c</code> hoặc <code>wget</code>.</li>
+          <li>Không mở cổng ra ngoài. Cần truy cập từ máy thì gắn vào <code>127.0.0.1</code>; người dùng chỉ vào qua nginx.</li>
+          <li>Đặt trần RAM trong <code>docker-compose.prod.yml</code>.</li>
+          <li>Chạy <code>python scripts/check_registry_overlay.py</code> (CI cũng chạy) để chắc lớp phủ registry không bỏ sót dịch vụ mới.</li>
+          <li><code>VOYA start</code>, rồi <code>VOYA status</code> phải thấy dịch vụ <b>healthy</b>.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="tracuu">
+      <h2>Tra cứu: muốn sửa chức năng nào thì tìm ở đâu</h2>
+      <p class="kicker">Sửa một chức năng đã có luôn đi bốn bước dưới đây. Bảng phía sau giúp bước 1.</p>
+      <ol class="steps">
+        <li><b>Tìm chỗ.</b> Tìm chức năng trong bảng dưới. Không có thì mở trang đó trên trình duyệt, bấm <kbd>F12</kbd> → tab <b>Network</b>, làm thao tác, xem đường được gọi (ví dụ <code>/api/v1/classes/…</code>), rồi tìm router có <code>prefix="/classes"</code> ở mục <a href="#api">API, router &amp; cổng</a>.</li>
+        <li><b>Sửa đúng lớp.</b> Router (<code>backend/app/routers/</code>) chỉ nhận yêu cầu và kiểm quyền; logic nằm ở tệp nghiệp vụ mà router gọi tới. Giao diện nằm ở <code>frontend/src/pages/</code> và hàm gọi API ở <code>frontend/src/api/</code>.</li>
+        <li><b>Chạy thử.</b> Frontend: <code>npm run dev</code> tự nạp lại. Backend: <code>VOYA update-code</code>. Tệp trong <code>processed/</code>, <code>scripts/</code>, <code>config/</code>: có hiệu lực ngay.</li>
+        <li><b>Kiểm.</b> Chạy test cùng tên: <code>VOYA test backend/tests/test_&lt;tên&gt;.py</code>. Frontend: <code>npm run typecheck</code> và <code>npx vitest run</code>. Rồi đưa lên như bước 5 của <a href="#batdau">lộ trình</a>.</li>
+      </ol>
+      <p>Đường dẫn trong bảng: backend tính từ <code>backend/app/</code>, frontend từ <code>frontend/src/</code>.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Chức năng</th><th>Backend</th><th>Frontend</th><th>Đọc thêm</th></tr></thead>
+        <tbody>
+          <tr><td>Đăng nhập, đăng ký, phiên</td><td class="wrap"><code>routers/auth.py</code>, <code>auth.py</code>, <code>cookie_auth.py</code>, <code>tokens.py</code></td><td class="wrap"><code>pages/LoginPage.tsx</code>, <code>RegisterPage.tsx</code>, <code>contexts/AuthContext.tsx</code></td><td><a class="doc" href="03-security/SESSION_LIFECYCLE.md">SESSION_LIFECYCLE</a></td></tr>
+          <tr><td>Quên mật khẩu, khôi phục</td><td class="wrap"><code>routers/auth.py</code>, <code>otp.py</code></td><td class="wrap"><code>pages/ForgotPasswordPage.tsx</code>, <code>ResetPasswordPage.tsx</code></td><td><a class="doc" href="03-security/ACCOUNT_RECOVERY.md">ACCOUNT_RECOVERY</a></td></tr>
+          <tr><td>Xác thực hai lớp (2FA)</td><td class="wrap"><code>routers/two_factor.py</code>, <code>totp.py</code></td><td class="wrap"><code>pages/settings/SecuritySettingsPage.tsx</code></td><td><a class="doc" href="03-security/TWO_FACTOR.md">TWO_FACTOR</a></td></tr>
+          <tr><td>Cổng truy cập, dùng thử</td><td class="wrap"><code>access_gate.py</code>, <code>trial.py</code>, <code>routers/trial.py</code></td><td class="wrap"><code>components/TrialGate.tsx</code>, <code>api/trial.ts</code></td><td>—</td></tr>
+          <tr><td>Thu mẫu bằng camera</td><td class="wrap"><code>routers/upload.py</code>, <code>routers/capture_sessions.py</code></td><td class="wrap"><code>pages/UploadPage.tsx</code>, <code>components/CaptureCamera.tsx</code>, <code>config/capture.ts</code></td><td><a class="doc" href="02-data/DATA_COLLECTION_PROTOCOL.md">DATA_COLLECTION_PROTOCOL</a></td></tr>
+          <tr><td>Tải video, xử lý video</td><td class="wrap"><code>routers/upload.py</code>, <code>tasks.py</code>, <code>processing/pipeline.py</code>, <code>processing/quality.py</code></td><td class="wrap"><code>components/UploadVideoForm.tsx</code></td><td>—</td></tr>
+          <tr><td>Tăng cường dữ liệu (augment)</td><td class="wrap"><code>processing/augmenter.py</code>, <code>processing/augmentations.py</code></td><td>—</td><td>—</td></tr>
+          <tr><td>Nhãn (lớp ký hiệu), thùng rác</td><td class="wrap"><code>routers/classes.py</code>, <code>routers/label_sessions.py</code>, <code>processing/class_registry.py</code></td><td class="wrap"><code>pages/LabelsPage.tsx</code>, <code>LabelDetailPage.tsx</code>, <code>TrashPage.tsx</code></td><td>—</td></tr>
+          <tr><td>Từ vựng, phương ngữ, vùng</td><td class="wrap"><code>routers/vocabulary.py</code>, <code>vocabulary_registry.py</code></td><td class="wrap"><code>pages/AdminVocabularyPage.tsx</code>, <code>components/AddDialectModal.tsx</code></td><td><a class="doc" href="02-data/VOCABULARY_SCHEMA_V2.md">VOCABULARY_SCHEMA_V2</a></td></tr>
+          <tr><td>Người ký</td><td class="wrap"><code>routers/signers_admin.py</code>, <code>signers.py</code></td><td class="wrap"><code>pages/AdminSignersPage.tsx</code></td><td><a class="doc" href="02-data/SAMPLE_OWNERSHIP.md">SAMPLE_OWNERSHIP</a></td></tr>
+          <tr><td>Kiểm duyệt dữ liệu</td><td class="wrap"><code>routers/moderation.py</code>, <code>moderation.py</code></td><td class="wrap"><code>pages/ModerationPage.tsx</code></td><td><a class="doc" href="01-architecture/COMMUNITY_MODERATION.md">COMMUNITY_MODERATION</a></td></tr>
+          <tr><td>Huấn luyện</td><td class="wrap"><code>routers/training.py</code>, <code>training_tasks.py</code>, <code>processed/train_utils/train_tcn.py</code></td><td class="wrap"><code>pages/training/</code>, <code>hooks/useTrainingAPI.ts</code></td><td><a class="doc" href="01-architecture/REGISTRY_ARCHITECTURE.md">REGISTRY_ARCHITECTURE</a></td></tr>
+          <tr><td>Nhận diện thời gian thực</td><td class="wrap"><code>routers/realtime_proxy.py</code>, <code>realtime_service/</code></td><td class="wrap"><code>pages/RealtimeRecognitionPage.tsx</code>, <code>components/realtime/</code>, <code>utils/realtime*.ts</code></td><td><a class="doc" href="05-frontend/realtime_runtime_ui.md">realtime_runtime_ui</a></td></tr>
+          <tr><td>Đọc thành tiếng (TTS)</td><td class="wrap"><code>routers/tts.py</code>, <code>services/tts_service.py</code></td><td class="wrap"><code>api/tts.ts</code></td><td>—</td></tr>
+          <tr><td>Học ký hiệu (công khai)</td><td class="wrap"><code>routers/learn.py</code>, <code>learn_catalog.py</code>, <code>data/qipedc_catalog.json</code></td><td class="wrap"><code>pages/learn/</code></td><td>—</td></tr>
+          <tr><td>Tổ chức, thành viên, lời mời</td><td class="wrap"><code>routers/tenants.py</code>, <code>tenant_lifecycle.py</code>, <code>tenant_admin.py</code></td><td class="wrap"><code>pages/OrganizationPage.tsx</code>, <code>pages/org/</code>, <code>AdminTenantsPage.tsx</code></td><td><a class="doc" href="01-architecture/TENANT_LIFECYCLE_AND_OTP.md">TENANT_LIFECYCLE_AND_OTP</a></td></tr>
+          <tr><td>Không gian làm việc</td><td class="wrap"><code>routers/workspaces.py</code>, <code>workspace_admin.py</code></td><td class="wrap"><code>pages/settings/WorkspacesPage.tsx</code>, <code>pages/console/</code></td><td><a class="doc" href="01-architecture/MULTITENANT_ARCHITECTURE.md">MULTITENANT_ARCHITECTURE</a></td></tr>
+          <tr><td>Gói dịch vụ, hạn mức</td><td class="wrap"><code>routers/billing.py</code>, <code>plans.py</code>, <code>subscription_lifecycle.py</code>, <code>storage_quota.py</code></td><td class="wrap"><code>pages/BillingPage.tsx</code>, <code>AdminBillingPage.tsx</code></td><td><a class="doc" href="07-business/SUBSCRIPTION_LIFECYCLE.md">SUBSCRIPTION_LIFECYCLE</a></td></tr>
+          <tr><td>Văn bản pháp lý, đồng thuận</td><td class="wrap"><code>routers/legal.py</code>, <code>routers/legal_admin.py</code>, <code>legal_store.py</code>, <code>consent_gate.py</code></td><td class="wrap"><code>pages/LegalDocumentPage.tsx</code>, <code>AdminLegalPage.tsx</code>, <code>pages/settings/ConsentsPage.tsx</code></td><td><a class="doc" href="04-legal/LEGAL_DOCUMENTS.md">LEGAL_DOCUMENTS</a></td></tr>
+          <tr><td>Hỗ trợ (phiếu)</td><td class="wrap"><code>routers/support.py</code>, <code>support.py</code>, <code>support_backlog.py</code></td><td class="wrap"><code>pages/SupportPage.tsx</code>, <code>pages/admin/AdminSupportPage.tsx</code></td><td><a class="doc" href="06-operations/NOTIFICATIONS_AND_SUPPORT.md">NOTIFICATIONS_AND_SUPPORT</a></td></tr>
+          <tr><td>Thông báo</td><td class="wrap"><code>routers/notifications.py</code>, <code>notifications.py</code></td><td class="wrap"><code>pages/NotificationsPage.tsx</code>, <code>components/NotificationBell.tsx</code></td><td>—</td></tr>
+          <tr><td>API key, webhook</td><td class="wrap"><code>routers/integrations.py</code>, <code>api_keys.py</code>, <code>webhooks.py</code></td><td class="wrap"><code>pages/IntegrationsPage.tsx</code></td><td>—</td></tr>
+          <tr><td>Xuất dữ liệu cá nhân</td><td class="wrap"><code>routers/personal_export.py</code>, <code>personal_export.py</code></td><td class="wrap"><code>pages/MyDataDownloadsPanel.tsx</code></td><td>—</td></tr>
+          <tr><td>SOT, đồng bộ Google Drive</td><td class="wrap"><code>sot/</code>, <code>routers/sot_admin.py</code>, <code>sync_tasks.py</code>, <code>storage/gdrive_client.py</code></td><td class="wrap"><code>pages/SotAdminPage.tsx</code></td><td><a class="doc" href="02-data/DRIVE_STORAGE_AND_LOOKUP_LIST.md">DRIVE_STORAGE_AND_LOOKUP_LIST</a></td></tr>
+          <tr><td>Giám sát tài nguyên, phiên hoạt động</td><td class="wrap"><code>monitoring.py</code>, <code>activity.py</code>, <code>routers/admin.py</code></td><td class="wrap"><code>pages/AdminResourcesPage.tsx</code>, <code>AdminActivityPage.tsx</code></td><td><a class="doc" href="06-operations/OBSERVABILITY_PLAN.md">OBSERVABILITY_PLAN</a></td></tr>
+          <tr><td>Nhật ký kiểm toán</td><td class="wrap"><code>audit.py</code></td><td>—</td><td><a class="doc" href="03-security/AUDIT_TRAIL.md">AUDIT_TRAIL</a></td></tr>
+          <tr><td>Sao lưu và khôi phục</td><td class="wrap"><code>scripts/pg_backup.sh</code>, <code>scripts/pg_restore.sh</code>, <code>scripts/backup.py</code></td><td>—</td><td><a class="doc" href="06-operations/BACKUP_RESTORE.md">BACKUP_RESTORE</a></td></tr>
+          <tr><td>Cảnh báo Grafana, thư báo động</td><td class="wrap"><code>logging/grafana/alerting/</code></td><td>—</td><td><a class="doc" href="06-operations/OBSERVABILITY_PLAN.md">OBSERVABILITY_PLAN</a></td></tr>
+          <tr><td>Trang bảo trì</td><td class="wrap"><code>nginx.conf.d/maintenance.html</code>, <code>scripts/voya.py</code></td><td>—</td><td>—</td></tr>
+          <tr><td>Ngôn ngữ, giao diện chung</td><td>—</td><td class="wrap"><code>i18n/</code>, <code>components/Layout.tsx</code>, <code>theme/status.ts</code>, <code>index.css</code></td><td><a class="doc" href="05-frontend/UI_DESIGN_SYSTEM.md">UI_DESIGN_SYSTEM</a></td></tr>
+        </tbody></table></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="api">
+      <h2>API, router &amp; cổng</h2>
+      <p class="kicker">Ảnh chụp từ mã nguồn ngày 23/10/2026: 31 router, 251 endpoint. Bản luôn đúng là Swagger chạy kèm backend.</p>
+
+      <h3>Xem API trực tiếp bằng Swagger</h3>
+      <ol class="steps">
+        <li>Đăng nhập ở <code>http://localhost</code> (Swagger cũng đi qua cổng truy cập nên cần phiên đăng nhập).</li>
+        <li>Mở <code>http://localhost:8000/docs</code> để xem và bấm thử từng endpoint, hoặc <code>http://localhost:8000/redoc</code> để đọc. Tệp mô tả máy đọc được: <code>http://localhost:8000/openapi.json</code>.</li>
+      </ol>
+      <p>Cổng 8000 chỉ mở trên chính máy (127.0.0.1), nên Swagger không lộ ra internet. Trên máy chủ, mở từ trình duyệt của máy đó.</p>
+
+      <h3>Các cổng đang dùng</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Cổng</th><th>Ai nghe</th><th>Mở cho</th><th>Dùng để</th></tr></thead>
+        <tbody>
+          <tr><td><code>80</code></td><td>nginx</td><td>mọi người (qua tunnel/tên miền)</td><td>Cửa vào duy nhất: trang web, <code>/api/…</code>, <code>/voya/…</code>. Đổi bằng <code>NGINX_HTTP_PORT</code>.</td></tr>
+          <tr><td><code>8000</code></td><td>nginx → backend</td><td>chỉ máy này</td><td>Gọi thẳng backend, Swagger, đích của <code>npm run dev</code>.</td></tr>
+          <tr><td><code>8001</code></td><td>nginx</td><td>chỉ máy này</td><td>Trả "OK" để kiểm nginx còn sống.</td></tr>
+          <tr><td><code>3000</code></td><td>grafana</td><td>chỉ máy này</td><td>Bảng số đo, cảnh báo.</td></tr>
+          <tr><td><code>8765</code></td><td>VOYA_UI</td><td>chỉ máy này</td><td>Bảng điều khiển vận hành và sổ tay này.</td></tr>
+          <tr><td><code>5173</code></td><td>Vite</td><td>máy dev</td><td><code>npm run dev</code>, chỉ khi phát triển frontend.</td></tr>
+        </tbody></table></div>
+      <p>Cổng chỉ có trong mạng Docker (không mở ra máy): backend <code>8000</code>, frontend <code>80</code>, realtime_service <code>8010</code>, postgres <code>5432</code>, redis <code>6379</code>, loki <code>3100</code>, prometheus <code>9090</code>. Muốn vào postgres thì dùng <code>docker exec -it voya_postgres psql -U &lt;POSTGRES_USER&gt; -d signdb</code>.</p>
+
+      <h3>Danh sách router và endpoint</h3>
+      <p>Bấm vào một router để xem endpoint. Cột quyền là mức <b>tối thiểu</b> đọc từ mã; một số endpoint kiểm thêm bên trong hàm. Router cũ còn trả lời ở đường không có <code>/api/v1</code> để tương thích ngược; code mới luôn dùng <code>/api/v1</code>.</p>
+      <p><span class="pill p-safe">Công khai</span> không cần đăng nhập · <span class="pill p-safe">Khách dùng thử</span> phiên hoặc phiếu dùng thử · Đăng nhập · Biên tập tổ chức · QT tổ chức · QT nền tảng (quản trị viên toàn hệ thống).</p>
+      <div class="api-group">Tài khoản &amp; đăng nhập</div>
+      <details class="api"><summary><code>/api/v1/auth</code><span class="d">Đăng nhập, đăng ký, phiên, đổi và khôi phục mật khẩu</span><span class="n">14 endpoint · routers/auth.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/register</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/login</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/login/2fa</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/auth/my-notice</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/my-notice/ack</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/refresh</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/logout</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/auth/me</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/auth/me</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/forgot-password</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/reset-password</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/change-password</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/change-email/start</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/change-email/confirm</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/auth</code><span class="d">Xác minh email và số điện thoại</span><span class="n">6 endpoint · routers/verification.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/auth/verification-status</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/verify/send</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/verify/confirm</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/recover/start</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/recover/verify</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/auth/recover/confirm</code></td><td>Công khai</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/2fa</code><span class="d">Xác thực hai lớp (TOTP)</span><span class="n">5 endpoint · routers/two_factor.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/2fa/status</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/2fa/enroll</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/2fa/confirm</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/2fa/disable</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/2fa/recovery-codes</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/trial</code><span class="d">Phiếu dùng thử cho khách chưa đăng nhập</span><span class="n">2 endpoint · routers/trial.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/trial/start</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/trial/status</code></td><td>Công khai</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/notifications</code><span class="d">Thông báo trong ứng dụng</span><span class="n">5 endpoint · routers/notifications.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/notifications</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/notifications/unread-count</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/notifications/read</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/notifications/read-all</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/notifications/kinds</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/me/exports</code><span class="d">Tải về dữ liệu của chính mình</span><span class="n">3 endpoint · routers/personal_export.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/me/exports</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/me/exports</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/me/exports/{export_id}/download</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <div class="api-group">Thu và quản lý dữ liệu</div>
+      <details class="api"><summary><code>/api/v1/upload</code><span class="d">Tải video, gửi mẫu từ camera</span><span class="n">3 endpoint · routers/upload.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/upload/video</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/upload/video/process</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/upload/camera</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/jobs</code><span class="d">Trạng thái việc xử lý video</span><span class="n">2 endpoint · routers/jobs.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/jobs/{job_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/jobs/</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/sessions</code><span class="d">Phiên thu mẫu (lịch sử thu)</span><span class="n">2 endpoint · routers/capture_sessions.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/sessions</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/sessions/{capture_session_id}</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/classes</code><span class="d">Nhãn (lớp ký hiệu), thống kê, thùng rác nhãn</span><span class="n">17 endpoint · routers/classes.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/register</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/request</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/list</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/suggest</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/collectors</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/preferences</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/preferences</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/stats</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/community-stats</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/balance</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PUT">PUT</span></td><td><code>/api/v1/classes/{class_ref}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/trash</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/trash/restore</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/trash/purge</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/classes/{class_ref}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/{class_uid}/restore</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/classes/{class_uid}/purge</code></td><td>QT nền tảng</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/classes</code><span class="d">Các phiên thu trong một nhãn: xem lại, chuyển, xoá</span><span class="n">7 endpoint · routers/label_sessions.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/{class_uid}/sessions</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/{class_uid}/sessions/{session_id}/provenance</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/classes/{class_uid}/sessions/{session_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/classes/{class_uid}/sessions/{session_id}/reassign</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/{class_uid}/sessions/{session_id}/frames</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/{class_uid}/sessions/{session_id}/preview</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/classes/{class_uid}/sessions/{session_id}/preview.mp4</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/dataset</code><span class="d">Mẫu dữ liệu, nhãn, thùng rác mẫu</span><span class="n">16 endpoint · routers/dataset.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/dataset/labels</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/dataset/labels</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/dataset/labels/merge</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PUT">PUT</span></td><td><code>/api/v1/dataset/labels/{class_ref}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/dataset/labels/{class_ref}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/dataset/samples</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/dataset/samples/{sample_id}/data</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/dataset/samples/trash</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/dataset/samples/trash/restore</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/dataset/samples/trash/purge</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/dataset/samples/{sample_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/dataset/samples/{sample_id}/restore</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/dataset/samples/{sample_id}/purge</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/dataset/samples/add</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/dataset/sessions</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/dataset/dataset/sessions</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/vocabulary</code><span class="d">Từ vựng, phương ngữ, danh mục</span><span class="n">15 endpoint · routers/vocabulary.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/vocabulary/registry</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/dialects</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/vocabulary/dialects/pending</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/dialects/{dialect_id}/approve</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/dialects/{dialect_id}/reject</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/vocabulary/dialects/{dialect_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/vocabulary/catalog</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/vocabulary/catalog/versions</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/vocabulary/catalog/versions/{version}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/catalog/publish</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/catalog/seed</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/catalog/dialects</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/vocabulary/catalog/dialects/{dialect_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/vocabulary/catalog/profiles/{profile_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/vocabulary/catalog/clone</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/moderation</code><span class="d">Kiểm duyệt dữ liệu đóng góp</span><span class="n">3 endpoint · routers/moderation.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/moderation/queue</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/moderation/sessions/{capture_session_id}/approve</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/moderation/sessions/{capture_session_id}/reject</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <div class="api-group">Huấn luyện &amp; nhận diện</div>
+      <details class="api"><summary><code>/api/v1/training</code><span class="d">Huấn luyện, lịch sử, đưa mô hình vào phục vụ</span><span class="n">17 endpoint · routers/training.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/splits</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/splits/operational</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/dataset-info</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/training/dataset/prepare</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/dataset/prepare/{run_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/training/start</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/jobs</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/jobs/{job_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/jobs/{job_id}/metrics</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/jobs/{job_id}/evaluation</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/jobs/{job_id}/provenance</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/training/queue/status</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/training/jobs/{job_id}/cancel</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/training/jobs/{job_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/training/jobs/{job_id}/promote</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m WEBSOCKET">WEBSOCKET</span></td><td><code>/api/v1/training/ws/{job_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/training/jobs/{job_id}/predict</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/realtime</code><span class="d">Nhận diện thời gian thực (chuyển tới realtime_service)</span><span class="n">3 endpoint · routers/realtime_proxy.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/realtime/models</code></td><td>Khách dùng thử</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/realtime/health</code></td><td>Khách dùng thử</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/realtime/predict</code></td><td>Khách dùng thử</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/inference</code><span class="d">Danh sách lớp mà mô hình nhận diện</span><span class="n">1 endpoint · routers/inference.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/inference/classes</code></td><td>Khách dùng thử</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/tts</code><span class="d">Đọc thành tiếng</span><span class="n">3 endpoint · routers/tts.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tts/voices</code></td><td>Khách dùng thử</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tts/prewarm</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tts/speak</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/learn</code><span class="d">Học ký hiệu, mở cho mọi người</span><span class="n">2 endpoint · routers/learn.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/learn/signs</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/learn/sign</code></td><td>Công khai</td></tr>
+        </tbody></table></div></details>
+      <div class="api-group">Tổ chức, gói &amp; tích hợp</div>
+      <details class="api"><summary><code>/api/v1/tenants</code><span class="d">Tổ chức, thành viên, lời mời, xuất và xoá tổ chức</span><span class="n">27 endpoint · routers/tenants.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/invitations/inspect</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/invitations/accept</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/switch</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PUT">PUT</span></td><td><code>/api/v1/tenants/home-assignment/{user_id}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/accounts/search</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/self-serve</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/me</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/mine</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/tenants/{tenant_id}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/tenants/{tenant_id}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}/members</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/{tenant_id}/members</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/tenants/{tenant_id}/members/{user_id}</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/tenants/{tenant_id}/members/{user_id}</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}/invitations</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/{tenant_id}/invitations</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/tenants/{tenant_id}/invitations/{invitation_id}</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}/subscription</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/{tenant_id}/subscription/auto-renew</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/{tenant_id}/exports</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}/exports</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}/exports/{export_id}/download</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/tenants/{tenant_id}/purge-preview</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/tenants/{tenant_id}/purge</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/workspaces</code><span class="d">Không gian làm việc, dự án, phân bổ, thành viên</span><span class="n">14 endpoint · routers/workspaces.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces/summary</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces/roles</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/workspaces</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces/{workspace_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/workspaces/{workspace_id}</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces/{workspace_id}/projects</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/workspaces/{workspace_id}/projects</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/workspaces/{workspace_id}/projects/{project_id}</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces/{workspace_id}/allocations</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PUT">PUT</span></td><td><code>/api/v1/workspaces/{workspace_id}/allocations</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/workspaces/{workspace_id}/members</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/workspaces/{workspace_id}/members</code></td><td>QT tổ chức</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/workspaces/{workspace_id}/members/{assignment_id}</code></td><td>QT tổ chức</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/billing</code><span class="d">Gói dịch vụ, đăng ký, hạn mức</span><span class="n">7 endpoint · routers/billing.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/billing/plans</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/billing/me</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/billing/usage</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/billing/plans/{plan_code}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/billing/platform-usage</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/billing/tenants/{tenant_id}/plan</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/billing/tenants/{tenant_id}/status</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/integrations</code><span class="d">API key và webhook</span><span class="n">9 endpoint · routers/integrations.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/integrations/api-keys</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/integrations/api-keys</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/integrations/api-keys/{key_id}</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/integrations/webhooks/event-types</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/integrations/webhooks</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/integrations/webhooks</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/integrations/webhooks/{endpoint_id}</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/integrations/webhooks/{endpoint_id}/test</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/integrations/webhooks/{endpoint_id}/deliveries</code></td><td>Biên tập tổ chức</td></tr>
+        </tbody></table></div></details>
+      <div class="api-group">Pháp lý &amp; hỗ trợ</div>
+      <details class="api"><summary><code>/api/v1/legal</code><span class="d">Đọc văn bản pháp lý, chấp thuận và rút đồng thuận</span><span class="n">7 endpoint · routers/legal.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/legal/documents</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/legal/me/consents</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/legal/{kind}</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/legal/{kind}/content</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/legal/{kind}/file</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/legal/{kind}/accept</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/legal/{kind}/withdraw</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/admin</code><span class="d">Soạn, duyệt, công bố văn bản pháp lý</span><span class="n">13 endpoint · routers/legal_admin.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/documents</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/documents/{kind}/{version}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/documents/{kind}/{version}/file</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/legal/documents</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/legal/documents/upload</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/drafts</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/legal/drafts</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/drafts/{draft_id}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/admin/legal/drafts/{draft_id}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/legal/drafts/{draft_id}/status</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/legal/drafts/{draft_id}/publish</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/events</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/legal/consents/{user_id}</code></td><td>QT nền tảng</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/support</code><span class="d">Phiếu hỗ trợ</span><span class="n">8 endpoint · routers/support.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/support/categories</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/support/starters</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/support/tickets</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/support/tickets</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/support/tickets/{ticket_id}</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/support/tickets/{ticket_id}/reply</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/support/tickets/{ticket_id}/status</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/support/queue</code></td><td>QT nền tảng</td></tr>
+        </tbody></table></div></details>
+      <div class="api-group">Quản trị nền tảng</div>
+      <details class="api"><summary><code>/api/v1/admin</code><span class="d">Người dùng, chặn IP, cài đặt, giám sát, nhật ký</span><span class="n">22 endpoint · routers/admin.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/sudo</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/admin/sudo</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/settings</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m PUT">PUT</span></td><td><code>/api/v1/admin/settings/{key}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/users</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m PUT">PUT</span></td><td><code>/api/v1/admin/users/{user_id}/role</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/resources</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/attention</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/activity</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/block-ip</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/unblock-ip</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/force-logout</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/users/{user_id}/lock</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/users/{user_id}/unlock</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/users/{user_id}/recovery</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/users/{user_id}/warn</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/security-log</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/audit-log</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/data-report</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/sync-local</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/sync-status/{task_id}</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/config/ignore-hardware</code></td><td>QT nền tảng</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/admin</code><span class="d">Hàng đợi xử lý</span><span class="n">2 endpoint · routers/processing_admin.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/processing</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/processing/revoke</code></td><td>Biên tập tổ chức</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/admin</code><span class="d">Người ký</span><span class="n">3 endpoint · routers/signers_admin.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/signers</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m PATCH">PATCH</span></td><td><code>/api/v1/admin/signers/{signer_id}</code></td><td>Biên tập tổ chức</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/signers/{signer_id}/merge</code></td><td>Biên tập tổ chức</td></tr>
+        </tbody></table></div></details>
+      <details class="api"><summary><code>/api/v1/admin</code><span class="d">Nguồn sự thật (SOT) và máy được phép ghi</span><span class="n">6 endpoint · routers/sot_admin.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/sot/overview</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/sot/schema</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/admin/sot/remote</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/sot/verify</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m POST">POST</span></td><td><code>/api/v1/admin/sot/machines</code></td><td>QT nền tảng</td></tr>
+          <tr><td><span class="m DELETE">DELETE</span></td><td><code>/api/v1/admin/sot/machines/{fingerprint}</code></td><td>QT nền tảng</td></tr>
+        </tbody></table></div></details>
+      <div class="api-group">Hạ tầng</div>
+      <details class="api"><summary><code>/api/v1/health</code><span class="d">Kiểm tra sức khoẻ, dùng cho healthcheck và giám sát</span><span class="n">7 endpoint · routers/health.py</span></summary>
+        <div class="tbl"><table><tbody>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health/</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health/ready</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health/live</code></td><td>Công khai</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health/status</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health/config</code></td><td>Đăng nhập</td></tr>
+          <tr><td><span class="m GET">GET</span></td><td><code>/api/v1/health/deps</code></td><td>Đăng nhập</td></tr>
+        </tbody></table></div></details>
+      <p>Ngoài router còn hai đường khai báo riêng: <code>POST /api/v1/presence</code> (trình duyệt báo đang trực tuyến, trong <code>main.py</code>) và <code>GET /metrics</code> (số đo cho Prometheus, trong <code>app/metrics.py</code>). realtime_service có API riêng trên cổng nội bộ 8010: <code>GET /health</code>, <code>GET /models</code>, <code>POST /predict</code>, <code>POST /reload</code> (nạp lại mô hình), <code>GET /metrics</code>.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="kiemthu">
+      <h2>Kiểm thử</h2>
+      <p class="kicker">Backend có khoảng 2.000 ca test chạy trên PostgreSQL thật (vì RLS chỉ chứng minh được trên CSDL thật), nhưng là CSDL riêng <code>signdb_test</code>.</p>
+
+      <h3>Chuẩn bị một lần</h3>
+      <ol class="steps">
+        <li>Dựng image test (thêm pytest lên image backend):
+          <div class="code"><pre><code>docker build -f backend/Dockerfile.test -t voya_backend_test:latest backend</code></pre></div></li>
+        <li>Tạo vai test (dùng <code>bash</code>, không phải <code>sh</code>, trên PowerShell):
+          <div class="code"><pre><code>bash scripts/provision_test_db_roles.sh</code></pre></div></li>
+        <li>Tạo <code>signdb_test</code> là bản sao của <code>signdb</code> (dùng TEMPLATE để mang theo cả quyền):
+          <div class="code"><pre><code>docker exec voya_postgres psql -U &lt;POSTGRES_USER&gt; -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='signdb' AND pid&lt;&gt;pg_backend_pid()"
+docker exec voya_postgres psql -U &lt;POSTGRES_USER&gt; -d postgres -c "CREATE DATABASE signdb_test WITH TEMPLATE signdb OWNER &lt;POSTGRES_USER&gt;"</code></pre></div>
+          Lệnh đầu ngắt kết nối đang mở tới <code>signdb</code> trong tích tắc; làm lúc ít người dùng.</li>
+      </ol>
+
+      <h3>Chạy</h3>
+      <div class="tbl"><table>
+        <thead><tr><th>Việc</th><th>Lệnh</th></tr></thead>
+        <tbody>
+          <tr><td>Một tệp test backend</td><td><code>VOYA test backend/tests/test_x.py</code></td></tr>
+          <tr><td>Cả bộ backend (10–15 phút)</td><td><code>VOYA test</code> hoặc <code>bash scripts/run_tests.sh</code></td></tr>
+          <tr><td>Kiểu TypeScript</td><td><code>cd frontend &amp;&amp; npm run typecheck</code></td></tr>
+          <tr><td>Test frontend</td><td><code>npx vitest run</code></td></tr>
+          <tr><td>Cổng đa ngôn ngữ</td><td><code>node scripts/i18n-gate.mjs</code></td></tr>
+          <tr><td>Kiểm đầu-cuối (Playwright)</td><td><code>npm run test:e2e</code></td></tr>
+          <tr><td>Test script vận hành</td><td><code>python -m unittest discover -s scripts/ops/tests</code></td></tr>
+        </tbody></table></div>
+
+      <h3>CI trên GitHub</h3>
+      <p><code>.github/workflows/ci.yml</code> chạy ba việc cho mỗi lần đẩy: frontend (kiểu, i18n, test, dựng), backend (dựng CSDL từ đầu, cấp vai, pytest), và vệ sinh kho (script <code>.sh</code> phải là LF, không có bí mật bị commit, lớp phủ registry đủ dịch vụ, diễn tập sao lưu/khôi phục).</p>
+
+      <div class="note warn"><b>Đỏ hàng loạt thì nghi môi trường trước</b>
+        <p>Hàng trăm lỗi cùng lúc gần như luôn là do môi trường, không phải do mã: <code>signdb_test</code> chưa tồn tại hoặc rỗng; thiếu vai test; stack Docker vừa tắt (log có <code>host lookup failed</code>); ổ đĩa trên 95% đầy. Kiểm mấy thứ này trước khi đọc traceback.</p>
+        <p>Hai test là "danh sách cho phép" và đỏ có chủ ý khi bạn thêm thứ mới: <code>test_tenant_isolation::test_boundary_crossings_are_an_allowlist</code> (thêm <code>system_scope</code>) và <code>test_celery_tenant_propagation</code> (thêm tác vụ <code>platform_wide</code>). Thêm một dòng lý do là xong.</p></div>
+      <p>Chi tiết: <a class="doc" href="08-testing/TESTING.md">08-testing/TESTING.md</a>.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="trienkhai">
+      <h2>Triển khai &amp; quay lui</h2>
+      <p class="kicker">Máy chủ sản xuất chạy từ chính kho git này (tên máy, thư mục và cách đăng nhập vào máy: nhận riêng), cập nhật bằng VOYA. Không dựng thư mục mới cho mỗi lần triển khai.</p>
+
+      <h3>Đưa code mới lên máy chủ</h3>
+      <ol class="steps">
+        <li>Đẩy code lên nhánh <code>deploy_ctu_ver-2.2.1</code> (sau khi CI xanh).</li>
+        <li>Trên máy chủ: <code>VOYA update-git</code>. Lệnh tự xem tệp nào đổi để chọn cách dựng: chỉ <code>backend/app</code> → dựng nhanh; <code>requirements.txt</code> → dựng đầy đủ; <code>frontend/</code> → dựng frontend; chỉ <code>processed/</code>, <code>scripts/</code>, <code>config/</code> → không cần dựng.</li>
+        <li>Thứ tự lệnh tự làm: tạo mốc quay lui → sao lưu CSDL → bật trang bảo trì → dựng → bật → kiểm sức khoẻ → <b>hỏng thì tự quay lui</b> và báo → tắt trang bảo trì.</li>
+        <li>Sau đó: <code>VOYA fresh</code> (code đang chạy có đúng là code mới) và <code>VOYA verify</code>.</li>
+      </ol>
+      <p>Có thay đổi một chiều trong lược đồ (B2)? Chạy <code>app.cli.migrate</code> <b>trước</b> khi bật ảnh mới, vì backend mới sẽ từ chối khởi động trên lược đồ cũ.</p>
+
+      <h3>Khi có sự cố</h3>
+      <ul>
+        <li>Quay image về mốc trước: <code>VOYA rollback</code> (CSDL không bị đụng).</li>
+        <li>Khôi phục CSDL từ bản sao lưu: theo <a class="doc" href="06-operations/BACKUP_RESTORE.md">06-operations/BACKUP_RESTORE.md</a>. Bản sao lưu hằng ngày nằm ở <code>backups/</code>, thêm bản <code>PRE_deploy</code> trước mỗi lần triển khai.</li>
+        <li>Cần chặn người dùng khi đang sửa: <code>VOYA maintenance on</code>, xong thì <code>off</code>.</li>
+      </ul>
+
+      <h3>Giám sát</h3>
+      <p>Grafana chỉ mở trên máy chủ: <code>http://127.0.0.1:3000</code> (tài khoản: nhận riêng). Cảnh báo cấu hình trong Grafana (không có Alertmanager), gửi thư qua SMTP trong <code>.env</code>. Trong web có trang quản trị <b>Giám sát tài nguyên</b> (<code>/admin/resources</code>).</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="loi">
+      <h2>Lỗi hay gặp</h2>
+      <p class="kicker">Triệu chứng → nguyên nhân thật → cách sửa. Phần lớn đã từng xảy ra trên hệ thống này.</p>
+      <div class="faq">
+        <div class="q"><h4>Sửa code backend mà web vẫn chạy như cũ</h4>
+          <p class="why">Code được chép vào image lúc dựng, không đọc trực tiếp từ thư mục.</p>
+          <p><code>VOYA update-code</code>, rồi <code>VOYA fresh</code> để chắc chắn. "healthy" không có nghĩa là đang chạy mã mới.</p></div>
+        <div class="q"><h4>Sửa <code>.env</code> mà không có tác dụng</h4>
+          <p class="why"><code>restart</code> giữ nguyên biến môi trường cũ của container.</p>
+          <p>Dùng <code>VOYA start</code> để tạo lại container.</p></div>
+        <div class="q"><h4>Frontend khởi động lại liên tục, log có <code>exec: no such file or directory</code></h4>
+          <p class="why">Git trên Windows đổi <code>docker-entrypoint.sh</code> sang kết thúc dòng CRLF.</p>
+          <p>Xoá tệp đó rồi lấy lại từ git để <code>.gitattributes</code> áp LF: <code>del frontend\docker-entrypoint.sh</code> rồi <code>git checkout -- frontend/docker-entrypoint.sh</code>. Sau đó <code>VOYA update-code --frontend</code>.</p></div>
+        <div class="q"><h4>Huấn luyện chạy rất chậm, trainer không thấy GPU</h4>
+          <p class="why">Ai đó chạy <code>docker compose</code> với danh sách <code>-f</code> gõ tay và bỏ mất <code>docker-compose.gpu.yml</code>.</p>
+          <p>Kiểm <code>COMPOSE_FILE</code> trong <code>.env</code> có đủ 3 tệp; luôn gọi <code>docker compose</code> trần hoặc qua VOYA. <code>VOYA verify</code> báo dòng GPU.</p></div>
+        <div class="q"><h4>Cả stack không lên, <code>sot-init</code> thoát mã 4</h4>
+          <p class="why">Chữ ký hoặc checksum của nguồn sự thật trên Drive không khớp. Đây là chặn có chủ ý.</p>
+          <p>Đừng nới kiểm tra. Đọc log <code>docker compose logs sot-init</code> và báo người quản lý SOT. Thiếu hẳn thông tin Google Drive thì <code>sot-init</code> chỉ bỏ qua, không chặn.</p></div>
+        <div class="q"><h4>Backend không khởi động, báo lệch phiên bản lược đồ</h4>
+          <p class="why">Image mới hơn hoặc cũ hơn lược đồ trong CSDL.</p>
+          <p><code>python -m app.cli.migrate --status</code> để xem; chạy migration đúng phiên bản hoặc quay image về bản khớp.</p></div>
+        <div class="q"><h4>Truy vấn trả 0 dòng dù chắc chắn có dữ liệu</h4>
+          <p class="why">Đang chạy ngoài phạm vi tổ chức nên RLS ẩn hết. Hay gặp trong tác vụ nền, script, hoặc test dùng <code>TestClient</code>.</p>
+          <p>Bọc bằng <code>tenant_scope(tenant_id)</code> (<code>app/tenant_context.py</code>). Việc toàn nền tảng thì <code>system_scope("lý do")</code> và thêm vào danh sách cho phép của test.</p></div>
+        <div class="q"><h4>Endpoint mới trả 401 dù đã đăng nhập ở trình duyệt</h4>
+          <p class="why">Gọi bằng <code>fetch</code> trần hoặc sai tiền tố đường dẫn; hoặc endpoint cần mở công khai mà chưa khai báo.</p>
+          <p>Gọi qua <code>axiosClient</code> với đường <code>/api/v1/…</code>. Nếu phải công khai, thêm vào <code>PUBLIC_ROUTES</code>.</p></div>
+        <div class="q"><h4>Yêu cầu ghi trả 403 <code>no_tenant_role</code></h4>
+          <p class="why">Tài khoản là thành viên tổ chức nhưng chưa được cấp vai, nên cổng truy cập chặn mọi thao tác ghi.</p>
+          <p>Quản trị viên tổ chức cấp vai cho người đó. Nếu endpoint chỉ ghi dữ liệu của chính người gọi, thêm tiền tố vào <code>SELF_SERVICE_WRITE_PREFIXES</code> (xem <a href="#r-api">A1</a>).</p></div>
+        <div class="q"><h4>Yêu cầu ghi trả 403 <code>CSRF token missing or invalid</code></h4>
+          <p class="why">Thiếu header <code>X-CSRF-Token</code>.</p>
+          <p>Dùng <code>axiosClient</code>; nó tự gắn. Từ script thì dùng API key thay vì cookie.</p></div>
+        <div class="q"><h4><code>npx tsc --noEmit</code> xanh nhưng <code>npm run build</code> đỏ</h4>
+          <p class="why"><code>tsconfig.json</code> gốc không chứa tệp nào, nên lệnh đó kiểm 0 tệp.</p>
+          <p>Dùng <code>npm run typecheck</code>.</p></div>
+        <div class="q"><h4>Docker báo hết chỗ, <code>dockerd</code> chết</h4>
+          <p class="why">Ổ đĩa ảo của Docker (<code>.vhdx</code>) chỉ phình ra, không tự co.</p>
+          <p><code>VOYA disk --don</code> để dọn, <code>VOYA disk --nen</code> để nén ổ ảo (phải dừng stack). Đừng chạy <code>docker compose down -v</code>.</p></div>
+        <div class="q"><h4>Web chập chờn, log báo lỗi DNS hoặc mất kết nối Drive</h4>
+          <p class="why">Máy chủ đi ngủ hoặc mất mạng. Không phải lỗi Docker.</p>
+          <p>Tắt chế độ ngủ của máy chủ; các tác vụ Drive/Sheets tự chạy bù khi có mạng lại.</p></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="luat">
+      <h2>Luật không được phá</h2>
+      <p class="kicker">Mỗi luật ở đây sinh ra từ một sự cố có thật. Phá luật thường không báo lỗi ngay, mà làm hỏng dữ liệu một cách im lặng.</p>
+      <ul class="rule-list">
+        <li><b>Không chạy test trên <code>signdb</code>.</b><span>Dùng <code>VOYA test</code> hoặc <code>scripts/run_tests.sh</code>. Bộ test từng ghi đè lược đồ sản xuất (13/08/2026).</span></li>
+        <li><b>Không chạy <code>docker compose down -v</code>.</b><span><code>-v</code> xoá volume, tức là xoá CSDL.</span></li>
+        <li><b>Không commit bí mật.</b><span><code>.env</code>, <code>gdrive/*.json</code>, khoá ký SOT nằm ngoài git. CI quét và chặn.</span></li>
+        <li><b>Không để <code>DATABASE_URL</code> dùng vai superuser.</b><span>RLS mất tác dụng và mọi tổ chức thấy dữ liệu của nhau, không có lỗi nào báo.</span></li>
+        <li><b>Không đổi hay xoá cấu trúc CSDL trong đường khởi động.</b><span>Thay đổi một chiều chỉ đi qua <code>app.cli.migrate</code>, có sao lưu trước.</span></li>
+        <li><b>Không nới kiểm tra chữ ký của <code>sot-init</code>.</b><span>Nó chặn cả stack khi nguồn sự thật có thể đã bị sửa; đó là chủ ý.</span></li>
+        <li><b>Không sửa tay <code>signer_id</code> hàng loạt.</b><span>Danh tính người ký đang được rà soát; xem <a class="doc" href="02-data/SAMPLE_OWNERSHIP.md">SAMPLE_OWNERSHIP</a> trước.</span></li>
+        <li><b>Không xoá mục nào ở thư mục gốc Google Drive.</b><span><code>labels</code> và <code>samples</code> ở đó là Google Sheets đang được dùng, không phải thư mục rác.</span></li>
+        <li><b>Không dùng emoji và không dùng xanh lá cho "thành công" trong giao diện.</b><span>Hệ thiết kế dùng xanh dương CTU và biểu tượng SVG.</span></li>
+        <li><b>Không gõ tay danh sách <code>-f</code> cho <code>docker compose</code>.</b><span>Để <code>COMPOSE_FILE</code> trong <code>.env</code> lo; gõ tay từng làm mất GPU.</span></li>
+      </ul>
+    </section>
+
+    <!-- ============================================================ -->
+    <section class="sec" id="tailieu">
+      <h2>Tài liệu đọc thêm</h2>
+      <p class="kicker">Sổ tay này là cửa vào. Chi tiết và lý do của từng quyết định nằm trong <code>docs/</code>.</p>
+      <div class="tbl"><table>
+        <thead><tr><th>Câu hỏi</th><th>Tài liệu</th></tr></thead>
+        <tbody>
+          <tr><td>Mục lục toàn bộ tài liệu</td><td><a class="doc" href="README.md">docs/README.md</a></td></tr>
+          <tr><td>Các khái niệm hay bị nhầm (tenant, community, default…)</td><td><a class="doc" href="01-architecture/CONCEPTS.md">01-architecture/CONCEPTS.md</a></td></tr>
+          <tr><td>Cô lập dữ liệu giữa các tổ chức</td><td><a class="doc" href="01-architecture/TENANT_ISOLATION.md">01-architecture/TENANT_ISOLATION.md</a></td></tr>
+          <tr><td>Vòng đời hạ tầng: dựng, chạy, nâng cấp</td><td><a class="doc" href="01-architecture/INFRA_LIFECYCLE.md">01-architecture/INFRA_LIFECYCLE.md</a></td></tr>
+          <tr><td>Từ điển dữ liệu, 63 bảng</td><td><a class="doc" href="02-data/db/PDM_V8_DATA_DICTIONARY.md">02-data/db/PDM_V8_DATA_DICTIONARY.md</a></td></tr>
+          <tr><td>Triển khai lên máy khác</td><td><a class="doc" href="06-operations/DEPLOY_SECOND_MACHINE.md">06-operations/DEPLOY_SECOND_MACHINE.md</a></td></tr>
+          <tr><td>Chuyển máy chủ</td><td><a class="doc" href="06-operations/HOST_TRANSFER.md">06-operations/HOST_TRANSFER.md</a></td></tr>
+          <tr><td>CI/CD</td><td><a class="doc" href="06-operations/CI_CD.md">06-operations/CI_CD.md</a></td></tr>
+          <tr><td>Đặc tả chức năng (use case)</td><td><a class="doc" href="09-specs/USE_CASE_SPECIFICATION.md">09-specs/USE_CASE_SPECIFICATION.md</a></td></tr>
+          <tr><td>Lỗi đã biết, việc còn dang dở</td><td><a class="doc" href="10-issues/KNOWN_ISSUES.md">10-issues/KNOWN_ISSUES.md</a></td></tr>
+          <tr><td>Danh sách lệnh vận hành</td><td><code>VOYA help</code></td></tr>
+        </tbody></table></div>
+    </section>
+
+    <footer>
+      Tệp này: <code>docs/HUONG_DAN_DEV.html</code>. Mở bằng cách bấm đúp, hoặc từ nút <b>Hướng dẫn cho Dev</b> trên bảng điều khiển VOYA_UI. Khi thêm công thức hoặc đổi quy trình, sửa luôn tệp này trong cùng commit.
+    </footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  // Nút chép cho mọi khối mã.
+  document.querySelectorAll("pre").forEach(function (pre) {
+    var wrap = pre.parentElement.classList.contains("code") ? pre.parentElement : null;
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.className = "code";
+      pre.parentNode.insertBefore(wrap, pre);
+      wrap.appendChild(pre);
+    }
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy";
+    btn.textContent = "Chép";
+    btn.addEventListener("click", function () {
+      var text = pre.innerText;
+      var done = function () { btn.textContent = "Đã chép"; setTimeout(function () { btn.textContent = "Chép"; }, 1500); };
+      var fallback = function () {
+        var r = document.createRange(); r.selectNodeContents(pre);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        btn.textContent = "Đã chọn, bấm Ctrl+C";
+      };
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+        else fallback();
+      } catch (e) { fallback(); }
+    });
+    wrap.appendChild(btn);
+  });
+
+  // Lọc theo từ khoá: ẩn mục/công thức không chứa từ cần tìm.
+  var input = document.getElementById("q");
+  var note = document.getElementById("qnote");
+  var empty = document.getElementById("empty");
+  var sections = Array.prototype.slice.call(document.querySelectorAll("main .sec"));
+  var fold = function (s) { return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase(); };
+  sections.forEach(function (sec) { sec._text = fold(sec.textContent); });
+  document.querySelectorAll(".recipe, .q, .tbl tbody tr, details.api").forEach(function (el) { el._text = fold(el.textContent); });
+
+  function applyFilter() {
+    var q = fold(input.value.trim());
+    var shown = 0;
+    sections.forEach(function (sec) {
+      var hit = !q || sec._text.indexOf(q) !== -1;
+      sec.classList.toggle("hidden-by-search", !hit);
+      if (hit) shown++;
+      sec.querySelectorAll(".recipe, .q, .tbl tbody tr, details.api").forEach(function (el) {
+        var miss = !!q && el._text.indexOf(q) === -1;
+        el.classList.toggle("hidden-by-search", miss);
+        if (el.tagName === "DETAILS") el.open = !!q && !miss;
+      });
+    });
+    empty.style.display = shown ? "none" : "block";
+    note.textContent = q ? ("Đang hiện " + shown + "/" + sections.length + " mục khớp.") : "Gõ để lọc các mục bên phải.";
+  }
+  input.addEventListener("input", applyFilter);
+
+  // Đánh dấu mục đang đọc trong mục lục.
+  var links = {};
+  document.querySelectorAll("#toc a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if ("IntersectionObserver" in window) {
+    var targets = document.querySelectorAll("main .sec, main .recipe");
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        var id = e.target.id;
+        var sec = e.target.closest(".sec");
+        Object.keys(links).forEach(function (k) { links[k].classList.remove("on"); });
+        if (links[id]) links[id].classList.add("on");
+        if (sec && links[sec.id]) links[sec.id].classList.add("on");
+      });
+    }, { rootMargin: "0px 0px -70% 0px" });
+    targets.forEach(function (t) { io.observe(t); });
+  }
+})();
+</script>
+</body>
+</html>

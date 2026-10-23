@@ -267,6 +267,36 @@ class ControlPanelTests(unittest.TestCase):
         finally:
             server.shutdown()
 
+    def test_doc_file_stays_inside_docs(self):
+        self.assertEqual(voya_ui.doc_file(voya_ui.GUIDE).name, "HUONG_DAN_DEV.html")
+        self.assertIsNotNone(voya_ui.doc_file("/docs/03-security/AUTHORIZATION.md"))
+        for bad in ("/docs/../.env", "/docs/%2e%2e/.env", "/docs/../scripts/voya.py",
+                    "/docs/khong-co.md", "/docs/02-data/db/gen_erd.py", "/etc/passwd"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(voya_ui.doc_file(bad))
+
+    def test_guide_is_served_without_token_but_not_to_a_foreign_host(self):
+        server = voya_ui.ThreadingHTTPServer(("127.0.0.1", 0), None)
+        port = server.server_address[1]
+        server.RequestHandlerClass = voya_ui.make_handler("tok", port, voya_ui.Job())
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            def get(path, headers=None):
+                req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers or {})
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        return r.status, r.headers.get("Content-Type", "")
+                except urllib.error.HTTPError as e:
+                    return e.code, ""
+
+            self.assertEqual(get(voya_ui.GUIDE), (200, "text/html; charset=utf-8"))
+            self.assertEqual(get("/huong-dan")[0], 200)  # theo chuyển hướng tới GUIDE
+            self.assertEqual(get("/docs/README.md")[1], "text/plain; charset=utf-8")
+            self.assertEqual(get("/docs/../.env")[0], 404)
+            self.assertEqual(get(voya_ui.GUIDE, {"Host": "evil.example:80"})[0], 403)
+        finally:
+            server.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()
