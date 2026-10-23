@@ -43,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.auth import get_current_user, require_admin  # noqa: E402
+from app.modules.identity._web_compat import get_current_user, require_admin  # noqa: E402
 from app.routers import training as tr  # noqa: E402
 from app.routers.training import router, training_jobs  # noqa: E402
 

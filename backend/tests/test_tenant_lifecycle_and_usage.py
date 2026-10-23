@@ -295,7 +295,7 @@ class TestPurgeExecution:
         cập ở tổ chức kia — và để lại một bản ghi thành viên trỏ tới tài khoản
         không còn tồn tại."""
         from app.modules.saas import plans, tenant_admin
-        from app import auth
+        from app.modules.identity import _web_compat as auth
         from conftest import purge_tenant
 
         survivor_tenant = f"lc{uuid.uuid4().hex[:10]}"

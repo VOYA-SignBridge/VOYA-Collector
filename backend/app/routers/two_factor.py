@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.modules.security import two_factor
-from app import activity
-from app.auth import get_current_user, verify_password
+from app.modules.security import audit_log
+from app.modules.identity._web_compat import get_current_user, verify_password
 
 router = APIRouter(prefix="/2fa", tags=["two-factor"])
 
@@ -98,7 +98,7 @@ def disable(payload: PasswordRequest, request: Request,
     # tự thêm tiền tố `security.`. Gọi thẳng `audit.record` thì sự kiện mang
     # tiền tố an ninh nhưng lại VẮNG MẶT ở bảng an ninh — một chỗ lệch mà người
     # đọc không có cách nào đoán ra.
-    activity.log_security_event(
+    audit_log.log_security_event(
         "2fa.disabled", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
     return {"enabled": False}
@@ -116,7 +116,7 @@ def regenerate(payload: PasswordRequest, request: Request,
     # Cấp lại mã khôi phục giết bộ cũ. Nếu chủ tài khoản không phải người bấm
     # thì lần sau họ dùng mã cũ sẽ bị từ chối mà không hiểu vì sao — dòng này
     # là thứ giải thích được. KHÔNG ghi mã vào `detail`.
-    activity.log_security_event(
+    audit_log.log_security_event(
         "2fa.recovery_codes_regenerated", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
     return {"recovery_codes": codes}

@@ -22,11 +22,12 @@ def release_memory_after_task(sender=None, **_kwargs) -> None:
 
 
 @worker_ready.connect
-def start_resource_monitor(**_kwargs) -> None:
+def start_resource_monitor(sender=None, **_kwargs) -> None:
     """Start the GPU sampler when this worker has compatible hardware."""
     try:
         from app.modules.monitoring.gpu import start_gpu_monitor
 
-        start_gpu_monitor()
+        hostname = str(getattr(sender, "hostname", "") or "")
+        start_gpu_monitor(is_trainer=hostname.startswith("trainer@"))
     except Exception:
         logger.exception("[MONITOR] failed to start GPU sampler")

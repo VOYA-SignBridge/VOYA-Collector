@@ -552,7 +552,7 @@ def main() -> int:
         import shutil
 
         from app.config import settings as _settings
-        from app.monitoring import DISK_CRIT_PCT, DISK_WARN_PCT
+        from app.modules.monitoring.service import DISK_CRIT_PCT, DISK_WARN_PCT
 
         usage = shutil.disk_usage(str(_settings.dataset_root))
         pct = 100.0 * usage.used / usage.total if usage.total else 0.0
@@ -615,7 +615,7 @@ def main() -> int:
     # missing or unreadable" — nen ngay 2026-08-09 no bao di tim cai card dang
     # nam yen trong may, trong khi loi that la stack dung thieu overlay GPU.
     try:
-        from app.monitoring import read_gpu_snapshot
+        from app.modules.monitoring.gpu import read_gpu_snapshot
 
         snap = read_gpu_snapshot()
         if not snap.get("available"):

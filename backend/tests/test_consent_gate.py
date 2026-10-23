@@ -496,7 +496,7 @@ class TestChuoiDayDu:
     def signer_with_account(self):
         import uuid as _uuid
 
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from app.storage.metadata_db import _execute, _fetch_all
         from app.modules.saas.tenant_context import system_scope
         from conftest import purge_registered_account

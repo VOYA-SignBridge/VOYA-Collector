@@ -332,7 +332,7 @@ def client_quan_tri_to_chuc(to_chuc, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app.modules.saas import saas_tasks
-    from app import auth
+    from app.modules.identity import _web_compat as auth
     from app.routers.tenants import router
     from app.modules.saas.tenant_middleware import TenantScopeMiddleware
 
@@ -406,7 +406,7 @@ def test_tim_tai_khoan_khop_mot_phan_va_tu_choi_chuoi_qua_ngan(to_chuc):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.modules.security.rate_limit_deps import limit_catalog
     from app.routers.tenants import router
 

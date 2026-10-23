@@ -2694,7 +2694,8 @@ MIGRATION_STATEMENTS = [
     # ---------------------------------------------------------------------
     # v3.7 — Nhật ký kiểm toán bền.
     #
-    # `activity.py` ghi vào Redis, cấu hình `volatile-lru` 400mb — dấu vết bị
+    # `modules/security/audit_log.py` ghi vào Redis, cấu hình `volatile-lru`
+    # 400mb — dấu vết bị
     # ĐUỔI khi hết chỗ. Sudo mode và việc đổi hạn mức lúc chạy hiện không để
     # lại gì tồn tại qua một lần restart.
     #

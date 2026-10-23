@@ -150,7 +150,7 @@ class TestSeats:
         trở lại một cách âm thầm.
         """
         from app.modules.saas import tenant_admin
-        from app import auth
+        from app.modules.identity import _web_compat as auth
 
         _set_plan(throwaway_tenant, "free")  # max_seats = 3, nhưng không ai đọc
         created = []
@@ -194,7 +194,7 @@ class TestSeats:
         nổi vai trò của chính thành viên mình — bế tắc không lối ra ngoài việc
         nâng gói."""
         from app.modules.saas import tenant_admin
-        from app import auth
+        from app.modules.identity import _web_compat as auth
 
         _set_plan(throwaway_tenant, "free")
         name = f"seat{uuid.uuid4().hex[:9]}"

@@ -10,7 +10,7 @@ from app.infrastructure.database.connection import connect_postgres
 from app.storage.rls import apply_scope
 from psycopg2.extras import RealDictCursor
 from app.storage.gdrive_client import download_from_gdrive
-from app.monitoring import DISK_CRIT_PCT
+from app.modules.monitoring.service import DISK_CRIT_PCT
 
 logger = logging.getLogger(__name__)
 

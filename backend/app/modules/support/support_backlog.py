@@ -127,7 +127,7 @@ def sweep() -> Dict[str, Any]:
     """
     from app.modules.support import support
     from app.config import settings
-    from app.monitoring import _redis_client
+    from app.infrastructure.redis.connection import get_redis_client as _redis_client
 
     stats = measure()
     client = _redis_client()

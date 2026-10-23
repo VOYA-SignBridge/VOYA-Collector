@@ -107,7 +107,7 @@ def tai_khoan_that(request):
     phá dữ liệu của người khác, kể cả trên bản sao.
     """
     refuse_to_touch_production()
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     email = request.param
     with system_scope("test: tim tai khoan san co"):
@@ -140,7 +140,7 @@ class TestMotDiaChiMotTaiKhoan:
     @pytest.mark.parametrize("email", ALL_EMAILS)
     def test_tra_cuu_khong_phan_biet_hoa_thuong(self, email):
         """Đăng nhập bằng ĐỊA CHỈ VIẾT HOA phải ra đúng tài khoản đó."""
-        from app.auth import _fetch_user_by_login
+        from app.modules.identity._web_compat import _fetch_user_by_login
 
         thuong = _fetch_user_by_login(email)
         hoa = _fetch_user_by_login(email.upper())
@@ -200,7 +200,7 @@ class TestTenMienBonCap:
         assert req.email == EMAIL_UNIVERSITY
 
     def test_khong_bi_cat_khi_chuan_hoa(self):
-        from app.auth import _normalize_login
+        from app.modules.identity._web_compat import _normalize_login
 
         assert _normalize_login(f"  {EMAIL_UNIVERSITY.upper()}  ") == EMAIL_UNIVERSITY
 
@@ -354,17 +354,17 @@ class TestMotHopThuMotTaiKhoan:
         ("ai.do+x@outlook.com", "ai.do@outlook.com"),
     ])
     def test_canonical_email_gop_bi_danh(self, a, b):
-        from app.auth import canonical_email
+        from app.modules.identity._web_compat import canonical_email
         assert canonical_email(a) == canonical_email(b)
 
     def test_dau_cham_KHONG_bi_bo_ngoai_gmail(self):
-        from app.auth import canonical_email
+        from app.modules.identity._web_compat import canonical_email
         assert canonical_email("ai.do@ctu.edu.vn") != canonical_email("aido@ctu.edu.vn")
 
     def test_dang_ky_lan_hai_bang_bi_danh_bi_tu_choi_409(self):
         refuse_to_touch_production()
         from fastapi import HTTPException
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         tag = uuid.uuid4().hex[:8]
         base = f"hopthu{tag}@gmail.com"
@@ -382,7 +382,7 @@ class TestMotHopThuMotTaiKhoan:
         """Gõ `hop.thu@gmail.com` khi đăng ký bằng `hopthu@gmail.com` — cùng hộp
         thư, phải tìm ra tài khoản (đây là lỗi 'khôi phục mật khẩu' ngày 14/09)."""
         refuse_to_touch_production()
-        from app.auth import _fetch_user_by_login, create_user
+        from app.modules.identity._web_compat import _fetch_user_by_login, create_user
 
         tag = uuid.uuid4().hex[:8]
         first = create_user(username=f"hopthu{tag}", email=f"hopthu{tag}@gmail.com", password=PASSWORD)
@@ -398,7 +398,7 @@ class TestMotHopThuMotTaiKhoan:
         người quên mật khẩu đi đăng ký lại thay vì khôi phục."""
         refuse_to_touch_production()
         from fastapi import HTTPException
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         tag = uuid.uuid4().hex[:8]
         first = create_user(username=f"trung{tag}", email=f"trung{tag}@example.test", password=PASSWORD)

@@ -43,7 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.modules.legal import legal, legal_store
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -322,7 +322,7 @@ def accept_document(
 ) -> Dict[str, Any]:
     """Ký một văn bản. Idempotent — ký lại bản đang hiệu lực không đổi gì."""
     _reject_unknown_kind(kind)
-    from app.rate_limit import client_ip
+    from app.modules.security._web_compat import client_ip
 
     # Cùng công thức băm với luồng đăng ký (`routers/auth._record_consents`):
     # băm IP chứ không lưu IP, và trộn `user_id` vào để hai người cùng một mạng

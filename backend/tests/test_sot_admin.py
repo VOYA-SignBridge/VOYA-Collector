@@ -90,7 +90,7 @@ def test_effective_keys_unions_db_and_drops_revoked():
 @pytest.fixture
 def client():
     from app.main import app
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
 
     app.dependency_overrides[require_admin] = lambda: {"id": "t", "username": "tester", "is_admin": True}
     yield TestClient(app)

@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import activity
-from app.auth import require_tenant_editor
+from app.modules.security import audit_log
+from app.modules.identity._web_compat import require_tenant_editor
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def revoke_task(body: RevokeBody, request: Request,
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail=f"Không gửi được lệnh huỷ: {exc}")
 
-    activity.log_security_event(
+    audit_log.log_security_event(
         "processing.task_revoked", actor=str(current_user.get("username", "")),
         target=body.task_id, extra={"terminate": body.terminate},
         actor_user=current_user, request=request)

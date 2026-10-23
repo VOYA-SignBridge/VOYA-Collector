@@ -31,7 +31,7 @@ def _ensure_schema():
 @pytest.fixture(autouse=True)
 def _clean_redis():
     """Mỗi test bắt đầu với bitmap trống, nếu không phiếu của test trước còn sống."""
-    from app.rate_limit import _client
+    from app.modules.security._web_compat import _client
 
     client = _client()
     if client is not None:
@@ -314,7 +314,7 @@ class TestTrialEndpoints:
 
 @pytest.fixture
 def admin_account():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"sudo{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -433,7 +433,7 @@ class TestRedisFailureDoesNotLatchForever:
     """
 
     def test_a_failure_is_retried_after_the_cooldown(self, monkeypatch):
-        import app.rate_limit as rl
+        from app.modules.security import _web_compat as rl
 
         monkeypatch.setattr(rl, "_client_singleton", None)
         monkeypatch.setattr(rl, "_client_retry_at", 0.0)
@@ -459,7 +459,7 @@ class TestRedisFailureDoesNotLatchForever:
         assert calls["n"] == 2
 
     def test_it_recovers_when_redis_comes_back(self, monkeypatch):
-        import app.rate_limit as rl
+        from app.modules.security import _web_compat as rl
 
         monkeypatch.setattr(rl, "_client_singleton", None)
         monkeypatch.setattr(rl, "_client_retry_at", time.monotonic() - 1)

@@ -66,7 +66,7 @@ def test_hanh_dong_nay_co_ghi_kiem_toan(action, tep, ly_do):
     """Hành động phải được ghi, bằng MỘT TRONG HAI lối gọi hợp lệ.
 
     * `audit.record("mien.viec")` — chỉ vào nhật ký bền.
-    * `activity.log_security_event("viec")` — vào **cả hai** nhật ký, và tự
+    * `audit_log.log_security_event("viec")` — vào **cả hai** nhật ký, và tự
       thêm tiền tố `security.`. Đây là lối đúng cho mọi thứ thuộc mặt phẳng an
       ninh: gọi thẳng `audit.record("security.…")` thì sự kiện mang tiền tố an
       ninh nhưng lại VẮNG MẶT ở bảng "Nhật ký bảo mật" — một chỗ lệch mà người

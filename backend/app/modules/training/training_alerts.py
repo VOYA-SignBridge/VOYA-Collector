@@ -80,9 +80,9 @@ def notify_admins_training_failure(
 
     # 3) Best-effort in-app admin feed (Redis) — skipped silently if Redis down.
     try:
-        from app import activity
+        from app.modules.security import audit_log
 
-        activity.log_security_event(
+        audit_log.log_security_event(
             action="TRAINING_SYSTEM_FAILURE",
             actor=actor or "",
             target=job_id or "",

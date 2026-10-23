@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 
 import app.modules.saas.tenant_middleware as tm
 import app.modules.dataset.vocabulary_registry as vr
-from app.auth import get_current_user, require_tenant_editor
+from app.modules.identity._web_compat import get_current_user, require_tenant_editor
 from app.main import app
 from app.modules.saas.tenant_context import tenant_scope
 
@@ -101,7 +101,7 @@ class TestApiKeyRequestScope:
         """Cùng thứ tự với `get_current_user_optional`: có cookie thì người đang
         ngồi trước trình duyệt là danh tính, không phải khoá dán vào curl."""
         import app.modules.security.api_keys as api_keys
-        import app.auth as auth
+        from app.modules.identity import _web_compat as auth
 
         monkeypatch.setattr(api_keys, "authenticate", lambda raw: {"tenant_id": "iso_b"})
         monkeypatch.setattr(auth, "_subject_of", lambda token: "u-1" if token == "cookie-jwt" else None)

@@ -27,9 +27,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, validator
 
 from app.modules.security import otp
-from app.auth import _fetch_user_by_login, get_current_user
+from app.modules.identity._web_compat import _fetch_user_by_login, get_current_user
 from app.config import settings
-from app.rate_limit import enforce_ip_limit
+from app.modules.security._web_compat import enforce_ip_limit
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def verification_status(
     authenticated, and half a number is not enough to answer the only question
     this page exists to answer — "is that still the right number?".
     """
-    from app.auth import _identity_cursor
+    from app.modules.identity._web_compat import _identity_cursor
 
     with _identity_cursor() as cur:
         cur.execute(
@@ -352,7 +352,7 @@ def verify_recovery_code(payload: RecoverVerifyRequest, request: Request) -> Dic
     """
     enforce_ip_limit(request, bucket="otp_recover_confirm", max_calls=20, window=3600)
 
-    from app.auth import PASSWORD_RESET_TICKET_MINUTES, create_password_reset_ticket
+    from app.modules.identity._web_compat import PASSWORD_RESET_TICKET_MINUTES, create_password_reset_ticket
 
     user = _spend_recovery_code(payload.identifier, payload.code)
     logger.info("[OTP] recovery code accepted for user %s", user["id"])
@@ -373,7 +373,7 @@ def confirm_recovery(payload: RecoverConfirmRequest, request: Request) -> Dict[s
             detail=f"Mật khẩu phải có ít nhất {settings.min_password_length} ký tự.",
         )
 
-    from app.auth import set_password_and_revoke_sessions, verify_password_reset_ticket
+    from app.modules.identity._web_compat import set_password_and_revoke_sessions, verify_password_reset_ticket
 
     if payload.reset_ticket:
         user_id = verify_password_reset_ticket(payload.reset_ticket)

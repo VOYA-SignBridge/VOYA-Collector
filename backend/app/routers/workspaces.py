@@ -35,7 +35,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from app.modules.admin import workspace_admin
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 from app.modules.security.quota_deps import working_tenant_of
 from app.modules.security.rate_limit_deps import limit_catalog
 

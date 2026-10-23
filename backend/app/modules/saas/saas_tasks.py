@@ -151,7 +151,7 @@ def cleanup_refresh_tokens(self, retain_days: int = 7):
     `platform_wide` vì bảng `refresh_tokens` thuộc mặt phẳng danh tính — nó
     không mang `tenant_id`, và một lượt dọn theo tenant sẽ bỏ sót phần lớn bảng.
     """
-    from app.auth import purge_expired_refresh_tokens
+    from app.modules.identity._web_compat import purge_expired_refresh_tokens
 
     try:
         removed = purge_expired_refresh_tokens(retain_days=int(retain_days))

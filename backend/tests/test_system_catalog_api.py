@@ -38,7 +38,7 @@ def _ensure_schema():
 
 @pytest.fixture
 def client():
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
 
     app.dependency_overrides[require_admin] = lambda: {
@@ -58,7 +58,7 @@ def tenant_user_client():
     alone would be enough to let a tenant user read the template if the other
     were ever relaxed.
     """
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
 
     app.dependency_overrides[require_admin] = lambda: {

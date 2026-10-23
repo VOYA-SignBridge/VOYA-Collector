@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from app.modules.security import api_keys as api_keys_service
 from app.modules.saas import webhooks as webhooks_service
-from app.auth import require_tenant_editor
+from app.modules.identity._web_compat import require_tenant_editor
 from app.modules.security.quota_deps import working_tenant_of
 from app.modules.security.rate_limit_deps import limit_catalog
 

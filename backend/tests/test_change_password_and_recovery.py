@@ -46,7 +46,7 @@ class _Req:
 
 
 def _make_account(prefix: str) -> dict:
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"{prefix}{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -94,7 +94,7 @@ def _change(account, **kw):
 class TestKhongCo2FA:
     def test_doi_duoc_bang_mat_khau_hien_tai(self, account, scope):
         _change(account)
-        from app.auth import verify_password
+        from app.modules.identity._web_compat import verify_password
 
         assert verify_password("a brand new passphrase",
                                _current(account)["password_hash"])
@@ -155,7 +155,7 @@ class TestCo2FA:
         # đây sẽ làm test đỏ vì một tính chất bảo mật đang hoạt động đúng, và
         # cách "sửa" mà nó gợi ý là nới chống-phát-lại ra.
         _change(account, code=totp.totp(with_2fa["secret"], at=time.time() + 30))
-        from app.auth import verify_password
+        from app.modules.identity._web_compat import verify_password
 
         assert verify_password("a brand new passphrase",
                                _current(account)["password_hash"])
@@ -164,7 +164,7 @@ class TestCo2FA:
         """Mất điện thoại không được đồng nghĩa với mất tài khoản. Đây là điều
         kiện đã chọn thay cho "bắt buộc bật 2FA" — xem chú thích đầu tệp."""
         _change(account, code=with_2fa["recovery"][0])
-        from app.auth import verify_password
+        from app.modules.identity._web_compat import verify_password
 
         assert verify_password("a brand new passphrase",
                                _current(account)["password_hash"])

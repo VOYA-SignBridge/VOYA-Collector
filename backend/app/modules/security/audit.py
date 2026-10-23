@@ -2,7 +2,7 @@
 
 Vì sao cần, nói cho cụ thể
 --------------------------
-`app/activity.py` đã ghi hoạt động — vào REDIS. Redis ở triển khai này chạy
+`app/modules/security/audit_log.py` đã ghi hoạt động — vào REDIS. Redis ở triển khai này chạy
 `maxmemory 400mb` với chính sách `volatile-lru`, nghĩa là khi bộ nhớ chật, các
 khoá bị ĐUỔI. Với một hàng đợi hoạt động thì mất vài dòng cũ là chấp nhận
 được. Với câu hỏi "ai đã nâng quyền sudo lúc 2 giờ sáng" thì không: dấu vết
@@ -152,7 +152,7 @@ def hash_ip(request: Any) -> Optional[str]:
         return None
     try:
         from app.config import settings
-        from app.rate_limit import client_ip
+        from app.modules.security._web_compat import client_ip
 
         pepper = (getattr(settings, "otp_pepper", "") or "").strip()
         if not pepper:

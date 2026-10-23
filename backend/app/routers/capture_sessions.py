@@ -35,8 +35,8 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import activity
-from app.auth import get_current_user
+from app.modules.security import audit_log
+from app.modules.identity._web_compat import get_current_user
 from app.storage.metadata_db import _execute, _fetch_all
 from app.modules.saas.tenant_context import require_tenant
 
@@ -252,7 +252,7 @@ def update_session(
         tuple(params),
     )
 
-    activity.log_security_event(
+    audit_log.log_security_event(
         "collection_session.updated", actor=str(current_user.get("username", "")),
         target=capture_session_id,
         extra={"closed": bool(body.close), "note_set": body.note is not None,

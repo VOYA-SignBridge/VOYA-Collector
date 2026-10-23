@@ -85,7 +85,7 @@ def _signed_in_client(*, is_admin: bool):
     from fastapi.testclient import TestClient
 
     from conftest import LoopbackPeer, fresh_client_ip
-    from app import auth
+    from app.modules.identity import _web_compat as auth
     from app.main import app
 
     name = _unique("sgn")
@@ -321,7 +321,7 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         """
         from conftest import purge_tenant
         from app.modules.saas import tenant_admin
-        from app import auth
+        from app.modules.identity import _web_compat as auth
         from app.modules.saas.tenant_context import system_scope
 
         name = _unique("owner")
@@ -367,7 +367,7 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         """
         from conftest import purge_tenant
         from app.modules.saas import tenant_admin
-        from app import auth
+        from app.modules.identity import _web_compat as auth
 
         ten_tk, tao = [], []
         try:

@@ -1,7 +1,7 @@
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 from app.infrastructure.celery.app import celery_app
 from app.core.http_validation import validate_job_id
 

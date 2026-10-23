@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from app.modules.saas import tenant_admin
 from app.modules.security import audit
-from app.auth import get_current_user, require_admin
+from app.modules.identity._web_compat import get_current_user, require_admin
 from app.modules.security.rate_limit_deps import limit_catalog
 from app.modules.security.sudo_mode import require_sudo
 

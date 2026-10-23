@@ -159,10 +159,10 @@ def test_a_security_event_lands_in_the_durable_log_too():
     được, vì đó mới là bản trả lời được câu hỏi "tháng trước ai đã khoá tài
     khoản này".
     """
-    from app import activity
+    from app.modules.security import audit_log
 
     target = f"muc-tieu-{uuid.uuid4().hex[:8]}"
-    activity.log_security_event("thu_nghiem", actor="nguoi-kiem-thu",
+    audit_log.log_security_event("thu_nghiem", actor="nguoi-kiem-thu",
                                 target=target, reason="ly do")
 
     with system_scope("test: đọc lại nhật ký bền"):
@@ -177,7 +177,7 @@ def test_a_security_event_lands_in_the_durable_log_too():
 def test_a_broken_durable_write_does_not_break_the_redis_write(monkeypatch):
     """Hai nhánh độc lập. Postgres chết không được làm mất luôn dòng Redis —
     nếu không thì thêm một nhật ký thứ hai lại làm YẾU đi cái thứ nhất."""
-    from app import activity
+    from app.modules.security import audit_log
 
     def boom(**_kwargs):
         raise RuntimeError("postgres đang chết")
@@ -185,9 +185,9 @@ def test_a_broken_durable_write_does_not_break_the_redis_write(monkeypatch):
     monkeypatch.setattr(db, "insert_audit_log", boom)
 
     target = f"muc-tieu-{uuid.uuid4().hex[:8]}"
-    activity.log_security_event("thu_nghiem_hong", actor="ai-do", target=target)
+    audit_log.log_security_event("thu_nghiem_hong", actor="ai-do", target=target)
 
-    events = activity.list_security_log(limit=50)
+    events = audit_log.list_security_log(limit=50)
     assert any(e.get("target") == target for e in events), \
         "nhánh Redis chết theo nhánh Postgres"
 

@@ -119,7 +119,7 @@ def tenant_dich():
 
 
 def _client(*, la_admin: bool):
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
 
     app.dependency_overrides[require_admin] = lambda: {
@@ -131,7 +131,7 @@ def _client(*, la_admin: bool):
 
 @pytest.fixture
 def client_admin():
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
 
     app, c = _client(la_admin=True)
     yield c
@@ -146,7 +146,7 @@ def client_khong_quyen():
     là hàng rào RIÊNG của mặt phẳng này (`assert_system_admin`), chứ không phải
     dependency đứng trước nó. Hai lớp là cố ý tách rời.
     """
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
 
     app, c = _client(la_admin=False)
     yield c

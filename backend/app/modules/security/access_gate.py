@@ -436,7 +436,7 @@ def _resolve_user(request: Request):
     """
     from fastapi.security import HTTPAuthorizationCredentials
 
-    from app.auth import get_current_user_optional
+    from app.modules.identity._web_compat import get_current_user_optional
     from app.main import app
 
     resolver = app.dependency_overrides.get(

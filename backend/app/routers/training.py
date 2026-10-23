@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 
 from app.infrastructure.redis.connection import get_redis_client
-from app.auth import get_current_user, get_user_from_token, require_admin
+from app.modules.identity._web_compat import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance, research_catalog
 from app.modules.dataset.vocabulary_registry import assert_can_use_dialect
 from app.modules.security.quota_deps import guard_quota, tenant_of

@@ -33,7 +33,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from app.modules.legal import legal, legal_store
-from app.auth import require_admin
+from app.modules.identity._web_compat import require_admin
 
 logger = logging.getLogger(__name__)
 

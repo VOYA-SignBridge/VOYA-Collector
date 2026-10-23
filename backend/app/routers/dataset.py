@@ -27,7 +27,7 @@ from app.catalog_sync import (
     empty_sample_trash,
 )
 from app.modules.admin import moderation
-from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
 from app.modules.saas.tenant_context import require_tenant
 from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
 from app.modules.dataset.sample_access import can_manage_tenant_samples, readable_sample_uids

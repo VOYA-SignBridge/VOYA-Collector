@@ -564,10 +564,10 @@ def get_current_user_optional(
     # Force-logout: an admin can invalidate a user's live sessions. Tokens
     # issued before the force-logout marker are rejected; a fresh login works.
     try:
-        from app import activity
+        from app.modules.security import account_controls, session_controls
 
-        if activity.is_user_denied(user_id, payload.get("iat")):
-            fl = activity.get_force_logout(user_id) or {}
+        if account_controls.is_user_denied(user_id, payload.get("iat")):
+            fl = account_controls.get_force_logout(user_id) or {}
             msg = "Phiên đã bị đăng xuất bởi quản trị viên"
             if fl.get("reason"):
                 msg += f": {fl['reason']}"
@@ -578,7 +578,7 @@ def get_current_user_optional(
         # 60 phút, đúng bằng hành vi cũ. Đó là đường chuyển tiếp, tự hết sau một
         # vòng đời access token, nên không cần cờ cấu hình nào.
         jti = payload.get("jti")
-        if jti and activity.is_access_token_denied(str(jti)):
+        if jti and session_controls.is_access_token_denied(str(jti)):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Phiên này đã đăng xuất. Vui lòng đăng nhập lại.",
@@ -587,7 +587,7 @@ def get_current_user_optional(
         # Cả HỌ bị thu hồi: refresh token của phiên này đã bị dùng lại, tức là
         # nó đã bị sao chép. Chỉ nhánh phiên đó chết; thiết bị khác không sao.
         fam = payload.get("fam")
-        if fam and activity.is_token_family_denied(str(fam)):
+        if fam and session_controls.is_token_family_denied(str(fam)):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Phiên đăng nhập đã bị thu hồi vì phát hiện dấu hiệu bị "
@@ -612,9 +612,9 @@ def get_current_user_optional(
     # mọi lỗi để Redis chết không làm sập xác thực, nhưng ở đây dữ liệu đã nằm
     # sẵn trong tay, không có gì để hỏng, nên nuốt lỗi chỉ có thể che mất một
     # lệnh thu hồi thật.
-    from app import activity as _activity
+    from app.modules.security import session_controls
 
-    if _activity.token_predates_marker(
+    if session_controls.token_predates_marker(
         payload.get("iat"), user.get("sessions_invalid_before")
     ):
         raise HTTPException(
@@ -998,10 +998,10 @@ def _burn_token_family(cur, family_id: Optional[str], token_hash: str,
     #  2. Nó đá MỌI thiết bị. Người dùng bị trộm phiên trên điện thoại không có
     #     lý do gì phải văng khỏi máy tính — đó là trừng phạt nạn nhân.
     try:
-        from app import activity
+        from app.modules.security import session_controls
 
         if family_id:
-            activity.deny_token_family(str(family_id))
+            session_controls.deny_token_family(str(family_id))
     except Exception:
         logger.exception("[auth] chan ho token that bai family=%s", family_id)
 
@@ -1159,9 +1159,9 @@ def deny_this_access_token(raw_token: str) -> bool:
     if not jti:
         return False  # token cấp trước bản vá — không có gì để chặn
     try:
-        from app import activity
+        from app.modules.security import session_controls
 
-        return activity.deny_access_token(str(jti), payload.get("exp"))
+        return session_controls.deny_access_token(str(jti), payload.get("exp"))
     except Exception:
         logger.exception("[auth] chan access token that bai")
         return False

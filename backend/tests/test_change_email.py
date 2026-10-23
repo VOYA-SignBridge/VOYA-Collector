@@ -47,7 +47,7 @@ class _Req:
 
 
 def _make_account(prefix: str) -> dict:
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"{prefix}{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",

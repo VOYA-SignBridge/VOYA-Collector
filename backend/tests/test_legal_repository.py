@@ -76,7 +76,7 @@ def published():
 
 @pytest.fixture
 def account():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"lgr{uuid.uuid4().hex[:9]}"
     user = create_user(username=name, email=f"{name}@example.test",

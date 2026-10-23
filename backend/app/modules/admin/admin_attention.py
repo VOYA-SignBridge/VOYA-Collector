@@ -93,7 +93,7 @@ def collect(tenant_id: str) -> Dict[str, Any]:
     # Giám sát tài nguyên: số cảnh báo đang mở. Lấy thẳng từ `collect_resources`
     # để bảng thanh bên và trang giám sát không bao giờ nói hai con số khác nhau.
     try:
-        from app.monitoring import collect_resources
+        from app.modules.monitoring.service import collect_resources
         alerts = len(collect_resources().get("alerts") or [])
     except Exception:
         logger.exception("[ATTENTION] khong doc duoc canh bao tai nguyen")

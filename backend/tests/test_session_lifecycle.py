@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import auth
+from app.modules.identity import _web_compat as auth
 from app.storage.metadata_db import _execute, _fetch_all
 from app.modules.saas.tenant_context import system_scope
 
@@ -32,7 +32,7 @@ from app.modules.saas.tenant_context import system_scope
 @pytest.fixture
 def account():
     """Một tài khoản dùng một lần, dọn sạch kể cả khi test đỏ."""
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
     from conftest import purge_registered_account
 
     name = f"sess{uuid.uuid4().hex[:8]}"
@@ -204,7 +204,7 @@ class TestPhatHienTaiSuDung:
         khoá trên chính những dòng nó muốn sửa (treo vĩnh viễn — test này dựng
         lại được), và nó đá MỌI thiết bị của người dùng, tức trừng phạt nạn nhân.
         """
-        from app import activity
+        from app.modules.security import session_controls
 
         raw = auth.create_refresh_token(account["id"])
         fam_bi_trom = str(_row(raw)["family_id"])
@@ -215,8 +215,8 @@ class TestPhatHienTaiSuDung:
         _backdate_revocation(raw, seconds=120)
         auth.rotate_refresh_token(raw)
 
-        assert activity.is_token_family_denied(fam_bi_trom) is True
-        assert activity.is_token_family_denied(fam_an_toan) is False
+        assert session_controls.is_token_family_denied(fam_bi_trom) is True
+        assert session_controls.is_token_family_denied(fam_an_toan) is False
 
     def test_phat_hien_tai_su_dung_KHONG_TREO(self, account):
         """Ghim riêng cái deadlock, vì nó im lặng và chỉ lộ ra dưới tải thật.
@@ -254,7 +254,7 @@ class TestDangXuatGietDungPhienDo:
         assert claims_a["jti"] and claims_a["jti"] != claims_b["jti"]
 
     def test_dang_xuat_chan_dung_token_do(self):
-        from app import activity
+        from app.modules.security import session_controls
 
         token = auth.create_access_token({"sub": "u1"})
         assert auth.deny_this_access_token(token) is True
@@ -265,10 +265,10 @@ class TestDangXuatGietDungPhienDo:
         jti = jose_jwt.decode(token, settings.secret_key,
                               algorithms=[settings.algorithm],
                               options={"verify_aud": False})["jti"]
-        assert activity.is_access_token_denied(jti) is True
+        assert session_controls.is_access_token_denied(jti) is True
 
     def test_dang_xuat_KHONG_dung_toi_phien_khac(self):
-        from app import activity
+        from app.modules.security import session_controls
         from jose import jwt as jose_jwt
 
         from app.config import settings
@@ -280,7 +280,7 @@ class TestDangXuatGietDungPhienDo:
         jti_may_tinh = jose_jwt.decode(may_tinh, settings.secret_key,
                                        algorithms=[settings.algorithm],
                                        options={"verify_aud": False})["jti"]
-        assert activity.is_access_token_denied(jti_may_tinh) is False
+        assert session_controls.is_access_token_denied(jti_may_tinh) is False
 
     def test_token_gia_KHONG_chan_duoc_gi(self):
         """Nếu đọc claim mà không xác minh chữ ký, bất kỳ ai cũng tự chế được một
@@ -323,7 +323,7 @@ class TestResetMatKhauDaMoiThietBi:
         assert rows[0]["sessions_invalid_before"] is not None
 
     def test_token_cap_truoc_moc_bi_tu_choi(self, account):
-        from app import activity
+        from app.modules.security import session_controls
 
         cu = time.time() - 3600
         auth.set_password_and_revoke_sessions(account["id"], "mat khau moi hoan toan")
@@ -332,13 +332,13 @@ class TestResetMatKhauDaMoiThietBi:
                 "SELECT sessions_invalid_before FROM users WHERE id = %s",
                 (account["id"],))[0]["sessions_invalid_before"]
 
-        assert activity.token_predates_marker(cu, moc) is True
-        assert activity.token_predates_marker(time.time() + 60, moc) is False
+        assert session_controls.token_predates_marker(cu, moc) is True
+        assert session_controls.token_predates_marker(time.time() + 60, moc) is False
 
     def test_khong_co_moc_thi_khong_tu_choi_ai(self):
-        from app import activity
+        from app.modules.security import session_controls
 
-        assert activity.token_predates_marker(time.time(), None) is False
+        assert session_controls.token_predates_marker(time.time(), None) is False
 
 
 class TestMocThuHoiBen:
@@ -346,9 +346,9 @@ class TestMocThuHoiBen:
     hồi phiên của quản trị viên bốc hơi, và không có dòng log nào báo."""
 
     def test_force_logout_ghi_ca_xuong_postgres(self, account):
-        from app import activity
+        from app.modules.security import account_controls
 
-        activity.force_logout_user(account["id"], by="test", reason="kiem tra")
+        account_controls.force_logout_user(account["id"], by="test", reason="kiem tra")
         with system_scope("test read: moc thu hoi"):
             rows = _fetch_all(
                 "SELECT sessions_invalid_before FROM users WHERE id = %s",
@@ -358,14 +358,14 @@ class TestMocThuHoiBen:
     def test_moc_chi_tien_khong_lui(self, account):
         """`GREATEST`: hai lệnh thu hồi gần nhau không được làm mốc trẻ lại, vì
         như thế là hồi sinh đúng những token vừa bị đá."""
-        from app import activity
+        from app.modules.security import account_controls
 
-        activity.force_logout_user(account["id"], by="test")
+        account_controls.force_logout_user(account["id"], by="test")
         with system_scope("test read"):
             moc1 = _fetch_all("SELECT sessions_invalid_before FROM users WHERE id = %s",
                               (account["id"],))[0]["sessions_invalid_before"]
 
-        activity._persist_force_logout_marker(account["id"], time.time() - 7200)
+        account_controls._persist_force_logout_marker(account["id"], time.time() - 7200)
         with system_scope("test read"):
             moc2 = _fetch_all("SELECT sessions_invalid_before FROM users WHERE id = %s",
                               (account["id"],))[0]["sessions_invalid_before"]

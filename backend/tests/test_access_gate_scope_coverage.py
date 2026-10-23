@@ -72,7 +72,7 @@ def account():
     created: list[str] = []
 
     def _make() -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = f"g{uuid.uuid4().hex[:10]}"
         user = create_user(

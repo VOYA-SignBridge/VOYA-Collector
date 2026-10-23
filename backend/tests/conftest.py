@@ -211,7 +211,7 @@ class _MirroringOverrides(dict):
 
     def __setitem__(self, key, value):
         super().__setitem__(key, value)
-        from app.auth import get_current_user, get_current_user_optional, require_admin
+        from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
 
         if key is get_current_user:
             super().__setitem__(get_current_user_optional, value)
@@ -230,7 +230,7 @@ class _MirroringOverrides(dict):
         return result
 
     def _drop_mirror(self, key):
-        from app.auth import get_current_user, get_current_user_optional, require_admin
+        from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
 
         if key in (require_admin, get_current_user):
             super().pop(get_current_user_optional, None)

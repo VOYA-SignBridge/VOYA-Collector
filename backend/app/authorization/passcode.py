@@ -82,7 +82,7 @@ def _hasher():
     Nhập ở đây chứ không tự chọn thuật toán: hai bộ băm khác nhau cho hai loại
     bí mật nghĩa là hai lịch nâng cấp tham số, và cái ít được để ý sẽ tụt lại.
     """
-    from app.auth import pwd_context
+    from app.modules.identity._web_compat import pwd_context
 
     return pwd_context
 

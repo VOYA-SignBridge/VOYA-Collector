@@ -217,7 +217,7 @@ def client_ip(request: Request) -> str:
     """Real client address as our own gateway resolved it. Never raises.
 
     This value is not a logging nicety: it keys the per-IP flood block, the
-    generic limiter below and activity.get_block(), the admin's IP ban list.
+    generic limiter below and ip_controls.get_block(), the admin's IP ban list.
     Anything a caller can choose here, a caller can use to reset all three on
     every request — so a header is believed ONLY when the TCP peer is one of our
     own proxies (TRUSTED_PROXIES). Reached directly, headers are ignored
@@ -360,7 +360,8 @@ def _pair_block_key(identifier: str, ip: str) -> str:
     return f"{_KEY_PREFIX}login:pairblock:{_norm(identifier)}:{ip}"
 
 
-# Kept at this exact name: activity.detect_anomalies scans "ratelimit:login:ip:*"
+# Kept at this exact name: activity_monitor.detect_anomalies scans
+# "ratelimit:login:ip:*"
 # to surface failed-login bursts on the admin activity page.
 def _login_ip_key(ip: str) -> str:
     return f"{_KEY_PREFIX}login:ip:{ip}"

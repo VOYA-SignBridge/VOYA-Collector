@@ -37,7 +37,7 @@ from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 def _make_account(prefix: str) -> dict:
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"{prefix}{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -118,13 +118,13 @@ class TestTenPhienDangHoatDong:
     def test_resolve_usernames_tra_ve_ten_chu_khong_phai_rong(self, account, tenant):
         """Bảng "Phiên đang hoạt động" hiện MỌI dòng là "Khách" khi hàm này trả {}.
 
-        `activity._resolve_usernames` cũng mở kết nối trần và cũng đọc `users`.
+        `account_controls.resolve_usernames` cũng mở kết nối trần và cũng đọc `users`.
         Triệu chứng khác nhau, nguyên nhân giống hệt, nên nó phải được neo ở
         cùng một chỗ — nếu không lần sửa sau sẽ chỉ vá một nửa.
         """
-        from app import activity
+        from app.modules.security import account_controls
 
-        got = activity._resolve_usernames({account["id"]})
+        got = account_controls.resolve_usernames({account["id"]})
         assert account["id"] in got, (
             "Không tra được tên — kết nối thiếu apply_scope(), và giao diện sẽ "
             "ghi 'Khách' cho mọi phiên."

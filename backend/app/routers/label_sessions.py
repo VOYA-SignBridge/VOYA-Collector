@@ -28,7 +28,7 @@ import numpy as np
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 from app.modules.saas.tenant_context import require_tenant
 from app.modules.dataset.preview_render import (
     find_class_meta,

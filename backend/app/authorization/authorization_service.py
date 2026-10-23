@@ -276,7 +276,8 @@ def _record_shadow(actor_id: str, permission: str, legacy: bool, casbin: bool,
     # dừng cho việc chuyển chế độ.
     #
     # Cả phép import lẫn phép đo đều nằm trong `try`, và không phải vì cẩn thận
-    # quá mức: `app.infrastructure.observability.metrics` kéo theo `prometheus_client` và `app.monitoring`,
+    # quá mức: `app.infrastructure.observability.metrics` kéo theo `prometheus_client`
+    # và toàn bộ monitoring service,
     # vốn không có mặt ở mọi lối vào (CLI, một số test). Một `ImportError` ở
     # đây sẽ làm hỏng chính phép phân quyền — tức là một chỉ số quan sát làm
     # sập thứ nó đang quan sát.

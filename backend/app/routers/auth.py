@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
 from app.modules.saas import tenant_admin
 from app.config import settings
-from app.auth import (
+from app.modules.identity._web_compat import (
     _fetch_user_by_id,
     authenticate_user,
     create_access_token,
@@ -30,8 +30,9 @@ from app.modules.identity.cookies import (
     generate_csrf_token,
     set_auth_cookies,
 )
+from app.modules.security import account_controls, audit_log
 from app.core.public_url import resolve_frontend_base_url
-from app.rate_limit import (
+from app.modules.security._web_compat import (
     check_login_allowed,
     check_register_allowed,
     client_ip,
@@ -285,7 +286,7 @@ def _record_consents(user_id: str, consents: dict, request: Request) -> None:
     cá nhân cho một mục đích không đòi hỏi nó.
     """
     from app.modules.legal import legal
-    from app.rate_limit import client_ip
+    from app.modules.security._web_compat import client_ip
 
     ip_hash = hashlib.sha256(
         f"{client_ip(request)}|{user_id}".encode("utf-8")).hexdigest()
@@ -547,13 +548,11 @@ def login(payload: LoginRequest, request: Request, response: Response):
 
     # Correct password but the account is locked by an admin → say so clearly.
     try:
-        from app import activity
-
-        lock = activity.get_user_lock(user["id"])
+        lock = account_controls.get_user_lock(user["id"])
         if lock:
             reason = lock.get("reason") or "vi phạm quy định"
             msg = f"Tài khoản của bạn đã bị khóa. Lý do: {reason}"
-            until = activity._fmt_until(lock.get("until") or 0)
+            until = account_controls.format_until(lock.get("until") or 0)
             if until:
                 msg += f" (mở lại lúc {until})"
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
@@ -672,17 +671,13 @@ def login_two_factor(payload: TwoFactorLoginRequest,
 @router.get("/my-notice")
 def my_notice(current_user: dict = Depends(get_current_user)):
     """Pending admin notice (warning) for the logged-in user, if any."""
-    from app import activity
-
-    return {"warning": activity.get_user_warning(current_user["id"])}
+    return {"warning": account_controls.get_user_warning(current_user["id"])}
 
 
 @router.post("/my-notice/ack")
 def ack_my_notice(current_user: dict = Depends(get_current_user)):
     """Dismiss the pending warning after the user has read it."""
-    from app import activity
-
-    activity.ack_user_warning(current_user["id"])
+    account_controls.ack_user_warning(current_user["id"])
     return {"status": "ok"}
 
 
@@ -730,7 +725,7 @@ def logout(request: Request, response: Response):
     Chặn theo `jti` chứ không gọi `force_logout_user`: hàm kia đá MỌI thiết bị,
     nên đăng xuất trên điện thoại sẽ làm văng phiên trên máy tính.
     """
-    from app.auth import deny_this_access_token
+    from app.modules.identity._web_compat import deny_this_access_token
     from app.modules.identity.cookies import ACCESS_COOKIE
 
     revoke_refresh_token(request.cookies.get(REFRESH_COOKIE) or "")
@@ -886,8 +881,7 @@ def change_password(
     sót đúng cái mình định đuổi. Giao diện phải nói trước điều này.
     """
     from app.modules.security import audit, two_factor
-    from app import activity
-    from app.auth import _apply_password_reset, _identity_cursor
+    from app.modules.identity._web_compat import _apply_password_reset, _identity_cursor
 
     # Chặn dò mật khẩu bằng cách gọi thẳng endpoint này với một access token đã
     # chiếm được. Cùng ngưỡng với `/reset-password`.
@@ -895,7 +889,7 @@ def change_password(
 
     if not verify_password(payload.current_password,
                            current_user.get("password_hash") or ""):
-        activity.log_security_event(
+        audit_log.log_security_event(
             "password.change_rejected", actor=current_user.get("username", ""),
             target=str(current_user["id"]), actor_user=current_user, request=request)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
@@ -929,7 +923,7 @@ def change_password(
         "account.password.change", actor=current_user, target_type="user",
         target_id=str(current_user["id"]),
         detail={"used_recovery_code": used_recovery}, request=request)
-    activity.log_security_event(
+    audit_log.log_security_event(
         "password.changed", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
 
@@ -1013,11 +1007,9 @@ class ChangeEmailConfirmResponse(BaseModel):
 
 
 def _guard_email_change(current_user, password: str, request: Request) -> None:
-    from app import activity
-
     enforce_ip_limit(request, "change-email", max_calls=10, window=3600)
     if not verify_password(password, current_user.get("password_hash") or ""):
-        activity.log_security_event(
+        audit_log.log_security_event(
             "email.change_rejected", actor=current_user.get("username", ""),
             target=str(current_user["id"]), actor_user=current_user, request=request)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
@@ -1031,7 +1023,7 @@ def change_email_start(
     current_user=Depends(get_current_user),
 ):
     from app.modules.security import otp
-    from app.auth import _identity_cursor
+    from app.modules.identity._web_compat import _identity_cursor
     from app.email_service import EmailNotConfigured, send_verification_code_email
 
     _guard_email_change(current_user, payload.current_password, request)
@@ -1053,7 +1045,7 @@ def change_email_start(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail="Địa chỉ này đã có tài khoản khác dùng.")
     # Và cùng HỘP THƯ viết bằng bí danh — cùng quy tắc với đăng ký.
-    from app.auth import find_user_with_same_mailbox
+    from app.modules.identity._web_compat import find_user_with_same_mailbox
     if find_user_with_same_mailbox(new_email, exclude_user_id=str(current_user["id"])):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Hộp thư này đã có tài khoản khác dùng (địa chỉ viết khác nhưng cùng hộp thư).")
@@ -1082,8 +1074,7 @@ def change_email_confirm(
 ):
     from app.modules.security import audit, otp
     from app.modules.support import notifications
-    from app import activity
-    from app.auth import _identity_cursor
+    from app.modules.identity._web_compat import _identity_cursor
 
     _guard_email_change(current_user, payload.current_password, request)
 
@@ -1122,7 +1113,7 @@ def change_email_confirm(
                  target_id=str(current_user["id"]),
                  detail={"old_email": old_email, "new_email": new_email},
                  request=request)
-    activity.log_security_event(
+    audit_log.log_security_event(
         "email.changed", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
 

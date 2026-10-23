@@ -43,7 +43,7 @@ def phien():
     from fastapi.testclient import TestClient
 
     from conftest import LoopbackPeer, fresh_client_ip
-    from app import auth
+    from app.modules.identity import _web_compat as auth
     from app.main import app
 
     def _tao(*, is_admin: bool):

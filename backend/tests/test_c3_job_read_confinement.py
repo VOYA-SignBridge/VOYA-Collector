@@ -134,7 +134,7 @@ def app_client(hai_nguoi_dung):
 
 def _nhu(uid: str) -> Dict[str, str]:
     """Header của một phiên THẬT. Middleware và `get_current_user` cùng đọc nó."""
-    from app import auth
+    from app.modules.identity import _web_compat as auth
 
     return {"Authorization": f"Bearer {auth.create_access_token({'sub': uid})}"}
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Gauge, Counter, Histogram
-from app.monitoring import collect_resources
+from app.modules.monitoring.service import collect_resources
 import asyncio
 import logging
 
@@ -284,7 +284,7 @@ async def metrics():
             # là "Nvidia GPU is missing or unreadable" cho mọi nguyên nhân, nên
             # ngày 2026-08-09 nó gửi đi một lá thư bảo đi tìm cái card đang nằm
             # yên trong máy — cái sai thật là stack được dựng thiếu overlay GPU.
-            from app.monitoring import GPU_ABSENCE_HINTS
+            from app.modules.monitoring.gpu import GPU_ABSENCE_HINTS
 
             reason = str(gpu.get("reason") or "unknown")
             logger.error(

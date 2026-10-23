@@ -16,6 +16,28 @@ logger = logging.getLogger("monitoring")
 GPU_SNAPSHOT_KEY = "monitor:gpu"
 GPU_SNAPSHOT_TTL = 15
 GPU_SAMPLE_INTERVAL = 4
+GPU_ABSENCE_KEY = "monitor:gpu:absent"
+GPU_ABSENCE_INTERVAL = 60
+GPU_ABSENCE_TTL = 180
+GPU_ABSENCE_HINTS: Dict[str, str] = {
+    "no_device_in_container": (
+        "Trainer đang chạy nhưng không được cấp thiết bị nào. Nếu máy chủ có card "
+        "NVIDIA thì stack đã được dựng thiếu overlay GPU — chạy lại scripts/deploy.sh, "
+        "nó tự dò card. Nếu máy chủ không có card thì đây là trạng thái đúng."
+    ),
+    "no_snapshot": (
+        "Không container nào báo cáo GPU. Trainer có thể đã chết, hoặc đang chạy ảnh "
+        "cũ chưa có ngọn đèn báo vắng mặt — kiểm tra trainer còn sống không trước khi "
+        "kết luận về phần cứng."
+    ),
+    "redis_unavailable": "Không nối được Redis — đây là sự cố Redis, không phải sự cố GPU.",
+    "redis_error": "Redis trả lời lỗi — đây là sự cố Redis, không phải sự cố GPU.",
+    "parse_error": "Ảnh chụp GPU trong Redis không đọc được (hỏng định dạng).",
+}
+
+# A patch point used by focused tests and by callers that replace the Redis
+# transport. Keep the alias local to this bounded context.
+_redis_client = get_redis_client
 _sampler_started = False
 _sampler_lock = threading.Lock()
 
@@ -91,7 +113,7 @@ def _sampler_loop() -> None:
             snapshot = sample_gpu()
             if snapshot is not None:
                 snapshot["ts"] = time.time()
-                client = get_redis_client()
+                client = _redis_client()
                 if client is not None:
                     client.set(GPU_SNAPSHOT_KEY, json.dumps(snapshot), ex=GPU_SNAPSHOT_TTL)
         except Exception as exc:
@@ -99,33 +121,102 @@ def _sampler_loop() -> None:
         time.sleep(GPU_SAMPLE_INTERVAL)
 
 
-def start_gpu_monitor() -> None:
-    """Start one sampler thread, only where a GPU is visible."""
+def _publish_absence_beacon() -> None:
+    client = _redis_client()
+    if client is None:
+        return
+    try:
+        client.set(
+            GPU_ABSENCE_KEY,
+            json.dumps({"reason": "no_device_in_container", "ts": time.time()}),
+            ex=GPU_ABSENCE_TTL,
+        )
+    except Exception as exc:
+        logger.debug("[MONITOR] absence beacon not published: %s", exc)
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def _absence_beacon_loop() -> None:
+    """Refresh the trainer-alive/no-device signal until a GPU appears."""
+    global _sampler_started
+    while True:
+        if sample_gpu() is not None:
+            with _sampler_lock:
+                if not _sampler_started:
+                    threading.Thread(
+                        target=_sampler_loop, name="gpu-monitor", daemon=True
+                    ).start()
+                    _sampler_started = True
+                    logger.info("[MONITOR] GPU became visible; sampler started")
+            return
+        _publish_absence_beacon()
+        time.sleep(GPU_ABSENCE_INTERVAL)
+
+
+def start_gpu_monitor(*, is_trainer: bool = False) -> None:
+    """Start sampling; only a trainer publishes the no-device beacon."""
     global _sampler_started
     with _sampler_lock:
         if _sampler_started:
             return
-        if shutil.which("nvidia-smi") is None or sample_gpu() is None:
-            logger.info("[MONITOR] no GPU visible here — sampler disabled")
+        has_device = shutil.which("nvidia-smi") is not None and sample_gpu() is not None
+        if has_device:
+            threading.Thread(
+                target=_sampler_loop, name="gpu-monitor", daemon=True
+            ).start()
+            _sampler_started = True
+            logger.info("[MONITOR] GPU sampler thread launched")
             return
-        threading.Thread(target=_sampler_loop, name="gpu-monitor", daemon=True).start()
-        _sampler_started = True
-        logger.info("[MONITOR] GPU sampler thread launched")
+
+    logger.info(
+        "[MONITOR] no GPU visible here — sampler disabled (trainer=%s)", is_trainer
+    )
+    if is_trainer:
+        threading.Thread(
+            target=_absence_beacon_loop, name="gpu-absence", daemon=True
+        ).start()
 
 
 def read_gpu_snapshot() -> Dict[str, Any]:
-    client = get_redis_client()
+    client = _redis_client()
     if client is None:
-        return {"available": False, "reason": "redis_unavailable"}
+        return {
+            "available": False,
+            "reason": "redis_unavailable",
+            "hint": GPU_ABSENCE_HINTS["redis_unavailable"],
+        }
     try:
         raw = client.get(GPU_SNAPSHOT_KEY)
+        beacon = None if raw else client.get(GPU_ABSENCE_KEY)
     except Exception:
-        return {"available": False, "reason": "redis_error"}
+        return {
+            "available": False,
+            "reason": "redis_error",
+            "hint": GPU_ABSENCE_HINTS["redis_error"],
+        }
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
     if not raw:
-        return {"available": False, "reason": "no_snapshot"}
+        reason = "no_device_in_container" if beacon else "no_snapshot"
+        return {
+            "available": False,
+            "reason": reason,
+            "hint": GPU_ABSENCE_HINTS[reason],
+        }
     try:
         data = json.loads(raw)
         data["age_s"] = round(time.time() - float(data.get("ts", 0)), 1)
         return data
     except Exception:
-        return {"available": False, "reason": "parse_error"}
+        return {
+            "available": False,
+            "reason": "parse_error",
+            "hint": GPU_ABSENCE_HINTS["parse_error"],
+        }

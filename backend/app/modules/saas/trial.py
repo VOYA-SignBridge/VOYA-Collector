@@ -38,14 +38,14 @@ Nên: một phiếu ngẫu nhiên đặt trong cookie HttpOnly, chỉ lưu BĂM 
 máy chủ. Xoá cookie là được phiếu mới, và điều đó **chấp nhận được**: mục tiêu
 không phải chặn người quyết tâm mà là tạo một thời điểm mời đăng ký tự nhiên cho
 người bình thường. Chống lạm dụng có hệ thống là việc của trần toàn cục trong
-`rate_limit.py`, không phải việc của module này.
+`modules/security/_web_compat.py`, không phải việc của module này.
 
 Fail-closed hay fail-open khi Redis chết?
 ------------------------------------------
 **Fail-open**, và đây là lựa chọn có cân nhắc, khác với mọi chỗ khác trong hệ
 thống này. Redis chết mà chặn nghĩa là tính năng dùng thử biến mất với mọi
 người vì một sự cố hạ tầng; thứ bị rủi ro chỉ là một hạn ngạch trải nghiệm, chứ
-không phải dữ liệu của ai. `rate_limit.py` đã fail-open vì cùng lý do. Ranh giới
+không phải dữ liệu của ai. Limiter đã fail-open vì cùng lý do. Ranh giới
 THẬT — ai đọc được dữ liệu nào — nằm ở RLS và ở `access_gate`, không nằm ở đây.
 """
 
@@ -128,7 +128,7 @@ def _client():
     Hai pool tới cùng một Redis là hai lần chi phí kết nối và hai chỗ phải sửa
     khi URL đổi — và pool kia đã có sẵn xử lý fail-open cần thiết.
     """
-    from app.rate_limit import _client as shared_client
+    from app.modules.security._web_compat import _client as shared_client
 
     return shared_client()
 

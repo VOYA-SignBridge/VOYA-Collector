@@ -16,8 +16,8 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import activity
-from app.auth import require_admin
+from app.modules.security import audit_log
+from app.modules.identity._web_compat import require_admin
 from app.sot import catalog_schema, keys
 from app.sot import manifest as m
 from app.storage import metadata_db as db
@@ -260,7 +260,7 @@ def register_machine(payload: RegisterMachine, request: Request,
     # tin. Bảng `sot_authorized_keys` nói máy nào ĐANG được phép; nó không nói
     # ai đã cho phép và lúc nào — và khi một bản publish lạ xuất hiện thì đó
     # đúng là câu hỏi đầu tiên. Vân tay khoá ghi lại, khoá riêng thì KHÔNG.
-    activity.log_security_event(
+    audit_log.log_security_event(
         "sot.machine_registered", actor=current_user.get("username", ""),
         target=fp, extra={"name": name, "mode": payload.mode},
         actor_user=current_user, request=request)
@@ -298,7 +298,7 @@ def revoke_machine(fingerprint: str, request: Request,
     # Thu hồi là hành động làm một máy đang chạy mất quyền publish giữa chừng.
     # Nếu không ai nhớ đã thu hồi, triệu chứng ở đầu kia là `sot-init` thoát mã
     # 4 và cả stack không lên — một sự cố trông như lỗi hạ tầng.
-    activity.log_security_event(
+    audit_log.log_security_event(
         "sot.machine_revoked", actor=current_user.get("username", ""),
         target=fingerprint, actor_user=current_user, request=request)
     return {"revoked": True, "fingerprint": fingerprint}

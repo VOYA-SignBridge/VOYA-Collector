@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.modules.security import audit
 from app.modules.dataset import vocabulary_registry as vr
-from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
 from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)

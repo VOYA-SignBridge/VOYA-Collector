@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.modules.support import notifications
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 

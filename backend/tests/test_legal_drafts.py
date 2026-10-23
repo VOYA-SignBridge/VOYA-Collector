@@ -414,7 +414,7 @@ class TestTheRegister:
         Tức là thêm một sổ đăng bạ đã âm thầm làm hỏng quyền xoá tài khoản, thứ
         chính sách quyền riêng tư hứa ở mục 6. Test này ghim việc đó đã được vá.
         """
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         name = f"lgev{uuid.uuid4().hex[:8]}"
@@ -434,7 +434,7 @@ class TestTheRegister:
                                                                 free_legal_kinds):
         """Xoá tài khoản không được xoá dấu vết ai đã làm gì. `actor_label` được
         điền ngay lúc ghi, chính vì `actor_user_id` không còn khoá ngoại."""
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         name = f"lglb{uuid.uuid4().hex[:8]}"

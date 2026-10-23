@@ -125,7 +125,7 @@ def _tenant_of_user(user_id: str) -> Optional[str]:
 
 def resolve_tenant(access_cookie: Optional[str], bearer: Optional[str]) -> Optional[str]:
     """Tenant for a request carrying these credentials. Never raises."""
-    from app.auth import _subject_of
+    from app.modules.identity._web_compat import _subject_of
 
     # Khoá API (`Bearer voya_...`) không phải JWT: `_subject_of` trả None và yêu
     # cầu từng rơi về phạm vi CÔNG KHAI (`default`) — khoá của trường B đọc/ghi

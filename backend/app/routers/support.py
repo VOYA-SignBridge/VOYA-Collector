@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.modules.support import support, support_bot
-from app.auth import get_current_user, require_admin
+from app.modules.identity._web_compat import get_current_user, require_admin
 
 router = APIRouter(prefix="/support", tags=["support"])
 

@@ -33,7 +33,7 @@ from typing import Any, Dict
 
 from fastapi import Depends, HTTPException, Request, status
 
-from app.auth import get_current_user, require_admin
+from app.modules.identity._web_compat import get_current_user, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ SUDO_TTL_SECONDS = 300
 
 
 def _client():
-    from app.rate_limit import _client as shared_client
+    from app.modules.security._web_compat import _client as shared_client
 
     return shared_client()
 
@@ -82,7 +82,7 @@ def seconds_remaining(user_id: str) -> int:
 
 def elevate(user: Dict[str, Any], password: str) -> int:
     """Xác minh mật khẩu rồi nâng quyền. Ném lỗi nếu sai."""
-    from app.auth import authenticate_user
+    from app.modules.identity._web_compat import authenticate_user
 
     if not password or authenticate_user(user["email"], password) is None:
         # Ghi lại: mật khẩu sai ở bước nâng quyền nghĩa là có người đang ngồi

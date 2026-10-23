@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 import app.routers.training as tr
 import app.modules.saas.tenant_middleware as tm
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 from app.main import app
 
 HOME = "truong-b"

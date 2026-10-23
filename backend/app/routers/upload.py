@@ -44,7 +44,7 @@ from app.core.http_validation import (
     validate_dialect,
     save_upload_with_limit,
 )
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 from app.modules.saas.tenant_context import require_tenant
 from app.modules.saas import storage_quota
 from app.modules.security.quota_deps import guard_storage, storage_full_http

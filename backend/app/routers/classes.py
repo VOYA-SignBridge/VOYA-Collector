@@ -28,7 +28,7 @@ from app.catalog_sync import (
     empty_class_trash,
 )
 from app.config import settings
-from app.auth import get_current_user, require_admin, require_tenant_editor
+from app.modules.identity._web_compat import get_current_user, require_admin, require_tenant_editor
 from app.modules.saas.tenant_context import require_tenant
 
 from app.modules.saas.webhooks import emit

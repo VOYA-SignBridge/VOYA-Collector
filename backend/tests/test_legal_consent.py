@@ -134,7 +134,7 @@ def _publish(kind="terms", version="2026-08-07", body="Nội dung điều khoả
 
 @pytest.fixture
 def account():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"lgl{uuid.uuid4().hex[:9]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -458,7 +458,7 @@ class TestMyConsentsEndpoint:
     def signed_in(self, account):
         from fastapi.testclient import TestClient
         from conftest import LoopbackPeer
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: account

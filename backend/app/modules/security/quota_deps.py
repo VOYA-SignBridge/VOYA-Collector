@@ -113,7 +113,7 @@ def _announce_quota_exceeded(tenant_id: str, exc: QuotaExceeded) -> None:
     biết mình chạm trần, không cần biết mình chạm trần một nghìn lần.
     """
     try:
-        from app.rate_limit import _client
+        from app.modules.security._web_compat import _client
 
         client = _client()
         if client is not None:

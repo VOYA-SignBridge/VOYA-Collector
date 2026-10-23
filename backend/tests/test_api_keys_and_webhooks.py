@@ -115,7 +115,7 @@ class TestKeyAuthorisation:
         với thao tác nhạy cảm là một lần nhập lại mật khẩu — thứ một chuỗi ký
         tự trong biến môi trường CI không có.
         """
-        from app.auth import _user_from_api_key
+        from app.modules.identity._web_compat import _user_from_api_key
 
         created = api_keys.create_key(two_tenants[0], scopes="write")
         user = _user_from_api_key(created["key"])
@@ -125,7 +125,7 @@ class TestKeyAuthorisation:
     def test_a_read_key_cannot_edit_the_catalogue(self, two_tenants):
         from fastapi import HTTPException
 
-        from app.auth import _user_from_api_key, require_tenant_editor
+        from app.modules.identity._web_compat import _user_from_api_key, require_tenant_editor
 
         created = api_keys.create_key(two_tenants[0], scopes="read")
         user = _user_from_api_key(created["key"])
@@ -135,7 +135,7 @@ class TestKeyAuthorisation:
 
     def test_a_write_key_can(self, two_tenants):
         """Phản chứng. Không có nó, test trên vẫn xanh nếu khoá nào cũng bị chặn."""
-        from app.auth import _user_from_api_key, require_tenant_editor
+        from app.modules.identity._web_compat import _user_from_api_key, require_tenant_editor
 
         created = api_keys.create_key(two_tenants[0], scopes="write")
         user = _user_from_api_key(created["key"])
@@ -149,7 +149,7 @@ class TestKeyAuthorisation:
         Dòng phải được ghi, với nhãn còn nói được ai đã làm.
         """
         from app.modules.security import audit
-        from app.auth import _user_from_api_key
+        from app.modules.identity._web_compat import _user_from_api_key
 
         created = api_keys.create_key(two_tenants[0], scopes="write")
         user = _user_from_api_key(created["key"])
@@ -366,8 +366,8 @@ class TestRateLimitKeyspace:
         đếm tới ngưỡng trong test là chậm và phụ thuộc cấu hình, còn khoá thì
         nói thẳng thùng nào được dùng.
         """
-        from app.auth import _user_from_api_key
-        from app.rate_limit import _KEY_PREFIX, _hashed
+        from app.modules.identity._web_compat import _user_from_api_key
+        from app.modules.security._web_compat import _KEY_PREFIX, _hashed
 
         created = api_keys.create_key(two_tenants[0], scopes="read")
         user = _user_from_api_key(created["key"])

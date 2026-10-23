@@ -22,7 +22,7 @@ from app.modules.saas.tenant_context import system_scope
 @pytest.fixture
 def account():
     """Một tài khoản dùng một lần, dọn sạch kể cả khi test đỏ."""
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
     from conftest import purge_registered_account
 
     name = f"rn{uuid.uuid4().hex[:8]}"
@@ -146,7 +146,7 @@ class TestTuChoiNhungCaiPhaiTuChoi:
     def test_trung_ten_bao_bang_tieng_nguoi(self, account):
         """Để ràng buộc UNIQUE tự bắn thì thông báo nói về tên chỉ mục, không
         nói được với người dùng rằng cái tên họ chọn đã có người lấy."""
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         other = f"rn{uuid.uuid4().hex[:8]}"
@@ -161,7 +161,7 @@ class TestTuChoiNhungCaiPhaiTuChoi:
             purge_registered_account(other)
 
     def test_trung_ten_khong_phan_biet_hoa_thuong(self, account):
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         other = f"rn{uuid.uuid4().hex[:8]}"

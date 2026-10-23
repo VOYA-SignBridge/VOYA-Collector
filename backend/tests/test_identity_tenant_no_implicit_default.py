@@ -31,7 +31,7 @@ import uuid
 
 import pytest
 
-from app.auth import _row_to_user
+from app.modules.identity._web_compat import _row_to_user
 from app.storage.metadata_db import _migration_cursor, insert_user
 from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 

@@ -69,7 +69,7 @@ def account():
     created = []
 
     def _make(username: str = "", *, is_admin: bool = False) -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = username or f"t{uuid.uuid4().hex[:10]}"
         user = create_user(
@@ -700,7 +700,7 @@ class TestRouterAuthorisation:
 
     @staticmethod
     def _client(user):
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
@@ -716,7 +716,7 @@ class TestRouterAuthorisation:
 
     @staticmethod
     def _reset():
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -817,7 +817,7 @@ class TestTheLinkAndTheMail:
 
     @staticmethod
     def _client(user):
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
@@ -826,7 +826,7 @@ class TestTheLinkAndTheMail:
 
     @staticmethod
     def _reset():
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -955,14 +955,14 @@ class TestNhanLoiMoiBangTaiKhoanDaCo:
     """
 
     def _client(self, user):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
         return TestClient(app)
 
     def _reset(self):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -1074,14 +1074,14 @@ class TestLietKeMoiToChucCuaToi:
     """
 
     def _client(self, user):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
         return TestClient(app)
 
     def _reset(self):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)

@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
 
-from app.auth import require_tenant_editor
+from app.modules.identity._web_compat import require_tenant_editor
 from app.modules.identity import require_admin
 from app.modules.security.account_controls import resolve_usernames
 from app.modules.google_sync.restore_tasks import download_missing_files_to_local

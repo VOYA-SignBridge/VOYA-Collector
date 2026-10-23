@@ -54,7 +54,7 @@ def client(monkeypatch):
     """
     from app.config import settings
     from app.main import app
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
 
     monkeypatch.setattr(settings, "public_tenant_id", SCOPE, raising=False)
     app.dependency_overrides[require_admin] = lambda: {

@@ -508,7 +508,7 @@ class TestRequestTenantResolution:
         import app.modules.saas.tenant_middleware as tm
 
         monkeypatch.setattr(tm, "_tenant_of_user", lambda uid: "truong-b")
-        monkeypatch.setattr("app.auth._subject_of", lambda token: "user-1")
+        monkeypatch.setattr("app.modules.identity._web_compat._subject_of", lambda token: "user-1")
         assert tm.resolve_tenant("cookie-token", None) == "truong-b"
 
     def test_cookie_wins_over_bearer(self, monkeypatch):
@@ -518,7 +518,7 @@ class TestRequestTenantResolution:
         import app.modules.saas.tenant_middleware as tm
 
         seen = []
-        monkeypatch.setattr("app.auth._subject_of", lambda token: seen.append(token) or "u")
+        monkeypatch.setattr("app.modules.identity._web_compat._subject_of", lambda token: seen.append(token) or "u")
         monkeypatch.setattr(tm, "_tenant_of_user", lambda uid: "truong-b")
         tm.resolve_tenant("from-cookie", "from-bearer")
         assert seen == ["from-cookie"]
@@ -546,7 +546,7 @@ class TestRequestTenantResolution:
         from app.config import settings
 
         monkeypatch.setattr(settings, "public_tenant_id", "default", raising=False)
-        monkeypatch.setattr("app.auth._subject_of", lambda token: None)
+        monkeypatch.setattr("app.modules.identity._web_compat._subject_of", lambda token: None)
         assert tm.resolve_tenant("garbage", None) == "default"
 
     def test_database_failure_degrades_to_anonymous(self, monkeypatch):
@@ -557,7 +557,7 @@ class TestRequestTenantResolution:
             raise RuntimeError("db down")
 
         monkeypatch.setattr(settings, "public_tenant_id", "default", raising=False)
-        monkeypatch.setattr("app.auth._subject_of", lambda token: "u")
+        monkeypatch.setattr("app.modules.identity._web_compat._subject_of", lambda token: "u")
         monkeypatch.setattr(tm, "_tenant_of_user", _boom)
         assert tm.resolve_tenant("t", None) == "default"
 
@@ -568,7 +568,7 @@ class TestRequestTenantResolution:
         from app.config import settings
 
         monkeypatch.setattr(settings, "public_tenant_id", "default", raising=False)
-        monkeypatch.setattr("app.auth._subject_of", lambda token: "u")
+        monkeypatch.setattr("app.modules.identity._web_compat._subject_of", lambda token: "u")
         monkeypatch.setattr(tm, "_tenant_of_user", lambda uid: None)
         assert tm.resolve_tenant("t", None) == "default"
 
@@ -604,7 +604,7 @@ class TestRequestTenantResolution:
         allowed = {
             "cli/backfill_sample_owners.py",   # operator command
             "cli/verify_deployment.py",        # operator command
-            "db.py",                           # boot: CSV->DB sync spans tenants
+            "bootstrap/database.py",           # boot: CSV->DB sync spans tenants
             "sot/cli.py",                      # the SOT is a cross-tenant artefact
             "infrastructure/celery/tenant.py", # Celery tasks bind an explicit tenant
             "routers/sot_admin.py",            # counts compared against the SOT total
@@ -679,7 +679,7 @@ class TestRequestTenantResolution:
             # `record()` KHÔNG crossing và không được phép trở thành như vậy.
             # Nó cố ý fail-closed khi không có phạm vi: một dòng kiểm toán
             # không biết mình thuộc tenant nào là một dòng không ai đọc lại
-            # được đúng chỗ. Xem docstring `app/audit.py`.
+            # được đúng chỗ. Xem docstring `app/modules/security/audit.py`.
             #
             # Phạm vi đặt TRONG hai hàm đó chứ không ở chỗ gọi, để chúng không
             # thể bị gọi sai: gọi từ nơi thiếu phạm vi thì RLS lọc sạch và con
@@ -776,7 +776,7 @@ class TestRequestTenantResolution:
             # dòng TRONG IM LẶNG — lệnh thu hồi phiên trông như thành công mà
             # không thu hồi gì. Câu ghi duy nhất ở đây khoá theo `id = %s` của
             # đúng một người dùng, không nhận điều kiện nào từ bên ngoài.
-            "activity.py",
+            "modules/security/account_controls.py",
             # --- mặt phẳng phân quyền (PDM v1.0) ---
             # Adapter nạp policy của MỌI tenant vào một enforcer dùng chung cho
             # cả tiến trình. Một enforcer chỉ thấy tenant của người phái là một
@@ -820,7 +820,7 @@ class TestRequestTenantResolution:
             # Hàm này chỉ ĐỌC, và trả về một ánh xạ đường-dẫn → tenant. Nó không
             # ghi gì; quyết định xoá nằm ở `_checkpoints_to_prune`, nơi cửa sổ
             # giữ được áp RIÊNG cho từng tenant.
-            "training_tasks.py",
+            "modules/training/tasks.py",
         }
 
         app = Path(__file__).resolve().parents[1] / "app"

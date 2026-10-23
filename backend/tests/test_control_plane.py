@@ -479,7 +479,7 @@ def _dem_so_cai(cur_owner, tenant: str) -> int:
 
 @pytest.fixture
 def client_quan_tri():
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
     from fastapi.testclient import TestClient
 

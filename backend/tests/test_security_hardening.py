@@ -125,7 +125,7 @@ class TestRateLimitKeys:
     def test_user_and_ip_use_separate_key_spaces(self, monkeypatch):
         """Signing in must not inherit an anonymous caller's spent budget, and
         signing out must not reset it."""
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         keys = []
         monkeypatch.setattr(
@@ -142,7 +142,7 @@ class TestRateLimitKeys:
     def test_user_id_is_hashed_into_the_key(self, monkeypatch):
         """Redis keys end up in `KEYS`/`MONITOR` output and in memory dumps; a
         raw user id there is a needless identifier leak."""
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         keys = []
         monkeypatch.setattr(
@@ -154,7 +154,7 @@ class TestRateLimitKeys:
     def test_over_limit_raises_429_with_retry_after(self, monkeypatch):
         from fastapi import HTTPException
 
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         monkeypatch.setattr(
             rate_limit, "_incr_with_window", lambda key, window, sliding=False: (99, 42)
@@ -165,7 +165,7 @@ class TestRateLimitKeys:
         assert exc.value.headers.get("Retry-After") == "42"
 
     def test_under_limit_does_not_raise(self, monkeypatch):
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         monkeypatch.setattr(
             rate_limit, "_incr_with_window", lambda key, window, sliding=False: (1, 60)
@@ -185,7 +185,7 @@ class TestRateLimitKeys:
         Note this differs from the tenant boundary, which fails CLOSED: that one
         protects other people's data, this one protects capacity.
         """
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         monkeypatch.setattr(rate_limit, "_client", lambda: None)
         rate_limit.enforce_actor_limit(None, "upload", 1, 60, user_id="u-1")
@@ -232,7 +232,7 @@ class TestLimiterNeverAnswersForTheAuthenticator:
     def test_authenticated_only_endpoints_do_not_count_anonymous_calls(
         self, path, method, monkeypatch
     ):
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         counted = []
         monkeypatch.setattr(
@@ -251,7 +251,7 @@ class TestLimiterNeverAnswersForTheAuthenticator:
     ):
         """`/realtime/predict` serves anonymous callers for real, so skipping
         them would leave it with no ceiling at all — which was B2."""
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         counted = []
         monkeypatch.setattr(
@@ -264,7 +264,7 @@ class TestLimiterNeverAnswersForTheAuthenticator:
         assert len(counted) == 1 and ":ip:" in counted[0]
 
     def test_authenticated_calls_are_always_counted(self, monkeypatch):
-        from app import rate_limit
+        from app.modules.security import _web_compat as rate_limit
 
         counted = []
         monkeypatch.setattr(
@@ -297,7 +297,7 @@ class TestWritePathsAreCovered:
         ("/training/start", "POST"),
     ])
     def test_endpoint_has_a_limiter(self, path, method):
-        from app.rate_limit import enforce_actor_limit  # noqa: F401  (documents intent)
+        from app.modules.security._web_compat import enforce_actor_limit  # noqa: F401  (documents intent)
 
         matches = [
             r for r in self._routes()

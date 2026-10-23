@@ -4,11 +4,11 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from app.auth import get_current_user, require_admin
+from app.modules.identity._web_compat import get_current_user, require_admin
 from app.modules.security.sudo_mode import require_sudo
 from app.modules.admin.user_service import set_user_admin_role
-from app.monitoring import collect_resources
-from app import activity
+from app.modules.monitoring.service import collect_resources
+from app.modules.security import account_controls, activity_monitor, audit_log, ip_controls
 from app.routers import admin_data as _admin_data
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -180,8 +180,8 @@ def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
         ORDER BY created_at DESC
         """
     )
-    locked = activity.list_locked_users()
-    warned = activity.list_warned_users()
+    locked = account_controls.list_locked_users()
+    warned = account_controls.list_warned_users()
     # Chuyển đổi UUID/datetime sang string để FastAPI tự serialize
     for u in users:
         u["id"] = str(u["id"])
@@ -276,7 +276,7 @@ def get_attention(current_user: Dict[str, Any] = Depends(require_admin)):
 @router.get("/activity")
 def get_activity(current_user: Dict[str, Any] = Depends(require_admin)):
     """Active sessions (IP, user, location, usage) + anomalies + blocklist."""
-    return activity.activity_report(limit=150)
+    return activity_monitor.activity_report(limit=150)
 
 
 @router.post("/block-ip")
@@ -287,9 +287,9 @@ def block_ip(payload: IPAction, request: Request,
     if not ip:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thiếu địa chỉ IP")
     by = current_user.get("username", "")
-    ok = activity.block_ip(ip, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
+    ok = ip_controls.block_ip(ip, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
     if ok:
-        activity.log_security_event("block_ip", actor=by, target=ip, reason=payload.reason,
+        audit_log.log_security_event("block_ip", actor=by, target=ip, reason=payload.reason,
                                     extra={"duration_seconds": payload.duration_seconds},
                                     actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "ip": ip, "blocked": ok}
@@ -302,9 +302,9 @@ def unblock_ip(payload: IPAction, request: Request,
     ip = (payload.ip or "").strip()
     if not ip:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thiếu địa chỉ IP")
-    ok = activity.unblock_ip(ip)
+    ok = ip_controls.unblock_ip(ip)
     if ok:
-        activity.log_security_event("unblock_ip", actor=current_user.get("username", ""),
+        audit_log.log_security_event("unblock_ip", actor=current_user.get("username", ""),
                                     target=ip, actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "ip": ip, "blocked": False}
 
@@ -320,8 +320,8 @@ def force_logout(payload: ForceLogout, request: Request,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Không thể tự đăng xuất chính mình bằng công cụ này")
     by = current_user.get("username", "")
-    activity.force_logout_user(uid, by=by, reason=payload.reason)
-    activity.log_security_event("force_logout", actor=by, target=uid, reason=payload.reason,
+    account_controls.force_logout_user(uid, by=by, reason=payload.reason)
+    audit_log.log_security_event("force_logout", actor=by, target=uid, reason=payload.reason,
                                 actor_user=current_user, request=request)
     return {"status": "success", "user_id": uid}
 
@@ -337,9 +337,9 @@ def lock_user_account(user_id: str, payload: LockUser, request: Request,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Không thể tự khóa tài khoản của chính mình")
     by = current_user.get("username", "")
-    ok = activity.lock_user(uid, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
+    ok = account_controls.lock_user(uid, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
     if ok:
-        activity.log_security_event("lock_user", actor=by, target=uid, reason=payload.reason,
+        audit_log.log_security_event("lock_user", actor=by, target=uid, reason=payload.reason,
                                     extra={"duration_seconds": payload.duration_seconds},
                                     actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": uid, "locked": ok}
@@ -349,9 +349,9 @@ def lock_user_account(user_id: str, payload: LockUser, request: Request,
 def unlock_user_account(user_id: str, request: Request,
                         current_user: Dict[str, Any] = Depends(require_admin)):
     """Re-enable a locked user account."""
-    ok = activity.unlock_user(user_id)
+    ok = account_controls.unlock_user(user_id)
     if ok:
-        activity.log_security_event("unlock_user", actor=current_user.get("username", ""),
+        audit_log.log_security_event("unlock_user", actor=current_user.get("username", ""),
                                     target=user_id, actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": user_id, "locked": False}
 
@@ -401,7 +401,7 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
     """
     from app.modules.security import audit, two_factor
     from app.modules.support import notifications
-    from app.auth import request_password_reset
+    from app.modules.identity._web_compat import request_password_reset
     from app.email_service import send_password_reset_email
     from app.core.public_url import resolve_frontend_base_url
     from app.storage.metadata_db import _fetch_all
@@ -448,7 +448,7 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
     audit.record("account.recovery.assisted", actor=operator,
                  target_type="user", target_id=str(target["id"]),
                  detail={"action": action, "reason": reason}, request=request)
-    activity.log_security_event(
+    audit_log.log_security_event(
         f"recovery.{action}", actor=operator.get("username", ""),
         target=str(target["id"]), reason=reason,
         actor_user=operator, request=request)
@@ -465,9 +465,9 @@ def warn_user_account(user_id: str, payload: WarnUser, request: Request,
     if not msg:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thiếu nội dung cảnh báo")
     by = current_user.get("username", "")
-    ok = activity.warn_user(user_id, by=by, message=msg)
+    ok = account_controls.warn_user(user_id, by=by, message=msg)
     if ok:
-        activity.log_security_event("warn_user", actor=by, target=user_id, reason=msg,
+        audit_log.log_security_event("warn_user", actor=by, target=user_id, reason=msg,
                                     actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": user_id}
 
@@ -479,7 +479,7 @@ def get_security_log(current_user: Dict[str, Any] = Depends(require_admin)):
     Đọc từ danh sách Redis: nhanh, và **có thể mất dòng** (cắt còn 500 mục,
     Redis chạy `volatile-lru`). Cần bản đầy đủ thì dùng `/admin/audit-log`.
     """
-    return {"events": activity.list_security_log(limit=150)}
+    return {"events": audit_log.list_security_log(limit=150)}
 
 
 @router.get("/audit-log")
@@ -529,7 +529,7 @@ def ignore_hardware_alert(
     current_user: Dict[str, Any] = Depends(require_admin)
 ):
     """Bật/tắt cảnh báo (mute) cho phần cứng bị thiếu thông qua Redis (Chỉ Admin)"""
-    from app.monitoring import _redis_client
+    from app.infrastructure.redis.connection import get_redis_client as _redis_client
     r = _redis_client()
     if not r:
         raise HTTPException(status_code=500, detail="Redis unavailable")

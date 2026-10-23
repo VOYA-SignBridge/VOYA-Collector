@@ -128,7 +128,7 @@ def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger
     # thật là stack dựng thiếu overlay GPU. Nên test này giờ khẳng định điều
     # đáng khẳng định: lý do được MANG THEO, và lời khuyên đi kèm là lời khuyên
     # của đúng lý do đó. Xem `app/monitoring.GPU_ABSENCE_HINTS`.
-    from app.monitoring import GPU_ABSENCE_HINTS
+    from app.modules.monitoring.gpu import GPU_ABSENCE_HINTS
 
     gpu_call = next(
         c for c in mock_logger.error.call_args_list
@@ -168,7 +168,7 @@ def test_asgi_correlation_id_middleware_no_header():
     the override just gets past the door so the correlation-id middleware is
     what the assertion actually measures.
     """
-    from app.auth import get_current_user_optional
+    from app.modules.identity._web_compat import get_current_user_optional
 
     @app.get("/api/v1/test_trace_empty")
     def trace_endpoint():

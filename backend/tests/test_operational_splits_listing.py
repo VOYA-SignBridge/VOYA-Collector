@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 import app.routers.training as tr
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth
+from app.modules.identity import _web_compat as auth
 from app.main import app
 from app.storage.metadata_db import _execute, _fetch_all
 

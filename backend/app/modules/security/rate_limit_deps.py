@@ -1,9 +1,8 @@
 """FastAPI wiring for rate limits, kept apart from the limiter itself.
 
-`rate_limit.py` is the mechanism and knows nothing about authentication;
-`auth.py` imports it. Putting the dependency factory there too would close that
-loop into an import cycle, so the wiring lives here — the one module allowed to
-know about both.
+`_web_compat.py` owns the limiter mechanism and knows nothing about identity;
+this module wires it to the identity dependency without creating an import
+cycle.
 
 Why the limits are what they are
 --------------------------------
@@ -12,8 +11,8 @@ recording sign samples for an afternoon. Every ceiling below is set well above
 observed real usage and is overridable by environment variable, because the
 right number is a property of a deployment rather than of the code.
 
-Before this, `grep -rl rate_limit backend/app/routers/` matched exactly one file:
-`auth.py`. Everything else — including `upload.py`, the most expensive path in
+Before this, only the auth router had a limiter. Everything else — including
+`upload.py`, the most expensive path in
 the system, where one request writes to disk, runs MediaPipe and enqueues a
 Celery task — had no ceiling at all.
 """
@@ -24,9 +23,9 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, Request
 
-from app.auth import get_current_user_optional
+from app.modules.identity._web_compat import get_current_user_optional
 from app.config import settings
-from app.rate_limit import enforce_actor_limit
+from app.modules.security._web_compat import enforce_actor_limit
 
 
 def rate_limited(

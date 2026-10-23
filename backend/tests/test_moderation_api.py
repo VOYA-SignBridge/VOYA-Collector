@@ -43,7 +43,7 @@ def tai_khoan():
     tao: list[str] = []
 
     def _make(*, is_admin: bool = False) -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = f"md{uuid.uuid4().hex[:10]}"
         u = create_user(username=name, email=f"{name}@example.test",

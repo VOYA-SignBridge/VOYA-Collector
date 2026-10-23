@@ -47,7 +47,7 @@ def accounts():
     created = []
 
     def _make() -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = f"t{uuid.uuid4().hex[:10]}"
         user = create_user(
@@ -247,7 +247,7 @@ class TestUsersAreConstrainedInTheDataPlane:
         than being 'cleaned up' later by someone who sees a system_scope call
         and assumes it is an oversight.
         """
-        from app.auth import authenticate_user
+        from app.modules.identity._web_compat import authenticate_user
 
         _, b = two_tenants
         user = accounts()

@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.modules.admin import moderation_admin
 from app.modules.security import audit
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
