@@ -7,9 +7,8 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
-from app.modules.dataset.split_selection import deployment_split_for
 from app.modules.training.schemas import SplitProvenance
 
 logger = logging.getLogger(__name__)
@@ -17,93 +16,80 @@ WORKSPACE_ROOT = Path("/workspace")
 SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
 
 
-def provenance_from_dir(split_dir: Path) -> SplitProvenance:
-    provenance = SplitProvenance()
-    metadata_path = split_dir / "split_metadata.json"
-    if metadata_path.exists():
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            provenance.split_mode = metadata.get("split_mode")
-            provenance.dataset_manifest = str(metadata.get("dataset_manifest") or "") or None
-            provenance.valid_for_research = metadata.get("valid_for_research")
-        except Exception as exc:
-            logger.warning("[SPLIT_PROV] không đọc được split_metadata.json: %s", exc)
+def provenance_from_artifact(
+    artifact: Any,
+    *,
+    canonical_signer: Callable[[Mapping[str, object], Optional[Mapping[str, str]]], str],
+    identity_column: Callable[[Sequence[str]], Optional[str]],
+    legacy_signer_map: Optional[Mapping[str, str]] = None,
+) -> SplitProvenance:
+    """Describe the exact split artifact selected by the trainer.
 
-    identity_column: Optional[str] = None
+    The resolver owns the choice of files.  This function only reads those
+    resolved files and deliberately receives the signer helpers from the
+    caller: ``processed`` is mounted at runtime and is not importable from the
+    API package until ``/workspace`` has been added to ``sys.path``.
+    """
+    metadata = dict(getattr(artifact, "metadata", None) or {})
+    provenance = SplitProvenance(
+        split_id=str(getattr(artifact, "split_id", "") or "") or None,
+        purpose=str(getattr(artifact, "purpose", "") or "") or None,
+        owner_state=str(getattr(artifact, "owner_state", "") or "") or None,
+        split_mode=metadata.get("split_mode"),
+        dataset_manifest=str(metadata.get("dataset_manifest") or "") or None,
+        valid_for_research=metadata.get("valid_for_research"),
+    )
+
+    paths = {
+        "train": Path(artifact.train_csv),
+        "val": Path(artifact.val_csv),
+        "test": Path(artifact.test_csv),
+    }
     seen: dict[str, set[str]] = {}
-    for part in ("train", "val", "test"):
-        path = split_dir / f"{part}.csv"
-        if not path.exists():
-            continue
+    chosen_identity: Optional[str] = None
+    for part, path in paths.items():
         signers: set[str] = set()
         count = 0
         try:
             with path.open(newline="", encoding="utf-8") as handle:
                 reader = csv.DictReader(handle)
-                columns = reader.fieldnames or []
-                column = "signer_id" if "signer_id" in columns else (
-                    "user_id" if "user_id" in columns else None
-                )
-                identity_column = identity_column or column
+                column = identity_column(reader.fieldnames or ())
+                chosen_identity = chosen_identity or column
                 for row in reader:
                     count += 1
-                    signer = (row.get(column) or "").strip() if column else ""
+                    signer = canonical_signer(row, legacy_signer_map)
                     if signer:
                         signers.add(signer)
         except Exception as exc:
             logger.warning("[SPLIT_PROV] không đọc được %s: %s", path.name, exc)
-            continue
         seen[part] = signers
         provenance.counts[part] = count
         provenance.signers[part] = sorted(signers)
 
-    train, validation, test = (
-        seen.get("train", set()), seen.get("val", set()), seen.get("test", set())
+    provenance.identity_column = chosen_identity
+    train = seen.get("train", set())
+    validation = seen.get("val", set())
+    test = seen.get("test", set())
+    overlap = sorted(
+        (train & validation) | (train & test) | (validation & test)
     )
-    overlap = sorted((train & test) | (train & validation))
     provenance.signer_disjoint = bool(train and test) and not overlap
-    if identity_column is None and (train or validation or test or provenance.counts):
+
+    if chosen_identity is None:
         provenance.warning = (
             "Tập dữ liệu đang dùng không có cột định danh người ký "
-            "(signer_id hoặc user_id), nên KHÔNG kiểm được người ký có bị lẫn "
-            "giữa huấn luyện và đánh giá hay không."
-        )
-    elif not metadata_path.exists():
-        provenance.warning = (
-            "Tập dữ liệu đang dùng không có split_metadata.json, nên không thể "
-            "xác định nó được chia thế nào."
+            "(user_id hoặc signer_id), nên KHÔNG kiểm được người ký có bị lẫn "
+            "giữa các phân vùng hay không."
         )
     elif overlap:
         provenance.warning = (
-            f"{len(overlap)} người ký xuất hiện ở cả tập huấn luyện và tập đánh giá "
-            f"({', '.join(overlap[:5])}{'…' if len(overlap) > 5 else ''}). Kết quả sẽ "
-            "lạc quan hơn thực tế: mô hình đã thấy chính người đó lúc học."
+            f"{len(overlap)} người ký xuất hiện ở cả các phân vùng "
+            f"({', '.join(overlap[:5])}{'…' if len(overlap) > 5 else ''}). "
+            "Kết quả sẽ lạc quan hơn thực tế: mô hình đã thấy chính người đó lúc học."
         )
     elif not train or not test:
         provenance.warning = "Tập huấn luyện hoặc tập đánh giá rỗng."
     return provenance
-
-
-def root_split_provenance(workspace_root: Path = WORKSPACE_ROOT) -> SplitProvenance:
-    return provenance_from_dir(workspace_root / "processed" / "splits")
-
-
-def effective_split_provenance(
-    dialect: Optional[str], workspace_root: Path = WORKSPACE_ROOT
-) -> SplitProvenance:
-    if dialect:
-        try:
-            chosen = deployment_split_for([dialect], workspace_root)
-            if chosen:
-                directory = workspace_root / "processed" / "splits" / "versions" / chosen["split_version"]
-                if (directory / "train.csv").exists():
-                    result = provenance_from_dir(directory)
-                    result.dataset_manifest = result.dataset_manifest or chosen["split_version"]
-                    result.is_deployment_split = True
-                    return result
-        except Exception as exc:
-            logger.warning("[SPLIT_PROV] không phân giải được split cho dialect %s: %s", dialect, exc)
-    return root_split_provenance(workspace_root)
 
 
 def trainable_dialects(workspace_root: Path = WORKSPACE_ROOT) -> dict[str, int]:
@@ -291,9 +277,3 @@ def operational_splits(
         })
     output.sort(key=lambda row: str(row.get("generated_at") or ""), reverse=True)
     return output
-
-
-_provenance_from_dir = provenance_from_dir
-_root_split_provenance = root_split_provenance
-_effective_split_provenance = effective_split_provenance
-_trainable_dialects_from_splits = trainable_dialects

@@ -56,8 +56,8 @@ def client(monkeypatch):
     # dataset happens to be mounted in the test container.
     monkeypatch.setattr(
         training_module,
-        "_effective_split_provenance",
-        lambda dialect=None: training_module.SplitProvenance(
+        "_split_provenance",
+        lambda **_kwargs: training_module.SplitProvenance(
             counts={"train": 100, "val": 20, "test": 20}
         ),
     )
@@ -164,6 +164,32 @@ def test_submit_queues_job_and_dispatches_to_the_training_queue(client):
     # Must go to the dedicated trainer queue, not the default one: the default
     # worker has no GPU reservation and would run training on the API host.
     assert task.apply_async.call_args.kwargs["queue"] == "training"
+
+
+def test_submit_resolves_provenance_from_the_exact_run_config(client, monkeypatch):
+    """Preflight and the worker must select the artifact through the same door."""
+    seen = {}
+
+    def _capture(*, config, tenant_id):
+        seen["split_id"] = config.operational_split_id
+        seen["tenant_id"] = tenant_id
+        return training_module.SplitProvenance(
+            split_id=config.operational_split_id,
+            purpose="operational",
+            owner_state="owned",
+            counts={"train": 2, "val": 1, "test": 1},
+        )
+
+    monkeypatch.setattr(training_module, "_split_provenance", _capture)
+    with patch("app.modules.training.tasks.run_training_job"):
+        response = client.post(
+            "/training/start",
+            json=_config(operational_split_id="sp-42"),
+        )
+
+    assert response.status_code == 200, response.text
+    assert seen == {"split_id": "sp-42", "tenant_id": USER["tenant_id"]}
+    assert response.json()["split_provenance"]["split_id"] == "sp-42"
 
 
 def test_submit_persists_before_dispatching(client, monkeypatch):

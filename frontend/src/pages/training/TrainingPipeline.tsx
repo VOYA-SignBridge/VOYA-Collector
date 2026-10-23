@@ -89,6 +89,24 @@ const TrainingPipeline: React.FC = () => {
     loadDatasetInfo();
   }, [loadDatasetInfo]);
 
+  // Keep the provenance panel tied to the exact artifact that the pending run
+  // will send. Selecting another split must refresh more than the three counts:
+  // signer identity/disjointness also belongs to that artifact.
+  useEffect(() => {
+    if (currentStep !== 3) return;
+    loadDatasetInfo(
+      undefined,
+      undefined,
+      operationalSplitId,
+      trainingConfig.run_purpose,
+    );
+  }, [
+    currentStep,
+    loadDatasetInfo,
+    operationalSplitId,
+    trainingConfig.run_purpose,
+  ]);
+
   // Load lịch sử jobs khi ở landing view
   const refreshHistory = useCallback(async () => {
     setHistoryLoading(true);

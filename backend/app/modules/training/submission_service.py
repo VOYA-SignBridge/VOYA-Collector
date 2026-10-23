@@ -53,7 +53,7 @@ async def submit_training_job(
     jobs: dict[str, dict[str, Any]],
     research_splits: Callable[[], list[dict[str, Any]]],
     trainable_dialects: Callable[[], dict[str, int]],
-    effective_provenance: Callable[[Optional[str]], SplitProvenance],
+    resolve_provenance: Callable[..., SplitProvenance],
     persist_job: Callable[..., Awaitable[None]],
 ) -> TrainingJob:
     """Validate, persist and enqueue one job in that exact order."""
@@ -89,8 +89,7 @@ async def submit_training_job(
 
     split_provenance: Optional[SplitProvenance] = None
     if config.run_purpose != "research":
-        dialect = (config.dialects or [None])[0] if len(config.dialects or []) == 1 else None
-        split_provenance = effective_provenance(dialect)
+        split_provenance = resolve_provenance(config=config, tenant_id=tenant_id)
         if not split_provenance.counts.get("train") or not split_provenance.counts.get("test"):
             raise SubmissionValidationError(
                 "Tập chia hiện tại không dùng được để huấn luyện "

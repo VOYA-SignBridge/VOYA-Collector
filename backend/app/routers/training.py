@@ -115,18 +115,6 @@ def _get_dialects_by_language(tenant_id: Optional[str] = None) -> Dict[str, List
     return catalog_service.dialects_by_language(labels)
 
 
-def _provenance_from_dir(split_dir: Path) -> SplitProvenance:
-    return dataset_provenance.provenance_from_dir(split_dir)
-
-
-def _root_split_provenance() -> SplitProvenance:
-    return dataset_provenance.root_split_provenance(WORKSPACE_ROOT)
-
-
-def _effective_split_provenance(dialect: Optional[str]) -> SplitProvenance:
-    return dataset_provenance.effective_split_provenance(dialect, WORKSPACE_ROOT)
-
-
 def _trainable_dialects_from_splits() -> Dict[str, int]:
     return dataset_provenance.trainable_dialects(WORKSPACE_ROOT)
 
@@ -156,7 +144,63 @@ def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
 
 
 def _split_provenance(**kwargs) -> SplitProvenance:
-    return _effective_split_provenance(kwargs.get("dialect"))
+    """Describe the same artifact that a training run would consume.
+
+    This is a display path, so resolution failures become a safe warning.  The
+    submission path remains fail-closed and performs its own validation.
+    """
+    try:
+        import sys
+
+        workspace = str(WORKSPACE_ROOT)
+        if workspace not in sys.path:
+            sys.path.insert(0, workspace)
+
+        from app.modules.training.tasks import _resolve_for_run
+        from processed.train_utils.signer_identity import (
+            canonical_signer,
+            identity_column,
+            load_legacy_signer_map,
+        )
+
+        raw_config = kwargs.get("config") or {}
+        if hasattr(raw_config, "model_dump"):
+            config = raw_config.model_dump()
+        elif hasattr(raw_config, "dict"):
+            config = raw_config.dict()
+        elif isinstance(raw_config, dict):
+            config = dict(raw_config)
+        else:
+            config = {}
+
+        artifact = _resolve_for_run(
+            config,
+            tenant_id=str(kwargs.get("tenant_id") or ""),
+        )
+        if artifact is None:
+            return SplitProvenance(
+                warning=(
+                    "Chưa xác định được tập dữ liệu: lượt chạy sẽ dùng mặc định "
+                    "của trainer."
+                )
+            )
+        return dataset_provenance.provenance_from_artifact(
+            artifact,
+            canonical_signer=canonical_signer,
+            identity_column=identity_column,
+            legacy_signer_map=load_legacy_signer_map(),
+        )
+    except Exception:
+        logger.warning(
+            "[SPLIT_PROV] không phân giải được hiện vật mà trainer sẽ dùng",
+            exc_info=True,
+        )
+        return SplitProvenance(
+            warning=(
+                "Chưa xác định được tập dữ liệu sẽ dùng; hiện vật chia tập "
+                "không thể được xác minh."
+            )
+        )
 
 
 def _research_splits() -> List[Dict[str, Any]]:
@@ -293,6 +337,10 @@ async def list_operational_splits(
 async def get_dataset_info(
     dialect: Optional[str] = Query(None, description="Filter by dialect"),
     language: Optional[str] = Query("vn", description="Filter by language"),
+    operational_split_id: Optional[str] = Query(
+        None, description="Operational split selected for the next run"
+    ),
+    run_purpose: str = Query("smoke_test", description="Purpose of the next run"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> DatasetInfo:
     """
@@ -340,7 +388,14 @@ async def get_dataset_info(
             for row in samples
         )
         samples_by_dialect.pop("", None)
-        provenance = await asyncio.to_thread(_split_provenance, tenant_id=tenant_id)
+        provenance = await asyncio.to_thread(
+            _split_provenance,
+            tenant_id=tenant_id,
+            config={
+                "operational_split_id": operational_split_id,
+                "run_purpose": run_purpose,
+            },
+        )
         return DatasetInfo(
             total_samples=len(samples),
             total_classes=len(class_counts),
@@ -389,7 +444,7 @@ async def start_training(
             jobs=training_jobs,
             research_splits=_research_splits,
             trainable_dialects=_trainable_dialects_from_splits,
-            effective_provenance=_effective_split_provenance,
+            resolve_provenance=_split_provenance,
             persist_job=_persist_job,
         )
     except submission_service.SubmissionValidationError as exc:

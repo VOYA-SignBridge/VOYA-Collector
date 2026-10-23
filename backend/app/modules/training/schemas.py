@@ -19,6 +19,10 @@ class SplitProvenance(BaseModel):
     sự thật.
     """
 
+    split_id: Optional[str] = None
+    purpose: Optional[str] = None
+    owner_state: Optional[str] = None
+    identity_column: Optional[str] = None
     split_mode: Optional[str] = None
     signer_disjoint: bool = False
     signers: Dict[str, List[str]] = {}

@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 
 from app.modules.identity import _web_compat as auth
 from app.main import app
+from app.modules.training.schemas import SplitProvenance
 from app.storage.metadata_db import _execute, _fetch_all
 
 PW = "PipePass12!"
@@ -312,9 +313,21 @@ def test_camera_too_many_frames_rejected(user_client, monkeypatch):
 # training start + promote (model export) — lifecycle guards
 # ===========================================================================
 
+def _usable_training_split(**_kwargs):
+    """This module tests dispatch/persistence, not split artifact validation."""
+    return SplitProvenance(
+        split_id="test-operational-split",
+        purpose="operational",
+        owner_state="owned",
+        identity_column="user_id",
+        signer_disjoint=True,
+        counts={"train": 2, "val": 1, "test": 1},
+    )
+
 def test_training_start_dispatches_and_persists(user_client):
     c, _ = user_client
-    with patch("app.modules.training.tasks.run_training_job", _fake_task()):
+    with patch("app.routers.training._split_provenance", _usable_training_split), \
+         patch("app.modules.training.tasks.run_training_job", _fake_task()):
         r = c.post("/api/v1/training/start", json={"epochs": 3}, headers=_csrf(c))
     assert r.status_code == 200, r.text
     job = r.json()
@@ -342,7 +355,8 @@ def test_training_start_returns_503_when_dispatch_fails(user_client):
     broken = MagicMock()
     broken.apply_async.side_effect = RuntimeError("redis down")
     try:
-        with patch("app.modules.training.tasks.run_training_job", broken):
+        with patch("app.routers.training._split_provenance", _usable_training_split), \
+             patch("app.modules.training.tasks.run_training_job", broken):
             r = c.post("/api/v1/training/start", json={}, headers=_csrf(c))
         assert r.status_code == 503
         assert ("trainer" in r.json()["detail"].lower()

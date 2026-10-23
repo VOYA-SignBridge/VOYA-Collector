@@ -260,13 +260,20 @@ export function useTrainingAPI() {
   const [error, setError] = useState<string | null>(null);
 
   // Tải dataset info
-  const loadDatasetInfo = useCallback(async (dialect?: string, language?: string) => {
+  const loadDatasetInfo = useCallback(async (
+    dialect?: string,
+    language?: string,
+    operationalSplitId?: string | null,
+    runPurpose?: TrainingConfig['run_purpose'],
+  ) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (dialect) params.append('dialect', dialect);
       if (language) params.append('language', language);
+      if (operationalSplitId) params.append('operational_split_id', operationalSplitId);
+      if (runPurpose) params.append('run_purpose', runPurpose);
 
       const response = await axiosClient.get(`${API_PREFIX}/dataset-info`, { params });
       const data = response.data;
