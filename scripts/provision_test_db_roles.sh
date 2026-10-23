@@ -109,29 +109,29 @@ END \$\$;
 -- CREATEDB: BẬT ở vai chủ sở hữu. CREATEROLE: TẮT. Hai quyền này khác hẳn nhau
 -- về hậu quả, và gộp chúng làm một là lý do lần vá đầu đi sai.
 -- ---------------------------------------------------------------------------
--- `test_tenant_isolation.py` dựng CSDL nháp `voya_rls_proof_*` cho mỗi module,
+-- test_tenant_isolation.py dựng CSDL nháp voya_rls_proof_* cho mỗi module,
 -- cài lược đồ thật và chính sách RLS thật lên đó rồi kiểm. Không chạy chung
 -- CSDL được, vì phép kiểm đụng tới chính các câu DDL sửa chính sách.
 --
 -- Vì sao CREATEDB không mở đường nào sang sản xuất — ba lối, chặn cả ba:
---   * CONNECT vào `${PROD_DB}` đã bỏ khỏi PUBLIC ở bước 2, cấp lại tường minh
---     chỉ cho `admin` và `voya_app`. Đo ở bước 4, không suy luận.
---   * `CREATE DATABASE ... TEMPLATE ${PROD_DB}` không đi được: PostgreSQL chỉ
---     cho nhân bản khi template có `datistemplate = true` hoặc người gọi là
---     chủ sở hữu/superuser. `${PROD_DB}` không phải template và thuộc `admin`.
---   * CSDL mới sinh ra từ `template1`, rỗng. Tạo được CSDL MỚI không cho đọc
+--   * CONNECT vào ${PROD_DB} đã bỏ khỏi PUBLIC ở bước 2, cấp lại tường minh
+--     chỉ cho admin và voya_app. Đo ở bước 4, không suy luận.
+--   * CREATE DATABASE ... TEMPLATE ${PROD_DB} không đi được: PostgreSQL chỉ
+--     cho nhân bản khi template có datistemplate = true hoặc người gọi là
+--     chủ sở hữu/superuser. ${PROD_DB} không phải template và thuộc admin.
+--   * CSDL mới sinh ra từ template1, rỗng. Tạo được CSDL MỚI không cho đọc
 --     CSDL CŨ.
 --
 -- CREATEROLE thì NGƯỢC LẠI, và đây mới là quyền phải giữ tắt: nó cho đổi mật
--- khẩu của một vai không-superuser khác — kể cả `voya_app`, vai DUY NHẤT còn
+-- khẩu của một vai không-superuser khác — kể cả voya_app, vai DUY NHẤT còn
 -- CONNECT được vào sản xuất. Đó là một đường leo thang thật, chỉ hai bước.
 --
 -- Ghi lại lần vá hụt 14/08 để không ai đi lại: chỉ cấp CREATEDB thôi thì fixture
--- vẫn đổ, vì nó còn gọi `provision_db_roles.provision()`, mà câu
--- `ALTER ROLE ... NOSUPERUSER` trong đó đòi SUPERUSER. Nửa còn lại của lời giải
--- nằm ở `provision()`: vai là đối tượng toàn cụm nên khi chạy lần hai trên CSDL
+-- vẫn đổ, vì nó còn gọi provision_db_roles.provision(), mà câu
+-- ALTER ROLE ... NOSUPERUSER trong đó đòi SUPERUSER. Nửa còn lại của lời giải
+-- nằm ở provision(): vai là đối tượng toàn cụm nên khi chạy lần hai trên CSDL
 -- nháp, hai câu ALTER ROLE ấy không còn việc gì để làm; nay chúng được phép
--- thất bại ĐÚNG KHI trạng thái mong muốn đã hợp lệ, đo bằng `pg_roles`.
+-- thất bại ĐÚNG KHI trạng thái mong muốn đã hợp lệ, đo bằng pg_roles.
 ALTER ROLE voya_test_owner WITH LOGIN NOSUPERUSER NOBYPASSRLS CREATEDB
     NOCREATEROLE NOREPLICATION INHERIT PASSWORD '${OWNER_PW}';
 ALTER ROLE voya_test_app   WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
@@ -140,13 +140,13 @@ ALTER ROLE voya_test_app   WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
 -- Vai ĐIỀU KHIỂN: thuộc tính giống hệt vai ứng dụng. Nó KHÔNG mạnh hơn ở mức
 -- vai — chỗ khác nhau duy nhất là tập GRANT trên đúng vài bảng ở bước 3.
 --
--- Đây là điểm dễ hiểu sai nhất của thiết kế: `voya_control` không phải "vai
--- quản trị nhỏ". Nó là một danh tính HẸP HƠN `voya_app` trên gần như mọi bảng,
+-- Đây là điểm dễ hiểu sai nhất của thiết kế: voya_control không phải "vai
+-- quản trị nhỏ". Nó là một danh tính HẸP HƠN voya_app trên gần như mọi bảng,
 -- và rộng hơn ở đúng những bảng điều khiển đã khai báo.
 ALTER ROLE voya_test_control WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB
     NOCREATEROLE NOREPLICATION INHERIT PASSWORD '${CONTROL_PW}';
 
--- Không vai nào được thừa hưởng quyền của vai kia. `INHERIT` ở trên chỉ nói về
+-- Không vai nào được thừa hưởng quyền của vai kia. INHERIT ở trên chỉ nói về
 -- các vai mà nó LÀ THÀNH VIÊN; câu này bảo đảm nó không là thành viên của ai.
 REVOKE voya_test_owner FROM voya_test_control;
 REVOKE voya_test_app   FROM voya_test_control;
@@ -244,11 +244,11 @@ GRANT USAGE ON SCHEMA public TO voya_test_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO voya_test_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO voya_test_app;
 
--- Danh mục THAM CHIẾU toàn cục: chỉ đọc, y như `voya_app` trên sản xuất.
--- `regions` và `languages` không mang tenant_id nên nằm ngoài RLS — đúng, vì
--- chúng không phải dữ liệu của ai. Nhưng cả hai được `classes` trỏ tới bằng
--- ON UPDATE CASCADE, nên ghi được chúng là ghi lại `classes` của MỌI tenant
--- mà không policy nào của `classes` được hỏi tới. Xem REFERENCE_TABLES trong
+-- Danh mục THAM CHIẾU toàn cục: chỉ đọc, y như voya_app trên sản xuất.
+-- regions và languages không mang tenant_id nên nằm ngoài RLS — đúng, vì
+-- chúng không phải dữ liệu của ai. Nhưng cả hai được classes trỏ tới bằng
+-- ON UPDATE CASCADE, nên ghi được chúng là ghi lại classes của MỌI tenant
+-- mà không policy nào của classes được hỏi tới. Xem REFERENCE_TABLES trong
 -- app/cli/provision_db_roles.py.
 REVOKE INSERT, UPDATE, DELETE ON regions   FROM voya_test_app;
 REVOKE INSERT, UPDATE, DELETE ON languages FROM voya_test_app;
@@ -263,12 +263,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE voya_test_owner IN SCHEMA public
 
 -- MẶT PHẲNG ĐIỀU KHIỂN.
 --
--- Vai điều khiển KHÔNG được cấp hàng loạt: không `ON ALL TABLES`, không
--- `ALTER DEFAULT PRIVILEGES`. Nó chỉ chạm đúng những bảng khai báo ở
--- `app/storage/control_plane.py`, nên một bảng mới sinh ra sau này không tự
+-- Vai điều khiển KHÔNG được cấp hàng loạt: không ON ALL TABLES, không
+-- ALTER DEFAULT PRIVILEGES. Nó chỉ chạm đúng những bảng khai báo ở
+-- app/storage/control_plane.py, nên một bảng mới sinh ra sau này không tự
 -- động vào tầm với của nó.
 --
--- Danh sách dưới đây phải KHỚP khai báo Python. `test_control_plane.py` so hai
+-- Danh sách dưới đây phải KHỚP khai báo Python. test_control_plane.py so hai
 -- bên và đỏ nếu lệch — chép tay ở hai nơi là cách chắc chắn nhất để một ngày
 -- nào đó chúng nói khác nhau.
 GRANT USAGE ON SCHEMA public TO voya_test_control;
@@ -278,14 +278,14 @@ REVOKE ALL    ON tenant_purges FROM voya_test_control;
 GRANT  INSERT ON tenant_purges TO   voya_test_control;
 
 -- Và vai ỨNG DỤNG mất sạch quyền trên bảng điều khiển. Phải đứng SAU câu
--- `GRANT ... ON ALL TABLES` ở trên, vì câu đó quét cả bảng này.
+-- GRANT ... ON ALL TABLES ở trên, vì câu đó quét cả bảng này.
 REVOKE SELECT, INSERT, UPDATE, DELETE ON tenant_purges FROM voya_test_app;
 
--- `voya_app` (vai SẢN XUẤT) cũng còn quyền trên cơ sở dữ liệu test, do lịch sử
+-- voya_app (vai SẢN XUẤT) cũng còn quyền trên cơ sở dữ liệu test, do lịch sử
 -- cấp phát để lại. Bộ test không dùng nó, nhưng để nguyên thì phép kiểm cấu
 -- trúc phải nới thành "vai test không có quyền" thay vì "không vai ứng dụng
 -- nào có quyền" — và một phép kiểm nới ra để hợp với hiện trạng là phép kiểm
--- yếu đi. Quyền trên SẢN XUẤT do `app.cli.provision_db_roles` lo.
+-- yếu đi. Quyền trên SẢN XUẤT do app.cli.provision_db_roles lo.
 REVOKE SELECT, INSERT, UPDATE, DELETE ON tenant_purges FROM voya_app;
 SQL
 

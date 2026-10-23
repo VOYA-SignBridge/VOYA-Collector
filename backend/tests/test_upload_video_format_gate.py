@@ -10,10 +10,14 @@ Hai nhom test duoi day canh hai dieu khac nhau:
     xuong dia se cut dau, mot loi im lang va rat kho truy.
 """
 
+import asyncio
 import io
 
 import pytest
+from fastapi import UploadFile
 
+from app.modules.saas.tenant_context import tenant_scope
+from app.routers import upload as upload_router
 from app.routers.upload import _looks_like_video, _peek_head
 
 
@@ -81,3 +85,44 @@ class TestPeekKhongTieuThuLuong:
         buf.seek(4)
         assert _peek_head(buf, 4) == b"4567"
         assert buf.tell() == 4
+
+
+def test_loi_sau_khi_giu_han_muc_phai_tra_lai_cho(monkeypatch):
+    """Một lỗi trước quyết toán không được giam quota tới khi reservation hết hạn."""
+    raw = _pad(b"\x00\x00\x00\x20ftypisom") + b"video-payload"
+    upload = UploadFile(filename="clip.mp4", file=io.BytesIO(raw))
+    reservation = object()
+    guarded = []
+    released = []
+
+    def guard(_user, *, nbytes):
+        guarded.append(nbytes)
+        return reservation
+
+    def fail_class_registration(**_kwargs):
+        raise RuntimeError("characterization: class registration failed")
+
+    monkeypatch.setattr(upload_router, "normalize_dialect", lambda value, **_kwargs: value)
+    monkeypatch.setattr(upload_router, "guard_storage", guard)
+    monkeypatch.setattr(upload_router, "get_or_register_class", fail_class_registration)
+    monkeypatch.setattr(upload_router.storage_quota, "release", released.append)
+
+    with tenant_scope("tenant-a"):
+        with pytest.raises(RuntimeError, match="class registration failed"):
+            asyncio.run(
+                upload_router.upload_video(
+                    file=upload,
+                    user="collector",
+                    label="Xin chao",
+                    language="vn",
+                    dialect="common",
+                    class_uid=None,
+                    visibility="private",
+                    session_id="session-1",
+                    upload_uid=None,
+                    current_user={"id": "user-1", "tenant_id": "tenant-a"},
+                )
+            )
+
+    assert guarded == [len(raw)]
+    assert released == [reservation]
