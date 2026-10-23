@@ -31,6 +31,8 @@ def test_video_task_forwards_metadata_to_pipeline(monkeypatch) -> None:
         "session_id": "session-1",
         "dialect": "hoa-de",
         "language": "vn",
+        "class_uid": "",
+        "visibility": "private",
     }
 
 

@@ -36,7 +36,9 @@ def enqueue_video_processing(row: Dict[str, Any], triggered_by: str) -> Dict[str
         session_id=row.get("session_id", "") or uuid.uuid4().hex,
         dialect=row.get("dialect", "") or "common",
         language=row.get("language", "") or "vn",
-        user_id=triggered_by,
+        user_id=row.get("user_id", "") or triggered_by,
+        class_uid=row.get("class_uid", "") or "",
+        visibility=row.get("visibility", "private") or "private",
     )
     return {"upload_uid": upload_uid, "job_id": task.id, "status": "queued"}
 
