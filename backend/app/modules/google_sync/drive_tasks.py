@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.infrastructure.celery.app import celery_app
 from app.config import settings
+from app.storage.drive_layout import drive_path_for
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,62 @@ def delete_gdrive_paths_task(self, rel_paths: list):
     return {"status": "done", "results": results}
 
 
+def _drive_file_ref_candidates(ref: str, tenant_id: Optional[str] = None) -> List[str]:
+    """Return mapped and legacy names to try for one Drive file reference."""
+    text = str(ref or "").strip()
+    if not text:
+        return []
+    if text.startswith("gdrive://") or "drive.google.com" in text:
+        return [text]
+    if "/" not in text and "\\" not in text:
+        return [text]
+    candidates: List[str] = []
+    try:
+        mapped = drive_path_for(text, tenant_id)
+        if mapped:
+            candidates.append(mapped)
+    except Exception as exc:
+        logger.debug("[GDRIVE_FILE_DELETE] cannot map %r: %s", text, exc)
+    if text not in candidates:
+        candidates.append(text)
+    return candidates
+
+
+@celery_app.task(
+    bind=True,
+    name="app.export_tasks.delete_gdrive_files_task",
+    max_retries=3,
+    default_retry_delay=30,
+)
+def delete_gdrive_files_task(self, refs: list, tenant_id: Optional[str] = None):
+    """Delete Drive files addressed by storage key, URL, gdrive ref, or ID."""
+    if not getattr(settings, "use_google_drive", False):
+        return {"status": "skipped", "reason": "gdrive_disabled"}
+
+    from app.storage.gdrive_client import get_gdrive_client
+
+    client = get_gdrive_client()
+    results = {}
+    failures = 0
+    for ref in refs or []:
+        if not ref:
+            continue
+        try:
+            deleted = False
+            for candidate in _drive_file_ref_candidates(ref, tenant_id):
+                if client.delete_file(candidate):
+                    deleted = True
+                    break
+            results[ref] = "ok" if deleted else "not_found"
+        except Exception as exc:
+            logger.warning("[GDRIVE_FILE_DELETE] %s failed: %s", ref, exc)
+            results[ref] = f"failed: {exc}"
+            failures += 1
+    if failures and self.request.retries < self.max_retries:
+        raise self.retry(exc=RuntimeError(f"{failures} Drive file delete(s) failed"))
+    return {"status": "done", "results": results}
+
+
 @celery_app.task(
     bind=True,
     name="app.export_tasks.move_gdrive_paths_task",
@@ -123,6 +180,22 @@ def move_gdrive_paths_task(self, pairs: list):
     return {"status": "done", "results": results}
 
 
+def _raw_upload_tenant(upload_uid: str) -> Optional[str]:
+    """Resolve the owner of a queued pre-tenant-argument raw-video task."""
+    try:
+        from app.storage.metadata_db import _fetch_all
+
+        rows = _fetch_all(
+            "SELECT tenant_id FROM raw_uploads WHERE upload_uid = %s",
+            (upload_uid,),
+        )
+        tenant = (rows[0].get("tenant_id") or "").strip() if rows else ""
+        return tenant or None
+    except Exception as exc:
+        logger.warning("[GDRIVE_RAW_VIDEO] cannot resolve tenant of %s: %s", upload_uid, exc)
+        return None
+
+
 @celery_app.task(
     bind=True,
     name="app.export_tasks.upload_raw_video_to_gdrive_task",
@@ -135,6 +208,7 @@ def upload_raw_video_to_gdrive_task(
     local_path: str,
     storage_key: str,
     content_type: str = "application/octet-stream",
+    tenant_id: Optional[str] = None,
 ):
     """Mirror a raw uploaded video to Google Drive in the background.
 
@@ -153,8 +227,16 @@ def upload_raw_video_to_gdrive_task(
             logger.warning("[GDRIVE_RAW_VIDEO] Local file not found: %s", local_path)
             return {"status": "skipped", "reason": "file_not_found"}
 
-        logger.info("[GDRIVE_RAW_VIDEO] Uploading %s to GDrive key %s", local_path, storage_key)
-        storage_url = upload_to_gdrive(local_path, storage_key, content_type=content_type)
+        if tenant_id is None:
+            tenant_id = _raw_upload_tenant(upload_uid)
+        drive_path = drive_path_for(storage_key, tenant_id)
+        logger.info(
+            "[GDRIVE_RAW_VIDEO] Uploading %s to GDrive %s (key %s)",
+            local_path,
+            drive_path,
+            storage_key,
+        )
+        storage_url = upload_to_gdrive(local_path, drive_path, content_type=content_type)
         if not storage_url:
             raise RuntimeError("upload_to_gdrive returned None")
 
@@ -195,8 +277,14 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
             logger.warning("[GDRIVE_UPLOAD] Local file not found: %s", local_path)
             return {"status": "skipped", "reason": "file_not_found"}
 
-        logger.info("[GDRIVE_UPLOAD] Uploading %s to GDrive key %s", local_path, storage_key)
-        storage_url = upload_to_gdrive(local_path, storage_key)
+        drive_path = drive_path_for(storage_key)
+        logger.info(
+            "[GDRIVE_UPLOAD] Uploading %s to GDrive %s (key %s)",
+            local_path,
+            drive_path,
+            storage_key,
+        )
+        storage_url = upload_to_gdrive(local_path, drive_path)
 
         if not storage_url:
             raise RuntimeError("upload_to_gdrive returned None")
@@ -216,7 +304,7 @@ def upload_npz_to_gdrive_task(self, sample_uid: str, local_path: str, storage_ke
             logger.warning("[GDRIVE_UPLOAD] Failed to update sidecar JSON: %s", e)
 
         # 2. Update Postgres database
-        update_sample_gdrive_url(sample_uid, storage_url)
+        update_sample_gdrive_url(sample_uid, storage_url, storage_key)
 
         # 3. Update samples.csv
         update_sample_row(sample_uid, {
@@ -272,7 +360,7 @@ def upload_npz_batch_to_gdrive_task(self, items: list):
                 logger.warning("[GDRIVE_BATCH] file not found, skipping: %s", local_path)
                 continue
 
-            storage_url = upload_to_gdrive(local_path, storage_key)
+            storage_url = upload_to_gdrive(local_path, drive_path_for(storage_key))
             if not storage_url:
                 raise RuntimeError("upload_to_gdrive returned None")
 
@@ -290,7 +378,7 @@ def upload_npz_batch_to_gdrive_task(self, items: list):
 
             # DB per-item (pooled connection → cheap)
             try:
-                update_sample_gdrive_url(sample_uid, storage_url)
+                update_sample_gdrive_url(sample_uid, storage_url, storage_key)
             except Exception as e:
                 logger.warning("[GDRIVE_BATCH] DB update failed for %s: %s", sample_uid, e)
 

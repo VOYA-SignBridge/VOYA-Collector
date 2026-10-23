@@ -38,10 +38,32 @@ def export_samples_to_sheets(self):
             logger.debug("[EXPORT] Samples Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        rows = _load_all_samples_unscoped()
-        values = [list(SAMPLE_FIELDS)]
+        from app.storage.metadata_db import list_all_deleted_samples
+
+        active = _load_all_samples_unscoped()
+        seen = {row.get("sample_uid") or "" for row in active}
+        rows = []
+        for item in active:
+            row = dict(item)
+            row["deleted_at"] = ""
+            rows.append(row)
+        try:
+            for item in list_all_deleted_samples():
+                if (item.get("sample_uid") or "") not in seen:
+                    rows.append(dict(item))
+        except Exception as exc:
+            logger.warning("[EXPORT] deleted-samples marker load failed: %s", exc)
+        rows.sort(
+            key=lambda row: (
+                str(row.get("created_at") or ""),
+                str(row.get("sample_uid") or ""),
+            )
+        )
+
+        header = list(SAMPLE_FIELDS) + ["deleted_at"]
+        values = [header]
         values.extend(
-            [str(row.get(field, "") or "") for field in SAMPLE_FIELDS]
+            [str(row.get(field, "") or "") for field in header]
             for row in rows
         )
 
@@ -64,7 +86,12 @@ def export_samples_to_sheets(self):
         except Exception:
             pass
 
-        logger.info("[EXPORT] ✅ Mirrored %d samples to Sheets (full replace)", len(rows))
+        logger.info(
+            "[EXPORT] ✅ Mirrored %d samples to Sheets (%d active + %d deleted)",
+            len(rows),
+            len(active),
+            len(rows) - len(active),
+        )
         return {"status": "success", "synced_count": len(rows)}
     except Exception as exc:
         logger.error("[EXPORT] Samples Sheets export failed: %s", exc)

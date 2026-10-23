@@ -7,6 +7,7 @@ from app.modules.google_sync.catalog_tasks import (
     sync_lookup_lists,
 )
 from app.modules.google_sync.drive_tasks import (
+    delete_gdrive_files_task,
     delete_gdrive_paths_task,
     mirror_catalog_csvs_to_drive,
     move_gdrive_paths_task,
@@ -22,6 +23,7 @@ from app.modules.google_sync.sheets_tasks import (
 
 
 __all__ = [
+    "delete_gdrive_files_task",
     "delete_gdrive_paths_task",
     "export_labels_to_sheets",
     "export_samples_to_sheets",

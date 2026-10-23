@@ -237,7 +237,7 @@ class TestCatalogSyncPaths:
     def test_dispatch_skips_an_unmappable_path_instead_of_failing_the_rename(self, tenant_mode, monkeypatch):
         """Đổi tên/xoá lớp đã commit cục bộ; Drive là phần best-effort phía sau."""
         import app.catalog_sync as cs
-        import app.export_tasks as et
+        from app.modules.google_sync import drive_tasks as et
 
         sent = []
         monkeypatch.setattr(et.move_gdrive_paths_task, "delay", lambda pairs: sent.append(pairs))
@@ -521,7 +521,7 @@ class TestQueuedRawVideoTaskWithoutTenant:
     `tenant` chúng bị từ chối; hàng `raw_uploads` biết chủ của video nên tra ra."""
 
     def test_tenant_is_looked_up_when_the_task_has_none(self, tenant_mode, fake_drive, monkeypatch):
-        import app.export_tasks as et
+        from app.modules.google_sync import drive_tasks as et
         import app.raw_uploads as ru
         import app.storage.metadata_db as mdb
         from app.export_tasks import upload_raw_video_to_gdrive_task
@@ -534,7 +534,7 @@ class TestQueuedRawVideoTaskWithoutTenant:
         assert fake_drive.uploads == ["Tenants/truong-b/Videos/" + VIDEO.split("/", 1)[1]]
 
     def test_explicit_tenant_wins_over_the_lookup(self, tenant_mode, fake_drive, monkeypatch):
-        import app.export_tasks as et
+        from app.modules.google_sync import drive_tasks as et
         import app.raw_uploads as ru
         import app.storage.metadata_db as mdb
         from app.export_tasks import upload_raw_video_to_gdrive_task
@@ -547,7 +547,7 @@ class TestQueuedRawVideoTaskWithoutTenant:
         assert fake_drive.uploads == ["Tenants/truong-c/Videos/" + VIDEO.split("/", 1)[1]]
 
     def test_unknown_owner_is_still_refused_not_defaulted(self, tenant_mode, fake_drive, monkeypatch):
-        import app.export_tasks as et
+        from app.modules.google_sync import drive_tasks as et
         from app.export_tasks import upload_raw_video_to_gdrive_task
 
         monkeypatch.setattr(et, "_raw_upload_tenant", lambda uid: None)
