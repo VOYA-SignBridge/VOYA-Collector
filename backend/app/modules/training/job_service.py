@@ -85,6 +85,7 @@ def _persist_job_sync(job: TrainingJob, auth_user_id: Optional[str] = None) -> N
             "test_f1": job.test_f1,
             "error_message": job.error_message,
             "promoted_at": job.promoted_at,
+            "superseded_at": job.superseded_at,
             "split_provenance": job.split_provenance.dict() if job.split_provenance else None,
         })
     except Exception as exc:
@@ -150,6 +151,7 @@ def _job_from_db_row(row: Dict[str, Any]) -> TrainingJob:
         test_f1=row.get("test_f1"),
         error_message=row.get("error_message"),
         promoted_at=_iso(row.get("promoted_at")),
+        superseded_at=_iso(row.get("superseded_at")),
         split_provenance=_split_prov_from_row(row.get("split_provenance")),
     )
 

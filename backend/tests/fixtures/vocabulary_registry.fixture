@@ -1,0 +1,14 @@
+{
+  "source": "test_fixture",
+  "tenant_id": "test",
+  "registry_version": 1,
+  "content_hash": "test-fixture-v1",
+  "profiles": [
+    {"profile_id": "alphabet", "is_trainable": true},
+    {"profile_id": "hoa_de", "is_trainable": true},
+    {"profile_id": "north", "is_trainable": true},
+    {"profile_id": "central", "is_trainable": true},
+    {"profile_id": "south", "is_trainable": true},
+    {"profile_id": "legacy_unassigned", "is_trainable": false}
+  ]
+}

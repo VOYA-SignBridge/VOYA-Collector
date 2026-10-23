@@ -57,6 +57,7 @@ class TrainingConfig(BaseModel):
     kernel_size: int = 5
     run_purpose: str = "smoke_test"
     split_version: Optional[str] = None
+    operational_split_id: Optional[str] = None
     dataset_version: Optional[str] = None
     recognition_profile: Optional[str] = None
 
@@ -77,6 +78,7 @@ class TrainingJob(BaseModel):
     test_f1: Optional[float] = None
     error_message: Optional[str] = None
     promoted_at: Optional[str] = None
+    superseded_at: Optional[str] = None
     split_provenance: Optional[SplitProvenance] = None
 
 
@@ -97,7 +99,9 @@ class DatasetPrepareRequest(BaseModel):
 
     dialects: Optional[List[str]] = None
     profiles: Optional[List[str]] = None
+    min_samples_per_class: Optional[int] = None
     seed: int = 42
+    with_research: bool = False
 
 
 class PromoteResponse(BaseModel):

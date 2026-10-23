@@ -29,6 +29,14 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
 
+# Research/split tests must not depend on a generated snapshot left behind by a
+# particular developer machine. Point them at a small, committed registry whose
+# identities cover the profiles exercised by those tests. Individual missing-
+# snapshot tests can still override this variable explicitly.
+os.environ["VOCABULARY_REGISTRY_PATH"] = str(
+    Path(__file__).resolve().parent / "fixtures" / "vocabulary_registry.fixture"
+)
+
 # The standalone suites import from both the repo root and backend/.
 for _p in (_REPO, _REPO / "backend"):
     if str(_p) not in sys.path:

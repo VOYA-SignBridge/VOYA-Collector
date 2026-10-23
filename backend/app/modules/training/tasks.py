@@ -33,6 +33,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import redis
 
+from app.modules.dataset import split_selection
 from app.modules.training.checkpoint_io import load_checkpoint
 from app.infrastructure.celery.app import celery_app
 
@@ -50,6 +51,16 @@ TRAINING_JOB_TIMEOUT_SECONDS = int(os.getenv("TRAINING_JOB_TIMEOUT_SECONDS", str
 
 POLL_INTERVAL_SECONDS = 2
 TERMINATE_GRACE_SECONDS = 30
+
+
+def _deployment_splits() -> list[dict[str, Any]]:
+    """Compatibility boundary for callers that patch training-task discovery."""
+    return split_selection.deployment_splits(WORKSPACE_ROOT)
+
+
+def _deployment_split_for(dialects: list[str]) -> Optional[dict[str, Any]]:
+    """Select through the dataset module while preserving the legacy symbol."""
+    return split_selection.deployment_split_for(dialects, WORKSPACE_ROOT)
 
 
 def _now() -> str:

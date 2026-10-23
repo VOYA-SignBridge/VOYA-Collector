@@ -6,12 +6,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from app.modules.dataset.preparation_tasks import (
-    create_pending_report,
-    next_manifest_version,
-    prepare_dataset,
-    read_report,
-)
+from app.modules.dataset.preparation_tasks import read_report
 
 
 @dataclass(frozen=True)
@@ -25,24 +20,79 @@ def queue_preparation(
     profiles: Optional[list[str]],
     seed: int,
     profiles_for_dialects: Callable[[list[str]], tuple[list[str], list[str]]],
-    create_report: Callable[..., Any] = create_pending_report,
-    next_version: Callable[[], str] = next_manifest_version,
-    dispatch: Callable[..., Any] = prepare_dataset.delay,
+    tenant_id: Optional[str] = None,
+    minimum_samples: int = 25,
+    with_research: bool = False,
+    requested_by: str = "",
+    create_report: Optional[Callable[..., Any]] = None,
+    next_version: Optional[Callable[[], str]] = None,
+    dispatch: Optional[Callable[..., Any]] = None,
 ) -> dict[str, Any]:
-    """Resolve profiles, persist queued state, then dispatch one preparation run."""
+    """Persist queued state before dispatching one preparation run.
+
+    The operational path only needs dialects. Recognition profiles are resolved
+    when research artifacts were requested; requiring them unconditionally made
+    an otherwise valid operational split fail before it reached the worker.
+
+    ``tenant_id=None`` retains the old injection contract used by module-level
+    callers while the HTTP path always supplies an owner.
+    """
     resolved_profiles = profiles
-    if not resolved_profiles and dialects:
+    if not resolved_profiles and dialects and (with_research or tenant_id is None):
         resolved_profiles, unsupported = profiles_for_dialects(dialects)
         if not resolved_profiles:
             raise UnsupportedDialectsError(unsupported)
 
     run_id = uuid.uuid4().hex[:12]
-    version = next_version()
-    create_report(run_id, version, resolved_profiles or [], seed)
-    dispatch(run_id=run_id, profiles=resolved_profiles, seed=seed, version=version)
+    if tenant_id is None:
+        from app.modules.dataset import preparation_tasks as tasks
+
+        version = (next_version or tasks.next_manifest_version)()
+        (create_report or tasks.create_pending_report)(
+            run_id, version, resolved_profiles or [], seed
+        )
+        (dispatch or tasks.prepare_dataset.delay)(
+            run_id=run_id, profiles=resolved_profiles, seed=seed, version=version
+        )
+        return {
+            "run_id": run_id,
+            "manifest_version": version,
+            "profiles": resolved_profiles,
+            "status": "queued",
+        }
+
+    # Import through the compatibility facade at call time. Besides keeping old
+    # import paths alive, this ensures tests and operators patching that facade
+    # affect the actual dispatch boundary rather than a stale imported callable.
+    from app import dataset_prep_tasks as tasks
+
+    selected_dialects = [str(value).strip() for value in (dialects or []) if str(value).strip()]
+    floor = int(minimum_samples)
+    report_writer = create_report or tasks.create_pending_report
+    task_dispatch = dispatch or tasks.prepare_dataset.delay
+    report_writer(
+        run_id,
+        tenant_id=tenant_id,
+        dialects=selected_dialects,
+        floor=floor,
+        seed=seed,
+        with_research=with_research,
+        requested_by=requested_by,
+    )
+    task_dispatch(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        dialects=selected_dialects,
+        min_samples_per_class=floor,
+        seed=seed,
+        with_research=with_research,
+        profiles=resolved_profiles,
+        requested_by=requested_by,
+    )
     return {
         "run_id": run_id,
-        "manifest_version": version,
+        "dialects": selected_dialects,
+        "min_samples_per_class": floor,
         "profiles": resolved_profiles,
         "status": "queued",
     }

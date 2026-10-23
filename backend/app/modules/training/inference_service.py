@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from app.modules.training.checkpoint_io import load_checkpoint as _load_trusted_checkpoint
 from app.modules.training.schemas import TrainedModelPredictResponse
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class InferenceJobNotFoundError(LookupError):
 
 def load_checkpoint(checkpoint_path: Path | str) -> dict[str, Any]:
     """Load a trusted training checkpoint on CPU."""
-    return torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    return _load_trusted_checkpoint(checkpoint_path, map_location="cpu")
 
 
 def _import_models_registry(workspace_root: Path = WORKSPACE_ROOT):

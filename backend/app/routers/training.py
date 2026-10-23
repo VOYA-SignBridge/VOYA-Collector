@@ -16,6 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from app.infrastructure.redis.connection import get_redis_client
 from app.auth import get_current_user, get_user_from_token, require_admin
 from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance, research_catalog
+from app.modules.dataset.vocabulary_registry import assert_can_use_dialect
+from app.modules.security.quota_deps import guard_quota, tenant_of
+from app.modules.security.rate_limit_deps import limit_training
 from app.modules.saas.tenant_context import require_tenant
 from app.modules.training import (
     inference_service,
@@ -92,14 +95,23 @@ WORKSPACE_ROOT = Path("/workspace")
 DATASET_ROOT = WORKSPACE_ROOT / "dataset"
 SAMPLES_CSV = DATASET_ROOT / "samples.csv"
 LABELS_CSV = DATASET_ROOT / "labels.csv"
+SPLITS_DIR = WORKSPACE_ROOT / "processed" / "splits"
 
 
 def _load_samples_and_labels() -> tuple[List[Dict], List[Dict]]:
     return catalog_service.load_samples_and_labels(SAMPLES_CSV, LABELS_CSV)
 
 
-def _get_dialects_by_language() -> Dict[str, List[str]]:
+def _rows_of_tenant(rows: List[Dict], tenant_id: str) -> List[Dict]:
+    from app.modules.saas.tenancy import tenant_id_of
+
+    return [row for row in rows if tenant_id_of(row) == tenant_id]
+
+
+def _get_dialects_by_language(tenant_id: Optional[str] = None) -> Dict[str, List[str]]:
     _, labels = _load_samples_and_labels()
+    if tenant_id is not None:
+        labels = _rows_of_tenant(labels, tenant_id)
     return catalog_service.dialects_by_language(labels)
 
 
@@ -119,6 +131,34 @@ def _trainable_dialects_from_splits() -> Dict[str, int]:
     return dataset_provenance.trainable_dialects(WORKSPACE_ROOT)
 
 
+def _split_classes_below_floor(dialects, nguong, thu_muc=None):
+    return dataset_provenance.split_classes_below_floor(
+        dialects, nguong, Path(thu_muc) if thu_muc is not None else SPLITS_DIR
+    )
+
+
+def _split_evidence_problems(dialects, nguong, thu_muc=None):
+    return dataset_provenance.split_evidence_problems(
+        dialects, nguong, Path(thu_muc) if thu_muc is not None else SPLITS_DIR
+    )
+
+
+def _split_snapshot(thu_muc=None):
+    return dataset_provenance.split_snapshot(
+        Path(thu_muc) if thu_muc is not None else SPLITS_DIR
+    )
+
+
+def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
+    return dataset_provenance.operational_splits(
+        tenant_id, SPLITS_DIR, WORKSPACE_ROOT
+    )
+
+
+def _split_provenance(**kwargs) -> SplitProvenance:
+    return _effective_split_provenance(kwargs.get("dialect"))
+
+
 def _research_splits() -> List[Dict[str, Any]]:
     return research_catalog.research_splits(WORKSPACE_ROOT)
 
@@ -127,8 +167,32 @@ def _evaluation_protocols() -> List[Dict[str, Any]]:
     return research_catalog.evaluation_protocols(WORKSPACE_ROOT)
 
 
-def _profiles_for_dialects(dialects: List[str]) -> Tuple[List[str], List[str]]:
-    return catalog_service.profiles_for_dialects(dialects, labels_csv=LABELS_CSV)
+def _profiles_for_dialects(
+    dialects: List[str], tenant_id: Optional[str] = None
+) -> Tuple[List[str], List[str]]:
+    _, labels = _load_samples_and_labels()
+    if tenant_id is not None:
+        labels = _rows_of_tenant(labels, tenant_id)
+    wanted = {str(value).strip() for value in dialects if str(value).strip()}
+    by_dialect: Dict[str, set] = {}
+    for label in labels:
+        dialect = str(label.get("dialect") or "").strip()
+        profile = str(label.get("recognition_profile") or "").strip()
+        if dialect in wanted and profile:
+            by_dialect.setdefault(dialect, set()).add(profile)
+    profiles: List[str] = []
+    unsupported: List[str] = []
+    for dialect in sorted(wanted):
+        found = {
+            profile
+            for profile in by_dialect.get(dialect, set())
+            if profile != "legacy_unassigned"
+        }
+        if found:
+            profiles.extend(found)
+        else:
+            unsupported.append(dialect)
+    return sorted(set(profiles)), unsupported
 
 
 @router.post("/dataset/prepare")
@@ -143,13 +207,30 @@ async def start_dataset_preparation(
     đường dùng hằng ngày lẫn đường nghiên cứu, từ cùng một manifest, nên hai
     đường không thể lệch nhau về việc đang mô tả bộ dữ liệu nào.
     """
+    tenant_id = require_tenant()
+    user_id = str(current_user.get("id") or "") or None
+    if not body.dialects:
+        raise HTTPException(status_code=400, detail="Chưa chọn phương ngữ nào.")
+    for dialect in body.dialects or []:
+        try:
+            if tenant_id == "default":
+                assert_can_use_dialect(dialect, user_id)
+            else:
+                assert_can_use_dialect(dialect, user_id, tenant_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     try:
         result = await asyncio.to_thread(
             preparation_service.queue_preparation,
             dialects=body.dialects,
             profiles=body.profiles,
             seed=body.seed,
-            profiles_for_dialects=_profiles_for_dialects,
+            profiles_for_dialects=lambda dialects: _profiles_for_dialects(dialects, tenant_id),
+            tenant_id=tenant_id,
+            minimum_samples=body.min_samples_per_class or 25,
+            with_research=body.with_research,
+            requested_by=user_id or "",
         )
     except preparation_service.UnsupportedDialectsError as exc:
         raise HTTPException(
@@ -160,8 +241,10 @@ async def start_dataset_preparation(
                 "Hãy gán recognition_profile cho các nhãn của phương ngữ này trước."
             ),
         ) from exc
-    logger.info("[PREP] admin=%s bắt đầu run=%s version=%s",
-                current_user.get("username"), result["run_id"], result["manifest_version"])
+    logger.info(
+        "[PREP] admin=%s tenant=%s bắt đầu run=%s",
+        current_user.get("username"), tenant_id, result["run_id"],
+    )
     return result
 
 
@@ -171,8 +254,10 @@ async def get_dataset_preparation(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Tiến độ và kết quả của một lần chuẩn bị dữ liệu."""
-    report = await asyncio.to_thread(preparation_service.preparation_report, run_id)
-    if report is None:
+    from app.dataset_prep_tasks import read_report
+
+    report = await asyncio.to_thread(read_report, run_id)
+    if report is None or str(report.get("tenant_id") or "") != require_tenant():
         raise HTTPException(status_code=404, detail=f"Không tìm thấy lần chuẩn bị {run_id}")
     return report
 
@@ -193,6 +278,13 @@ async def list_research_splits(
     return await asyncio.to_thread(_research_splits)
 
 
+@router.get("/splits/operational")
+async def list_operational_splits(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> List[Dict[str, Any]]:
+    return await asyncio.to_thread(_operational_splits, require_tenant())
+
+
 # ============================================================================
 # API Endpoints
 # ============================================================================
@@ -209,19 +301,64 @@ async def get_dataset_info(
     Auto-load từ folder dataset, không cần upload
     """
     try:
-        return await asyncio.to_thread(
-            catalog_service.build_dataset_info,
-            dialect=dialect,
-            language=language,
-            effective_provenance=_effective_split_provenance,
-            samples_csv=SAMPLES_CSV,
-            labels_csv=LABELS_CSV,
+        tenant_id = require_tenant()
+        samples, labels = await asyncio.to_thread(_load_samples_and_labels)
+        samples = _rows_of_tenant(samples, tenant_id)
+        labels = _rows_of_tenant(labels, tenant_id)
+        dialects_map = await asyncio.to_thread(_get_dialects_by_language, tenant_id)
+        if dialect or language:
+            matching = {
+                str(label.get("class_uid") or "").strip()
+                for label in labels
+                if (
+                    not language
+                    or (str(label.get("language") or "vn").strip() or "vn") == language
+                )
+                and (
+                    not dialect
+                    or str(label.get("dialect") or "").strip() == dialect
+                )
+            }
+            samples = [
+                row
+                for row in samples
+                if str(row.get("class_uid") or "").strip() in matching
+            ]
+        class_counts = Counter(
+            str(row.get("class_uid") or "").strip()
+            for row in samples
+            if str(row.get("class_uid") or "").strip()
+        )
+        uid_to_dialect = {
+            str(label.get("class_uid") or "").strip(): str(
+                label.get("dialect") or ""
+            ).strip()
+            for label in labels
+        }
+        samples_by_dialect = Counter(
+            uid_to_dialect.get(str(row.get("class_uid") or "").strip(), "")
+            for row in samples
+        )
+        samples_by_dialect.pop("", None)
+        provenance = await asyncio.to_thread(_split_provenance, tenant_id=tenant_id)
+        return DatasetInfo(
+            total_samples=len(samples),
+            total_classes=len(class_counts),
+            languages=list(dialects_map),
+            dialects=dialects_map,
+            class_distribution=dict(class_counts),
+            samples_by_dialect=dict(samples_by_dialect),
+            split_provenance=provenance,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi tải dataset: {str(e)}")
 
 
-@router.post("/start", response_model=TrainingJob)
+@router.post(
+    "/start",
+    response_model=TrainingJob,
+    dependencies=[Depends(limit_training)],
+)
 async def start_training(
     config: TrainingConfig,
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -231,12 +368,24 @@ async def start_training(
 
     Tạo job ID, thêm vào queue, return job info
     """
+    working_tenant = require_tenant()
+    guard_quota(current_user, "training_jobs_running")
+    guard_quota(current_user, "training_jobs_queued")
+    if working_tenant != tenant_of(current_user):
+        guard_quota(current_user, "training_jobs_running", tenant_id=working_tenant)
+        guard_quota(current_user, "training_jobs_queued", tenant_id=working_tenant)
+    for dialect in config.dialects or []:
+        try:
+            assert_can_use_dialect(dialect, str(current_user.get("id") or ""))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     try:
         return await submission_service.submit_training_job(
             config,
             auth_user_id=str(current_user.get("id") or "") or None,
             username=current_user.get("username"),
-            tenant_id=require_tenant(),
+            tenant_id=working_tenant,
             jobs=training_jobs,
             research_splits=_research_splits,
             trainable_dialects=_trainable_dialects_from_splits,
@@ -443,6 +592,8 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     handshake; fall back to ?token= for legacy/API clients.
     """
     from app.modules.identity import ACCESS_COOKIE
+    from app.modules.saas import tenant_middleware
+    from app.modules.saas.tenant_context import tenant_scope
 
     effective_token = token or websocket.cookies.get(ACCESS_COOKIE, "")
     user = await asyncio.to_thread(get_user_from_token, effective_token) if effective_token else None
@@ -450,28 +601,39 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
-    job_info = await _ensure_job_loaded(job_id)
-    if not job_info:
-        await websocket.close(code=4004, reason="Job not found")
+    working_tenant = await asyncio.to_thread(
+        tenant_middleware._tenant_of_user, str(user.get("id") or "")
+    )
+    if not working_tenant:
+        await websocket.close(code=4001, reason="Tenant unavailable")
         return
 
-    await websocket.accept()
+    # HTTP requests receive this scope from TenantScopeMiddleware. WebSockets do
+    # not pass through that middleware, so keep the same active-tenant scope for
+    # both the ownership check and every subsequent progress read.
+    with tenant_scope(working_tenant):
+        job_info = await _ensure_job_loaded(job_id)
+        if not job_info:
+            await websocket.close(code=4004, reason="Job not found")
+            return
 
-    try:
-        await progress_service.stream_job_progress(
-            job_id,
-            websocket.send_json,
-            ensure_job=_ensure_job_loaded,
-        )
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        logger.warning("WebSocket error: %s", e)
-    finally:
+        await websocket.accept()
+
         try:
-            await websocket.close()
-        except Exception:
+            await progress_service.stream_job_progress(
+                job_id,
+                websocket.send_json,
+                ensure_job=_ensure_job_loaded,
+            )
+        except WebSocketDisconnect:
             pass
+        except Exception as e:
+            logger.warning("WebSocket error: %s", e)
+        finally:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
 
 # ============================================================================
