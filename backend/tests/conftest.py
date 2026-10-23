@@ -1108,9 +1108,11 @@ def isolation_tenants():
 
     yield wanted
 
-    with system_scope("test cleanup: remove cross-tenant proof parents"):
-        for tenant in reversed(created):
-            db._execute("DELETE FROM tenants WHERE tenant_id = %s", (tenant,))
+    # The proof suites may now leave durable audit/notification rows behind.
+    # Use the shared leaf-to-root purge order instead of deleting only the
+    # parent row, otherwise the tenant foreign keys correctly reject teardown.
+    for tenant in reversed(created):
+        purge_tenant(tenant)
 
 
 @pytest.fixture

@@ -269,23 +269,28 @@ def resolve_usernames(user_ids: Set[str]) -> Dict[str, Dict[str, Any]]:
     if not ids:
         return {}
     try:
-        connection = connect_postgres(connect_timeout=5)
-        try:
-            with connection:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    cursor.execute(
-                        "SELECT id, username, is_admin FROM users WHERE id::text = ANY(%s)",
-                        (ids,),
-                    )
-                    return {
-                        str(row["id"]): {
-                            "username": row["username"],
-                            "is_admin": bool(row["is_admin"]),
+        from app.modules.saas.tenant_context import system_scope
+        from app.storage.rls import apply_scope
+
+        with system_scope("activity: resolve usernames for platform admin console"):
+            connection = connect_postgres(connect_timeout=5)
+            try:
+                with connection:
+                    with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                        apply_scope(cursor)
+                        cursor.execute(
+                            "SELECT id, username, is_admin FROM users WHERE id::text = ANY(%s)",
+                            (ids,),
+                        )
+                        return {
+                            str(row["id"]): {
+                                "username": row["username"],
+                                "is_admin": bool(row["is_admin"]),
+                            }
+                            for row in cursor.fetchall()
                         }
-                        for row in cursor.fetchall()
-                    }
-        finally:
-            connection.close()
+            finally:
+                connection.close()
     except Exception as exc:
         logger.warning("[ACTIVITY] username resolve failed: %s", exc)
         return {}

@@ -364,11 +364,28 @@ def mot_lop_thieu_vung(cur):
     `MIGRATION_MUST_SUCCEED` dựng lại ràng buộc ở lượt `ensure_tables()` kế
     tiếp — bộ test tự lành, không cần sửa tay.
     """
+    import uuid
+
+    created_uid = None
     with _pham_vi_dung_trang_thai(cur):
         cur.execute("SELECT class_uid, region FROM classes "
                     "WHERE region IS NOT NULL LIMIT 1")
         row = cur.fetchone()
-        assert row is not None, "tien de sai: khong co lop nao de lam hong"
+        if row is None:
+            # Database dựng từ migration là trạng thái được hỗ trợ, không phải
+            # lỗi tiền đề. Tự sở hữu đúng một hàng thay vì dựa vào bản clone
+            # production từng được dùng để chạy suite.
+            from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+
+            tag = uuid.uuid4().hex[:10]
+            created_uid = f"seed_region_{tag}"
+            cur.execute(
+                "INSERT INTO classes "
+                "(tenant_id, class_uid, slug, language, region) "
+                "VALUES (%s, %s, %s, 'vn', 'unclassified')",
+                (DEFAULT_TENANT_ID, created_uid, f"seed-region-{tag}"),
+            )
+            row = (created_uid, "unclassified")
         uid, vung_cu = row
         cur.execute("ALTER TABLE classes ALTER COLUMN region DROP NOT NULL")
         cur.execute("UPDATE classes SET region = NULL WHERE class_uid = %s", (uid,))
@@ -379,6 +396,8 @@ def mot_lop_thieu_vung(cur):
             cur.execute("UPDATE classes SET region = %s WHERE class_uid = %s",
                         (vung_cu, uid))
             cur.execute("ALTER TABLE classes ALTER COLUMN region SET NOT NULL")
+            if created_uid is not None:
+                cur.execute("DELETE FROM classes WHERE class_uid = %s", (created_uid,))
 
 
 class TestBackfillVung:

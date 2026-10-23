@@ -21,11 +21,35 @@ class QueueUnavailableError(RuntimeError):
     pass
 
 
+def eligible_class_counts(dialects: list[str], minimum_samples: int) -> dict[str, int]:
+    """Count trainable classes per dialect in the ambient tenant scope."""
+    if not dialects or minimum_samples <= 0:
+        return {}
+    from app.storage.metadata_db import _fetch_all
+
+    rows = _fetch_all(
+        "SELECT dialect, count(*) AS n FROM ("
+        "  SELECT c.dialect, c.class_uid, "
+        "         count(s.sample_uid) FILTER (WHERE s.deleted_at IS NULL) AS m "
+        "    FROM classes c "
+        "    LEFT JOIN samples s ON s.class_uid = c.class_uid "
+        "   WHERE c.deleted_at IS NULL AND c.dialect = ANY(%s) "
+        "   GROUP BY c.dialect, c.class_uid"
+        ") t WHERE m >= %s GROUP BY dialect",
+        (list(dialects), minimum_samples),
+    )
+    return {
+        str(row.get("dialect") or ""): int(row.get("n") or 0)
+        for row in rows
+    }
+
+
 async def submit_training_job(
     config: TrainingConfig,
     *,
     auth_user_id: Optional[str],
     username: Optional[str],
+    tenant_id: str,
     jobs: dict[str, dict[str, Any]],
     research_splits: Callable[[], list[dict[str, Any]]],
     trainable_dialects: Callable[[], dict[str, int]],
@@ -84,7 +108,7 @@ async def submit_training_job(
         total_epochs=config.epochs,
         split_provenance=split_provenance,
     )
-    jobs[job_id] = {"job": job, "progress": []}
+    jobs[job_id] = {"job": job, "progress": [], "tenant_id": tenant_id}
     await persist_job(job, auth_user_id=auth_user_id)
 
     try:

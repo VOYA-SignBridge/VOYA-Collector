@@ -72,7 +72,11 @@ def test_list_users_preserves_query_serialization_and_security_state(monkeypatch
     users = user_service.list_users()
 
     assert connection.closed is True
-    assert cursor.executions == [(
+    assert cursor.executions[0] == (
+        "SELECT set_config(%s, %s, true), set_config(%s, %s, true)",
+        ("app.system_scope", "on", "app.tenant_id", ""),
+    )
+    assert cursor.executions[1:] == [(
         "SELECT id, username, email, is_active, is_admin, created_at "
         "FROM users ORDER BY created_at DESC",
         None,
@@ -102,7 +106,11 @@ def test_set_user_admin_role_preserves_update_contract(monkeypatch):
     updated = user_service.set_user_admin_role(str(user_id), True)
 
     assert connection.closed is True
-    assert cursor.executions == [(
+    assert cursor.executions[0] == (
+        "SELECT set_config(%s, %s, true), set_config(%s, %s, true)",
+        ("app.system_scope", "on", "app.tenant_id", ""),
+    )
+    assert cursor.executions[1:] == [(
         "UPDATE users SET is_admin = %s WHERE id = %s RETURNING id, username, is_admin",
         (True, str(user_id)),
     )]

@@ -51,6 +51,41 @@ def client(monkeypatch):
     monkeypatch.setattr(
         training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 7}
     )
+    # Submission fails closed when the selected operational split has no
+    # train/test rows.  Keep this lifecycle suite independent from whatever
+    # dataset happens to be mounted in the test container.
+    monkeypatch.setattr(
+        training_module,
+        "_effective_split_provenance",
+        lambda dialect=None: training_module.SplitProvenance(
+            counts={"train": 100, "val": 20, "test": 20}
+        ),
+    )
+    # C5/C6/C7/C12 normally inspect frozen dataset files that are deliberately
+    # not part of a clean source checkout.  This suite owns the HTTP lifecycle,
+    # while research_validity.py has its own contract tests, so model only the
+    # two checkpoint fields whose presentation is asserted below.
+    def _checkpoint_checks(ckpt, workspace_root=None):
+        failed = set()
+        if ckpt.get("run_purpose") != "research":
+            failed.add("C1")
+        if not ckpt.get("dataset_manifest_checksum"):
+            failed.add("C5")
+        return [
+            {
+                "id": f"C{i}",
+                "label": f"criterion {i}",
+                "ok": f"C{i}" not in failed,
+                "detail": "đạt" if f"C{i}" not in failed else "không đạt",
+            }
+            for i in range(1, 15)
+        ]
+
+    monkeypatch.setattr(
+        training_module.provenance_service,
+        "_provenance_checks",
+        _checkpoint_checks,
+    )
     # Cổng sàn số mẫu đếm lớp trong phạm vi tenant ĐANG chạy. Trước khi fixture
     # này đặt phạm vi, nó chạy ngoài mọi phạm vi và đếm ra một con số — bộ ca
     # vẫn xanh mà không ai chọn tenant nào. Giờ phạm vi là `iso_a`, một tổ chức
@@ -406,6 +441,17 @@ def test_promote_rejects_an_unrecognized_architecture(client, tmp_path):
     assert "Transformer" in response.json()["detail"]
 
 
+_REPRO_LABEL_KEYS = [
+    "vn/hoa_de/cat-dau-ca",
+    "vn/hoa_de/cat-ky",
+    "vn/hoa_de/danh-vay-ca",
+    "vn/hoa_de/lot-da-ca",
+    "vn/hoa_de/lot-vo-tom",
+    "vn/hoa_de/rang-muoi",
+    "vn/hoa_de/tom",
+]
+
+
 def _reproducible_ckpt(**overrides) -> dict:
     ckpt = {
         "git_commit": "0475b78cabc9c35b3ab9345097a774f8b78818be",
@@ -418,11 +464,28 @@ def _reproducible_ckpt(**overrides) -> dict:
             "deterministic_algorithms": True,
             "warnings": [],
         },
-        "dataset_version": "isds2026_v6",
-        "split_version": "hoa_de_loso_v5/test_S001",
-        "dataset_manifest_checksum": "a95bc6d1ed3b",
+        "dataset_version": "VSL2026_v22",
+        "split_version": "hoa_de_strict_v22",
+        "dataset_manifest_checksum": (
+            "9f893cdc8ad8649902dfe09afa0133331f9106b967435a3cee2b1cad086ca13f"
+        ),
         "model_type": "TCN",
+        "recognition_profile": "hoa_de",
+        "include_common": False,
+        "vocabulary_schema_version": "v2",
+        "normalization_version": "v2",
+        "seq_len": 60,
+        "feature_dim": 126,
         "num_classes": 7,
+        "preprocess_contract_version": "v2",
+        "storage_contract_version": "v2",
+        "motion_types_present": ["static", "dynamic"],
+        "label_to_idx": {key: i for i, key in enumerate(_REPRO_LABEL_KEYS)},
+        "idx_to_label": {
+            i: {"label_key": key} for i, key in enumerate(_REPRO_LABEL_KEYS)
+        },
+        "common_labels": [],
+        "profile_specific_labels": list(_REPRO_LABEL_KEYS),
         "runtime_env": {
             "python_version": "3.11.15",
             "pytorch_version": "2.0.0+cu117",
@@ -433,6 +496,15 @@ def _reproducible_ckpt(**overrides) -> dict:
             "criterion": "val_macro_f1",
             "restored_best_state": True,
             "best_epoch": 10,
+        },
+        "training_config": {
+            "augmentation": {
+                "augmentation_contract_version": "v2_wrist_centered_mirror",
+                "enabled": True,
+                "profile": "standard",
+                "mirror_prob": 0.5,
+                "p": 0.5,
+            },
         },
     }
     ckpt.update(overrides)
@@ -461,7 +533,7 @@ def test_provenance_reports_a_fully_reproducible_run(client, tmp_path):
     assert body["available"] is True
     assert body["reproducible"] is True
     assert body["code"]["seed"] == 42
-    assert body["data"]["dataset_version"] == "isds2026_v6"
+    assert body["data"]["dataset_version"] == "VSL2026_v22"
     assert all(check["ok"] for check in body["checks"])
 
 

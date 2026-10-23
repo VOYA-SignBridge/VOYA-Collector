@@ -13,6 +13,7 @@ from psycopg2.extras import RealDictCursor
 
 from app.infrastructure.database.connection import connect_postgres
 from app.modules.security.account_controls import list_locked_users, list_warned_users
+from app.storage.rls import apply_scope
 
 
 def list_users() -> List[Dict[str, Any]]:
@@ -21,6 +22,7 @@ def list_users() -> List[Dict[str, Any]]:
     try:
         with connection:
             with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                apply_scope(cursor)
                 cursor.execute(
                     """
                     SELECT id, username, email, is_active, is_admin, created_at
@@ -55,6 +57,7 @@ def set_user_admin_role(user_id: str, is_admin: bool) -> Optional[Dict[str, Any]
     try:
         with connection:
             with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                apply_scope(cursor)
                 cursor.execute(
                     "UPDATE users SET is_admin = %s WHERE id = %s "
                     "RETURNING id, username, is_admin",

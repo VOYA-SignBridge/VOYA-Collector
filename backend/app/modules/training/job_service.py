@@ -27,6 +27,32 @@ training_jobs: Dict[str, Dict[str, Any]] = {}
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
 
+def evaluation_label_names(labels: List[str]) -> Dict[str, str]:
+    """Resolve checkpoint class UUIDs to labels inside the ambient tenant."""
+    keys = [str(value) for value in labels if value]
+    if not keys:
+        return {}
+    try:
+        from app.modules.saas.tenant_context import require_tenant
+        from app.storage.metadata_db import _fetch_all
+
+        rows = _fetch_all(
+            "SELECT class_uid, label_original, slug FROM classes "
+            "WHERE tenant_id = %s AND class_uid = ANY(%s)",
+            (require_tenant(), keys),
+        )
+    except Exception as exc:
+        logger.warning("[EVAL] khong tra duoc ten nhan: %s", exc)
+        return {}
+    return {
+        str(row["class_uid"]): str(
+            row.get("label_original") or row.get("slug") or ""
+        ).strip()
+        for row in rows
+        if row.get("label_original") or row.get("slug")
+    }
+
+
 class JobNotFoundError(LookupError):
     pass
 
@@ -176,17 +202,32 @@ async def restore_jobs_from_db(limit: int = 50) -> None:
             except Exception as exc:
                 logger.warning("Requeue failed for %s: %s", job.id, exc)
 
-        training_jobs[job.id] = {"job": job, "progress": []}
+        training_jobs[job.id] = {
+            "job": job,
+            "progress": [],
+            "tenant_id": str(row.get("tenant_id") or ""),
+        }
         restored += 1
 
     logger.info("restored=%d requeued=%d", restored, requeued)
 
 
 async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
-    """Return cached job info, refreshing non-terminal state from Postgres."""
+    """Return a job visible in the ambient tenant, never a foreign cache hit."""
+    try:
+        from app.modules.saas.tenant_context import require_tenant
+
+        tenant_id = require_tenant()
+    except Exception as exc:
+        logger.warning("job=%s lookup without tenant scope: %s", job_id, exc)
+        return None
+
     cached = training_jobs.get(job_id)
-    if cached and cached["job"].status in TERMINAL_STATUSES:
-        return cached
+    owned_cached = (
+        cached if cached and cached.get("tenant_id") == tenant_id else None
+    )
+    if owned_cached and owned_cached["job"].status in TERMINAL_STATUSES:
+        return owned_cached
 
     try:
         from app.storage.metadata_db import get_training_job
@@ -194,16 +235,19 @@ async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
         row = await asyncio.to_thread(get_training_job, job_id)
     except Exception as exc:
         logger.warning("DB lookup failed for job %s: %s", job_id, exc)
-        return cached
+        return owned_cached
     if not row:
-        return cached
+        return owned_cached
+    if str(row.get("tenant_id") or "") != tenant_id:
+        logger.warning("job=%s DB row escaped tenant scope", job_id)
+        return None
 
     job = _job_from_db_row(row)
-    if cached:
-        cached["job"] = job
-        return cached
+    if owned_cached:
+        owned_cached["job"] = job
+        return owned_cached
 
-    job_info = {"job": job, "progress": []}
+    job_info = {"job": job, "progress": [], "tenant_id": tenant_id}
     training_jobs[job_id] = job_info
     return job_info
 

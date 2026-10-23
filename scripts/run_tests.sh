@@ -101,6 +101,11 @@ echo "==> dich test: $(printf '%s' "$app_dsn" | sed -E 's#://([^:]+):[^@]*@#://\
 # --------------------------------------------------------------------------
 extra=""
 
+# Bí mật CỐ ĐỊNH chỉ dùng trong container test. `.env` thật cố ý được phép để
+# trống trên máy mới, nhưng OTP từ chối hash mã sáu chữ số khi thiếu pepper.
+# Override ở đây giữ production fail-closed mà vẫn làm test tự đủ điều kiện.
+extra="$extra -e OTP_PEPPER=voya-test-only-pepper-not-for-production-2026"
+
 # 1) Google Drive: KHÔNG mount gdrive/ vào container test (từ 18/10/2026). Bộ
 #    test từng ghi thẳng lên Drive sản xuất qua đường này; conftest giờ chặn
 #    mọi lệnh gọi Google API, và 13 ca SOT tích hợp skip.

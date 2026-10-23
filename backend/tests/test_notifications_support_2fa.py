@@ -329,8 +329,13 @@ class TestPhieuDenTayNguoiTruc:
         """
         from pathlib import Path
 
-        nguon = (Path(__file__).resolve().parents[1] / "app" / "account_rename.py"
-                 ).read_text(encoding="utf-8")
+        nguon = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "modules"
+            / "admin"
+            / "account_rename.py"
+        ).read_text(encoding="utf-8")
         assert "support_messages" not in nguon, (
             "đổi tên tài khoản không được đụng tới lời nhắn hỗ trợ — "
             "author_label là bằng chứng lịch sử")

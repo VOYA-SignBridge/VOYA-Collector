@@ -4,13 +4,22 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from app.auth import get_current_user, require_admin, require_tenant_editor
+from app.auth import get_current_user, require_admin
 from app.modules.security.sudo_mode import require_sudo
-from app.sync_tasks import download_missing_files_to_local
+from app.modules.admin.user_service import set_user_admin_role
 from app.monitoring import collect_resources
 from app import activity
+from app.routers import admin_data as _admin_data
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+router.include_router(_admin_data.router)
+
+# Compatibility exports for callers that historically imported these handlers
+# from ``app.routers.admin``. Their implementation and route registration now
+# have one owner: ``admin_data``.
+get_data_report = _admin_data.get_data_report
+sync_local_files = _admin_data.sync_local_files
+get_sync_status = _admin_data.get_sync_status
 
 
 # ---------------------------------------------------------------- sudo mode
@@ -189,6 +198,7 @@ def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
 def update_user_role(
     user_id: str,
     payload: UserRoleUpdate,
+    current_user: Dict[str, Any] = Depends(require_admin),
     # Mặc định `None`, KHÔNG bọc `Optional[Request]`: FastAPI chỉ nhận diện
     # được kiểu tiêm-thẳng đặc biệt này khi chú thích kiểu là ĐÚNG `Request`,
     # và `Optional[Request]` làm nó rơi vào nhánh dựng field Pydantic bình
@@ -198,7 +208,6 @@ def update_user_role(
     # mà không truyền `request`; FastAPI vẫn tiêm đúng đối tượng thật khi chạy
     # qua HTTP dù tham số có giá trị mặc định.
     request: Request = None,
-    current_user: Dict[str, Any] = Depends(require_admin)
 ):
     """Cấp hoặc gỡ quyền QUẢN TRỊ NỀN TẢNG (`users.is_admin`) — Chỉ Admin.
 
@@ -217,22 +226,12 @@ def update_user_role(
             detail="Không thể tự gỡ quyền Admin của chính mình."
         )
 
-    # Cùng lý do với `get_all_users`: kết nối trần không đặt `app.tenant_id`, nên
-    # `WHERE id = %s` khớp 0 dòng và endpoint này trả 404 "Không tìm thấy người
-    # dùng" cho một tài khoản đang tồn tại — một lỗi 404 nói dối về nguyên nhân.
-    from app.storage.metadata_db import _fetch_all
-
-    rows = _fetch_all(
-        "UPDATE users SET is_admin = %s WHERE id = %s "
-        "RETURNING id, username, is_admin",
-        (payload.is_admin, user_id),
-    )
-    if not rows:
+    updated = set_user_admin_role(user_id, payload.is_admin)
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Không tìm thấy người dùng"
         )
-    updated = rows[0]
     # `is_admin_moi` trong `detail` chứ không chỉ hành động: "cấp quyền" và
     # "gỡ quyền" là hai câu chuyện khác hẳn nhau, cùng lý do đã ghi ở
     # `tenant.member_role_changed` trong routers/tenants.py.
@@ -519,156 +518,6 @@ def get_audit_log(
         "excludes_platform_rows": True,
     }
 
-
-@router.get("/data-report")
-def get_data_report(current_user: Dict[str, Any] = Depends(require_tenant_editor)):
-    """Dataset dashboard: totals, per-label / per-region / per-source breakdowns,
-    top contributors, and the most recent samples.
-
-    CỔNG PHẢI KHỚP PHÂN LOẠI — sửa 16/08/2026
-    =========================================
-    Endpoint này được phân loại TENANT_ADMIN và dữ liệu của nó đã thu về phạm vi
-    tenant người gọi. Nhưng cổng vẫn là `require_admin`, mà cổng ấy kiểm cờ
-    `users.is_admin` — tức `platform_administrator`
-    (docs/03-security/AUTHORIZATION.md §247). Ghép lại thành một endpoint không
-    phục vụ đúng ai cả:
-
-        quản trị TENANT   -> 403, dù đây là bảng điều khiển của chính tổ chức họ
-        quản trị NỀN TẢNG -> qua, nhưng chỉ thấy tenant NHÀ của mình
-
-    Ba thứ phải nhất quán, và trước bản vá này chúng lệch nhau:
-
-        chủ thể   quyền   phạm vi   ngữ nghĩa endpoint
-
-    `require_tenant_editor` là bậc quyền đúng: nó cấp theo VAI TRONG TENANT NHÀ
-    (`tenant_members.role`), và vẫn cho quản trị nền tảng qua. Không endpoint
-    nào ở bậc này nhận tenant từ người gọi, nên không có gì để giả mạo.
-
-    Nếu sau này cần một bảng điều khiển TOÀN NỀN TẢNG thì đó là endpoint riêng
-    với một quyền hệ thống tường minh — không nới cổng này ra.
-    """
-    from collections import Counter
-    from app.dataset_manager import list_classes
-    from app.dataset_samples import list_samples
-    from app.modules.saas.tenant_context import require_tenant
-
-    # PHÂN LOẠI (16/08/2026): TENANT_ADMIN + DISPLAY/AGGREGATION -> theo phạm vi.
-    #
-    # `require_admin` chỉ kiểm cờ boolean `is_admin`, không phải một quyền có
-    # phạm vi. Nghĩa là ở cổng này hệ thống KHÔNG phân biệt được:
-    #
-    #     quản trị viên CỦA MỘT TENANT   vs   người vận hành NỀN TẢNG
-    #
-    # Bản trước đọc toàn bộ kho, nên bất kỳ ai mang cờ ấy đều thấy được tổng số
-    # lớp/mẫu, phân rã theo vùng/nguồn, và DANH SÁCH NGƯỜI ĐÓNG GÓP của mọi tổ
-    # chức — cùng loại rò đã gỡ ở ô tìm kiếm người đóng góp.
-    #
-    # Hai lý do chọn phạm vi tenant thay vì giữ toàn cục:
-    #   1. `is_admin` là quyền cao TRONG tenant, không phải quyền vượt ranh giới
-    #      tenant. Quyền hành động lớn hơn không có nghĩa phạm vi rộng hơn.
-    #   2. Endpoint anh em ngay trên (`/admin/audit`) ĐÃ theo phạm vi và nói
-    #      thẳng điều đó trong phản hồi (`scope`, `excludes_platform_rows`). Để
-    #      hai endpoint cạnh nhau trả lời hai kiểu là chỗ để hiểu nhầm.
-    #
-    # Nếu về sau cần bảng điều khiển TOÀN NỀN TẢNG thì đó là một endpoint RIÊNG
-    # với một quyền hệ thống tường minh, không phải nới endpoint này ra. Không
-    # tạo ngoại lệ hệ thống chỉ vì tệp có tên `admin.py`.
-    scope = require_tenant()
-    metas = list_classes(tenant_id=scope)
-    samples = list_samples(scope)
-
-    label_c: Counter = Counter()
-    region_c: Counter = Counter()
-    source_c: Counter = Counter()
-    contrib_c: Counter = Counter()
-    for s in samples:
-        label_c[(s.get("label_original") or s.get("slug") or "?").strip() or "?"] += 1
-        region_c[(s.get("dialect") or "").strip() or "khác"] += 1
-        source_c[(s.get("source_type") or "").strip() or "khác"] += 1
-        uid = (s.get("user_id") or "").strip()
-        if uid:
-            contrib_c[uid] += 1
-
-    regions = {(getattr(m, "dialect", "") or "").strip() for m in metas}
-    regions.discard("")
-
-    top_ids = [uid for uid, _ in contrib_c.most_common(10)]
-    umap = activity._resolve_usernames(set(top_ids))
-    top_contributors = [
-        {"user_id": uid, "username": (umap.get(uid) or {}).get("username") or uid[:8], "count": cnt}
-        for uid, cnt in contrib_c.most_common(10)
-    ]
-
-    recent = sorted(samples, key=lambda s: str(s.get("created_at") or ""), reverse=True)[:12]
-    recent_out = [{
-        "label": r.get("label_original") or r.get("slug"),
-        "dialect": r.get("dialect"),
-        "source": r.get("source_type"),
-        "created_at": str(r.get("created_at") or ""),
-    } for r in recent]
-
-    return {
-        "labels_count": len(metas),
-        "total_samples": len(samples),
-        "contributors_count": len(contrib_c),
-        "regions_count": len(regions),
-        "top_labels": [{"label": l, "count": c} for l, c in label_c.most_common(12)],
-        "by_region": [{"region": r, "count": c} for r, c in region_c.most_common()],
-        "by_source": [{"source": s, "count": c} for s, c in source_c.most_common()],
-        "top_contributors": top_contributors,
-        "recent": recent_out,
-    }
-
-
-@router.post("/sync-local")
-def sync_local_files(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Trigger task tải các file feature và raw video thiếu từ Google Drive về local"""
-    task = download_missing_files_to_local.delay()
-    return {
-        "status": "success",
-        "message": "Đã bắt đầu quá trình đồng bộ hóa file về server",
-        "task_id": task.id
-    }
-
-@router.get("/sync-status/{task_id}")
-def get_sync_status(task_id: str, current_user: Dict[str, Any] = Depends(require_admin)):
-    """Kiểm tra trạng thái tiến trình đồng bộ"""
-    from celery.result import AsyncResult
-    task = AsyncResult(task_id)
-    
-    if task.state == 'PENDING':
-        response = {
-            'state': task.state,
-            'current': 0,
-            'total': 1,
-            'status': 'Pending...'
-        }
-    elif task.state == 'PROGRESS':
-        response = {
-            'state': task.state,
-            'current': task.info.get('current', 0),
-            'total': task.info.get('total', 1),
-            'downloaded': task.info.get('downloaded', 0),
-            'skipped': task.info.get('skipped', 0),
-            'errors': task.info.get('errors', 0)
-        }
-    elif task.state == 'SUCCESS':
-        response = {
-            'state': task.state,
-            'current': task.info.get('current', 1),
-            'total': task.info.get('total', 1),
-            'downloaded': task.info.get('downloaded', 0),
-            'skipped': task.info.get('skipped', 0),
-            'errors': task.info.get('errors', 0)
-        }
-    else:
-        # FAILURE or others
-        response = {
-            'state': task.state,
-            'status': str(task.info)
-        }
-    
-    return response
 
 class IgnoreHardwarePayload(BaseModel):
     resource: str
