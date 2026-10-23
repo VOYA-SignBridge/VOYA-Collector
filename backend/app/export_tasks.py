@@ -1,5 +1,7 @@
 """Compatibility facade for Google Sheets and Google Drive Celery tasks."""
 
+from app.config import settings
+
 from app.modules.google_sync.drive_tasks import (
     delete_gdrive_paths_task,
     mirror_catalog_csvs_to_drive,
@@ -9,6 +11,7 @@ from app.modules.google_sync.drive_tasks import (
     upload_raw_video_to_gdrive_task,
 )
 from app.modules.google_sync.sheets_tasks import (
+    _LABELS_SHEET_REFRESH_SECONDS,
     export_labels_to_sheets,
     export_samples_to_sheets,
 )
@@ -23,4 +26,5 @@ __all__ = [
     "upload_npz_batch_to_gdrive_task",
     "upload_npz_to_gdrive_task",
     "upload_raw_video_to_gdrive_task",
+    "settings",
 ]

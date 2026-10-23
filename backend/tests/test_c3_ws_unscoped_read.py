@@ -55,7 +55,7 @@ B = "iso_b"
 
 
 @pytest.fixture
-def job_cua_A():
+def job_cua_A(isolation_tenants):
     jid = str(uuid.uuid4())
     with tenant_scope(A):
         upsert_training_job({

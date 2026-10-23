@@ -74,7 +74,7 @@ UID_B = "c3bbbbbb-0000-4000-8000-00000000000b"
 
 
 @pytest.fixture(scope="module")
-def hai_nguoi_dung():
+def hai_nguoi_dung(isolation_tenants):
     """Hai tài khoản THẬT trong `users`, hai tenant khác nhau.
 
     Không dùng `dependency_overrides[get_current_user]` với một `dict` giả, và
@@ -140,7 +140,7 @@ def _nhu(uid: str) -> Dict[str, str]:
 
 
 @pytest.fixture
-def job_cua_A():
+def job_cua_A(isolation_tenants):
     """Một job ĐÃ HOÀN THÀNH thuộc `iso_a`, ghi thật vào Postgres."""
     jid = str(uuid.uuid4())
     row = {

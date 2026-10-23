@@ -55,19 +55,56 @@ def force_logout_user(user_id: str, by: str = "", reason: str = "") -> bool:
     if not user_id:
         return False
     ttl = int(settings.access_token_expire_minutes) * 60 + 120
+    marker = time.time()
     client = get_activity_client()
     if client is not None:
         try:
             client.set(
                 f"forcelogout:{user_id}",
-                json.dumps({"ts": time.time(), "by": by, "reason": reason}),
+                json.dumps({"ts": marker, "by": by, "reason": reason}),
                 ex=ttl,
             )
         except Exception:
             pass
+    _persist_force_logout_marker(user_id, marker)
     revoke_all_refresh_tokens(user_id)
     logger.info("[ACTIVITY] force-logout user=%s by=%s", user_id, by)
     return True
+
+
+def _persist_force_logout_marker(user_id: str, marker: float) -> None:
+    """Persist an account-wide revocation marker that can only move forward."""
+    try:
+        from app.modules.saas.tenant_context import system_scope
+        from app.storage.rls import apply_scope
+
+        with system_scope("activity: thu hoi phien, mat phang danh tinh"):
+            connection = connect_postgres(connect_timeout=5)
+            try:
+                with connection:
+                    with connection.cursor() as cursor:
+                        apply_scope(cursor)
+                        cursor.execute(
+                            "UPDATE users SET sessions_invalid_before = "
+                            "GREATEST(COALESCE(sessions_invalid_before, to_timestamp(0)), "
+                            "to_timestamp(%s)) WHERE id = %s",
+                            (marker, user_id),
+                        )
+                        if cursor.rowcount == 0:
+                            logger.error(
+                                "[ACTIVITY] moc force-logout khong ghi duoc dong nao "
+                                "cho user=%s — kiem tra scope/RLS",
+                                user_id,
+                            )
+            finally:
+                connection.close()
+    except Exception as exc:
+        logger.error(
+            "[ACTIVITY] KHONG ghi duoc moc force-logout ben cho user=%s: %s — "
+            "lenh thu hoi nay chi song trong Redis",
+            user_id,
+            exc,
+        )
 
 
 def get_force_logout(user_id: str) -> Optional[Dict[str, Any]]:

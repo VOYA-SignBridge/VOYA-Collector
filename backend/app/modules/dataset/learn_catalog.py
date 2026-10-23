@@ -28,7 +28,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-CATALOG_PATH = Path(__file__).resolve().parent / "data" / "qipedc_catalog.json"
+CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "qipedc_catalog.json"
 
 #: Trang chính thức để xem video; mã mục ghép vào để người học tìm đúng từ.
 QIPEDC_DICTIONARY_URL = "https://qipedc.moet.gov.vn/dictionary"

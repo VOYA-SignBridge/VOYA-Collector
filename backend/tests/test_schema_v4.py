@@ -134,6 +134,23 @@ class TestPlanColumnCannotBeNull:
 
 
 class TestSeededPlans:
+    def test_env_example_defaults_to_a_seeded_self_serve_plan(self):
+        """Máy mới copy .env.example; default đó phải tồn tại sau migration."""
+        from pathlib import Path
+
+        env_example = Path(__file__).resolve().parents[2] / ".env.example"
+        configured = next(
+            line.split("=", 1)[1].strip()
+            for line in env_example.read_text(encoding="utf-8").splitlines()
+            if line.startswith("SELF_SERVE_PLAN_CODE=")
+        )
+        rows = db._fetch_all(
+            "SELECT plan_code, is_self_serve FROM plans WHERE plan_code = %s",
+            (configured,),
+        )
+        assert rows, f".env.example trỏ tới gói không được seed: {configured!r}"
+        assert rows[0]["is_self_serve"] is True
+
     def test_the_four_plans_are_present(self):
         codes = {r["plan_code"] for r in db._fetch_all("SELECT plan_code FROM plans")}
         assert {"enterprise", "free", "plus", "pro"} <= codes

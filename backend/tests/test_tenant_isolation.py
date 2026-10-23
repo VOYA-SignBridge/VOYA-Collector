@@ -606,12 +606,12 @@ class TestRequestTenantResolution:
             "cli/verify_deployment.py",        # operator command
             "db.py",                           # boot: CSV->DB sync spans tenants
             "sot/cli.py",                      # the SOT is a cross-tenant artefact
-            "worker.py",                       # every Celery task is platform work
+            "infrastructure/celery/tenant.py", # Celery tasks bind an explicit tenant
             "routers/sot_admin.py",            # counts compared against the SOT total
-            "tenant_context.py",               # the definition itself
-            "tenant_admin.py",                 # acts ON tenants, not inside one
-            "auth.py",                         # identity plane: precedes the tenant
-            "tenant_middleware.py",            # decides the scope, so cannot need one
+            "modules/saas/tenant_context.py",  # the definition itself
+            "modules/saas/tenant_admin.py",    # acts ON tenants, not inside one
+            "modules/identity/_web_compat.py", # identity plane: precedes the tenant
+            "modules/saas/tenant_middleware.py", # decides the scope itself
             "cli/verify_existing_emails.py",   # operator command
             "cli/register_legal_document.py",  # operator command
             "cli/backfill_consents.py",        # operator command
@@ -621,23 +621,23 @@ class TestRequestTenantResolution:
             # kiểm toán toàn nền tảng, đúng nghĩa `system_scope`.
             "cli/seed_storage_counters.py",    # operator command
             # Thiết lập áp cho cả nền tảng, không thuộc tenant nào.
-            "platform_settings.py",
+            "modules/admin/platform_settings.py",
             # Văn bản pháp lý và chấp thuận: gắn với TÀI KHOẢN, không gắn với
             # tenant. Cùng mặt phẳng danh tính với auth.py.
-            "legal.py",
+            "modules/legal/legal.py",
             # Authorisation plane. `tenant_role` answers "what is this user's
             # role in THAT tenant" — a different tenant from the caller's
             # ambient scope, so the scope cannot filter the answer. A point
             # lookup keyed by both ids; it cannot list or discover anything.
-            "vocabulary_registry.py",
+            "modules/dataset/vocabulary_registry.py",
             # --- mặt phẳng thương mại (v4) ---
             # Hạn mức là thứ NỀN TẢNG áp lên tenant, nên nó phải đọc được số
             # liệu của tenant đang bị áp — kể cả khi người gọi là quản trị viên
             # nền tảng đứng ở một tenant khác. Cùng lý do với tenant_admin.py.
-            "plans.py",
+            "modules/saas/plans.py",
             # Gộp số đo qua MỌI tenant trong một lượt GROUP BY. Phạm vi theo
             # tenant của người phái sẽ khiến bảng gộp chỉ có một dòng.
-            "usage.py",
+            "modules/saas/usage.py",
             # v8 — lượt ĐỐI CHIẾU bộ đếm dung lượng, và CHỈ nó. Nó đi bộ thư mục
             # của mọi tenant rồi ghi đè bộ đếm, nên phải chạy ngoài phạm vi; nó
             # còn chạy từ celery-beat, nơi không có yêu cầu nào để lấy phạm vi.
@@ -646,16 +646,16 @@ class TestRequestTenantResolution:
             # KHÔNG mở phạm vi: chúng chạy trong một yêu cầu đã có tenant, và mở
             # phạm vi ở đó là để một lượt tải của tổ chức A trừ vào bộ đếm của
             # tổ chức B nếu có ai truyền nhầm tham số.
-            "storage_quota.py",
+            "modules/saas/storage_quota.py",
             # Xác thực bằng khoá API xảy ra TRƯỚC khi biết tenant nào — chính
             # khoá là thứ quyết định tenant. Cùng vòng lặp nhân-quả với auth.py.
-            "api_keys.py",
+            "modules/security/api_keys.py",
             # Hàng đợi giao webhook trải trên mọi tenant; tiến trình giao không
             # có yêu cầu nào để lấy phạm vi.
-            "webhooks.py",
+            "modules/saas/webhooks.py",
             # Xuất và xoá vĩnh viễn: người vận hành nền tảng tác động LÊN một
             # tenant, không đứng bên trong nó.
-            "tenant_lifecycle.py",
+            "modules/saas/tenant_lifecycle.py",
             # `personal_export.py` — CHỈ hai hàm chạy trong Celery:
             # `run_export` và `cleanup_expired_exports`. Cả hai được worker
             # gọi, nơi không có request nào đặt phạm vi, và `run_export` phải
@@ -667,10 +667,10 @@ class TestRequestTenantResolution:
             # `tenant_lifecycle`, `tenant_id` của chúng luôn là kết quả của
             # `require_tenant()` — tức đúng phạm vi phiên đang có — không phải
             # một tham số đường dẫn có thể khác tenant nhà của người gọi.
-            "personal_export.py",
+            "modules/export/personal_export.py",
             # /metrics là điểm Prometheus quét, không có người dùng nào; nó
             # tổng hợp số liệu của mọi tenant thành một trang.
-            "metrics.py",
+            "infrastructure/observability/metrics.py",
             # CHỈ hai hàm ĐỌC dùng cho giám sát: `count_since` và
             # `seconds_since_last_entry`. Chúng trả lời "sổ kiểm toán có còn lớn
             # lên không" cho toàn nền tảng, và được `/metrics` gọi — nơi không
@@ -684,7 +684,7 @@ class TestRequestTenantResolution:
             # Phạm vi đặt TRONG hai hàm đó chứ không ở chỗ gọi, để chúng không
             # thể bị gọi sai: gọi từ nơi thiếu phạm vi thì RLS lọc sạch và con
             # số trả về sẽ SAI trong im lặng — tệ hơn hẳn một lỗi.
-            "audit.py",
+            "modules/security/audit.py",
             # Lệnh của người vận hành: xuất trạng thái đồng thuận của MỘT tenant
             # ra tệp cho các script offline. Chạy từ dòng lệnh, nơi không có
             # request nào đặt phạm vi.
@@ -708,7 +708,9 @@ class TestRequestTenantResolution:
             # 1`, trả về đúng một hằng số. Nó không liệt kê được thành viên, không
             # đọc được tenant nào, và không trả lời được câu hỏi nào mà người gọi
             # chưa hỏi về chính mình.
-            "access_gate.py",
+            "modules/security/access_gate.py",
+            # Force-logout writes the durable identity-plane session marker.
+            "modules/security/account_controls.py",
             # `moderation_admin.py` — CHỈ hàm `can_moderate`.
             #
             # Nó trả lời "tài khoản này có được duyệt dữ liệu không", và câu ấy
@@ -727,7 +729,7 @@ class TestRequestTenantResolution:
             # vậy: nó nhận `tenant_id` từ chỗ gọi và mọi câu đọc/ghi đều mang
             # mệnh đề ấy. Một quyết định kiểm duyệt không biết mình thuộc tổ
             # chức nào là một quyết định áp nhầm tổ chức.
-            "moderation_admin.py",
+            "modules/admin/moderation_admin.py",
             # `consent_gate.py` — CHỈ hàm cầu nối `_sync_signer_consent_inner`.
             # Nó chạy từ luồng đăng ký và từ lần đóng góp đầu tiên, tức mặt
             # phẳng danh tính, nơi người dùng có thể chưa có phạm vi tenant nào.
@@ -739,7 +741,7 @@ class TestRequestTenantResolution:
             # một. Gọi từ nơi thiếu phạm vi thì chúng nhận 0 hàng, nghĩa là
             # "không ai có đồng thuận", nghĩa là CHẶN. Hướng hỏng đó đúng chiều:
             # thiếu phạm vi làm cổng khoá chặt hơn, không mở ra.
-            "consent_gate.py",
+            "modules/security/consent_gate.py",
             # Lệnh của người vận hành: chép chấp thuận đã có sẵn trong
             # `user_consents` sang `signer_consents` cho dữ liệu cũ.
             "cli/backfill_signer_consents.py",
@@ -753,7 +755,7 @@ class TestRequestTenantResolution:
             # đề ấy thì nhánh "hàng vô chủ, khớp theo tên hiển thị" sẽ đổi tên
             # cả dữ liệu của tenant khác trùng tên — lỗi vô hình trên bản triển
             # khai một tenant. Xem chú thích trong `rename_user`.
-            "account_rename.py",
+            "modules/admin/account_rename.py",
             # Vòng đời đăng ký. Lượt quét chạy từ celery-beat, nơi không có
             # request nào đặt phạm vi, và nó phải xét MỌI tenant — đó chính là
             # công việc của nó. Một lượt quét chỉ thấy tenant của chính mình là
@@ -763,7 +765,7 @@ class TestRequestTenantResolution:
             # (`subscription_id`) hoặc `tenant_id = %s` lấy từ chính hàng vừa
             # đọc ra trong cùng lượt, chứ không từ tham số bên ngoài. Không câu
             # nào ghi theo một điều kiện do người gọi truyền vào.
-            "subscription_lifecycle.py",
+            "modules/saas/subscription_lifecycle.py",
             # Thu hồi phiên đăng nhập. Mặt phẳng DANH TÍNH, cùng lý do với
             # `auth.py`: lệnh tới từ quản trị viên nền tảng, từ dòng lệnh, hoặc
             # từ chính đường phát hiện refresh token bị dùng lại — không đường

@@ -100,7 +100,7 @@ def _doc_he_thong(sql: str, params=()):
 
 
 @pytest.fixture
-def job_A():
+def job_A(isolation_tenants):
     jid = _job(A)
     yield jid
     _doc_he_thong("DELETE FROM training_jobs WHERE job_id = %s RETURNING job_id",
@@ -108,7 +108,7 @@ def job_A():
 
 
 @pytest.fixture
-def job_B():
+def job_B(isolation_tenants):
     jid = _job(B)
     yield jid
     _doc_he_thong("DELETE FROM training_jobs WHERE job_id = %s RETURNING job_id",

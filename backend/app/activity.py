@@ -7,6 +7,7 @@ those components migrate independently.
 
 from app.infrastructure.redis.connection import get_activity_client
 from app.modules.security.account_controls import (
+    _persist_force_logout_marker,
     ack_user_warning,
     force_logout_user,
     format_until as _fmt_until,
@@ -58,6 +59,13 @@ from app.modules.security.ip_controls import (
     is_blocked,
     list_blocked,
     unblock_ip,
+)
+from app.modules.security.session_controls import (
+    deny_access_token,
+    deny_token_family,
+    is_access_token_denied,
+    is_token_family_denied,
+    token_predates_marker,
 )
 
 _client = get_activity_client

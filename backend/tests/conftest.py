@@ -1079,6 +1079,40 @@ def corpus_row_to_poke():
                 pass
 
 
+@pytest.fixture(scope="session")
+def isolation_tenants():
+    """Provide the two tenant parents used by the cross-tenant proof suites.
+
+    Older local test databases inherited these rows from a production clone.
+    A database built from migrations is intentionally empty, so the proof data
+    must own its parent rows just like it owns its jobs, metrics and users.
+    """
+    from app.storage import metadata_db as db
+    from app.modules.saas.tenant_context import system_scope
+
+    wanted = ("iso_a", "iso_b")
+    with system_scope("test: seed cross-tenant proof parents"):
+        existing = {
+            row["tenant_id"]
+            for row in db._fetch_all(
+                "SELECT tenant_id FROM tenants WHERE tenant_id = ANY(%s)",
+                (list(wanted),),
+            )
+        }
+        created = [tenant for tenant in wanted if tenant not in existing]
+        for tenant in created:
+            db._execute(
+                "INSERT INTO tenants (tenant_id, display_name, slug) VALUES (%s, %s, %s)",
+                (tenant, tenant, tenant),
+            )
+
+    yield wanted
+
+    with system_scope("test cleanup: remove cross-tenant proof parents"):
+        for tenant in reversed(created):
+            db._execute("DELETE FROM tenants WHERE tenant_id = %s", (tenant,))
+
+
 @pytest.fixture
 def rollback_cursor():
     """Con trỏ luôn được rollback, buộc vào SYSTEM scope.
