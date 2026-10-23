@@ -45,6 +45,7 @@ def test_retired_root_facades_are_removed() -> None:
     assert not (app_root / "auth.py").exists()
     assert not (app_root / "activity.py").exists()
     assert not (app_root / "monitoring.py").exists()
+    assert not (app_root / "training_tasks.py").exists()
 
 
 def test_root_implementations_are_relocated_to_their_domains() -> None:

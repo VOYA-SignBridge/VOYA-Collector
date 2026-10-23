@@ -349,7 +349,7 @@ class TestCongChanTruocKhiHuanLuyen:
     """
 
     def test_lay_dung_ba_tep_split_tu_chinh_dong_lenh(self):
-        from app.training_tasks import _split_csvs_of
+        from app.modules.training.tasks import _split_csvs_of
 
         cmd = ["python", "-m", "x", "--epochs=5",
                "--train_csv=/a/train.csv", "--val_csv=/a/val.csv",
@@ -360,14 +360,14 @@ class TestCongChanTruocKhiHuanLuyen:
         """Nhánh dialect/language chạy bằng mặc định của trainer — không có
         đường dẫn nào trên dòng lệnh để soi, và đoán bừa một đường dẫn còn tệ
         hơn không soi."""
-        from app.training_tasks import _consent_preflight
+        from app.modules.training.tasks import _consent_preflight
 
         assert _consent_preflight({}, ["python", "-m", "x", "--epochs=5"]) is None
 
     def test_muc_phat_hanh_chan_mau_vo_danh(self, tmp_path, monkeypatch):
         import csv as _csv
 
-        from app import training_tasks
+        from app.modules.training import tasks as training_tasks
 
         train = tmp_path / "train.csv"
         with train.open("w", newline="", encoding="utf-8") as fh:
@@ -393,7 +393,7 @@ class TestCongChanTruocKhiHuanLuyen:
         của việc phạm vi phụ thuộc `run_purpose`."""
         import csv as _csv
 
-        from app import training_tasks
+        from app.modules.training import tasks as training_tasks
 
         train = tmp_path / "train.csv"
         with train.open("w", newline="", encoding="utf-8") as fh:
@@ -414,7 +414,7 @@ class TestCongChanTruocKhiHuanLuyen:
         huấn luyện được gì. Dấu vết phải đủ to để phát hiện điều đó đã xảy ra."""
         import logging
 
-        from app import training_tasks
+        from app.modules.training import tasks as training_tasks
 
         def _boom(*_a, **_k):
             raise RuntimeError("cong hong")

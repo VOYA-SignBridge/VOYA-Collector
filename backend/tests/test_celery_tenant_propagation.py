@@ -309,7 +309,7 @@ class TestTheAggregateTasksStayPlatformWide:
         import app.export_tasks  # noqa: F401
         import app.modules.saas.saas_tasks  # noqa: F401
         from app.modules.google_sync import restore_tasks  # noqa: F401
-        import app.training_tasks  # noqa: F401
+        from app.modules.training import tasks  # noqa: F401
 
         found = {
             name for name, task in celery_app.tasks.items()

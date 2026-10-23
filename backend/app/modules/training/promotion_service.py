@@ -317,7 +317,7 @@ async def promote_job(
     await persist_job(job)
 
     try:
-        from app.training_tasks import backup_promoted_checkpoint_task
+        from app.modules.training.tasks import backup_promoted_checkpoint_task
 
         backup_promoted_checkpoint_task.delay(
             job_id=job_id,

@@ -112,7 +112,7 @@ async def submit_training_job(
     await persist_job(job, auth_user_id=auth_user_id)
 
     try:
-        from app.training_tasks import run_training_job
+        from app.modules.training.tasks import run_training_job
 
         await asyncio.to_thread(
             run_training_job.apply_async,

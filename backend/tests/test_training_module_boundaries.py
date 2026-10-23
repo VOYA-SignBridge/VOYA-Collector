@@ -1,8 +1,9 @@
-def test_training_task_facade_aliases_implementation_module():
-    import app.training_tasks as legacy_tasks
-    from app.modules.training import tasks
+from pathlib import Path
 
-    assert legacy_tasks is tasks
+
+def test_training_task_facade_is_removed():
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    assert not (app_root / "training_tasks.py").exists()
 
 
 def test_training_tasks_preserve_legacy_celery_names():

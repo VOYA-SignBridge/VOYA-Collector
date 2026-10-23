@@ -303,14 +303,14 @@ class TestDialectMergeDrivePairs:
 
 class TestModelBackupPaths:
     def test_legacy_keeps_the_fixed_path_mobile_reads(self, legacy_mode):
-        from app.training_tasks import model_drive_paths
+        from app.modules.training.tasks import model_drive_paths
 
         deploy, latest = model_drive_paths("Hòa đê", "2026-08-18 04-11-40", tenant_id="default")
         assert deploy == "models/Hòa đê/Deploy 2026-08-18 04-11-40"
         assert latest == "models/Hòa đê/latest_manifest.json"
 
     def test_tenant_layout(self, tenant_mode):
-        from app.training_tasks import model_drive_paths
+        from app.modules.training.tasks import model_drive_paths
 
         deploy, latest = model_drive_paths("Hòa đê", "2026-08-18 04-11-40", tenant_id="truong-b")
         assert deploy == "Tenants/truong-b/Models/Hòa đê/Deploy 2026-08-18 04-11-40"

@@ -106,7 +106,7 @@ def test_deleting_a_job_takes_its_contract_with_it():
 def test_checkpoint_label_pair_reads_the_original_label_from_a_dict_entry():
     """Checkpoint từ split vận hành lưu `idx_to_label[i]` là một dict. Ép nó qua
     `str()` ghi cả chuỗi `{'label_key': ...}` vào cột `label` (18/10/2026)."""
-    from app.training_tasks import checkpoint_label_pair
+    from app.modules.training.tasks import checkpoint_label_pair
 
     entry = {"label_key": "uid-1", "class_uid": "uid-1", "label_slug": "tom",
              "label_original": "tôm", "dialect": "hoa-de"}
@@ -117,7 +117,7 @@ def test_checkpoint_label_pair_reads_the_original_label_from_a_dict_entry():
 
 
 def test_checkpoint_label_pair_keeps_the_legacy_string_form():
-    from app.training_tasks import checkpoint_label_pair
+    from app.modules.training.tasks import checkpoint_label_pair
 
     assert checkpoint_label_pair("vn/alphabet/a") == ("vn/alphabet/a", "")
 

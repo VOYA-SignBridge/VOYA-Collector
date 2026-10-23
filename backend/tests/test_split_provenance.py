@@ -103,7 +103,7 @@ def hien_vat(tmp_path, monkeypatch):
             split_id=split_id, purpose=purpose,
             train_csv=d / "train.csv", val_csv=d / "val.csv", test_csv=d / "test.csv",
             tenant_id="default", owner_state=owner_state)
-        import app.training_tasks as tt
+        from app.modules.training import tasks as tt
         monkeypatch.setattr(tt, "_resolve_for_run", lambda cfg, *, tenant_id: art)
         return art
 
@@ -242,7 +242,7 @@ def test_khong_phan_giai_duoc_thi_noi_ra_chu_khong_no(monkeypatch):
     dựng — trong khi thứ người dùng cần đọc lúc ấy chính là lý do. Phần CHẶN
     thật nằm ở chỗ phái job và vẫn chặn nguyên.
     """
-    import app.training_tasks as tt
+    from app.modules.training import tasks as tt
 
     def _no(cfg, *, tenant_id):
         raise RuntimeError("hiện vật không xác minh được")
@@ -271,7 +271,7 @@ def test_tra_None_thi_noi_la_mac_dinh_trainer(monkeypatch):
     Không được đoán hộ rằng đó là ba tệp gốc: nhánh nghiên cứu ghim
     `split_version` cũng trả None, và hai trường hợp ấy đọc hai nơi khác nhau.
     """
-    import app.training_tasks as tt
+    from app.modules.training import tasks as tt
 
     monkeypatch.setattr(tt, "_resolve_for_run", lambda cfg, *, tenant_id: None)
     p = tr._split_provenance(tenant_id="default")

@@ -54,7 +54,7 @@ import logging
 
 import pytest
 
-from app import training_tasks as tt
+from app.modules.training import tasks as tt
 
 
 CKPT = "/tmp/khong-ton-tai.pt"

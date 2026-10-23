@@ -193,7 +193,7 @@ def khai_bao():
 def _gui(client, **cau_hinh):
     goc = {"model_type": "tcn", "epochs": 1, "batch_size": 32}
     goc.update(cau_hinh)
-    with patch("app.training_tasks.run_training_job"):
+    with patch("app.modules.training.tasks.run_training_job"):
         return client.post("/training/start", json=goc)
 
 
@@ -290,12 +290,12 @@ class TestLenhMangDungBaTepDo:
 
     @pytest.fixture(autouse=True)
     def _tro_ve_kho_that(self, monkeypatch):
-        from app import training_tasks as tt
+        from app.modules.training import tasks as tt
 
         monkeypatch.setattr(tt, "SPLITS_DIR", SPLITS)
 
     def test_van_hanh_truyen_duong_dan_tuong_minh(self):
-        from app.training_tasks import _build_cmd
+        from app.modules.training.tasks import _build_cmd
 
         cmd = _build_cmd(
             {"model_type": "tcn", "run_purpose": "operational",
@@ -317,7 +317,7 @@ class TestLenhMangDungBaTepDo:
         con — chứ không dựng lại từ config. Dựng lại là bản cài đặt thứ hai của
         cùng một quy tắc, và bản nào sai thì cổng soi nhầm tệp.
         """
-        from app.training_tasks import _build_cmd, _split_csvs_of
+        from app.modules.training.tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd(
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
@@ -335,7 +335,7 @@ class TestLenhMangDungBaTepDo:
         lúc duyệt và lúc chạy. Worker phân giải lại, và cũng fail-closed.
         """
         from processed.train_utils.split_artifact import SplitArtifactError
-        from app.training_tasks import _build_cmd
+        from app.modules.training.tasks import _build_cmd
 
         with pytest.raises(SplitArtifactError):
             _build_cmd({"run_purpose": "operational"}, Path("m.jsonl"),
@@ -348,7 +348,7 @@ class TestLenhMangDungBaTepDo:
         **không lượt huấn luyện legacy nào từng được cổng đồng thuận soi**. Giờ
         legacy cũng đi qua resolver và nói ra ba tệp nó dùng.
         """
-        from app.training_tasks import _build_cmd, _split_csvs_of
+        from app.modules.training.tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd({"model_type": "tcn", "dialects": [PHUONG_NGU]},
                          Path("m.jsonl"), tenant_id=TENANT)
@@ -378,7 +378,7 @@ class TestArgvLaThamQuyenCuoiCung:
 
     @pytest.fixture(autouse=True)
     def _tro_ve_kho_that(self, monkeypatch):
-        from app import training_tasks as tt
+        from app.modules.training import tasks as tt
 
         monkeypatch.setattr(tt, "SPLITS_DIR", SPLITS)
 
@@ -391,7 +391,7 @@ class TestArgvLaThamQuyenCuoiCung:
         """
         import inspect
 
-        from app.training_tasks import run_training_job
+        from app.modules.training.tasks import run_training_job
 
         ma = inspect.getsource(run_training_job)
         assert "_build_cmd(" in ma and "Popen(" in ma, (
@@ -415,7 +415,7 @@ class TestArgvLaThamQuyenCuoiCung:
         khớp — báo cả A lẫn B cho cổng đồng thuận. Cổng soi hai tệp, trainer đọc
         một, và cả hai đều "không sai".
         """
-        from app.training_tasks import _build_cmd
+        from app.modules.training.tasks import _build_cmd
 
         for cau_hinh in (
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
@@ -433,7 +433,7 @@ class TestArgvLaThamQuyenCuoiCung:
         của cả hai đều "đúng" ở tệp của nó, nhưng lượt chạy thì không thuộc
         hiện vật nào.
         """
-        from app.training_tasks import _build_cmd, _split_csvs_of
+        from app.modules.training.tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd(
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
@@ -448,7 +448,7 @@ class TestChayThatBangChinhLenhAPIDung:
 
     def test_toan_chuoi_tu_API_toi_checkpoint(self, tmp_path, monkeypatch,
                                               khai_bao):
-        from app import training_tasks as tt
+        from app.modules.training import tasks as tt
 
         monkeypatch.setattr(tt, "SPLITS_DIR", SPLITS)
         monkeypatch.setenv("FEATURES_ROOT", str(FEATURES))

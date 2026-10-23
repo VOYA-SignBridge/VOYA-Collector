@@ -905,7 +905,12 @@ def model_drive_paths(folder_name: str, deploy_stamp: str, *, tenant_id: Optiona
 
 
 
-@celery_app.task(bind=True, max_retries=5, default_retry_delay=30)
+@celery_app.task(
+    bind=True,
+    name="app.training_tasks.backup_promoted_checkpoint_task",
+    max_retries=5,
+    default_retry_delay=30,
+)
 def backup_promoted_checkpoint_task(
     self,
     job_id: str,

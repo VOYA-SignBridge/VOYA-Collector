@@ -197,7 +197,7 @@ async def restore_jobs_from_db(limit: int = 50) -> None:
 
         if job.status == "queued":
             try:
-                from app.training_tasks import run_training_job
+                from app.modules.training.tasks import run_training_job
 
                 run_training_job.apply_async(args=[job.id], queue="training")
                 requeued += 1

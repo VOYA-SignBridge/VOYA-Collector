@@ -24,7 +24,7 @@ import uuid
 import pytest
 
 from app.modules.support import notifications
-from app import training_tasks
+from app.modules.training import tasks as training_tasks
 from app.storage.metadata_db import _execute
 from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 from app.modules.saas.tenant_context import system_scope, tenant_scope

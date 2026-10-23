@@ -152,7 +152,7 @@ def _seed_job(job_id: str, status: str, **fields) -> TrainingJob:
 # --------------------------------------------------------------------------
 
 def test_submit_queues_job_and_dispatches_to_the_training_queue(client):
-    with patch("app.training_tasks.run_training_job") as task:
+    with patch("app.modules.training.tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config())
 
     assert response.status_code == 200, response.text
@@ -175,7 +175,7 @@ def test_submit_persists_before_dispatching(client, monkeypatch):
 
     monkeypatch.setattr(training_module, "_persist_job", _record_persist)
 
-    with patch("app.training_tasks.run_training_job") as task:
+    with patch("app.modules.training.tasks.run_training_job") as task:
         task.apply_async.side_effect = lambda *a, **k: order.append("dispatch")
         client.post("/training/start", json=_config())
 
@@ -191,7 +191,7 @@ def test_submit_marks_job_failed_when_the_queue_is_down(client, monkeypatch):
 
     monkeypatch.setattr(training_module, "_persist_job", _capture)
 
-    with patch("app.training_tasks.run_training_job") as task:
+    with patch("app.modules.training.tasks.run_training_job") as task:
         task.apply_async.side_effect = RuntimeError("redis down")
         response = client.post("/training/start", json=_config())
 
@@ -206,7 +206,7 @@ def test_submit_rejects_dialects_without_enough_data(client, monkeypatch):
     """Caught up front — otherwise the trainer subprocess fails later with rc=1."""
     monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 1})
 
-    with patch("app.training_tasks.run_training_job") as task:
+    with patch("app.modules.training.tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config(dialects=["hoa-de"]))
 
     assert response.status_code == 400
@@ -231,7 +231,7 @@ SPLIT = {
 
 
 def test_research_mode_requires_a_split(client):
-    with patch("app.training_tasks.run_training_job") as task:
+    with patch("app.modules.training.tasks.run_training_job") as task:
         response = client.post("/training/start", json=_config(run_purpose="research"))
 
     assert response.status_code == 400
@@ -243,7 +243,7 @@ def test_research_mode_rejects_a_split_that_is_not_research_valid(client, monkey
     SystemExit in _enforce_research_preconditions after the job is queued."""
     monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
 
-    with patch("app.training_tasks.run_training_job") as task:
+    with patch("app.modules.training.tasks.run_training_job") as task:
         response = client.post(
             "/training/start",
             json=_config(run_purpose="research", split_version="made_up_v9"),
@@ -265,7 +265,7 @@ def test_research_mode_pins_provenance_from_the_chosen_split(client, monkeypatch
 
     monkeypatch.setattr(training_module, "_persist_job", _capture)
 
-    with patch("app.training_tasks.run_training_job"):
+    with patch("app.modules.training.tasks.run_training_job"):
         response = client.post(
             "/training/start",
             json=_config(
@@ -287,7 +287,7 @@ def test_research_mode_skips_the_dialect_data_check(client, monkeypatch):
     monkeypatch.setattr(training_module, "_research_splits", lambda: [SPLIT])
     monkeypatch.setattr(training_module, "_trainable_dialects_from_splits", lambda thu_muc=None: {"hoa-de": 1})
 
-    with patch("app.training_tasks.run_training_job"):
+    with patch("app.modules.training.tasks.run_training_job"):
         response = client.post(
             "/training/start",
             json=_config(run_purpose="research", split_version="hoa_de_sample_v5",
@@ -298,7 +298,7 @@ def test_research_mode_skips_the_dialect_data_check(client, monkeypatch):
 
 
 def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
-    from app.training_tasks import _build_cmd
+    from app.modules.training.tasks import _build_cmd
 
     cmd = _build_cmd(
         {
@@ -328,7 +328,7 @@ def test_research_command_passes_provenance_flags_and_drops_dialect_filters():
 
 
 def test_exploratory_command_keeps_dialect_filters_and_stays_smoke_test():
-    from app.training_tasks import _build_cmd
+    from app.modules.training.tasks import _build_cmd
 
     cmd = _build_cmd({"model_type": "tcn", "dialects": ["hoa-de"], "languages": ["vn"]},
                      "m.jsonl", tenant_id="iso_a")
@@ -343,7 +343,7 @@ def test_exploratory_command_keeps_dialect_filters_and_stays_smoke_test():
 # --------------------------------------------------------------------------
 
 def test_job_status_is_readable_after_submit(client):
-    with patch("app.training_tasks.run_training_job"):
+    with patch("app.modules.training.tasks.run_training_job"):
         job_id = client.post("/training/start", json=_config()).json()["id"]
 
     response = client.get(f"/training/jobs/{job_id}")
@@ -595,7 +595,7 @@ def test_promote_accepts_every_trained_architecture(client, tmp_path, monkeypatc
     )
 
     with patch.object(training_module, "load_checkpoint", return_value={"model_type": model_type}), \
-         patch("app.training_tasks.backup_promoted_checkpoint_task"):
+         patch("app.modules.training.tasks.backup_promoted_checkpoint_task"):
         response = client.post(f"/training/jobs/{job_id}/promote")
 
     assert response.status_code == 200, response.text

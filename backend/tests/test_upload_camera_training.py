@@ -314,7 +314,7 @@ def test_camera_too_many_frames_rejected(user_client, monkeypatch):
 
 def test_training_start_dispatches_and_persists(user_client):
     c, _ = user_client
-    with patch("app.training_tasks.run_training_job", _fake_task()):
+    with patch("app.modules.training.tasks.run_training_job", _fake_task()):
         r = c.post("/api/v1/training/start", json={"epochs": 3}, headers=_csrf(c))
     assert r.status_code == 200, r.text
     job = r.json()
@@ -342,7 +342,7 @@ def test_training_start_returns_503_when_dispatch_fails(user_client):
     broken = MagicMock()
     broken.apply_async.side_effect = RuntimeError("redis down")
     try:
-        with patch("app.training_tasks.run_training_job", broken):
+        with patch("app.modules.training.tasks.run_training_job", broken):
             r = c.post("/api/v1/training/start", json={}, headers=_csrf(c))
         assert r.status_code == 503
         assert ("trainer" in r.json()["detail"].lower()
@@ -433,7 +433,7 @@ def test_promote_completed_tcn_job_deploys_model(admin_client, tmp_path, monkeyp
                    return_value=str(tmp_path / "deployed" / "model.pt")), \
              patch("app.routers.training._update_registry", return_value=True), \
              patch("app.routers.training._notify_realtime_service_reload", return_value=True), \
-             patch("app.training_tasks.backup_promoted_checkpoint_task", _fake_task()):
+             patch("app.modules.training.tasks.backup_promoted_checkpoint_task", _fake_task()):
             r = c.post(f"/api/v1/training/jobs/{job_id}/promote", headers=_csrf(c))
         assert r.status_code == 200, r.text
         body = r.json()
