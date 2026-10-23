@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
     name="app.export_tasks.mirror_catalog_csvs_to_drive",
     max_retries=3,
     default_retry_delay=60,
+    platform_wide=True,
 )
 def mirror_catalog_csvs_to_drive(self):
     """Periodically mirror local catalog CSV snapshots to Google Drive.

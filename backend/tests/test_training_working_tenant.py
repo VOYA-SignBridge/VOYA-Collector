@@ -71,7 +71,7 @@ def test_dataset_info_counts_the_working_tenants_data(working_in_voya, monkeypat
 
 
 def test_dataset_preparation_is_owned_by_the_working_tenant(working_in_voya, monkeypatch):
-    import app.dataset_prep_tasks as dp
+    from app.modules.dataset import preparation_tasks as dp
 
     reports, dispatched = [], []
     monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
@@ -85,7 +85,7 @@ def test_dataset_preparation_is_owned_by_the_working_tenant(working_in_voya, mon
 
 @pytest.mark.parametrize("owner,status", [(WORKING, 200), (HOME, 404)])
 def test_preparation_report_is_readable_from_the_working_tenant(working_in_voya, monkeypatch, owner, status):
-    import app.dataset_prep_tasks as dp
+    from app.modules.dataset import preparation_tasks as dp
 
     monkeypatch.setattr(dp, "read_report", lambda run_id: {"run_id": run_id, "tenant_id": owner})
     r = client.get("/training/dataset/prepare/run-1")

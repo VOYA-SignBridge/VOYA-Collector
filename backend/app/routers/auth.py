@@ -24,7 +24,7 @@ from app.auth import (
     rotate_refresh_token,
     verify_password,
 )
-from app.cookie_auth import (
+from app.modules.identity.cookies import (
     REFRESH_COOKIE,
     clear_auth_cookies,
     generate_csrf_token,
@@ -731,7 +731,7 @@ def logout(request: Request, response: Response):
     nên đăng xuất trên điện thoại sẽ làm văng phiên trên máy tính.
     """
     from app.auth import deny_this_access_token
-    from app.cookie_auth import ACCESS_COOKIE
+    from app.modules.identity.cookies import ACCESS_COOKIE
 
     revoke_refresh_token(request.cookies.get(REFRESH_COOKIE) or "")
     deny_this_access_token(request.cookies.get(ACCESS_COOKIE) or "")

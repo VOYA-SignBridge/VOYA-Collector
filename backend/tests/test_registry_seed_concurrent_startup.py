@@ -24,7 +24,7 @@ def _seed(barrier, results):
 
 def _init(barrier, results):
     try:
-        from app.db import init_db
+        from app.bootstrap.database import init_db
 
         barrier.wait(timeout=120)
         ok = init_db()
@@ -47,7 +47,7 @@ def _registry_state():
 def test_concurrent_full_startup_does_not_mint_versions_or_empty_snapshots():
     """Same content must not become new versions on every restart, and no worker
     may ever freeze an EMPTY dialect list (= read under no tenant scope)."""
-    from app.db import init_db
+    from app.bootstrap.database import init_db
 
     assert init_db()  # Settle once: content now current.
     before = _registry_state()

@@ -254,7 +254,7 @@ async def get_dataset_preparation(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Tiến độ và kết quả của một lần chuẩn bị dữ liệu."""
-    from app.dataset_prep_tasks import read_report
+    from app.modules.dataset.preparation_tasks import read_report
 
     report = await asyncio.to_thread(read_report, run_id)
     if report is None or str(report.get("tenant_id") or "") != require_tenant():

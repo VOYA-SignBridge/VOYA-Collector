@@ -921,10 +921,10 @@ class TestRebuildFromCsv:
         def run(sample_row):
             # Wipe only the SAMPLE; the class stays so the FK is satisfiable.
             _execute("DELETE FROM samples WHERE sample_uid = %s", (SAMPLE_UID,))
-            import app.dataset_manager as dm
-            import app.dataset_samples as ds
-            import app.raw_uploads as ru
-            from app.db import sync_missing_data_on_startup
+            from app.modules.dataset import catalog as dm
+            from app.modules.dataset import raw_uploads as ru
+            from app.modules.dataset import samples as ds
+            from app.bootstrap.database import sync_missing_data_on_startup
 
             # Vá các hàm ĐỌC TOÀN KHO, không phải bản có phạm vi.
             #

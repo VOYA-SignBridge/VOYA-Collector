@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
 from app.modules.security.rate_limit_deps import limit_upload
-from app.processing import storage_utils as su
+from app.modules.dataset.catalog import now_str as dataset_now_str
 from app.dataset_manager import (
     get_or_register_class,
     list_classes,
@@ -38,7 +38,7 @@ from app.raw_uploads import (
     now_str as raw_upload_now_str,
 )
 from app.config import settings
-from app.api_validation import (
+from app.core.http_validation import (
     validate_label,
     validate_language,
     validate_dialect,
@@ -823,7 +823,7 @@ async def upload_camera(
             "quality_config_version": qc_thresholds["quality_config_version"],
             "quality_thresholds": qc_thresholds,
             "source_type": "camera",
-            "timestamp": su.now_str(),
+            "timestamp": dataset_now_str(),
         })
         raise HTTPException(
             status_code=422,
@@ -894,7 +894,7 @@ async def upload_camera(
         "quality_thresholds": qc_thresholds,
         "hands_required": effective_hands or None,
         "client_quality": client_quality,
-        "created_at": su.now_str(),
+        "created_at": dataset_now_str(),
     }
 
     # Hạn mức dung lượng. Đường này gửi landmark dạng JSON, nên kích thước trên
@@ -962,7 +962,7 @@ async def upload_camera(
         "quality_thresholds": qc_thresholds,
         "source_type": "camera",
         "sample_path": path,
-        "timestamp": su.now_str(),
+        "timestamp": dataset_now_str(),
     })
 
     quality_payload = metrics.as_dict()

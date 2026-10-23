@@ -308,7 +308,7 @@ class TestTheAggregateTasksStayPlatformWide:
 
         import app.export_tasks  # noqa: F401
         import app.modules.saas.saas_tasks  # noqa: F401
-        import app.sync_tasks  # noqa: F401
+        from app.modules.google_sync import restore_tasks  # noqa: F401
         import app.training_tasks  # noqa: F401
 
         found = {

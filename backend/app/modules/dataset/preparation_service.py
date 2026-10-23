@@ -61,10 +61,9 @@ def queue_preparation(
             "status": "queued",
         }
 
-    # Import through the compatibility facade at call time. Besides keeping old
-    # import paths alive, this ensures tests and operators patching that facade
-    # affect the actual dispatch boundary rather than a stale imported callable.
-    from app import dataset_prep_tasks as tasks
+    # Resolve at call time so tests can patch the canonical task boundary without
+    # this service retaining a stale imported Celery proxy.
+    from app.modules.dataset import preparation_tasks as tasks
 
     selected_dialects = [str(value).strip() for value in (dialects or []) if str(value).strip()]
     floor = int(minimum_samples)

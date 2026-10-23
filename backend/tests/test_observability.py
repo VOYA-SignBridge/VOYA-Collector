@@ -11,7 +11,7 @@ import structlog
 from asgi_correlation_id import correlation_id
 
 from app.main import app
-from app.logging_config import mask_sensitive_data, add_correlation_id
+from app.bootstrap.logging import mask_sensitive_data, add_correlation_id
 from app.worker import setup_structlog_context, clear_structlog_context
 
 client = TestClient(app)

@@ -13,8 +13,8 @@ MOCK_CLASS = {
     "class_idx": 9999,
     "slug": "test-slug",
     "label_original": "Test Label",
-    "language": "en",
-    "dialect": "us",
+    "language": "vn",
+    "dialect": "common",
     "is_common_global": False,
     "is_common_language": False,
     "folder_name": "test_folder",
@@ -25,7 +25,12 @@ MOCK_CLASS = {
 @pytest.fixture(autouse=True)
 def setup_and_teardown():
     """Ensure tables exist, and any mock data is cleaned up before and after each test (Hard Delete)."""
+    from app.modules.dataset.vocabulary_registry import seed_from_csv
+
     ensure_tables()
+    # Production calls this immediately before the catalog sync. Keep the
+    # integration fixture under the same foreign-key precondition.
+    seed_from_csv()
     _execute("DELETE FROM classes WHERE class_uid = %s", (MOCK_CLASS["class_uid"],))
     yield
     # Teardown logic
@@ -42,8 +47,8 @@ def fake_fetch_all(query, params=None):
     return original_fetch_all(query, params)
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.modules.dataset.catalog.load_labels")
-@patch("app.modules.dataset.samples.list_samples")
+@patch("app.modules.dataset.catalog._load_all_labels_unscoped")
+@patch("app.modules.dataset.samples._load_all_samples_unscoped")
 @patch("app.modules.dataset.raw_uploads.list_raw_uploads")
 def test_sync_on_empty_db(mock_raw, mock_samples, mock_labels, mock_fetch):
     """Test 1: When DB is missing records, it should insert them."""
@@ -60,8 +65,8 @@ def test_sync_on_empty_db(mock_raw, mock_samples, mock_labels, mock_fetch):
     assert rows[0]["slug"] == "test-slug"
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.modules.dataset.catalog.load_labels")
-@patch("app.modules.dataset.samples.list_samples")
+@patch("app.modules.dataset.catalog._load_all_labels_unscoped")
+@patch("app.modules.dataset.samples._load_all_samples_unscoped")
 @patch("app.modules.dataset.raw_uploads.list_raw_uploads")
 def test_sync_idempotency(mock_raw, mock_samples, mock_labels, mock_fetch):
     """Test 2: Running multiple times shouldn't duplicate or throw errors."""
@@ -79,8 +84,8 @@ def test_sync_idempotency(mock_raw, mock_samples, mock_labels, mock_fetch):
     assert len(rows) == 1
 
 @patch("app.storage.metadata_db._fetch_all", side_effect=fake_fetch_all)
-@patch("app.modules.dataset.catalog.load_labels")
-@patch("app.modules.dataset.samples.list_samples")
+@patch("app.modules.dataset.catalog._load_all_labels_unscoped")
+@patch("app.modules.dataset.samples._load_all_samples_unscoped")
 @patch("app.modules.dataset.raw_uploads.list_raw_uploads")
 def test_sync_soft_delete_safety(mock_raw, mock_samples, mock_labels, mock_fetch):
     """Test 3: Sync shouldn't overwrite deleted_at for existing records."""
@@ -99,8 +104,9 @@ def test_sync_soft_delete_safety(mock_raw, mock_samples, mock_labels, mock_fetch
     MOCK_CLASS_MODIFIED["slug"] = "test-slug-updated"
     mock_labels.return_value = [MOCK_CLASS_MODIFIED]
     
-    # 4. Sync again (should update the slug but NOT touch deleted_at)
-    sync_missing_data_on_startup()
+    # 4. A full sync propagates edits while the upsert still preserves deleted_at.
+    # The normal keyset sync deliberately writes missing rows only.
+    sync_missing_data_on_startup(full=True)
     
     # 5. Verify deleted_at is NOT NULL
     rows = original_fetch_all("SELECT slug, deleted_at FROM classes WHERE class_uid = %s", (MOCK_CLASS["class_uid"],))

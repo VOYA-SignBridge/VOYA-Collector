@@ -21,10 +21,15 @@ _LABELS_SHEET_REFRESH_SECONDS = 3600
     name="app.export_tasks.export_samples_to_sheets",
     max_retries=3,
     default_retry_delay=30,
+    platform_wide=True,
 )
 def export_samples_to_sheets(self):
     """Mirror ``samples.csv`` to Google Sheets via full replacement."""
-    from app.modules.dataset.samples import SAMPLE_FIELDS, SAMPLES_CSV, list_samples
+    from app.modules.dataset.samples import (
+        SAMPLE_FIELDS,
+        SAMPLES_CSV,
+        _load_all_samples_unscoped,
+    )
 
     try:
         spreadsheet_id = str(getattr(settings, "google_sheets_samples_spreadsheet_id", "")).strip()
@@ -33,7 +38,7 @@ def export_samples_to_sheets(self):
             logger.debug("[EXPORT] Samples Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        rows = list_samples()
+        rows = _load_all_samples_unscoped()
         values = [list(SAMPLE_FIELDS)]
         values.extend(
             [str(row.get(field, "") or "") for field in SAMPLE_FIELDS]
@@ -82,7 +87,11 @@ def export_labels_to_sheets(self):
             logger.debug("[EXPORT] Labels Sheets sync skipped: spreadsheet not configured")
             return {"status": "skipped", "reason": "not_configured"}
 
-        from app.dataset_manager import LABEL_FIELDS, MASTER_LABELS, _load_all_labels_unscoped
+        from app.modules.dataset.catalog import (
+            LABEL_FIELDS,
+            MASTER_LABELS,
+            _load_all_labels_unscoped,
+        )
         from app.storage.metadata_db import list_deleted_classes
 
         active = _load_all_labels_unscoped()

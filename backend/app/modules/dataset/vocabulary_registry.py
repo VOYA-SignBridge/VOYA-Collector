@@ -730,9 +730,10 @@ def assert_system_admin(is_system_admin: bool) -> None:
         raise PermissionError("Danh mục hệ thống (System Catalog) chỉ admin hệ thống mới xem/sửa được.")
 
 
-CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
-# The image copies only app/, so /config does not exist in a container; the repo
-# is mounted at /workspace instead. Same fallback as dataset_manager's mapping.
+CONFIG_DIR = Path(__file__).resolve().parents[4] / "config"
+# This module moved from app/ to app/modules/dataset/. Keep resolving the
+# repository-level config directory; packaged images may instead mount it at
+# /workspace/config.
 _CONFIG_FALLBACK = Path("/workspace/config")
 
 

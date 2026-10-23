@@ -2,6 +2,10 @@
 
 from app.config import settings
 
+from app.modules.google_sync.catalog_tasks import (
+    reconcile_samples_csv_task,
+    sync_lookup_lists,
+)
 from app.modules.google_sync.drive_tasks import (
     delete_gdrive_paths_task,
     mirror_catalog_csvs_to_drive,
@@ -23,6 +27,8 @@ __all__ = [
     "export_samples_to_sheets",
     "mirror_catalog_csvs_to_drive",
     "move_gdrive_paths_task",
+    "reconcile_samples_csv_task",
+    "sync_lookup_lists",
     "upload_npz_batch_to_gdrive_task",
     "upload_npz_to_gdrive_task",
     "upload_raw_video_to_gdrive_task",

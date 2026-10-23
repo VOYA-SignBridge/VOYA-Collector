@@ -55,7 +55,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 
 from app.config import settings
-from app.cookie_auth import ACCESS_COOKIE
+from app.modules.identity.cookies import ACCESS_COOKIE
 from app.modules.saas.tenant_context import bind_request_scope, unbind_request_scope
 
 logger = logging.getLogger(__name__)

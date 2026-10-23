@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import db as app_db
+from app.bootstrap import database as app_db
 
 
 def _row(uid: str, **extra):
@@ -113,9 +113,13 @@ def test_full_resync_env_flag(flag, expected, monkeypatch):
 
     monkeypatch.setattr(app_db, "_sync_one_table",
                         lambda **kw: (seen.update(full=kw["full"]), (0, 0))[1])
-    monkeypatch.setattr("app.dataset_manager.load_labels", lambda: [])
-    monkeypatch.setattr("app.dataset_samples.list_samples", lambda: [])
-    monkeypatch.setattr("app.raw_uploads.list_raw_uploads", lambda: [])
+    monkeypatch.setattr(
+        "app.modules.dataset.catalog._load_all_labels_unscoped", lambda: []
+    )
+    monkeypatch.setattr(
+        "app.modules.dataset.samples._load_all_samples_unscoped", lambda: []
+    )
+    monkeypatch.setattr("app.modules.dataset.raw_uploads.list_raw_uploads", lambda: [])
 
     assert app_db.sync_missing_data_on_startup() is True
     assert seen["full"] is expected

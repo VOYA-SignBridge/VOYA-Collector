@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.db import init_db
+from app.bootstrap.database import init_db
 
 
 @pytest.fixture(autouse=True)
@@ -28,11 +28,11 @@ def _no_real_catalog_writes():
     Autouse rather than a fifth @patch on each test: the next side effect added
     to init_db() would otherwise reintroduce the same landmine silently.
     """
-    with patch("app.dataset_samples.ensure_samples_column") as m:
+    with patch("app.modules.dataset.samples.ensure_samples_column") as m:
         yield m
 
 
-@patch("app.db.sync_missing_data_on_startup")
+@patch("app.bootstrap.database.sync_missing_data_on_startup")
 @patch("app.storage.metadata_db.drop_all_tables")
 @patch("app.storage.metadata_db.ensure_tables")
 @patch("app.storage.metadata_db._column_exists")
@@ -52,7 +52,7 @@ def test_sync_failure_alone_never_drops_tables(mock_col, mock_ensure, mock_drop,
     assert mock_sync.call_count == 1
 
 
-@patch("app.db.sync_missing_data_on_startup")
+@patch("app.bootstrap.database.sync_missing_data_on_startup")
 @patch("app.storage.metadata_db.drop_all_tables")
 @patch("app.storage.metadata_db.ensure_tables")
 @patch("app.storage.metadata_db._column_exists")
@@ -69,7 +69,7 @@ def test_corrupt_schema_still_rebuilds(mock_col, mock_ensure, mock_drop, mock_sy
     assert mock_sync.call_count == 2     # initial + re-seed
 
 
-@patch("app.db.sync_missing_data_on_startup")
+@patch("app.bootstrap.database.sync_missing_data_on_startup")
 @patch("app.storage.metadata_db.drop_all_tables")
 @patch("app.storage.metadata_db.ensure_tables")
 @patch("app.storage.metadata_db._column_exists")
@@ -86,7 +86,7 @@ def test_corrupt_schema_rebuild_failure_reports_false(mock_col, mock_ensure, moc
     assert mock_sync.call_count == 2
 
 
-@patch("app.db.sync_missing_data_on_startup")
+@patch("app.bootstrap.database.sync_missing_data_on_startup")
 @patch("app.storage.metadata_db.drop_all_tables")
 @patch("app.storage.metadata_db.ensure_tables")
 @patch("app.storage.metadata_db._column_exists")
