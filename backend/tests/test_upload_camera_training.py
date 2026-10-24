@@ -214,7 +214,7 @@ def test_process_single_upload_uid_enqueues(user_client):
     c, _ = user_client
     uid = uuid.uuid4().hex
     row = {"upload_uid": uid, "storage_url": "/dataset/x.mp4", "label_original": "x"}
-    with patch("app.routers.upload.find_raw_upload", return_value=row), \
+    with patch("app.modules.dataset.video_processing_service.find_raw_upload", return_value=row), \
          patch("app.tasks.enqueue_process_video", _fake_task()):
         r = c.post("/api/v1/upload/video/process", json={"upload_uid": uid}, headers=_csrf(c))
     assert r.status_code == 200
@@ -224,7 +224,7 @@ def test_process_single_upload_uid_enqueues(user_client):
 
 def test_process_reports_invalid_and_missing_uids(user_client):
     c, _ = user_client
-    with patch("app.routers.upload.find_raw_upload", return_value=None), \
+    with patch("app.modules.dataset.video_processing_service.find_raw_upload", return_value=None), \
          patch("app.tasks.enqueue_process_video", _fake_task()):
         r = c.post("/api/v1/upload/video/process",
                    json={"upload_uids": ["zzz", uuid.uuid4().hex]}, headers=_csrf(c))
@@ -241,7 +241,10 @@ def test_process_requires_some_selector(user_client):
 
 def test_process_by_class_404_when_no_uploads(user_client):
     c, _ = user_client
-    with patch("app.routers.upload.find_raw_uploads_by_class", return_value=[]):
+    with patch(
+        "app.modules.dataset.video_processing_service.find_raw_uploads_by_class",
+        return_value=[],
+    ):
         r = c.post("/api/v1/upload/video/process",
                    json={"class_uid": "nope"}, headers=_csrf(c))
     assert r.status_code == 404

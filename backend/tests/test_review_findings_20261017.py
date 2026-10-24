@@ -143,11 +143,11 @@ def test_member_label_request_cannot_set_common_language_and_is_audited(
 # ------------------------------------------------- 4. xử lý lại video theo tenant
 
 def test_reprocess_only_accepts_rows_of_the_request_tenant():
-    from app.routers.upload import _in_request_tenant
+    from app.modules.dataset.video_processing_service import in_request_tenant
 
-    assert _in_request_tenant({"tenant_id": "a"}, "a") is True
-    assert _in_request_tenant({"tenant_id": "b"}, "a") is False
-    assert _in_request_tenant({"tenant_id": ""}, "default") is True
+    assert in_request_tenant({"tenant_id": "a"}, "a") is True
+    assert in_request_tenant({"tenant_id": "b"}, "a") is False
+    assert in_request_tenant({"tenant_id": ""}, "default") is True
 
 
 # ------------------------------------------------------------------- 9. Learn

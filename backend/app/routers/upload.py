@@ -1,7 +1,4 @@
-import asyncio
-import re
 import uuid
-import logging
 
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
@@ -10,13 +7,10 @@ from app.modules.security.rate_limit_deps import limit_upload
 from app.modules.dataset import (
     camera_capture_service,
     raw_video_upload_service,
+    video_processing_service,
 )
 from app.dataset_manager import normalize_dialect
 from app.processing.class_registry import AlphabetLabelError
-from app.raw_uploads import (
-    find_raw_upload,
-    find_raw_uploads_by_class,
-)
 from app.core.http_validation import (
     validate_label,
     validate_language,
@@ -117,62 +111,6 @@ async def upload_video(
     except storage_quota.StorageQuotaExceeded as exc:
         raise storage_full_http(exc) from exc
 
-def _raw_upload_owner(upload_uid: str) -> str:
-    """`auth_user_id` của người đã tải video lên (rỗng nếu không tra được)."""
-    if not upload_uid:
-        return ""
-    try:
-        from app.storage.metadata_db import _fetch_all
-
-        rows = _fetch_all("SELECT auth_user_id FROM raw_uploads WHERE upload_uid = %s", (upload_uid,))
-        return str(rows[0]["auth_user_id"] or "") if rows else ""
-    except Exception:
-        return ""
-
-
-def _in_request_tenant(row: Dict[str, Any], tenant: str) -> bool:
-    """`uploads.csv` là tệp CHUNG của mọi tenant: chỉ nhận dòng của tenant đang dùng.
-
-    Trước 17/10/2026 endpoint xử lý lại nhận bất kỳ `upload_uid`/`class_uid` nào
-    trong tệp, nên thành viên tenant A đưa được video của tenant B vào hàng xử lý.
-    Lọc ở đây cũng làm task mang đúng header tenant (tenant của request = tenant
-    của bản tải lên), nên pipeline tìm được `class_uid` của nó.
-    """
-    from app.modules.saas.tenancy import tenant_id_of
-
-    return tenant_id_of(row) == tenant
-
-
-def _enqueue_video_processing(row: Dict[str, Any], triggered_by: str) -> Dict[str, Any]:
-    """Enqueue the async feature-extraction pipeline for one raw upload row.
-
-    Returns a per-item status dict (never raises) so batch calls can report
-    partial results. Prefers the Drive URL when present (worker downloads it),
-    else the local path (shared /dataset mount).
-    """
-    from app.tasks import enqueue_process_video
-
-    uid = str(row.get("upload_uid", "")).strip()
-    video_path = (row.get("storage_url") or row.get("local_path") or "").strip()
-    if not video_path:
-        return {"upload_uid": uid, "status": "no_file"}
-
-    task = enqueue_process_video.delay(
-        video_path=video_path,
-        user=row.get("user_id", "") or "",
-        label=row.get("label_original", "") or "",
-        session_id=row.get("session_id", "") or uuid.uuid4().hex,
-        dialect=row.get("dialect", "") or "common",
-        language=row.get("language", "") or "vn",
-        # Chủ mẫu là người TẢI video lên, không phải người bấm xử lý lại.
-        # `uploads.csv` không có cột này nên đọc từ bảng `raw_uploads`.
-        user_id=_raw_upload_owner(uid) or triggered_by,
-        class_uid=row.get("class_uid", "") or "",
-        visibility=row.get("visibility", "private") or "private",
-    )
-    return {"upload_uid": uid, "job_id": task.id, "status": "queued"}
-
-
 @router.post("/video/process")
 async def process_uploaded_videos(
     payload: dict = Body(...),
@@ -187,56 +125,16 @@ async def process_uploaded_videos(
       - {"upload_uids": ["<uid>", ...]}    → explicit batch
       - {"class_uid": "<class_uid>"}       → all raw uploads of a class
     """
-    log = logging.getLogger("upload.process")
-
-    uid_pattern = re.compile(r"[a-fA-F0-9]{8,64}")
-
-    def _valid(uid: str) -> bool:
-        return bool(uid_pattern.fullmatch(uid))
-
-    # 1. Resolve the set of raw-upload rows to process.
-    rows: list[Dict[str, Any]] = []
-    class_uid = str(payload.get("class_uid", "") or "").strip()
-    tenant = require_tenant()
-    if class_uid:
-        rows = await asyncio.to_thread(find_raw_uploads_by_class, class_uid)
-        rows = [r for r in rows if _in_request_tenant(r, tenant)]
-        if not rows:
-            raise HTTPException(status_code=404, detail=f"no raw uploads for class_uid: {class_uid}")
-    else:
-        uids = payload.get("upload_uids")
-        single = str(payload.get("upload_uid", "") or "").strip().lower()
-        if single and not uids:
-            uids = [single]
-        if not uids or not isinstance(uids, list):
-            raise HTTPException(
-                status_code=422,
-                detail="provide upload_uid, upload_uids[], or class_uid",
-            )
-
-    triggered_by = str(current_user.get("id", "") or "")
-
-    # 2. Enqueue each. Missing/invalid entries are reported, not fatal.
-    results: list[Dict[str, Any]] = []
-    if class_uid:
-        for row in rows:
-            results.append(_enqueue_video_processing(row, triggered_by))
-    else:
-        for raw_uid in uids:
-            uid = str(raw_uid).strip().lower()
-            if not _valid(uid):
-                results.append({"upload_uid": uid, "status": "invalid_uid"})
-                continue
-            row = await asyncio.to_thread(find_raw_upload, uid)
-            if not row or not _in_request_tenant(row, tenant):
-                # Cùng câu trả lời cho "không có" và "của tenant khác".
-                results.append({"upload_uid": uid, "status": "not_found"})
-                continue
-            results.append(_enqueue_video_processing(row, triggered_by))
-
-    queued = sum(1 for r in results if r.get("status") == "queued")
-    log.info("[UPLOAD][process] triggered_by=%s queued=%s total=%s", triggered_by, queued, len(results))
-    return {"success": True, "queued": queued, "total": len(results), "results": results}
+    try:
+        return await video_processing_service.enqueue_uploaded_videos(
+            payload,
+            triggered_by=str(current_user.get("id", "") or ""),
+            tenant_id=require_tenant(),
+        )
+    except video_processing_service.ProcessingRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except video_processing_service.RawUploadsNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/camera")

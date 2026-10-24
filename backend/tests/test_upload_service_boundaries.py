@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
@@ -145,13 +146,18 @@ def test_raw_video_upload_returns_existing_idempotent_record(monkeypatch) -> Non
 def test_video_processing_reports_invalid_missing_and_queued_items() -> None:
     rows = {
         "abcdef12": None,
-        "12345678": {"upload_uid": "12345678", "local_path": "/raw/video.mp4"},
+        "12345678": {
+            "upload_uid": "12345678",
+            "local_path": "/raw/video.mp4",
+            "tenant_id": "tenant-a",
+        },
     }
 
     result = asyncio.run(
         video_processing_service.enqueue_uploaded_videos(
             {"upload_uids": ["bad", "abcdef12", "12345678"]},
             triggered_by="user-1",
+            tenant_id="tenant-a",
             find_one=lambda uid: rows[uid],
             enqueue=lambda row, _user: {
                 "upload_uid": row["upload_uid"],
@@ -171,3 +177,59 @@ def test_video_processing_reports_invalid_missing_and_queued_items() -> None:
             {"upload_uid": "12345678", "job_id": "job-1", "status": "queued"},
         ],
     }
+
+
+def test_video_processing_hides_rows_from_other_tenants() -> None:
+    result = asyncio.run(
+        video_processing_service.enqueue_uploaded_videos(
+            {"upload_uid": "12345678"},
+            triggered_by="user-1",
+            tenant_id="tenant-a",
+            find_one=lambda _uid: {
+                "upload_uid": "12345678",
+                "local_path": "/raw/video.mp4",
+                "tenant_id": "tenant-b",
+            },
+            enqueue=lambda *_args: (_ for _ in ()).throw(
+                AssertionError("cross-tenant row must not be enqueued")
+            ),
+        )
+    )
+
+    assert result["results"] == [
+        {"upload_uid": "12345678", "status": "not_found"}
+    ]
+
+
+def test_video_reprocessing_preserves_original_upload_owner(monkeypatch) -> None:
+    monkeypatch.setattr(
+        video_processing_service,
+        "raw_upload_owner",
+        lambda _uid: "original-owner",
+    )
+    task = SimpleNamespace(id="job-1")
+    with patch("app.tasks.enqueue_process_video.delay", return_value=task) as delay:
+        result = video_processing_service.enqueue_video_processing(
+            {
+                "upload_uid": "12345678",
+                "local_path": "/raw/video.mp4",
+                "user_id": "display-name",
+            },
+            "person-clicking-reprocess",
+        )
+
+    assert result["status"] == "queued"
+    assert delay.call_args.kwargs["user_id"] == "original-owner"
+
+
+def test_video_process_router_delegates_to_service() -> None:
+    source = inspect.getsource(upload.process_uploaded_videos)
+
+    assert "video_processing_service.enqueue_uploaded_videos" in source
+    for forbidden in (
+        "find_raw_upload",
+        "find_raw_uploads_by_class",
+        "enqueue_process_video",
+        "asyncio.to_thread",
+    ):
+        assert forbidden not in source
