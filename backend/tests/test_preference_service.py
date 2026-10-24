@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 
 from app.routers import classes as classes_router
 from app.services import preferences
@@ -31,22 +32,28 @@ def test_load_preferences_fails_open_for_invalid_json(tmp_path) -> None:
     assert preferences.get_value("languageSelected", path=path) is None
 
 
-def test_classes_router_delegates_preferences_to_service(monkeypatch) -> None:
-    monkeypatch.setattr(preferences, "get_value", lambda key: f"saved:{key}")
+def test_classes_router_partitions_preferences_by_tenant_and_user(monkeypatch) -> None:
+    user = {"tenant_id": "school-a", "id": "user-7"}
+    stored = {"school-a::user-7": {"languageSelected": "vn"}}
     writes = []
-    monkeypatch.setattr(
-        preferences,
-        "set_value",
-        lambda key, value: writes.append((key, value)),
-    )
+    monkeypatch.setattr(classes_router, "_load_prefs", lambda: stored)
+    monkeypatch.setattr(classes_router, "_save_prefs", lambda value: writes.append(value))
+    monkeypatch.setattr(classes_router, "FileLock", lambda _path: nullcontext())
 
-    assert classes_router.get_preference("languageSelected") == {
+    assert classes_router.get_preference("languageSelected", current_user=user) == {
         "key": "languageSelected",
-        "value": "saved:languageSelected",
+        "value": "vn",
     }
-    assert classes_router.set_preference({"key": "dialectSelected", "value": "common"}) == {
+    assert classes_router.set_preference(
+        {"key": "dialectSelected", "value": "common"}, current_user=user
+    ) == {
         "success": True,
         "key": "dialectSelected",
         "value": "common",
     }
-    assert writes == [("dialectSelected", "common")]
+    assert writes == [{
+        "school-a::user-7": {
+            "languageSelected": "vn",
+            "dialectSelected": "common",
+        }
+    }]

@@ -113,17 +113,29 @@ def test_read_report_rejects_path_like_ids(prep_dirs):
 class TestRoute:
     @pytest.fixture(autouse=True)
     def _auth(self, monkeypatch):
-        app.dependency_overrides[get_current_user] = lambda: USER
+        # Preparing immutable training artifacts is deliberately admin-only.
+        app.dependency_overrides[get_current_user] = lambda: {
+            **USER,
+            "is_admin": True,
+        }
         # Huấn luyện đi theo phạm vi request (tổ chức đang làm việc), không theo
         # `tenant_id` của tài khoản; ở đây hai thứ trùng nhau.
         import app.modules.saas.tenant_middleware as tm
         monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: USER["tenant_id"])
-        monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
+        monkeypatch.setattr(tr, "assert_can_use_dialect", lambda *_args: None)
         # Người giả không có grant trong DB; cổng tenant không phải thứ đang kiểm.
         import app.modules.security.access_gate as gate
         monkeypatch.setattr(gate, "_has_any_tenant_grant", lambda user: True)
         yield
         app.dependency_overrides.pop(get_current_user, None)
+
+    def test_start_requires_admin(self):
+        app.dependency_overrides[get_current_user] = lambda: USER
+        r = client.post(
+            "/training/dataset/prepare",
+            json={"dialects": ["hoa-de"]},
+        )
+        assert r.status_code == 403
 
     def test_start_writes_pending_report_and_enqueues_with_caller_tenant(self, prep_dirs, monkeypatch):
         sent = {}

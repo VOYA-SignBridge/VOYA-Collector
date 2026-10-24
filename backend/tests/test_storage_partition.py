@@ -183,7 +183,7 @@ class TestOwnerSurvivesEveryRoundTrip:
 
 class TestAuditToleratesThePartition:
     def test_scan_does_not_report_the_partition_dir_as_a_language(self, tmp_path):
-        from app.feature_structure_audit import scan
+        from scripts.migration.feature_structure_audit import scan
 
         (tmp_path / "_tenants" / "truong-b" / "vn" / "bac" / "class_x").mkdir(parents=True)
         (tmp_path / "vn" / "bac" / "class_y").mkdir(parents=True)

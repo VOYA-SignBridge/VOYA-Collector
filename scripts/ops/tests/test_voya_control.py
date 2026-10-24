@@ -155,7 +155,13 @@ class IntentionalStopAndLockTests(unittest.TestCase):
         compose.assert_not_called()
 
     def test_stop_marks_and_start_clears(self):
-        with patch.dict(os.environ, {"VOYA_CONFIRMED": "co"}), patch.object(voya, "compose"),                 patch.object(voya, "wait_healthy", return_value=True), quiet():
+        with (
+            patch.dict(os.environ, {"VOYA_CONFIRMED": "co"}),
+            patch.object(voya, "compose"),
+            patch.object(voya, "wait_healthy", return_value=True),
+            patch.object(voya, "record_deploy"),
+            quiet(),
+        ):
             voya.cmd_stop([])
             self.assertTrue(voya.STOPPED_FLAG.exists())
             voya.cmd_start([])

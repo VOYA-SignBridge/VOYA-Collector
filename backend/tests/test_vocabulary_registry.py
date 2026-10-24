@@ -137,6 +137,7 @@ _SCAN_ROOTS = ((REPO / "backend" / "app"), (REPO / "frontend" / "src"))
 _ALLOWED = {
     "vocabulary_registry.py",   # the registry itself
     "dataset_manager.py",       # _INPUT_ALIASES: spellings, not identities
+    "catalog.py",               # canonical home of those input aliases
     "test_vocabulary_registry.py",
     # Trang "Học ký hiệu" (14/09/2026): 'bac'/'nam'/'trung' ở đây là VÙNG của
     # từ điển QIPEDC (trục `region`), không phải phương ngữ — trùng chữ với ba

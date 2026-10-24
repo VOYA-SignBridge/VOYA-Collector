@@ -58,9 +58,13 @@ APP = Path(__file__).resolve().parents[1] / "app"
 #: Tiêu chí: thao tác chiếu CSV sang Postgres, đồng bộ danh mục, kiểm toàn vẹn,
 #: sửa chữa quản trị. KHÔNG bao giờ là một đường phục vụ request của người dùng.
 MODULE_BAO_TRI = {
+    "bootstrap/database.py",       # database bootstrap/reconciliation
     "catalog_sync.py",
     "db.py",
     "export_tasks.py",
+    "modules/dataset/catalog.py",  # canonical catalog maintenance
+    "modules/dataset/samples.py",  # canonical sample maintenance
+    "modules/google_sync/sheets_tasks.py",  # platform-wide Sheets projection
     "balancer.py",
     "oversample_balance.py",
     "global_common_promoter.py",

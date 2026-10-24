@@ -9,7 +9,7 @@ the server. This parses every file and cross-checks the wiring end to end:
   - prometheus scrapes the backend metrics port
   - grafana datasources expose the uids the alerts reference
   - every voya_* metric used in dashboards/alerts is really exported by
-    app/metrics.py (catches renamed / typo'd metrics)
+    app/infrastructure/observability/metrics.py (catches renamed / typo'd metrics)
   - docker-compose still mounts the provisioning files
 
 Pure file/parse checks — no DB or running stack needed.
@@ -26,7 +26,10 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 LOGGING = REPO / "logging"
-METRICS_PY = Path(__file__).resolve().parents[1] / "app" / "metrics.py"
+METRICS_PY = (
+    Path(__file__).resolve().parents[1]
+    / "app" / "infrastructure" / "observability" / "metrics.py"
+)
 
 
 def _yaml(rel: str):
@@ -117,7 +120,7 @@ def _referenced_metrics() -> set[str]:
 def test_dashboards_and_alerts_only_use_exported_metrics():
     exported = _exported_metrics()
     referenced = _referenced_metrics()
-    assert exported, "parsed no voya_* metrics from app/metrics.py"
+    assert exported, "parsed no voya_* metrics from canonical metrics module"
     assert referenced, "parsed no voya_* metric references from grafana configs"
     missing = referenced - exported
     assert not missing, (

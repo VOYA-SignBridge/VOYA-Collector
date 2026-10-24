@@ -1094,7 +1094,11 @@ def isolation_tenants():
     Older local test databases inherited these rows from a production clone.
     A database built from migrations is intentionally empty, so the proof data
     must own its parent rows just like it owns its jobs, metrics and users.
+    Create them through the domain service: since schema v4 a live tenant must
+    carry a plan and exactly one open subscription, so a bare INSERT leaves an
+    invalid parent that breaks whichever schema/SOT test happens to run later.
     """
+    from app.modules.saas import tenant_admin
     from app.storage import metadata_db as db
     from app.modules.saas.tenant_context import system_scope
 
@@ -1109,9 +1113,11 @@ def isolation_tenants():
         }
         created = [tenant for tenant in wanted if tenant not in existing]
         for tenant in created:
-            db._execute(
-                "INSERT INTO tenants (tenant_id, display_name, slug) VALUES (%s, %s, %s)",
-                (tenant, tenant, tenant),
+            tenant_admin.create_tenant(
+                tenant,
+                display_name=tenant,
+                slug=tenant,
+                clone_catalog=False,
             )
 
     yield wanted
