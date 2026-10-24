@@ -458,7 +458,7 @@ def _billable_paths(tenant_id: str) -> Iterator["object"]:
     """
     from pathlib import Path
 
-    from app.dataset_manager import iter_tenant_feature_files
+    from app.modules.dataset.catalog import iter_tenant_feature_files
     from app.dataset_samples import raw_archive_path
     from app.storage.metadata_db import _fetch_all, resolve_absolute_path
 

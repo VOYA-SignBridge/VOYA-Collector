@@ -253,20 +253,20 @@ class TestClassFolderOnCreate:
     thư mục nằm trong cây của tenant gốc."""
 
     def _meta(self, tenant):
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
 
         return ClassMetadata(class_uid="8d76181c-0000-0000-0000-000000000000", class_idx=1, slug="xin-chao",
                              label_original="xin chào", language="vn", dialect="hoa-de",
                              is_common_global=False, is_common_language=False, tenant_id=tenant)
 
     def test_legacy_tenant_class_goes_under_its_partition(self, legacy_mode):
-        from app.dataset_manager import drive_class_folder
+        from app.modules.dataset.catalog import drive_class_folder
 
         assert drive_class_folder(self._meta("truong-b")) == "features/_tenants/truong-b/vn/hoa-de/class_xin-chao_8d76181c"
         assert drive_class_folder(self._meta("default")) == "features/vn/hoa-de/class_xin-chao_8d76181c"
 
     def test_tenant_layout(self, tenant_mode):
-        from app.dataset_manager import drive_class_folder
+        from app.modules.dataset.catalog import drive_class_folder
 
         assert drive_class_folder(self._meta("truong-b")) == "Tenants/truong-b/Samples/vn/hoa-de/class_xin-chao_8d76181c"
 
@@ -328,7 +328,7 @@ class TestStorageKeyIsTheFileOnDisk:
 
     @pytest.fixture
     def kho_tam(self, monkeypatch, tmp_path):
-        import app.dataset_manager as dm
+        import app.modules.dataset.catalog as dm
         import app.dataset_samples as ds
 
         monkeypatch.setattr(dm, "FEATURES_ROOT", tmp_path / "features")
@@ -340,7 +340,7 @@ class TestStorageKeyIsTheFileOnDisk:
         return bat
 
     def _meta(self, tenant="default", common=False):
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
 
         return ClassMetadata(class_uid="7246af3c-0000-0000-0000-000000000000", class_idx=1, slug="tom",
                              label_original="tôm", language="vn", dialect="hoa-de",
@@ -367,7 +367,7 @@ class TestStorageKeyIsTheFileOnDisk:
         assert (tmp_path / item["storage_key"]) == __import__("pathlib").Path(item["local_path"])
 
     def test_class_storage_dir_follows_hierarchy(self, kho_tam):
-        from app.dataset_manager import class_storage_dir
+        from app.modules.dataset.catalog import class_storage_dir
 
         assert class_storage_dir(self._meta("truong-b")) == "features/_tenants/truong-b/vn/hoa-de/class_tom_7246af3c"
         assert class_storage_dir(self._meta("default", common=True)) == "features/vn/common/class_tom_7246af3c"

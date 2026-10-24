@@ -121,7 +121,7 @@ def _goi_khong_tham_so(path: Path, ten_ham: tuple[str, ...]) -> list[tuple[str, 
 
 def test_load_labels_khong_co_tenant_thi_nem_loi():
     """Thiếu ngữ cảnh phải là LỖI, không phải "trả toàn bộ"."""
-    from app.dataset_manager import load_labels
+    from app.modules.dataset.catalog import load_labels
     from app.dataset_samples import TenantScopeRequired
 
     with pytest.raises(TenantScopeRequired):
@@ -141,7 +141,7 @@ def test_chuoi_rong_khong_phai_duong_lui():
     Nếu chuỗi rỗng lọt qua thì mọi caller quên truyền tenant sẽ im lặng đọc kho
     của tenant gốc, và `default` trở thành một super-tenant ngầm.
     """
-    from app.dataset_manager import load_labels
+    from app.modules.dataset.catalog import load_labels
     from app.dataset_samples import TenantScopeRequired, list_samples
 
     for gia_tri in ("", "   ", None):
@@ -156,7 +156,7 @@ def test_ham_toan_kho_van_ton_tai_va_ten_van_xau():
 
     Đổi nó thành một cái tên vô hại là gỡ mất tín hiệu mà người duyệt mã dựa vào.
     """
-    import app.dataset_manager as dm
+    import app.modules.dataset.catalog as dm
     import app.dataset_samples as ds
 
     assert callable(dm._load_all_labels_unscoped)
@@ -193,7 +193,7 @@ def test_module_bao_tri_khong_tu_moc_them():
         rel = p.relative_to(APP).as_posix()
         if rel in MODULE_BAO_TRI or p.name in MODULE_BAO_TRI:
             continue
-        if p.name in ("dataset_manager.py", "dataset_samples.py"):
+        if p.name == "dataset_samples.py":
             continue  # nơi định nghĩa
         src = p.read_text(encoding="utf-8")
         for ten in HAM_TOAN_KHO:

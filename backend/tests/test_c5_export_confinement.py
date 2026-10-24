@@ -56,7 +56,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.modules.saas import tenant_lifecycle
-from app import dataset_manager  # noqa: E402
+from app.modules.dataset import catalog as dataset_manager  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"

@@ -118,7 +118,7 @@ def run_export(export_id: str) -> Dict[str, Any]:
     import zipfile
 
     from app.config import settings
-    from app.dataset_manager import iter_tenant_feature_files, load_labels
+    from app.modules.dataset.catalog import iter_tenant_feature_files, load_labels
     from app.dataset_samples import SAMPLE_FIELDS
     from app.modules.export.portable_export import write_feature_bundle
     from app.storage.metadata_db import _execute, _fetch_all

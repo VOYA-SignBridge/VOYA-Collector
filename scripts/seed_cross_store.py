@@ -189,7 +189,7 @@ PREFIX_TEP_TRONG_CONTAINER = "/isodata"
 def _dung_cay(goc: Path, dt: list[dict],
               prefix_tep: str = PREFIX_TEP_TRONG_CONTAINER
               ) -> tuple[list[dict], list[dict]]:
-    from app.dataset_manager import LABEL_FIELDS
+    from app.modules.dataset.catalog import LABEL_FIELDS
     from app.dataset_samples import SAMPLE_FIELDS
 
     nhan, mau = [], []

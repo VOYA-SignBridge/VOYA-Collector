@@ -272,7 +272,7 @@ def test_goi_ca_nhan_chi_chua_dong_va_tep_cua_dung_nguoi_do(to_chuc, tmp_path, m
     tep_a.parent.mkdir(parents=True)
     np.savez_compressed(tep_a, sequence=np.ones((60, 126), dtype=np.float32))
     np.savez_compressed(tep_b, sequence=np.ones((60, 126), dtype=np.float32))
-    monkeypatch.setattr("app.dataset_manager.iter_tenant_feature_files",
+    monkeypatch.setattr("app.modules.dataset.catalog.iter_tenant_feature_files",
                         lambda tenant: iter([tep_a, tep_b]))
     monkeypatch.setattr(personal_export, "_export_root", lambda: _thu_muc_ra(tmp_path))
 
@@ -302,7 +302,7 @@ def test_nguoi_khac_khong_tai_duoc_va_khong_thay_ban_xuat_khong_phai_cua_minh(
 
     tid, a, b = to_chuc["tid"], to_chuc["a"], to_chuc["b"]
     monkeypatch.setattr("app.dataset_samples.list_samples", lambda tenant: [])
-    monkeypatch.setattr("app.dataset_manager.iter_tenant_feature_files", lambda tenant: iter([]))
+    monkeypatch.setattr("app.modules.dataset.catalog.iter_tenant_feature_files", lambda tenant: iter([]))
     monkeypatch.setattr(personal_export, "_export_root", lambda: _thu_muc_ra(tmp_path))
 
     with tenant_scope(tid):

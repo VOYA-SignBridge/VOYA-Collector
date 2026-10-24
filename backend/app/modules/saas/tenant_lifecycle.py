@@ -499,7 +499,7 @@ def _add_feature_files(bundle: zipfile.ZipFile, tenant: str, *,
     và "không biết" ở một cổng phát hành phải nghĩa là không, giống hệt lý do
     `consent_gate._signer_of` từ chối lùi về `user_id`.
     """
-    from app.dataset_manager import iter_tenant_feature_files, tenant_features_root
+    from app.modules.dataset.catalog import iter_tenant_feature_files, tenant_features_root
 
     root = tenant_features_root(tenant)
     la_phat_hanh = export_purpose in RELEASE_PURPOSES
@@ -904,7 +904,7 @@ def _remove_tenant_files(tenant: str) -> tuple[int, int]:
     chối thẳng thay vì tin vào việc người gọi đã kiểm — `purge_tenant` cũng
     kiểm, và hai lớp cho một thao tác không hoàn tác được là đúng mức.
     """
-    from app.dataset_manager import tenant_features_root
+    from app.modules.dataset.catalog import tenant_features_root
     from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
     if tenant == DEFAULT_TENANT_ID:

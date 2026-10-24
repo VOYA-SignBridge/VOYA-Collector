@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.dataset_manager import (  # noqa: E402
+from app.modules.dataset.catalog import (  # noqa: E402
     REGION_UNCLASSIFIED,
     normalize_region,
 )
@@ -114,7 +114,7 @@ def kho_tam(monkeypatch, tmp_path):
     """
     import importlib
 
-    from app import dataset_manager as dm
+    from app.modules.dataset import catalog as dm
 
     _don_lop_test_trong_db()
     monkeypatch.setenv("DATASET_ROOT", str(tmp_path))

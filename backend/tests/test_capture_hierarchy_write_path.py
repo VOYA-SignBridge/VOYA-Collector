@@ -249,7 +249,7 @@ def test_duong_thu_mau_that_su_goi_ham_dung_phan_cap(to_chuc):
     """
     import numpy as np
     from app import dataset_samples as ds
-    from app.dataset_manager import ClassMetadata
+    from app.modules.dataset.catalog import ClassMetadata
 
     tid, cls = to_chuc
     bat: dict = {}

@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from app import export_tasks
-from app import dataset_manager
+from app.modules.dataset import catalog as dataset_manager
 from app.storage import metadata_db, gdrive_client
 
 

@@ -35,7 +35,7 @@ from app import export_tasks as et
 from app import dataset_samples as ds
 from app.catalog_sync import CatalogSyncError
 from app.dataset_samples import SAMPLE_FIELDS
-from app.dataset_manager import LABEL_FIELDS
+from app.modules.dataset.catalog import LABEL_FIELDS
 
 
 # ===========================================================================
@@ -341,7 +341,7 @@ def test_labels_sheet_keeps_deleted_class_marked_and_ordered(monkeypatch):
     # `['B'] != ['A','B','C']` — trông như lỗi thứ tự sắp xếp, trong khi nguyên
     # nhân là hai dòng đang hoạt động chưa bao giờ được nạp.
     monkeypatch.setattr(
-        "app.dataset_manager._load_all_labels_unscoped",
+        "app.modules.dataset.catalog._load_all_labels_unscoped",
         lambda: [_lrow("A", 1), _lrow("C", 3)])
     monkeypatch.setattr("app.storage.metadata_db.list_deleted_classes", lambda: [{
         "class_uid": "B", "class_idx": 2, "slug": "b", "label_original": "lbl_B",

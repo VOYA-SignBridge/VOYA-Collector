@@ -263,7 +263,7 @@ class TestStoragePartition:
     """A4: the tenant also decides where the .npz files land."""
 
     def test_each_tenant_gets_its_own_feature_root(self, two_tenants):
-        from app.dataset_manager import FEATURES_ROOT, tenant_features_root
+        from app.modules.dataset.catalog import FEATURES_ROOT, tenant_features_root
 
         a, b = two_tenants
         assert tenant_features_root(a) == FEATURES_ROOT
@@ -273,7 +273,7 @@ class TestStoragePartition:
     def test_the_ambient_scope_picks_the_root(self, two_tenants):
         """The path comes from the scope, not from an argument — so a handler
         cannot write into another tenant's tree by passing the wrong string."""
-        from app.dataset_manager import ambient_tenant_features_root, tenant_features_root
+        from app.modules.dataset.catalog import ambient_tenant_features_root, tenant_features_root
 
         _, b = two_tenants
         with tenant_scope(b):

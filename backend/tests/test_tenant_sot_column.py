@@ -294,7 +294,7 @@ def test_label_fields_never_shift_existing_columns():
     Nên ghim thứ hai thứ: `tenant_id` vẫn ở đúng chỉ số cũ (không bị đẩy), và
     cột mới nhất đứng cuối.
     """
-    from app.dataset_manager import LABEL_FIELDS
+    from app.modules.dataset.catalog import LABEL_FIELDS
 
     assert LABEL_FIELDS.count(TENANT_COLUMN) == 1
     # 19 là vị trí của tenant_id từ khi nó được thêm; thay đổi số này nghĩa là
@@ -321,7 +321,7 @@ def test_raw_upload_fields_keep_tenant_id_in_place():
     "module,attr,table",
     [
         ("app.dataset_samples", "SAMPLE_FIELDS", "samples"),
-        ("app.dataset_manager", "LABEL_FIELDS", "classes"),
+        ("app.modules.dataset.catalog", "LABEL_FIELDS", "classes"),
         ("app.modules.dataset.raw_uploads", "RAW_UPLOAD_FIELDS", "raw_uploads"),
     ],
 )
@@ -524,7 +524,7 @@ class TestWritersStampTenant:
         assert TENANT_COLUMN not in caller_dict
 
     def test_label_row_gets_the_bootstrap_tenant(self, tmp_path, monkeypatch):
-        import app.dataset_manager as dm
+        import app.modules.dataset.catalog as dm
 
         path = tmp_path / "labels.csv"
         monkeypatch.setattr(dm, "MASTER_LABELS", path)
@@ -537,7 +537,7 @@ class TestWritersStampTenant:
             assert next(csv.DictReader(f))[TENANT_COLUMN] == DEFAULT_TENANT_ID
 
     def test_class_metadata_defaults_and_honours_the_tenant(self):
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
 
         common = dict(
             slug="xin-chao", label_original="Xin chào", language="vn",

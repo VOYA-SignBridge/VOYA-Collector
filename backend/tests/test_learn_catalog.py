@@ -71,14 +71,14 @@ class TestApiCongKhai:
         đầu gọi `.get` và 500 trên sản xuất trong khi test vẫn xanh: container
         test không gắn `/dataset`, nên `labels.csv` rỗng và nhánh ấy chưa từng
         chạy. Ép nó chạy bằng một lớp giả đúng kiểu."""
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
         import app.routers.learn as learn
 
         fake = ClassMetadata(class_uid="uid-1", slug="chao-co", label_original="chào cờ",
                              language="vn", dialect="can-tho", is_common_global=False,
                              is_common_language=False)
         monkeypatch.setattr(learn, "_own_classes_by_slug", learn._own_classes_by_slug)  # giữ nguyên
-        monkeypatch.setattr("app.dataset_manager.list_classes", lambda tenant_id=None: [fake])
+        monkeypatch.setattr("app.modules.dataset.catalog.list_classes", lambda tenant_id=None: [fake])
         monkeypatch.setattr("app.dataset_samples.list_samples",
                             lambda tenant_id=None: [{"class_uid": "uid-1", "review_status": "approved",
                                                      "deleted_at": "", "sample_uid": "s1"}])

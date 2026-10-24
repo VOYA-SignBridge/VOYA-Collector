@@ -9,7 +9,7 @@ import numpy as np
 
 from app.modules.security import audit
 from app.config import settings
-from app.dataset_manager import load_labels, ClassMetadata
+from app.modules.dataset.catalog import load_labels, ClassMetadata
 from app.modules.saas.tenancy import tenant_id_of
 from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
@@ -178,7 +178,7 @@ def create_label(
 
     Creates/returns a class entry in the new hierarchy while keeping the old response shape.
     """
-    from app.dataset_manager import get_or_register_class
+    from app.modules.dataset.catalog import get_or_register_class
 
     meta = get_or_register_class(
         label_original=label,

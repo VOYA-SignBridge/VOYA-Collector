@@ -337,7 +337,7 @@ def find_class_meta(class_uid: str, *, tenant_id: str):
     không lọt vào vòng lặp, nên nó không phân biệt được với một `class_uid`
     không tồn tại — người gọi không có gì để lỡ kiểm.
     """
-    from app.dataset_manager import list_classes
+    from app.modules.dataset.catalog import list_classes
 
     for meta in list_classes(tenant_id=tenant_id):
         if meta.class_uid == class_uid:

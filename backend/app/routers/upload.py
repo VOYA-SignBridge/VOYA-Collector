@@ -9,7 +9,7 @@ from app.modules.dataset import (
     raw_video_upload_service,
     video_processing_service,
 )
-from app.dataset_manager import normalize_dialect
+from app.modules.dataset.catalog import normalize_dialect
 from app.processing.class_registry import AlphabetLabelError
 from app.core.http_validation import (
     validate_label,

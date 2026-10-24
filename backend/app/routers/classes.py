@@ -6,7 +6,7 @@ from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from app.modules.security import audit
 from app.modules.security.rate_limit_deps import limit_catalog
-from app.dataset_manager import (
+from app.modules.dataset.catalog import (
     get_or_register_class,
     list_classes,
     normalize_dialect,

@@ -41,7 +41,7 @@ def _ensure_schema():
 def to_chuc():
     """Tenant thật, gói Free (2 GB), dọn sạch cả DB lẫn ĐĨA sau bài."""
     from app.modules.saas import tenant_admin
-    from app.dataset_manager import tenant_features_root
+    from app.modules.dataset.catalog import tenant_features_root
     from conftest import purge_tenant
 
     tid = f"stq{uuid.uuid4().hex[:9]}"
@@ -80,7 +80,7 @@ def _so_khoan_giu_cho(tid: str) -> int:
 
 def _ghi_tep(tid: str, ten: str, n: int) -> Path:
     """Ghi `n` byte vào cây đặc trưng của tenant — hiện vật TÍNH PHÍ thật."""
-    from app.dataset_manager import tenant_features_root
+    from app.modules.dataset.catalog import tenant_features_root
 
     p = tenant_features_root(tid) / "vn" / "common" / "class_test_0000" / ten
     p.parent.mkdir(parents=True, exist_ok=True)

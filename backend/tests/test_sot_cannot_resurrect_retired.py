@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.dataset_manager import REGION_UNCLASSIFIED  # noqa: E402
+from app.modules.dataset.catalog import REGION_UNCLASSIFIED  # noqa: E402
 from app.storage import metadata_db as db  # noqa: E402
 
 CHI_MUC_CU = "uq_classes_tenant_slug_lang_dialect"

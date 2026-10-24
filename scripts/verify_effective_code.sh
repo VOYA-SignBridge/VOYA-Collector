@@ -50,7 +50,7 @@ import hashlib, importlib, json, os, sys
 # Các module QUYẾT ĐỊNH hành vi đang đo. Thêm vào đây khi phạm vi mở rộng —
 # một module thiếu ở đây là một biến không kiểm soát.
 MODULES = [
-    "app.catalog_sync", "app.dataset_samples", "app.dataset_manager",
+    "app.catalog_sync", "app.dataset_samples", "app.modules.dataset.catalog",
     "app.preview_render", "app.preview_tasks", "app.tenant_context",
     "app.tenant_middleware", "app.auth", "app.quota_deps",
     "app.training_tasks", "app.export_tasks", "app.storage.metadata_db",

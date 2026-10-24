@@ -1494,7 +1494,7 @@ MIGRATION_STATEMENTS = [
     #
     # `dialect` gánh ba nghĩa cùng lúc: tập vốn từ (`bang-chu-cai`, `spa`,
     # `can-tho`, `hoa-de`), phạm vi (`common`), và vùng miền (`bac`/`nam`/
-    # `trung`). Chính `app/dataset_manager.py` đã ghi "DEPRECATED as a semantic
+    # `trung`). Chính `app/modules/dataset/catalog.py` đã ghi "DEPRECATED as a semantic
     # field (it conflated region / vocabulary domain / collection campaign)" —
     # cột này hoàn tất việc tách đó.
     #
@@ -5149,7 +5149,7 @@ _CLASS_DB_KEYS = (
     "semantic_label", "vocabulary_scope", "recognition_profile", "vocabulary_group",
     "collection_campaign", "is_active", "motion_type",
     # Vùng miền của ký hiệu — trục riêng, tách khỏi `dialect`. Xem
-    # app/dataset_manager.py VALID_REGIONS.
+    # app/modules/dataset/catalog.py VALID_REGIONS.
     "region",
     # Spelled as a literal, not TENANT_COLUMN, on purpose: tests/
     # test_sot_schema_coverage.py reads these three tuples as SOURCE TEXT (so it
@@ -5230,7 +5230,7 @@ def upsert_class(row: Dict[str, Any]):
     # Import trong hàm: `dataset_manager` import ngược tệp này, nên import ở
     # đầu module sẽ thành vòng. Chuẩn hoá phải dùng CHUNG một hàm — hai bảng
     # ánh xạ vùng sẽ trôi khỏi nhau đúng như mọi danh sách chép tay khác.
-    from app.dataset_manager import normalize_region
+    from app.modules.dataset.catalog import normalize_region
 
     # Ba trạng thái, không phải hai. `COALESCE` trong SQL chỉ thấy NULL, nên nếu
     # tầng này không tách chúng ra thì "gói cũ không biết vùng" và "gói mới cố ý

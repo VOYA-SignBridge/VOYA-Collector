@@ -253,7 +253,7 @@ def _fingerprint(table: str, key: str, tenant_id: str, ts_cols: Tuple[str, ...])
 
 
 def _label_header() -> List[str]:
-    from app.dataset_manager import LABEL_FIELDS
+    from app.modules.dataset.catalog import LABEL_FIELDS
     from app.modules.saas.tenancy import TENANT_COLUMN
 
     return [c for c in LABEL_FIELDS if c != TENANT_COLUMN] + [
@@ -294,7 +294,7 @@ LAYOUT_HEADER = ["folder", "contents", "written_by", "naming_rule", "storage_url
 
 
 def _labels(tenant_id: str, state: Dict[str, Any]) -> Tuple[List[str], List[List[str]]]:
-    from app.dataset_manager import ClassMetadata, drive_class_folder
+    from app.modules.dataset.catalog import ClassMetadata, drive_class_folder
 
     header = _label_header()
     counts = {r["class_uid"]: r for r in _db(

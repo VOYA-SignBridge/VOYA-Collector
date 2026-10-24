@@ -38,7 +38,7 @@ def _own_classes_by_slug() -> Dict[str, List[Dict[str, Any]]]:
     if not tenant:
         return {}
     from app.modules.admin import moderation
-    from app.dataset_manager import list_classes
+    from app.modules.dataset.catalog import list_classes
     from app.dataset_samples import list_samples
 
     samples = moderation.filter_rows(list_samples(tenant), viewer_id=None).kept

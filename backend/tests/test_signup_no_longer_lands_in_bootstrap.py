@@ -182,7 +182,7 @@ def _drop_class_from_labels_csv(class_uid: str) -> None:
     """
     import csv
 
-    from app.dataset_manager import MASTER_LABELS
+    from app.modules.dataset.catalog import MASTER_LABELS
 
     if not MASTER_LABELS.exists():
         return

@@ -37,7 +37,7 @@ sys.path.insert(0, "/app")
 
 from app.modules.security import audit  # noqa: E402
 from app.catalog_sync import _catalog_lock, _write_csv, _write_samples_csv  # noqa: E402
-from app.dataset_manager import DATASET_ROOT, MASTER_LABELS, tenant_features_root  # noqa: E402
+from app.modules.dataset.catalog import DATASET_ROOT, MASTER_LABELS, tenant_features_root  # noqa: E402
 from app.dataset_samples import SAMPLES_CSV, raw_archive_path  # noqa: E402
 from app.storage.metadata_db import _cursor, _fetch_all  # noqa: E402
 from app.modules.saas.tenant_context import system_scope, tenant_scope  # noqa: E402

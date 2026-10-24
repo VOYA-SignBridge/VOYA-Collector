@@ -38,7 +38,7 @@ from app.modules.saas.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN
 @pytest.fixture
 def lop_cua_tenant_khac():
     """`ClassMetadata` thuộc một tenant KHÁC tenant khởi tạo."""
-    from app.dataset_manager import ClassMetadata
+    from app.modules.dataset.catalog import ClassMetadata
 
     tag = uuid.uuid4().hex[:8]
     return ClassMetadata(
@@ -123,7 +123,7 @@ class TestTenantDiTheoLop:
 
         Không có bài này, một bản vá viết cứng `"truong-xyz"` cũng xanh.
         """
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
 
         tag = uuid.uuid4().hex[:8]
         goc = ClassMetadata(

@@ -28,7 +28,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Các tệp quyết định hành vi đang được đo. Thêm tệp vào đây khi phạm vi đo mở
 # rộng — một tệp thiếu ở đây là một biến không kiểm soát.
-FILES="catalog_sync.py dataset_samples.py dataset_manager.py preview_render.py
+FILES="catalog_sync.py dataset_samples.py modules/dataset/catalog.py preview_render.py
        preview_tasks.py routers/label_sessions.py tenant_context.py
        tenant_middleware.py"
 

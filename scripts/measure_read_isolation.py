@@ -338,7 +338,7 @@ def main() -> int:
 
     # ------------------------------------- READ-5 không rơi về "default" --
     from app.dataset_samples import TenantScopeRequired, list_samples
-    from app.dataset_manager import load_labels
+    from app.modules.dataset.catalog import load_labels
     for ten, fn in (("list_samples", list_samples), ("load_labels", load_labels)):
         for gt in (None, "", "   "):
             try:

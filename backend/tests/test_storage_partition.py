@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from app import dataset_manager
-from app.dataset_manager import (
+from app.modules.dataset import catalog as dataset_manager
+from app.modules.dataset.catalog import (
     ClassMetadata,
     ambient_tenant,
     ambient_tenant_features_root,
@@ -153,7 +153,7 @@ class TestOwnerSurvivesEveryRoundTrip:
     }
 
     def test_labels_csv_row(self):
-        from app.dataset_manager import _build_meta_from_row
+        from app.modules.dataset.catalog import _build_meta_from_row
 
         assert _build_meta_from_row(dict(self.ROW)).tenant_id == "truong-b"
 
@@ -165,7 +165,7 @@ class TestOwnerSurvivesEveryRoundTrip:
     def test_blank_tenant_means_the_bootstrap_tenant(self):
         """Rows written before the column existed. Consistent with every other
         absent-value decision in `app.modules.saas.tenancy`."""
-        from app.dataset_manager import _build_meta_from_row
+        from app.modules.dataset.catalog import _build_meta_from_row
 
         row = dict(self.ROW, tenant_id="")
         assert _build_meta_from_row(row).tenant_id == DEFAULT_TENANT_ID
@@ -173,7 +173,7 @@ class TestOwnerSurvivesEveryRoundTrip:
     def test_path_follows_the_owner_not_the_caller(self):
         """The decisive property: a platform job acting for nobody must still
         write tenant B's class into tenant B's tree."""
-        from app.dataset_manager import _build_meta_from_row
+        from app.modules.dataset.catalog import _build_meta_from_row
 
         meta = _build_meta_from_row(dict(self.ROW))
         with system_scope("test"):
