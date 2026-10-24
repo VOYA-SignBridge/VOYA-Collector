@@ -272,7 +272,7 @@ def test_sample_fields_never_shift_existing_columns():
     `test_label_fields_never_shift_existing_columns` đã đi qua đúng chuyện này
     ngày 14/08 khi thêm cột `region`. Ghim theo VỊ TRÍ, không theo "đứng cuối".
     """
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.modules.dataset.samples import SAMPLE_FIELDS
 
     assert SAMPLE_FIELDS.count(TENANT_COLUMN) == 1
     # 32 là vị trí của tenant_id từ khi nó được thêm; thay đổi số này nghĩa là
@@ -320,7 +320,7 @@ def test_raw_upload_fields_keep_tenant_id_in_place():
 @pytest.mark.parametrize(
     "module,attr,table",
     [
-        ("app.dataset_samples", "SAMPLE_FIELDS", "samples"),
+        ("app.modules.dataset.samples", "SAMPLE_FIELDS", "samples"),
         ("app.modules.dataset.catalog", "LABEL_FIELDS", "classes"),
         ("app.modules.dataset.raw_uploads", "RAW_UPLOAD_FIELDS", "raw_uploads"),
     ],
@@ -346,7 +346,7 @@ def test_sot_manifest_promises_every_csv_column(module, attr, table):
 
 @pytest.fixture
 def csv_module(tmp_path, monkeypatch):
-    import app.dataset_samples as ds
+    import app.modules.dataset.samples as ds
 
     path = tmp_path / "samples.csv"
     monkeypatch.setattr(ds, "SAMPLES_CSV", path)
@@ -598,7 +598,7 @@ class TestRawUploadsMigration:
 
 class TestProjections:
     def test_sample_projection_forces_a_tenant(self):
-        from app.dataset_samples import _db_row_to_csv_row
+        from app.modules.dataset.samples import _db_row_to_csv_row
 
         assert _db_row_to_csv_row({"sample_uid": "a"})[TENANT_COLUMN] == DEFAULT_TENANT_ID
         assert _db_row_to_csv_row(
@@ -606,7 +606,7 @@ class TestProjections:
         )[TENANT_COLUMN] == "truong-b"
 
     def test_class_projection_forces_a_tenant(self):
-        from app.catalog_sync import _db_class_row_to_label_row
+        from app.modules.dataset.catalog_sync import _db_class_row_to_label_row
 
         assert _db_class_row_to_label_row({"class_uid": "c"})[
             TENANT_COLUMN
@@ -899,7 +899,7 @@ class TestAgainstPostgres:
 
     def test_projection_of_a_real_db_row_keeps_the_tenant(self, tenant_b):
         """Ties the reconcile query to the CSV projection end to end."""
-        from app.dataset_samples import _db_row_to_csv_row
+        from app.modules.dataset.samples import _db_row_to_csv_row
         from app.storage.metadata_db import list_active_samples
 
         row = next(r for r in list_active_samples() if r["sample_uid"] == SAMPLE_UID)

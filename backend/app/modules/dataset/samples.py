@@ -1115,7 +1115,7 @@ def reconcile_samples_csv_from_db() -> int:
     _ensure_samples_file()
 
     from filelock import Timeout
-    from app.catalog_sync import _catalog_lock
+    from app.modules.dataset.catalog_sync import _catalog_lock
 
     try:
         # Skip this run (not fail) if a catalog op is busy — the beat retries soon.

@@ -74,7 +74,7 @@ def _migration_cursor():
     exists does not roll back the twenty statements before it. Inside one
     transaction the first error would poison the rest.
     """
-    from app.storage.postgres_connection import connect_migration
+    from app.infrastructure.database.connection import connect_migration
 
     conn = connect_migration()
     try:

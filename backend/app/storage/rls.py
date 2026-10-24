@@ -427,7 +427,7 @@ def isolation_posture(conn) -> Dict[str, Any]:
     Kept as data rather than a bare bool so the caller can log the specifics and
     a test can assert on them.
     """
-    from app.storage.postgres_connection import current_role_privileges, rls_enabled_tables
+    from app.infrastructure.database.connection import current_role_privileges, rls_enabled_tables
 
     privileges = current_role_privileges(conn)
     # Both shapes count: a shared-catalogue table with RLS switched off is just

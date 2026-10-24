@@ -213,7 +213,7 @@ def decide_session(
     Lý do là BẮT BUỘC khi từ chối. Một lượt từ chối không nói vì sao thì người
     đóng góp không có gì để sửa, và họ sẽ quay lại đúng như cũ.
     """
-    from app.catalog_sync import CatalogSyncError, sync_set_review_status
+    from app.modules.dataset.catalog_sync import CatalogSyncError, sync_set_review_status
     from app.modules.saas.tenancy import TENANT_COLUMN
 
     sid = str(capture_session_id or "").strip()

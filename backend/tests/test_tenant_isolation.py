@@ -54,7 +54,7 @@ SAMPLE_B = "bbbbbbbb01"
 
 def _admin_dsn() -> str:
     from app.config import settings
-    from app.storage.postgres_connection import migration_dsn
+    from app.infrastructure.database.connection import migration_dsn
 
     return migration_dsn() or settings.database_url
 

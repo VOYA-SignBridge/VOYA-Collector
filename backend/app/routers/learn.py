@@ -39,7 +39,7 @@ def _own_classes_by_slug() -> Dict[str, List[Dict[str, Any]]]:
         return {}
     from app.modules.admin import moderation
     from app.modules.dataset.catalog import list_classes
-    from app.dataset_samples import list_samples
+    from app.modules.dataset.samples import list_samples
 
     samples = moderation.filter_rows(list_samples(tenant), viewer_id=None).kept
     per_class: Dict[str, int] = {}

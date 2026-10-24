@@ -30,7 +30,7 @@ import pytest
 
 from app.cli import provision_db_roles
 from app.storage import rls
-from app.storage.postgres_connection import RolePrivileges
+from app.infrastructure.database.connection import RolePrivileges
 
 
 # ---------------------------------------------------------------------------
@@ -254,14 +254,14 @@ class TestMigrationDsn:
     def test_falls_back_to_application_dsn(self, monkeypatch):
         """A deployment that has not split the roles must be unaffected."""
         from app.config import settings
-        from app.storage import postgres_connection
+        from app.infrastructure.database import connection as postgres_connection
 
         monkeypatch.setattr(settings, "migration_database_url", "", raising=False)
         assert postgres_connection.migration_dsn() == settings.database_url
 
     def test_uses_migration_url_when_set(self, monkeypatch):
         from app.config import settings
-        from app.storage import postgres_connection
+        from app.infrastructure.database import connection as postgres_connection
 
         monkeypatch.setattr(
             settings, "migration_database_url", "postgresql://m:m@h:5432/db", raising=False
@@ -272,7 +272,7 @@ class TestMigrationDsn:
         """Docker compose passes an unset variable through as an empty string, so
         `MIGRATION_DATABASE_URL=` must mean 'not split', not 'connect to ""'."""
         from app.config import settings
-        from app.storage import postgres_connection
+        from app.infrastructure.database import connection as postgres_connection
 
         monkeypatch.setattr(settings, "migration_database_url", "   ", raising=False)
         assert postgres_connection.migration_dsn() == settings.database_url
@@ -381,7 +381,7 @@ class TestRlsDdl:
 
 
 def _live_conn():
-    from app.storage.postgres_connection import connect_postgres
+    from app.infrastructure.database.connection import connect_postgres
 
     try:
         return connect_postgres(connect_timeout=3)
@@ -394,7 +394,7 @@ class TestAgainstLiveDatabase:
     def test_reports_the_role_the_app_actually_connects_as(self):
         conn = _live_conn()
         try:
-            from app.storage.postgres_connection import current_role_privileges
+            from app.infrastructure.database.connection import current_role_privileges
 
             privileges = current_role_privileges(conn)
             assert privileges.rolname
@@ -451,7 +451,7 @@ class TestCliGuards:
     def test_refuses_missing_password(self, monkeypatch, capsys):
         # main() imports connect_migration at call time, so patching the module
         # it comes from is what takes effect.
-        import app.storage.postgres_connection as pc
+        import app.infrastructure.database.connection as pc
 
         monkeypatch.delenv(provision_db_roles.PASSWORD_ENV, raising=False)
         monkeypatch.setattr(pc, "connect_migration", lambda **_: _FakeConn())
@@ -460,7 +460,7 @@ class TestCliGuards:
 
     def test_refuses_short_password(self, monkeypatch, capsys):
         monkeypatch.setenv(provision_db_roles.PASSWORD_ENV, "short")
-        import app.storage.postgres_connection as pc
+        import app.infrastructure.database.connection as pc
 
         monkeypatch.setattr(pc, "connect_migration", lambda **_: _FakeConn())
         assert provision_db_roles.main([]) == 2
@@ -470,7 +470,7 @@ class TestCliGuards:
         """Provisioning needs CREATE ROLE. Failing early with the reason beats a
         raw permission error twelve statements in."""
         monkeypatch.setenv(provision_db_roles.PASSWORD_ENV, "x" * 20)
-        import app.storage.postgres_connection as pc
+        import app.infrastructure.database.connection as pc
 
         monkeypatch.setattr(
             pc, "connect_migration", lambda **_: _FakeConn(role="voya_app", superuser=False)
@@ -490,7 +490,7 @@ class TestCheckCommand:
 
     @staticmethod
     def _patch(monkeypatch, *, runtime, migration):
-        import app.storage.postgres_connection as pc
+        import app.infrastructure.database.connection as pc
 
         monkeypatch.setattr(pc, "connect_postgres", lambda **_: runtime)
         monkeypatch.setattr(pc, "connect_migration", lambda **_: migration)

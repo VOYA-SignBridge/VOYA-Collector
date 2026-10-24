@@ -686,7 +686,7 @@ def create_invitation(
 
     email_sent = False
     try:
-        from app.email_service import send_invitation_email
+        from app.services.email import send_invitation_email
 
         send_invitation_email(
             invitation["email"],

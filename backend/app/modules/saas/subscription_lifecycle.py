@@ -264,7 +264,7 @@ def _send_reminder(tenant_id: str, days_left: int, ends_at: datetime,
     vòng đời.
     """
     from app.modules.support import notifications
-    from app import email_service
+    from app.services import email as email_service
 
     sent = 0
     for row in _tenant_admins(tenant_id):

@@ -248,7 +248,7 @@ def test_duong_thu_mau_that_su_goi_ham_dung_phan_cap(to_chuc):
     đang kiểm là chúng có ra đời trong cùng lượt ghi hay không.
     """
     import numpy as np
-    from app import dataset_samples as ds
+    from app.modules.dataset import samples as ds
     from app.modules.dataset.catalog import ClassMetadata
 
     tid, cls = to_chuc

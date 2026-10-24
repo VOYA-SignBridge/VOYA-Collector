@@ -243,7 +243,7 @@ def test_save_npz_storage_key_persisted():
 # --------------------------------------------------------------------------- #
 def test_pool():
     print("[test_pool]  (T2.1)")
-    from app.storage import postgres_connection as pc
+    from app.infrastructure.database import connection as pc
     try:
         conn = pc.get_pooled_conn()
     except Exception as e:

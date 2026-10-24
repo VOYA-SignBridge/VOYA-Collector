@@ -28,7 +28,7 @@ from app.modules.dataset import signers as signer_registry
 from app.modules.security import audit_log
 from app.modules.identity._web_compat import require_tenant_editor
 from app.modules.security.consent_gate import SCOPE_LADDER, load_consents
-from app.dataset_samples import list_samples
+from app.modules.dataset.samples import list_samples
 from app.storage.metadata_db import _execute, _fetch_all
 from app.modules.saas.tenant_context import require_tenant
 

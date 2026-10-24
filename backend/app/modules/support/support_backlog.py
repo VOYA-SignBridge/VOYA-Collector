@@ -166,7 +166,7 @@ def sweep() -> Dict[str, Any]:
                 stat["waiting"], stat["oldest_hours"])
             continue
 
-        from app import email_service
+        from app.services import email as email_service
         for addr in recipients:
             try:
                 email_service.send_support_backlog_email(

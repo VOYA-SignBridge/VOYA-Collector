@@ -107,7 +107,7 @@ with system_scope("gop may kia: nguoi ky"):
         _execute("UPDATE signers SET external_user_id = %s WHERE tenant_id = %s AND signer_id = %s", (ext, TENANT, s))
 
 # ---- ghi: tệp + CSV + DB ---------------------------------------------------------
-from app.dataset_samples import _samples_fieldnames, SAMPLES_CSV  # noqa: E402
+from app.modules.dataset.samples import _samples_fieldnames, SAMPLES_CSV  # noqa: E402
 from filelock import FileLock  # noqa: E402
 
 csv_rows, n_files = [], 0

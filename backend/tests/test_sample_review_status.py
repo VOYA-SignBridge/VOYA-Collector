@@ -82,7 +82,7 @@ class TestTrangThaiKhoiDau:
     """Mẫu mới LUÔN chờ duyệt. Không có ngoại lệ, và không có công tắc."""
 
     def test_luon_luon_cho_duyet(self):
-        from app.dataset_samples import REVIEW_PENDING, initial_review_status
+        from app.modules.dataset.samples import REVIEW_PENDING, initial_review_status
 
         assert initial_review_status() == REVIEW_PENDING
 
@@ -95,7 +95,7 @@ class TestTrangThaiKhoiDau:
         """
         import inspect
 
-        from app.dataset_samples import initial_review_status
+        from app.modules.dataset.samples import initial_review_status
 
         assert list(inspect.signature(initial_review_status).parameters) == []
 
@@ -110,7 +110,7 @@ class TestTrangThaiKhoiDau:
         này nữa, và bài test đi qua cả năm hình dạng của cấu hình để chứng minh.
         """
         from app.config import settings
-        from app.dataset_samples import initial_review_status
+        from app.modules.dataset.samples import initial_review_status
 
         monkeypatch.setattr(settings, "public_tenant_id", cau_hinh, raising=False)
         assert initial_review_status() == "pending"
@@ -280,7 +280,7 @@ class TestHopDongTepVaSOT:
         """Bản nhân bản Google Sheets phát header nguyên văn thành dòng 1, nên
         một cột chèn vào GIỮA sẽ đẩy mọi cột hiện có sang phải một ô — trên một
         bảng tính người ta đang mở."""
-        from app.dataset_samples import SAMPLE_FIELDS
+        from app.modules.dataset.samples import SAMPLE_FIELDS
 
         assert SAMPLE_FIELDS[-1] == "review_status"
 

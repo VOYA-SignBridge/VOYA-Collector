@@ -24,7 +24,7 @@ import pytest
 
 def _infra_available():
     try:
-        from app.storage.postgres_connection import connect_postgres
+        from app.infrastructure.database.connection import connect_postgres
 
         connect_postgres(connect_timeout=3).close()
     except Exception as exc:

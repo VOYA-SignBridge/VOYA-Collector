@@ -100,7 +100,7 @@ def dataset(tmp_path, monkeypatch):
         return rows
 
     monkeypatch.setattr(pr, "find_class_meta", _meta)
-    monkeypatch.setattr("app.dataset_samples.list_samples", _mau)
+    monkeypatch.setattr("app.modules.dataset.samples.list_samples", _mau)
     # The router imported these symbols by name — patch its bindings too.
     import app.routers.label_sessions as ls
 
@@ -297,7 +297,7 @@ class TestSessionListEdgeCases:
         extra = _sample_row("stat-del", "sess-stat", 0, status="deleted")
         rows = list(pr.list_session_rows("cls123", tenant_id="default").values())
         monkeypatch.setattr(
-            "app.dataset_samples.list_samples",
+            "app.modules.dataset.samples.list_samples",
             lambda tenant_id: [r for group in rows for r in group] + [extra],
         )
         # Act
@@ -405,7 +405,7 @@ def owned_dataset(dataset, monkeypatch):
     để không đụng CSV/Drive thật, chỉ đếm số dòng đã được chuyển."""
     import app.routers.label_sessions as ls  # noqa: F401  (router đã import)
     import app.storage.metadata_db as mdb
-    import app.catalog_sync as cs
+    import app.modules.dataset.catalog_sync as cs
 
     monkeypatch.setattr(mdb, "get_sample_owner", lambda uid: "u-owner" if uid == "abc" else None)
     monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {u: "u-owner" for u in uids if u in {"abc", "abc-aug"}})
@@ -459,7 +459,7 @@ class TestSessionOwnershipPermissions:
 
     @pytest.mark.parametrize("operation", ["delete", "reassign"])
     def test_partial_mutation_is_not_reported_as_complete(self, owned_dataset, monkeypatch, operation):
-        import app.catalog_sync as cs
+        import app.modules.dataset.catalog_sync as cs
 
         def mutate(uid, *args, **kwargs):
             if uid == "abc-aug":

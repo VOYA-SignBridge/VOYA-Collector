@@ -170,7 +170,7 @@ def _rename_in_samples_csv(old_username: str, new_username: str) -> int:
     import os
     import tempfile
 
-    from app.dataset_samples import SAMPLES_CSV
+    from app.modules.dataset.samples import SAMPLES_CSV
 
     if not SAMPLES_CSV.exists():
         return 0

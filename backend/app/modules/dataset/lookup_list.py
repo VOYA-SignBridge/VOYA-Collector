@@ -261,7 +261,7 @@ def _label_header() -> List[str]:
 
 
 def _sample_header() -> List[str]:
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.modules.dataset.samples import SAMPLE_FIELDS
     from app.modules.saas.tenancy import TENANT_COLUMN
 
     return [c for c in SAMPLE_FIELDS if c != TENANT_COLUMN] + ["deleted_at"]

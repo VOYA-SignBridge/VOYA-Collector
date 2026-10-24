@@ -169,7 +169,7 @@ class _Recorder:
 
 @pytest.fixture
 def fake_drive(monkeypatch, tmp_path):
-    import app.dataset_samples as ds
+    import app.modules.dataset.samples as ds
     import app.storage.gdrive_client as gc
     import app.storage.metadata_db as mdb
 
@@ -228,7 +228,7 @@ class TestUploadTasks:
 
 class TestCatalogSyncPaths:
     def test_raw_dir_needs_the_class_tenant(self, tenant_mode):
-        from app.catalog_sync import _drive_relative_path
+        from app.modules.dataset.catalog_sync import _drive_relative_path
 
         raw_dir = settings.dataset_root / "raw_videos" / "vn" / "nam" / "class_dia-chi_df77087d"
         assert _drive_relative_path(raw_dir, tenant_id="truong-b") == (
@@ -236,7 +236,7 @@ class TestCatalogSyncPaths:
 
     def test_dispatch_skips_an_unmappable_path_instead_of_failing_the_rename(self, tenant_mode, monkeypatch):
         """Đổi tên/xoá lớp đã commit cục bộ; Drive là phần best-effort phía sau."""
-        import app.catalog_sync as cs
+        import app.modules.dataset.catalog_sync as cs
         from app.modules.google_sync import drive_tasks as et
 
         sent = []
@@ -329,7 +329,7 @@ class TestStorageKeyIsTheFileOnDisk:
     @pytest.fixture
     def kho_tam(self, monkeypatch, tmp_path):
         import app.modules.dataset.catalog as dm
-        import app.dataset_samples as ds
+        import app.modules.dataset.samples as ds
 
         monkeypatch.setattr(dm, "FEATURES_ROOT", tmp_path / "features")
         monkeypatch.setattr(ds, "DATASET_ROOT", tmp_path)
@@ -349,7 +349,7 @@ class TestStorageKeyIsTheFileOnDisk:
     def _save(self, meta):
         import numpy as np
 
-        from app.dataset_samples import save_sequence_npz
+        from app.modules.dataset.samples import save_sequence_npz
 
         items = []
         save_sequence_npz(meta, np.zeros((60, 126), dtype=np.float32), meta={}, augment_id=0,

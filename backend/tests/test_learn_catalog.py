@@ -79,7 +79,7 @@ class TestApiCongKhai:
                              is_common_language=False)
         monkeypatch.setattr(learn, "_own_classes_by_slug", learn._own_classes_by_slug)  # giữ nguyên
         monkeypatch.setattr("app.modules.dataset.catalog.list_classes", lambda tenant_id=None: [fake])
-        monkeypatch.setattr("app.dataset_samples.list_samples",
+        monkeypatch.setattr("app.modules.dataset.samples.list_samples",
                             lambda tenant_id=None: [{"class_uid": "uid-1", "review_status": "approved",
                                                      "deleted_at": "", "sample_uid": "s1"}])
 

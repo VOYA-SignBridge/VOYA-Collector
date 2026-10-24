@@ -178,7 +178,7 @@ fi
 docker exec -i voya_backend python - "$to" "$level" "$why" "$summary" <<'PY' 2>&1 | tail -2
 import sys
 to, level, why, summary = sys.argv[1:5]
-from app.email_service import _send
+from app.services.email import _send
 _send(
     to,
     f"[VOYA] Dia Docker: {level}",

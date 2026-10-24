@@ -621,7 +621,7 @@ class TestUnconfiguredEmailNeverLeaksTheCode:
     def test_sending_a_code_without_smtp_raises_instead_of_logging(
         self, monkeypatch, caplog
     ):
-        import app.email_service as es
+        import app.services.email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         with caplog.at_level(logging.WARNING):
@@ -633,7 +633,7 @@ class TestUnconfiguredEmailNeverLeaksTheCode:
     def test_a_reset_link_may_still_fall_back_to_the_log(self, monkeypatch, caplog):
         """The documented dev convenience stays. The token is 32 bytes and
         single-use, which is a different risk from a six-digit code."""
-        import app.email_service as es
+        import app.services.email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         with caplog.at_level(logging.WARNING):
@@ -646,7 +646,7 @@ class TestUnconfiguredEmailNeverLeaksTheCode:
     ):
         """A misconfigured deployment is not the caller's fault, and the person
         needs to learn about it now rather than by never receiving a code."""
-        import app.email_service as es
+        import app.services.email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         token = _access_token_for(account)

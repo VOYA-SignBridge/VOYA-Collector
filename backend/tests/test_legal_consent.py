@@ -330,7 +330,7 @@ class TestRegistrationSendsTheVerificationCode:
         import app.routers.auth as auth_router
 
         monkeypatch.setattr(
-            "app.email_service.send_verification_code_email",
+            "app.services.email.send_verification_code_email",
             lambda to, code, purpose: sent.append((to, purpose)))
         monkeypatch.setattr(auth_router.settings, "otp_pepper",
                             "pepper-for-tests-at-least-32-chars", raising=False)

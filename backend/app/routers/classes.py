@@ -13,10 +13,10 @@ from app.modules.dataset.catalog import (
     normalize_region,
 )
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
-from app.dataset_samples import list_samples
+from app.modules.dataset.samples import list_samples
 from app.modules.dataset.balancing import build_balance_plan
 from app.core.http_validation import validate_label, validate_language, validate_dialect
-from app.catalog_sync import (
+from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,

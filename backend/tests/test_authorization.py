@@ -526,7 +526,7 @@ def passcode_thresholds():
 # ===========================================================================
 
 def _live_conn():
-    from app.storage.postgres_connection import connect_postgres
+    from app.infrastructure.database.connection import connect_postgres
 
     try:
         return connect_postgres(connect_timeout=3)
@@ -1009,7 +1009,7 @@ class TestRolesCatalogueRlsIsAsymmetric:
 
     def test_a_tenant_cannot_create_a_platform_role(self, authz_fixture):
         from app.storage.metadata_db import _cursor
-        from app.storage.postgres_connection import current_role_privileges
+        from app.infrastructure.database.connection import current_role_privileges
         from app.modules.saas.tenant_context import tenant_scope
 
         # Chính sách RLS không ràng buộc được một role BYPASSRLS, nên với

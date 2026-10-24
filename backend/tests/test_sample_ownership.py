@@ -128,7 +128,7 @@ def test_insert_raw_upload_normalises_blank_owner(monkeypatch):
 
 @pytest.fixture
 def csv_module(tmp_path, monkeypatch):
-    import app.dataset_samples as ds
+    import app.modules.dataset.samples as ds
 
     path = tmp_path / "samples.csv"
     monkeypatch.setattr(ds, "SAMPLES_CSV", path)
@@ -189,7 +189,7 @@ def test_appended_row_carries_the_owner(csv_module):
 
 
 def test_sample_fields_declares_the_column():
-    import app.dataset_samples as ds
+    import app.modules.dataset.samples as ds
 
     # The invariant is APPEND-ONLY, not "auth_user_id is last forever".
     #

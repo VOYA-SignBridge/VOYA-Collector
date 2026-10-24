@@ -132,7 +132,7 @@ def control_cursor():
     điều khiển ở tầng SQL không". Câu "người dùng có được phép làm việc này
     không" phải đã được trả lời TRƯỚC, ở tầng ứng dụng.
     """
-    from app.storage.postgres_connection import connect_control
+    from app.infrastructure.database.connection import connect_control
 
     conn = connect_control()
     try:

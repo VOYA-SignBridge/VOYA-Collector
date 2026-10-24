@@ -153,7 +153,7 @@ class TestNhacTruocHan:
         nhận 24 lá thư "còn 7 ngày" trong một ngày."""
         sent = []
         monkeypatch.setattr(
-            "app.email_service.send_subscription_reminder_email",
+            "app.services.email.send_subscription_reminder_email",
             lambda to, **kw: sent.append((to, kw["days_left"])))
         monkeypatch.setattr(sub, "_tenant_admins", lambda _t: [_ADMIN_GIA])
 
@@ -170,7 +170,7 @@ class TestNhacTruocHan:
     def test_moc_gan_hon_thi_gui_tiep(self, tenant, monkeypatch):
         sent = []
         monkeypatch.setattr(
-            "app.email_service.send_subscription_reminder_email",
+            "app.services.email.send_subscription_reminder_email",
             lambda to, **kw: sent.append(kw["days_left"]))
         monkeypatch.setattr(sub, "_tenant_admins", lambda _t: [_ADMIN_GIA])
 
@@ -186,7 +186,7 @@ class TestNhacTruocHan:
         def _explode(*_a, **_k):
             raise RuntimeError("SMTP chết")
 
-        monkeypatch.setattr("app.email_service.send_subscription_reminder_email", _explode)
+        monkeypatch.setattr("app.services.email.send_subscription_reminder_email", _explode)
         monkeypatch.setattr(sub, "_tenant_admins", lambda _t: [_ADMIN_GIA])
         _set(tenant, current_period_end=datetime.now(timezone.utc) + timedelta(days=6, hours=1))
 

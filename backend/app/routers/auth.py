@@ -41,7 +41,7 @@ from app.modules.security._web_compat import (
     register_failed_login,
     reset_login_attempts,
 )
-from app.email_service import send_password_reset_email
+from app.services.email import send_password_reset_email
 
 logger = logging.getLogger(__name__)
 
@@ -310,7 +310,7 @@ def _send_welcome_verification(user: dict) -> None:
     việc của người vận hành, và luôn còn đường `/auth/verify/send`.
     """
     from app.modules.security import otp
-    from app.email_service import send_verification_code_email
+    from app.services.email import send_verification_code_email
 
     try:
         _, code = otp.issue(
@@ -1024,7 +1024,7 @@ def change_email_start(
 ):
     from app.modules.security import otp
     from app.modules.identity._web_compat import _identity_cursor
-    from app.email_service import EmailNotConfigured, send_verification_code_email
+    from app.services.email import EmailNotConfigured, send_verification_code_email
 
     _guard_email_change(current_user, payload.current_password, request)
 

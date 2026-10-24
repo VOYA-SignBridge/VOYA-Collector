@@ -388,7 +388,7 @@ def test_doi_chieu_khong_keu_khi_khong_lech(to_chuc, caplog):
 def test_doi_chieu_dem_ca_KHO_RAW_khong_chi_dac_trung(to_chuc):
     """Một mẫu là hai tệp ở hai cây. Bỏ kho raw ra là tính thiếu ~1/3 mỗi mẫu —
     và nó là nửa KHÔNG tái tạo được, tức nửa đắt hơn."""
-    from app.dataset_samples import raw_archive_path
+    from app.modules.dataset.samples import raw_archive_path
 
     dac_trung = _ghi_tep(to_chuc, "sample_dddddddddd.npz", 2000)
     kho = raw_archive_path(dac_trung)

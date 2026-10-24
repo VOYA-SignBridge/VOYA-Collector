@@ -642,7 +642,7 @@ def load_labels(tenant_id: Optional[str] = None) -> List[Dict[str, str]]:
     `None` ném lỗi chứ không rơi về toàn cục, và cũng không rơi về `default`.
     Xem `dataset_samples.list_samples()` về vì sao không có đường lùi.
     """
-    from app.dataset_samples import TenantScopeRequired
+    from app.modules.dataset.samples import TenantScopeRequired
 
     if not (tenant_id or "").strip():
         raise TenantScopeRequired(

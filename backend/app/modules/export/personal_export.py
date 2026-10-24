@@ -73,7 +73,7 @@ def request_export(tenant_id: str, user_id: str) -> Dict[str, Any]:
 
 
 def _owned_rows(tenant: str, user_id: str) -> List[Dict[str, str]]:
-    from app.dataset_samples import list_samples
+    from app.modules.dataset.samples import list_samples
 
     uid = str(user_id)
     return [r for r in list_samples(tenant) if str(r.get("auth_user_id") or "") == uid]
@@ -119,7 +119,7 @@ def run_export(export_id: str) -> Dict[str, Any]:
 
     from app.config import settings
     from app.modules.dataset.catalog import iter_tenant_feature_files, load_labels
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.modules.dataset.samples import SAMPLE_FIELDS
     from app.modules.export.portable_export import write_feature_bundle
     from app.storage.metadata_db import _execute, _fetch_all
     from app.modules.saas.tenant_context import system_scope

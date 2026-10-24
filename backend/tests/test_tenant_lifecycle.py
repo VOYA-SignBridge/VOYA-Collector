@@ -881,7 +881,7 @@ class TestTheLinkAndTheMail:
         The invitation is already in the table and the link is in this response,
         so the admin can still send it by hand — failing the request would throw
         away a perfectly good invitation."""
-        from app import email_service
+        from app.services import email as email_service
 
         def _explode(*_a, **_kw):
             raise email_service.EmailNotConfigured("no smtp here")
@@ -900,7 +900,7 @@ class TestTheLinkAndTheMail:
         """`email_sent` decides which sentence the admin page shows. Saying
         "sent" when nothing was sent leaves the invited person waiting for a
         message that does not exist."""
-        from app import email_service
+        from app.services import email as email_service
 
         seen = {}
 
@@ -924,7 +924,7 @@ class TestTheLinkAndTheMail:
         nothing at all."""
         import logging
 
-        from app import email_service
+        from app.services import email as email_service
 
         monkeypatch.setattr(email_service.settings, "smtp_host", "", raising=False)
         with caplog.at_level(logging.DEBUG):

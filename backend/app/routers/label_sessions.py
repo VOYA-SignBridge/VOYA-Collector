@@ -315,7 +315,7 @@ def delete_label_session(
     _get_class_or_404(class_uid)
     rows = _get_session_rows_or_404(class_uid, session_id)
 
-    from app.catalog_sync import sync_soft_delete_sample
+    from app.modules.dataset.catalog_sync import sync_soft_delete_sample
 
     _require_session_owner(rows, current_user)
     is_admin = bool(current_user.get("is_admin"))
@@ -362,7 +362,7 @@ def reassign_label_session(
     _get_class_or_404(class_uid)
     rows = _get_session_rows_or_404(class_uid, session_id)
 
-    from app.catalog_sync import sync_reassign_sample
+    from app.modules.dataset.catalog_sync import sync_reassign_sample
 
     _require_session_owner(rows, current_user)
     is_admin = bool(current_user.get("is_admin"))
@@ -421,7 +421,7 @@ def get_session_frames(
         # Raw landmarks when the sample has them: `sequence` is the model's
         # input, not a picture of the recording — it drops where the hands were
         # relative to each other and flattens depth. See load_display_sequence.
-        from app.dataset_samples import load_display_sequence, load_world_sequence
+        from app.modules.dataset.samples import load_display_sequence, load_world_sequence
 
         sequence, landmark_source = load_display_sequence(npz_path)
         world = load_world_sequence(npz_path)

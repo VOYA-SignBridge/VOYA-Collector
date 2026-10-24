@@ -17,7 +17,7 @@ from passlib.context import CryptContext
 
 from app.config import settings
 from app.modules.identity.cookies import ACCESS_COOKIE
-from app.storage.postgres_connection import connect_postgres
+from app.infrastructure.database.connection import connect_postgres
 from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
 logger = logging.getLogger(__name__)

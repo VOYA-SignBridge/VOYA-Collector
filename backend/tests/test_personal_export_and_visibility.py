@@ -265,7 +265,7 @@ def test_goi_ca_nhan_chi_chua_dong_va_tep_cua_dung_nguoi_do(to_chuc, tmp_path, m
     npz_a, npz_b = f"sample_{uuid.uuid4().hex[:6]}.npz", f"sample_{uuid.uuid4().hex[:6]}.npz"
     rows = [_dong_mau(a, "aaaa000001", npz_a), _dong_mau(b, "bbbb000002", npz_b)]
 
-    monkeypatch.setattr("app.dataset_samples.list_samples", lambda tenant: list(rows))
+    monkeypatch.setattr("app.modules.dataset.samples.list_samples", lambda tenant: list(rows))
     import numpy as np
     monkeypatch.setattr("app.config.settings.dataset_root", str(tmp_path))
     tep_a, tep_b = (tmp_path / r["file_path"] for r in rows)
@@ -301,7 +301,7 @@ def test_nguoi_khac_khong_tai_duoc_va_khong_thay_ban_xuat_khong_phai_cua_minh(
     from app.modules.export import personal_export
 
     tid, a, b = to_chuc["tid"], to_chuc["a"], to_chuc["b"]
-    monkeypatch.setattr("app.dataset_samples.list_samples", lambda tenant: [])
+    monkeypatch.setattr("app.modules.dataset.samples.list_samples", lambda tenant: [])
     monkeypatch.setattr("app.modules.dataset.catalog.iter_tenant_feature_files", lambda tenant: iter([]))
     monkeypatch.setattr(personal_export, "_export_root", lambda: _thu_muc_ra(tmp_path))
 

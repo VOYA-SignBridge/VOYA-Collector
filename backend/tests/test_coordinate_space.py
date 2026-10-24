@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from app.dataset_samples import (
+from app.modules.dataset.samples import (
     COORD_SPACE_IMAGE,
     coordinate_space_of,
     load_display_sequence,
@@ -188,7 +188,7 @@ class TestWriterStamping:
     @pytest.fixture(autouse=True)
     def _local_only(self, monkeypatch):
         """No Drive round trip: this suite is about what lands in the npz."""
-        import app.dataset_samples as ds
+        import app.modules.dataset.samples as ds
 
         monkeypatch.setattr(ds.settings, "use_google_drive", False, raising=False)
         monkeypatch.setattr(ds, "append_sample_row", lambda *a, **k: None, raising=False)
@@ -198,7 +198,7 @@ class TestWriterStamping:
             return d["meta"].item()
 
     def test_space_is_derived_when_the_caller_says_nothing(self, class_meta, monkeypatch):
-        import app.dataset_samples as ds
+        import app.modules.dataset.samples as ds
 
         monkeypatch.setattr(ds, "append_sample_row", lambda *a, **k: None)
         monkeypatch.setattr(ds, "_maybe_upload_to_drive", lambda *a, **k: None, raising=False)
@@ -211,7 +211,7 @@ class TestWriterStamping:
         """The video pipeline reuses one window_meta across every augmented
         variant, so a value left in it must not survive as if it described
         this write."""
-        import app.dataset_samples as ds
+        import app.modules.dataset.samples as ds
 
         monkeypatch.setattr(ds, "append_sample_row", lambda *a, **k: None)
         monkeypatch.setattr(ds, "_maybe_upload_to_drive", lambda *a, **k: None, raising=False)
@@ -224,7 +224,7 @@ class TestWriterStamping:
         assert self._saved_meta(path)["coordinate_space"] == COORD_SPACE_IMAGE
 
     def test_world_landmarks_round_trip(self, class_meta, monkeypatch):
-        import app.dataset_samples as ds
+        import app.modules.dataset.samples as ds
 
         monkeypatch.setattr(ds, "append_sample_row", lambda *a, **k: None)
         monkeypatch.setattr(ds, "_maybe_upload_to_drive", lambda *a, **k: None, raising=False)
@@ -238,7 +238,7 @@ class TestWriterStamping:
         assert got is not None and np.allclose(got, world)
 
     def test_a_sample_without_world_landmarks_says_so(self, class_meta, monkeypatch):
-        import app.dataset_samples as ds
+        import app.modules.dataset.samples as ds
 
         monkeypatch.setattr(ds, "append_sample_row", lambda *a, **k: None)
         monkeypatch.setattr(ds, "_maybe_upload_to_drive", lambda *a, **k: None, raising=False)

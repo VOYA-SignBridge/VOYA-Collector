@@ -13,7 +13,7 @@ import time
 import pytest
 from psycopg2 import pool as pg_pool
 
-from app.storage import postgres_connection as pc
+from app.infrastructure.database import connection as pc
 
 
 class FakePool:

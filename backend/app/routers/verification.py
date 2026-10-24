@@ -118,7 +118,7 @@ def _deliver(channel: str, destination: str, code: str, purpose: str) -> None:
 
         send_sms(destination, f"Mã xác minh VOYA-Collector: {code}")
         return
-    from app.email_service import send_verification_code_email
+    from app.services.email import send_verification_code_email
 
     send_verification_code_email(destination, code, purpose)
 
@@ -202,7 +202,7 @@ def send_verification_code(
     except otp.OtpError as exc:
         raise _translate(exc) from exc
 
-    from app.email_service import EmailNotConfigured
+    from app.services.email import EmailNotConfigured
 
     try:
         _deliver(payload.channel, otp.normalize_destination(

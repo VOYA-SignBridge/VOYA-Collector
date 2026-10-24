@@ -191,7 +191,7 @@ def main() -> int:
         chu_so_huu[t] = u
 
     from app.modules.dataset.catalog import LABEL_FIELDS
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.modules.dataset.samples import SAMPLE_FIELDS
 
     base = Path(args.base)
     base.mkdir(parents=True, exist_ok=True)

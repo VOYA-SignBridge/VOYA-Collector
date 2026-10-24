@@ -231,7 +231,7 @@ class TestThu:
         Câu "kênh hỗ trợ đang có tồn đọng" mà không kèm số thì người đọc vẫn
         phải mở hệ thống ra mới biết — tức là thư chưa làm xong việc của nó.
         """
-        from app import email_service
+        from app.services import email as email_service
 
         gui = {}
 
@@ -256,7 +256,7 @@ class TestThu:
     def test_thu_ton_dong_noi_ro_nguong_nao_bi_vuot(self):
         """Hai ngưỡng nghĩa là hai câu chuyện khác nhau — "một phiếu bị bỏ
         quên" và "đang có một đợt hỏi dồn". Người đọc phải biết là cái nào."""
-        from app import email_service
+        from app.services import email as email_service
 
         gui = {}
         goc = email_service._send
@@ -281,7 +281,7 @@ class TestThu:
         thiểu để người trực quyết định có mở hay không; phần người dùng gõ ra
         thì phải đọc trong hệ thống, nơi có kiểm soát truy cập.
         """
-        from app import email_service
+        from app.services import email as email_service
 
         gui = {}
         goc = email_service._send

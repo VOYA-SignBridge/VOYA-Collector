@@ -284,7 +284,7 @@ class TestCauHinhSaiBiTuChoi:
         import os
 
         from app.storage.control_plane import CONTROL_DSN_ENV, control_cursor
-        from app.storage.postgres_connection import ControlPlaneMisconfigured
+        from app.infrastructure.database.connection import ControlPlaneMisconfigured
 
         monkeypatch.setenv(CONTROL_DSN_ENV, os.environ["DATABASE_URL"])
 
@@ -302,7 +302,7 @@ class TestCauHinhSaiBiTuChoi:
         import os
 
         from app.storage.control_plane import CONTROL_DSN_ENV, control_cursor
-        from app.storage.postgres_connection import ControlPlaneMisconfigured
+        from app.infrastructure.database.connection import ControlPlaneMisconfigured
 
         monkeypatch.setenv(CONTROL_DSN_ENV, os.environ["MIGRATION_DATABASE_URL"])
 
@@ -318,7 +318,7 @@ class TestCauHinhSaiBiTuChoi:
         lại xảy ra trong im lặng.
         """
         from app.storage.control_plane import CONTROL_DSN_ENV, control_cursor
-        from app.storage.postgres_connection import ControlPlaneMisconfigured
+        from app.infrastructure.database.connection import ControlPlaneMisconfigured
 
         monkeypatch.delenv(CONTROL_DSN_ENV, raising=False)
 

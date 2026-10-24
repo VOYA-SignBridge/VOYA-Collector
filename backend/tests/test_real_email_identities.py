@@ -232,7 +232,7 @@ class TestKhongLoMa:
             self, email, monkeypatch, caplog):
         import logging
 
-        from app import email_service as es
+        from app.services import email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         ma = "424242"

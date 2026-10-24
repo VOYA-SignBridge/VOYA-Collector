@@ -50,7 +50,7 @@ from processed.shared.vocabulary import RECOGNITION_PROFILES, validate_label_v2 
 def raw_archive_path(npz_path: Path) -> Path:
     """dataset/features/<...>/x.npz -> dataset/raw/<...>/x.npz
 
-    Mirrors app.dataset_samples.raw_archive_path, which is the definition. It
+    Mirrors app.modules.dataset.samples.raw_archive_path, which is the definition. It
     is restated here rather than imported because this gate runs standalone and
     the backend package is not importable from a bare checkout — the backend
     container carries its own copy of the normalizer for the same reason.

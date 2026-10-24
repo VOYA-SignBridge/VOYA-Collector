@@ -226,7 +226,7 @@ def control_database_url(password: str, template: Optional[str] = None) -> str:
 
 def check(conn) -> dict:
     """Report the isolation posture of `conn` without changing anything."""
-    from app.storage.postgres_connection import current_role_privileges
+    from app.infrastructure.database.connection import current_role_privileges
     from app.storage.rls import isolation_posture
 
     posture = isolation_posture(conn)
@@ -349,7 +349,7 @@ def check_command() -> int:
     worse than no check: it trains the operator to ignore the one warning that
     matters.
     """
-    from app.storage.postgres_connection import connect_migration, connect_postgres
+    from app.infrastructure.database.connection import connect_migration, connect_postgres
 
     runtime = connect_postgres(application_name="provision_db_roles")
     try:
@@ -407,7 +407,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.check:
         return check_command()
 
-    from app.storage.postgres_connection import connect_migration, current_role_privileges
+    from app.infrastructure.database.connection import connect_migration, current_role_privileges
 
     conn = connect_migration()
     try:

@@ -242,7 +242,7 @@ def dong_thuan_gia(monkeypatch, cay_gia):
     `signer_consents` — phần đó đã có bộ đo riêng.
     """
     from app.modules.security import consent_gate
-    from app import dataset_samples
+    from app.modules.dataset import samples as dataset_samples
 
     thang = consent_gate.scope_rank("research_release")
     monkeypatch.setattr(consent_gate, "load_consents", lambda *a, **k: {

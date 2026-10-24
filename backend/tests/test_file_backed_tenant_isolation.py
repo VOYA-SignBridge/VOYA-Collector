@@ -59,7 +59,7 @@ APP = Path(__file__).resolve().parents[1] / "app"
 #: sửa chữa quản trị. KHÔNG bao giờ là một đường phục vụ request của người dùng.
 MODULE_BAO_TRI = {
     "bootstrap/database.py",       # database bootstrap/reconciliation
-    "catalog_sync.py",
+    "modules/dataset/catalog_sync.py",
     "db.py",
     "export_tasks.py",
     "modules/dataset/catalog.py",  # canonical catalog maintenance
@@ -122,14 +122,14 @@ def _goi_khong_tham_so(path: Path, ten_ham: tuple[str, ...]) -> list[tuple[str, 
 def test_load_labels_khong_co_tenant_thi_nem_loi():
     """Thiếu ngữ cảnh phải là LỖI, không phải "trả toàn bộ"."""
     from app.modules.dataset.catalog import load_labels
-    from app.dataset_samples import TenantScopeRequired
+    from app.modules.dataset.samples import TenantScopeRequired
 
     with pytest.raises(TenantScopeRequired):
         load_labels()
 
 
 def test_list_samples_khong_co_tenant_thi_nem_loi():
-    from app.dataset_samples import TenantScopeRequired, list_samples
+    from app.modules.dataset.samples import TenantScopeRequired, list_samples
 
     with pytest.raises(TenantScopeRequired):
         list_samples()
@@ -142,7 +142,7 @@ def test_chuoi_rong_khong_phai_duong_lui():
     của tenant gốc, và `default` trở thành một super-tenant ngầm.
     """
     from app.modules.dataset.catalog import load_labels
-    from app.dataset_samples import TenantScopeRequired, list_samples
+    from app.modules.dataset.samples import TenantScopeRequired, list_samples
 
     for gia_tri in ("", "   ", None):
         with pytest.raises(TenantScopeRequired):
@@ -157,7 +157,7 @@ def test_ham_toan_kho_van_ton_tai_va_ten_van_xau():
     Đổi nó thành một cái tên vô hại là gỡ mất tín hiệu mà người duyệt mã dựa vào.
     """
     import app.modules.dataset.catalog as dm
-    import app.dataset_samples as ds
+    import app.modules.dataset.samples as ds
 
     assert callable(dm._load_all_labels_unscoped)
     assert callable(ds._load_all_samples_unscoped)
@@ -193,8 +193,6 @@ def test_module_bao_tri_khong_tu_moc_them():
         rel = p.relative_to(APP).as_posix()
         if rel in MODULE_BAO_TRI or p.name in MODULE_BAO_TRI:
             continue
-        if p.name == "dataset_samples.py":
-            continue  # nơi định nghĩa
         src = p.read_text(encoding="utf-8")
         for ten in HAM_TOAN_KHO:
             if re.search(rf"\b{ten}\s*\(", src):

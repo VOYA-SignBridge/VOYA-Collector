@@ -432,7 +432,7 @@ def _ten_tep_duoc_phep(tenant: str, scope_yeu_cau: str, *,
     """
     from app.modules.admin import moderation
     from app.modules.security import consent_gate
-    from app.dataset_samples import list_samples
+    from app.modules.dataset.samples import list_samples
 
     rows = list_samples(tenant)
 

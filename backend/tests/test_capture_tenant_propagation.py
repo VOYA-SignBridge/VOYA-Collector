@@ -61,7 +61,7 @@ def bat_dong_ghi(monkeypatch):
     Không chạm đĩa và không chạm cơ sở dữ liệu: điều đang kiểm là hình dạng của
     dòng, không phải việc ghi tệp có chạy không.
     """
-    from app import dataset_samples as ds
+    from app.modules.dataset import samples as ds
 
     bat: dict = {}
     monkeypatch.setattr(ds, "append_sample_row", lambda row: bat.update(csv=dict(row)))
@@ -73,7 +73,7 @@ def bat_dong_ghi(monkeypatch):
 
 
 def _thu_mot_mau(class_meta, meta=None):
-    from app.dataset_samples import save_sequence_npz
+    from app.modules.dataset.samples import save_sequence_npz
 
     seq = np.zeros((60, 126), dtype=np.float32)
     return save_sequence_npz(class_meta, seq, meta=meta or {}, augment_id=0,

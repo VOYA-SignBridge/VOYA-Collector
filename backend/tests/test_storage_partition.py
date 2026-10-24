@@ -158,7 +158,7 @@ class TestOwnerSurvivesEveryRoundTrip:
         assert _build_meta_from_row(dict(self.ROW)).tenant_id == "truong-b"
 
     def test_catalog_sync_row(self):
-        from app.catalog_sync import _build_class_meta_from_row
+        from app.modules.dataset.catalog_sync import _build_class_meta_from_row
 
         assert _build_class_meta_from_row(dict(self.ROW)).tenant_id == "truong-b"
 

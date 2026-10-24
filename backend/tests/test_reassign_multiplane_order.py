@@ -48,9 +48,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app import catalog_sync as cs
+from app.modules.dataset import catalog_sync as cs
 from app import export_tasks as et
-from app.catalog_sync import CatalogSyncError
+from app.modules.dataset.catalog_sync import CatalogSyncError
 
 
 TENANT = "ten_a"

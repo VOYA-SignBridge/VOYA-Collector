@@ -202,7 +202,7 @@ def send_support_ticket_emails(self, ticket_id: str, tenant_id: str,
     được truyền vào, nên nó cần đọc `users` ngoài phạm vi của người phái.
     """
     from app.modules.support import support
-    from app import email_service
+    from app.services import email as email_service
     from app.config import settings
 
     try:

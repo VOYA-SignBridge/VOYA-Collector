@@ -158,7 +158,7 @@ def _resolve(
 
 def _write_csv_owners(owners_by_uid: Dict[str, str], samples_csv: Path) -> int:
     """Copy resolved owners into samples.csv. Only fills BLANK cells."""
-    from app.dataset_samples import ensure_samples_column
+    from app.modules.dataset.samples import ensure_samples_column
 
     ensure_samples_column("auth_user_id")
     from filelock import FileLock

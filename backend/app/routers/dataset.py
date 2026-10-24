@@ -11,9 +11,9 @@ from app.modules.security import audit
 from app.config import settings
 from app.modules.dataset.catalog import load_labels, ClassMetadata
 from app.modules.saas.tenancy import tenant_id_of
-from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
+from app.modules.dataset.samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
-from app.catalog_sync import (
+from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,

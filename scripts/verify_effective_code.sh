@@ -10,8 +10,8 @@
 # `sys.path` có thể trỏ tới một bản khác — một bản đã cài trong `site-packages`,
 # một `.egg-link`, hay một thư mục đứng trước trong đường tìm kiếm. Khi đó:
 #
-#     sha256 /app/app/catalog_sync.py   khớp snapshot     <- kiểm "tệp có mặt"
-#     app.catalog_sync.__file__         trỏ chỗ KHÁC      <- mã thật sự chạy
+#     sha256 /app/app/modules/dataset/catalog_sync.py khớp snapshot <- kiểm "tệp có mặt"
+#     app.modules.dataset.catalog_sync.__file__         trỏ chỗ KHÁC      <- mã thật sự chạy
 #
 # Phép kiểm duy nhất có nghĩa là hỏi CHÍNH MODULE ĐÃ IMPORT nó đến từ đâu, rồi
 # băm đúng tệp ở `module.__file__`.
@@ -50,7 +50,7 @@ import hashlib, importlib, json, os, sys
 # Các module QUYẾT ĐỊNH hành vi đang đo. Thêm vào đây khi phạm vi mở rộng —
 # một module thiếu ở đây là một biến không kiểm soát.
 MODULES = [
-    "app.catalog_sync", "app.dataset_samples", "app.modules.dataset.catalog",
+    "app.modules.dataset.catalog_sync", "app.modules.dataset.samples", "app.modules.dataset.catalog",
     "app.preview_render", "app.preview_tasks", "app.tenant_context",
     "app.tenant_middleware", "app.auth", "app.quota_deps",
     "app.training_tasks", "app.export_tasks", "app.storage.metadata_db",

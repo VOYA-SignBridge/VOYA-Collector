@@ -311,7 +311,7 @@ class TestSuaNhanKhongDuocXoaVung:
     """Lỗi phá dữ liệu ĐÃ ĐÚNG, ở một thao tác không ai ngờ liên quan."""
 
     def test_payload_im_lang_thi_GIU_NGUYEN_vung(self):
-        from app.catalog_sync import _build_updated_class_meta
+        from app.modules.dataset.catalog_sync import _build_updated_class_meta
 
         meta = _build_updated_class_meta(_hang("RG-BAC", 901, "bac"),
                                          {"label_original": "an sang"})
@@ -321,7 +321,7 @@ class TestSuaNhanKhongDuocXoaVung:
             f"bản ghi không còn phân biệt được với biến thể miền khác")
 
     def test_payload_noi_ra_thi_doi_duoc(self):
-        from app.catalog_sync import _build_updated_class_meta
+        from app.modules.dataset.catalog_sync import _build_updated_class_meta
 
         meta = _build_updated_class_meta(_hang("RG-BAC", 901, "bac"),
                                          {"label_original": "an", "region": "trung"})
@@ -334,7 +334,7 @@ class TestSuaNhanKhongDuocXoaVung:
         Rơi về `unclassified` để người phân loại còn thấy mà xử lý, thay vì
         biến mất thành một vùng nào đó không ai chọn.
         """
-        from app.catalog_sync import _build_updated_class_meta
+        from app.modules.dataset.catalog_sync import _build_updated_class_meta
 
         meta = _build_updated_class_meta(_hang("RG-BAC", 901, "bac"),
                                          {"label_original": "an",

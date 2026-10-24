@@ -402,7 +402,7 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
     from app.modules.security import audit, two_factor
     from app.modules.support import notifications
     from app.modules.identity._web_compat import request_password_reset
-    from app.email_service import send_password_reset_email
+    from app.services.email import send_password_reset_email
     from app.core.public_url import resolve_frontend_base_url
     from app.storage.metadata_db import _fetch_all
 

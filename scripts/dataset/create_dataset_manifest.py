@@ -121,7 +121,7 @@ def _signer_name(*candidates) -> str:
 def _raw_archive_path(npz_path: Path) -> Path:
     """dataset/features/<...>/x.npz -> dataset/raw/<...>/x.npz
 
-    See app.dataset_samples.raw_archive_path, which is the definition.
+    See app.modules.dataset.samples.raw_archive_path, which is the definition.
     """
     parts = list(npz_path.resolve().parts)
     for i in range(len(parts) - 1, -1, -1):
