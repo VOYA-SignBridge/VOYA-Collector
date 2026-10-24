@@ -268,7 +268,7 @@ def _sample_header() -> List[str]:
 
 
 def _video_header() -> List[str]:
-    from app.raw_uploads import RAW_UPLOAD_FIELDS
+    from app.modules.dataset.raw_uploads import RAW_UPLOAD_FIELDS
     from app.modules.saas.tenancy import TENANT_COLUMN
 
     return [c for c in RAW_UPLOAD_FIELDS if c != TENANT_COLUMN] + [

@@ -215,7 +215,7 @@ class TestUploadTasks:
         assert fake_drive.uploads == [NPZ]
 
     def test_raw_video_uses_the_tenant_argument(self, tenant_mode, fake_drive, monkeypatch):
-        import app.raw_uploads as ru
+        import app.modules.dataset.raw_uploads as ru
         import app.storage.metadata_db as mdb
         from app.export_tasks import upload_raw_video_to_gdrive_task
 
@@ -522,7 +522,7 @@ class TestQueuedRawVideoTaskWithoutTenant:
 
     def test_tenant_is_looked_up_when_the_task_has_none(self, tenant_mode, fake_drive, monkeypatch):
         from app.modules.google_sync import drive_tasks as et
-        import app.raw_uploads as ru
+        import app.modules.dataset.raw_uploads as ru
         import app.storage.metadata_db as mdb
         from app.export_tasks import upload_raw_video_to_gdrive_task
 
@@ -535,7 +535,7 @@ class TestQueuedRawVideoTaskWithoutTenant:
 
     def test_explicit_tenant_wins_over_the_lookup(self, tenant_mode, fake_drive, monkeypatch):
         from app.modules.google_sync import drive_tasks as et
-        import app.raw_uploads as ru
+        import app.modules.dataset.raw_uploads as ru
         import app.storage.metadata_db as mdb
         from app.export_tasks import upload_raw_video_to_gdrive_task
 

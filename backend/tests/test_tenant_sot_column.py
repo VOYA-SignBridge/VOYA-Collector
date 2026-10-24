@@ -310,7 +310,7 @@ def test_raw_upload_fields_keep_tenant_id_in_place():
     phạm vi chia sẻ) nó đứng ngay trước. Điều phải giữ là nó không bị dời đi
     và không có cột nào chen vào giữa — không phải nó mãi là cột cuối.
     """
-    from app.raw_uploads import RAW_UPLOAD_FIELDS
+    from app.modules.dataset.raw_uploads import RAW_UPLOAD_FIELDS
 
     assert RAW_UPLOAD_FIELDS.count(TENANT_COLUMN) == 1
     assert RAW_UPLOAD_FIELDS.index(TENANT_COLUMN) == 15
@@ -322,7 +322,7 @@ def test_raw_upload_fields_keep_tenant_id_in_place():
     [
         ("app.dataset_samples", "SAMPLE_FIELDS", "samples"),
         ("app.dataset_manager", "LABEL_FIELDS", "classes"),
-        ("app.raw_uploads", "RAW_UPLOAD_FIELDS", "raw_uploads"),
+        ("app.modules.dataset.raw_uploads", "RAW_UPLOAD_FIELDS", "raw_uploads"),
     ],
 )
 def test_sot_manifest_promises_every_csv_column(module, attr, table):
@@ -554,7 +554,7 @@ class TestWritersStampTenant:
 class TestRawUploadsMigration:
     @pytest.fixture
     def raw_module(self, tmp_path, monkeypatch):
-        import app.raw_uploads as ru
+        import app.modules.dataset.raw_uploads as ru
 
         path = tmp_path / "uploads.csv"
         monkeypatch.setattr(ru, "RAW_UPLOADS_CSV", path)
