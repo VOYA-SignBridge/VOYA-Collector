@@ -65,11 +65,11 @@ MODULE_BAO_TRI = {
     "modules/dataset/catalog.py",  # canonical catalog maintenance
     "modules/dataset/samples.py",  # canonical sample maintenance
     "modules/google_sync/sheets_tasks.py",  # platform-wide Sheets projection
-    "balancer.py",
+    "modules/dataset/balancing.py",
     "oversample_balance.py",
     "global_common_promoter.py",
     "dialect_mapping_reclassifier.py",
-    "inference_loader.py",
+    "modules/dataset/inference.py",
     "validation/dataset_validator.py",
 }
 

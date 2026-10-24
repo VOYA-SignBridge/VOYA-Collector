@@ -14,7 +14,7 @@ from app.dataset_manager import (
 )
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
 from app.dataset_samples import list_samples
-from app.balancer import build_balance_plan
+from app.modules.dataset.balancing import build_balance_plan
 from app.core.http_validation import validate_label, validate_language, validate_dialect
 from app.catalog_sync import (
     CatalogSyncError,

@@ -185,7 +185,7 @@ def test_resolve_signer_khop_theo_UUID_chu_khong_theo_TEN():
     """
     import inspect
 
-    from app import signers
+    from app.modules.dataset import signers
 
     nguon = inspect.getsource(signers.resolve_signer_for_user)
     # Phép khớp ĐỌC trường nào của hàng đang duyệt — đó mới là câu hỏi. Hàm

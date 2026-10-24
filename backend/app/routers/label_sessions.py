@@ -228,7 +228,7 @@ def session_provenance(
     signer_name = None
     if signer_id:
         try:
-            from app.signers import get_signer
+            from app.modules.dataset.signers import get_signer
             rec = get_signer(signer_id)
             signer_name = (rec or {}).get("display_name") or None
         except Exception:

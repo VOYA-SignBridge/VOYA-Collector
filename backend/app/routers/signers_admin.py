@@ -1,6 +1,6 @@
 """API quản lý hồ sơ NGƯỜI KÝ (UC11 — Manage Signers).
 
-Sổ đăng ký người ký đã có từ lược đồ v2 (`app/signers.py`, `dataset/signers.csv`
+Sổ đăng ký người ký đã có từ lược đồ v2 (`modules/dataset/signers.py`, `dataset/signers.csv`
 mirror sang bảng `signers`), nhưng cho tới nay chỉ có ĐƯỜNG GHI TỰ ĐỘNG: một
 tài khoản đóng góp mẫu đầu tiên thì `resolve_signer_for_user` lập hồ sơ cho họ.
 Không có đường nào để con người xem, sửa, hay nói "hai id này là một người" —
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import signers as signer_registry
+from app.modules.dataset import signers as signer_registry
 from app.modules.security import audit_log
 from app.modules.identity._web_compat import require_tenant_editor
 from app.modules.security.consent_gate import SCOPE_LADDER, load_consents

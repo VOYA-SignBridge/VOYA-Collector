@@ -20,7 +20,8 @@ from app.processing.augmenter import generate_augmented_sequences
 def get_class_dirs(tenant_id: str) -> dict[str, Path]:
     # Công cụ này SINH mẫu tăng cường rồi ghi xuống cây dữ liệu. Đường ghi
     # bám theo chủ sở hữu của lớp, nên đọc toàn kho ở đây sẽ đổ mẫu mới vào
-    # cây của tổ chức khởi tạo — xem chú thích ở `balancer.load_class_meta_map`.
+    # cây của tổ chức khởi tạo — xem chú thích ở
+    # `modules.dataset.balancing.load_class_meta_map`.
     rows = load_labels(tenant_id)
     out = {}
     for r in rows:

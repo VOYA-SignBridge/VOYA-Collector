@@ -211,7 +211,7 @@ def _rename_in_signers_csv(user_id: str, new_username: str) -> None:
     try:
         from filelock import FileLock
 
-        from app import signers as signers_mod
+        from app.modules.dataset import signers as signers_mod
 
         lock = FileLock(str(signers_mod.SIGNERS_CSV) + ".lock")
         with lock:
