@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +13,7 @@ from app.modules.dataset import (
     raw_video_upload_service,
     video_processing_service,
 )
+from app.routers import upload
 
 
 def test_camera_frames_convert_mediapipe_hands_to_126_features() -> None:
@@ -34,9 +36,12 @@ def test_camera_capture_persists_normalized_and_raw_sequences(monkeypatch) -> No
         vocabulary_scope="profile_specific",
         vocabulary_group="daily",
         semantic_label="hello",
+        tenant_id="tenant-a",
     )
     saved = {}
     audit = []
+    emitted = []
+    settled = []
 
     monkeypatch.setattr(camera_capture_service, "get_or_register_class", lambda **_kwargs: class_meta)
     monkeypatch.setattr(camera_capture_service, "_resolve_signer", lambda _user: "signer-1")
@@ -47,7 +52,28 @@ def test_camera_capture_persists_normalized_and_raw_sequences(monkeypatch) -> No
         return "/dataset/features/sample.npz"
 
     monkeypatch.setattr(camera_capture_service, "save_sequence_npz", save_sequence)
-    frame = [0.1] * 126
+    reservation = object()
+    monkeypatch.setattr(
+        camera_capture_service, "guard_storage", lambda *_args, **_kwargs: reservation
+    )
+    monkeypatch.setattr(
+        camera_capture_service.storage_quota,
+        "settle",
+        lambda *args, **kwargs: settled.append((args, kwargs)),
+    )
+    monkeypatch.setattr(camera_capture_service.storage_quota, "release", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        camera_capture_service,
+        "emit",
+        lambda *args, **kwargs: emitted.append((args, kwargs)),
+    )
+    point = {"x": 0.1, "y": 0.2, "z": 0.3}
+    frame = {
+        "left_hand": [point] * 21,
+        "right_hand": [point] * 21,
+        "left_hand_world": [point] * 21,
+        "right_hand_world": [point] * 21,
+    }
     result = camera_capture_service.capture_camera_sample(
         payload={"frames": [{"landmarks": frame} for _ in range(60)]},
         current_user={"id": "user-1"},
@@ -56,15 +82,34 @@ def test_camera_capture_persists_normalized_and_raw_sequences(monkeypatch) -> No
         language="vn",
         dialect="hoa-de",
         session_id="session-1",
+        visibility="tenant",
     )
 
     assert result["success"] is True
     assert result["paths"] == ["/dataset/features/sample.npz"]
     assert saved["sequence"].shape == (60, 126)
     assert saved["raw_sequence"].shape == (60, 126)
+    assert saved["world_sequence"].shape == (60, 126)
     assert saved["meta"]["signer_id"] == "signer-1"
+    assert saved["meta"]["visibility"] == "tenant"
     assert saved["meta"]["preprocess_contract_version"] == "v2"
     assert audit[-1]["status"] == "accepted"
+    assert settled and settled[0][1]["absorb_overflow"] is True
+    assert emitted[0][0][0:2] == ("tenant-a", "sample.created")
+
+
+def test_camera_router_delegates_persistence_to_service() -> None:
+    source = inspect.getsource(upload.upload_camera)
+
+    assert "camera_capture_service.capture_camera_sample" in source
+    for forbidden in (
+        "save_sequence_npz",
+        "guard_storage",
+        "storage_quota.settle",
+        "record_quality_attempt",
+        "emit(",
+    ):
+        assert forbidden not in source
 
 
 def test_raw_video_upload_returns_existing_idempotent_record(monkeypatch) -> None:

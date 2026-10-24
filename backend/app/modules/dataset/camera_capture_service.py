@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
@@ -11,18 +12,27 @@ import numpy as np
 from app.config import settings
 from app.modules.dataset.catalog import (
     get_or_register_class,
+    list_classes,
     parse_hands_required,
     set_class_hands_required,
 )
 from app.modules.dataset.raw_uploads import now_str
-from app.modules.dataset.samples import save_sequence_npz
+from app.modules.dataset.samples import raw_archive_path, save_sequence_npz
+from app.modules.saas import storage_quota
+from app.modules.saas.tenant_context import require_tenant
+from app.modules.saas.webhooks import emit
+from app.modules.security.quota_deps import guard_storage
 from app.processing.quality import (
     compute_quality_metrics,
     evaluate_quality,
     qc_threshold_snapshot,
     record_quality_attempt,
 )
-from app.processing.utils import normalize_hands_vector_126, normalize_sequence
+from app.processing.utils import (
+    DEFAULT_NORMALIZATION_VERSION,
+    normalize_hands_vector_126,
+    normalize_sequence,
+)
 
 logger = logging.getLogger("upload.camera")
 
@@ -31,6 +41,36 @@ class CameraQualityRejected(ValueError):
     def __init__(self, detail: Dict[str, Any]):
         super().__init__(str(detail.get("message") or "camera sample rejected"))
         self.detail = detail
+
+
+class CameraClassNotFoundError(LookupError):
+    """The explicitly selected class does not belong to the request tenant."""
+
+
+def _class_by_uid(class_uid: str):
+    uid = str(class_uid or "").strip()
+    if not uid:
+        return None
+    tenant_id = require_tenant()
+    found = next(
+        (item for item in list_classes(tenant_id=tenant_id) if item.class_uid == uid),
+        None,
+    )
+    if found is None:
+        raise CameraClassNotFoundError("Nhãn không thuộc tổ chức hiện tại")
+    return found
+
+
+def _bytes_written(npz_path) -> int:
+    """Billable bytes written for one camera sample and its raw archive."""
+    path = Path(npz_path)
+    total = 0
+    for artifact in (path, raw_archive_path(path), path.with_suffix(".json")):
+        try:
+            total += artifact.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def _coerce_nested_values(value) -> np.ndarray:
@@ -59,7 +99,10 @@ def _coerce_nested_values(value) -> np.ndarray:
     return np.asarray(values, dtype=np.float32)
 
 
-def _flatten_landmarks(landmarks) -> np.ndarray | None:
+def _flatten_landmarks(
+    landmarks,
+    keys: tuple[str, str] = ("left_hand", "right_hand"),
+) -> np.ndarray | None:
     if landmarks is None:
         return None
     if isinstance(landmarks, (list, tuple, np.ndarray)):
@@ -69,7 +112,7 @@ def _flatten_landmarks(landmarks) -> np.ndarray | None:
             return _coerce_nested_values(landmarks)
     if isinstance(landmarks, dict):
         values: list[float] = []
-        for key in ("left_hand", "right_hand"):
+        for key in keys:
             points = list(landmarks.get(key, []))[:21]
             points.extend([None] * (21 - len(points)))
             for point in points:
@@ -83,12 +126,17 @@ def _flatten_landmarks(landmarks) -> np.ndarray | None:
     return np.asarray(landmarks, dtype=np.float32).flatten()
 
 
-def frames_to_sequence(frames: list, feature_dim: int) -> np.ndarray:
+def frames_to_sequence(
+    frames: list,
+    feature_dim: int,
+    *,
+    keys: tuple[str, str] = ("left_hand", "right_hand"),
+) -> np.ndarray:
     """Convert accepted camera frame shapes into a fixed-width float matrix."""
     rows: list[np.ndarray] = []
     for frame in frames:
         raw = frame.get("landmarks") if isinstance(frame, dict) else None
-        flattened = _flatten_landmarks(raw)
+        flattened = _flatten_landmarks(raw, keys=keys)
         if flattened is None:
             raise ValueError("frame missing landmarks")
         rows.append(flattened)
@@ -153,6 +201,8 @@ def capture_camera_sample(
     language: str,
     dialect: str,
     session_id: str,
+    class_uid: str = "",
+    visibility: str = "private",
 ) -> Dict[str, Any]:
     """Validate, normalize, quality-check and persist one camera capture."""
     frames = payload.get("frames")
@@ -169,11 +219,17 @@ def capture_camera_sample(
         if isinstance(payload.get("quality_info"), dict)
         else None
     )
-    class_meta = get_or_register_class(
-        label_original=label,
-        language=language,
-        dialect=dialect or "",
-    )
+    class_meta = _class_by_uid(class_uid)
+    if class_meta is None:
+        class_meta = get_or_register_class(
+            label_original=label,
+            language=language,
+            dialect=dialect or "",
+        )
+    else:
+        label = class_meta.label_original
+        language = class_meta.language
+        dialect = class_meta.dialect
     effective_hands = class_meta.hands_required or hands_required_payload
     if not class_meta.hands_required and hands_required_payload in (1, 2):
         try:
@@ -193,6 +249,28 @@ def capture_camera_sample(
 
     raw_sequence = sequence.astype(np.float32, copy=True)
     original_length = int(sequence.shape[0])
+    world_sequence = None
+    try:
+        world_rows = [
+            _flatten_landmarks(
+                frame.get("landmarks") if isinstance(frame, dict) else None,
+                keys=("left_hand_world", "right_hand_world"),
+            )
+            for frame in frames
+        ]
+        if any(
+            row is not None and row.size and np.any(row != 0.0)
+            for row in world_rows
+        ):
+            world_sequence = np.zeros((len(world_rows), feature_dim), dtype=np.float32)
+            for index, row in enumerate(world_rows):
+                if row is None or not row.size:
+                    continue
+                length = min(row.size, feature_dim)
+                world_sequence[index, :length] = row[:length].astype(np.float32)
+    except Exception as exc:
+        logger.warning("[LANDMARKS][world] ignored malformed world landmarks: %s", exc)
+        world_sequence = None
     padded, _info = normalize_sequence(
         sequence,
         expected_T=int(getattr(settings, "seq_len", 60)),
@@ -241,13 +319,17 @@ def capture_camera_sample(
             }
         )
 
+    normalization_version = DEFAULT_NORMALIZATION_VERSION
     for index in range(padded.shape[0]):
-        padded[index] = normalize_hands_vector_126(padded[index])
+        padded[index] = normalize_hands_vector_126(
+            padded[index], normalization_version
+        )
 
     metadata = {
         "user": user,
         "user_id": user,
         "auth_user_id": current_user["id"],
+        "visibility": visibility,
         "signer_id": signer_id,
         "session_id": session_id,
         "collection_campaign": getattr(settings, "collection_campaign", "") or "",
@@ -255,9 +337,9 @@ def capture_camera_sample(
         "recognition_profile": class_meta.recognition_profile or "",
         "vocabulary_group": class_meta.vocabulary_group or "",
         "semantic_label": class_meta.semantic_label or "",
-        "normalization_version": "hands126_v1",
+        "normalization_version": normalization_version,
         "preprocess_contract_version": "v2",
-        "coordinate_space": "mediapipe_normalized",
+        "coordinate_space": "wrist_centred_v1",
         "target_sequence_length": int(getattr(settings, "seq_len", 60)),
         "feature_dimension": feature_dim,
         "sequence_length_original": original_length,
@@ -279,21 +361,48 @@ def capture_camera_sample(
         "client_quality": client_quality,
         "created_at": now_str(),
     }
+    upper_bound = int(padded.nbytes) * 2
+    for array in (
+        raw_sequence,
+        world_sequence,
+        frame_valid,
+        left_valid,
+        right_valid,
+    ):
+        if array is not None:
+            upper_bound += int(np.asarray(array).nbytes)
+    upper_bound += 64 * 1024
+
+    reservation = guard_storage(current_user, nbytes=upper_bound)
+    settled = False
     try:
-        path = save_sequence_npz(
-            class_meta,
-            padded,
-            meta=metadata,
-            augment_id=0,
-            source_type="camera",
-            raw_sequence=raw_sequence,
-            frame_valid_mask=frame_valid,
-            left_hand_valid_mask=left_valid,
-            right_hand_valid_mask=right_valid,
+        try:
+            path = save_sequence_npz(
+                class_meta,
+                padded,
+                meta=metadata,
+                augment_id=0,
+                source_type="camera",
+                raw_sequence=raw_sequence,
+                world_sequence=world_sequence,
+                coordinate_space="wrist_centred_v1",
+                frame_valid_mask=frame_valid,
+                left_hand_valid_mask=left_valid,
+                right_hand_valid_mask=right_valid,
+            )
+        except Exception as exc:
+            logger.error("[UPLOAD][camera][ERROR] sample save failed: %s", exc)
+            return {"success": False, "message": f"Sample upload failed: {exc}"}
+
+        storage_quota.settle(
+            reservation,
+            _bytes_written(path),
+            absorb_overflow=True,
         )
-    except Exception as exc:
-        logger.error("[UPLOAD][camera][ERROR] sample save failed: %s", exc)
-        return {"success": False, "message": f"Sample upload failed: {exc}"}
+        settled = True
+    finally:
+        if not settled:
+            storage_quota.release(reservation)
 
     record_quality_attempt(
         _quality_record(
@@ -321,6 +430,18 @@ def capture_camera_sample(
         }
         for code in verdict.warning_codes
     ]
+    emit(
+        class_meta.tenant_id,
+        "sample.created",
+        {
+            "session_id": session_id,
+            "label": label,
+            "language": language,
+            "dialect": dialect,
+            "class_uid": class_meta.class_uid,
+            "source_type": "camera",
+        },
+    )
     return {
         "success": True,
         "id": session_id,

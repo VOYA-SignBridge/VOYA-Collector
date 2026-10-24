@@ -196,8 +196,7 @@ def test_video_retry_returns_before_revalidating_fields(user_client):
 
 def test_video_upload_rejects_empty_label(user_client):
     c, _ = user_client
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()):
-        r = _post_video(c, label="   ")
+    r = _post_video(c, label="   ")
     assert r.status_code == 422
 
 
@@ -273,8 +272,13 @@ def test_camera_valid_frames_build_a_seqlen_x_126_sequence(user_client):
         seen["shape"] = seq.shape
         return "/dataset/samples/x.npz"
 
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
-         patch("app.routers.upload.save_sequence_npz", side_effect=_capture):
+    with patch(
+        "app.modules.dataset.camera_capture_service.get_or_register_class",
+        return_value=_fake_class(),
+    ), patch(
+        "app.modules.dataset.camera_capture_service.save_sequence_npz",
+        side_effect=_capture,
+    ):
         r = c.post("/api/v1/upload/camera",
                    json={"label": "xin chào", "frames": [_good_frame() for _ in range(60)]},
                    headers=_csrf(c))
@@ -297,8 +301,13 @@ def test_camera_all_zero_frames_rejected_by_quality_gate(user_client):
     # 200 {"success": false} — the old shape gave the client nothing to branch
     # on and left no record of WHY the capture was refused.
     c, _ = user_client
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
-         patch("app.routers.upload.save_sequence_npz", return_value="/x.npz"):
+    with patch(
+        "app.modules.dataset.camera_capture_service.get_or_register_class",
+        return_value=_fake_class(),
+    ), patch(
+        "app.modules.dataset.camera_capture_service.save_sequence_npz",
+        return_value="/x.npz",
+    ):
         r = c.post("/api/v1/upload/camera",
                    json={"label": "x", "frames": [_zero_frame() for _ in range(60)]},
                    headers=_csrf(c))
@@ -310,8 +319,10 @@ def test_camera_all_zero_frames_rejected_by_quality_gate(user_client):
 
 def test_camera_too_many_frames_rejected(user_client, monkeypatch):
     c, _ = user_client
-    from app.routers import upload as up
-    monkeypatch.setattr(up.settings, "max_camera_frames", 5, raising=False)
+    from app.modules.dataset import camera_capture_service
+    monkeypatch.setattr(
+        camera_capture_service.settings, "max_camera_frames", 5, raising=False
+    )
     r = c.post("/api/v1/upload/camera",
                json={"label": "x", "frames": [_good_frame() for _ in range(6)]},
                headers=_csrf(c))
