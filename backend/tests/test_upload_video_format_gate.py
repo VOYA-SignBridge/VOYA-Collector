@@ -5,20 +5,22 @@ duoc nhan, va — nghiem trong hon — `get_or_register_class` chay TRUOC moi ph
 kiem, nen mot lan tai len that bai van de lai mot lop tu vung phai don tay.
 
 Hai nhom test duoi day canh hai dieu khac nhau:
-  * `_looks_like_video` nhan dung / tu choi dung theo CHU KY container;
-  * `_peek_head` khong tieu thu luong — neu no an mat byte dau thi tep luu
+  * `looks_like_video` nhan dung / tu choi dung theo CHU KY container;
+  * `peek_head` khong tieu thu luong — neu no an mat byte dau thi tep luu
     xuong dia se cut dau, mot loi im lang va rat kho truy.
 """
 
 import asyncio
+import inspect
 import io
 
 import pytest
 from fastapi import UploadFile
 
 from app.modules.saas.tenant_context import tenant_scope
+from app.modules.dataset import raw_video_upload_service as upload_service
 from app.routers import upload as upload_router
-from app.routers.upload import _looks_like_video, _peek_head
+from app.modules.dataset.raw_video_upload_service import looks_like_video, peek_head
 
 
 def _pad(head: bytes) -> bytes:
@@ -39,7 +41,7 @@ class TestNhanDungDinhDangVideo:
         ],
     )
     def test_chap_nhan_container_hop_le(self, head, ten):
-        assert _looks_like_video(_pad(head)) is True, ten
+        assert looks_like_video(_pad(head)) is True, ten
 
 
 class TestTuChoiThuKhongPhaiVideo:
@@ -55,11 +57,11 @@ class TestTuChoiThuKhongPhaiVideo:
         ],
     )
     def test_tu_choi_tep_khong_phai_video(self, head, ten):
-        assert _looks_like_video(_pad(head)) is False, ten
+        assert looks_like_video(_pad(head)) is False, ten
 
     def test_tep_qua_ngan_bi_tu_choi(self):
-        assert _looks_like_video(b"ftyp") is False
-        assert _looks_like_video(b"") is False
+        assert looks_like_video(b"ftyp") is False
+        assert looks_like_video(b"") is False
 
     def test_mpeg_ts_khong_duoc_nhan(self):
         """0x47 la mot byte — nhan no se cho lot moi tep bat dau bang chu 'G'.
@@ -67,15 +69,15 @@ class TestTuChoiThuKhongPhaiVideo:
         Test nay ghim mot QUYET DINH, khong phai mot han che ky thuat: neu ai do
         them TS vao danh sach, cong se ngung chan duoc `b"Giao trinh..."`.
         """
-        assert _looks_like_video(_pad(b"G" + b"\x00" * 11)) is False
-        assert _looks_like_video(_pad(b"Giao trinh VSL")) is False
+        assert looks_like_video(_pad(b"G" + b"\x00" * 11)) is False
+        assert looks_like_video(_pad(b"Giao trinh VSL")) is False
 
 
 class TestPeekKhongTieuThuLuong:
     def test_con_tro_tro_ve_cho_cu(self):
         raw = b"\x00\x00\x00\x20ftypisom" + b"REST-OF-FILE" * 10
         buf = io.BytesIO(raw)
-        head = _peek_head(buf)
+        head = peek_head(buf)
         assert head == raw[:16]
         assert buf.tell() == 0, "peek da an mat byte dau — tep luu xuong se cut dau"
         assert buf.read() == raw, "noi dung doc lai phai nguyen ven"
@@ -83,7 +85,7 @@ class TestPeekKhongTieuThuLuong:
     def test_peek_giu_nguyen_vi_tri_khac_khong(self):
         buf = io.BytesIO(b"0123456789abcdefghij")
         buf.seek(4)
-        assert _peek_head(buf, 4) == b"4567"
+        assert peek_head(buf, 4) == b"4567"
         assert buf.tell() == 4
 
 
@@ -95,7 +97,7 @@ def test_loi_sau_khi_giu_han_muc_phai_tra_lai_cho(monkeypatch):
     guarded = []
     released = []
 
-    def guard(_user, *, nbytes):
+    def reserve(_tenant, nbytes):
         guarded.append(nbytes)
         return reservation
 
@@ -103,9 +105,9 @@ def test_loi_sau_khi_giu_han_muc_phai_tra_lai_cho(monkeypatch):
         raise RuntimeError("characterization: class registration failed")
 
     monkeypatch.setattr(upload_router, "normalize_dialect", lambda value, **_kwargs: value)
-    monkeypatch.setattr(upload_router, "guard_storage", guard)
-    monkeypatch.setattr(upload_router, "get_or_register_class", fail_class_registration)
-    monkeypatch.setattr(upload_router.storage_quota, "release", released.append)
+    monkeypatch.setattr(upload_service.storage_quota, "reserve", reserve)
+    monkeypatch.setattr(upload_service, "get_or_register_class", fail_class_registration)
+    monkeypatch.setattr(upload_service.storage_quota, "release", released.append)
 
     with tenant_scope("tenant-a"):
         with pytest.raises(RuntimeError, match="class registration failed"):
@@ -126,3 +128,16 @@ def test_loi_sau_khi_giu_han_muc_phai_tra_lai_cho(monkeypatch):
 
     assert guarded == [len(raw)]
     assert released == [reservation]
+
+
+def test_route_chi_goi_service_khong_tu_luu_hien_vat():
+    source = inspect.getsource(upload_router.upload_video)
+    assert "raw_video_upload_service.store_raw_video" in source
+    for forbidden in (
+        "append_raw_upload_row",
+        "save_upload_with_limit",
+        "insert_raw_upload",
+        "upload_raw_video_to_gdrive_task",
+        "storage_quota.settle",
+    ):
+        assert forbidden not in source

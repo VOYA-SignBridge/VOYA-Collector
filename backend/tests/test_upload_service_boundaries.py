@@ -67,7 +67,15 @@ def test_camera_capture_persists_normalized_and_raw_sequences(monkeypatch) -> No
     assert audit[-1]["status"] == "accepted"
 
 
-def test_raw_video_upload_returns_existing_idempotent_record() -> None:
+def test_raw_video_upload_returns_existing_idempotent_record(monkeypatch) -> None:
+    monkeypatch.setattr(
+        raw_video_upload_service,
+        "find_raw_upload",
+        lambda _uid: {
+            "session_id": "original-session",
+            "storage_url": "gdrive://existing",
+        },
+    )
     result = asyncio.run(
         raw_video_upload_service.store_raw_video(
             file=SimpleNamespace(file=None, filename="ignored.mp4", content_type="video/mp4"),
@@ -75,19 +83,12 @@ def test_raw_video_upload_returns_existing_idempotent_record() -> None:
             label="hello",
             language="vn",
             dialect="common",
+            class_uid=None,
+            visibility="private",
             session_id="new-session",
             upload_uid="abcdef12",
+            tenant_id="tenant-a",
             current_user={"id": "user-1"},
-            save_upload=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                AssertionError("duplicate upload must not write")
-            ),
-            normalize_fields=lambda *_args: (_ for _ in ()).throw(
-                AssertionError("duplicate upload must return before validation")
-            ),
-            find_existing=lambda _uid: {
-                "session_id": "original-session",
-                "storage_url": "gdrive://existing",
-            },
         )
     )
 

@@ -155,11 +155,11 @@ def _post_video(c, *, label="xin chào", upload_uid=None, extra=None):
 def test_video_upload_stores_raw_and_returns_uid(user_client):
     c, _ = user_client
     captured = {}
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
-         patch("app.routers.upload.save_upload_with_limit", return_value=(17, "/dataset/raw/clip.mp4")), \
-         patch("app.routers.upload.append_raw_upload_row", side_effect=lambda row: captured.update(row)), \
+    with patch("app.modules.dataset.raw_video_upload_service.get_or_register_class", return_value=_fake_class()), \
+         patch("app.modules.dataset.raw_video_upload_service.save_upload_with_limit", return_value=(17, "/dataset/raw/clip.mp4")), \
+         patch("app.modules.dataset.raw_video_upload_service.append_raw_upload_row", side_effect=lambda row: captured.update(row)), \
          patch("app.storage.metadata_db.insert_raw_upload") as ins, \
-         patch("app.routers.upload.find_raw_upload", return_value=None):
+         patch("app.modules.dataset.raw_video_upload_service.find_raw_upload", return_value=None):
         r = _post_video(c)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -176,12 +176,22 @@ def test_video_upload_is_idempotent_on_upload_uid(user_client):
     c, _ = user_client
     uid = uuid.uuid4().hex  # valid 32-hex
     existing = {"upload_uid": uid, "session_id": "s1", "storage_url": "/dataset/x.mp4"}
-    with patch("app.routers.upload.find_raw_upload", return_value=existing):
+    with patch("app.modules.dataset.raw_video_upload_service.find_raw_upload", return_value=existing):
         r = _post_video(c, upload_uid=uid)
     assert r.status_code == 200
     body = r.json()
     assert body["duplicate"] is True
     assert body["upload_uid"] == uid
+
+
+def test_video_retry_returns_before_revalidating_fields(user_client):
+    c, _ = user_client
+    uid = uuid.uuid4().hex
+    existing = {"upload_uid": uid, "session_id": "s1", "storage_url": "/dataset/x.mp4"}
+    with patch("app.modules.dataset.raw_video_upload_service.find_raw_upload", return_value=existing):
+        r = _post_video(c, label="   ", upload_uid=uid)
+    assert r.status_code == 200
+    assert r.json()["duplicate"] is True
 
 
 def test_video_upload_rejects_empty_label(user_client):

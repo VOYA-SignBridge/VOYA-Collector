@@ -1,7 +1,6 @@
 import asyncio
 import re
 import uuid
-import time
 import logging
 import numpy as np
 
@@ -10,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, HTTPException
 
 from app.modules.security.rate_limit_deps import limit_upload
+from app.modules.dataset import raw_video_upload_service
 from app.modules.dataset.catalog import now_str as dataset_now_str
 from app.dataset_manager import (
     get_or_register_class,
@@ -32,17 +32,14 @@ from app.processing.quality import (
 )
 from app.dataset_samples import save_sequence_npz
 from app.raw_uploads import (
-    append_raw_upload_row,
     find_raw_upload,
     find_raw_uploads_by_class,
-    now_str as raw_upload_now_str,
 )
 from app.config import settings
 from app.core.http_validation import (
     validate_label,
     validate_language,
     validate_dialect,
-    save_upload_with_limit,
 )
 from app.modules.identity._web_compat import get_current_user
 from app.modules.saas.tenant_context import require_tenant
@@ -63,12 +60,6 @@ router = APIRouter(
 async def options_camera():
     return {"success": True}
 
-def _safe_path_part(value: str | None, fallback: str) -> str:
-    text = str(value or fallback).strip() or fallback
-    text = Path(text).name.strip() or fallback
-    return "".join(ch if ch.isalnum() or ch in " ._-" else "_" for ch in text)
-
-
 def _class_by_uid(class_uid: str):
     """Resolve a selected class inside the request tenant, never globally."""
     uid = str(class_uid or "").strip()
@@ -79,67 +70,6 @@ def _class_by_uid(class_uid: str):
     if found is None:
         raise HTTPException(status_code=404, detail="Nhãn không thuộc tổ chức hiện tại")
     return found
-
-
-#: Chu ky container video, ghi bang HEX cua bon byte dau. Dung hex chu khong
-#: dung escape nhi phan trong nguon: mot chuoi kieu "\x1a" rat de bi mot lop
-#: xu ly trung gian dien giai som, va luc do nguon mang byte that thay vi van ban.
-_VIDEO_MAGIC_HEAD_HEX = {
-    "1a45dfa3",   # EBML  — WebM / MKV
-    "000001ba",   # MPEG-PS
-    "000001b3",   # MPEG-1 video
-}
-
-
-def _peek_head(upload_file, n: int = 16) -> bytes:
-    """Doc `n` byte dau roi TRA CON TRO VE cho cu — khong tieu thu luong."""
-    try:
-        pos = upload_file.tell()
-        head = upload_file.read(n)
-        upload_file.seek(pos)
-        return head or b""
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"cannot read uploaded file: {exc}") from exc
-
-
-def _looks_like_video(head: bytes) -> bool:
-    """True khi `head` mang chu ky cua mot container video da biet.
-
-    Kiem CHU KY chu khong kiem duoi tep hay `content_type`: ca hai deu do phia
-    goi tu khai, nen chung noi len y dinh chu khong noi len noi dung.
-
-    Danh sach nay CO Y giu chat, va no khong thay the bo giai ma — OpenCV/FFmpeg
-    van la trong tai cuoi cung. Cong nay chi keo loi ve DAU VAO, truoc khi mot
-    lop tu vung kip duoc dang ky cho mot tep hoa ra khong phai video.
-
-    MPEG-TS co y KHONG nam trong danh sach: chu ky cua no la mot byte 0x47 duy
-    nhat, nen bat ky tep nao bat dau bang chu "G" cung lot — mot cong nhu vay
-    khong chan duoc gi va chi tao cam giac an toan.
-    """
-    if len(head) < 12:
-        return False
-    if head[4:8] == b"ftyp":                              # MP4 / MOV / M4V / 3GP
-        return True
-    if head[:4].hex() in _VIDEO_MAGIC_HEAD_HEX:
-        return True
-    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":     # AVI
-        return True
-    if head[:3] == b"FLV":                                # Flash Video
-        return True
-    return False
-
-
-def _measure_upload_size(upload_file, *, max_bytes: int) -> int:
-    try:
-        upload_file.seek(0, 2)
-        size = upload_file.tell()
-        upload_file.seek(0)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"cannot read uploaded file: {exc}") from exc
-
-    if max_bytes > 0 and size > max_bytes:
-        raise HTTPException(status_code=413, detail=f"upload too large (max {max_bytes} bytes)")
-    return int(size)
 
 
 def _bytes_da_ghi(npz_path) -> int:
@@ -163,13 +93,6 @@ def _bytes_da_ghi(npz_path) -> int:
         except OSError:
             continue
     return tong
-
-
-def _raw_upload_local_path(class_meta, upload_uid: str, original_filename: str) -> Path:
-    from app.dataset_manager import raw_class_dir
-
-    return raw_class_dir(class_meta) / f"{upload_uid}_{original_filename}"
-
 
 
 def _alphabet_error_detail(exc: Exception, requested: str, resolved: str) -> str:
@@ -202,32 +125,11 @@ async def upload_video(
     upload_uid: str = Form(None),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    start = time.time()
-    log = logging.getLogger("upload.video")
-
-    if not session_id:
-        session_id = uuid.uuid4().hex
-
-    # Idempotency key: client sends a stable upload_uid so a client-side
-    # timeout + retry does not create duplicate records + duplicate mirrors.
-    if upload_uid and re.fullmatch(r"[a-fA-F0-9]{8,64}", upload_uid):
-        upload_uid = upload_uid.lower()
-        existing = await asyncio.to_thread(find_raw_upload, upload_uid)
-        if existing:
-            log.info("[UPLOAD][video] duplicate upload_uid=%s — returning existing record", upload_uid)
-            return {
-                "success": True,
-                "id": upload_uid,
-                "session_id": existing.get("session_id") or session_id,
-                "upload_uid": upload_uid,
-                "storage_url": existing.get("storage_url") or existing.get("local_path", ""),
-                "message": "already uploaded (duplicate ignored)",
-                "duplicate": True,
-            }
-    else:
-        upload_uid = uuid.uuid4().hex[:8]
-
-    # Validate & normalize inputs
+    duplicate = await raw_video_upload_service.duplicate_upload_result(
+        upload_uid, session_id
+    )
+    if duplicate is not None:
+        return duplicate
     label = validate_label(label)
     language = validate_language(language)
     dialect_requested = dialect
@@ -240,203 +142,35 @@ async def upload_video(
         else validate_dialect(normalize_dialect(dialect, tenant_id=require_tenant()))
     )
     visibility = visibility if visibility in {"private", "tenant", "community"} else "private"
-
-    log.info("[UPLOAD][video] user=%s label=%s lang=%s dialect=%s filename=%s session=%s", user or current_user.get("username", ""), label, language, dialect, getattr(file, 'filename', ''), session_id)
-    # Log pipeline-relevant settings for traceability
     try:
-        seq_len = int(getattr(settings, "seq_len", 60))
-        feat_dim = int(getattr(settings, "feature_dim", 126))
-        aug_live = int(getattr(settings, "augment_per_seq", 8))
-        aug_video = int(getattr(settings, "video_augment_per_seq", 0) or 0)
-        aug_n = aug_video if aug_video > 0 else aug_live
-        log.info(
-            "[PIPELINE_CFG] seq_len=%s feature_dim=%s stride=%s aug_n=%s (AUG_PER_SEQ=%s VIDEO_AUG_PER_SEQ=%s) VIDEO_COMPLETENESS=%s",
-            seq_len,
-            feat_dim,
-            int(getattr(settings, "stride", 2)),
-            aug_n,
-            aug_live,
-            aug_video,
-            float(getattr(settings, "video_completeness_threshold", 0.8)),
+        return await raw_video_upload_service.store_raw_video(
+            file=file,
+            user=user,
+            label=label,
+            language=language,
+            dialect=dialect,
+            class_uid=class_uid,
+            visibility=visibility,
+            session_id=session_id,
+            upload_uid=upload_uid,
+            tenant_id=require_tenant(),
+            current_user=current_user,
         )
-    except Exception:
-        pass
-
-    # Cong dinh dang, dat TRUOC `get_or_register_class` — thu tu nay la trong tam.
-    #
-    # Cho toi ban nay, mot tep khong phai video van di qua duoc day va DE LAI mot
-    # lop tu vung: lop duoc dang ky truoc khi bat ky thu gi ve tep duoc kiem, nen
-    # mot lan tai len that bai van sinh ra rac phai don bang tay. Tu choi o day
-    # thi khong con gi de don.
-    if not _looks_like_video(_peek_head(file.file)):
-        log.warning("[UPLOAD][video] tu choi: khong nhan ra chu ky container video")
+    except raw_video_upload_service.UploadReadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except raw_video_upload_service.UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except raw_video_upload_service.InvalidVideoFormatError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except raw_video_upload_service.UploadClassNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AlphabetLabelError as exc:
         raise HTTPException(
-            status_code=415,
-            detail="Tep khong phai dinh dang video duoc ho tro (MP4/MOV/WebM/MKV/AVI).",
-        )
-
-    max_mb = int(getattr(settings, "max_upload_mb", 1024))
-    max_bytes = max_mb * 1024 * 1024 if max_mb > 0 else 0
-    upload_size = _measure_upload_size(file.file, max_bytes=max_bytes)
-    log.info("[UPLOAD][video] bytes_received=%s max_bytes=%s", upload_size, max_bytes)
-
-    # Hạn mức dung lượng. Từ v8 thứ được kiểm là DUNG LƯỢNG chứ không phải số
-    # mẫu: hai quota chồng lên cùng một tài nguyên là hai cách nói về một giới
-    # hạn, và người dùng không đoán được cái nào chặn mình.
-    #
-    # Giữ chỗ theo `upload_size` — kích thước ĐO ĐƯỢC — chứ không theo
-    # `Content-Length`. Starlette đã nhận trọn thân yêu cầu vào một tệp tạm
-    # trước khi hàm này chạy, nên `_measure_upload_size` biết sự thật ngay tại
-    # đây, còn `Content-Length` chỉ là con số client khai. Lấy con số khai khi
-    # con số thật nằm ngay trên tay là chọn cái tệ hơn một cách cố ý.
-    #
-    # (Bản trước đặt phép kiểm ở đầu hàm với lý do "chặn trước khi máy chủ nhận
-    # trọn video". Lý do đó không đúng: tới lúc thân hàm chạy thì video đã nằm
-    # trên đĩa máy chủ rồi. Thứ thật sự chặn một tệp quá lớn là `max_upload_mb`
-    # ngay phía trên.)
-    #
-    # Và phép kiểm phải đứng TRƯỚC `get_or_register_class`: đăng ký lớp trước
-    # rồi mới từ chối sẽ để lại một lớp từ vựng rỗng phải dọn bằng tay — đúng
-    # thứ mà cổng định dạng phía trên được dựng lên để tránh.
-    giu_cho = guard_storage(current_user, nbytes=upload_size)
-    da_tieu_giu_cho = False
-    try:
-        # Register / fetch class in new hierarchy (in thread — CSV/DB I/O)
-        try:
-            class_meta = await asyncio.to_thread(_class_by_uid, class_uid)
-            if class_meta is None:
-                class_meta = await asyncio.to_thread(
-                    get_or_register_class, label_original=label, language=language, dialect=dialect or ""
-                )
-            else:
-                # class_uid is canonical; stale display fields must not move
-                # the upload to another class.
-                label, language, dialect = class_meta.label_original, class_meta.language, class_meta.dialect
-        except AlphabetLabelError as exc:
-            # Nhãn bảng chữ cái nhiều hơn một ký tự. Lỗi của NGƯỜI GỬI, phải
-            # về 422 kèm câu giải thích — trước đây rơi xuống 500 "Internal
-            # Server Error" (đo 15/09/2026), người thu không biết mình sai gì.
-            raise HTTPException(status_code=422, detail=_alphabet_error_detail(exc, dialect_requested, dialect)) from exc
-
-        original_filename = _safe_path_part(getattr(file, "filename", None), "upload.mp4")
-        local_path = _raw_upload_local_path(class_meta, upload_uid, original_filename)
-        storage_key = local_path.relative_to(settings.dataset_root).as_posix()
-
-        # In thread — large file write + fsync would block the event loop
-        bytes_written, local_path_str = await asyncio.to_thread(
-            save_upload_with_limit, file.file, local_path, max_bytes=max_bytes
-        )
-
-        # Quyết toán bằng byte THẬT, trước khi có dòng metadata nào trỏ tới tệp.
-        # Thứ tự này là điều làm cho `discard` an toàn: tới đây tệp đã tồn tại
-        # nhưng chưa ai biết về nó, nên gỡ đi là gỡ sạch.
-        try:
-            await asyncio.to_thread(
-                storage_quota.settle, giu_cho, bytes_written,
-                discard=lambda: local_path.unlink(missing_ok=True),
-            )
-        except storage_quota.StorageQuotaExceeded as exc:
-            log.warning(
-                "[UPLOAD][video] tu choi sau khi ghi: %s byte khong vua han muc; "
-                "da go tep", bytes_written)
-            raise storage_full_http(exc) from exc
-        da_tieu_giu_cho = True
-    finally:
-        # Bắt CẢ `return` sớm lẫn ngoại lệ. Một khoản giữ chỗ không được tiêu sẽ
-        # giam chỗ của tổ chức cho tới khi hết hạn, và người dùng thấy "hết dung
-        # lượng" cho phần họ chưa hề ghi.
-        if not da_tieu_giu_cho:
-            storage_quota.release(giu_cho)
-
-    storage_url = local_path_str
-    provider = "local"
-
-    created_at = raw_upload_now_str()
-    raw_upload_row = {
-        "upload_uid": upload_uid,
-        "class_uid": class_meta.class_uid,
-        "slug": class_meta.slug,
-        "label_original": class_meta.label_original,
-        "language": class_meta.language,
-        "dialect": class_meta.dialect,
-        "source_type": "video",
-        "user_id": user or current_user.get("username", ""),
-        "session_id": session_id,
-        # Chủ của video đi theo LỚP (khoá ngoại ghép `(tenant_id, class_uid)`):
-        # tổ chức nhà của người tải ≠ tổ chức của lớp khi họ làm việc ở nơi khác,
-        # và khi ấy dòng này từng bị DB từ chối mà không ai biết (18/10/2026).
-        "tenant_id": class_meta.tenant_id,
-        "visibility": visibility,
-        "original_filename": original_filename,
-        "local_path": local_path_str,
-        "storage_key": storage_key,
-        "storage_url": storage_url,
-        "created_at": created_at,
-        "updated_at": created_at,
-    }
-    try:
-        await asyncio.to_thread(append_raw_upload_row, raw_upload_row)
-    except Exception as e:
-        log.warning("[UPLOAD][video] raw upload CSV metadata failed: %s", e)
-
-    try:
-        from app.storage.metadata_db import insert_raw_upload
-
-        await asyncio.to_thread(insert_raw_upload, {**raw_upload_row, "auth_user_id": current_user["id"]})
-    except Exception as e:
-        # WARNING, not debug: this failing means the upload is invisible to
-        # every DB-backed view (owner lookup, trash, moderation). It hid a
-        # foreign-key failure for weeks (class not yet mirrored to Postgres).
-        log.warning("[UPLOAD][video] raw upload DB metadata failed for %s: %s", upload_uid, e)
-
-    # Defer Google Drive mirror to Celery (same pattern as npz samples).
-    # The user gets a response immediately after the local save; the worker
-    # transfers the video to Drive and updates storage_url when done.
-    gdrive_mirror = "disabled"
-    if getattr(settings, "use_google_drive", False):
-        try:
-            from app.export_tasks import upload_raw_video_to_gdrive_task
-
-            upload_raw_video_to_gdrive_task.delay(
-                upload_uid=upload_uid,
-                local_path=local_path_str,
-                storage_key=storage_key,
-                content_type=file.content_type or "application/octet-stream",
-                # raw_videos/ không phân vùng trên đĩa: tenant đi theo LỚP.
-                tenant_id=class_meta.tenant_id,
-            )
-            gdrive_mirror = "queued"
-            log.info("[UPLOAD][video] Google Drive mirror deferred to Celery key=%s", storage_key)
-        except Exception as e:
-            gdrive_mirror = "dispatch_failed"
-            log.warning("[UPLOAD][video] Failed to dispatch GDrive mirror task (local copy kept): %s", e)
-
-    log.info(
-        "[UPLOAD][video] stored raw video provider=%s path=%s bytes_written=%s gdrive_mirror=%s elapsed=%.3fs",
-        provider,
-        local_path_str,
-        bytes_written,
-        gdrive_mirror,
-        time.time() - start,
-    )
-    # Start feature extraction right away. Until 15/09/2026 nothing did: the
-    # UI showed "Thành công" after the raw clip was stored and no client or
-    # server code ever called /upload/video/process, so uploaded videos never
-    # became samples unless someone hit that endpoint by hand.
-    processing = _enqueue_video_processing(raw_upload_row, triggered_by=str(current_user.get("id") or ""))
-
-    return {
-        "success": True,
-        "id": upload_uid,
-        "session_id": session_id,
-        "upload_uid": upload_uid,
-        "storage_url": storage_url,
-        "gdrive_mirror": gdrive_mirror,
-        "job_id": processing.get("job_id"),
-        "processing": processing.get("status"),
-        "message": "raw video uploaded",
-    }
-
+            status_code=422,
+            detail=_alphabet_error_detail(exc, dialect_requested, dialect),
+        ) from exc
+    except storage_quota.StorageQuotaExceeded as exc:
+        raise storage_full_http(exc) from exc
 
 def _raw_upload_owner(upload_uid: str) -> str:
     """`auth_user_id` của người đã tải video lên (rỗng nếu không tra được)."""
