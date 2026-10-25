@@ -1,8 +1,5 @@
 from typing import Optional, Dict, Any
-import json
 import unicodedata
-from pathlib import Path
-from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from app.modules.security import audit
 from app.modules.security.rate_limit_deps import limit_catalog
@@ -27,40 +24,13 @@ from app.modules.dataset.catalog_sync import (
     bulk_purge_classes,
     empty_class_trash,
 )
-from app.config import settings
 from app.modules.identity._web_compat import get_current_user, require_admin, require_tenant_editor
 from app.modules.saas.tenant_context import require_tenant
+from app.services import preferences
 
 from app.modules.saas.webhooks import emit
 
 router = APIRouter(prefix="/classes", tags=["classes"])
-
-# ---------------------------------------------------------------------------
-# Preferences file (replaces localStorage on frontend)
-# ---------------------------------------------------------------------------
-_PREFS_PATH = Path(settings.dataset_root) / "user_preferences.json"
-_PREFS_LOCK = str(_PREFS_PATH) + ".lock"
-
-
-def _load_prefs() -> dict:
-    if not _PREFS_PATH.exists():
-        return {}
-    try:
-        with open(_PREFS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_prefs(data: dict) -> None:
-    # Callers MUST already hold the prefs FileLock (set_preference does). This
-    # helper deliberately does NOT re-acquire it: FileLock is not reentrant
-    # across instances in the same process, so a nested acquire self-deadlocks
-    # (the request hangs forever, leaking a thread-pool worker + poisoning the
-    # lock for every later preference write).
-    _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_PREFS_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -359,15 +329,8 @@ def get_preference(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Get a user preference value by key."""
-    prefs = _load_prefs()
-    mine = prefs.get(_prefs_bucket(current_user)) or {}
-    if key in mine:
-        return {"key": key, "value": mine[key]}
-    # Rơi về giá trị cũ ở mức trên cùng, MỘT LẦN: những khoá đó do bản trước
-    # v4 ghi và là tuỳ chọn thật của ai đó. Đọc được nhưng không ghi vào nữa,
-    # nên chúng tắt dần khi mỗi người lưu lại lựa chọn của mình.
-    legacy = prefs.get(key)
-    return {"key": key, "value": legacy if not isinstance(legacy, dict) else None}
+    value = preferences.get_scoped_value(_prefs_bucket(current_user), key)
+    return {"key": key, "value": value}
 
 
 @router.post("/preferences")
@@ -381,18 +344,7 @@ def set_preference(
     if not key:
         raise HTTPException(status_code=400, detail="Key is required")
 
-    bucket = _prefs_bucket(current_user)
-    lock = FileLock(_PREFS_LOCK)
-    with lock:
-        prefs = _load_prefs()
-        mine = prefs.get(bucket)
-        # Một khoá cũ ở mức trên cùng có thể trùng tên với một ngăn; kiểm kiểu
-        # ở đây để dữ liệu cũ không biến thành ngăn của ai đó.
-        if not isinstance(mine, dict):
-            mine = {}
-        mine[key] = value
-        prefs[bucket] = mine
-        _save_prefs(prefs)
+    preferences.set_scoped_value(_prefs_bucket(current_user), key, value)
 
     return {"success": True, "key": key, "value": value}
 
