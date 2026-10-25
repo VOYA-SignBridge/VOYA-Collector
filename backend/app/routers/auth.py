@@ -18,7 +18,6 @@ from app.modules.identity._web_compat import (
     new_session_family,
     create_user,
     get_current_user,
-    request_password_reset,
     reset_password_with_token,
     revoke_refresh_token,
     rotate_refresh_token,
@@ -30,6 +29,7 @@ from app.modules.identity.cookies import (
     generate_csrf_token,
     set_auth_cookies,
 )
+from app.modules.identity import account_workflows
 from app.modules.security import account_controls, audit_log
 from app.core.public_url import resolve_frontend_base_url
 from app.modules.security._web_compat import (
@@ -41,8 +41,6 @@ from app.modules.security._web_compat import (
     register_failed_login,
     reset_login_attempts,
 )
-from app.services.email import send_password_reset_email
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -296,66 +294,6 @@ def _record_consents(user_id: str, consents: dict, request: Request) -> None:
                              ip_hash=ip_hash, user_agent=agent)
 
 
-def _send_welcome_verification(user: dict) -> None:
-    """Gửi mã xác minh ngay khi tài khoản vừa tạo.
-
-    Không có bước này thì `REQUIRE_EMAIL_VERIFICATION` là một cái bẫy: người
-    dùng đăng ký xong, đăng nhập, bị từ chối vì chưa xác minh — và không có gì
-    trong hộp thư để họ xác minh bằng. Mã phải đi CÙNG lúc tài khoản ra đời,
-    không phải chờ họ tự tìm ra một nút ở đâu đó.
-
-    **Không bao giờ làm hỏng việc đăng ký.** Tài khoản đã tồn tại và giao dịch
-    đã xong; ném lỗi ở đây trả về 500 cho một request đã thành công, và người
-    dùng sẽ thử đăng ký lại rồi đụng chính username họ vừa chiếm. SMTP hỏng là
-    việc của người vận hành, và luôn còn đường `/auth/verify/send`.
-    """
-    from app.modules.security import otp
-    from app.services.email import send_verification_code_email
-
-    try:
-        _, code = otp.issue(
-            user_id=user["id"], purpose="verify_email",
-            channel="email", destination=user["email"],
-        )
-        send_verification_code_email(user["email"], code, "verify_email")
-    except Exception as exc:
-        # Chỉ ghi TÊN LOẠI ngoại lệ. Thông điệp của một lỗi SMTP có thể mang
-        # theo cả nội dung thư — và nội dung thư ở đây chính là mã.
-        logger.warning(
-            "[REGISTER] không gửi được mã xác minh cho %s: %s",
-            user["id"], type(exc).__name__,
-        )
-
-
-def _deactivate_stranded_account(user_id: str, *, reason: str) -> None:
-    """Đóng một tài khoản vừa tạo mà không gắn được vào tổ chức nào.
-
-    Nó vẫn đang mang tenant gốc, và đó là trạng thái duy nhất không được phép
-    tồn tại ở dạng SỐNG. Vô hiệu hoá là thao tác nhỏ nhất đạt được điều đó —
-    xoá hẳn thì mất luôn dấu vết chấp thuận điều khoản vừa ghi, thứ có thể cần
-    tới nếu người dùng khiếu nại.
-
-    Nuốt lỗi có chủ ý: hàm này chạy trong nhánh xử lý một lỗi khác, và để nó
-    ném tiếp sẽ thay thế nguyên nhân thật bằng một lỗi thứ cấp.
-    """
-    try:
-        from app.storage.metadata_db import _execute
-
-        _execute("UPDATE users SET is_active = FALSE WHERE id = %s", (str(user_id),))
-        logger.error(
-            "[REGISTER] tài khoản %s bị vô hiệu hoá vì không tạo được tổ chức: %s",
-            user_id, reason,
-        )
-    except Exception as exc:
-        # Đây là trường hợp xấu nhất: một tài khoản sống trong tenant gốc.
-        # Không im lặng được — nó phải hiện ra ở cảnh báo để có người xử lý.
-        logger.critical(
-            "[REGISTER] KHÔNG vô hiệu hoá được tài khoản %s đang kẹt trong tenant "
-            "gốc (%s); cần xử lý bằng tay",
-            user_id, type(exc).__name__,
-        )
-
-
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, request: Request):
     # Two-stage: a tight per-minute cap on ATTEMPTS (stops a script hammering
@@ -471,7 +409,7 @@ def register(payload: RegisterRequest, request: Request):
                 "không ghi được gì cho tới khi có người cấp vai", user["id"])
         user = _fetch_user_by_id(user["id"]) or user
 
-    _send_welcome_verification(user)
+    account_workflows.send_welcome_verification(user)
 
     register_account_created(ip)
     return user
@@ -814,16 +752,14 @@ def forgot_password(
 ):
     # Throttle per IP so nobody can spam reset emails / probe accounts.
     enforce_ip_limit(request, "forgot", max_calls=5, window=3600)
-    result = request_password_reset(payload.identifier.strip())
-    if result:
-        user, token = result
-        # Built from THIS request's host when that host is allowlisted, so a
-        # moved tunnel URL mails a working link without a redeploy; otherwise
-        # (or on a forged Host) it falls back to FRONTEND_BASE_URL.
-        reset_link = f"{resolve_frontend_base_url(request)}/reset-password?token={token}"
-        background_tasks.add_task(
-            send_password_reset_email, user["email"], user["username"], reset_link
-        )
+    # The workflow keeps account lookup and email dispatch outside the HTTP
+    # boundary.  Its boolean result is deliberately ignored to prevent user
+    # enumeration.
+    account_workflows.queue_password_reset(
+        payload.identifier,
+        resolve_frontend_base_url(request),
+        background_tasks.add_task,
+    )
 
     # Always the same response, whether or not the account exists.
     return {"message": _FORGOT_PASSWORD_GENERIC_MESSAGE}
@@ -881,7 +817,6 @@ def change_password(
     sót đúng cái mình định đuổi. Giao diện phải nói trước điều này.
     """
     from app.modules.security import audit, two_factor
-    from app.modules.identity._web_compat import _apply_password_reset, _identity_cursor
 
     # Chặn dò mật khẩu bằng cách gọi thẳng endpoint này với một access token đã
     # chiếm được. Cùng ngưỡng với `/reset-password`.
@@ -916,8 +851,9 @@ def change_password(
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                     detail="Mã xác thực không đúng.")
 
-    with _identity_cursor() as cur:
-        _apply_password_reset(cur, str(current_user["id"]), payload.new_password)
+    account_workflows.apply_password_change(
+        str(current_user["id"]), payload.new_password
+    )
 
     audit.record(
         "account.password.change", actor=current_user, target_type="user",
@@ -1023,46 +959,20 @@ def change_email_start(
     current_user=Depends(get_current_user),
 ):
     from app.modules.security import otp
-    from app.modules.identity._web_compat import _identity_cursor
-    from app.services.email import EmailNotConfigured, send_verification_code_email
+    from app.services.email import EmailNotConfigured
 
     _guard_email_change(current_user, payload.current_password, request)
 
-    new_email = str(payload.new_email).strip().lower()
-    if new_email == str(current_user.get("email") or "").strip().lower():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Địa chỉ mới trùng địa chỉ đang dùng.")
-
-    # Kiểm trùng ở mặt phẳng DANH TÍNH, không phải trong tenant: `users.email` là
-    # khoá đăng nhập của cả nền tảng, nên "chưa ai dùng" phải đúng trên toàn hệ
-    # thống. Hỏi trong phạm vi tenant sẽ báo "chưa ai dùng" cho một địa chỉ đang
-    # thuộc tổ chức khác, rồi câu INSERT vỡ vì ràng buộc UNIQUE — một lỗi 500 ở
-    # bước cuối thay vì một câu trả lời rõ ràng ở bước đầu.
-    with _identity_cursor() as cur:
-        cur.execute("SELECT 1 FROM users WHERE lower(email) = %s AND id <> %s",
-                    (new_email, str(current_user["id"])))
-        if cur.fetchone():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="Địa chỉ này đã có tài khoản khác dùng.")
-    # Và cùng HỘP THƯ viết bằng bí danh — cùng quy tắc với đăng ký.
-    from app.modules.identity._web_compat import find_user_with_same_mailbox
-    if find_user_with_same_mailbox(new_email, exclude_user_id=str(current_user["id"])):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Hộp thư này đã có tài khoản khác dùng (địa chỉ viết khác nhưng cùng hộp thư).")
-
     try:
-        challenge_id, code = otp.issue(
-            user_id=current_user["id"], purpose="verify_email",
-            channel="email", destination=new_email)
+        result = account_workflows.begin_email_change(current_user, payload.new_email)
+    except account_workflows.AccountWorkflowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except otp.OtpError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-    try:
-        send_verification_code_email(new_email, code, "verify_email")
     except EmailNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return {"challenge_id": challenge_id, "sent_to": new_email,
+    return {"challenge_id": result["challenge_id"], "sent_to": result["sent_to"],
             "expires_in_minutes": settings.otp_ttl_minutes}
 
 
@@ -1073,48 +983,20 @@ def change_email_confirm(
     current_user=Depends(get_current_user),
 ):
     from app.modules.security import audit, otp
-    from app.modules.support import notifications
-    from app.modules.identity._web_compat import _identity_cursor
 
     _guard_email_change(current_user, payload.current_password, request)
 
     try:
-        result = otp.verify(user_id=current_user["id"], purpose="verify_email",
-                            code=payload.code)
+        changed = account_workflows.confirm_email_change(current_user, payload.code)
     except otp.OtpError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    new_email = str(result["destination"]).strip().lower()
-    old_email = str(current_user.get("email") or "")
-
-    # Chỉ MỘT câu UPDATE, và đó là câu đúng — khác hẳn đổi tên đăng nhập.
-    #
-    # `rename_user` phải chạm vào năm bảng cộng `samples.csv` vì cái TÊN được
-    # chép vào dữ liệu ngay lúc ghi. Địa chỉ email thì không: cả lược đồ chỉ có
-    # hai cột mang email, `users.email` và `tenant_invitations.email`.
-    #
-    # Và cột thứ hai **cố ý không đổi theo**. Nó ghi lại địa chỉ mà lời mời đã
-    # được gửi TỚI — một sự kiện đã xảy ra, không phải một thuộc tính hiện tại
-    # của tài khoản. Viết lại nó theo địa chỉ mới là sửa lịch sử, cùng lý do
-    # `audit_log.actor_label` giữ nguyên tên cũ sau khi đổi tên đăng nhập.
-    with _identity_cursor() as cur:
-        cur.execute(
-            "UPDATE users SET email = %s, email_verified_at = NOW() WHERE id = %s",
-            (new_email, str(current_user["id"])))
-
-    # Báo cho chính chủ, và ghi cả hai nhật ký. Đổi địa chỉ nhận thư khôi phục
-    # là thao tác biến một phiên bị chiếm thành mất tài khoản vĩnh viễn — nếu
-    # chủ tài khoản không bao giờ biết, họ không có gì để tố cáo.
-    notifications.notify(
-        str(current_user["id"]), "security", "Địa chỉ email đã được đổi",
-        body=f"Từ {old_email} sang {new_email}.",
-        link="/settings/security", severity="critical")
     audit.record("account.email.change", actor=current_user, target_type="user",
                  target_id=str(current_user["id"]),
-                 detail={"old_email": old_email, "new_email": new_email},
+                 detail=changed,
                  request=request)
     audit_log.log_security_event(
         "email.changed", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
 
-    return {"email": new_email, "email_verified": True}
+    return {"email": changed["new_email"], "email_verified": True}

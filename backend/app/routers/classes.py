@@ -24,6 +24,7 @@ from app.modules.dataset.catalog_sync import (
     bulk_purge_classes,
     empty_class_trash,
 )
+from app.config import settings
 from app.modules.identity._web_compat import get_current_user, require_admin, require_tenant_editor
 from app.modules.saas.tenant_context import require_tenant
 from app.services import preferences

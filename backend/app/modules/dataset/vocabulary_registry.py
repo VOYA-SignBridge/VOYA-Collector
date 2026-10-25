@@ -108,6 +108,33 @@ def _cached(key: str, loader):
 # --------------------------------------------------------------------------- read
 
 
+def list_pending_dialects(
+    tenant_id: str = DEFAULT_TENANT,
+) -> List[Dict[str, Any]]:
+    """Pending dialect requests with their creator display name."""
+    from app.storage.metadata_db import _fetch_all
+
+    return _fetch_all(
+        "SELECT d.*, u.username AS created_by_username FROM dialects d "
+        "LEFT JOIN users u ON u.id = d.created_by "
+        "WHERE d.tenant_id = %s AND d.status = 'pending' ORDER BY d.created_at",
+        (tenant_id,),
+    )
+
+
+def tenant_exists(tenant_id: str) -> bool:
+    """Check a clone target from inside that target's own RLS scope."""
+    from app.modules.saas.tenant_context import tenant_scope
+    from app.storage.metadata_db import _fetch_all
+
+    with tenant_scope(tenant_id):
+        rows = _fetch_all(
+            "SELECT 1 FROM tenants WHERE tenant_id = %s AND deleted_at IS NULL",
+            (tenant_id,),
+        )
+    return bool(rows)
+
+
 def list_dialects(
     tenant_id: str = DEFAULT_TENANT,
     *,

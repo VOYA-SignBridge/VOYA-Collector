@@ -78,7 +78,10 @@ def _forgot_capture(identifier, ip=None):
         cap["reset_link"] = reset_link
         cap["token"] = reset_link.split("token=")[-1]
 
-    with patch("app.routers.auth.send_password_reset_email", side_effect=fake_send) as m:
+    with patch(
+        "app.modules.identity.account_workflows.email.send_password_reset_email",
+        side_effect=fake_send,
+    ) as m:
         resp = _forgot(identifier, ip)
     return resp, cap, m
 

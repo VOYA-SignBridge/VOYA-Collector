@@ -117,6 +117,36 @@ def test_set_user_admin_role_preserves_update_contract(monkeypatch):
     assert updated == {"id": str(user_id), "username": "bob", "is_admin": True}
 
 
+def test_get_user_preserves_scope_and_normalizes_identity(monkeypatch):
+    from app.modules.admin import user_service
+
+    user_id = UUID("bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
+    cursor = FakeCursor(row={
+        "id": user_id,
+        "username": "carol",
+        "email": "carol@example.test",
+    })
+    connection = FakeConnection(cursor)
+    monkeypatch.setattr(user_service, "connect_postgres", lambda: connection)
+
+    found = user_service.get_user(str(user_id))
+
+    assert connection.closed is True
+    assert cursor.executions[0] == (
+        "SELECT set_config(%s, %s, true), set_config(%s, %s, true)",
+        ("app.system_scope", "on", "app.tenant_id", ""),
+    )
+    assert cursor.executions[1:] == [(
+        "SELECT id, username, email FROM users WHERE id = %s",
+        (str(user_id),),
+    )]
+    assert found == {
+        "id": str(user_id),
+        "username": "carol",
+        "email": "carol@example.test",
+    }
+
+
 def test_admin_router_keeps_http_validation_and_status_mapping(monkeypatch):
     from app.routers import admin
 

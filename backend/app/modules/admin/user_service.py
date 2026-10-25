@@ -74,3 +74,27 @@ def set_user_admin_role(user_id: str, is_admin: bool) -> Optional[Dict[str, Any]
         "username": updated["username"],
         "is_admin": updated["is_admin"],
     }
+
+
+def get_user(user_id: str) -> Optional[Dict[str, Any]]:
+    """Return one user visible in the current tenant scope."""
+    connection = connect_postgres()
+    try:
+        with connection:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                apply_scope(cursor)
+                cursor.execute(
+                    "SELECT id, username, email FROM users WHERE id = %s",
+                    (user_id,),
+                )
+                row = cursor.fetchone()
+    finally:
+        connection.close()
+
+    if not row:
+        return None
+    return {
+        "id": str(row["id"]),
+        "username": row["username"],
+        "email": row["email"],
+    }

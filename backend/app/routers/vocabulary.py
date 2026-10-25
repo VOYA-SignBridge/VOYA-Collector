@@ -80,16 +80,7 @@ def create_dialect(
 
 @router.get("/dialects/pending")
 def list_pending(_: Dict[str, Any] = Depends(require_admin)):
-    from app.storage.metadata_db import _fetch_all
-
-    return {
-        "items": _fetch_all(
-            "SELECT d.*, u.username AS created_by_username FROM dialects d "
-            "LEFT JOIN users u ON u.id = d.created_by "
-            "WHERE d.tenant_id = %s AND d.status = 'pending' ORDER BY d.created_at",
-            (vr.DEFAULT_TENANT,),
-        )
-    }
+    return {"items": vr.list_pending_dialects()}
 
 
 @router.post("/dialects/{dialect_id}/approve")
@@ -381,9 +372,6 @@ def clone_to_tenant(
     # tenant nobody can reach, while the `UPDATE tenants SET
     # cloned_from_community_version` silently matches zero rows and the
     # provenance is lost. Refuse before writing anything.
-    from app.storage.metadata_db import _fetch_all
-    from app.modules.saas.tenant_context import tenant_scope
-
     # Phạm vi của TENANT ĐÍCH — KHÔNG phải `system_scope`.
     #
     # Khi `tenants` bật RLS (15/08/2026), phép kiểm này chạy dưới phạm vi của
@@ -401,12 +389,7 @@ def clone_to_tenant(
     #
     # Cùng phạm vi ấy được `clone_catalog_to_tenant` dùng lại cho toàn bộ phép
     # ghi, nên cả endpoint chạy dưới đúng một phạm vi: tenant đích.
-    with tenant_scope(tenant_id):
-        co_tenant = _fetch_all(
-            "SELECT 1 FROM tenants WHERE tenant_id = %s AND deleted_at IS NULL",
-            (tenant_id,))
-
-    if not co_tenant:
+    if not vr.tenant_exists(tenant_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Tenant '{tenant_id}' không tồn tại.")
 

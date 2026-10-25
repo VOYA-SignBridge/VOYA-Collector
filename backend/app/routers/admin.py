@@ -6,7 +6,8 @@ from pydantic import BaseModel
 
 from app.modules.identity._web_compat import get_current_user, require_admin
 from app.modules.security.sudo_mode import require_sudo
-from app.modules.admin.user_service import set_user_admin_role
+from app.modules.admin import recovery_service
+from app.modules.admin.user_service import list_users, set_user_admin_role
 from app.modules.monitoring.service import collect_resources
 from app.modules.security import account_controls, activity_monitor, audit_log, ip_controls
 from app.routers import admin_data as _admin_data
@@ -163,36 +164,11 @@ class WarnUser(BaseModel):
 def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
     """Người dùng CỦA TENANT hiện tại (Chỉ Admin).
 
-    Đi qua `_fetch_all` chứ không mở kết nối trần. `users` mang chính sách
-    row-level security (`storage/rls.py`), và chính sách đó đọc GUC
-    `app.tenant_id`. Một kết nối trần chưa từng gọi `apply_scope()` thì GUC rỗng,
-    `tenant_id = ''` không khớp dòng nào, và câu lệnh trả về **danh sách rỗng —
-    không phải lỗi**. Đó chính là kiểu hỏng mà `docs/` gọi là RLS fail-open ở mặt
-    phẳng danh tính: màn hình ghi "Không có người dùng." trong khi cơ sở dữ liệu
-    có mười tài khoản, và không có gì trong nhật ký để lần ra.
+    Persistence và response shaping nằm ở `modules.admin.user_service`; router
+    chỉ giữ cổng quyền HTTP. Service vẫn gọi `apply_scope()` trước truy vấn để
+    danh sách tuân theo tenant hiện hành thay vì âm thầm trả rỗng dưới RLS.
     """
-    from app.storage.metadata_db import _fetch_all
-
-    users = _fetch_all(
-        """
-        SELECT id, username, email, is_active, is_admin, created_at
-        FROM users
-        ORDER BY created_at DESC
-        """
-    )
-    locked = account_controls.list_locked_users()
-    warned = account_controls.list_warned_users()
-    # Chuyển đổi UUID/datetime sang string để FastAPI tự serialize
-    for u in users:
-        u["id"] = str(u["id"])
-        if u["created_at"]:
-            u["created_at"] = u["created_at"].isoformat()
-        lk = locked.get(u["id"])
-        u["locked"] = bool(lk)
-        u["lock_reason"] = (lk or {}).get("reason", "")
-        u["lock_until"] = (lk or {}).get("until", 0)
-        u["has_warning"] = u["id"] in warned
-    return users
+    return list_users()
 
 @router.put("/users/{user_id}/role")
 def update_user_role(
@@ -399,12 +375,8 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
        người tố cáo — và người duy nhất có thể tố cáo lại chính là người không
        được báo.
     """
-    from app.modules.security import audit, two_factor
-    from app.modules.support import notifications
-    from app.modules.identity._web_compat import request_password_reset
-    from app.services.email import send_password_reset_email
+    from app.modules.security import audit
     from app.core.public_url import resolve_frontend_base_url
-    from app.storage.metadata_db import _fetch_all
 
     action = (payload.action or "").strip()
     if action not in {"reset_link", "clear_2fa"}:
@@ -417,34 +389,18 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Cần ghi lý do (ít nhất 5 ký tự).")
 
-    # Đi qua `_fetch_all` để RLS áp: một quản trị viên chỉ hỗ trợ được người
-    # trong tenant của mình. Xem `get_all_users` về vì sao kết nối trần là bẫy.
-    rows = _fetch_all("SELECT id, username, email FROM users WHERE id = %s",
-                      (user_id,))
-    if not rows:
+    try:
+        target = recovery_service.assist(
+            user_id,
+            action,
+            reason=reason,
+            operator_name=str(operator.get("username") or ""),
+            resolve_frontend_base_url=lambda: resolve_frontend_base_url(request),
+            enqueue=background_tasks.add_task,
+        )
+    except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Không tìm thấy người dùng")
-    target = rows[0]
-
-    if action == "clear_2fa":
-        two_factor.disable(str(target["id"]))
-        title = "Quản trị viên đã gỡ xác thực hai bước"
-        body = (f"Do {operator.get('username', 'quản trị viên')} thực hiện. "
-                f"Lý do: {reason}. Nếu không phải bạn yêu cầu, hãy đổi mật khẩu "
-                f"và báo ngay.")
-    else:
-        result = request_password_reset(str(target["email"] or ""))
-        if result:
-            user, token = result
-            link = f"{resolve_frontend_base_url(request)}/reset-password?token={token}"
-            background_tasks.add_task(
-                send_password_reset_email, user["email"], user["username"], link)
-        title = "Quản trị viên đã gửi lại liên kết đặt lại mật khẩu"
-        body = (f"Do {operator.get('username', 'quản trị viên')} thực hiện. "
-                f"Lý do: {reason}. Kiểm tra hộp thư của bạn.")
-
-    notifications.notify(str(target["id"]), "security", title, body=body,
-                         link="/settings/security", severity="warning")
+                            detail="Không tìm thấy người dùng") from None
     audit.record("account.recovery.assisted", actor=operator,
                  target_type="user", target_id=str(target["id"]),
                  detail={"action": action, "reason": reason}, request=request)
