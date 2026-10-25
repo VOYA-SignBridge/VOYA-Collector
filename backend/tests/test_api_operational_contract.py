@@ -44,6 +44,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.modules.identity._web_compat import get_current_user, require_admin  # noqa: E402
+from app.modules.dataset import provenance as dataset_provenance  # noqa: E402
 from app.routers import training as tr  # noqa: E402
 from app.routers.training import router, training_jobs  # noqa: E402
 
@@ -164,6 +165,8 @@ def client(monkeypatch):
     đường dẫn của container trainer, không tồn tại trong container test.
     """
     monkeypatch.setattr(tr, "SPLITS_DIR", SPLITS)
+    from app.modules.training import tasks as training_tasks
+    monkeypatch.setattr(training_tasks, "SPLITS_DIR", SPLITS)
 
     app = FastAPI()
     app.include_router(router)
@@ -265,8 +268,8 @@ class TestCongSoiDungHienVatDaGhim:
         lớp yếu); hiện vật vận hành chứa 7. Nếu cổng vẫn đọc `SPLITS_DIR` thì
         nó sẽ duyệt trên tập 8 lớp — đúng tập mà trainer KHÔNG đọc.
         """
-        theo_hien_vat = tr._split_class_uids([PHUONG_NGU], ARTIFACT)
-        theo_goc = tr._split_class_uids([PHUONG_NGU], SPLITS)
+        theo_hien_vat = dataset_provenance.split_class_uids([PHUONG_NGU], ARTIFACT)
+        theo_goc = dataset_provenance.split_class_uids([PHUONG_NGU], SPLITS)
 
         assert len(theo_hien_vat) == SO_LOP
         assert len(theo_goc) > SO_LOP, (

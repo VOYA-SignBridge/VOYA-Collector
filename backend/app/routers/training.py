@@ -144,11 +144,26 @@ def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
 
 
 def _split_provenance(**kwargs) -> SplitProvenance:
-    """Describe the same artifact that a training run would consume.
+    """Resolve the trainer's artifact through one door and describe it.
 
-    This is a display path, so resolution failures become a safe warning.  The
-    submission path remains fail-closed and performs its own validation.
+    Display callers opt into ``fail_soft``.  Submission deliberately does not:
+    an invalid operational artifact must be returned to the API as its precise
+    resolver error, not disguised as an empty split.
     """
+    raw_config = kwargs.get("config") or {}
+    if hasattr(raw_config, "model_dump"):
+        config = raw_config.model_dump()
+    elif hasattr(raw_config, "dict"):
+        config = raw_config.dict()
+    elif isinstance(raw_config, dict):
+        config = dict(raw_config)
+    else:
+        config = {}
+    operational = (
+        str(config.get("run_purpose") or "") == "operational"
+        or bool(str(config.get("operational_split_id") or "").strip())
+    )
+
     try:
         import sys
 
@@ -163,16 +178,6 @@ def _split_provenance(**kwargs) -> SplitProvenance:
             load_legacy_signer_map,
         )
 
-        raw_config = kwargs.get("config") or {}
-        if hasattr(raw_config, "model_dump"):
-            config = raw_config.model_dump()
-        elif hasattr(raw_config, "dict"):
-            config = raw_config.dict()
-        elif isinstance(raw_config, dict):
-            config = dict(raw_config)
-        else:
-            config = {}
-
         artifact = _resolve_for_run(
             config,
             tenant_id=str(kwargs.get("tenant_id") or ""),
@@ -184,6 +189,21 @@ def _split_provenance(**kwargs) -> SplitProvenance:
                     "của trainer."
                 )
             )
+
+        if operational:
+            metadata = getattr(artifact, "metadata", {}) or {}
+            scope = list((metadata.get("scope") or {}).get("dialects") or [])
+            requested = [value for value in (config.get("dialects") or []) if value]
+            outside = sorted(set(requested) - set(scope))
+            if outside:
+                raise ValueError(
+                    f"Hiện vật '{getattr(artifact, 'split_id', '')}' chỉ chứa "
+                    f"phương ngữ {scope}, nhưng lượt chạy xin {outside}. Lọc thêm "
+                    "sẽ làm checkpoint học một tập nhỏ hơn tập hiện vật khai báo."
+                )
+            if not requested and hasattr(raw_config, "dialects"):
+                raw_config.dialects = scope
+
         return dataset_provenance.provenance_from_artifact(
             artifact,
             canonical_signer=canonical_signer,
@@ -191,6 +211,8 @@ def _split_provenance(**kwargs) -> SplitProvenance:
             legacy_signer_map=load_legacy_signer_map(),
         )
     except Exception:
+        if operational and not kwargs.get("fail_soft"):
+            raise
         logger.warning(
             "[SPLIT_PROV] không phân giải được hiện vật mà trainer sẽ dùng",
             exc_info=True,
@@ -391,6 +413,7 @@ async def get_dataset_info(
         provenance = await asyncio.to_thread(
             _split_provenance,
             tenant_id=tenant_id,
+            fail_soft=True,
             config={
                 "operational_split_id": operational_split_id,
                 "run_purpose": run_purpose,

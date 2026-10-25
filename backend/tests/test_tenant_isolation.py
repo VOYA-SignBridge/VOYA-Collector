@@ -605,6 +605,10 @@ class TestRequestTenantResolution:
             "cli/backfill_sample_owners.py",   # operator command
             "cli/verify_deployment.py",        # operator command
             "bootstrap/database.py",           # boot: CSV->DB sync spans tenants
+            # Boot has no request scope.  This is a point lookup followed by an
+            # idempotent insert of the configured platform administrator; the
+            # inserted row carries DEFAULT_TENANT_ID explicitly.
+            "bootstrap/admin.py",
             "sot/cli.py",                      # the SOT is a cross-tenant artefact
             "infrastructure/celery/tenant.py", # Celery tasks bind an explicit tenant
             "routers/sot_admin.py",            # counts compared against the SOT total

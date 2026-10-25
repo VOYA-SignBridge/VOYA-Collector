@@ -17,7 +17,7 @@ sys.modules[SPEC.name] = IMPORTER
 SPEC.loader.exec_module(IMPORTER)
 
 
-class CommunityImporterSafetyTests(unittest.TestCase):
+class TestCommunityImporterSafety(unittest.TestCase):
     def test_storage_keys_map_drive_aliases_to_local_layout(self):
         cases = [
             ("Samples/vn/class-a/sample.npz", "features", "features/vn/class-a/sample.npz"),

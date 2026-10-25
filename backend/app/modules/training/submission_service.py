@@ -57,6 +57,23 @@ async def submit_training_job(
     persist_job: Callable[..., Awaitable[None]],
 ) -> TrainingJob:
     """Validate, persist and enqueue one job in that exact order."""
+    split_id = str(config.operational_split_id or "").strip()
+    operational = config.run_purpose == "operational" or bool(split_id)
+    if operational and config.run_purpose == "research":
+        raise SubmissionValidationError(
+            "Không thể vừa là lượt nghiên cứu vừa ghim hiện vật vận hành. "
+            "Hai hợp đồng này khác nhau: nghiên cứu cần tính lặp lại, vận hành "
+            "cần tính hợp lệ hiện tại."
+        )
+    if operational and not split_id:
+        raise SubmissionValidationError(
+            "Lượt huấn luyện vận hành phải ghim một hiện vật: thiếu "
+            "`operational_split_id`. Hệ thống KHÔNG tự chọn hiện vật mới nhất "
+            "và KHÔNG rơi về ba tệp nghiên cứu đóng băng."
+        )
+    if operational:
+        config.run_purpose = "operational"
+
     if config.run_purpose == "research":
         if not config.split_version:
             raise SubmissionValidationError(
@@ -73,8 +90,25 @@ async def submit_training_job(
         config.dataset_version = chosen["dataset_version"]
         config.recognition_profile = chosen["recognition_profile"]
 
+    split_provenance: Optional[SplitProvenance] = None
+    if config.run_purpose != "research":
+        try:
+            split_provenance = resolve_provenance(config=config, tenant_id=tenant_id)
+        except Exception as exc:
+            raise SubmissionValidationError(str(exc)) from exc
+        if not split_provenance.counts.get("train") or not split_provenance.counts.get("test"):
+            raise SubmissionValidationError(
+                "Tập chia hiện tại không dùng được để huấn luyện "
+                f"(train={split_provenance.counts.get('train', 0)}, "
+                f"test={split_provenance.counts.get('test', 0)} mẫu). "
+                "Hãy chia lại tập dữ liệu trước khi huấn luyện."
+            )
+
     selected_dialects = [] if config.run_purpose == "research" else list(config.dialects or [])
-    if selected_dialects:
+    # Operational scope comes from the resolved immutable artifact.  The
+    # generic catalogue gate reads the legacy/root split and must not judge a
+    # different input than the trainer will consume.
+    if selected_dialects and config.run_purpose != "operational":
         trainable = trainable_dialects()
         empty = [dialect for dialect in selected_dialects if trainable.get(dialect, 0) < 2]
         if empty:
@@ -85,17 +119,6 @@ async def submit_training_job(
                 f"Phương ngữ đang huấn luyện được: {available or 'chưa có'}. "
                 "Nếu bạn vừa thu dữ liệu mới, hãy chia lại tập "
                 "(processed/splits/make_splits.py) trước khi huấn luyện."
-            )
-
-    split_provenance: Optional[SplitProvenance] = None
-    if config.run_purpose != "research":
-        split_provenance = resolve_provenance(config=config, tenant_id=tenant_id)
-        if not split_provenance.counts.get("train") or not split_provenance.counts.get("test"):
-            raise SubmissionValidationError(
-                "Tập chia hiện tại không dùng được để huấn luyện "
-                f"(train={split_provenance.counts.get('train', 0)}, "
-                f"test={split_provenance.counts.get('test', 0)} mẫu). "
-                "Hãy chia lại tập dữ liệu trước khi huấn luyện."
             )
 
     job_id = str(uuid.uuid4())[:8]
