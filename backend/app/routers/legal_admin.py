@@ -23,7 +23,6 @@ hạn chế, đó là mô hình.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -32,10 +31,8 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from app.modules.legal import legal, legal_store
+from app.modules.legal import legal, legal_store, reconsent
 from app.modules.identity._web_compat import require_admin
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/legal", tags=["admin", "legal"])
 
@@ -70,47 +67,6 @@ def _require_sudo(current_user: Dict[str, Any]) -> None:
                 "ttl_seconds": sudo_mode.SUDO_TTL_SECONDS,
             },
         )
-
-
-def _notify_reconsent(kind: str, version: str) -> None:
-    """Báo cho những người sẽ bị chặn nếu không ký lại.
-
-    Vì sao cần
-    -----------
-    `requires_reconsent=True` biến mọi chữ ký cũ thành "cần đồng ý lại", và cổng
-    đồng thuận đọc trạng thái đó. Không báo thì lần đầu người dùng biết chuyện
-    là lúc một thao tác của họ bị từ chối — với một lý do nghe như lỗi hệ thống
-    chứ không như một việc họ cần làm.
-
-    Chỉ báo cho người ĐANG HOẠT ĐỘNG trong tenant hiện hành. Văn bản pháp lý là
-    của cả nền tảng, nhưng thông báo thì thuộc về tenant — một dòng không biết
-    mình thuộc tenant nào là dòng mà RLS sẽ giấu khỏi chính người cần đọc.
-
-    **Không bao giờ ném.** Bản văn đã công bố xong và đã ghi kiểm toán; làm hỏng
-    một thao tác đã thành công vì cái chuông ghi hụt là đánh đổi sai.
-    """
-    from app.modules.support import notifications
-    from app.storage.metadata_db import _fetch_all
-
-    try:
-        rows = _fetch_all("SELECT id FROM users WHERE is_active")
-    except Exception as exc:
-        logger.warning("[LEGAL] khong doc duoc danh sach nguoi dung de bao: %s",
-                       type(exc).__name__)
-        return
-
-    notifications.notify_many(
-        [str(r["id"]) for r in rows],
-        kind="consent",
-        title="Văn bản pháp lý mới cần bạn đồng ý lại",
-        # Mã loại nguyên văn (`terms`, `privacy`, …) chứ không dịch ở đây: nhãn
-        # hiển thị là việc của giao diện, và `api/legal.ts` đã có sẵn bảng
-        # `LEGAL_KIND_LABEL`. Dịch ở máy chủ là đóng cứng một ngôn ngữ vào một
-        # hàng dữ liệu sẽ còn được đọc sau khi người dùng đổi ngôn ngữ.
-        body=f"{kind} — bản {version}. Chưa ký lại thì một số thao tác sẽ bị tạm dừng.",
-        link="/settings/consents",
-        severity="warning",
-    )
 
 
 @router.get("/documents")
@@ -233,7 +189,7 @@ def publish_document(
                  })
 
     if payload.requires_reconsent:
-        _notify_reconsent(payload.kind, payload.version)
+        reconsent.notify_active_users(payload.kind, payload.version)
 
     doc = legal.admin_read_document(payload.kind, payload.version) or {}
     return {
