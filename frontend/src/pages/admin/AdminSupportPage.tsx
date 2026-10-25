@@ -188,8 +188,9 @@ export default function AdminSupportPage() {
       return next;
     });
     setDrafts((d) => {
-      const { [id]: _gone, ...rest } = d;
-      return rest;
+      const next = { ...d };
+      delete next[id];
+      return next;
     });
   };
 

@@ -23,7 +23,7 @@ vi.mock("../../api/axiosClient", () => ({
 }));
 
 vi.mock("../useToast", () => ({
-  useToast: () => ({ toast: { info, success: vi.fn(), error: vi.fn(), warning: vi.fn() } }),
+  useOptionalToast: () => ({ info, success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
 }));
 
 import { useAdminAttention } from "../useAdminAttention";

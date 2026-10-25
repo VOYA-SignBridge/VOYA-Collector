@@ -196,7 +196,7 @@ export default function AdminActivityPage() {
       if (run !== auditRun.current) return;
       setAudit(res.data.events || []);
       setAuditError(null);
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (run !== auditRun.current) return;
       setAuditError(friendlyError(e, t("Không tải được nhật ký kiểm toán")));
     } finally {
@@ -210,7 +210,7 @@ export default function AdminActivityPage() {
       setData(rep.data);
       setSecLog(rep.data.security_log || []);
       setError(null);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(friendlyError(e, t("Không tải được dữ liệu phiên hoạt động")));
     }
   }, []);
@@ -240,7 +240,7 @@ export default function AdminActivityPage() {
       });
       toast.success(t("Đã chặn {ip}", { ip }));
       await fetchReport();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error(friendlyError(e, t("Chặn IP thất bại")));
     } finally { setBusy(null); }
   };
@@ -251,7 +251,7 @@ export default function AdminActivityPage() {
       await apiClient.post("/api/v1/admin/unblock-ip", { ip });
       toast.success(t("Đã bỏ chặn {ip}", { ip }));
       await fetchReport();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error(friendlyError(e, t("Bỏ chặn thất bại")));
     } finally { setBusy(null); }
   };
@@ -264,7 +264,7 @@ export default function AdminActivityPage() {
       await apiClient.post("/api/v1/admin/force-logout", { user_id: userId, reason });
       toast.success(t("Đã đăng xuất {name}", { name }));
       await fetchReport();
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error(friendlyError(e, t("Đăng xuất thất bại")));
     } finally { setBusy(null); }
   };

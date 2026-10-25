@@ -157,7 +157,7 @@ export default function TestTrainedModelModal({
               const w = canvas.width;
               const h = canvas.height;
 
-              mpResults.multiHandLandmarks.forEach((landmarks: any[]) => {
+              mpResults.multiHandLandmarks.forEach((landmarks) => {
                 // Draw connections (skeleton)
                 const connections = [
                   [0, 1], [1, 2], [2, 3], [3, 4],
@@ -184,7 +184,7 @@ export default function TestTrainedModelModal({
 
                 // Draw joints
                 ctx.fillStyle = '#00ff00';
-                landmarks.forEach((lm: any) => {
+                landmarks.forEach((lm) => {
                   const x = lm.x * w;
                   const y = lm.y * h;
                   ctx.beginPath();

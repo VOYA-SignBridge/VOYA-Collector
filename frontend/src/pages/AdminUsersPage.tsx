@@ -44,7 +44,7 @@ export default function AdminUsersPage() {
       setLoading(true);
       const res = await apiClient.get<UserData[]>("/api/v1/admin/users");
       setUsers(res.data);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error(friendlyError(error, t("Không thể tải danh sách người dùng")));
     } finally {
       setLoading(false);
@@ -56,7 +56,7 @@ export default function AdminUsersPage() {
       await apiClient.post(`/api/v1/admin/users/${userId}/lock`, payload);
       toast.success(t("Đã khóa tài khoản"));
       fetchUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error(friendlyError(error, t("Khóa tài khoản thất bại")));
     }
   };
@@ -66,7 +66,7 @@ export default function AdminUsersPage() {
       await apiClient.post(`/api/v1/admin/users/${userId}/unlock`);
       toast.success(t("Đã mở khóa tài khoản"));
       fetchUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error(friendlyError(error, t("Mở khóa thất bại")));
     }
   };
@@ -78,7 +78,7 @@ export default function AdminUsersPage() {
       await apiClient.post(`/api/v1/admin/users/${userId}/warn`, { message: message.trim() });
       toast.success(t("Đã gửi cảnh báo tới {name}", { name }));
       fetchUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error(friendlyError(error, t("Gửi cảnh báo thất bại")));
     }
   };
@@ -95,7 +95,7 @@ export default function AdminUsersPage() {
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, is_admin: !currentIsAdmin } : u))
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error(friendlyError(error, t("Lỗi cập nhật quyền")));
     }
   };

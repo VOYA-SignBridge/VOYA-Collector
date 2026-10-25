@@ -307,7 +307,6 @@ class TestTheAggregateTasksStayPlatformWide:
         from app.worker import celery_app
 
         import app.export_tasks  # noqa: F401
-        import app.modules.saas.saas_tasks  # noqa: F401
         from app.modules.google_sync import restore_tasks  # noqa: F401
         from app.modules.training import tasks  # noqa: F401
 
