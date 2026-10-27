@@ -6,6 +6,62 @@ This folder contains helpers to load the dataset and a ready-to-run TCN trainer.
 - `dataset_loader.py`: Loads `.npz` feature sequences with metadata and provides a padding collate.
 - `run_loader_sanity.py`: Prints a few samples from `processed/splits/train.csv` to verify shapes.
 - `train_tcn.py`: Trains a Temporal Convolutional Network (TCN) classifier on the splits.
+- `models/hd_gcn_lite.py`: HD-GCN variant with direct `nn.Linear` graph projections; keeps the original graph, pooling, temporal convolutions and attention.
+- `export_tflite.py`: Exports an in-memory trained model directly using `litert_torch.convert(model.eval(), sample_inputs)` and `edge_model.export(...)`.
+
+## HD-GCN Lite: direct TFLite output
+
+Once a compatible Linux LiteRT Torch environment has been prepared separately:
+
+```bash
+python -m processed.train_utils.train_tcn --model_type hdgcn_lite --epochs 80 --batch_size 32
+```
+
+The existing trainer prerequisites still apply, including valid splits and the
+pinned vocabulary registry snapshot (`VOCABULARY_REGISTRY_PATH` when needed).
+
+Uses the same split/data arguments and graph hyperparameters as `hdgcn`.
+Training restores the best validation state **in memory**, then exports float32
+`handgcn_lite_*.tflite` directly. No intermediate `.pt` is written. Outputs also
+include `.metadata.json` (class mapping, preprocessing/training contract, model
+configuration and conversion parity checks) and the usual training `.json` summary.
+The graph returns logits; preprocessing remains external and must match training.
+Export shape is fixed to `[1, 60, input_dim]`, normally `[1, 60, 126]`.
+
+To export a model from your own training code:
+
+```python
+from processed.train_utils.models import HandGCNLiteModel
+from processed.train_utils.export_tflite import export_tflite
+
+model = HandGCNLiteModel.from_config(126, num_classes, model_config)
+# Train model here and restore your best in-memory state_dict, if applicable.
+export_tflite(model, "handgcn_lite.tflite", sample_input=preprocessed_clip)
+```
+
+`preprocessed_clip` must be a float tensor of shape `[1, 60, 126]`. Constructing
+the model alone does not train it. The exporter copies the model to CPU/eval,
+checks PyTorch/TFLite output parity before writing, and leaves the caller's model
+unchanged. Architecture construction/training imports no LiteRT dependency.
+There is no claim of a smaller model or better accuracy than original HD-GCN.
+
+This is currently a **CLI training/export path**. The web training job tracker,
+promotion and realtime loader still consume PyTorch checkpoints; deploying a
+TFLite artifact there requires separate runtime integration. The TFLite final
+record uses `artifact_path` and leaves `checkpoint_path` empty intentionally.
+
+Official conversion/environment documentation:
+https://github.com/google-ai-edge/litert-torch
+and https://github.com/google-ai-edge/litert-torch/blob/main/docs/pytorch_converter/README.md
+
+Checks that need only the existing PyTorch environment:
+
+```bash
+python -m unittest processed.train_utils.test_hd_gcn_lite -v
+```
+
+The real conversion/reload test is skipped if `litert_torch` is absent. Exporter
+test doubles verify control flow only and do not prove TFLite compatibility.
 
 ## Prerequisites
 - Python 3.10+ (khuyến nghị) để cài dependency ổn định nhất.

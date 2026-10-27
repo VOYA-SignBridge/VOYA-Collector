@@ -260,6 +260,9 @@ _MODEL_NAME_TO_REGISTRY_KEY = {
     "hdgcn": "handgcn",
     "hd-gcn": "handgcn",   # model.get_model_name() returns "HD-GCN"
     "hd_gcn": "handgcn",
+    # Architecture reconstruction only; this does not add a TFLite runtime.
+    "handgcn_lite": "hdgcn_lite",
+    "hdgcn_lite": "hdgcn_lite",
     "tcn": "tcn",
 }
 

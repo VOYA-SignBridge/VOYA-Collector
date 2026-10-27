@@ -1240,8 +1240,8 @@ def main() -> None:
         "--model_type",
         type=str,
         default="tcn",
-        choices=["tcn", "cnn", "lstm", "bigru_attention", "hdgcn"],
-        help="Model architecture to use. Default: tcn",
+        choices=["tcn", "cnn", "lstm", "bigru_attention", "hdgcn", "hdgcn_lite"],
+        help="Model architecture. hdgcn_lite exports TFLite directly; others save .pt. Default: tcn",
     )
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument(
@@ -1347,6 +1347,11 @@ def main() -> None:
         help="Attach tracking to an existing experiment ID instead of creating a new one.",
     )
     args = parser.parse_args()
+    export_as_tflite = args.model_type == "hdgcn_lite"
+    if export_as_tflite:
+        from processed.train_utils.export_tflite import require_litert_torch
+        # Fail before training if the optional export environment is missing.
+        require_litert_torch()
     # Set when a profile/subset run builds its own label maps; stays None on the
     # plain path, where build_checkpoint falls back to bare keys as before.
     rich_i2l: Optional[Dict[int, Dict[str, object]]] = None
@@ -1827,7 +1832,7 @@ def main() -> None:
     except Exception as e:
         raise RuntimeError(
             f"Failed to load model '{args.model_type}': {e}\n"
-            f"Supported models: tcn, cnn, lstm, bigru_attention, handgcn (hdgcn)"
+            f"Supported models: tcn, cnn, lstm, bigru_attention, hdgcn, hdgcn_lite"
         )
 
     print(f"\n{'='*70}")
@@ -1987,7 +1992,9 @@ def main() -> None:
             improved = va_f1 > best_val_f1
             if improved:
                 best_val_f1 = va_f1
-                best_state = {k: v.cpu() for k, v in model.state_dict().items()}
+                # cpu() alone aliases live tensors when training on CPU. Clone
+                # so subsequent optimizer/BN updates cannot change the best state.
+                best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
                 since_best = 0
                 _best_epoch_track = epoch
                 _best_val_acc_track = va_acc
@@ -2076,10 +2083,6 @@ def main() -> None:
     print(f"  Both hands:      {te_hand_metrics['both_acc']:.4f} ({te_hand_metrics['both_n']} samples)")
     print(f"{'='*70}\n")
 
-    if tracker and experiment_id:
-        tracker.update_status(experiment_id, "completed")
-        tracker.update_summary(experiment_id, _best_epoch_track, _best_val_acc_track, best_val_f1)
-
     # save
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg_json_for_ckpt = {k: (str(v) if isinstance(v, Path) else v) for k, v in asdict(cfg).items()}
@@ -2150,22 +2153,51 @@ def main() -> None:
     final_checkpoint["model_type"] = model_name
 
     prefix = f"{model_type}_{stamp}" if not subset_mode else f"{model_type}_{subset_tag}_{stamp}"
-    out_ckpt = cfg.out_dir / f"{prefix}.pt"
+    out_ckpt = cfg.out_dir / f"{prefix}{'.tflite' if export_as_tflite else '.pt'}"
+    if export_as_tflite:
+        from processed.train_utils.export_tflite import export_tflite
+        # The best model is already restored above. Pass the live nn.Module,
+        # never serialize/reload a .pt file. Keep labels and preprocessing in
+        # the JSON sidecar because they used to live inside the checkpoint.
+        export_contract = {
+            key: value for key, value in final_checkpoint.items()
+            if key != "model_state_dict"
+        }
+        held_out = next(iter(test_loader))[0][:4]
+        try:
+            export_tflite(
+                model, out_ckpt,
+                sample_input=held_out[:1],
+                validation_inputs=(clip.unsqueeze(0) for clip in held_out[1:]),
+                metadata=export_contract,
+            )
+        except Exception:
+            if tracker and experiment_id:
+                tracker.update_status(experiment_id, "failed")
+            raise
+    else:
+        torch.save(final_checkpoint, out_ckpt)
 
-    torch.save(final_checkpoint, out_ckpt)
+    if tracker and experiment_id:
+        tracker.update_status(experiment_id, "completed")
+        tracker.update_summary(experiment_id, _best_epoch_track, _best_val_acc_track, best_val_f1)
 
     # Final line tells the tailer the EXACT checkpoint of this run
     # (no more "latest file by mtime" guessing) + test metrics.
     _append_metric_line({
         "type": "final",
-        "checkpoint_path": str(out_ckpt.resolve()),
+        # TFLite is a deployment artifact, not a torch checkpoint. The current
+        # backend checkpoint/promotion endpoints must not torch.load this file.
+        "checkpoint_path": None if export_as_tflite else str(out_ckpt.resolve()),
+        "artifact_path": str(out_ckpt.resolve()),
+        "artifact_format": "tflite" if export_as_tflite else "pt",
         "test_acc": round(float(te_acc), 6),
         "test_f1": round(float(te_f1), 6),
         "model_type": model_name,
         "evaluation": test_evaluation,  # confusion matrix + per-class (may be None)
     })
 
-    if tracker and experiment_id:
+    if tracker and experiment_id and not export_as_tflite:
         _model_family_track = f"{subset_tag}-{model_type}" if subset_mode else model_type
         _dialect_model_track = "+".join(dialects) if dialects else "all"
         _runtime_env_track = {
@@ -2225,11 +2257,14 @@ def main() -> None:
                 "both_n": te_hand_metrics['both_n'],
             }
         },
-        "checkpoint": str(out_ckpt),
+        "checkpoint": None if export_as_tflite else str(out_ckpt),
+        "artifact_path": str(out_ckpt),
+        "artifact_format": "tflite" if export_as_tflite else "pt",
+        "metadata_path": str(out_ckpt.with_suffix(".metadata.json")) if export_as_tflite else None,
     }
 
     (cfg.out_dir / f"{prefix}.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Saved checkpoint and summary to {cfg.out_dir}")
+    print(f"Saved {'TFLite artifact' if export_as_tflite else 'checkpoint'} and summary to {cfg.out_dir}")
 
     # OPTIONAL: Run diagnostic tools (additive observability only)
     if args.run_diagnostics:

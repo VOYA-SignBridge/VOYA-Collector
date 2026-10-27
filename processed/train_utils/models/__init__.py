@@ -7,6 +7,7 @@ Supported models:
 - LSTM: Long Short-Term Memory
 - BiGRU_Attention: Bidirectional GRU with Attention
 - HandGCN: Hand Skeleton Graph Convolutional Network
+- HandGCN_Lite: HD-GCN with direct in-memory TFLite export support
 """
 
 from .base import SignLanguageModel
@@ -15,6 +16,7 @@ from .cnn import CNNModel
 from .lstm import LSTMModel
 from .bigru_attention import BiGRUAttentionModel
 from .hd_gcn import HandGCNModel
+from .hd_gcn_lite import HandGCNLiteModel
 
 __all__ = [
     "SignLanguageModel",
@@ -23,6 +25,7 @@ __all__ = [
     "LSTMModel",
     "BiGRUAttentionModel",
     "HandGCNModel",
+    "HandGCNLiteModel",
 ]
 
 MODEL_REGISTRY = {
@@ -33,6 +36,7 @@ MODEL_REGISTRY = {
     "handgcn": HandGCNModel,
     "hdgcn": HandGCNModel,  # Backward compatibility alias
     "hd_gcn": HandGCNModel,
+    "hdgcn_lite": HandGCNLiteModel,
 }
 
 
