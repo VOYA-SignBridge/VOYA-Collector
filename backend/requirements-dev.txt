@@ -6,3 +6,4 @@
 # reused rather than reinstalled.
 pytest==8.3.4
 pytest-timeout==2.3.1
+pytest-html==4.1.1

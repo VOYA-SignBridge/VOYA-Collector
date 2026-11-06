@@ -716,6 +716,23 @@ def cmd_test(args):
     subprocess.run([bash(), "scripts/run_tests.sh", *targets, "-q", "-p", "no:cacheprovider"], cwd=ROOT, env=env)
 
 
+def _kiem_thu(lenh: str) -> None:
+    """Bộ chạy nằm ở scripts/kiem_thu.py; mã thoát của nó là kết luận của lượt chạy."""
+    code = subprocess.run([PY, str(ROOT / "scripts" / "kiem_thu.py"), lenh], cwd=ROOT).returncode
+    if code:
+        raise SystemExit(code)
+
+
+def cmd_kiem_du(_args):
+    """Chay het moi test, don, kiem lai da don, xong mo bao cao."""
+    _kiem_thu("toan-bo")
+
+
+def cmd_bao_cao(_args):
+    """Mo trang bao cao kiem thu."""
+    _kiem_thu("bao-cao")
+
+
 def cmd_disk(args):
     """Dung luong Docker; --don = don an toan, --nen = nen o ao (dung stack)."""
     sh(["docker", "system", "df"], check=False)
@@ -965,6 +982,8 @@ COMMANDS = [
     ("maintenance", "Bao tri | Trang bao tri (on/off)", cmd_maintenance),
     ("fresh", "Bao tri | Code dang chay co moi nhat khong", cmd_fresh),
     ("test", "Bao tri | Chay test (DB test)", cmd_test),
+    ("kiem-du", "Kiem thu | Kiem thu toan bo", cmd_kiem_du),
+    ("bao-cao", "Kiem thu | Mo bao cao", cmd_bao_cao),
     ("disk", "Bao tri | Dung luong Docker / don", cmd_disk),
     ("autostart", "Bao tri | Tu bat sau khi khoi dong + canh gac 30 phut", cmd_autostart),
     ("boot", "Bao tri | Bat stack sau khi bat may (tac vu tu goi)", cmd_boot),
@@ -981,7 +1000,7 @@ COMMANDS = [
 RISK = {
     "start": "confirm", "restart": "confirm", "backup": "confirm", "update-code": "confirm",
     "update-git": "confirm", "maintenance": "confirm", "disk": "confirm", "autostart": "confirm",
-    "boot": "confirm", "goi-drive": "confirm", "test": "confirm",
+    "boot": "confirm", "goi-drive": "confirm", "test": "confirm", "kiem-du": "confirm",
     "stop": "danger", "rollback": "danger", "goi-tao": "danger", "tat-may-cu": "danger",
 }
 #: Chữ phải gõ cho `confirm()` của từng lệnh (mặc định "co").

@@ -61,6 +61,8 @@ VI = {
     "maintenance": ("Trang bảo trì", "Bật/tắt trang 'đang bảo trì' cho người dùng"),
     "fresh": ("Code đang chạy có mới nhất?", "So image và container với mã nguồn"),
     "test": ("Chạy test backend", "Trên DB test riêng, không đụng dữ liệu thật"),
+    "kiem-du": ("Kiểm thử toàn bộ", "Chạy hết mọi test, trình duyệt thật, đo nhận dạng, dọn rồi kiểm lại, tự mở báo cáo"),
+    "bao-cao": ("Mở báo cáo kiểm thử", "Từng ca test và kết quả trả về, do chính công cụ test sinh ra"),
     "disk": ("Dung lượng Docker", "Xem; --don dọn an toàn; --nen nén ổ ảo (dừng stack)"),
     "autostart": ("Tự bật sau khởi động + canh gác", "Tạo/xoá tác vụ Windows; bỏ trống = xem"),
     "boot": ("Bật stack như sau khi khởi động", "Đợi/mở Docker Desktop, bật stack, kiểm"),
@@ -70,7 +72,8 @@ VI = {
     "goi-kiem": ("Kiểm gói", "SHA-256 mọi tệp trong gói"),
     "tat-may-cu": ("Tắt máy cũ", "Tắt tunnel + stack (mở cửa sổ quyền Admin)"),
 }
-GROUP_VI = {"Hang ngay": "Hằng ngày", "Bao tri": "Bảo trì", "Chuyen server": "Chuyển server"}
+GROUP_VI = {"Hang ngay": "Hằng ngày", "Bao tri": "Bảo trì", "Kiem thu": "Kiểm thử",
+            "Chuyen server": "Chuyển server"}
 
 
 class Job:

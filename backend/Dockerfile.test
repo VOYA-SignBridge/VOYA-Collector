@@ -14,9 +14,10 @@ FROM ${BASE_IMAGE}
 
 USER root
 
-COPY requirements-dev.txt /tmp/requirements-dev.txt
+COPY requirements-dev.txt requirements.txt /tmp/
 RUN python -m pip install --no-cache-dir -r /tmp/requirements-dev.txt \
-    && rm /tmp/requirements-dev.txt
+    && rm /tmp/requirements-dev.txt \
+    && mkdir -p /workspace && chown appuser /workspace
 
 # Tests import `app` (backend/app) and the research modules (processed/,
 # scripts/) from the repo mounted at /src.
@@ -25,6 +26,9 @@ ENV PYTHONPATH=/src:/src/backend \
     PYTHONDONTWRITEBYTECODE=1
 
 USER appuser
+# edge-tts đi theo bản trong requirements.txt: Microsoft đổi giao thức thì bản cũ bị 403.
+# `--user` vì ảnh gốc cài vào ~/.local, thứ thắng thư mục hệ thống khi import.
+RUN python -m pip install --no-cache-dir --user "$(grep '^edge-tts==' /tmp/requirements.txt)"
 WORKDIR /src
 
 CMD ["python", "-m", "pytest", "backend/tests", "-q"]
