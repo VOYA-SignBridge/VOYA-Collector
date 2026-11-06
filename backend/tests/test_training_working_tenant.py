@@ -74,7 +74,7 @@ def test_dataset_preparation_is_owned_by_the_working_tenant(working_in_voya, mon
     import app.dataset_prep_tasks as dp
 
     reports, dispatched = [], []
-    monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
+    monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid, tenant=None: None)
     monkeypatch.setattr(dp, "create_pending_report", lambda run_id, **kw: reports.append(kw["tenant_id"]))
     monkeypatch.setattr(dp.prepare_dataset, "delay", lambda **kw: dispatched.append(kw["tenant_id"]))
 

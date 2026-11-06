@@ -272,34 +272,43 @@ def initialize_app_state(
         registry = load_registry(registry_path)
         registry_dir = Path(registry_path).parent
 
+        # Mỗi thành viên có thể có model riêng ở đây: một mục hỏng chỉ được làm mất
+        # đúng mục đó, không được kéo cả dịch vụ của mọi tổ chức đổ theo.
         for entry in registry.models:
-            validate_registry_contract(entry)
+            try:
+                validate_registry_contract(entry)
 
-            raw = Path(entry.checkpoint_path)
-            resolved = (registry_dir / raw).resolve() if not raw.is_absolute() else raw.resolve()
+                raw = Path(entry.checkpoint_path)
+                resolved = (registry_dir / raw).resolve() if not raw.is_absolute() else raw.resolve()
 
-            if not resolved.exists() or not resolved.is_file():
-                raise RuntimeError(f"[MODEL] id={entry.id} checkpoint not found: {resolved}")
+                if not resolved.exists() or not resolved.is_file():
+                    raise RuntimeError(f"[MODEL] id={entry.id} checkpoint not found: {resolved}")
 
-            logger.info("[MODEL] id=%s loading checkpoint path=%s", entry.id, resolved)
+                logger.info("[MODEL] id=%s loading checkpoint path=%s", entry.id, resolved)
 
-            sha = compute_file_sha256(str(resolved))
-            ckpt = load_checkpoint(str(resolved))
-            validate_checkpoint_schema(ckpt)
-            validate_checkpoint_vs_registry(ckpt, entry)
+                sha = compute_file_sha256(str(resolved))
+                ckpt = load_checkpoint(str(resolved))
+                validate_checkpoint_schema(ckpt)
+                validate_checkpoint_vs_registry(ckpt, entry)
 
-            bundle = build_bundle(
-                model_id=entry.id,
-                model_name=entry.name,
-                checkpoint_path=str(resolved),
-                language=entry.language,
-                dialect=entry.dialect,
-                ckpt=ckpt,
-                checkpoint_sha256=sha,
-                label_lookup=label_lookup,
-            )
+                bundle = build_bundle(
+                    model_id=entry.id,
+                    model_name=entry.name,
+                    checkpoint_path=str(resolved),
+                    language=entry.language,
+                    dialect=entry.dialect,
+                    ckpt=ckpt,
+                    checkpoint_sha256=sha,
+                    label_lookup=label_lookup,
+                )
+            except Exception:
+                logger.exception("[MODEL][SKIP] id=%s không nạp được, bỏ qua mục này", entry.id)
+                continue
             bundles[entry.id] = bundle
             logger.info("[MODEL][READY] id=%s warmup_ok=%s", entry.id, bundle.warmup_ok)
+
+        if registry.models and not bundles:
+            raise RuntimeError("[MODEL] không nạp được model nào trong registry")
 
         app.state.registry = registry
     else:

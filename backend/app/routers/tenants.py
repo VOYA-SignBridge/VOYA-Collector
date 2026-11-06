@@ -30,6 +30,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from app import audit, tenant_admin
+from app.tenant_context import tenant_scope
 from app.auth import get_current_user, require_admin
 from app.rate_limit_deps import limit_catalog
 from app.sudo_mode import require_sudo
@@ -245,10 +246,14 @@ def switch_active_tenant(
     except tenant_admin.NotAMember as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    audit.record("tenant.active.switched", actor=current_user, request=request,
-                 target_type="tenant", target_id=result["tenant_id"],
-                 tenant_id=result["tenant_id"],
-                 detail={"is_home": result["is_home"]})
+    # Dòng này mang tenant đích, còn request vẫn ở phạm vi tổ chức cũ: ghi ngoài
+    # `tenant_scope` thì `WITH CHECK` của RLS từ chối và lần chuyển không để lại dấu.
+    # Tư cách thành viên ở đích đã được `set_active_tenant` xác nhận ở trên.
+    with tenant_scope(result["tenant_id"]):
+        audit.record("tenant.active.switched", actor=current_user, request=request,
+                     target_type="tenant", target_id=result["tenant_id"],
+                     tenant_id=result["tenant_id"],
+                     detail={"is_home": result["is_home"]})
     return result
 
 

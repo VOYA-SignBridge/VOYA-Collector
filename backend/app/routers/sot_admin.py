@@ -150,10 +150,10 @@ def sot_remote(current_user: Dict[str, Any] = Depends(require_admin)):
 
     try:
         store = GDriveSotStore(read_only=True)
-        if not store.exists(m.LATEST_NAME):
+        try:
+            latest = json.loads(store.read_bytes(m.LATEST_NAME).decode("utf-8"))
+        except FileNotFoundError:
             return {"available": True, "published": False}
-
-        latest = json.loads(store.read_bytes(m.LATEST_NAME).decode("utf-8"))
         version = latest.get("version")
         manifest_bytes = store.read_bytes(f"{version}/{m.MANIFEST_NAME}")
         manifest = json.loads(manifest_bytes.decode("utf-8"))

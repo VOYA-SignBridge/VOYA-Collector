@@ -54,14 +54,16 @@ def client(monkeypatch):
     """
     from app.config import settings
     from app.main import app
-    from app.auth import require_admin
+    from app.auth import require_admin, require_tenant_curator
 
     monkeypatch.setattr(settings, "public_tenant_id", SCOPE, raising=False)
     app.dependency_overrides[require_admin] = lambda: {
         "id": "kiemthu-khong-phai-uuid", "username": "kiemthu", "is_admin": True,
     }
+    app.dependency_overrides[require_tenant_curator] = app.dependency_overrides[require_admin]
     yield TestClient(app)
     app.dependency_overrides.pop(require_admin, None)
+    app.dependency_overrides.pop(require_tenant_curator, None)
 
 
 @pytest.fixture

@@ -42,3 +42,28 @@ def test_path_traversal_rejected(tmp_path):
         store.read_bytes("../escape.txt")
     with pytest.raises(ValueError):
         store.write_bytes("../../etc/passwd", b"x")
+
+
+def test_gdriveStore_sameFolderLookedUpTwice_asksDriveOnce():
+    """Trang SOT tra `SOT/` nhiều lần trong một lượt; mỗi lần là một lượt gọi Drive."""
+    from types import SimpleNamespace
+
+    from app.sot.store import GDriveSotStore
+
+    da_hoi = []
+
+    def _get_folder_id(ten, cha):
+        da_hoi.append(ten)
+        return None if ten == "thieu" else f"id-{ten}"
+
+    client = SimpleNamespace(root_folder_id="goc", _get_folder_id=_get_folder_id)
+    store = GDriveSotStore()
+    assert store._find_folder_id(client, "SOT/Ver1") == "id-Ver1"
+    assert store._find_folder_id(client, "SOT/Ver1") == "id-Ver1"
+    assert store._find_folder_id(client, "SOT/Ver2") == "id-Ver2"
+    assert da_hoi == ["SOT", "Ver1", "Ver2"]
+
+    # Không có thì không nhớ: lần sau phải hỏi lại, thư mục có thể vừa được tạo.
+    assert store._find_folder_id(client, "SOT/thieu") is None
+    assert store._find_folder_id(client, "SOT/thieu") is None
+    assert da_hoi.count("thieu") == 2

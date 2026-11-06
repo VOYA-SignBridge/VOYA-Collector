@@ -130,6 +130,11 @@ class UserOut(BaseModel):
     # mục Kiểm duyệt sẽ giấu nó khỏi đúng những người nó sinh ra để phục vụ.
     can_moderate: bool = False
 
+    # Cùng tính chất với `can_moderate`, và cần vì `tenant_role` không thay được:
+    # `tenant_role` đọc tổ chức NHÀ, còn `require_tenant_editor` xét tổ chức ĐANG
+    # LÀM VIỆC. Người có nhà ở A làm việc ở B sẽ thấy nút theo vai ở A rồi ăn 403.
+    can_edit_tenant: bool = False
+
 
 class MessageResponse(BaseModel):
     message: str
@@ -207,6 +212,17 @@ def _with_capabilities(user: dict) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("[AUTH] không tra được quyền kiểm duyệt cho %s", out.get("id"))
         out["can_moderate"] = False
+
+    try:
+        from app.tenant_context import current_tenant
+        from app.vocabulary_registry import can_edit_registry
+
+        out["can_edit_tenant"] = can_edit_registry(
+            current_tenant() or str(out.get("tenant_id") or ""),
+            str(out.get("id") or ""), bool(out.get("is_admin")))
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được quyền biên tập cho %s", out.get("id"))
+        out["can_edit_tenant"] = False
     return out
 
 

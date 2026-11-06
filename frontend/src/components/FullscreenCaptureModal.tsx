@@ -484,7 +484,10 @@ export default function FullscreenCaptureModal({
   );
   const [catalogError, setCatalogError] = useState<string>("");
   const [countdown, setCountdown] = useState(0);
+  // "Sẵn sàng" nghĩa là ĐÃ NHẬN DẠNG được khung đầu tiên, không phải camera đã mở:
+  // bộ nhận dạng ~10 MB tải sau đó, và trong lúc ấy chưa thu được khung nào.
   const [isReady, setIsReady] = useState(false);
+  const isReadyRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
@@ -908,7 +911,7 @@ export default function FullscreenCaptureModal({
       if (!ok) return;
     }
     setRecording(false); setMode("IDLE"); setFrames([]);
-    expectedHandsRef.current = null; setCountdown(0); setIsReady(false);
+    expectedHandsRef.current = null; setCountdown(0); setIsReady(false); isReadyRef.current = false;
     setCurrentCaptureIndex(0); setCompletedCaptures(0); setCameraError(null);
     try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* ignore */ }
     stopCameraResources();
@@ -1109,7 +1112,7 @@ export default function FullscreenCaptureModal({
   // Capture handlers
   // -------------------------------------------------------------------------
   const handleQuickCapture = useCallback(() => {
-    if (!labelRef.current || !userRef.current || connectionIssueRef.current) return;
+    if (!labelRef.current || !userRef.current || connectionIssueRef.current || !isReadyRef.current) return;
     setFrames([]); framesRef.current = [];
     expectedHandsRef.current = expectedHandsOptionRef.current;
     // If user explicitly selected 1/2 hands, skip warmup and accept frames immediately
@@ -1217,6 +1220,7 @@ export default function FullscreenCaptureModal({
     hands.setOptions({ ...HAND_TRACKING_OPTIONS });
 
     hands.onResults((results: unknown) => {
+      if (!isReadyRef.current) { isReadyRef.current = true; setIsReady(true); }
       const r = results as {
         multiHandLandmarks?: MediaPipeLandmark[][];
         // MediaPipe's metric 3D output, parallel to multiHandLandmarks and
@@ -1668,10 +1672,10 @@ export default function FullscreenCaptureModal({
 
     cameraRef.current = camera;
     camera.start()
-      .then(() => { setIsReady(true); setCameraError(null); })
+      .then(() => { setCameraError(null); })
       .catch((error: unknown) => {
         const errorMsg = getCameraErrorMessage(error);
-        setCameraError(errorMsg); setIsReady(false);
+        setCameraError(errorMsg); setIsReady(false); isReadyRef.current = false;
       });
 
     return () => {
@@ -1931,7 +1935,9 @@ export default function FullscreenCaptureModal({
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row pt-0 sm:pt-20 overflow-hidden">
         {/* Camera Feed */}
         <div className="flex-1 relative flex items-center justify-center bg-gray-900 w-full min-h-[42svh] sm:min-h-[50vh] lg:h-full overflow-hidden">
-          <video ref={videoRef} autoPlay muted playsInline className="hidden" />
+          {/* Hiện hình camera ngay trong lúc tải bộ nhận dạng; canvas chỉ có hình sau đó. */}
+          <video ref={videoRef} autoPlay muted playsInline style={{ transform: "scaleX(-1)" }}
+            className={isReady ? "hidden" : "absolute inset-0 h-full w-full object-contain"} />
           <canvas
             ref={canvasRef}
             width={CAPTURE_FRAME_WIDTH}
@@ -1939,6 +1945,15 @@ export default function FullscreenCaptureModal({
             className="block w-full h-full max-w-full max-h-full object-cover sm:object-contain border border-gray-600 rounded-lg bg-gray-950"
             style={{ minHeight: "200px" }}
           />
+
+          {!isReady && !cameraError && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none" data-testid="capture-loading">
+              <div className="bg-black/70 text-white px-4 py-2 rounded-lg text-center" role="status">
+                <div className="font-semibold">{t("Đang tải bộ nhận dạng bàn tay...")}</div>
+                <div className="text-xs mt-0.5 text-gray-300">{t("Lần đầu có thể mất vài chục giây. Chưa thu được cho tới khi tải xong.")}</div>
+              </div>
+            </div>
+          )}
 
           {recording && !handsVisible && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

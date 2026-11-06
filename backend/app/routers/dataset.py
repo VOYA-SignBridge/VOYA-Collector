@@ -27,27 +27,38 @@ from app.catalog_sync import (
     empty_sample_trash,
 )
 from app import moderation
-from app.auth import get_current_user, get_current_user_optional, require_admin
-from app.tenant_context import require_tenant
+from app.auth import get_current_user, get_current_user_optional, require_tenant_curator
+from app.tenant_context import current_tenant, require_tenant
 from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
 from app.sample_access import can_manage_tenant_samples, readable_sample_uids
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
 
-def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
-    """Raise 403 if current_user is not the owner of the sample and is not admin.
+def _manages_working_tenant(current_user: Dict[str, Any]) -> bool:
+    """Platform admin, hoặc admin/editor của tổ chức đang làm việc.
 
-    Legacy samples with auth_user_id=NULL (guest uploads) can only be deleted by admin.
+    `current_tenant()` chứ không `require_tenant()`: không có phạm vi thì đây là
+    câu trả lời "không" cho người thường, không phải một lỗi 500.
     """
-    if current_user.get("is_admin"):
-        return  # Admin bypass
+    return can_manage_tenant_samples(current_user, current_tenant() or "")
+
+
+def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
+    """Raise 403 unless current_user owns the sample or manages the working tenant.
+
+    Legacy samples with auth_user_id=NULL (guest uploads) can only be touched by
+    a tenant admin/editor. Passing here does not reach across tenants: every
+    caller then acts through a `sync_*` bound to `require_tenant()`.
+    """
+    if _manages_working_tenant(current_user):
+        return
     owner_id = get_sample_owner(sample_id)
     if owner_id is None:
         # Guest sample or sample not found in DB — only admin can touch
         raise HTTPException(
             status_code=403,
-            detail="Chỉ admin mới có thể xóa mẫu không có chủ sở hữu",
+            detail="Chỉ quản trị viên hoặc biên tập viên tổ chức mới xóa được mẫu không có chủ sở hữu",
         )
     if str(owner_id) != str(current_user["id"]):
         raise HTTPException(
@@ -58,7 +69,7 @@ def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> Non
 
 _SKIP_REASONS = {
     "foreign": "thuộc về tài khoản khác",
-    "unowned": "chưa gắn chủ sở hữu (dữ liệu cũ) — cần admin",
+    "unowned": "chưa gắn chủ sở hữu (dữ liệu cũ) — cần quản trị viên tổ chức",
     "missing": "không có trong cơ sở dữ liệu",
 }
 
@@ -68,7 +79,8 @@ def _actionable_uids(
 ) -> tuple[List[str], Dict[str, Any]]:
     """Keep only the uids this caller may act on, and explain the rest.
 
-    Admin acts on everything. For anyone else this is ONE query for the whole
+    A manager of the working tenant acts on everything in it (`_bulk` binds the
+    actual work to that tenant). For anyone else this is ONE query for the whole
     batch (partition_sample_ownership), not one per uid — a 200-sample
     selection used to mean 200 round-trips.
 
@@ -78,7 +90,7 @@ def _actionable_uids(
     mention of the other 3 reads as data loss.
     """
     uids = [str(u).strip() for u in (uids or []) if str(u or "").strip()]
-    if current_user.get("is_admin"):
+    if _manages_working_tenant(current_user):
         return uids, {"skipped_count": 0, "skipped": {}}
 
     split = partition_sample_ownership(uids, str(current_user.get("id") or ""))
@@ -232,7 +244,7 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
 def update_label(
     class_ref: str,
     label: str = Form(...),
-    admin_user: Dict[str, Any] = Depends(require_admin),
+    admin_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     try:
         result = sync_update_class(class_ref, {"label_original": label}, tenant_id=require_tenant())
@@ -245,7 +257,7 @@ def update_label(
 def delete_label(
     class_ref: str,
     request: Request,
-    admin_user: Dict[str, Any] = Depends(require_admin),
+    admin_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     try:
         result = sync_soft_delete_class(class_ref, tenant_id=require_tenant())
@@ -372,7 +384,7 @@ def list_sample_trash(current_user: Dict[str, Any] = Depends(get_current_user)):
     try:
         tenant = require_tenant()
         if can_manage_tenant_samples(current_user, tenant):
-            items = list_trash_samples()
+            items = list_trash_samples(tenant)
         else:
             items = list_trash_samples_for_user(str(current_user["id"]))
         readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in items], tenant, include_deleted=True)
@@ -404,14 +416,14 @@ def bulk_purge_samples_endpoint(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Permanently delete samples. Body: {sample_uids: [...]} for a selection, or
-    {all: true} to empty the trash. Irreversible. A non-admin acts ONLY on their
-    own samples: {all: true} empties just their trash; anything else is reported
-    in `skipped` with a reason."""
-    is_admin = bool(current_user.get("is_admin"))
+    {all: true} to empty the trash. Irreversible. Anyone who does not manage the
+    working tenant acts ONLY on their own samples: {all: true} empties just their
+    trash; anything else is reported in `skipped` with a reason."""
+    is_admin = _manages_working_tenant(current_user)
     skip_info: Dict[str, Any] = {"skipped_count": 0, "skipped": {}}
     if payload.get("all"):
         if is_admin:
-            result = empty_sample_trash()
+            result = empty_sample_trash(require_tenant())
         else:
             own = [s["sample_uid"] for s in list_trash_samples_for_user(str(current_user["id"]))]
             result = bulk_purge_samples(own)

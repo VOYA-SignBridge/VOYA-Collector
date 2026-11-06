@@ -170,6 +170,8 @@ export interface TrainingMetrics {
 
 export interface TrainingJob {
   id: string;
+  /** Người chạy job. */
+  auth_user_id?: string | null;
   status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   config: TrainingConfig;
   created_at: string;

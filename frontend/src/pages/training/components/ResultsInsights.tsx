@@ -19,6 +19,7 @@ import {
   PlayCircleIcon,
   ArrowUpCircleIcon,
 } from '../../../components/ui/Icons';
+import { canEditTenant } from '../../../api/auth';
 import { useAuth } from '../../../hooks/useAuth';
 import { useI18n } from "../../../i18n";
 
@@ -83,7 +84,9 @@ const ProvenanceRow: React.FC<{
 const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
   const { t } = useI18n();
   const [showTestModal, setShowTestModal] = useState(false);
-  const { isAdmin } = useAuth();
+  const { user } = useAuth();
+  const canEdit = canEditTenant(user);
+  const isOwner = !!user?.id && job?.auth_user_id === user.id;
   const { getJobEvaluation, getJobProvenance } = useTrainingAPI();
   const [promoting, setPromoting] = useState(false);
   const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
@@ -458,15 +461,17 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                   <PlayCircleIcon className="h-3.5 w-3.5" />
                   {t("Kiểm tra model (Realtime)")}
                 </button>
-                {isAdmin && onPromote && job.status === 'completed' && !job.promoted_at && (
+                {(canEdit || isOwner) && onPromote && job.status === 'completed' && !job.promoted_at && (
                   <button
                     onClick={async () => {
-                      if (!window.confirm(t('Đưa model này vào tab nhận diện realtime? Model sẽ hiển thị cho tất cả người dùng.'))) return;
+                      if (!window.confirm(canEdit
+                        ? t('Đưa model này vào tab nhận diện realtime? Model sẽ thay model cùng phương ngữ đang chạy của tổ chức bạn.')
+                        : t('Đưa model này vào tab nhận diện realtime cho riêng bạn? Người khác không thấy model này.'))) return;
                       setPromoting(true);
                       setPromoteMessage(null);
                       try {
                         const res = await onPromote();
-                        setPromoteMessage(res ? res.message : t('Không thể đưa vào Realtime — kiểm tra quyền admin hoặc log backend'));
+                        setPromoteMessage(res ? res.message : t('Không thể đưa vào Realtime. Hãy thử lại sau.'));
                       } finally {
                         setPromoting(false);
                       }

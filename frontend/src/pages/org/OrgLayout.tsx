@@ -43,15 +43,17 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Outlet, useParams } from "react-router-dom";
 
+import { canEditTenant } from "../../api/auth";
 import { fetchMyTenant, listMyTenants, switchTenant, type TenantMembershipRow } from "../../api/tenants";
 import Button from "../../components/ui/Button";
+import { useAuth } from "../../hooks/useAuth";
 import { useI18n } from "../../i18n";
 import {
-  ArrowLeftIcon, BuildingIcon, ChartBarIcon, ChipIcon, ClipboardCheckIcon,
-  FolderIcon, HandIcon, TagIcon, UploadIcon, UsersIcon,
+  ArrowLeftIcon, BuildingIcon, ChartBarIcon, ChipIcon, ClipboardCheckIcon, DatabaseIcon,
+  FolderIcon, HandIcon, ServerIcon, TagIcon, TrashIcon, UploadIcon, UsersIcon,
 } from "../../components/ui/Icons";
 
-type Item = { key: string; to: string; icon: ReactNode; end?: boolean };
+type Item = { key: string; to: string; icon: ReactNode; end?: boolean; adminOnly?: boolean };
 
 const ICON = "h-4 w-4 shrink-0";
 
@@ -76,6 +78,13 @@ const GROUPS: { title: string | null; items: Item[] }[] = [
     title: "QUẢN LÝ",
     items: [
       { key: "Thành viên", to: "members", icon: <UsersIcon className={ICON} /> },
+      // Ba mục dưới là việc của người phụ trách dữ liệu tổ chức. Máy chủ cho vai
+      // biên tập vào từ trước, nhưng chúng chỉ có route dưới `/admin`, mà cả khu
+      // đó gác bằng cờ quản trị NỀN TẢNG, nên họ không có đường nào tới.
+      { key: "Quản lý dữ liệu", to: "data", icon: <DatabaseIcon className={ICON} />, adminOnly: true },
+      { key: "Người ký", to: "signers", icon: <UsersIcon className={ICON} />, adminOnly: true },
+      { key: "Hàng đợi xử lý", to: "processing", icon: <ServerIcon className={ICON} />, adminOnly: true },
+      { key: "Thùng rác", to: "trash", icon: <TrashIcon className={ICON} /> },
       { key: "Cài đặt tổ chức", to: "settings", icon: <ClipboardCheckIcon className={ICON} /> },
     ],
   },
@@ -83,6 +92,7 @@ const GROUPS: { title: string | null; items: Item[] }[] = [
 
 export default function OrgLayout() {
   const { t } = useI18n();
+  const { user } = useAuth();
   const { tenantId = "" } = useParams<{ tenantId: string }>();
 
   const [rows, setRows] = useState<TenantMembershipRow[]>([]);
@@ -228,7 +238,7 @@ export default function OrgLayout() {
                 </p>
               )}
               <ul className="space-y-1">
-                {group.items.map((item) => (
+                {group.items.filter((item) => !item.adminOnly || canEditTenant(user)).map((item) => (
                   <li key={item.to || "_index"}>
                     <NavLink
                       to={item.to}

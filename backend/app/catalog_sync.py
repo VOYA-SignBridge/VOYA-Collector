@@ -1291,9 +1291,9 @@ def sync_purge_class(class_uid: str, *, tenant_id: str) -> Dict[str, Any]:
         return {"purged": True, "class_uid": class_uid, "op_id": op_id}
 
 
-def list_trash_classes() -> List[Dict[str, Any]]:
+def list_trash_classes(tenant_id: str) -> List[Dict[str, Any]]:
     ensure_tables()
-    return db_list_deleted_classes()
+    return db_list_deleted_classes(tenant_id)
 
 
 # ===========================================================================
@@ -1696,9 +1696,9 @@ def sync_reassign_sample(sample_uid: str, target_class_ref: int | str,
                                    error_code=getattr(exc, "error_code", "CATALOG_SYNC_FAILED")) from exc
 
 
-def list_trash_samples() -> List[Dict[str, Any]]:
+def list_trash_samples(tenant_id: str) -> List[Dict[str, Any]]:
     ensure_tables()
-    return db_list_deleted_samples()
+    return db_list_deleted_samples(tenant_id)
 
 
 def list_trash_samples_for_user(auth_user_id: str) -> List[Dict[str, Any]]:
@@ -1753,14 +1753,14 @@ def bulk_purge_samples(sample_uids: Sequence[str]) -> Dict[str, Any]:
     return _bulk(sync_purge_sample, sample_uids)
 
 
-def empty_class_trash() -> Dict[str, Any]:
-    """Permanently delete every soft-deleted class."""
-    return bulk_purge_classes([c["class_uid"] for c in list_trash_classes()])
+def empty_class_trash(tenant_id: str) -> Dict[str, Any]:
+    """Permanently delete every soft-deleted class of ONE tenant."""
+    return bulk_purge_classes([c["class_uid"] for c in list_trash_classes(tenant_id)])
 
 
-def empty_sample_trash() -> Dict[str, Any]:
-    """Permanently delete every soft-deleted sample (whose class is active)."""
-    return bulk_purge_samples([s["sample_uid"] for s in list_trash_samples()])
+def empty_sample_trash(tenant_id: str) -> Dict[str, Any]:
+    """Permanently delete every soft-deleted sample of ONE tenant (class still active)."""
+    return bulk_purge_samples([s["sample_uid"] for s in list_trash_samples(tenant_id)])
 
 
 def sync_purge_sample(sample_uid: str, *, tenant_id: str) -> Dict[str, Any]:

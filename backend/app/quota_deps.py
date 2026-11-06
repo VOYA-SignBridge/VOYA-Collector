@@ -180,10 +180,15 @@ def guard_storage(
     thật, rồi tới `Content-Length` của yêu cầu, cuối cùng là 0. Giữ chỗ 0 byte
     vẫn phải qua phép nhận việc — một tổ chức đã chạm trần bị chặn ngay ở đây
     chứ không phải sau khi đã ghi xong tệp.
+
+    Giữ chỗ ở tổ chức ĐANG LÀM VIỆC: đó là nơi tệp được ghi và là chủ mà
+    `reconcile` tính byte. Trước 06/11/2026 nó đọc tổ chức NHÀ, trong khi request
+    nằm trong phạm vi tổ chức kia, nên RLS từ chối và mọi lượt tải lên của người
+    đang làm việc ngoài tổ chức nhà trả 500.
     """
     from app import storage_quota
 
-    tenant = tenant_of(current_user)
+    tenant = working_tenant_of(current_user)
     if nbytes is not None:
         n = max(0, int(nbytes))
     elif request is not None:

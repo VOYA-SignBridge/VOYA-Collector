@@ -11,8 +11,10 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ValidationError, root_validator, validator
 
+from app import realtime_slots
 from app.config import settings
 from app.rate_limit_deps import limit_predict
+from app.tenant_context import current_tenant
 
 logger = logging.getLogger("realtime_proxy")
 
@@ -131,11 +133,22 @@ class RealtimeProxyResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/models")
-async def proxy_models(response: Response) -> Any:
-    """Pure passthrough to inference service /models.
+async def _nguoi_goi(request: Request) -> Optional[str]:
+    """Id người gọi. Chỉ gọi khi có slot cá nhân: đường /predict chạy nhiều khung mỗi giây."""
+    from fastapi.concurrency import run_in_threadpool
 
-    No caching, mutation, or reordering in backend.
+    from app.access_gate import _resolve_user
+
+    user = await run_in_threadpool(_resolve_user, request)
+    return str(user.get("id")) if user else None
+
+
+@router.get("/models")
+async def proxy_models(request: Request, response: Response) -> Any:
+    """Inference service /models, minus the slots of other tenants.
+
+    The inference service knows nothing about tenants, so this is the only place
+    that can hide them. No caching or reordering in backend.
     Cache-Control: no-store prevents stale browser model list.
     """
     client = _get_client()
@@ -150,7 +163,10 @@ async def proxy_models(response: Response) -> Any:
 
     if upstream.status_code == 200:
         response.headers["Cache-Control"] = "no-store"
-        return upstream.json()
+        models = upstream.json()
+        tenant = current_tenant()
+        nguoi = await _nguoi_goi(request) if any(realtime_slots.is_personal(m.get("id")) for m in models) else None
+        return [m for m in models if realtime_slots.visible_to(m.get("id"), tenant, nguoi)]
 
     logger.error(
         "[REALTIME_PROXY] event=UPSTREAM_ERROR endpoint=models status=%d",
@@ -237,6 +253,13 @@ async def proxy_predict(request: Request, response: Response) -> RealtimeProxyRe
     # 5. Generate request_id if absent
     request_id = (body.request_id or "").strip() or uuid.uuid4().hex
     model_id = body.model_id
+
+    # Danh sách đã ẩn slot của tổ chức khác, nhưng ẩn không phải chặn: `model_id`
+    # do client gửi. 404 như thể slot không tồn tại — 403 sẽ xác nhận là có thật.
+    nguoi = await _nguoi_goi(request) if realtime_slots.is_personal(model_id) else None
+    if not realtime_slots.visible_to(model_id, current_tenant(), nguoi):
+        logger.warning("[REALTIME_PROXY] req=%s model=%s event=FOREIGN_SLOT", request_id, model_id)
+        raise HTTPException(status_code=404, detail="Model not found")
 
     logger.info(
         "[REALTIME_PROXY] req=%s model=%s event=REQUEST",

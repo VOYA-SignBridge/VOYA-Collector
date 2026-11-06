@@ -338,7 +338,8 @@ VOYA fresh</code></pre></div>
         <thead><tr><th>Bạn sửa</th><th>Chạy ở dịch vụ</th><th>Để có hiệu lực</th></tr></thead>
         <tbody>
           <tr><td><code>backend/app/**</code></td><td>backend, worker, trainer, celery-beat, sot-init (cùng 1 image)</td><td><code>VOYA update-code</code> (dựng lại nhanh, ~1–3 phút)</td></tr>
-          <tr><td><code>backend/requirements.txt</code>, <code>backend/Dockerfile</code></td><td>như trên</td><td><code>VOYA update-code --full</code> (tải lại thư viện, lâu)</td></tr>
+          <tr><td><code>backend/requirements.txt</code></td><td>như trên</td><td><code>VOYA update-code</code> (chỉ tải gói đã đổi); riêng khi đổi <code>torch</code> thì <code>--full</code></td></tr>
+          <tr><td><code>backend/Dockerfile</code></td><td>như trên</td><td><code>VOYA update-code --full</code> (tải lại thư viện, lâu)</td></tr>
           <tr><td><code>frontend/**</code></td><td>frontend</td><td><code>VOYA update-code --frontend</code>; lúc phát triển thì dùng <code>npm run dev</code></td></tr>
           <tr><td><code>processed/**</code>, <code>scripts/**</code>, <code>config/**</code></td><td>gắn vào container qua <code>/workspace</code></td><td>có hiệu lực ngay, không cần dựng</td></tr>
           <tr><td><code>backend/realtime_service/**</code></td><td>realtime_service (gắn thẳng mã nguồn)</td><td><code>docker compose restart realtime_service</code></td></tr>

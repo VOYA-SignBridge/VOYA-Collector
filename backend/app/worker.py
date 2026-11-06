@@ -2,7 +2,8 @@ import logging
 import os
 from celery import Celery
 from celery.signals import (
-    before_task_publish, task_prerun, task_postrun, worker_ready, setup_logging,
+    before_task_publish, task_failure, task_prerun, task_postrun, worker_ready,
+    setup_logging,
 )
 from app.config import settings
 from app.mem_utils import release_memory
@@ -27,7 +28,7 @@ def config_loggers(*args, **kwargs):
 
 
 @before_task_publish.connect
-def stamp_tenant_on_task(headers=None, **_kwargs):
+def stamp_tenant_on_task(headers=None, body=None, **_kwargs):
     """Record which tenant asked for this task, at dispatch time.
 
     Dispatch is the only moment the answer is known. By the time the worker
@@ -41,6 +42,54 @@ def stamp_tenant_on_task(headers=None, **_kwargs):
     tenant = current_tenant()
     if tenant and headers is not None:
         headers[TENANT_HEADER] = tenant
+        # Cùng câu trả lời, ghi thêm một chỗ mà màn hình hàng đợi đọc được:
+        # `celery inspect` không trả header tự đặt. Xem app/task_registry.py.
+        # Protocol 2 đặt id trong header; protocol 1 đặt trong body.
+        task_id = headers.get("id") or (body.get("id") if isinstance(body, dict) else None)
+        from app import task_registry
+
+        task_registry.record_owner(task_id, tenant)
+
+
+@task_failure.connect
+def audit_task_failure(sender=None, task_id=None, exception=None, **_kwargs):
+    """Ghi một dòng `task.failed` khi tác vụ hỏng HẲN.
+
+    Celery không giữ sổ việc hỏng khi không có backend kết quả, nên màn hình
+    UC16 đọc mục "việc hỏng gần đây" từ `audit_log`. Trước 23/10/2026 không chỗ
+    nào ghi dòng đó, nên mục ấy luôn rỗng — đọc như "không có việc hỏng".
+
+    Tín hiệu này chỉ bắn ở lần thất bại cuối: một lần `self.retry()` ném
+    `Retry`, không phải `task_failure`. Nó chạy TRƯỚC `task_postrun`, nên phạm
+    vi do `task_prerun` đặt vẫn còn: việc của một tổ chức ghi dòng mang tenant
+    đó, việc nền tảng ghi dòng `tenant_id` NULL mà chỉ system scope đọc được.
+
+    Ngoại lệ là tiến trình con chết (hết RAM, quá giờ): Celery bắn tín hiệu từ tiến
+    trình CHA, nơi `task_prerun` chưa từng chạy. Không có phạm vi thì RLS từ chối dòng
+    này, đúng những lỗi nặng nhất lại không hiện, nên tra chủ việc ở sổ ghi.
+    """
+    try:
+        from contextlib import nullcontext
+
+        from app import audit, task_registry
+        from app.tenant_context import current_tenant, in_system_scope, system_scope, tenant_scope
+
+        name = getattr(sender, "name", None) or "?"
+        error = f"{type(exception).__name__}: {exception}" if exception else ""
+        if current_tenant() or in_system_scope():
+            pham_vi = nullcontext()
+        else:
+            chu = task_registry.owners_of([str(task_id or "")]).get(str(task_id or ""))
+            pham_vi = tenant_scope(chu) if chu else system_scope("task_failure ở tiến trình cha của worker")
+        with pham_vi:
+            audit.record(
+                "task.failed",
+                target_type="task",
+                target_id=str(task_id or ""),
+                detail={"name": name, "error": error[:300]},
+            )
+    except Exception as exc:  # pragma: no cover - nhật ký hỏng không được làm hỏng worker
+        logger.warning("[TASK-FAILURE] khong ghi duoc audit cho %s: %s", task_id, exc)
 
 
 @task_prerun.connect

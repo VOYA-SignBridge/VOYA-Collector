@@ -1688,3 +1688,122 @@ Hướng gia cố về sau (chưa làm, không gấp — hiện có 0 endpoint t
 
 Ghi vào Data Dictionary ở dạng mô tả trung thực (`VERIFIED`), không hạ trạng
 thái: cơ chế đã được xác minh, cái thiếu là một lớp gia cố chưa có.
+
+---
+
+## Việc của tổ chức bị khoá ở quản trị nền tảng (05/11/2026)
+
+`authorization/catalog.py` cấp `training.promote`, `class.update`, `class.delete`
+và `sample.delete` cho vai tổ chức, nhưng mã gác các route đó bằng `require_admin`
+(`users.is_admin`). Hệ quả: quản trị viên một trường huấn luyện xong không tự đưa
+được mô hình vào dùng, và biên tập viên không sửa được nhãn của chính tổ chức.
+
+**Đã sửa.** Promote và 9 route sửa/xoá lớp chuyển sang `require_tenant_curator`
+(admin/editor của tổ chức ĐANG LÀM VIỆC, không nhận khoá API). Mẫu vô chủ và thùng
+rác mẫu theo `can_manage_tenant_samples`. Giao diện đọc `can_edit_tenant` thay cho
+`is_admin`; `tenant_role` không dùng được vì nó đọc tổ chức NHÀ. `/admin/data`,
+`/admin/signers`, `/admin/processing` có thêm lối vào dưới `/org/:tenantId`.
+
+**Mở quyền đòi phải vá ba chỗ trước, nếu không là tạo lỗ xuyên tổ chức:**
+
+| Chỗ | Vì sao nguy hiểm khi mở | Đã làm |
+|---|---|---|
+| Slot realtime | `models.json` một slot/phương ngữ cho cả nền tảng: editor trường A sẽ thay model mọi trường đang dùng | `app/realtime_slots.py`: tổ chức dùng `hoa-de@<tenant>`, slot trần là của Cộng đồng; proxy ẩn ở `/models` và trả 404 ở `/predict` |
+| Thùng rác | `list_deleted_*` không có điều kiện tenant, chỉ dựa RLS, và "dọn thùng" nối thẳng vào đó | Thêm điều kiện tường minh, `empty_*_trash` bắt buộc `tenant_id` |
+| Cổng phương ngữ | `assert_can_use_dialect` / `dialect_owner` ở `training.py` không truyền tenant nên luôn tra `default`: phương ngữ chờ duyệt của tổ chức khác luôn lọt | Truyền tổ chức đang làm việc |
+
+**Cố ý KHÔNG đổi:**
+
+- Slot chung vẫn do vai tổ chức của `default` thay được, theo đúng danh mục: 6 biên
+  tập viên `default` giờ thay được model mọi người dùng thấy. Mọi lượt promote ghi
+  `audit_log` (`training.promote`). Muốn hẹp hơn thì đó là quyết định sản phẩm.
+- Xoá vĩnh viễn lớp mở cho cả editor, cũng theo danh mục (`class.delete`).
+- Mẫu mới vẫn `pending` và không vào tập huấn luyện cho tới khi được duyệt
+  (`COMMUNITY_MODERATION.md`). Đây là cổng chất lượng, không phải lỗi quyền.
+- `community_member` không có `training.submit` trong danh mục nhưng mã vẫn cho
+  huấn luyện (`AUTHZ_MODE=shadow`, hệ cũ quyết định). Chưa đóng lệch này.
+- `/training/jobs/{id}/cancel` và `DELETE` chưa kiểm chủ job: thành viên cùng tổ
+  chức huỷ/xoá được job của nhau. Không vượt tổ chức, nhưng là nợ.
+
+---
+
+## Đợt kiểm thật bằng trình duyệt (06/11/2026)
+
+### Đã sửa
+
+- **Tải lên trả 500 khi làm việc ngoài tổ chức nhà.** `guard_storage` giữ chỗ ở tổ
+  chức nhà trong phạm vi tổ chức kia, RLS từ chối. Giờ giữ chỗ ở tổ chức đang làm
+  việc, cùng chủ mà `reconcile` tính byte.
+- **Nhật ký chuyển tổ chức không bao giờ được ghi.** `tenant.active.switched` mang
+  tenant đích trong phạm vi tổ chức cũ. Giờ ghi trong `tenant_scope` của đích.
+- **Giọng đọc hỏng hẳn.** `edge-tts 7.2.8` bị Microsoft trả 403; `7.3.1` đọc được.
+  Đổi `requirements.txt` nên phải dựng lại ảnh đầy đủ (`update-code --full`).
+  Giao diện từng im lặng khi lỗi, giờ hiện thông báo.
+- **Lần sửa nhãn đầu của mỗi worker chậm** vì chạy lại `ensure_tables()` trong request.
+
+### OPEN — model không biết nói "không phải ký hiệu"
+
+Đo 06/11/2026 bằng mẫu thật qua dịch vụ realtime đang chạy. Tập test được chia sau khi
+hai checkpoint đã huấn luyện nên số "đúng" có thể lạc quan.
+
+| Tình huống | `hoa-de` | `bang-chu-cai` |
+|---|---|---|
+| Đúng, đủ 60 khung | 100% (59 mẫu) | 97,9% (237 mẫu) |
+| Tay đứng yên: hiện / đọc thành tiếng | 100% / 95% | 98% / 85% |
+| Ký từ ngoài model: hiện / đọc | 92% / 60% | 88% / 52% |
+| Đúng khi cửa sổ mới 30 khung | 96,6% | 26,2% |
+| Đúng khi camera chậm một nửa | 98,3% | 100% |
+
+Đường dịch vụ và chuẩn hoá đúng. Softmax luôn chọn một nhãn trong tập đóng, nên mọi
+thứ ngoài tập đều thành một nhãn với độ tin cao. Nâng ngưỡng chỉ đỡ một phần và không
+chung được: ở 0,95 `hoa-de` giữ 98% nhận đúng, `bang-chu-cai` chỉ còn 80%.
+
+Hướng đúng là huấn luyện thêm lớp từ chối từ mẫu ngoài tập và tay nghỉ. Cần chốt dữ
+liệu phủ định trước khi làm. Ngưỡng đọc 85% là lựa chọn của chủ dự án, chưa đổi.
+
+### OPEN — gõ tên nhãn trong khung thu tạo lớp mới
+
+Trong khung thu camera, gõ tên mà không chọn gợi ý thì `/upload/camera` đăng ký lớp mới
+ở phương ngữ đang chọn (mặc định `common`), kể cả với thành viên không có vai, dù tên đó
+đã có ở phương ngữ khác. Mẫu rơi vào lớp trùng và không vào tập của phương ngữ cần thu.
+
+### Thành viên dùng model của riêng mình (06/11/2026)
+
+Chủ dự án chốt: thành viên thường vẫn tự dùng được cho cá nhân. `POST /training/jobs/{id}/promote`
+giờ có hai đường: admin/editor vào slot tổ chức; thành viên chỉ với job của chính mình, vào
+slot cá nhân `hoa-de@<tenant>~<user id>` (`realtime_slots`), chỉ người đó thấy và gọi được.
+Đây là nới so với `catalog.py` (`training.promote` không có ở vai contributor) nhưng không
+đụng tới model của ai: slot cá nhân không thay slot chung.
+
+Hạn chế biết trước: mỗi slot cá nhân chiếm thêm RAM ở dịch vụ realtime (giới hạn 800 MB), chưa
+có trần số slot và chưa có đường gỡ.
+
+### Rà soát phần chưa commit (06/11/2026)
+
+Đã sửa, mỗi mục có test trừ khi ghi khác:
+
+| Lỗi | Hệ quả nếu để | Cách sửa |
+|---|---|---|
+| `is_owner` chỉ có ở `GET /jobs` | Thành viên huấn luyện xong không thấy nút đưa vào Realtime, phải mở lại từ lịch sử | Job mang `auth_user_id` trên mọi đường, giao diện tự so |
+| Promote ghi `models.json` rồi mới `/reload` kiểm | Một model hỏng làm realtime của mọi tổ chức không lên ở lần khởi động sau | 4xx từ `/reload` thì trả slot về cũ; `startup.py` bỏ qua mục hỏng (kiểm trên container thật, không có test tự động) |
+| `models.json` ghi không khoá, không nguyên tử | Hai người promote cùng lúc mất entry của nhau | `FileLock` + `atomic_write_json` |
+| `supersede_other_promotions` theo tổ chức + phương ngữ | Job đang chạy ở slot khác bị ghi "đã thay" | Chỉ job có checkpoint vừa bị đẩy khỏi slot |
+| Biên tập viên `default` promote | Thay slot chung của mọi tổ chức và khách | Slot chung chỉ dành cho quản trị nền tảng |
+| `task_failure` từ tiến trình cha của worker | Lỗi nặng nhất (hết RAM) không vào "Việc hỏng gần đây" | Tra chủ việc ở sổ ghi, không có thì system scope |
+| `/realtime/predict` tra người dùng hai lần mỗi khung | Thêm tải ở đường nóng | Nhớ trên `request.state` |
+
+Còn mở:
+
+* `promoted_at` không cho biết job ở slot nào: job đã vào slot cá nhân thì biên tập viên không
+  thấy nút đưa vào slot tổ chức, phải huấn luyện lại. Cần lưu slot trên job (đổi lược đồ).
+* `/login` và `/refresh` trả `can_edit_tenant` theo phạm vi khách, không theo nơi làm việc.
+  Chưa ảnh hưởng ai vì giao diện gọi lại `/me`; `_fetch_user_by_id` không chọn `active_tenant_id`
+  nên sửa đúng phải thêm một truy vấn.
+
+Đo tốc độ cùng ngày, trên máy phát triển:
+
+| Chỗ | Trước | Sau | Ghi chú |
+|---|---|---|---|
+| `/admin/processing` | 4,19 s | 2,12 s | Hai lệnh `inspect` chạy song song |
+| `/admin/sot/remote` | 5,8 s | 7,5 s trở lên | 11 lượt Drive × ~350 ms, không phải lỗi mã; ô này tải riêng, không chặn trang |
+| 8 API của một trang | 181 ms | 202 ms | `access_gate` vào threadpool không làm nhanh hơn; giữ để truy vấn chậm không chặn event loop |

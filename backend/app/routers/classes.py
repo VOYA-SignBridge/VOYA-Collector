@@ -28,7 +28,7 @@ from app.catalog_sync import (
     empty_class_trash,
 )
 from app.config import settings
-from app.auth import get_current_user, require_admin, require_tenant_editor
+from app.auth import get_current_user, require_tenant_curator, require_tenant_editor
 from app.tenant_context import require_tenant
 
 from app.webhooks import emit
@@ -515,7 +515,7 @@ def balance_plan(target: int | None = None):
 def update_class(
     class_ref: str,
     payload: dict = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     try:
         result = sync_update_class(class_ref, payload, tenant_id=require_tenant())
@@ -549,10 +549,10 @@ def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
 
 
 @router.get("/trash")
-def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
-    """List soft-deleted classes (Trash). Admin only."""
+def list_class_trash(current_user: Dict[str, Any] = Depends(require_tenant_curator)):
+    """List soft-deleted classes (Trash) of the working tenant."""
     try:
-        items = list_trash_classes()
+        items = list_trash_classes(require_tenant())
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Kh\u00f4ng \u0111\u1ecdc \u0111\u01b0\u1ee3c th\u00f9ng r\u00e1c: {exc}")
@@ -561,7 +561,7 @@ def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
 @router.post("/trash/restore", dependencies=[Depends(limit_catalog)])
 def bulk_restore_classes_endpoint(
     payload: dict = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Restore several soft-deleted classes at once. Body: {class_uids: [...]}."""
     uids = payload.get("class_uids") or []
@@ -574,12 +574,12 @@ def bulk_restore_classes_endpoint(
 def bulk_purge_classes_endpoint(
     request: Request,
     payload: dict = Body(default={}),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Permanently delete classes. Body: {class_uids: [...]} for a selection, or
     {all: true} to empty the whole class trash. Irreversible."""
     if payload.get("all"):
-        result = empty_class_trash()
+        result = empty_class_trash(require_tenant())
     else:
         result = bulk_purge_classes(payload.get("class_uids") or [])
     _reject_if_nothing_done(result)
@@ -596,7 +596,7 @@ def bulk_purge_classes_endpoint(
 def delete_class(
     class_ref: str,
     request: Request,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Soft-delete a class to Trash (restorable). Files/Drive are kept until purge."""
     try:
@@ -623,7 +623,7 @@ def delete_class(
 @router.post("/{class_uid}/restore", dependencies=[Depends(limit_catalog)])
 def restore_class_endpoint(
     class_uid: str,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Restore a soft-deleted class from Trash."""
     try:
@@ -637,7 +637,7 @@ def restore_class_endpoint(
 def purge_class_endpoint(
     class_uid: str,
     request: Request,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Permanently delete a class (files + Drive + DB). Irreversible.
 

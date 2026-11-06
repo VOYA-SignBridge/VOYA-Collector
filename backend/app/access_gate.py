@@ -34,6 +34,7 @@ import logging
 from typing import Optional
 
 from fastapi import Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -419,6 +420,8 @@ def _has_any_tenant_grant(user) -> bool:
 def _resolve_user(request: Request):
     """Ai đang gọi, hoặc None.
 
+    Nhớ kết quả trên request: `/realtime/predict` hỏi lại cùng câu này ở mỗi khung hình.
+
     Hai chi tiết ở đây đều là lỗi đã mắc phải rồi sửa, nên đáng ghi lại.
 
     **Bearer phải tự đọc.** `get_current_user_optional(request, credentials)`
@@ -434,6 +437,13 @@ def _resolve_user(request: Request):
     cổng ở middleware — và đặt nó ở middleware là thứ khiến nó phủ cả những
     route khai báo thẳng trên `app`, ngoài mọi router.
     """
+    if hasattr(request.state, "nguoi_goi"):
+        return request.state.nguoi_goi
+    request.state.nguoi_goi = _tra_nguoi_goi(request)
+    return request.state.nguoi_goi
+
+
+def _tra_nguoi_goi(request: Request):
     from fastapi.security import HTTPAuthorizationCredentials
 
     from app.auth import get_current_user_optional
@@ -484,7 +494,9 @@ async def access_gate(request: Request, call_next):
     if key in PUBLIC_ROUTES:
         return await call_next(request)
 
-    user = _resolve_user(request)
+    # Đây là truy vấn DB: gọi thẳng thì chặn event loop, và các API của một trang
+    # xếp hàng sau nhau dù đến cùng lúc.
+    user = await run_in_threadpool(_resolve_user, request)
 
     if user is not None:
         # Cổng thứ hai — xem khối chú thích ở `SELF_SERVICE_WRITE_PREFIXES`.

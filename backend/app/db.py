@@ -91,6 +91,11 @@ def _init_db(full_resync: bool | None = None):
     try:
         from app.storage.metadata_db import ensure_tables, drop_all_tables, _column_exists
         ensure_tables()
+        # Tiến trình này vừa bảo đảm lược đồ xong. Không báo cho `catalog_sync` thì
+        # lần sửa nhãn đầu tiên của mỗi worker làm lại toàn bộ việc này ngay trong
+        # request; đo 06/11/2026: 15 giây trên một lượt lưu mà phần sửa chỉ 1 giây.
+        from app import catalog_sync
+        catalog_sync._SCHEMA_ENSURED = True
 
         # Cổng phiên bản lược đồ, SAU `ensure_tables()` và TRƯỚC mọi thứ khác.
         #

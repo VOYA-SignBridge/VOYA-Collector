@@ -41,6 +41,7 @@ def client(monkeypatch):
     app.include_router(router)
     app.dependency_overrides[get_current_user] = lambda: USER
     app.dependency_overrides[require_admin] = lambda: ADMIN
+    monkeypatch.setattr(training_module, "_la_bien_tap", lambda _u, _t: True)
 
     # No Postgres: persistence is verified by call, not by round-trip.
     async def _no_db_persist(job, auth_user_id=None):

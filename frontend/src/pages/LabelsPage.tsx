@@ -11,6 +11,7 @@ import LoadingScreen from "../components/LoadingScreen";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import { SearchIcon, TagIcon } from "../components/ui/Icons";
+import { canEditTenant } from "../api/auth";
 import { useAuth } from "../hooks/useAuth";
 import { dialectLabel } from "../config/dialectLabels";
 import DialectBadge from "../components/DialectBadge";
@@ -22,7 +23,8 @@ import { catalogCSV } from "../utils/catalogExport";
 export default function LabelsPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const { loading: authLoading, isAdmin, user } = useAuth();
+  const { loading: authLoading, user } = useAuth();
+  const canEdit = canEditTenant(user);
   // The four dialect pickers below used to be four hand-written <option> lists
   // that disagreed with each other and could never offer a newly approved
   // dialect. They all read this now.
@@ -332,7 +334,7 @@ export default function LabelsPage() {
         is_common_language: createDialect === "common",
         is_common_global: false,
       };
-      const result = isAdmin
+      const result = canEdit
         ? await registerClass(payload)
         : await requestClass(payload);
       if (!result.ok) {
@@ -543,9 +545,9 @@ export default function LabelsPage() {
             <div className="flex items-center gap-2">
               {!loading && (
                 <>
-                  {(isAdmin || Boolean(user)) && (
+                  {Boolean(user) && (
                     <Button variant="primary" size="sm" onClick={() => setCreateTarget(true)}>
-                      <span className="text-xs">{t(isAdmin ? "Tạo nhãn mới" : "Đề xuất nhãn mới")}</span>
+                      <span className="text-xs">{t(canEdit ? "Tạo nhãn mới" : "Đề xuất nhãn mới")}</span>
                     </Button>
                   )}
                   {renderItems.length > 0 && <>
@@ -780,7 +782,7 @@ export default function LabelsPage() {
                     </div>
                   )}
 
-                  {isAdmin ? (
+                  {canEdit ? (
                     <div className={`mt-3 grid grid-cols-3 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
                       <Button
                         variant="primary"
@@ -836,7 +838,7 @@ export default function LabelsPage() {
       <Modal
         isOpen={createTarget}
         onClose={() => !createSaving && setCreateTarget(false)}
-        title={t(isAdmin ? "Tạo nhãn mới" : "Đề xuất nhãn mới")}
+        title={t(canEdit ? "Tạo nhãn mới" : "Đề xuất nhãn mới")}
       >
         <div className="space-y-4">
           <div className="rounded-lg border border-ctu-blue/30 bg-ctu-blue/10 p-4 text-sm text-ctu-navy">

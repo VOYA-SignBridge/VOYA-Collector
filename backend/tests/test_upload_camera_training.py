@@ -370,7 +370,10 @@ def test_promote_unknown_job_is_404(admin_client):
 
 
 def test_promote_requires_admin(user_client):
-    c, _ = user_client  # normal user
+    c, u = user_client
+    # Fixture cấp vai `editor`, mà editor của tổ chức được promote. Người không có
+    # vai ở tổ chức mới là người phải bị chặn.
+    _execute("UPDATE memberships SET legacy_role = NULL WHERE user_id = %s", (u["id"],))
     r = c.post("/api/v1/training/jobs/whatever/promote", headers=_csrf(c))
     assert r.status_code == 403
 

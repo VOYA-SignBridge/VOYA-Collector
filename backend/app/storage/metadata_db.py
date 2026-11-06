@@ -5799,8 +5799,18 @@ def unregistered_dialects_in_use() -> List[Dict[str, Any]]:
     )
 
 
-def supersede_other_promotions(job_id: str, dialect: str) -> List[str]:
-    """Record that `job_id` is now THE promoted model for `dialect`.
+def supersede_other_promotions(job_id: str, dialect: str, tenant_id: Optional[str] = None,
+                               checkpoint_names: Optional[List[str]] = None) -> List[str]:
+    """Record that `job_id` is now THE promoted model for `dialect` in its tenant.
+
+    Each tenant has its own realtime slot per dialect (`app/realtime_slots.py`),
+    so a promotion only retires jobs of the same tenant. Pass `tenant_id`: without
+    it the narrowing is left to RLS alone.
+
+    `checkpoint_names` is what the promotion actually pushed out of the slot. A tenant
+    has an org slot and one personal slot per member for the same dialect, so "same
+    tenant and dialect" would also retire jobs that are still serving the other slots.
+    A job's `checkpoint_path` points at its deployed copy, named after the job.
 
     The realtime registry keys one slot per dialect, so promoting a new job
     silently deletes the previous job's entry from models.json. Nothing used to
@@ -5827,9 +5837,12 @@ def supersede_other_promotions(job_id: str, dialect: str) -> List[str]:
                AND promoted_at IS NOT NULL
                AND superseded_at IS NULL
                AND COALESCE(config->'dialects'->>0, 'multi') = %(dialect)s
+               AND (%(tenant_id)s::text IS NULL OR tenant_id = %(tenant_id)s)
+               AND (%(names)s::text[] IS NULL
+                    OR substring(checkpoint_path from '[^/]+$') = ANY(%(names)s::text[]))
             RETURNING job_id
             """,
-            {"job_id": job_id, "dialect": dialect},
+            {"job_id": job_id, "dialect": dialect, "tenant_id": tenant_id, "names": checkpoint_names},
         )
         superseded = [str(r[0]) for r in cur.fetchall()]
         # Re-promoting a job that was itself superseded earlier must clear its
@@ -5931,18 +5944,25 @@ def restore_sample(sample_uid: str):
     _execute("UPDATE samples SET deleted_at = NULL WHERE sample_uid = %s", (sample_uid,))
 
 
-def list_deleted_classes() -> List[Dict[str, Any]]:
-    """Soft-deleted classes for the Trash view, with their live sample counts."""
+def list_deleted_classes(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Soft-deleted classes for the Trash view, with their live sample counts.
+
+    `tenant_id` là lớp thứ hai sau RLS, và đường ghi nào dẫn tới xoá vĩnh viễn
+    đều phải truyền nó: thùng rác lớp mở cho biên tập viên tổ chức từ 05/11/2026.
+    Không truyền chỉ dành cho những chỗ đã có phạm vi riêng (bản xuất, Sheets).
+    """
+    cua_tenant = "AND c.tenant_id = %s" if tenant_id else ""
     return _fetch_all(
-        """
+        f"""
         SELECT c.class_uid, c.class_idx, c.slug, c.label_original, c.language,
                c.dialect, c.is_common_global, c.is_common_language, c.folder_name,
                c.created_at, c.migrated_at, c.deleted_at,
                (SELECT COUNT(*) FROM samples s WHERE s.class_uid = c.class_uid) AS sample_count
         FROM classes c
-        WHERE c.deleted_at IS NOT NULL
+        WHERE c.deleted_at IS NOT NULL {cua_tenant}
         ORDER BY c.deleted_at DESC
-        """
+        """,
+        (tenant_id,) if tenant_id else (),
     )
 
 
@@ -5956,20 +5976,25 @@ def list_samples_by_class(class_uid: str, include_deleted: bool = True) -> List[
     return _fetch_all(f"SELECT * FROM samples WHERE {where}", (class_uid,))
 
 
-def list_deleted_samples() -> List[Dict[str, Any]]:
+def list_deleted_samples(tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Soft-deleted samples whose CLASS is still active (class-level trash lists
-    classes separately, so this avoids double-listing a whole deleted class)."""
+    classes separately, so this avoids double-listing a whole deleted class).
+
+    `tenant_id`: xem `list_deleted_classes`.
+    """
+    cua_tenant = "AND s.tenant_id = %s" if tenant_id else ""
     return _fetch_all(
-        """
+        f"""
         SELECT s.sample_uid, s.class_uid, s.slug, s.label_original, s.language,
                s.dialect, s.source_type, s.user_id, u.username, s.file_path,
                s.storage_url, s.seq_len, s.created_at, s.deleted_at
         FROM samples s
         JOIN classes c ON c.class_uid = s.class_uid
         LEFT JOIN users u ON u.id = s.auth_user_id
-        WHERE s.deleted_at IS NOT NULL AND c.deleted_at IS NULL
+        WHERE s.deleted_at IS NOT NULL AND c.deleted_at IS NULL {cua_tenant}
         ORDER BY s.deleted_at DESC
-        """
+        """,
+        (tenant_id,) if tenant_id else (),
     )
 
 

@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 import torch
+from filelock import FileLock
 import torch.nn as nn
 import numpy as np
 import redis
@@ -27,8 +28,10 @@ from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.auth import get_current_user, get_user_from_token, require_admin
+from app import realtime_slots
+from app.auth import get_current_user, get_user_from_token
 from app.checkpoint_io import load_checkpoint
+from app.processing.utils import atomic_write_json
 from app.quota_deps import guard_quota, tenant_of
 from app.rate_limit_deps import limit_predict, limit_training
 from app.vocabulary_registry import assert_can_use_dialect, dialect_owner
@@ -468,6 +471,9 @@ class TrainingConfig(BaseModel):
 class TrainingJob(BaseModel):
     """Thông tin training job"""
     id: str
+    #: Người chạy job. Đi cùng job trên mọi đường (`/start`, `/jobs/{id}`, WebSocket), để
+    #: giao diện so với người đang xem: một cờ tính theo người xem thì WebSocket không có.
+    auth_user_id: Optional[str] = None
     status: str  # queued, running, completed, failed, cancelled
     config: TrainingConfig
     created_at: str
@@ -578,6 +584,7 @@ def _job_from_db_row(row: Dict[str, Any]) -> TrainingJob:
         error_message=row.get("error_message"),
         promoted_at=_iso(row.get("promoted_at")),
         superseded_at=_iso(row.get("superseded_at")),
+        auth_user_id=(str(row["auth_user_id"]) if row.get("auth_user_id") else None),
     )
 
 
@@ -1214,8 +1221,12 @@ def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optio
     return None
 
 
-def _registry_display_name(dialect: str) -> str:
-    """Tên hiển thị của model đang phục vụ dialect này trong models.json ("" nếu chưa có)."""
+def _registry_display_name(dialect: str, owner: Optional[str] = None) -> str:
+    """Tên hiển thị của model đang phục vụ dialect này trong models.json ("" nếu chưa có).
+
+    `owner` là chủ của slot (`realtime_slots`): tổ chức có slot riêng thì không
+    mượn tên của slot chung.
+    """
     try:
         if not REGISTRY_PATH.exists():
             return ""
@@ -1225,11 +1236,41 @@ def _registry_display_name(dialect: str) -> str:
         return ""
 
     for m in registry_data.get("models", []):
-        if isinstance(m, dict) and m.get("dialect") == dialect:
+        if (isinstance(m, dict) and m.get("dialect") == dialect
+                and realtime_slots.slot_owner(m.get("id")) == owner):
             name = str(m.get("name") or "").strip()
             if name:
                 return name
     return ""
+
+
+class _ReloadRejected(Exception):
+    """Realtime đã đọc model và từ chối; khác với việc không gọi được realtime."""
+
+
+def _registry_lock() -> FileLock:
+    """Mọi thành viên đều promote được, nên hai lượt ghi cùng lúc là chuyện thường."""
+    return FileLock(str(REGISTRY_PATH) + ".lock", timeout=30)
+
+
+def _entries_of_slot(model_id: str, dialect: str) -> List[Dict[str, Any]]:
+    """Các entry mà lượt promote này sẽ thay: cùng dialect, cùng chủ."""
+    if not REGISTRY_PATH.exists():
+        return []
+    owner = realtime_slots.slot_owner(model_id)
+    data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+    return [m for m in data.get("models", []) if isinstance(m, dict) and (
+        m.get("id") == model_id
+        or (m.get("dialect") == dialect and realtime_slots.slot_owner(m.get("id")) == owner))]
+
+
+def _restore_slot(model_id: str, entries: List[Dict[str, Any]]) -> None:
+    """Trả slot về như trước lượt promote; không đụng slot khác có thể vừa đổi."""
+    with _registry_lock():
+        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+        registry_data["models"] = [m for m in registry_data.get("models", [])
+                                   if not (isinstance(m, dict) and m.get("id") == model_id)] + entries
+        atomic_write_json(REGISTRY_PATH, registry_data)
 
 
 def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
@@ -1239,25 +1280,22 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
     Entry được build từ chính checkpoint để pass validate_checkpoint_vs_registry
     của realtime service (normalization_version, seq_len, feature_dim phải khớp).
 
-    Mỗi dialect chỉ có đúng một entry: promote model mới cho một dialect sẽ THAY
-    THẾ entry cũ (giữ nguyên tên hiển thị) thay vì thêm model trùng vào danh sách.
+    Mỗi dialect chỉ có đúng một entry TRÊN MỖI CHỦ: promote model mới sẽ THAY THẾ
+    entry cũ cùng chủ (giữ nguyên tên hiển thị) thay vì thêm model trùng vào danh
+    sách, và không đụng tới entry của tổ chức khác. Chủ đọc từ `model_id`.
     """
     try:
         if not REGISTRY_PATH.exists():
             logger.error("Registry not found: %s", REGISTRY_PATH)
             return False
 
-        # Load existing registry
-        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
-
         seq_len = int(ckpt.get("seq_len", 60))
         feature_dim = int(ckpt.get("feature_dim", 126))
 
-        existing = [m for m in registry_data.get("models", []) if isinstance(m, dict)]
-
         # Giữ tên hiển thị của entry đang phục vụ dialect này (vd "Hòa đê") để
         # dropdown realtime không đổi nhãn sau mỗi lần promote.
-        kept_name = _registry_display_name(dialect)
+        owner = realtime_slots.slot_owner(model_id)
+        kept_name = _registry_display_name(dialect, owner)
 
         model_entry = {
             "id": model_id,
@@ -1283,16 +1321,22 @@ def _update_registry(model_id: str, checkpoint_rel_path: str, display_name: str,
             }
         }
 
-        # Thay thế mọi entry cũ của dialect này (kể cả entry "training_<job_id>"
-        # do các bản promote trước để lại) — một dialect = một model.
-        registry_data["models"] = [
-            m for m in existing
-            if m.get("id") != model_id and m.get("dialect") != dialect
-        ]
-        registry_data["models"].append(model_entry)
+        # Đọc trong khoá: đọc trước khoá thì lượt ghi sau xoá mất entry của lượt trước.
+        # Ghi nguyên tử: realtime đọc tệp này lúc khởi động, nửa tệp là không lên được.
+        with _registry_lock():
+            registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+            existing = [m for m in registry_data.get("models", []) if isinstance(m, dict)]
 
-        # Write updated registry
-        REGISTRY_PATH.write_text(json.dumps(registry_data, indent=2, ensure_ascii=False), encoding="utf-8")
+            # Thay thế mọi entry cũ của dialect này CÙNG CHỦ (kể cả entry
+            # "training_<job_id>" do các bản promote trước để lại, đó là slot chung).
+            registry_data["models"] = [
+                m for m in existing
+                if m.get("id") != model_id
+                and not (m.get("dialect") == dialect
+                         and realtime_slots.slot_owner(m.get("id")) == owner)
+            ]
+            registry_data["models"].append(model_entry)
+            atomic_write_json(REGISTRY_PATH, registry_data)
         logger.info("Registry updated: %s", model_id)
 
         return True
@@ -1322,12 +1366,15 @@ def _notify_realtime_service_reload(model_id: str, checkpoint_path: str, version
             if response.status_code == 200:
                 logger.info("Realtime service reloaded model: %s", model_id)
                 return True
-            else:
-                logger.warning(
-                    "Realtime service reload failed: status=%s body=%s",
-                    response.status_code, response.text[:500],
-                )
-                return False
+            logger.warning(
+                "Realtime service reload failed: status=%s body=%s",
+                response.status_code, response.text[:500],
+            )
+            if 400 <= response.status_code < 500:
+                raise _ReloadRejected(response.text[:300])
+            return False
+    except _ReloadRejected:
+        raise
     except Exception as e:
         logger.error("Failed to notify realtime service: %s", e)
         return False
@@ -1476,14 +1523,14 @@ async def start_dataset_preparation(
     dialects = [str(d).strip() for d in (body.dialects or []) if str(d).strip()]
     if not dialects:
         raise HTTPException(status_code=400, detail="Chưa chọn phương ngữ nào để chuẩn bị.")
+    tenant_id = _working_tenant()
     for d in dialects:
         try:
-            assert_can_use_dialect(d, str(current_user.get("id") or ""))
+            assert_can_use_dialect(d, str(current_user.get("id") or ""), tenant_id)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc))
 
     floor = int(body.min_samples_per_class or _cfg.min_samples_per_class_for_training or 0)
-    tenant_id = _working_tenant()
     profiles: List[str] = []
     if body.with_research:
         profiles, unsupported = await asyncio.to_thread(_profiles_for_dialects, dialects, tenant_id)
@@ -1685,7 +1732,7 @@ async def start_training(
         # into the shared realtime list. Owner-only until approved.
         for d in selected_dialects:
             try:
-                assert_can_use_dialect(d, str(current_user.get("id") or ""))
+                assert_can_use_dialect(d, str(current_user.get("id") or ""), pham_vi_nguoi_goi)
             except PermissionError as exc:
                 raise HTTPException(status_code=403, detail=str(exc))
 
@@ -1789,6 +1836,7 @@ async def start_training(
             config=config,
             created_at=now,
             total_epochs=config.epochs,
+            auth_user_id=str(current_user.get("id") or "") or None,
         )
 
         training_jobs[job_id] = {
@@ -2249,12 +2297,36 @@ class PromoteResponse(BaseModel):
     message: str
 
 
+def _la_bien_tap(user: Dict[str, Any], tenant_id: str) -> bool:
+    """Admin/editor của tổ chức, hoặc quản trị nền tảng."""
+    from app.vocabulary_registry import can_edit_registry
+
+    return can_edit_registry(tenant_id, user.get("id"), bool(user.get("is_admin")))
+
+
+def _la_nguoi_chay_job(job_id: str, user_id: str) -> bool:
+    from app.storage.metadata_db import get_training_job
+
+    row = get_training_job(job_id) or {}
+    return bool(user_id) and str(row.get("auth_user_id") or "") == user_id
+
+
 @router.post("/jobs/{job_id}/promote", response_model=PromoteResponse, dependencies=[Depends(limit_training)])
 async def promote_training_job(
     job_id: str,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> PromoteResponse:
-    """Promote model của job lên tab nhận diện realtime (ADMIN ONLY).
+    """Promote model của job lên tab nhận diện realtime.
+
+    Hai đường, theo vai ở tổ chức sở hữu job (`realtime_slots`):
+
+      * quản trị viên, biên tập viên, quản trị nền tảng (`training.promote`): model vào
+        slot của tổ chức, ai trong tổ chức cũng dùng được;
+      * thành viên thường: chỉ model DO CHÍNH MÌNH huấn luyện, vào slot cá nhân chỉ
+        người đó thấy, nên không đụng tới model của ai.
+
+    Khoá API không promote được. Job của tổ chức khác không tới được đây:
+    `_ensure_job_loaded` coi nó như không tồn tại.
 
     Luồng: copy đúng checkpoint của job → config/checkpoints của realtime
     service → ghi entry vào models.json (bền qua restart) → gọi /reload để
@@ -2265,6 +2337,20 @@ async def promote_training_job(
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
     job = job_info["job"]
+
+    if current_user.get("auth_method") == "api_key":
+        raise HTTPException(status_code=403, detail="Khoá API không dùng được cho thao tác này.")
+    chu_job = str(job_info.get("tenant_id") or "").strip() or _working_tenant()
+    nguoi_goi = str(current_user.get("id") or "")
+    # Slot của Community là slot CHUNG, mọi tổ chức và khách đều dùng, nên biên tập viên
+    # của Community cũng chỉ được slot cá nhân: thay nó là việc của quản trị nền tảng.
+    slot_chung = realtime_slots.slot_owner(realtime_slots.slot_id("x", chu_job)) is None
+    ca_nhan = not _la_bien_tap(current_user, chu_job) or (slot_chung and not current_user.get("is_admin"))
+    if ca_nhan and not await asyncio.to_thread(_la_nguoi_chay_job, job_id, nguoi_goi):
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn chỉ đưa được model do chính mình huấn luyện vào Realtime.",
+        )
 
     if job.status != "completed":
         raise HTTPException(
@@ -2295,20 +2381,21 @@ async def promote_training_job(
             ),
         )
 
-    # Slot realtime được đánh khóa theo dialect (giống lúc startup load từ DB):
-    # promote model mới cho "hoa-de" sẽ thay model "hoa-de" đang chạy, không
-    # thêm một lựa chọn trùng vào tab nhận diện.
+    # Slot realtime được đánh khóa theo dialect VÀ chủ: promote model mới cho
+    # "hoa-de" sẽ thay model "hoa-de" đang chạy của cùng tổ chức, không thêm một
+    # lựa chọn trùng vào tab nhận diện, và không đụng tới slot của tổ chức khác.
     dialect = (job.config.dialects[0] if job.config.dialects else "multi")
     language = (job.config.languages[0] if job.config.languages else "vn")
-    model_id = dialect
+    model_id = realtime_slots.slot_id(dialect, chu_job, nguoi_goi if ca_nhan else None)
 
     # Promoting means "everyone now sees this in the realtime tab". A model
     # trained on a dialect still waiting for approval must not get there: its
     # label set describes a vocabulary only one person has proposed. Approve the
     # dialect first, then promote — the order matters, not the permission of the
     # admin doing it.
-    owner = dialect_owner(dialect)
-    if owner is not None:
+    owner = dialect_owner(dialect, chu_job)
+    # Slot cá nhân không hiện cho ai khác, nên người đề xuất dùng được ngay.
+    if owner is not None and not (ca_nhan and owner == nguoi_goi):
         raise HTTPException(
             status_code=409,
             detail=(
@@ -2327,7 +2414,9 @@ async def promote_training_job(
     fname = Path(deployed_path).name
 
     # 2. Ghi models.json (bền vững — realtime restart vẫn load được)
-    display_name = _registry_display_name(dialect) or f"{model_type.upper()} {dialect} ({job_id})"
+    display_name = (_registry_display_name(dialect, realtime_slots.slot_owner(model_id))
+                    or (f"Của tôi: {dialect} ({job_id})" if ca_nhan else f"{model_type.upper()} {dialect} ({job_id})"))
+    bi_thay = await asyncio.to_thread(_entries_of_slot, model_id, dialect)
     registry_updated = await asyncio.to_thread(
         _update_registry,
         model_id,
@@ -2339,14 +2428,19 @@ async def promote_training_job(
     )
 
     # 3. Hot-swap: báo realtime service load model ngay (path TRONG container realtime)
-    realtime_reloaded = await asyncio.to_thread(
-        _notify_realtime_service_reload,
-        model_id,
-        f"{REALTIME_CONTAINER_CHECKPOINTS}/{fname}",
-        f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        dialect,
-        language,
-    )
+    try:
+        realtime_reloaded = await asyncio.to_thread(
+            _notify_realtime_service_reload,
+            model_id,
+            f"{REALTIME_CONTAINER_CHECKPOINTS}/{fname}",
+            f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            dialect,
+            language,
+        )
+    except _ReloadRejected as e:
+        # Model đang chạy vẫn nguyên; để entry hỏng lại thì lần khởi động sau mới vỡ.
+        await asyncio.to_thread(_restore_slot, model_id, bi_thay)
+        raise HTTPException(status_code=422, detail=f"Realtime từ chối model này, model đang chạy được giữ nguyên: {e}")
 
     # 4. Ghi nhận promotion. checkpoint_path trỏ sang bản deployed để:
     #    - retention sweep dọn outputs/ không thể phá model đã promote
@@ -2363,7 +2457,8 @@ async def promote_training_job(
     try:
         from app.storage.metadata_db import supersede_other_promotions
 
-        retired = await asyncio.to_thread(supersede_other_promotions, job_id, dialect)
+        retired = await asyncio.to_thread(supersede_other_promotions, job_id, dialect, chu_job,
+                                          [Path(str(m.get("checkpoint_path"))).name for m in bi_thay])
         # The in-memory cache never re-reads a terminal job (see
         # _ensure_job_loaded), so a DB-only update would keep serving the stale
         # flag until the backend restarts.
@@ -2381,30 +2476,43 @@ async def promote_training_job(
         logger.warning("job=%s không đánh dấu được promotion cũ của '%s': %s", job_id, dialect, e)
 
     # 5. Publish bản promoted lên Google Drive (background, best-effort):
-    #    models/<tên model>/Deploy <thời điểm>/ gồm checkpoint + manifest inference
+    #    models/<tên model>/Deploy <thời điểm>/ gồm checkpoint + manifest inference.
+    #    Model cá nhân không lên thư mục model dùng chung.
     try:
         from app.training_tasks import backup_promoted_checkpoint_task
 
-        backup_promoted_checkpoint_task.delay(
-            job_id=job_id,
-            checkpoint_path=deployed_path,
-            model_id=model_id,
-            display_name=display_name,
-            dialect=dialect,
-            language=language,
-            promoted_at=job.promoted_at,
-            tenant_id=(job_info.get("tenant_id") or None),
-        )
-        logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
+        if not ca_nhan:
+            backup_promoted_checkpoint_task.delay(
+                job_id=job_id,
+                checkpoint_path=deployed_path,
+                model_id=model_id,
+                display_name=display_name,
+                dialect=dialect,
+                language=language,
+                promoted_at=job.promoted_at,
+                tenant_id=(job_info.get("tenant_id") or None),
+            )
+            logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
     except Exception as e:
         logger.warning("job=%s GDrive backup dispatch failed (promotion vẫn OK): %s", job_id, e)
 
     logger.info(
-        "job=%s promoted by admin=%s registry=%s reload=%s",
-        job_id, current_user.get("username"), registry_updated, realtime_reloaded,
+        "job=%s promoted by user=%s slot=%s registry=%s reload=%s",
+        job_id, current_user.get("username"), model_id, registry_updated, realtime_reloaded,
+    )
+    # Thay model đang phục vụ là việc phải tra lại được: ai, lúc nào, slot nào.
+    from app import audit
+
+    audit.record(
+        "training.promote", actor=current_user, target_type="training_job", target_id=job_id,
+        tenant_id=chu_job,
+        detail={"model_id": model_id, "dialect": dialect, "registry_updated": registry_updated,
+                "realtime_reloaded": realtime_reloaded},
     )
 
-    if realtime_reloaded:
+    if realtime_reloaded and ca_nhan:
+        message = "Model đã vào Realtime, chỉ riêng bạn thấy và dùng được"
+    elif realtime_reloaded:
         message = "Model đã được đưa vào realtime và sẵn sàng sử dụng ngay"
     elif registry_updated:
         message = "Model đã ghi vào registry — sẽ hoạt động sau khi realtime service khởi động lại"

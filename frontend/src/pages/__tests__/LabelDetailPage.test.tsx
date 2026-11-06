@@ -115,7 +115,7 @@ describe("LabelDetailPage — màn hình Chi tiết nhãn (Phase 2)", () => {
     vi.mocked(useAuthHook.useAuth).mockReturnValue({
       loading: false,
       isAdmin: true,
-      user: { id: "1", username: "admin" },
+      user: { id: "1", username: "admin", is_admin: true },
       login: vi.fn(),
       logout: vi.fn(),
       checkStatus: vi.fn(),

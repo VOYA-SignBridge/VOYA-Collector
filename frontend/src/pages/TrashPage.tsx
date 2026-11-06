@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../hooks/useToast";
+import { canEditTenant } from "../api/auth";
 import { useAuth } from "../hooks/useAuth";
 import Modal from "../components/ui/Modal";
 import LoadingSpinner from "../components/ui/LoadingSpinner";
@@ -57,10 +58,11 @@ function fmtDate(v?: string) {
 export default function TrashPage() {
   const { t } = useI18n();
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { user } = useAuth();
+  const canEdit = canEditTenant(user);
   // Contributors only have a sample trash (they don't own labels), so default
   // them straight to it; admins land on the labels tab.
-  const [tab, setTab] = useState<Tab>(isAdmin ? "classes" : "samples");
+  const [tab, setTab] = useState<Tab>(canEdit ? "classes" : "samples");
   const [classes, setClasses] = useState<TrashClass[]>([]);
   const [samples, setSamples] = useState<TrashSample[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,7 +78,7 @@ export default function TrashPage() {
     const s = await getSampleTrash();
     if (s.ok) setSamples(s.data);
     else toast.error(s.error || t("Không đọc được thùng rác mẫu"));
-    if (isAdmin) {
+    if (canEdit) {
       const c = await getClassTrash();
       if (c.ok) setClasses(c.data);
       else toast.error(c.error || t("Không đọc được thùng rác nhãn"));
@@ -86,7 +88,7 @@ export default function TrashPage() {
     setSelClasses(new Set());
     setSelSamples(new Set());
     setLoading(false);
-  }, [toast, isAdmin]);
+  }, [toast, canEdit]);
 
   useEffect(() => {
     load();
@@ -219,7 +221,7 @@ export default function TrashPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{t("Thùng rác")}</h1>
           <p className="text-sm text-slate-500 mt-1 max-w-2xl leading-relaxed">
-            {isAdmin ? (
+            {canEdit ? (
               <>
                 <Trans
                   k="Nhãn và mẫu đã xóa mềm vẫn giữ nguyên dữ liệu. {khoi_phuc} để đưa lại, hoặc {xoa_han} (không thể hoàn tác). Xóa vĩnh viễn một nhãn sẽ xóa luôn các mẫu bên trong."
@@ -246,7 +248,7 @@ export default function TrashPage() {
 
       {/* Tabs */}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl mb-4">
-        {isAdmin && <TabPill t="classes" label={t("Nhãn đã xóa")} n={classes.length} />}
+        {canEdit && <TabPill t="classes" label={t("Nhãn đã xóa")} n={classes.length} />}
         <TabPill t="samples" label={t("Mẫu đã xóa")} n={samples.length} />
       </div>
 

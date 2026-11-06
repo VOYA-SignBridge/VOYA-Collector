@@ -118,7 +118,7 @@ class TestRoute:
         # `tenant_id` của tài khoản; ở đây hai thứ trùng nhau.
         import app.tenant_middleware as tm
         monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: USER["tenant_id"])
-        monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
+        monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid, tenant=None: None)
         # Người giả không có grant trong DB; cổng tenant không phải thứ đang kiểm.
         import app.access_gate as gate
         monkeypatch.setattr(gate, "_has_any_tenant_grant", lambda user: True)
