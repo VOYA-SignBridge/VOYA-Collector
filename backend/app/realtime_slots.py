@@ -49,6 +49,11 @@ def slot_id(dialect: str, tenant_id: Optional[str], user_id: Optional[str] = Non
     return f"{dialect}{SEPARATOR}{tenant}"
 
 
+def is_shared(tenant_id: Optional[str]) -> bool:
+    """Slot của `tenant_id` là slot mọi tổ chức và khách cùng dùng, tức Community."""
+    return slot_owner(slot_id("x", tenant_id)) is None
+
+
 def slot_owner(model_id: Optional[str]) -> Optional[str]:
     """Tổ chức sở hữu slot; `None` = slot chung."""
     _, sep, owner = str(model_id or "").rpartition(SEPARATOR)

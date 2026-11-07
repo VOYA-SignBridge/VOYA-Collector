@@ -370,3 +370,65 @@ class TestBatBienVaChiTaoMoi:
 
         for ten in ("train.csv", "val.csv", "test.csv"):
             assert not (kho / ten).exists(), f"{ten} bị ghi ở gốc"
+
+
+def _doi_mau(samples_csv: Path, class_uid: str, chu: str) -> None:
+    """Đặt mọi mẫu của một lớp về `pending`, thuộc tài khoản `chu`."""
+    with samples_csv.open(newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        cot = list(r.fieldnames or [])
+        hang = list(r)
+    if "auth_user_id" not in cot:
+        cot.append("auth_user_id")
+    for h in hang:
+        if h["class_uid"] == class_uid:
+            h["review_status"], h["auth_user_id"] = "pending", chu
+    _viet(samples_csv, cot, hang)
+
+
+def _lop(d: Path) -> set:
+    meta = json.loads((d / "split_metadata.json").read_text(encoding="utf-8"))
+    return {c["class_uid"] for c in meta["classes"]}
+
+
+class TestTapRieng:
+    """Thành viên huấn luyện được trên mẫu của mình trước khi có người duyệt."""
+
+    def test_makeSplits_viewerOwnsPendingClass_classIsInPersonalSet(self, kho, monkeypatch):
+        _doi_mau(ms.SAMPLES_CSV, "U-AAA", "nguoi-a")
+        d = _chay(kho, monkeypatch, "--dialects=pn-a", "--min_samples_per_class=25",
+                  "--viewer_id=nguoi-a", split_id="op-rieng")
+        assert "U-AAA" in _lop(d)
+        meta = json.loads((d / "split_metadata.json").read_text(encoding="utf-8"))
+        assert meta["auth_user_id"] == "nguoi-a"
+
+    def test_makeSplits_someoneElsesPendingClass_staysOut(self, kho, monkeypatch):
+        _doi_mau(ms.SAMPLES_CSV, "U-AAA", "nguoi-a")
+        d = _chay(kho, monkeypatch, "--dialects=pn-a", "--min_samples_per_class=25",
+                  "--viewer_id=nguoi-b", split_id="op-khac")
+        assert "U-AAA" not in _lop(d)
+
+    def test_makeSplits_sharedSet_onlyApprovedAndNoOwnerStamped(self, kho, monkeypatch):
+        _doi_mau(ms.SAMPLES_CSV, "U-AAA", "nguoi-a")
+        d = _chay(kho, monkeypatch, "--dialects=pn-a", "--min_samples_per_class=25", split_id="op-chung")
+        assert "U-AAA" not in _lop(d)
+        assert "auth_user_id" not in json.loads((d / "split_metadata.json").read_text(encoding="utf-8"))
+
+    def test_makeSplits_viewerWithoutArtifact_stops(self, kho, monkeypatch):
+        monkeypatch.setattr(ms, "OUT_DIR", kho)
+        monkeypatch.setattr(sys, "argv", ["make_splits.py", "--viewer_id=nguoi-a"])
+        with pytest.raises(SystemExit, match="viewer_id"):
+            ms.main()
+
+    def test_operationalSplits_personalSet_listedOnlyForItsOwner(self, kho, monkeypatch):
+        from app.routers import training
+
+        _doi_mau(ms.SAMPLES_CSV, "U-AAA", "nguoi-a")
+        _chay(kho, monkeypatch, "--dialects=pn-a", "--min_samples_per_class=25",
+              "--viewer_id=nguoi-a", split_id="op-rieng")
+        monkeypatch.setattr(training, "SPLITS_DIR", kho)
+
+        cua_chu = training._operational_splits("iso_a", "nguoi-a")
+        assert [s["split_id"] for s in cua_chu] == ["op-rieng"]
+        assert cua_chu[0]["personal"] is True
+        assert training._operational_splits("iso_a", "nguoi-b") == []

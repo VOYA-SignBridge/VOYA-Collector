@@ -27,6 +27,7 @@ def main() -> None:
     with system_scope("kiem thu: xac nhan dich"):
         ten = _fetch_all("SELECT current_database() AS d")[0]["d"]
         chu = _fetch_all("SELECT id FROM users WHERE username = 'iso_user_a'")
+        quan_tri = _fetch_all("SELECT id FROM users WHERE username = 'iso_admin_a'")
     if ten != CSDL:
         sys.exit(f"TU CHOI: dang tro vao '{ten}', chi duoc gieo tren '{CSDL}'.")
 
@@ -37,24 +38,31 @@ def main() -> None:
 
     mo_hinh = next(m for m in json.loads((CONFIG / "models.json").read_text(encoding="utf-8"))["models"]
                    if m["dialect"] == PHUONG_NGU)
-    job_id = str(uuid.uuid4())[:8]
     CHECKPOINTS.mkdir(parents=True, exist_ok=True)
-    tep = CHECKPOINTS / f"{job_id}.pt"
-    shutil.copyfile(CONFIG / mo_hinh["checkpoint_path"], tep)
-
     bay_gio = datetime.now(timezone.utc).isoformat()
-    with tenant_scope(TENANT):
-        upsert_training_job({
-            "job_id": job_id, "status": "completed", "model_type": "hdgcn",
-            "config": {"model_type": "hdgcn", "dialects": [PHUONG_NGU], "languages": ["vn"]},
-            "auth_user_id": str(chu[0]["id"]), "created_at": bay_gio, "started_at": bay_gio,
-            "completed_at": bay_gio, "current_epoch": 1, "total_epochs": 1,
-            "checkpoint_path": str(tep), "test_acc": 0.9, "test_f1": 0.9,
-            "error_message": None, "promoted_at": None,
-        })
-        # Trang kết quả chỉ dựng khi job có chỉ số, như mọi job huấn luyện thật.
-        insert_training_metric({"job_id": job_id, "epoch": 1, "train_loss": 0.4, "train_acc": 0.9,
-                                "val_loss": 0.5, "val_acc": 0.9, "val_f1": 0.9})
+
+    def gieo_job(tenant: str, nguoi: str) -> str:
+        job_id = str(uuid.uuid4())[:8]
+        tep = CHECKPOINTS / f"{job_id}.pt"
+        shutil.copyfile(CONFIG / mo_hinh["checkpoint_path"], tep)
+        with tenant_scope(tenant):
+            upsert_training_job({
+                "job_id": job_id, "status": "completed", "model_type": "hdgcn",
+                "config": {"model_type": "hdgcn", "dialects": [PHUONG_NGU], "languages": ["vn"]},
+                "auth_user_id": nguoi, "created_at": bay_gio, "started_at": bay_gio,
+                "completed_at": bay_gio, "current_epoch": 1, "total_epochs": 1,
+                "checkpoint_path": str(tep), "test_acc": 0.9, "test_f1": 0.9,
+                "error_message": None, "promoted_at": None,
+            })
+            # Trang kết quả chỉ dựng khi job có chỉ số, như mọi job huấn luyện thật.
+            insert_training_metric({"job_id": job_id, "epoch": 1, "train_loss": 0.4, "train_acc": 0.9,
+                                    "val_loss": 0.5, "val_acc": 0.9, "val_f1": 0.9})
+        return job_id
+
+    job_id = gieo_job(TENANT, str(chu[0]["id"]))
+    # Job của người khác ở `default`: job riêng của thành viên không ai khác thấy được,
+    # nên ca "không promote được model của người khác" cần một job thường có sẵn.
+    gieo_job("default", str(quan_tri[0]["id"]))
     print(json.dumps({"job": job_id, "tenant": TENANT}))
 
 

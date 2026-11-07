@@ -43,7 +43,7 @@ def working_in_voya(monkeypatch):
 
 def test_operational_split_list_is_the_working_tenants(working_in_voya, monkeypatch):
     seen = []
-    monkeypatch.setattr(tr, "_operational_splits", lambda tenant_id: seen.append(tenant_id) or [])
+    monkeypatch.setattr(tr, "_operational_splits", lambda tenant_id, _nguoi="": seen.append(tenant_id) or [])
     r = client.get("/training/splits/operational")
     assert r.status_code == 200, r.text
     assert seen == [WORKING]

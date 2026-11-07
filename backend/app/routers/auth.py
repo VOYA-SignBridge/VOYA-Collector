@@ -458,33 +458,34 @@ def register(payload: RegisterRequest, request: Request):
         # Re-read so the response carries the tenant the account actually ended
         # up in, not the one it was created in a moment ago.
         user = _fetch_user_by_id(user["id"]) or user
-    else:
-        # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
-        #
-        # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
-        # mời. Điều đó sai ở hai mức:
-        #
-        #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
-        #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
-        #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
-        #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
-        #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
-        #
-        # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
-        # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
-        # được ngay cả khi bước gắn vai bên dưới trượt.
-        #
-        # Nhưng gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì
-        # `access_gate` từ chối mọi lượt ghi — họ đăng nhập được, xem được, và
-        # không quay được. Trạng thái đó trông như hỏng chứ không như bị chặn,
-        # nên nó vào log ở mức ERROR chứ không im lặng.
-        try:
-            tenant_admin.join_community(user["id"])
-        except Exception:
-            logger.exception(
-                "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
-                "không ghi được gì cho tới khi có người cấp vai", user["id"])
-        user = _fetch_user_by_id(user["id"]) or user
+    # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
+    #
+    # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
+    # mời. Điều đó sai ở hai mức:
+    #
+    #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
+    #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
+    #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
+    #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
+    #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
+    #
+    # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
+    # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
+    # được ngay cả khi bước gắn vai bên dưới trượt.
+    #
+    # Cả người đăng ký qua lời mời cũng vào: lời mời không kèm vai không cấp gì, và
+    # bản trước bỏ qua họ, nên họ không ghi được gì tới lần backend khởi động lại.
+    #
+    # Gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì `access_gate`
+    # từ chối mọi lượt ghi — họ đăng nhập được, xem được, và không quay được. Trạng
+    # thái đó trông như hỏng chứ không như bị chặn, nên nó vào log ở mức ERROR.
+    try:
+        tenant_admin.join_community(user["id"])
+    except Exception:
+        logger.exception(
+            "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
+            "không ghi được gì cho tới khi có người cấp vai", user["id"])
+    user = _fetch_user_by_id(user["id"]) or user
 
     _send_welcome_verification(user)
 

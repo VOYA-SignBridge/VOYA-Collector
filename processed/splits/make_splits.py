@@ -1452,6 +1452,10 @@ def main():
                              'KHÔNG suy ra được về sau từ lượt huấn luyện đầu '
                              'tiên muốn dùng hiện vật, vì như vậy là ai hỏi '
                              'trước thì thành chủ. Không có mặc định.')
+    parser.add_argument('--viewer_id', type=str, default='',
+                        help='Tai khoan dung tap nay cho rieng minh: mau chua duyet CUA HO '
+                             'cung duoc tinh, va hien vat ghi ten ho nen chi ho thay. '
+                             'Chi dung voi --operational_split_id.')
     parser.add_argument('--min_classes', type=int, default=DEFAULT_MIN_CLASSES,
                         help=f'Số lớp tối thiểu SAU khi lọc; dưới ngưỡng thì DỪNG và '
                              f'không ghi split (mặc định {DEFAULT_MIN_CLASSES}, 0 = tắt). '
@@ -1481,6 +1485,8 @@ def main():
             'Chủ sở hữu đến từ ngữ cảnh tạo split. Không tìm được ngữ cảnh thì '
             'DỪNG — không dùng tenant khởi tạo, không dùng tenant của lượt '
             'huấn luyện sẽ tiêu thụ nó.')
+    if str(args.viewer_id or '').strip() and not args.operational_split_id:
+        raise SystemExit('--viewer_id chi dung voi --operational_split_id.')
     if str(args.tenant_id or '').strip() and not args.operational_split_id:
         raise SystemExit(
             '--tenant_id chỉ dùng với --operational_split_id. Bản khai ở gốc '
@@ -1579,11 +1585,11 @@ def main():
     # một lớp có 12 mẫu — 9 đã duyệt, 3 đang chờ — vượt sàn 10 rồi mới rụng
     # xuống 9, và split được dựng trên một lớp không đủ điều kiện.
     #
-    # KHÔNG có người xem
-    # -------------------
-    # Dựng split là bước đóng gói dữ liệu cho một lượt huấn luyện hoặc một bản
-    # phát hành — nó rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ.
-    # Chỉ `approved` đi tiếp.
+    # Người xem
+    # ---------
+    # Tập dùng chung rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ:
+    # chỉ `approved` đi tiếp. Tập riêng (`--viewer_id`) thì có: chủ dùng được dữ
+    # liệu của chính mình ngay, và hiện vật mang tên họ nên không ai khác ghim được.
     try:
         from app.moderation import filter_rows as _loc_kiem_duyet
     except ImportError as exc:            # pragma: no cover - lỗi cấu hình
@@ -1595,7 +1601,7 @@ def main():
             "Chay script nay o noi `app` import duoc (container trainer/backend). "
             f"Chi tiet: {exc}")
 
-    _kq_kd = _loc_kiem_duyet(rows, viewer_id=None)
+    _kq_kd = _loc_kiem_duyet(rows, viewer_id=str(args.viewer_id or '').strip() or None)
     if _kq_kd.withheld:
         print(f"[kiem-duyet] {_kq_kd.summary()}")
     rows = _kq_kd.kept
@@ -1730,7 +1736,9 @@ def main():
             # Phạm vi phải nằm TRONG hiện vật: đọc lại sau ba tháng, "7 lớp"
             # một mình không nói được đây là 7 lớp của hoa-de hay 7 lớp còn
             # sót của toàn bộ từ vựng.
-            extra={'scope': {'dialects': pn_muon}} if pn_muon else None,
+            extra={**({'scope': {'dialects': pn_muon}} if pn_muon else {}),
+                   **({'auth_user_id': str(args.viewer_id).strip()}
+                      if str(args.viewer_id or '').strip() else {})} or None,
         )
         print('Split summary:')
         for k, v in summary.items():

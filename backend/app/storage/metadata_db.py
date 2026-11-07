@@ -5629,6 +5629,14 @@ def upsert_training_job(row: Dict[str, Any]):
     _execute(SQL_UPSERT_TRAINING_JOB, payload)
 
 
+def update_training_job_config(job_id: str, changes: Dict[str, Any]) -> None:
+    """Gộp `changes` vào `config`. `upsert_training_job` không đụng cột này khi job đã có."""
+    _execute(
+        "UPDATE training_jobs SET config = COALESCE(config, '{}'::jsonb) || %s WHERE job_id = %s",
+        (Json(changes), job_id),
+    )
+
+
 def insert_training_metric(row: Dict[str, Any]):
     """Tenant của chỉ số được SUY RA từ hàng job cha, ngay tại chỗ ghi.
 

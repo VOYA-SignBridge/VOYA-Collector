@@ -466,6 +466,11 @@ class TrainingConfig(BaseModel):
     # liệu thực sự đã train.
     dataset_version: Optional[str] = None
     recognition_profile: Optional[str] = None
+    #: Job riêng của người chạy: chỉ họ thấy và dùng. Server đặt ở `/start`, không nhận
+    #: từ client. Nằm trong `config` vì đây là JSONB, nên không cần đổi lược đồ.
+    personal: bool = False
+    #: Lúc người chạy đề nghị dùng chung. Có giá trị thì người duyệt mới thấy job.
+    review_requested_at: Optional[str] = None
 
 
 class TrainingJob(BaseModel):
@@ -660,6 +665,33 @@ async def restore_jobs_from_db(limit: int = 50) -> None:
         restored += 1
 
     logger.info("restored=%d requeued=%d", restored, requeued)
+
+
+def _cho_xem(job: Any, nguoi_id: str, la_nguoi_duyet: bool) -> bool:
+    """Job riêng chỉ người chạy thấy; đã đề nghị dùng chung thì người duyệt thấy thêm."""
+    config = getattr(job, "config", None)
+    if not getattr(config, "personal", False) or str(getattr(job, "auth_user_id", "") or "") == nguoi_id:
+        return True
+    return la_nguoi_duyet and bool(config.review_requested_at)
+
+
+async def _job_cua(job_id: str, user: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """`_ensure_job_loaded`, nhưng job riêng của người khác coi như không tồn tại."""
+    job_info = await _ensure_job_loaded(job_id)
+    job = (job_info or {}).get("job")
+    if not getattr(getattr(job, "config", None), "personal", False):
+        return job_info
+
+    # Mỗi tiến trình backend có cache riêng và job đã kết thúc không đọc lại từ DB, nên
+    # đề nghị ghi ở tiến trình kia sẽ vô hình ở đây nếu tin bản trong cache.
+    from app.storage.metadata_db import get_training_job
+
+    row = await asyncio.to_thread(get_training_job, job_id)
+    if row:
+        job.config = _job_from_db_row(row).config
+    nguoi_id = str(user.get("id") or "")
+    la_nguoi_duyet = await asyncio.to_thread(_duyet_duoc, user, str(job_info.get("tenant_id") or ""))
+    return job_info if _cho_xem(job, nguoi_id, la_nguoi_duyet) else None
 
 
 async def _ensure_job_loaded(job_id: str) -> Optional[Dict[str, Any]]:
@@ -1133,7 +1165,7 @@ async def list_research_splits(
     return await asyncio.to_thread(_research_splits)
 
 
-def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
+def _operational_splits(tenant_id: str, user_id: str = "") -> List[Dict[str, Any]]:
     """Hiện vật vận hành mà TỔ CHỨC NÀY sở hữu và phân giải được.
 
     Vì sao lọc qua chính `resolve_operational` chứ không chỉ đọc JSON: hai hiện
@@ -1160,6 +1192,9 @@ def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
         except SplitArtifactError:
             continue  # không tồn tại / tổ chức khác / không rõ chủ: cùng một câu trả lời
         meta = art.metadata or {}
+        chu_rieng = str(meta.get("auth_user_id") or "")
+        if chu_rieng and chu_rieng != user_id:
+            continue  # tập riêng của người khác
         classes = meta.get("classes") or []
         dialects = sorted({str(c.get("dialect") or "") for c in classes if c.get("dialect")})
         counts: Dict[str, int] = {}
@@ -1177,6 +1212,7 @@ def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
             "generated_at": meta.get("generated_at"),
             "split_mode": meta.get("split_mode"),
             "counts": counts,
+            "personal": bool(chu_rieng),
         })
     # Mới nhất lên đầu — giao diện chọn sẵn phần tử đầu.
     out.sort(key=lambda r: str(r.get("generated_at") or ""), reverse=True)
@@ -1189,7 +1225,7 @@ async def list_operational_splits(
 ) -> List[Dict[str, Any]]:
     """Hiện vật vận hành tổ chức ĐANG LÀM VIỆC có thể ghim cho một lượt chạy."""
     tenant_id = _working_tenant()
-    return await asyncio.to_thread(_operational_splits, tenant_id)
+    return await asyncio.to_thread(_operational_splits, tenant_id, str(current_user.get("id") or ""))
 
 
 def _copy_checkpoint_to_deployment(src_path: Path, model_id: str, dst_dir: Optional[Path] = None) -> Optional[str]:
@@ -1542,6 +1578,11 @@ async def start_dataset_preparation(
                         "nghiên cứu. Bỏ tuỳ chọn nghiên cứu, hoặc gán recognition_profile cho "
                         "các nhãn trước."))
 
+    # Người duyệt dựng tập chung, chỉ từ mẫu đã duyệt. Người khác dựng tập riêng: có cả
+    # mẫu chưa duyệt của chính họ, không phải đợi ai duyệt mới huấn luyện được.
+    la_nguoi_duyet = await asyncio.to_thread(_duyet_duoc, current_user, tenant_id)
+    viewer_id = "" if la_nguoi_duyet else str(current_user.get("id") or "")
+
     run_id = uuid.uuid4().hex[:12]
     await asyncio.to_thread(
         create_pending_report, run_id, tenant_id=tenant_id, dialects=dialects, floor=floor,
@@ -1551,7 +1592,8 @@ async def start_dataset_preparation(
     prepare_dataset.delay(run_id=run_id, tenant_id=tenant_id, dialects=dialects,
                           min_samples_per_class=floor, seed=body.seed,
                           with_research=body.with_research, profiles=profiles,
-                          requested_by=str(current_user.get("username") or ""))
+                          requested_by=str(current_user.get("username") or ""),
+                          viewer_id=viewer_id)
     logger.info("[PREP] %s bắt đầu run=%s dialects=%s floor=%s research=%s",
                 current_user.get("username"), run_id, dialects, floor, body.with_research)
     return {"run_id": run_id, "dialects": dialects, "min_samples_per_class": floor,
@@ -1674,6 +1716,10 @@ async def start_training(
                 # đồng bộ. Worker vẫn phân giải lại — đó không phải thừa: giữa
                 # lúc duyệt và lúc chạy, hiện vật có thể bị đổi.
                 raise HTTPException(status_code=400, detail=str(exc))
+            # Tập riêng mang dữ liệu chưa duyệt của chủ nó; với người khác nó không tồn tại.
+            chu_rieng = str((art.metadata or {}).get("auth_user_id") or "")
+            if chu_rieng and chu_rieng != str(current_user.get("id") or ""):
+                raise HTTPException(status_code=400, detail=f"Không tìm thấy tập chia '{split_id}'.")
             hien_vat = Path(art.train_csv).parent
             config.run_purpose = "operational"
 
@@ -1829,6 +1875,8 @@ async def start_training(
 
         job_id = str(uuid.uuid4())[:8]
         now = datetime.now().isoformat()
+        config.personal = not await asyncio.to_thread(_duyet_duoc, current_user, pham_vi_nguoi_goi)
+        config.review_requested_at = None
 
         job = TrainingJob(
             id=job_id,
@@ -1921,11 +1969,15 @@ async def list_jobs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không đọc được lịch sử training: {e}")
 
+    nguoi_id = str(current_user.get("id") or "")
+    la_nguoi_duyet = await asyncio.to_thread(_duyet_duoc, current_user, _working_tenant())
     items: List[Dict[str, Any]] = []
     for row in rows:
         try:
             job = _job_from_db_row(row)
         except Exception:
+            continue
+        if not _cho_xem(job, nguoi_id, la_nguoi_duyet):
             continue
         item = job.dict()
         item["username"] = row.get("username")
@@ -1939,7 +1991,7 @@ async def get_job_status(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> TrainingJob:
     """Lấy trạng thái training job (fallback sang DB nếu không có trong memory)"""
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
@@ -1975,7 +2027,7 @@ async def get_job_metrics(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[TrainingMetrics]:
     """Lấy metrics của training job (fallback sang DB nếu không có trong memory)"""
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
@@ -2033,7 +2085,7 @@ async def get_job_evaluation(
     Trả về {"available": false} thay vì 404 khi job cũ chưa có dữ liệu này
     (các job train trước khi tính năng evaluation được thêm).
     """
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
@@ -2135,7 +2187,7 @@ async def get_job_provenance(
     lập được. Trả {"available": false} cho job cũ chưa ghi provenance, giống
     cách endpoint evaluation xử lý.
     """
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
@@ -2223,9 +2275,10 @@ async def cancel_training_job(
     trong ≤2s và terminate subprocess (SIGKILL sau 30s nếu lì).
     DB được đánh dấu cancelled ngay để UI phản hồi tức thì.
     """
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    await _chi_chu_hoac_bien_tap(job_id, current_user, str(job_info.get("tenant_id") or "") or _working_tenant())
 
     job = job_info["job"]
 
@@ -2264,9 +2317,10 @@ async def delete_training_job_endpoint(
     chạy/đang chờ phải hủy trước (xem cancel_training_job). Không xóa
     checkpoint file trên đĩa (xem delete_training_job trong metadata_db.py).
     """
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    await _chi_chu_hoac_bien_tap(job_id, current_user, str(job_info.get("tenant_id") or "") or _working_tenant())
 
     job = job_info["job"]
     if job.status not in TERMINAL_STATUSES:
@@ -2297,6 +2351,26 @@ class PromoteResponse(BaseModel):
     message: str
 
 
+def _duyet_duoc(user: Dict[str, Any], tenant_id: str) -> bool:
+    """Người đưa được model vào slot dùng chung của `tenant_id`, cũng là người duyệt đề nghị.
+
+    Slot của Community mọi tổ chức và khách đều dùng, nên biên tập viên của Community
+    cũng như thành viên: thay nó là việc của quản trị nền tảng. Khoá API không duyệt
+    được, và id của nó không phải UUID nên không được đem đi tra vai.
+    """
+    if user.get("auth_method") == "api_key":
+        return False
+    return _la_bien_tap(user, tenant_id) and (not realtime_slots.is_shared(tenant_id) or bool(user.get("is_admin")))
+
+
+async def _chi_chu_hoac_bien_tap(job_id: str, user: Dict[str, Any], tenant_id: str) -> None:
+    """Huỷ và xoá job là việc của người chạy nó, hoặc biên tập viên của tổ chức."""
+    if await asyncio.to_thread(_la_bien_tap, user, tenant_id):
+        return
+    if not await asyncio.to_thread(_la_nguoi_chay_job, job_id, str(user.get("id") or "")):
+        raise HTTPException(status_code=403, detail="Bạn chỉ huỷ hoặc xoá được job của chính mình.")
+
+
 def _la_bien_tap(user: Dict[str, Any], tenant_id: str) -> bool:
     """Admin/editor của tổ chức, hoặc quản trị nền tảng."""
     from app.vocabulary_registry import can_edit_registry
@@ -2325,6 +2399,9 @@ async def promote_training_job(
       * thành viên thường: chỉ model DO CHÍNH MÌNH huấn luyện, vào slot cá nhân chỉ
         người đó thấy, nên không đụng tới model của ai.
 
+    Model riêng muốn dùng chung thì người chạy đề nghị (`/review`), người duyệt thấy job
+    và bấm chính nút này: đó là bước duyệt, và job thôi là job riêng từ đây.
+
     Khoá API không promote được. Job của tổ chức khác không tới được đây:
     `_ensure_job_loaded` coi nó như không tồn tại.
 
@@ -2332,7 +2409,7 @@ async def promote_training_job(
     service → ghi entry vào models.json (bền qua restart) → gọi /reload để
     hot-swap → ghi promoted_at vào DB.
     """
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
@@ -2342,10 +2419,7 @@ async def promote_training_job(
         raise HTTPException(status_code=403, detail="Khoá API không dùng được cho thao tác này.")
     chu_job = str(job_info.get("tenant_id") or "").strip() or _working_tenant()
     nguoi_goi = str(current_user.get("id") or "")
-    # Slot của Community là slot CHUNG, mọi tổ chức và khách đều dùng, nên biên tập viên
-    # của Community cũng chỉ được slot cá nhân: thay nó là việc của quản trị nền tảng.
-    slot_chung = realtime_slots.slot_owner(realtime_slots.slot_id("x", chu_job)) is None
-    ca_nhan = not _la_bien_tap(current_user, chu_job) or (slot_chung and not current_user.get("is_admin"))
+    ca_nhan = not _duyet_duoc(current_user, chu_job)
     if ca_nhan and not await asyncio.to_thread(_la_nguoi_chay_job, job_id, nguoi_goi):
         raise HTTPException(
             status_code=403,
@@ -2450,6 +2524,12 @@ async def promote_training_job(
     job.checkpoint_path = deployed_path
     await _persist_job(job)
 
+    if not ca_nhan and getattr(job.config, "personal", False):
+        job.config.personal = False
+        job.config.review_requested_at = None
+        await _ghi_trang_thai_duyet(job, chu_job, "Đề nghị dùng chung đã được duyệt",
+                                    f"Model {job_id} giờ mọi người trong tổ chức dùng được.", "success")
+
     # 4b. One dialect = one realtime slot, so the job that used to hold this
     #     slot is no longer serving. _update_registry already dropped its entry
     #     from models.json; without this the database still called it promoted,
@@ -2529,6 +2609,89 @@ async def promote_training_job(
     )
 
 
+async def _ghi_trang_thai_duyet(job: TrainingJob, tenant_id: str, tieu_de: str, noi_dung: str,
+                                muc_do: str = "info") -> None:
+    """Lưu trạng thái đề nghị, rồi báo cho người chạy job."""
+    from app import notifications
+    from app.storage.metadata_db import update_training_job_config
+
+    await asyncio.to_thread(update_training_job_config, job.id, {
+        "personal": job.config.personal, "review_requested_at": job.config.review_requested_at})
+    if job.auth_user_id:
+        await asyncio.to_thread(notifications.notify, job.auth_user_id, "training", tieu_de, noi_dung,
+                                "/training", muc_do, tenant_id)
+
+
+class ReviewReject(BaseModel):
+    reason: str = ""
+
+
+@router.post("/jobs/{job_id}/review", response_model=TrainingJob, dependencies=[Depends(limit_training)])
+async def request_shared_review(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
+    """Người chạy đề nghị đưa model riêng ra dùng chung. Từ đây người duyệt mới thấy job."""
+    from app import audit, notifications, tenant_admin
+    from app.storage.metadata_db import update_training_job_config
+
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    job = job_info["job"]
+    if str(job.auth_user_id or "") != str(current_user.get("id") or ""):
+        raise HTTPException(status_code=403, detail="Chỉ người chạy job mới đề nghị được.")
+    if not job.config.personal:
+        raise HTTPException(status_code=409, detail="Model này không phải model riêng.")
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="Chỉ đề nghị được với job đã hoàn thành.")
+    if job.config.review_requested_at:
+        return job
+
+    chu_job = str(job_info.get("tenant_id") or "") or _working_tenant()
+    job.config.review_requested_at = datetime.now().isoformat()
+    await asyncio.to_thread(update_training_job_config, job_id,
+                            {"review_requested_at": job.config.review_requested_at})
+    nguoi_duyet = await asyncio.to_thread(tenant_admin.model_reviewer_ids, chu_job)
+    await asyncio.to_thread(
+        lambda: notifications.notify_many(
+            nguoi_duyet, kind="training", title="Có model chờ duyệt dùng chung",
+            body=f"{current_user.get('username')} đề nghị dùng chung model {job_id}.",
+            link="/training", tenant_id=chu_job))
+    audit.record("training.review.request", actor=current_user, target_type="training_job",
+                 target_id=job_id, tenant_id=chu_job, detail={"nguoi_duyet": len(nguoi_duyet)})
+    return job
+
+
+@router.post("/jobs/{job_id}/review/reject", response_model=TrainingJob, dependencies=[Depends(limit_training)])
+async def reject_shared_review(
+    job_id: str,
+    body: ReviewReject,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
+    """Người duyệt từ chối: job trở lại là job riêng, người chạy vẫn dùng được cho mình."""
+    from app import audit
+
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    job = job_info["job"]
+    chu_job = str(job_info.get("tenant_id") or "") or _working_tenant()
+    if not await asyncio.to_thread(_duyet_duoc, current_user, chu_job):
+        raise HTTPException(status_code=403, detail="Bạn không có quyền duyệt model dùng chung.")
+    if not job.config.review_requested_at:
+        raise HTTPException(status_code=409, detail="Job này không có đề nghị nào đang chờ.")
+
+    job.config.review_requested_at = None
+    ly_do = body.reason.strip()[:300]
+    await _ghi_trang_thai_duyet(job, chu_job, "Đề nghị dùng chung chưa được duyệt",
+                                f"Model {job_id} vẫn là model riêng của bạn." + (f" Lý do: {ly_do}" if ly_do else ""),
+                                "warning")
+    audit.record("training.review.reject", actor=current_user, target_type="training_job",
+                 target_id=job_id, tenant_id=chu_job, detail={"ly_do": ly_do})
+    return job
+
+
 @router.websocket("/ws/{job_id}")
 async def websocket_training_progress(websocket: WebSocket, job_id: str, token: str = Query(default="")):
     """
@@ -2576,16 +2739,16 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
         return
 
     with tenant_scope(pham_vi):
-        await _phat_tien_do(websocket, job_id)
+        await _phat_tien_do(websocket, job_id, user)
 
 
-async def _phat_tien_do(websocket: WebSocket, job_id: str) -> None:
+async def _phat_tien_do(websocket: WebSocket, job_id: str, user: Dict[str, Any]) -> None:
     """Thân của endpoint WS, tách ra để phạm vi tenant bọc trọn vòng đời.
 
     `asyncio.to_thread` chép ngữ cảnh hiện tại sang luồng phụ, nên các lượt đọc
     CSDL bên trong vẫn thấy phạm vi đã đặt.
     """
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, user)
     if not job_info:
         await websocket.close(code=4004, reason="Job not found")
         return
@@ -2663,7 +2826,7 @@ async def predict_trained_model(
     Load checkpoint locally and run inference without requiring registry entry.
     """
     # Validate job exists (fallback sang DB — job vẫn test được sau khi backend restart)
-    job_info = await _ensure_job_loaded(job_id)
+    job_info = await _job_cua(job_id, current_user)
     if not job_info:
         raise HTTPException(status_code=404, detail=f"Training job {job_id} not found")
 

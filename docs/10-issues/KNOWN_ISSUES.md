@@ -1794,11 +1794,24 @@ có trần số slot và chưa có đường gỡ.
 
 Còn mở:
 
-* `promoted_at` không cho biết job ở slot nào: job đã vào slot cá nhân thì biên tập viên không
-  thấy nút đưa vào slot tổ chức, phải huấn luyện lại. Cần lưu slot trên job (đổi lược đồ).
 * `/login` và `/refresh` trả `can_edit_tenant` theo phạm vi khách, không theo nơi làm việc.
   Chưa ảnh hưởng ai vì giao diện gọi lại `/me`; `_fetch_user_by_id` không chọn `active_tenant_id`
   nên sửa đúng phải thêm một truy vấn.
+
+### Model riêng của thành viên (07/11/2026)
+
+Người không duyệt được (`_duyet_duoc`) có job riêng: `config.personal`, chỉ họ thấy. Tập chia họ
+dựng có cả mẫu chưa duyệt của chính họ (`make_splits --viewer_id`), hiện vật mang `auth_user_id`
+nên người khác không liệt kê hay ghim được. Muốn dùng chung thì `POST /training/jobs/{id}/review`;
+từ đây người duyệt mới thấy job, bấm promote là duyệt, `review/reject` là từ chối. Người duyệt ở
+Community là quản trị nền tảng, ở tổ chức là admin và editor của tổ chức đó.
+
+Trạng thái nằm trong `training_jobs.config`, không đổi lược đồ. `upsert_training_job` KHÔNG ghi
+`config` khi job đã có, nên phải qua `update_training_job_config`; và cache của mỗi tiến trình
+backend không đọc lại job đã kết thúc, nên `_job_cua` đọc DB cho job riêng.
+
+Huỷ và xoá job chỉ người chạy và biên tập viên làm được. Model được duyệt có thể đã học từ mẫu
+chưa kiểm duyệt của người chạy; hộp xác nhận nói rõ điều đó, người duyệt chịu trách nhiệm.
 
 Đo tốc độ cùng ngày, trên máy phát triển:
 

@@ -37,7 +37,13 @@ test.describe.serial("Quyền theo tổ chức", () => {
 
   test("1. Thành viên thường không promote được model của người khác, kể cả gọi thẳng API", async ({ page }) => {
     await dangNhap(page, "iso_user_a", "default");
-    const job = await moJob(page);
+    await page.goto("/training");
+    const toi = await goiApi(page, "GET", "/api/v1/auth/me");
+    const jobs = await goiApi(page, "GET", "/api/v1/training/jobs");
+    const job = jobs.json.find((j: { status: string; auth_user_id: string }) =>
+      j.status === "completed" && j.auth_user_id !== toi.json.id)?.id;
+    expect(job, "phai co job hoan thanh cua nguoi khac").toBeTruthy();
+    await page.locator(`tr[title="Job ${job}"]`).click();
     await expect(page.getByRole("button", { name: "Kiểm tra model (Realtime)" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Đưa vào Realtime" })).toHaveCount(0);
     const r = await goiApi(page, "POST", `/api/v1/training/jobs/${job}/promote`);

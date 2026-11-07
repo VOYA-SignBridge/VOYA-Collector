@@ -572,3 +572,189 @@ def test_auditTaskFailure_workerChildDied_stillWritesUnderAScope(monkeypatch, ch
         tenant_context._tenant.reset(bo_tenant)
         tenant_context._system.reset(bo_system)
     assert da_ghi == ([(TENANT_A, False)] if chu else [(None, True)])
+
+
+@pytest.mark.parametrize("duong_dan", ["/2fa/enroll", "/2fa/confirm", "/2fa/disable", "/2fa/recovery-codes",
+                                       "/me/exports", "/presence"])
+def test_selfServiceWrite_personalActions_needNoTenantRole(duong_dan):
+    """Việc của riêng mình không được đợi ai cấp vai."""
+    from app.access_gate import _is_self_service_write
+
+    assert _is_self_service_write(duong_dan) is True
+
+
+@pytest.mark.parametrize("duong_dan", ["/me/exports/x/download", "/upload/video", "/training/start",
+                                       "/classes/request", "/tenants/self-serve"])
+def test_selfServiceWrite_workOnSharedData_staysBehindTheGate(duong_dan):
+    """Cổng này cố ý: ghi vào dữ liệu chung thì phải có ít nhất một vai."""
+    from app.access_gate import _is_self_service_write
+
+    assert _is_self_service_write(duong_dan) is False
+
+
+# --------------------------------------------------------------------------- model riêng
+
+
+def _job_rieng(chu=MEMBER["id"], da_de_nghi=None, status="completed"):
+    config = SimpleNamespace(personal=True, review_requested_at=da_de_nghi)
+    return SimpleNamespace(id="j1", auth_user_id=chu, config=config, status=status)
+
+
+def test_choXem_personalJob_ownerSeesIt():
+    assert training._cho_xem(_job_rieng(), MEMBER["id"], False) is True
+
+
+def test_choXem_personalJob_otherMemberDoesNot():
+    assert training._cho_xem(_job_rieng(), "nguoi-khac", False) is False
+
+
+def test_choXem_personalJobNotSubmitted_reviewerDoesNot():
+    assert training._cho_xem(_job_rieng(), EDITOR["id"], True) is False
+
+
+def test_choXem_submittedJob_reviewerSeesItButOtherMemberDoesNot():
+    job = _job_rieng(da_de_nghi="2026-11-07T10:00:00")
+    assert training._cho_xem(job, EDITOR["id"], True) is True
+    assert training._cho_xem(job, "nguoi-khac", False) is False
+
+
+def test_choXem_ordinaryJob_everyoneInTheTenant():
+    job = SimpleNamespace(auth_user_id=MEMBER["id"], config=SimpleNamespace(personal=False))
+    assert training._cho_xem(job, "nguoi-khac", False) is True
+
+
+def _nap_job(monkeypatch, job, tenant=TENANT_A, trong_db=None):
+    async def _nap(_id):
+        return {"job": job, "tenant_id": tenant}
+
+    monkeypatch.setattr(training, "_ensure_job_loaded", _nap)
+    monkeypatch.setattr(metadata_db, "get_training_job", lambda _id: trong_db)
+
+
+def test_jobCua_someoneElsesPersonalJob_looksMissing(monkeypatch):
+    _nap_job(monkeypatch, _job_rieng())
+    monkeypatch.setattr(training, "_duyet_duoc", lambda _u, _t: False)
+    assert asyncio.run(training._job_cua("j1", {"id": "nguoi-khac"})) is None
+
+
+def test_jobCua_requestWrittenByOtherWorker_reviewerStillSeesIt(monkeypatch):
+    """Mỗi tiến trình backend có cache riêng; job đã kết thúc không đọc lại DB."""
+    job = _job_rieng()
+    moi = {"job_id": "j1", "status": "completed", "auth_user_id": MEMBER["id"],
+           "config": {"personal": True, "review_requested_at": "2026-11-07T10:00:00"}}
+    _nap_job(monkeypatch, job, trong_db=moi)
+    monkeypatch.setattr(training, "_duyet_duoc", lambda _u, _t: True)
+    assert asyncio.run(training._job_cua("j1", EDITOR)) is not None
+
+
+def _quyen(monkeypatch, bien_tap):
+    monkeypatch.setattr(training, "_la_bien_tap", lambda _u, _t: bien_tap)
+
+
+def test_duyetDuoc_organisationEditor_yes(monkeypatch):
+    _quyen(monkeypatch, True)
+    assert training._duyet_duoc(EDITOR, TENANT_A) is True
+
+
+def test_duyetDuoc_communityEditor_no(monkeypatch):
+    """Slot của Community mọi tổ chức cùng dùng: duyệt là việc của quản trị nền tảng."""
+    _quyen(monkeypatch, True)
+    assert training._duyet_duoc(EDITOR, "default") is False
+    assert training._duyet_duoc({**EDITOR, "is_admin": True}, "default") is True
+
+
+def test_duyetDuoc_member_no(monkeypatch):
+    _quyen(monkeypatch, False)
+    assert training._duyet_duoc(MEMBER, TENANT_A) is False
+
+
+def _cho_review(monkeypatch, job, bien_tap=False):
+    from app import audit, notifications, tenant_admin
+
+    ghi, bao = [], []
+    _nap_job(monkeypatch, job)
+    async def _qua(_id, _u):
+        return {"job": job, "tenant_id": TENANT_A}
+
+    monkeypatch.setattr(training, "_job_cua", _qua)
+    monkeypatch.setattr(training, "_duyet_duoc", lambda _u, _t: bien_tap)
+    monkeypatch.setattr(tenant_admin, "model_reviewer_ids", lambda _t: [EDITOR["id"]])
+    monkeypatch.setattr(metadata_db, "update_training_job_config", lambda _id, doi: ghi.append(doi))
+    monkeypatch.setattr(notifications, "notify", lambda nguoi, *_a, **_k: bao.append(nguoi))
+    monkeypatch.setattr(audit, "record", lambda *_a, **_k: None)
+    return ghi, bao
+
+
+def test_requestReview_owner_savesAndTellsTheReviewers(monkeypatch):
+    job = _job_rieng()
+    ghi, bao = _cho_review(monkeypatch, job)
+    asyncio.run(training.request_shared_review("j1", MEMBER))
+    assert job.config.review_requested_at
+    assert ghi == [{"review_requested_at": job.config.review_requested_at}]
+    assert bao == [EDITOR["id"]]
+
+
+def test_requestReview_askedTwice_tellsReviewersOnce(monkeypatch):
+    job = _job_rieng()
+    _ghi, bao = _cho_review(monkeypatch, job)
+    asyncio.run(training.request_shared_review("j1", MEMBER))
+    asyncio.run(training.request_shared_review("j1", MEMBER))
+    assert len(bao) == 1
+
+
+def test_requestReview_notTheOwner_returns403(monkeypatch):
+    _cho_review(monkeypatch, _job_rieng(chu="nguoi-khac"))
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(training.request_shared_review("j1", MEMBER))
+    assert err.value.status_code == 403
+
+
+def test_requestReview_jobStillRunning_returns409(monkeypatch):
+    _cho_review(monkeypatch, _job_rieng(status="running"))
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(training.request_shared_review("j1", MEMBER))
+    assert err.value.status_code == 409
+
+
+def test_rejectReview_reviewer_jobGoesBackToBeingPersonal(monkeypatch):
+    job = _job_rieng(da_de_nghi="2026-11-07T10:00:00")
+    ghi, bao = _cho_review(monkeypatch, job, bien_tap=True)
+    asyncio.run(training.reject_shared_review("j1", training.ReviewReject(reason="chua on"), EDITOR))
+    assert job.config.review_requested_at is None and job.config.personal is True
+    assert ghi == [{"personal": True, "review_requested_at": None}]
+    assert bao == [MEMBER["id"]]
+
+
+def test_rejectReview_notAReviewer_returns403(monkeypatch):
+    _cho_review(monkeypatch, _job_rieng(da_de_nghi="2026-11-07T10:00:00"), bien_tap=False)
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(training.reject_shared_review("j1", training.ReviewReject(), MEMBER))
+    assert err.value.status_code == 403
+
+
+def test_chiChuHoacBienTap_otherMember_returns403(monkeypatch):
+    _quyen(monkeypatch, False)
+    monkeypatch.setattr(training, "_la_nguoi_chay_job", lambda _j, _u: False)
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(training._chi_chu_hoac_bien_tap("j1", MEMBER, TENANT_A))
+    assert err.value.status_code == 403
+
+
+def test_chiChuHoacBienTap_jobOwner_passes(monkeypatch):
+    _quyen(monkeypatch, False)
+    monkeypatch.setattr(training, "_la_nguoi_chay_job", lambda _j, _u: True)
+    asyncio.run(training._chi_chu_hoac_bien_tap("j1", MEMBER, TENANT_A))
+
+
+def test_chiChuHoacBienTap_editor_passes(monkeypatch):
+    _quyen(monkeypatch, True)
+    asyncio.run(training._chi_chu_hoac_bien_tap("j1", EDITOR, TENANT_A))
+
+
+def test_duyetDuoc_apiKey_noAndNeverLooksUpARole(monkeypatch):
+    """Id của khoá API không phải UUID: đem tra vai là `/training/start` trả 500."""
+    def _khong_duoc_goi(_u, _t):
+        raise AssertionError("khong duoc tra vai cho khoa API")
+
+    monkeypatch.setattr(training, "_la_bien_tap", _khong_duoc_goi)
+    assert training._duyet_duoc(API_KEY, TENANT_A) is False

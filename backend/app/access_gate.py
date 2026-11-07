@@ -208,7 +208,8 @@ TRIAL_CONSUMING_ROUTES: frozenset[tuple[str, str]] = frozenset({
 #: đường ghi cho người chưa được cấp vai; phải trả lời được câu "thao tác này có
 #: chỉ chạm tới dữ liệu của chính người gọi không?".
 SELF_SERVICE_WRITE_PREFIXES: tuple[str, ...] = (
-    "/auth/",            # đăng xuất, đổi mật khẩu, phiên, 2FA, mã khôi phục
+    "/auth/",            # đăng xuất, đổi mật khẩu, phiên
+    "/2fa/",             # 2FA và mã khôi phục của chính mình
     "/account/",         # hồ sơ cá nhân
     "/verification/",    # xác minh email và số điện thoại
     "/trial/",           # phiếu dùng thử gắn với chính người gọi
@@ -254,6 +255,11 @@ SELF_SERVICE_EXACT_PATHS: frozenset = frozenset({
     # vai ở tầng tenant để được XEM tổ chức mình đã thuộc về là một cái bẫy
     # ngược — người chưa có vai không chuyển sang nổi tổ chức nơi họ có vai.
     "/tenants/switch",
+    # Xuất dữ liệu của chính mình: quyền của chủ thể dữ liệu, cùng lý do với
+    # `/legal/{kind}/withdraw`, không được đặt dưới quyền cấp vai của người khác.
+    "/me/exports",
+    # Nhịp báo đang hoạt động của chính phiên này, trang gọi tự động.
+    "/presence",
 })
 
 SELF_SERVICE_LEGAL_ACTIONS: tuple[str, ...] = ("/accept", "/withdraw")

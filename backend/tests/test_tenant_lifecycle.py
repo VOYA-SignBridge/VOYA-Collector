@@ -230,6 +230,12 @@ class TestMembership:
         member = tenant_admin.list_members(tenant)[0]
         assert member["role"] is None
 
+    def test_modelReviewers_organisation_areItsAdminsAndEditorsOnly(self, tenant, account):
+        bien_tap, thanh_vien = account(), account()
+        tenant_admin.add_member(tenant, bien_tap["id"], "editor")
+        tenant_admin.add_member(tenant, thanh_vien["id"])
+        assert tenant_admin.model_reviewer_ids(tenant) == [str(bien_tap["id"])]
+
     def test_membership_without_a_tenant_role_is_a_real_membership(self, tenant, account):
         """Không vai KHÔNG phải không có mặt.
 
@@ -614,6 +620,28 @@ class TestRegistration:
             assert res.status_code == 201, res.text
             assert res.json()["tenant_id"] == tenant
             assert tenant_admin.list_members(tenant)[0]["role"] == "editor"
+        finally:
+            self._cleanup(name)
+
+    def test_invitationWithoutRole_newAccount_canStillWrite(self, anon_client, tenant):
+        """Lời mời không kèm vai không cấp gì; không vào Cộng đồng thì `access_gate`
+        chặn mọi lượt ghi của người này tới lần backend khởi động lại."""
+        from app.access_gate import _has_any_tenant_grant
+
+        name = f"t{uuid.uuid4().hex[:10]}"
+        email = f"{name}@example.test"
+        _, token = tenant_admin.create_invitation(tenant, email, None)
+        try:
+            res = anon_client.post("/api/v1/auth/register", json={
+                "username": name, "email": email,
+                "password": "correct horse battery",
+                **registration_consents(),
+                "invitation_token": token,
+            })
+            assert res.status_code == 201, res.text
+            assert res.json()["tenant_id"] == tenant, "nhà của họ vẫn là tổ chức đã mời"
+            assert tenant_admin.list_members(tenant)[0]["role"] is None
+            assert _has_any_tenant_grant({"id": res.json()["id"]}) is True
         finally:
             self._cleanup(name)
 

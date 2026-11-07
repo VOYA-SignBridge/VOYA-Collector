@@ -53,6 +53,10 @@ export interface DatasetInfo {
 export type ModelType = 'tcn' | 'cnn' | 'lstm' | 'bigru_attention' | 'hdgcn';
 
 export interface TrainingConfig {
+  /** Server đặt: job riêng của người chạy. */
+  personal?: boolean;
+  /** Lúc người chạy đề nghị dùng chung. */
+  review_requested_at?: string | null;
   model_type: ModelType;
   dialects: string[];
   languages: string[];
@@ -84,6 +88,8 @@ export interface OperationalSplit {
   generated_at: string | null;
   split_mode: string | null;
   counts: { train: number; val: number; test: number };
+  /** Tập riêng của người đang xem, có cả mẫu chưa duyệt của họ. */
+  personal?: boolean;
 }
 
 // POST /training/dataset/prepare → GET /training/dataset/prepare/{run_id}
@@ -369,6 +375,27 @@ export function useTrainingAPI() {
     }
   }, []);
 
+  // Đề nghị đưa model riêng ra dùng chung, và người duyệt từ chối đề nghị đó.
+  const requestReview = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/review`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  const rejectReview = useCallback(async (jobId: string, reason: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/review/reject`, { reason });
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
   // Per-class breakdown + confusion matrix trên test set (Step 7)
   const getJobEvaluation = useCallback(async (jobId: string): Promise<JobEvaluation | null> => {
     try {
@@ -464,6 +491,8 @@ export function useTrainingAPI() {
     listJobs,
     cancelTraining,
     promoteJob,
+    requestReview,
+    rejectReview,
     getJobEvaluation,
     getResearchSplits,
     getOperationalSplits,
