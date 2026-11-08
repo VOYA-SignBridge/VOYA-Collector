@@ -88,7 +88,7 @@ case "${1:-}" in
     # không, đúng kịch bản "máy thứ hai" từng hỏng trong im lặng.
     compose exec -T backend python -c "
 from app.storage.metadata_db import schema_debt
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 with system_scope('staging: kiem no luoc do'):
     debt = schema_debt()
 print(debt)

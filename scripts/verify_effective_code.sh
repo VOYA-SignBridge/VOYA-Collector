@@ -51,9 +51,9 @@ import hashlib, importlib, json, os, sys
 # một module thiếu ở đây là một biến không kiểm soát.
 MODULES = [
     "app.modules.dataset.catalog_sync", "app.modules.dataset.samples", "app.modules.dataset.catalog",
-    "app.preview_render", "app.preview_tasks", "app.tenant_context",
-    "app.tenant_middleware", "app.auth", "app.quota_deps",
-    "app.training_tasks", "app.export_tasks", "app.storage.metadata_db",
+    "app.modules.dataset.preview_render", "app.modules.dataset.preview_tasks", "app.modules.saas.tenant_context",
+    "app.modules.saas.tenant_middleware", "app.modules.identity._web_compat", "app.modules.security.quota_deps",
+    "app.modules.training.tasks", "app.export_tasks", "app.storage.metadata_db",
 ]
 
 ra = {}

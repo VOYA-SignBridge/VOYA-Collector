@@ -50,7 +50,7 @@ if ($BoQuaDrive) {
     # cua chinh lan khoi phuc nay, nen khong can biet ten container.
     Push-Location $AppRoot
     try {
-        $code = "from app.sync_tasks import download_missing_files_to_local as t; print(t.apply().get())"
+        $code = "from app.modules.google_sync.restore_tasks import download_missing_files_to_local as t; print(t.apply().get())"
         & docker compose exec -T -w /app worker python -c $code
         if ($LASTEXITCODE -ne 0) { Warn "tai tu Drive loi (xem dong tren). Chay lai script nay sau khi kiem tra mang/Drive." }
         else { Write-Host "  Xong. Dong cuoi ben tren la so tep da tai / bo qua / loi." }

@@ -53,7 +53,7 @@ def _nap_duong_dan_app() -> None:
 
 _nap_duong_dan_app()
 
-from app.auth import get_password_hash                    # noqa: E402
+from app.modules.identity.passwords import get_password_hash                    # noqa: E402
 from app.storage.metadata_db import _cursor               # noqa: E402
 from app.modules.saas.tenant_admin import create_tenant                # noqa: E402
 from app.modules.saas.tenant_context import system_scope, tenant_scope  # noqa: E402

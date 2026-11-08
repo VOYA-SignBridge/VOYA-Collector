@@ -229,7 +229,7 @@ def main() -> int:
     say("[8/8] Tải dữ liệu không mang theo gói")
     try:
         say("  " + stack.call("exec", "-T", "-w", "/app", "worker", "python", "-c",
-                              "from app.sync_tasks import download_missing_files_to_local as t; "
+                              "from app.modules.google_sync.restore_tasks import download_missing_files_to_local as t; "
                               "print(t.apply().get())", timeout=7200))
     except Failure as exc:
         say(f"  CẢNH BÁO: tải từ Drive lỗi ({exc}); chạy lại 3_TAI_DU_LIEU_MAY_MOI.bat -AppRoot {ROOT}")

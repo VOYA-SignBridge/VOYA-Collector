@@ -255,7 +255,7 @@ jobs:
         run: |
           python -c "
           from app.storage.metadata_db import schema_debt
-          from app.tenant_context import system_scope
+          from app.modules.saas.tenant_context import system_scope
           with system_scope('ci: kiem no luoc do'):
               debt = schema_debt()
           print('schema_debt:', debt)
@@ -273,8 +273,8 @@ jobs:
         working-directory: backend
         run: |
           python -c "
-          from app.tenant_context import system_scope
-          from app.vocabulary_registry import seed_from_csv
+          from app.modules.saas.tenant_context import system_scope
+          from app.modules.dataset.vocabulary_registry import seed_from_csv
           with system_scope('ci: gieo danh muc he thong'):
               print('dialects:', seed_from_csv())
           "

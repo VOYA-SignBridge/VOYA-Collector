@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.storage.metadata_db import _cursor, _fetch_all, insert_training_metric, upsert_training_job
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 CSDL = "signdb_pytest_e2e"
 TENANT = "iso_a"
