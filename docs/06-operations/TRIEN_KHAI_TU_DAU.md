@@ -117,7 +117,26 @@ cmd //c "VOYA.bat verify"
 > **Một tunnel chỉ được một máy chạy connector.** Nếu hai máy cùng chạy, người dùng bị chia
 > sang hai cơ sở dữ liệu khác nhau.
 
-### 7. Tự bật khi khởi động máy
+### 7. Cập nhật bằng ảnh dựng sẵn (nên bật trên máy chạy web)
+
+Mặc định, mỗi lần cập nhật máy chạy web **tự dựng ảnh**: tốn CPU, RAM và ổ đĩa của chính máy đó, và mất vài phút. Bật chế độ kéo ảnh thì máy chỉ **tải ảnh mà CI đã dựng và đã kiểm** cho đúng commit đó.
+
+Thêm một dòng vào `.env`:
+
+```
+VOYA_REGISTRY_NS=tamb2203579
+```
+
+Từ đó `VOYA.bat update-git` sẽ:
+1. Kiểm commit mới đã có ảnh trên Docker Hub chưa. Chưa có, tức CI chưa xong hoặc đang đỏ, thì **dừng, không đụng vào gì**.
+2. Tải ảnh **trong lúc web vẫn chạy**. Lớp thư viện nặng chỉ đổi khi danh sách gói đổi, nên thường chỉ tải vài chục MB.
+3. Kéo mã, bật trang bảo trì, chạy ảnh mới, kiểm sức khoẻ, tự quay về bản cũ nếu hỏng. Các bước này giống hệt khi tự dựng.
+
+Lần **đầu tiên** kéo ảnh vẫn tải trọn bộ (khoảng 4,5 GB với backend). Các lần sau chỉ tải phần đổi.
+
+Bỏ dòng đó đi thì máy quay lại tự dựng như cũ. `VOYA.bat update-code` (dựng từ mã đang có trên máy) không bị ảnh hưởng.
+
+### 8. Tự bật khi khởi động máy
 
 Chỉ làm trên máy chạy web thật:
 

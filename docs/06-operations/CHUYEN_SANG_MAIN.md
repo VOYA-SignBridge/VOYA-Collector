@@ -168,6 +168,8 @@ Lệnh 3 tạo nhánh riêng; sửa code và commit trên nhánh đó. Lệnh 4 
    ```
    `update-git` tự kéo mã, tự dựng phần cần thiết, bật trang bảo trì trong lúc cập nhật, và tự quay về bản cũ nếu bản mới không chạy.
 
+   Nếu `.env` có `VOYA_REGISTRY_NS` (xem [TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md), bước 7), máy **không dựng** mà tải ảnh CI đã dựng cho đúng commit. Nếu commit chưa có ảnh, lệnh báo `chua co anh tren Docker Hub` và dừng: đợi CI xanh rồi chạy lại.
+
 ## Các nhánh cũ
 
 | Nhánh | Xử lý |

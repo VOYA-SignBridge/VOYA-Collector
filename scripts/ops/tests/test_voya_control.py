@@ -214,6 +214,98 @@ class IntentionalStopAndLockTests(unittest.TestCase):
         self.assertFalse(voya.DEPLOY_LOCK.exists())
 
 
+class RegistryPullTests(unittest.TestCase):
+    """Chế độ kéo ảnh: máy chạy web dùng ảnh CI đã dựng cho ĐÚNG commit, không dựng."""
+
+    COMMIT = "f" * 40
+
+    def test_images_are_pinned_to_the_commit_and_mapped_to_local_names(self):
+        pairs = voya.remote_images("ns", self.COMMIT)
+        self.assertEqual([local for _, local in pairs],
+                         ["voya_backend:latest", "voya_frontend:latest", "voya_realtime_service:latest"])
+        for remote, _ in pairs:
+            self.assertTrue(remote.startswith("ns/voya_"))
+            self.assertTrue(remote.endswith(":sha-" + self.COMMIT))   # không bao giờ `latest`
+
+    def _git_and_docker(self, manifest_ok: bool, calls: list):
+        def fake_sh(args, **kw):
+            calls.append(args)
+            r = type("R", (), {"stdout": "", "returncode": 0})()
+            if args[:2] == ["git", "log"]:
+                r.stdout = "abc1234 fix something\n"
+            elif args[:3] == ["git", "diff", "--name-only"]:
+                r.stdout = "backend/app/x.py\n"
+            elif args == ["git", "rev-parse", "@{u}"]:
+                r.stdout = self.COMMIT + "\n"
+            elif args[:3] == ["docker", "manifest", "inspect"]:
+                r.returncode = 0 if manifest_ok else 1
+            return r
+        return fake_sh
+
+    def test_update_git_refuses_when_ci_has_not_published_the_commit(self):
+        calls: list = []
+        with patch.object(voya, "registry_ns", return_value="ns"), \
+                patch.object(voya, "sh", side_effect=self._git_and_docker(False, calls)), \
+                patch.object(voya, "build_and_deploy") as deploy, quiet(), \
+                self.assertRaises(SystemExit) as err:
+            voya.cmd_update_git([])
+        self.assertIn("chua co anh", str(err.exception))
+        self.assertNotIn(["git", "pull", "--ff-only"], calls)          # mã trên đĩa không đổi
+        self.assertFalse(any(c[:2] == ["docker", "pull"] for c in calls))
+        deploy.assert_not_called()
+
+    def test_update_git_pulls_images_before_code_and_deploys_without_building(self):
+        calls: list = []
+        os.environ["VOYA_CONFIRMED"] = "co"
+        try:
+            with patch.object(voya, "registry_ns", return_value="ns"), \
+                    patch.object(voya, "sh", side_effect=self._git_and_docker(True, calls)), \
+                    patch.object(voya, "build_and_deploy", return_value=True) as deploy, \
+                    patch.object(voya, "tidy_pulled_images") as tidy, quiet():
+                voya.cmd_update_git([])
+        finally:
+            os.environ.pop("VOYA_CONFIRMED", None)
+        first_pull = next(i for i, c in enumerate(calls) if c[:2] == ["docker", "pull"])
+        git_pull = calls.index(["git", "pull", "--ff-only"])
+        self.assertLess(first_pull, git_pull)        # tải xong (web vẫn chạy) rồi mới đổi mã
+        kwargs = deploy.call_args.kwargs
+        self.assertEqual(len(kwargs["pulled"]), 3)
+        self.assertFalse(kwargs["backend"] or kwargs["frontend"] or kwargs["full"])
+        tidy.assert_called_once_with("ns", self.COMMIT)
+
+    def test_pulled_deploy_retags_and_never_builds(self):
+        pulled = tuple(voya.remote_images("ns", self.COMMIT))
+        with patch.object(voya, "tag_rollback_point", return_value="rollback-auto-x"), \
+                patch.object(voya, "do_backup", return_value=(Path("b.dump"), True)), \
+                patch.object(voya, "sh") as sh, patch.object(voya, "compose") as compose, \
+                patch.object(voya, "problems_after_deploy", return_value=[]), \
+                patch.object(voya, "record_deploy"), \
+                patch.object(voya, "tidy_docker_after_build") as tidy_build, quiet():
+            ok = voya.build_and_deploy(backend=False, full=False, frontend=False, nginx=False,
+                                       label="t", pulled=pulled)
+        self.assertTrue(ok)
+        tagged = [c.args[0] for c in sh.call_args_list if c.args[0][:2] == ["docker", "tag"]]
+        self.assertEqual(tagged, [["docker", "tag", r, l] for r, l in pulled])
+        self.assertFalse(any("build" in c.args for c in compose.call_args_list))
+        self.assertFalse(any("build" in c.args[0] for c in sh.call_args_list))
+        tidy_build.assert_not_called()                # không có gì để dọn: không dựng
+        self.assertFalse(voya.MAINT_FLAG.exists())
+
+    def test_without_registry_update_git_still_builds_locally(self):
+        calls: list = []
+        os.environ["VOYA_CONFIRMED"] = "co"
+        try:
+            with patch.object(voya, "registry_ns", return_value=""), \
+                    patch.object(voya, "sh", side_effect=self._git_and_docker(False, calls)), \
+                    patch.object(voya, "build_and_deploy", return_value=True) as deploy, quiet():
+                voya.cmd_update_git([])
+        finally:
+            os.environ.pop("VOYA_CONFIRMED", None)
+        self.assertFalse(any(c[:2] == ["docker", "manifest"] for c in calls))
+        self.assertNotIn("pulled", deploy.call_args.kwargs)
+        self.assertTrue(deploy.call_args.kwargs["backend"])
+
+
 class StaleContainerTests(unittest.TestCase):
     def test_container_running_an_older_image_than_its_tag_is_stale(self):
         def fake_sh(args, **kw):

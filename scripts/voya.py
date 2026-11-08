@@ -438,6 +438,52 @@ ROLLBACK_REPOS = ("voya_backend", "voya_frontend", "voya_realtime_service")
 KEEP_AUTO_ROLLBACKS = 3
 
 
+# ---------------------------------------------------------------------------
+# Chế độ KÉO ẢNH: máy chạy web dùng đúng ảnh CI đã dựng và đã kiểm, không dựng.
+#
+# Bật bằng một dòng trong `.env`:  VOYA_REGISTRY_NS=<tài khoản Docker Hub của CI>
+# (cùng tên biến mà scripts/deploy.sh và docker-compose.registry.yml đã dùng).
+# Không có dòng đó thì `update-git` dựng tại chỗ như trước.
+#
+# Ảnh kéo về được gắn lại đúng tên cục bộ mà compose đang dùng
+# (`voya_backend:latest`, ...). Nhờ vậy mốc quay lui, kiểm container chạy ảnh cũ,
+# tự quay lui và trang bảo trì chạy y như khi dựng tại chỗ, và không tệp compose
+# nào phải đổi.
+# ---------------------------------------------------------------------------
+def registry_ns() -> str:
+    try:
+        return env_value("VOYA_REGISTRY_NS")
+    except OSError:      # máy chưa có .env
+        return ""
+
+
+def remote_images(ns: str, commit: str) -> list[tuple[str, str]]:
+    """(ảnh CI cho commit này, tên cục bộ compose dùng). Pure: testable.
+
+    CI gắn tag `sha-<40 ký tự>` (build_docker.yml). Không dùng `latest`: nó di
+    chuyển theo `main`, nên kéo nó có thể ra ảnh của commit khác với mã vừa
+    `git pull`, trong khi `processed/`, `scripts/` và mã realtime được gắn thẳng
+    từ thư mục làm việc. Ảnh và thư mục PHẢI cùng một commit."""
+    return [(f"{ns}/{repo}:sha-{commit}", f"{repo}:latest") for repo in ROLLBACK_REPOS]
+
+
+def missing_remote_images(pairs: list[tuple[str, str]]) -> list[str]:
+    """Ảnh nào CHƯA có trên registry: CI chưa xong, hoặc CI đỏ nên không đẩy."""
+    return [remote for remote, _ in pairs
+            if sh(["docker", "manifest", "inspect", remote], capture=True, check=False,
+                  timeout=120).returncode != 0]
+
+
+def tidy_pulled_images(ns: str, keep_commit: str) -> None:
+    """Bỏ tag `sha-…` của các lần kéo trước. Chỉ gỡ TAG: lớp ảnh vẫn còn nếu mốc
+    quay lui hay `latest` trỏ vào, và lớp chung giữa các bản không bị xoá."""
+    for repo in ROLLBACK_REPOS:
+        for tag in image_tags(f"{ns}/{repo}"):
+            if tag != f"sha-{keep_commit}":
+                sh(["docker", "image", "rm", f"{ns}/{repo}:{tag}"], capture=True, check=False)
+    sh(["docker", "image", "prune", "-f"], capture=True, check=False)
+
+
 #: Build cache không ai dùng lâu hơn bấy nhiêu thì bỏ. Cache của lần dựng vừa rồi
 #: (lớp `npm ci` / pip, ~1,1 GB "private") được GIỮ, nên lần sau vẫn nhanh; cache cũ
 #: thì không tích lại. Lưu ý khi đọc `docker system df`: phần lớn con số "Build
@@ -555,20 +601,23 @@ def unhealthy_services() -> list[str]:
 
 
 def build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, label: str,
-                     realtime_image: bool = False, restart: tuple = ()) -> bool:
+                     realtime_image: bool = False, restart: tuple = (), pulled: tuple = ()) -> bool:
     """Dựng → triển khai → kiểm; hỏng thì TỰ QUAY LUI về image vừa chạy.
 
     Thứ tự là nội dung: mốc quay lui và bản sao lưu có TRƯỚC khi đụng vào gì cả,
     bảo trì bật để người dùng thấy trang 'đang bảo trì' thay vì lỗi 502, và luôn
     tắt ở `finally` — kể cả khi dựng hỏng giữa chừng.
+
+    `pulled`: các cặp (ảnh đã kéo, tên cục bộ). Có nó thì KHÔNG dựng gì: chỉ gắn
+    tag rồi chạy; mốc, sao lưu, kiểm và quay lui giữ nguyên.
     """
     with deploy_lock():
         return _build_and_deploy(backend=backend, full=full, frontend=frontend, nginx=nginx, label=label,
-                                 realtime_image=realtime_image, restart=restart)
+                                 realtime_image=realtime_image, restart=restart, pulled=pulled)
 
 
 def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, label: str,
-                      realtime_image: bool = False, restart: tuple = ()) -> bool:
+                      realtime_image: bool = False, restart: tuple = (), pulled: tuple = ()) -> bool:
     clear_stopped()
     tag = tag_rollback_point()
     print(f"Moc quay lui: {tag}")
@@ -578,7 +627,10 @@ def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool,
     set_maintenance(True)
     print("Bat che do bao tri (nguoi dung thay trang 'dang bao tri').")
     try:
-        if backend and full:
+        if pulled:
+            for remote, local in pulled:
+                sh(["docker", "tag", remote, local])
+        elif backend and full:
             compose("build", "backend", env=BUILD_ENV)
         elif backend:
             if BASE_IMAGE not in [f"voya_backend:{t}" for t in image_tags("voya_backend")]:
@@ -586,9 +638,9 @@ def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool,
                 print(f"Tao anh nen {BASE_IMAGE} tu voya_backend:latest (lan dau).")
             sh(["docker", "build", "-f", "Dockerfile.coderefresh", "--build-arg", f"BASE={BASE_IMAGE}",
                 "-t", "voya_backend:latest", "."], cwd=ROOT / "backend", env=BUILD_ENV)
-        if frontend:
+        if frontend and not pulled:
             compose("build", "frontend", env=BUILD_ENV)
-        if realtime_image:
+        if realtime_image and not pulled:
             compose("build", "realtime_service", env=BUILD_ENV)
         compose("up", "-d", "--no-build")
         if nginx:
@@ -609,7 +661,8 @@ def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool,
             return False
         record_deploy(label)
         print(f"OK: {label} — da kiem health va container.")
-        tidy_docker_after_build()
+        if not pulled:
+            tidy_docker_after_build()
         return True
     finally:
         set_maintenance(False)
@@ -691,17 +744,45 @@ def cmd_update_git(args):
     requirements_diff = sh(["git", "diff", "HEAD", "@{u}", "--", "backend/requirements.txt"],
                            capture=True, check=False).stdout
     plan = plan_from_changes(changed, requirements_diff)
-    print("Ke hoach: " + (", ".join(k for k, v in plan.items() if v)
-                          or "chi cap nhat tep (khong dung image)"))
+    ns = registry_ns()
+    pulled: list[tuple[str, str]] = []
+    target = ""
+    if ns and any(plan.values()):
+        target = sh(["git", "rev-parse", "@{u}"], capture=True).stdout.strip()
+        pulled = remote_images(ns, target)
+        missing = missing_remote_images(pulled)
+        if missing:
+            raise SystemExit(
+                f"Commit {target[:7]} chua co anh tren Docker Hub ({', '.join(missing)}).\n"
+                "CI chua chay xong, hoac CI do nen khong day anh. Xem tab Actions tren GitHub;\n"
+                "doi commit nay xanh roi chay lai. Chua keo code, chua dung vao gi.")
+        print(f"Che do keo anh: {ns}/voya_*:sha-{target[:12]} (khong dung tai cho)")
+    else:
+        print("Ke hoach: " + (", ".join(k for k, v in plan.items() if v)
+                              or "chi cap nhat tep (khong dung image)"))
     if not confirm("Keo code moi va trien khai? Gian doan 1-3 phut (dung day du thi lau hon)."):
         return
+    if pulled:
+        # Tải TRƯỚC khi bật bảo trì: web vẫn phục vụ trong lúc tải. Lớp thư viện chỉ
+        # đổi khi requirements/Dockerfile/ảnh gốc đổi, nên thường chỉ tải lớp mã.
+        print("Tai anh (web van chay binh thuong trong luc tai)...")
+        for remote, _ in pulled:
+            sh(["docker", "pull", remote])
     sh(["git", "pull", "--ff-only"])
     if not any(plan.values()):
         record_deploy("update-git (tep)")
         print("OK: chi cap nhat tep gan vao container, khong can dung image.")
         return
     plan.pop("compose")
-    if not build_and_deploy(label="update-git", **plan):
+    if pulled:
+        ok = build_and_deploy(label=f"update-git (keo anh {target[:7]})", backend=False, full=False,
+                              frontend=False, nginx=plan["nginx"], restart=plan["restart"],
+                              pulled=tuple(pulled))
+        if ok:
+            tidy_pulled_images(ns, target)
+    else:
+        ok = build_and_deploy(label="update-git", **plan)
+    if not ok:
         raise SystemExit("Image da quay lui; code tren o dia VAN la ban moi -> sua loi roi chay lai.")
 
 
