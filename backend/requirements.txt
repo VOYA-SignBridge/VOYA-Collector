@@ -2,7 +2,7 @@ fastapi==0.95.2
 uvicorn[standard]==0.22.0
 python-multipart==0.0.6
 pydantic==1.10.11
-sqlalchemy==1.4.50
+sqlalchemy==2.1.8
 psycopg2-binary==2.9.7
 celery==5.3.1
 # Ghim vi celery khong dat tran: kombu 5.7 (03/11/2026) doi redis-py >= 6.1 ma repo ghim 4.5.1,
