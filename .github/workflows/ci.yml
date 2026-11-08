@@ -72,9 +72,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -133,7 +133,7 @@ jobs:
 
       - name: Nộp báo cáo test
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: junit-frontend
           path: frontend/junit-frontend.xml
@@ -187,13 +187,13 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}/backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Bước "Nâng cấp từ lược đồ của main" cần mã của `main` để dựng lược
           # đồ cũ; checkout nông chỉ có đúng một commit.
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
           cache: pip
@@ -387,7 +387,7 @@ jobs:
 
       - name: Nộp báo cáo test
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: junit-backend
           path: backend/junit-backend.xml
@@ -402,9 +402,9 @@ jobs:
     name: Nối dây — script, cấu hình, tài liệu khớp với mã
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -494,10 +494,10 @@ jobs:
             dockerfile: ./backend/realtime_service/Dockerfile
             image: voya_realtime_service
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: Dựng (không đẩy)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -511,7 +511,7 @@ jobs:
     name: Vệ sinh kho — thứ mà test không bao giờ bắt được
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Sự cố CRLF, 27/08/2026. `core.autocrlf=true` trên Windows làm
       # `docker-entrypoint.sh` được cam kết với đầu dòng CRLF; shebang
@@ -562,7 +562,7 @@ jobs:
           fi
           echo "Khong co .env nao bi theo doi."
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 

@@ -76,11 +76,11 @@ jobs:
             image: voya_realtime_service
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -109,7 +109,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Dựng và đẩy
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -164,7 +164,7 @@ jobs:
       ACCEPT_EXTERNAL_STORAGE: ${{ vars.ACCEPT_EXTERNAL_STORAGE }}
     steps:
       # No checkout action in the live directory: it can clean untracked data.
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
