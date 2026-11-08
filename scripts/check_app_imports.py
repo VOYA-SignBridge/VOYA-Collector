@@ -40,6 +40,8 @@ BACKEND = ROOT / "backend"
 SUFFIXES = {".py", ".sh", ".yml", ".yaml", ".ps1", ".bat", ".cmd", ".toml", ".cfg", ".ini", ".md"}
 #: Tài liệu kể chuyện lịch sử thì được nhắc đường cũ; chỉ kiểm mã và cấu hình.
 SKIP_PREFIXES = ("backend/app/", "docs/", "frontend/")
+#: Chính tệp này: chú thích của nó nêu ví dụ đường cũ để giải thích.
+SKIP_FILES = {"scripts/check_app_imports.py"}
 
 FROM_RE = re.compile(r"\bfrom\s+(app(?:\.\w+)*)\s+import\s+(\(?[\w\s,]+\)?)")
 IMPORT_RE = re.compile(r"(?<![\w.])import\s+(app(?:\.\w+)+)")
@@ -49,7 +51,7 @@ RUN_MODULE_RE = re.compile(r"\bpython[0-9.]*\s+-m\s+(app(?:\.\w+)+)")
 def tracked_files() -> list[str]:
     out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True)
     return [f for f in out.stdout.splitlines()
-            if f and not f.startswith(SKIP_PREFIXES)
+            if f and not f.startswith(SKIP_PREFIXES) and f not in SKIP_FILES
             and (Path(f).suffix in SUFFIXES or Path(f).name.startswith("Dockerfile"))]
 
 
