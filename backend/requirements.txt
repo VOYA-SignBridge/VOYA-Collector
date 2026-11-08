@@ -18,7 +18,7 @@ pyyaml==6.0.1
 numpy==1.26.2
 opencv-python-headless==4.11.0.86
 mediapipe==0.10.21
-filelock==3.16.1
+filelock==4.2.9
 google-api-python-client==2.196.0
 google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0
