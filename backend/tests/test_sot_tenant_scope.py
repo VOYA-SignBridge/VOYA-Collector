@@ -65,7 +65,7 @@ def _make_class(tenant_id: str, slug: str) -> str:
     phân quyền và hạn mức — ba thứ có thể đỏ vì lý do chẳng liên quan gì.
     """
     from app.storage import metadata_db as db
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     class_uid = uuid.uuid4().hex[:16]
     with tenant_scope(tenant_id):
@@ -82,7 +82,7 @@ def hai_tenant():
     """Hai tenant sạch, tự dọn. Hai chứ không một: mọi mệnh đề ở đây là mệnh đề
     SO SÁNH, và một tenant duy nhất thì không phân biệt được "giữ đúng chủ sở
     hữu" với "gán mọi thứ cho tenant đang chạy"."""
-    from app import tenant_admin
+    from app.modules.saas import tenant_admin
     from conftest import purge_tenant
 
     a = f"sota{uuid.uuid4().hex[:8]}"
@@ -154,7 +154,7 @@ def test_thu_pham_vi_theo_tenant_thi_goi_chi_con_tenant_do(hai_tenant):
     biến "chưa làm" thành "một lời gọi nữa là xong", và nó nói được điều đó bằng
     một phép đo chứ bằng một lời hứa.
     """
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     a, b = hai_tenant
     ua = _make_class(a, f"chi-a-{uuid.uuid4().hex[:6]}")

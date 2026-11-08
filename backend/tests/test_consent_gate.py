@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app import consent_gate as cg
+from app.modules.security import consent_gate as cg
 
 
 # --------------------------------------------------------------------------- helpers
@@ -349,7 +349,7 @@ class TestCongChanTruocKhiHuanLuyen:
     """
 
     def test_lay_dung_ba_tep_split_tu_chinh_dong_lenh(self):
-        from app.training_tasks import _split_csvs_of
+        from app.modules.training.tasks import _split_csvs_of
 
         cmd = ["python", "-m", "x", "--epochs=5",
                "--train_csv=/a/train.csv", "--val_csv=/a/val.csv",
@@ -360,14 +360,14 @@ class TestCongChanTruocKhiHuanLuyen:
         """Nhánh dialect/language chạy bằng mặc định của trainer — không có
         đường dẫn nào trên dòng lệnh để soi, và đoán bừa một đường dẫn còn tệ
         hơn không soi."""
-        from app.training_tasks import _consent_preflight
+        from app.modules.training.tasks import _consent_preflight
 
         assert _consent_preflight({}, ["python", "-m", "x", "--epochs=5"]) is None
 
     def test_muc_phat_hanh_chan_mau_vo_danh(self, tmp_path, monkeypatch):
         import csv as _csv
 
-        from app import training_tasks
+        from app.modules.training import tasks as training_tasks
 
         train = tmp_path / "train.csv"
         with train.open("w", newline="", encoding="utf-8") as fh:
@@ -393,7 +393,7 @@ class TestCongChanTruocKhiHuanLuyen:
         của việc phạm vi phụ thuộc `run_purpose`."""
         import csv as _csv
 
-        from app import training_tasks
+        from app.modules.training import tasks as training_tasks
 
         train = tmp_path / "train.csv"
         with train.open("w", newline="", encoding="utf-8") as fh:
@@ -414,7 +414,7 @@ class TestCongChanTruocKhiHuanLuyen:
         huấn luyện được gì. Dấu vết phải đủ to để phát hiện điều đó đã xảy ra."""
         import logging
 
-        from app import training_tasks
+        from app.modules.training import tasks as training_tasks
 
         def _boom(*_a, **_k):
             raise RuntimeError("cong hong")
@@ -496,9 +496,9 @@ class TestChuoiDayDu:
     def signer_with_account(self):
         import uuid as _uuid
 
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from app.storage.metadata_db import _execute, _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
         from conftest import purge_registered_account
 
         name = f"cg{_uuid.uuid4().hex[:8]}"
@@ -521,9 +521,9 @@ class TestChuoiDayDu:
 
     def test_ky_xong_thi_mau_di_duoc_vao_huan_luyen_noi_bo(self, signer_with_account,
                                                            monkeypatch):
-        from app import legal
+        from app.modules.legal import legal
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         doc = legal.current_document("data_contribution")
         if doc is None:
@@ -549,7 +549,7 @@ class TestChuoiDayDu:
 
     def test_ky_mot_lan_khong_nang_len_muc_phat_hanh(self, signer_with_account,
                                                      monkeypatch):
-        from app import legal
+        from app.modules.legal import legal
 
         doc = legal.current_document("data_contribution")
         if doc is None:
@@ -567,9 +567,9 @@ class TestChuoiDayDu:
     def test_ky_hai_lan_van_mot_dong_va_giu_nguyen_moc_thoi_gian(self,
                                                                  signer_with_account):
         """"Đồng ý rồi thì nó cứ ở đó" — không sinh dòng thứ hai, không dời mốc."""
-        from app import legal
+        from app.modules.legal import legal
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         doc = legal.current_document("data_contribution")
         if doc is None:
@@ -594,7 +594,7 @@ class TestChuoiDayDu:
 
     def test_rut_thi_cong_chan_ngay_o_muc_noi_bo(self, signer_with_account, monkeypatch):
         """Rút phải TỚI ĐƯỢC đường dữ liệu — đúng cái lỗ hổng module này bịt."""
-        from app import legal
+        from app.modules.legal import legal
 
         doc = legal.current_document("data_contribution")
         if doc is None:

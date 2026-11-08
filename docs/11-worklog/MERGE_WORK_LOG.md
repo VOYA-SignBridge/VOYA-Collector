@@ -6,7 +6,7 @@ liệu riêng cùng thư mục; ở đây chỉ tóm tắt và nối chúng lạ
 
 | tài liệu | nội dung |
 |---|---|
-| [`DATASET_SYNC_DEPLOY.md`](../06-operations/DATASET_SYNC_DEPLOY.md) | gộp dataset dev ↔ deploy, danh tính người ký, lỗi sync DB |
+| [`DATASET_SYNC_DEPLOY.md`](DATASET_SYNC_DEPLOY.md) | gộp dataset dev ↔ deploy, danh tính người ký, lỗi sync DB |
 | [`HARDCODED_VOCABULARY_AUDIT.md`](../10-issues/HARDCODED_VOCABULARY_AUDIT.md) | 7 bản danh sách gắn sẵn, 2 chỗ bịa giá trị, đợt 1 đã làm |
 | [`DIALECT_LIFECYCLE.md`](../02-data/DIALECT_LIFECYCLE.md) | 10 tầng lưu trữ một `dialect`, 3 tầng bất biến, cơ chế gộp |
 | [`MULTITENANT_PREP.md`](MULTITENANT_PREP.md) | nền hai mặt phẳng, những chỗ còn giả định một tenant |

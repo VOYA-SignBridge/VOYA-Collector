@@ -90,7 +90,7 @@ def emit(cur, *, tenant_id: Optional[str], reason: str,
 def latest_change() -> Optional[float]:
     """Thời điểm sự kiện đổi policy gần nhất, dạng epoch. None nếu chưa có."""
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: doc moc thay doi policy cua moi tenant"):
         rows = _fetch_all(

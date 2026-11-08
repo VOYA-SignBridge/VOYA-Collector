@@ -22,14 +22,15 @@ import uuid
 
 import pytest
 
-from app import admin_attention, support
+from app.modules.admin import admin_attention
+from app.modules.support import support
 from app.storage.metadata_db import _execute
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 def _make_account(prefix: str) -> dict:
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"{prefix}{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",

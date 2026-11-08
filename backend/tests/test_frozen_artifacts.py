@@ -35,17 +35,29 @@ def sha256_file(path: Path) -> str:
 
 def main() -> int:
     print("[F1 manifest immutability]")
-    found = 0
-    for sha_path in sorted(MANIFEST_DIR.glob("dataset_manifest_*.sha256")):
-        version = sha_path.stem.replace("dataset_manifest_", "")
-        manifest = MANIFEST_DIR / f"dataset_manifest_{version}.csv"
-        if not manifest.exists():
-            check(f"{version}: manifest file exists for recorded checksum", False)
-            continue
-        found += 1
-        recorded = sha_path.read_text(encoding="utf-8").strip()
-        check(f"{version}: sha256 unchanged", sha256_file(manifest) == recorded)
-    check("at least one released manifest present", found >= 1, found)
+    # Manifest nằm dưới `dataset/`, KHÔNG được track (mang mã mẫu và tên người
+    # ký — không đẩy lên git chỉ để bộ kiểm có cái mà kiểm). Checkout sạch không
+    # có thư mục `dataset/manifests/`, và "0 manifest" ở đó là "không có dữ liệu",
+    # không phải "manifest bị xoá". Dấu hiệu là CHÍNH thư mục ấy: bản đầu (18/10)
+    # dùng `dataset/features/`, nhưng các test khác TỰ TẠO thư mục đó trong lúc
+    # chạy, nên trên CI bộ này vẫn đỏ. Thư mục có mà 0 manifest thì vẫn ĐỎ. Chỉ bỏ
+    # F1 — F2 (split đóng băng, CÓ track) vẫn chạy, nên bộ này không bao giờ xanh
+    # mà không kiểm gì.
+    if not MANIFEST_DIR.is_dir():
+        print(f"  SKIP F1: checkout không có {MANIFEST_DIR.relative_to(REPO_ROOT)}/ "
+              "— manifest không được track, kiểm trên máy có dữ liệu")
+    else:
+        found = 0
+        for sha_path in sorted(MANIFEST_DIR.glob("dataset_manifest_*.sha256")):
+            version = sha_path.stem.replace("dataset_manifest_", "")
+            manifest = MANIFEST_DIR / f"dataset_manifest_{version}.csv"
+            if not manifest.exists():
+                check(f"{version}: manifest file exists for recorded checksum", False)
+                continue
+            found += 1
+            recorded = sha_path.read_text(encoding="utf-8").strip()
+            check(f"{version}: sha256 unchanged", sha256_file(manifest) == recorded)
+        check("at least one released manifest present", found >= 1, found)
 
     print("[F2 frozen research splits — checksum, not just presence]")
     # Bản trước của mục này chỉ hỏi "tệp còn đó không". Tên nó là

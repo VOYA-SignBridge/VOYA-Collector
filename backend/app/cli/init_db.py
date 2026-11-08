@@ -5,9 +5,9 @@ import logging
 import sys
 import time
 
+from app.bootstrap.database import init_db
 from app.config import settings, redact_db_url
-from app.db import init_db
-from app.logging_config import configure_logging
+from app.bootstrap.logging import configure_logging
 
 
 def run_init_db(full_resync: bool = False) -> int:

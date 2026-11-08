@@ -66,8 +66,8 @@ from app.storage.metadata_db import (  # noqa: E402
     list_training_metrics,
     upsert_training_job,
 )
-from app.tenancy import DEFAULT_TENANT_ID  # noqa: E402
-from app.tenant_context import no_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID  # noqa: E402
+from app.modules.saas.tenant_context import no_scope, tenant_scope  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
@@ -100,7 +100,7 @@ def _doc_he_thong(sql: str, params=()):
 
 
 @pytest.fixture
-def job_A():
+def job_A(isolation_tenants):
     jid = _job(A)
     yield jid
     _doc_he_thong("DELETE FROM training_jobs WHERE job_id = %s RETURNING job_id",
@@ -108,7 +108,7 @@ def job_A():
 
 
 @pytest.fixture
-def job_B():
+def job_B(isolation_tenants):
     jid = _job(B)
     yield jid
     _doc_he_thong("DELETE FROM training_jobs WHERE job_id = %s RETURNING job_id",

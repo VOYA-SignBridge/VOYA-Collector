@@ -48,14 +48,14 @@ from app.storage.metadata_db import (  # noqa: E402
     list_training_metrics,
     upsert_training_job,
 )
-from app.tenant_context import no_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenant_context import no_scope, tenant_scope  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
 
 
 @pytest.fixture
-def job_cua_A():
+def job_cua_A(isolation_tenants):
     jid = str(uuid.uuid4())
     with tenant_scope(A):
         upsert_training_job({

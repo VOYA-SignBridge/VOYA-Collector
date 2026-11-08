@@ -104,7 +104,14 @@ export default function AdminProcessingPage() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.task_id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 font-medium text-slate-800">{r.name}</td>
+                  <td className="px-3 py-2 font-medium text-slate-800">
+                    {r.name}
+                    {snap?.task_scope === "platform" && (
+                      <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] font-normal text-slate-500">
+                        {r.tenant_id ?? t("nền tảng")}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 font-mono text-xs text-slate-500">{r.worker}</td>
                   <td className="px-3 py-2 tabular-nums text-slate-600">{fmtStart(r.time_start)}</td>
                   <td className="max-w-xs truncate px-3 py-2 font-mono text-xs text-slate-400">
@@ -171,6 +178,14 @@ export default function AdminProcessingPage() {
         </div>
       )}
 
+      {snap?.task_scope === "tenant" && (
+        <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          {t(
+            "Chỉ hiện việc của tổ chức bạn đang làm việc. Số worker và chiều dài hàng đợi là số của toàn hệ thống, vì worker được các tổ chức dùng chung.",
+          )}
+        </p>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card title={t("Worker đang phục vụ")} icon={<ServerIcon className="h-5 w-5" />}>
           <div className="text-2xl font-bold tabular-nums text-slate-900">
@@ -192,8 +207,11 @@ export default function AdminProcessingPage() {
         </Card>
         <Card title={t("Việc hỏng gần đây")} icon={<AlertTriangleIcon className="h-5 w-5" />}>
           <div className="text-2xl font-bold tabular-nums text-slate-900">
-            {snap?.recent_failures.length ?? 0}
+            {snap?.recent_failures_error ? "—" : (snap?.recent_failures.length ?? 0)}
           </div>
+          {snap?.recent_failures_error && (
+            <p className="mt-1 text-[11px] text-red-600">{t("không đọc được nhật ký")}</p>
+          )}
         </Card>
       </div>
 

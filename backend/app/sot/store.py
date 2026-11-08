@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import List, Protocol
+from typing import Dict, List, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,9 @@ class GDriveSotStore:
     def __init__(self, root_folder: str = "SOT", *, read_only: bool = True):
         self.root_folder = root_folder.strip("/")
         self.read_only = read_only
+        # Một lượt đọc tra `SOT/` và thư mục phiên bản nhiều lần, mỗi lần một lượt gọi
+        # Drive. Mọi nơi đều tạo store mới cho mỗi lượt, nên nhớ thế này không cũ đi.
+        self._folder_ids: Dict[str, str] = {}
 
     def _client(self):
         from app.storage.gdrive_client import get_gdrive_client
@@ -96,18 +99,18 @@ class GDriveSotStore:
         Drive (unlike ensure_path, which creates). Used for read/list/exists.
         """
         parent = client.root_folder_id or "root"
+        da_qua = ""
         for part in [p for p in folder_path.strip("/").split("/") if p]:
-            q = (
-                f"name='{part}' and '{parent}' in parents "
-                "and mimeType='application/vnd.google-apps.folder' and trashed=false"
-            )
-            res = client.service.files().list(q=q, spaces="drive", fields="files(id)").execute(
-                num_retries=client.num_retries
-            )
-            files = res.get("files", [])
-            if not files:
+            da_qua = f"{da_qua}/{part}"
+            if da_qua in self._folder_ids:
+                parent = self._folder_ids[da_qua]
+                continue
+            # Cùng lối tra với bên ghi: nhiều thư mục trùng tên thì lấy cái cũ
+            # nhất, nên người đọc và người ghi luôn nhìn vào một thư mục.
+            parent = client._get_folder_id(part, parent)
+            if parent is None:
                 return None
-            parent = files[0]["id"]
+            self._folder_ids[da_qua] = parent
         return parent
 
     def _resolve_file_id(self, client, rel_path: str):

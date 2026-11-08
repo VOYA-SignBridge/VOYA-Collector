@@ -325,8 +325,6 @@ phải nguồn sự thật. Sau khôi phục, hai bên có thể lệch nếu b�
 docker exec voya_backend python -m app.cli.verify_deployment
 ```
 
-Xem `docs/99-archive/QUICK_REFERENCE.md` về đường đồng bộ CSV → DB.
-
 ## Ranh giới trách nhiệm
 
 | Mục | Hiện trạng |

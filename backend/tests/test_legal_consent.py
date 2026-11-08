@@ -15,9 +15,9 @@ import uuid
 
 import pytest
 
-from app import legal
+from app.modules.legal import legal
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -134,7 +134,7 @@ def _publish(kind="terms", version="2026-08-07", body="Nội dung điều khoả
 
 @pytest.fixture
 def account():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"lgl{uuid.uuid4().hex[:9]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -330,7 +330,7 @@ class TestRegistrationSendsTheVerificationCode:
         import app.routers.auth as auth_router
 
         monkeypatch.setattr(
-            "app.email_service.send_verification_code_email",
+            "app.services.email.send_verification_code_email",
             lambda to, code, purpose: sent.append((to, purpose)))
         monkeypatch.setattr(auth_router.settings, "otp_pepper",
                             "pepper-for-tests-at-least-32-chars", raising=False)
@@ -358,7 +358,7 @@ class TestRegistrationSendsTheVerificationCode:
         def _explode(*_a, **_k):
             raise RuntimeError("SMTP chết")
 
-        monkeypatch.setattr("app.otp.issue", _explode)
+        monkeypatch.setattr("app.modules.security.otp.issue", _explode)
 
         name = f"t{uuid.uuid4().hex[:10]}"
         res = anon_client.post("/api/v1/auth/register", json={
@@ -376,7 +376,7 @@ class TestRegistrationSendsTheVerificationCode:
         def _explode_with_the_code(*_a, **_k):
             raise RuntimeError("gửi thất bại, thư chứa: 424242")
 
-        monkeypatch.setattr("app.otp.issue", _explode_with_the_code)
+        monkeypatch.setattr("app.modules.security.otp.issue", _explode_with_the_code)
 
         name = f"t{uuid.uuid4().hex[:10]}"
         with caplog.at_level(logging.DEBUG):
@@ -397,7 +397,7 @@ class TestPublicReading:
         trị trong `legal.KINDS` phải có một dòng riêng trong PUBLIC_ROUTES. Thêm
         một `kind` mà quên dòng đó sẽ khiến nó 401 — hỏng an toàn, nhưng lặng
         lẽ, nên phép khẳng định này tồn tại."""
-        from app.access_gate import PUBLIC_ROUTES
+        from app.modules.security.access_gate import PUBLIC_ROUTES
 
         for kind in legal.KINDS:
             assert ("GET", f"/legal/{kind}") in PUBLIC_ROUTES, kind
@@ -458,7 +458,7 @@ class TestMyConsentsEndpoint:
     def signed_in(self, account):
         from fastapi.testclient import TestClient
         from conftest import LoopbackPeer
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: account

@@ -11,7 +11,7 @@ import uuid
 
 import pytest
 
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 from app.storage import metadata_db as db
 
 
@@ -34,7 +34,7 @@ def client():
 
 @pytest.fixture
 def unverified():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"ev{uuid.uuid4().hex[:10]}"
     user = create_user(username=name, email=f"{name}@example.test",

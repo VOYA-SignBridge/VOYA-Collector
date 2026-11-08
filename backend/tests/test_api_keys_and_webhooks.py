@@ -13,9 +13,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import api_keys, webhooks
+from app.modules.saas import webhooks
+from app.modules.security import api_keys
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -25,14 +26,15 @@ def _ensure_schema():
 
 @pytest.fixture
 def two_tenants():
-    from app import plans, tenant_admin
+    from app.modules.saas import plans, tenant_admin
     from conftest import purge_tenant
 
     ids = []
     for _ in range(2):
         tenant_id = f"kw{uuid.uuid4().hex[:10]}"
         tenant_admin.create_tenant(
-            tenant_id, display_name="Key Test", clone_catalog=False, plan_code="plus"
+            # Tên tổ chức phải duy nhất (18/10/2026), nên mỗi tổ chức một tên.
+            tenant_id, display_name=f"Key Test {tenant_id}", clone_catalog=False, plan_code="plus"
         )
         ids.append(tenant_id)
     plans._clear_caches()
@@ -113,7 +115,7 @@ class TestKeyAuthorisation:
         với thao tác nhạy cảm là một lần nhập lại mật khẩu — thứ một chuỗi ký
         tự trong biến môi trường CI không có.
         """
-        from app.auth import _user_from_api_key
+        from app.modules.identity._web_compat import _user_from_api_key
 
         created = api_keys.create_key(two_tenants[0], scopes="write")
         user = _user_from_api_key(created["key"])
@@ -123,7 +125,7 @@ class TestKeyAuthorisation:
     def test_a_read_key_cannot_edit_the_catalogue(self, two_tenants):
         from fastapi import HTTPException
 
-        from app.auth import _user_from_api_key, require_tenant_editor
+        from app.modules.identity._web_compat import _user_from_api_key, require_tenant_editor
 
         created = api_keys.create_key(two_tenants[0], scopes="read")
         user = _user_from_api_key(created["key"])
@@ -133,7 +135,7 @@ class TestKeyAuthorisation:
 
     def test_a_write_key_can(self, two_tenants):
         """Phản chứng. Không có nó, test trên vẫn xanh nếu khoá nào cũng bị chặn."""
-        from app.auth import _user_from_api_key, require_tenant_editor
+        from app.modules.identity._web_compat import _user_from_api_key, require_tenant_editor
 
         created = api_keys.create_key(two_tenants[0], scopes="write")
         user = _user_from_api_key(created["key"])
@@ -146,8 +148,8 @@ class TestKeyAuthorisation:
         là MỌI hành động qua khoá API biến mất khỏi nhật ký mà không ai thấy.
         Dòng phải được ghi, với nhãn còn nói được ai đã làm.
         """
-        from app import audit
-        from app.auth import _user_from_api_key
+        from app.modules.security import audit
+        from app.modules.identity._web_compat import _user_from_api_key
 
         created = api_keys.create_key(two_tenants[0], scopes="write")
         user = _user_from_api_key(created["key"])
@@ -364,8 +366,8 @@ class TestRateLimitKeyspace:
         đếm tới ngưỡng trong test là chậm và phụ thuộc cấu hình, còn khoá thì
         nói thẳng thùng nào được dùng.
         """
-        from app.auth import _user_from_api_key
-        from app.rate_limit import _KEY_PREFIX, _hashed
+        from app.modules.identity._web_compat import _user_from_api_key
+        from app.modules.security._web_compat import _KEY_PREFIX, _hashed
 
         created = api_keys.create_key(two_tenants[0], scopes="read")
         user = _user_from_api_key(created["key"])

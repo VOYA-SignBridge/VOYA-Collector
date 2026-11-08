@@ -31,9 +31,9 @@ def main(argv: list | None = None) -> int:
     args = ap.parse_args(argv)
     write = bool(args.confirm)
 
-    from app.consent_gate import CONSENT_DOCUMENT_SCOPE, sync_signer_consent
+    from app.modules.security.consent_gate import CONSENT_DOCUMENT_SCOPE, sync_signer_consent
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     kinds = tuple(CONSENT_DOCUMENT_SCOPE)
     with system_scope("backfill: tim chap thuan chua duoc phan chieu"):

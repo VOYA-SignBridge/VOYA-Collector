@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -54,21 +54,23 @@ def client(monkeypatch):
     """
     from app.config import settings
     from app.main import app
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin, require_tenant_curator
 
     monkeypatch.setattr(settings, "public_tenant_id", SCOPE, raising=False)
     app.dependency_overrides[require_admin] = lambda: {
         "id": "kiemthu-khong-phai-uuid", "username": "kiemthu", "is_admin": True,
     }
+    app.dependency_overrides[require_tenant_curator] = app.dependency_overrides[require_admin]
     yield TestClient(app)
     app.dependency_overrides.pop(require_admin, None)
+    app.dependency_overrides.pop(require_tenant_curator, None)
 
 
 @pytest.fixture
 def seeded():
     """Ghi vài dòng kiểm toán TRONG tenant mà request sẽ đọc, rồi dọn."""
-    from app import audit
-    from app.tenant_context import tenant_scope
+    from app.modules.security import audit
+    from app.modules.saas.tenant_context import tenant_scope
 
     marker = uuid.uuid4().hex[:8]
     actions = [f"test.api.{marker}.mot", f"test.api.{marker}.hai"]

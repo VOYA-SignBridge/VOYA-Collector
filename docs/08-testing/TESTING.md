@@ -9,6 +9,32 @@ những gì**, và **từng bộ test canh cái gì**.
 
 ## 1. Chạy test
 
+### 1.00 Cách thường dùng: bảng điều khiển `VOYA_UI.bat`, nhóm Kiểm thử
+
+| Nút | Làm gì |
+|---|---|
+| Kiểm thử toàn bộ | Chạy hết, dọn, kiểm lại đã dọn, tự mở báo cáo |
+| Mở báo cáo kiểm thử | `reports/kiem-thu/index.html`, giữ 10 lượt gần nhất |
+
+Thứ tự một lượt: backend (`--ignore` 13 ca Drive) → 13 ca Drive trong sandbox → frontend,
+kiểm kiểu, i18n, dựng thử → mọi kịch bản `frontend/tests-e2e/` → đo nhận dạng → dọn.
+
+Báo cáo ghi kết quả trả về của từng ca: pytest qua hook `pytest_assertion_pass` và bọc
+`httpx.Client.send` (`scripts/kiem_thu_env/ghi_ket_qua.py`), Vitest qua
+`frontend/vitest.ket-qua.ts`, Playwright qua fixture trong `tests-e2e/helpers.ts`. Bí mật bị
+che trước khi ghi. Cả ba chỉ nạp khi chạy từ nút này.
+
+Trình duyệt chạy **mã trong repo**, không phải stack đang phục vụ: CSDL tạm tạo từ
+`signdb_test` rồi xoá, `dataset` là bản sao trong container, Drive và Sheets tắt, worker,
+trainer và dịch vụ realtime thật, realtime trên bản sao cấu hình ở `_tmp/`.
+
+Drive thật chỉ mở cho `test_sot_integration.py`, trong thư mục `_KIEM_THU_<lượt>` tạo mới
+rồi xoá, dùng bản sao thông tin đăng nhập. `conftest.py` từ chối nếu root trùng gốc thật.
+
+Bước dọn kiểm lại từng thứ và ghi vào báo cáo; còn sót là KHÔNG ĐẠT: sandbox Drive,
+container, CSDL tạm, Redis db 13, `_tmp/kiem-thu`, hàng trong `signdb_test`, và mã băm của
+`labels.csv`, `samples.csv`, `models.json`.
+
 ### 1.0 Hai nền chạy khác nhau, và chúng trả lời hai câu khác nhau
 
 | Nền | Dùng để | Số mới nhất |
@@ -74,7 +100,7 @@ xanh. Tệp `.md` thì sửa thoải mái.
 ```bash
 docker run --rm --network voya-collector_voya_network \
   -v "E:/CTU_ProjectOutside/VOYA-Collector:/src" \
-  -v "E:/CTU_ProjectOutside/Videos:/testvideos:ro" \
+  -v "E:/CTU_ProjectOutside/qipedc_mau:/testvideos:ro" \
   -w /src/backend -e PYTHONPATH=/src/backend \
   -e VOYA_TEST_VIDEO=/testvideos/D0001B.mp4 \
   -e DATABASE_URL="postgresql://voya_app:<mật khẩu>@postgres:5432/signdb_test" \
@@ -297,6 +323,28 @@ không phải mở thân hàm.
 Với các tệp cũ hơn viết theo lối câu tiếng Anh
 (`test_an_attacker_cannot_lock_the_real_user_out`) thì giữ nguyên — đổi tên
 hàng loạt là một diff lớn không thêm thông tin nào.
+
+### 3.2b Chuẩn đặt tên
+
+Áp cho mọi thứ viết MỚI. Tên có sẵn thì giữ: đổi tên hàng loạt là diff lớn không
+thêm thông tin.
+
+| Thứ | Chuẩn | Ví dụ |
+|---|---|---|
+| Tệp pytest | `backend/tests/test_<năng_lực>.py`, snake_case tiếng Anh | `test_tenant_curator_permissions.py` |
+| Hàm pytest | `test_<hành vi>_<điều kiện>_<kết quả>`, nói ra hợp đồng | `test_listDeletedClasses_withTenant_filtersInTheQuery` |
+| Tệp Vitest | `<TênThànhPhần>.test.tsx` trong `__tests__/` cạnh mã | `LabelsPage.test.tsx` |
+| Tệp Playwright | `frontend/tests-e2e/<năng-lực>.spec.ts`, kebab-case | `tenant-permissions.spec.ts` |
+| Tiêu đề Playwright | `N. <câu tiếng Việt nói hành vi>` (là thứ đọc trong báo cáo) | `2. Biên tập viên tự đưa model vào Realtime` |
+| Tài khoản test | dùng lại `iso_user_a`, `iso_user_b`, `iso_tadmin_a`, `iso_admin_a` | không tạo tài khoản mới |
+| Tổ chức test | `iso_a`, `iso_b` | |
+| CSDL | `signdb_test`, hoặc `signdb_pytest_<việc>` cho CSDL tạm | `signdb_pytest_e2e` |
+| Redis | db 13 | |
+| Tệp tạm | `_tmp/kiem-thu/` | |
+| Báo cáo | `reports/kiem-thu/<năm tháng ngày-giờ phút giây>/` | |
+
+Không đặt tên theo ngày, phiên bản hay tên người, và không dùng từ `final`, `new`,
+`fix`, `temp` trong tên: tên phải nói test canh gì, không phải nó ra đời lúc nào.
 
 ### 3.3 DAMP hơn DRY
 

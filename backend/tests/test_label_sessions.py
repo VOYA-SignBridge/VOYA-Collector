@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.auth import get_current_user
+from app.modules.identity._web_compat import get_current_user
 
 client = TestClient(app)
 
@@ -69,7 +69,7 @@ def _sample_row(sample_uid, session_id, augment_id, file_path="", **extra):
 @pytest.fixture
 def dataset(tmp_path, monkeypatch):
     """A fake class with 2 sessions: one real npz session + one legacy row."""
-    import app.preview_render as pr
+    import app.modules.dataset.preview_render as pr
 
     class_dir = tmp_path / "features" / "vn" / "mienTay" / "class_xin-chao_cls123"
     class_dir.mkdir(parents=True)
@@ -100,11 +100,12 @@ def dataset(tmp_path, monkeypatch):
         return rows
 
     monkeypatch.setattr(pr, "find_class_meta", _meta)
-    monkeypatch.setattr("app.dataset_samples.list_samples", _mau)
+    monkeypatch.setattr("app.modules.dataset.samples.list_samples", _mau)
     # The router imported these symbols by name — patch its bindings too.
     import app.routers.label_sessions as ls
 
     monkeypatch.setattr(ls, "find_class_meta", _meta)
+    monkeypatch.setattr("app.storage.metadata_db.get_readable_sample_uids", lambda uids, user_id, tenant_id, **_k: set(uids))
     return {"meta": meta, "seq": seq, "class_dir": class_dir}
 
 
@@ -136,7 +137,7 @@ def test_sessions_unknown_class_404(dataset):
 def test_frames_payload_and_cache_header(dataset):
     res = client.get("/classes/cls123/sessions/sess-1/frames")
     assert res.status_code == 200
-    assert res.headers["cache-control"] == "private, max-age=604800"
+    assert res.headers["cache-control"] == "private, no-store"
     body = res.json()
     assert body["frames"] == 60
     assert body["dim"] == 126
@@ -172,7 +173,7 @@ def test_preview_status_renders_inline_without_broker(dataset):
     # the test passes whether or not a redis broker is reachable in this env.
     pytest.importorskip("cv2")
     with patch(
-        "app.preview_tasks.render_session_preview_task.delay",
+        "app.modules.dataset.preview_tasks.render_session_preview_task.delay",
         side_effect=RuntimeError("no broker (forced for test)"),
     ):
         res = client.get("/classes/cls123/sessions/sess-1/preview")
@@ -182,7 +183,7 @@ def test_preview_status_renders_inline_without_broker(dataset):
     video = client.get("/classes/cls123/sessions/sess-1/preview.mp4")
     assert video.status_code == 200
     assert video.headers["content-type"] == "video/mp4"
-    assert video.headers["cache-control"] == "private, max-age=604800"
+    assert video.headers["cache-control"] == "private, no-store"
     assert len(video.content) > 0
 
     # Session list now reports the cached preview.
@@ -212,7 +213,7 @@ def test_endpoints_require_auth(dataset):
 
 def test_render_all_zero_sequence_does_not_crash(tmp_path):
     pytest.importorskip("cv2")
-    from app.preview_render import render_sequence_to_mp4
+    from app.modules.dataset.preview_render import render_sequence_to_mp4
 
     out = tmp_path / "empty.mp4"
     render_sequence_to_mp4(np.zeros((10, 126), dtype=np.float32), out, fps=15)
@@ -220,14 +221,14 @@ def test_render_all_zero_sequence_does_not_crash(tmp_path):
 
 
 def test_render_rejects_bad_shape(tmp_path):
-    from app.preview_render import render_sequence_to_mp4
+    from app.modules.dataset.preview_render import render_sequence_to_mp4
 
     with pytest.raises(ValueError):
         render_sequence_to_mp4(np.zeros((10, 5), dtype=np.float32), tmp_path / "x.mp4")
 
 
 def test_safe_session_part_sanitizes_paths():
-    from app.preview_render import safe_session_part
+    from app.modules.dataset.preview_render import safe_session_part
 
     assert "/" not in safe_session_part("../../etc/passwd")
     assert "\\" not in safe_session_part("..\\..\\win")
@@ -244,17 +245,17 @@ class TestFpsFallbackChain:
     """Equivalence partitions của fps: hợp lệ / rỗng / rác / âm / zero."""
 
     def test_given_valid_fps_processed_then_it_wins(self):
-        from app.preview_render import sample_fps
+        from app.modules.dataset.preview_render import sample_fps
 
         assert sample_fps({"fps_processed": "30", "fps_original": "60"}) == 30.0
 
     def test_given_empty_fps_processed_when_original_valid_then_fallback(self):
-        from app.preview_render import sample_fps
+        from app.modules.dataset.preview_render import sample_fps
 
         assert sample_fps({"fps_processed": "", "fps_original": "24"}) == 24.0
 
     def test_given_all_invalid_then_default_15(self):
-        from app.preview_render import sample_fps
+        from app.modules.dataset.preview_render import sample_fps
 
         for row in (
             {"fps_processed": "", "fps_original": ""},
@@ -269,19 +270,19 @@ class TestOriginalSampleSelection:
     """Chọn mẫu gốc của session: augment_id nhỏ nhất; rác coi như 0."""
 
     def test_given_only_augmented_samples_then_lowest_augment_wins(self):
-        from app.preview_render import pick_original_sample
+        from app.modules.dataset.preview_render import pick_original_sample
 
         rows = [{"sample_uid": "a2", "augment_id": "2"}, {"sample_uid": "a1", "augment_id": "1"}]
         assert pick_original_sample(rows)["sample_uid"] == "a1"
 
     def test_given_garbage_augment_id_then_treated_as_zero_no_crash(self):
-        from app.preview_render import pick_original_sample
+        from app.modules.dataset.preview_render import pick_original_sample
 
         rows = [{"sample_uid": "g", "augment_id": "abc"}, {"sample_uid": "b", "augment_id": "3"}]
         assert pick_original_sample(rows)["sample_uid"] == "g"
 
     def test_given_empty_rows_then_none(self):
-        from app.preview_render import pick_original_sample
+        from app.modules.dataset.preview_render import pick_original_sample
 
         assert pick_original_sample([]) is None
 
@@ -291,12 +292,12 @@ class TestSessionListEdgeCases:
         self, dataset, monkeypatch
     ):
         # Arrange: thêm một row bị soft-delete qua cột status (không có deleted_at)
-        import app.preview_render as pr
+        import app.modules.dataset.preview_render as pr
 
         extra = _sample_row("stat-del", "sess-stat", 0, status="deleted")
         rows = list(pr.list_session_rows("cls123", tenant_id="default").values())
         monkeypatch.setattr(
-            "app.dataset_samples.list_samples",
+            "app.modules.dataset.samples.list_samples",
             lambda tenant_id: [r for group in rows for r in group] + [extra],
         )
         # Act
@@ -343,7 +344,7 @@ class TestRendererBoundaries:
     def test_given_single_visible_point_then_degenerate_bbox_does_not_crash(self, tmp_path):
         # Boundary: bbox span = 0 (chia scale phải có epsilon guard)
         pytest.importorskip("cv2")
-        from app.preview_render import render_sequence_to_mp4
+        from app.modules.dataset.preview_render import render_sequence_to_mp4
 
         seq = np.zeros((5, 126), dtype=np.float32)
         seq[:, 63:66] = 0.5  # đúng 1 landmark, đứng yên
@@ -354,7 +355,7 @@ class TestRendererBoundaries:
     def test_given_existing_preview_when_rerendered_then_atomic_overwrite(self, tmp_path):
         # Idempotency: render 2 lần cùng 1 output không hỏng file
         pytest.importorskip("cv2")
-        from app.preview_render import render_sequence_to_mp4
+        from app.modules.dataset.preview_render import render_sequence_to_mp4
 
         seq = np.random.default_rng(1).uniform(0.1, 0.9, (10, 126)).astype(np.float32)
         out = tmp_path / "twice.mp4"
@@ -366,7 +367,7 @@ class TestRendererBoundaries:
     def test_given_one_frame_sequence_then_video_still_written(self, tmp_path):
         # Boundary: T = 1 (nhỏ nhất có nghĩa)
         pytest.importorskip("cv2")
-        from app.preview_render import render_sequence_to_mp4
+        from app.modules.dataset.preview_render import render_sequence_to_mp4
 
         seq = np.random.default_rng(2).uniform(0.1, 0.9, (1, 126)).astype(np.float32)
         out = tmp_path / "one.mp4"
@@ -376,7 +377,7 @@ class TestRendererBoundaries:
     def test_given_wider_feature_dim_then_first_126_used(self, tmp_path):
         # Forward-compat: dữ liệu Holistic tương lai (D>126) không làm vỡ viewer
         pytest.importorskip("cv2")
-        from app.preview_render import render_sequence_to_mp4
+        from app.modules.dataset.preview_render import render_sequence_to_mp4
 
         seq = np.random.default_rng(3).uniform(0.1, 0.9, (5, 225)).astype(np.float32)
         out = tmp_path / "wide.mp4"
@@ -404,15 +405,17 @@ def owned_dataset(dataset, monkeypatch):
     để không đụng CSV/Drive thật, chỉ đếm số dòng đã được chuyển."""
     import app.routers.label_sessions as ls  # noqa: F401  (router đã import)
     import app.storage.metadata_db as mdb
-    import app.catalog_sync as cs
+    import app.modules.dataset.catalog_sync as cs
 
     monkeypatch.setattr(mdb, "get_sample_owner", lambda uid: "u-owner" if uid == "abc" else None)
-    monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {u: "u-owner" for u in uids if u == "abc"})
+    monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {u: "u-owner" for u in uids if u in {"abc", "abc-aug"}})
+    # Ownership tests use tenant-shared sessions; privacy is exercised below.
+    monkeypatch.setattr(mdb, "get_readable_sample_uids", lambda uids, user_id, tenant_id, **_k: set(uids))
     # Cổng access_gate đòi người gọi có MỘT grant tenant nào đó (community_member
     # được gắn lúc đăng ký). Người giả trong test không có dòng nào trong DB,
     # nên cho họ qua cổng ở đây — thứ đang được kiểm là phép kiểm CHỦ SỞ HỮU ở
     # tầng router, không phải cổng.
-    import app.access_gate as gate
+    import app.modules.security.access_gate as gate
 
     monkeypatch.setattr(gate, "_has_any_tenant_grant", lambda user: True)
     calls = {"deleted": [], "moved": []}
@@ -426,6 +429,63 @@ def _as(user):
 
 
 class TestSessionOwnershipPermissions:
+    @pytest.mark.parametrize("allowed", [set(), {"abc"}])
+    def test_private_or_mixed_session_denied_on_every_view_route(self, owned_dataset, monkeypatch, allowed):
+        import app.storage.metadata_db as mdb
+        monkeypatch.setattr(mdb, "get_readable_sample_uids", lambda *args, **_k: allowed)
+        _as(OTHER)
+        assert client.get("/classes/cls123/sessions").json()["sessions"] == []
+        for suffix in ("frames", "provenance", "preview", "preview.mp4"):
+            assert client.get(f"/classes/cls123/sessions/sess-1/{suffix}").status_code == 404
+
+    @pytest.mark.parametrize("user,role,expected", [
+        (OWNER, None, 200),
+        (OTHER, "editor", 200),     # editor CỦA tenant: quản lý mọi mẫu của tenant
+        (ADMIN, None, 200),         # admin nền tảng
+        (OTHER, None, 404),         # thành viên thường khác: private vẫn kín
+    ])
+    def test_private_is_visible_to_owner_and_tenant_managers_only(
+            self, owned_dataset, monkeypatch, user, role, expected):
+        """Chính sách 17/10/2026: `private` kín với THÀNH VIÊN khác, không kín với
+        người quản lý tenant (xem `app.modules.dataset.sample_access`)."""
+        import app.storage.metadata_db as mdb
+        import app.modules.dataset.vocabulary_registry as vr
+        monkeypatch.setattr(vr, "tenant_role", lambda t, u: role)
+        monkeypatch.setattr(mdb, "get_readable_sample_uids",
+                            lambda uids, user_id, tenant_id, manage_all=False, **_k:
+                            {"abc", "abc-aug"} if (manage_all or user_id == OWNER["id"]) else set())
+        _as(user)
+        assert client.get("/classes/cls123/sessions/sess-1/frames").status_code == expected
+
+    @pytest.mark.parametrize("operation", ["delete", "reassign"])
+    def test_partial_mutation_is_not_reported_as_complete(self, owned_dataset, monkeypatch, operation):
+        import app.modules.dataset.catalog_sync as cs
+
+        def mutate(uid, *args, **kwargs):
+            if uid == "abc-aug":
+                raise ValueError("test write failure")
+
+        monkeypatch.setattr(cs, "sync_soft_delete_sample" if operation == "delete" else "sync_reassign_sample", mutate)
+        _as(OWNER)
+        url = "/classes/cls123/sessions/sess-1"
+        response = client.delete(url) if operation == "delete" else client.post(url + "/reassign", json={"target_class_ref": "cls999"})
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+        assert response.json()["failed"][0]["sample_uid"] == "abc-aug"
+        assert response.json()["deleted_count" if operation == "delete" else "moved_count"] == 1
+
+    @pytest.mark.parametrize("owner", ["u-other", None])
+    def test_mixed_owner_session_cannot_be_managed(self, owned_dataset, monkeypatch, owner):
+        import app.storage.metadata_db as mdb
+        monkeypatch.setattr(mdb, "get_sample_owners", lambda uids: {"abc": "u-owner", "abc-aug": owner})
+        _as(OWNER)
+        sessions = client.get("/classes/cls123/sessions").json()["sessions"]
+        assert not next(s for s in sessions if s["session_id"] == "sess-1")["can_manage"]
+        assert client.delete("/classes/cls123/sessions/sess-1").status_code == 403
+        assert client.post("/classes/cls123/sessions/sess-1/reassign",
+                           json={"target_class_ref": "cls999"}).status_code == 403
+        assert owned_dataset == {"deleted": [], "moved": []}
+
     def test_list_marks_only_owner_session_manageable(self, owned_dataset):
         _as(OWNER)
         sessions = {s["session_id"]: s for s in client.get("/classes/cls123/sessions").json()["sessions"]}

@@ -52,7 +52,7 @@ def lay_danh_muc(vt):
     try:
         c.request("POST", "/dictionary/getAll",
                   body=urllib.parse.urlencode({"group": "20", "text": ""}),
-                  headers={"User-Agent": "CTU-SignBridge thesis measurement",
+                  headers={"User-Agent": "CTU.SignBridge thesis measurement",
                            "X-Requested-With": "XMLHttpRequest",
                            "Content-Type":
                                "application/x-www-form-urlencoded; charset=UTF-8"})
@@ -103,7 +103,7 @@ def main():
         try:
             c = ket_noi(vt)
             c.request("GET", "/videos/%s.mp4" % ma,
-                      headers={"User-Agent": "CTU-SignBridge thesis measurement"})
+                      headers={"User-Agent": "CTU.SignBridge thesis measurement"})
             r = c.getresponse()
             data = r.read()
             if r.status == 200 and data[4:8] == b"ftyp":

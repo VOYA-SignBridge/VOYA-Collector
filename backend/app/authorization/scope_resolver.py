@@ -154,7 +154,7 @@ def _default_project(tenant_id: str) -> Tuple[Optional[str], Optional[str]]:
         return cached
 
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     # System scope, cùng lý do như `vocabulary_registry.tenant_role`: phạm vi
     # hiện hành của request là tenant NHÀ của người gọi, còn câu hỏi ở đây có
@@ -193,7 +193,7 @@ def _tenant_of_row(kind: str, target_id: str) -> Optional[str]:
     """Tenant sở hữu một dòng dữ liệu."""
     table, key = TENANT_DATA_KINDS[kind]
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: tim tenant so huu doi tuong duoc neu ten"):
         rows = _fetch_all(
@@ -248,7 +248,7 @@ def _resolve_workspace(target: Target) -> ScopeContext:
     if not target.id:
         return ScopeContext(target.tenant_id)
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: tim tenant cua workspace duoc neu ten"):
         rows = _fetch_all(
@@ -265,7 +265,7 @@ def _resolve_project(target: Target) -> ScopeContext:
     if not target.id:
         return ScopeContext(target.tenant_id)
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("authz: tim vi tri cua project duoc neu ten"):
         rows = _fetch_all(

@@ -7,13 +7,13 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import numpy as np
 
-from app import audit
+from app.modules.security import audit
 from app.config import settings
-from app.dataset_manager import load_labels, ClassMetadata
-from app.tenancy import tenant_id_of
-from app.dataset_samples import list_samples as list_samples_v2, save_sequence_npz
+from app.modules.dataset.catalog import load_labels, ClassMetadata
+from app.modules.saas.tenancy import tenant_id_of
+from app.modules.dataset.samples import list_samples as list_samples_v2, save_sequence_npz
 from app.storage.gdrive_client import materialize_sample_artifacts
-from app.catalog_sync import (
+from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,
@@ -26,27 +26,37 @@ from app.catalog_sync import (
     bulk_purge_samples,
     empty_sample_trash,
 )
-from app import moderation
-from app.auth import get_current_user, get_current_user_optional, require_admin
-from app.tenant_context import require_tenant
+from app.modules.admin import moderation
+from app.modules.identity._web_compat import (
+    get_current_user,
+    get_current_user_optional,
+    require_tenant_curator,
+)
+from app.modules.saas.tenant_context import current_tenant, require_tenant
 from app.storage.metadata_db import get_sample_owner, partition_sample_ownership
+from app.modules.dataset.sample_access import can_manage_tenant_samples, readable_sample_uids
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
 
-def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
-    """Raise 403 if current_user is not the owner of the sample and is not admin.
+def _manages_working_tenant(current_user: Dict[str, Any]) -> bool:
+    """Return whether the caller may curate data in the active tenant."""
+    return can_manage_tenant_samples(current_user, current_tenant() or "")
 
-    Legacy samples with auth_user_id=NULL (guest uploads) can only be deleted by admin.
+
+def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> None:
+    """Raise 403 unless the caller owns the sample or manages its tenant.
+
+    Legacy samples with no owner can only be touched by a tenant curator.
     """
-    if current_user.get("is_admin"):
-        return  # Admin bypass
+    if _manages_working_tenant(current_user):
+        return
     owner_id = get_sample_owner(sample_id)
     if owner_id is None:
         # Guest sample or sample not found in DB — only admin can touch
         raise HTTPException(
             status_code=403,
-            detail="Chỉ admin mới có thể xóa mẫu không có chủ sở hữu",
+            detail="Chỉ quản trị viên hoặc biên tập viên tổ chức mới xóa được mẫu không có chủ sở hữu",
         )
     if str(owner_id) != str(current_user["id"]):
         raise HTTPException(
@@ -57,7 +67,7 @@ def _check_sample_ownership(sample_id: str, current_user: Dict[str, Any]) -> Non
 
 _SKIP_REASONS = {
     "foreign": "thuộc về tài khoản khác",
-    "unowned": "chưa gắn chủ sở hữu (dữ liệu cũ) — cần admin",
+    "unowned": "chưa gắn chủ sở hữu (dữ liệu cũ) — cần quản trị viên tổ chức",
     "missing": "không có trong cơ sở dữ liệu",
 }
 
@@ -67,7 +77,7 @@ def _actionable_uids(
 ) -> tuple[List[str], Dict[str, Any]]:
     """Keep only the uids this caller may act on, and explain the rest.
 
-    Admin acts on everything. For anyone else this is ONE query for the whole
+    A manager of the working tenant acts on everything in it. For anyone else this is ONE query for the whole
     batch (partition_sample_ownership), not one per uid — a 200-sample
     selection used to mean 200 round-trips.
 
@@ -77,7 +87,7 @@ def _actionable_uids(
     mention of the other 3 reads as data loss.
     """
     uids = [str(u).strip() for u in (uids or []) if str(u or "").strip()]
-    if current_user.get("is_admin"):
+    if _manages_working_tenant(current_user):
         return uids, {"skipped_count": 0, "skipped": {}}
 
     split = partition_sample_ownership(uids, str(current_user.get("id") or ""))
@@ -177,7 +187,7 @@ def create_label(
 
     Creates/returns a class entry in the new hierarchy while keeping the old response shape.
     """
-    from app.dataset_manager import get_or_register_class
+    from app.modules.dataset.catalog import get_or_register_class
 
     meta = get_or_register_class(
         label_original=label,
@@ -231,7 +241,7 @@ def merge_labels(src_class_idx: int = Form(...), dst_class_idx: int = Form(...))
 def update_label(
     class_ref: str,
     label: str = Form(...),
-    admin_user: Dict[str, Any] = Depends(require_admin),
+    admin_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     try:
         result = sync_update_class(class_ref, {"label_original": label}, tenant_id=require_tenant())
@@ -244,7 +254,7 @@ def update_label(
 def delete_label(
     class_ref: str,
     request: Request,
-    admin_user: Dict[str, Any] = Depends(require_admin),
+    admin_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     try:
         result = sync_soft_delete_class(class_ref, tenant_id=require_tenant())
@@ -271,7 +281,10 @@ def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
     # Quan trọng với `/data`: việc kiểm `Path(file_path).exists()` nằm SAU bước
     # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
     # vi. Trước 16/08/2026 đường này đọc toàn kho.
-    samples = list_samples_v2(require_tenant())
+    tenant = require_tenant()
+    samples = list_samples_v2(tenant)
+    readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in samples], tenant)
+    samples = [s for s in samples if s.get("sample_uid") in readable]
     # Cổng kiểm duyệt, với NGƯỜI XEM là chính người gọi.
     #
     # Đây là chỗ hợp đồng "chưa duyệt thì chỉ chủ dùng được" hiện ra với người
@@ -281,8 +294,11 @@ def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
     #
     # Lọc SAU khi đã phân giải theo phạm vi tenant: hai cổng độc lập, và cổng
     # tenant vẫn là cổng đứng trước.
-    samples = moderation.filter_rows(
-        samples, viewer_id=str(current_user.get("id") or "")).kept
+    # Admin/editor của tenant được miễn: họ là người duyệt, phải thấy thứ đang
+    # chờ duyệt (cùng ngoại lệ với `GET /samples/{id}/data`).
+    if not can_manage_tenant_samples(current_user, tenant):
+        samples = moderation.filter_rows(
+            samples, viewer_id=str(current_user.get("id") or "")).kept
     labels_by_uid = _class_uid_to_label_row_map()
     out: List[Dict[str, Any]] = []
     for s in samples:
@@ -309,7 +325,7 @@ def list_samples(current_user: Dict[str, Any] = Depends(get_current_user)):
     return out
 
 @router.get("/samples/{sample_id}/data")
-def get_sample_data(sample_id: str):
+def get_sample_data(sample_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     Trả về file npz/json của sample_id
     """
@@ -325,15 +341,28 @@ def get_sample_data(sample_id: str):
     match = next((s for s in samples if (s.get("sample_uid") == sample_id)), None)
     if not match:
         raise HTTPException(status_code=404, detail="Sample not found")
+    if sample_id not in readable_sample_uids(current_user, [sample_id], require_tenant()):
+        raise HTTPException(status_code=404, detail="Sample not found")
+    # Cùng cổng kiểm duyệt với `GET /samples`: chia sẻ ra tenant mới là ĐĂNG KÝ
+    # dùng chung, chưa duyệt thì chỉ chủ dùng được. Danh sách đã ẩn các mẫu này,
+    # nhưng đường tải theo id thì không — ai có `sample_id` vẫn lấy được tệp
+    # trước khi admin duyệt. Người duyệt của CHÍNH tenant này vẫn tải được: họ
+    # phải xem được thứ mình sắp duyệt. Cùng 404 như mẫu không tồn tại.
+    if not moderation.filter_rows([match], viewer_id=str(current_user.get("id") or "")).kept:
+        from app.modules.admin.moderation_admin import can_moderate
+
+        if not (can_moderate(current_user, require_tenant())
+                or can_manage_tenant_samples(current_user, require_tenant())):
+            raise HTTPException(status_code=404, detail="Sample not found")
     file_path = match.get("file_path") or ""
     if file_path and Path(file_path).exists():
-        return FileResponse(file_path, media_type="application/octet-stream")
+        return FileResponse(file_path, media_type="application/octet-stream", headers={"Cache-Control": "private, no-store"})
 
     cache_dir = Path(settings.dataset_root) / "cache" / "sample_downloads"
     resolved = materialize_sample_artifacts([match], cache_dir)
     if not resolved:
         raise HTTPException(status_code=404, detail="Sample file missing on disk")
-    return FileResponse(str(resolved[0]), media_type="application/octet-stream")
+    return FileResponse(str(resolved[0]), media_type="application/octet-stream", headers={"Cache-Control": "private, no-store"})
 
 
 def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
@@ -346,13 +375,17 @@ def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
 
 @router.get("/samples/trash")
 def list_sample_trash(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """List soft-deleted samples (whose class is still active). An admin sees the
-    whole sample trash; a contributor sees ONLY their own (by auth_user_id)."""
+    """List soft-deleted samples (whose class is still active). A tenant
+    admin/editor sees the tenant's whole sample trash; a contributor sees ONLY
+    their own (by auth_user_id)."""
     try:
-        if current_user.get("is_admin"):
-            items = list_trash_samples()
+        tenant = require_tenant()
+        if can_manage_tenant_samples(current_user, tenant):
+            items = list_trash_samples(tenant)
         else:
             items = list_trash_samples_for_user(str(current_user["id"]))
+        readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in items], tenant, include_deleted=True)
+        items = [s for s in items if s.get("sample_uid") in readable]
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Không đọc được thùng rác mẫu: {exc}")
@@ -383,11 +416,11 @@ def bulk_purge_samples_endpoint(
     {all: true} to empty the trash. Irreversible. A non-admin acts ONLY on their
     own samples: {all: true} empties just their trash; anything else is reported
     in `skipped` with a reason."""
-    is_admin = bool(current_user.get("is_admin"))
+    is_admin = _manages_working_tenant(current_user)
     skip_info: Dict[str, Any] = {"skipped_count": 0, "skipped": {}}
     if payload.get("all"):
         if is_admin:
-            result = empty_sample_trash()
+            result = empty_sample_trash(require_tenant())
         else:
             own = [s["sample_uid"] for s in list_trash_samples_for_user(str(current_user["id"]))]
             result = bulk_purge_samples(own)
@@ -499,7 +532,7 @@ def add_sample(
 
 @router.get("/sessions")
 @router.get("/dataset/sessions")
-def list_sessions(user: str = "", session_id: str = ""):
+def list_sessions(user: str = "", session_id: str = "", current_user: Dict[str, Any] = Depends(get_current_user)):
     """List capture sessions from the unified samples CSV."""
     # Phân giải TRONG phạm vi người gọi. Mẫu của tenant khác không lọt vào
     # danh sách, nên `match` là None và endpoint trả 404 — GIỐNG HỆT một
@@ -510,6 +543,8 @@ def list_sessions(user: str = "", session_id: str = ""):
     # này, nên sự tồn tại của tệp không bao giờ được hỏi cho một mẫu ngoài phạm
     # vi. Trước 16/08/2026 đường này đọc toàn kho.
     samples = list_samples_v2(require_tenant())
+    readable = readable_sample_uids(current_user, [s.get("sample_uid") for s in samples], require_tenant())
+    samples = [s for s in samples if s.get("sample_uid") in readable]
     # lightweight grouping without pandas
     sessions: Dict[str, Dict[str, Any]] = {}
     for s in samples:

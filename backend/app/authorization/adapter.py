@@ -208,7 +208,7 @@ class ReadOnlyPolicyAdapter(Adapter):
         bài toán vô hiệu hoá riêng.
         """
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import in_system_scope, system_scope
+        from app.modules.saas.tenant_context import in_system_scope, system_scope
 
         with system_scope("casbin: nap policy cho moi tenant"):
             # Khẳng định phạm vi thay vì tin vào context manager phía trên.

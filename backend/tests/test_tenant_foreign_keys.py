@@ -105,7 +105,7 @@ def rollback_cursor():
     cursor puts the FK back in the path.
     """
     from app.storage.rls import apply_scope
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     conn = psycopg2.connect(db.settings.database_url)
     conn.autocommit = False

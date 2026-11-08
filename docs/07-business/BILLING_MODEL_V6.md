@@ -325,7 +325,7 @@ một tenant dùng Free là xoá đúng thứ không được phép xoá.
 
 ## 8. External API và Webhook là quota tích hợp
 
-Hai thứ này **không liên quan** tới frontend của CTU-SignBridge. Free không có
+Hai thứ này **không liên quan** tới frontend của CTU.SignBridge. Free không có
 External API vẫn dùng giao diện chính bình thường.
 
 * **External API** — phần mềm bên ngoài gọi vào bằng API key.
@@ -399,7 +399,7 @@ upload mới               ✗
 cho tới khi giảm usage xuống dưới quota Free, hoặc trả tiền/nâng gói lại.
 
 Điều này **đổi hành vi hiện tại** của `subscription_lifecycle.sweep()`, đang chuyển
-sang `suspended` ở [subscription_lifecycle.py:356-359](../../backend/app/subscription_lifecycle.py#L356-L359).
+sang `suspended` ở [subscription_lifecycle.py](../../backend/app/modules/saas/subscription_lifecycle.py).
 `suspended` vẫn tồn tại nhưng chỉ dành cho quyết định của người vận hành.
 
 ---

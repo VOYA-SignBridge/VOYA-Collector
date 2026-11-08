@@ -54,6 +54,8 @@ example_*
 
 # Dataset (generated data)
 dataset/
+!scripts/dataset/
+!scripts/dataset/**
 raw_videos/
 features/
 models/

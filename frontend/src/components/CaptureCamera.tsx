@@ -15,12 +15,14 @@ import { useI18n } from "../i18n";
 type Props = {
   onError?: (msg: string) => void;
   onSuccess?: (msg: string) => void;
+  initialLabel?: string;
+  initialClassUid?: string;
 };
 
-export default function CaptureCamera({ onError, onSuccess }: Props) {
+export default function CaptureCamera({ onError, onSuccess, initialLabel = "", initialClassUid = "" }: Props) {
   const { t } = useI18n();
   // Removed frames state - now using only fullscreen capture
-  const [label, setLabel] = useState("");
+  const [label, setLabel] = useState(initialLabel);
   const [user, setUser] = useState("");
   const [showGuide, setShowGuide] = useState(false);
   // Removed preview state - using fullscreen capture only
@@ -155,7 +157,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
     // with nobody able to say where it came from.
     left_hand_world?: MediaPipeLandmark[];
     right_hand_world?: MediaPipeLandmark[];
-  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string; language?: string; hands_used?: number | null }) => {
+  }>, capturedLabel: string, capturedUser: string, meta?: { camera_info?: CameraInfo; quality_info?: QualityInfo; dialect?: string; language?: string; hands_used?: number | null; class_uid?: string; visibility?: "private" | "tenant" | "community" }) => {
     console.log(`Parent received capture: ${capturedLabel} with ${capturedFrames.length} frames`);
 
     // Don't set uploading state to avoid blocking the modal
@@ -172,6 +174,8 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
       };
       if (meta?.dialect) payload.dialect = meta.dialect;
       if (meta?.language) payload.language = meta.language;
+      if (meta?.class_uid) payload.class_uid = meta.class_uid;
+      if (meta?.visibility) payload.visibility = meta.visibility;
       if (meta?.hands_used === 1 || meta?.hands_used === 2) payload.hands_required = meta.hands_used;
       if (meta?.quality_info) payload.quality_info = meta.quality_info;
 
@@ -378,6 +382,7 @@ export default function CaptureCamera({ onError, onSuccess }: Props) {
           onClose={() => setShowFullscreen(false)}
           onSampleCapture={handleFullscreenCapture}
           initialLabel={label}
+          initialClassUid={initialClassUid}
           initialUser={user}
           targetFrames={targetFrames}
           captureCount={captureCount}

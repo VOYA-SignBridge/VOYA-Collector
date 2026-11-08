@@ -147,7 +147,7 @@ quyền riêng tư, sự đồng ý tham gia nghiên cứu, điều khoản nề
 ```
 Community dataset access is governed by:
   1. The applicable content licence (ví dụ CC BY-NC 4.0); and
-  2. The CTU-SignBridge Community Data Use Agreement.
+  2. The CTU.SignBridge Community Data Use Agreement.
 ```
 
 **Không** sửa văn bản pháp lý của Creative Commons rồi vẫn gọi nó là CC BY-NC.
@@ -344,8 +344,8 @@ Ba mô hình; **khuyến nghị mô hình 2**:
 
 ```
 Contributor giữ quyền sở hữu
-  → cấp cho CTU-SignBridge một licence
-    → CTU-SignBridge cấp phép lại (có điều kiện) cho tenant/nhà nghiên cứu
+  → cấp cho CTU.SignBridge một licence
+    → CTU.SignBridge cấp phép lại (có điều kiện) cho tenant/nhà nghiên cứu
 ```
 
 Mô hình 1 (chuyển hẳn quyền cho nền tảng) mạnh nhưng phức tạp pháp lý và không

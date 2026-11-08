@@ -19,9 +19,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import legal
+from app.modules.legal import legal
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -199,7 +199,7 @@ class TestTheTransitionTable:
     def test_approving_writesTheBodyToTheStore(self, drafts):
         """Bản đã phê duyệt là hiện vật người duyệt đã đọc; nó phải có một địa
         chỉ cố định TRƯỚC khi ai đó bấm Công bố."""
-        from app import legal_store
+        from app.modules.legal import legal_store
 
         draft = _new_draft(drafts)
         draft = legal.update_draft(draft["draft_id"], draft["revision"],
@@ -414,7 +414,7 @@ class TestTheRegister:
         Tức là thêm một sổ đăng bạ đã âm thầm làm hỏng quyền xoá tài khoản, thứ
         chính sách quyền riêng tư hứa ở mục 6. Test này ghim việc đó đã được vá.
         """
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         name = f"lgev{uuid.uuid4().hex[:8]}"
@@ -434,7 +434,7 @@ class TestTheRegister:
                                                                 free_legal_kinds):
         """Xoá tài khoản không được xoá dấu vết ai đã làm gì. `actor_label` được
         điền ngay lúc ghi, chính vì `actor_user_id` không còn khoá ngoại."""
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         name = f"lglb{uuid.uuid4().hex[:8]}"

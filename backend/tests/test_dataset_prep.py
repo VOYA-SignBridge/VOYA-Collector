@@ -15,8 +15,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.auth import get_current_user
-import app.dataset_prep_tasks as dp
+from app.modules.identity._web_compat import get_current_user
+from app.modules.dataset import preparation_tasks as dp
 import app.routers.training as tr
 
 client = TestClient(app)
@@ -114,9 +114,14 @@ class TestRoute:
     @pytest.fixture(autouse=True)
     def _auth(self, monkeypatch):
         app.dependency_overrides[get_current_user] = lambda: USER
-        monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
+        # Huấn luyện đi theo phạm vi request (tổ chức đang làm việc), không theo
+        # `tenant_id` của tài khoản; ở đây hai thứ trùng nhau.
+        import app.modules.saas.tenant_middleware as tm
+        monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: USER["tenant_id"])
+        monkeypatch.setattr(tr, "assert_can_use_dialect", lambda *_args: None)
+        monkeypatch.setattr(tr, "_duyet_duoc", lambda _user, _tenant: True)
         # Người giả không có grant trong DB; cổng tenant không phải thứ đang kiểm.
-        import app.access_gate as gate
+        import app.modules.security.access_gate as gate
         monkeypatch.setattr(gate, "_has_any_tenant_grant", lambda user: True)
         yield
         app.dependency_overrides.pop(get_current_user, None)
@@ -185,3 +190,21 @@ def test_research_names_carry_the_full_manifest_version_and_never_overwrite(prep
     assert not any(n == "alphabet_strict_v1" or n == "alphabet_loso_v1" for n in names)
     assert (old / "train.csv").read_text(encoding="utf-8") == "cu"
     assert report["research_splits"][0]["split_version"] == "alphabet_strict_VSL2026_v1"
+
+
+def test_prepareDataset_personalRun_passesTheViewerToMakeSplits(prep_dirs, monkeypatch):
+    run, calls = _fake_make_splits(prep_dirs)
+    monkeypatch.setattr(dp.subprocess, "run", run)
+    dp.prepare_dataset.run(
+        "abcdef123456",
+        tenant_id="iso_a",
+        dialects=["hoa-de"],
+        viewer_id="nguoi-a",
+    )
+    dp.prepare_dataset.run(
+        "abcdef123457",
+        tenant_id="iso_a",
+        dialects=["hoa-de"],
+    )
+    assert calls[0][-2:] == ["--viewer_id", "nguoi-a"]
+    assert "--viewer_id" not in calls[1]

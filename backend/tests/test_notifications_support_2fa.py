@@ -11,14 +11,15 @@ import uuid
 
 import pytest
 
-from app import notifications, support, totp, two_factor
+from app.modules.security import totp, two_factor
+from app.modules.support import notifications, support
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 def _make_account(prefix: str) -> dict:
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"{prefix}{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -88,7 +89,7 @@ class TestThongBao:
     def test_khong_co_pham_vi_tenant_thi_KHONG_ghi(self, account):
         """Fail-closed, cùng nguyên tắc với `audit.record()`: một dòng không biết
         mình thuộc tenant nào là dòng mà RLS sẽ giấu khỏi chính người cần đọc."""
-        from app.tenant_context import no_scope
+        from app.modules.saas.tenant_context import no_scope
 
         with no_scope():
             assert notifications.notify(account["id"], "system", "mo coi") is None
@@ -307,7 +308,7 @@ class TestPhieuDenTayNguoiTruc:
         cách một lỗi RLS đội lốt một cấu hình bình thường."""
         import logging
 
-        with caplog.at_level(logging.ERROR, logger="app.support"):
+        with caplog.at_level(logging.ERROR, logger="app.modules.support.support"):
             support._alert_staff("00000000-0000-0000-0000-000000000000",
                                  str(uuid.uuid4()), "chu de", "tieu de", "ai do")
         assert any("khong tim thay quan tri vien" in r.message for r in caplog.records)
@@ -328,8 +329,13 @@ class TestPhieuDenTayNguoiTruc:
         """
         from pathlib import Path
 
-        nguon = (Path(__file__).resolve().parents[1] / "app" / "account_rename.py"
-                 ).read_text(encoding="utf-8")
+        nguon = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "modules"
+            / "admin"
+            / "account_rename.py"
+        ).read_text(encoding="utf-8")
         assert "support_messages" not in nguon, (
             "đổi tên tài khoản không được đụng tới lời nhắn hỗ trợ — "
             "author_label là bằng chứng lịch sử")
@@ -478,12 +484,12 @@ class TestVeHaiBuoc:
     """Vé tạm giữa hai bước đăng nhập."""
 
     def test_ve_hop_le_tra_ve_dung_nguoi(self):
-        from app.auth import create_2fa_challenge, verify_2fa_challenge
+        from app.modules.identity._web_compat import create_2fa_challenge, verify_2fa_challenge
 
         assert verify_2fa_challenge(create_2fa_challenge("u-123")) == "u-123"
 
     def test_ve_gia_bi_tu_choi(self):
-        from app.auth import verify_2fa_challenge
+        from app.modules.identity._web_compat import verify_2fa_challenge
 
         assert verify_2fa_challenge("khong-phai-jwt") is None
         assert verify_2fa_challenge("") is None
@@ -491,7 +497,7 @@ class TestVeHaiBuoc:
     def test_access_token_KHONG_dung_thay_ve_duoc(self):
         """Thiếu bước kiểm `typ`, một access token bình thường sẽ qua được cửa
         này — tức bước hai tự vô hiệu hoá chính nó."""
-        from app.auth import create_access_token, verify_2fa_challenge
+        from app.modules.identity._web_compat import create_access_token, verify_2fa_challenge
 
         assert verify_2fa_challenge(create_access_token({"sub": "u-123"})) is None
 
@@ -506,7 +512,7 @@ class TestVeHaiBuoc:
         """
         from fastapi import HTTPException
 
-        from app.auth import _decode_token, create_2fa_challenge
+        from app.modules.identity._web_compat import _decode_token, create_2fa_challenge
 
         with pytest.raises(HTTPException) as e:
             _decode_token(create_2fa_challenge("u-123"))
@@ -519,7 +525,7 @@ class TestVeHaiBuoc:
 
         from jose import jwt as jose_jwt
 
-        from app.auth import _decode_token
+        from app.modules.identity._web_compat import _decode_token
         from app.config import settings
 
         cu = jose_jwt.encode(

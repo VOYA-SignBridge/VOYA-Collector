@@ -11,7 +11,7 @@ import structlog
 from asgi_correlation_id import correlation_id
 
 from app.main import app
-from app.logging_config import mask_sensitive_data, add_correlation_id
+from app.bootstrap.logging import mask_sensitive_data, add_correlation_id
 from app.worker import setup_structlog_context, clear_structlog_context
 
 client = TestClient(app)
@@ -69,7 +69,7 @@ def test_add_correlation_id_processor():
     correlation_id.set(None)
 
 
-@patch("app.metrics.collect_resources")
+@patch("app.infrastructure.observability.metrics.collect_resources")
 def test_prometheus_metrics_endpoint_standard(mock_collect):
     """Verify that /metrics returns valid Prometheus text format."""
     # Keys phải khớp đúng cái metrics.py đọc: host.get("ram_used_mb") /
@@ -91,8 +91,8 @@ def test_prometheus_metrics_endpoint_standard(mock_collect):
     assert "voya_gpu_usage_percent 80.0" in text
 
 
-@patch("app.metrics.logger")
-@patch("app.metrics.collect_resources")
+@patch("app.infrastructure.observability.metrics.logger")
+@patch("app.infrastructure.observability.metrics.collect_resources")
 def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger):
     """Verify edge case where GPU or Disk are completely unavailable."""
     mock_collect.return_value = {
@@ -128,7 +128,7 @@ def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger
     # thật là stack dựng thiếu overlay GPU. Nên test này giờ khẳng định điều
     # đáng khẳng định: lý do được MANG THEO, và lời khuyên đi kèm là lời khuyên
     # của đúng lý do đó. Xem `app/monitoring.GPU_ABSENCE_HINTS`.
-    from app.monitoring import GPU_ABSENCE_HINTS
+    from app.modules.monitoring.gpu import GPU_ABSENCE_HINTS
 
     gpu_call = next(
         c for c in mock_logger.error.call_args_list
@@ -143,8 +143,8 @@ def test_prometheus_metrics_endpoint_missing_resources(mock_collect, mock_logger
     assert extra["details"] not in ("", None)
     assert all(hint for hint in GPU_ABSENCE_HINTS.values())
 
-@patch("app.metrics.logger")
-@patch("app.metrics.collect_resources")
+@patch("app.infrastructure.observability.metrics.logger")
+@patch("app.infrastructure.observability.metrics.collect_resources")
 def test_prometheus_metrics_endpoint_missing_but_ignored(mock_collect, mock_logger):
     """Verify that ignored missing resources do not spam logs."""
     mock_collect.return_value = {
@@ -168,7 +168,7 @@ def test_asgi_correlation_id_middleware_no_header():
     the override just gets past the door so the correlation-id middleware is
     what the assertion actually measures.
     """
-    from app.auth import get_current_user_optional
+    from app.modules.identity._web_compat import get_current_user_optional
 
     @app.get("/api/v1/test_trace_empty")
     def trace_endpoint():

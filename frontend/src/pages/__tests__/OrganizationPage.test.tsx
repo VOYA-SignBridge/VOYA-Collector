@@ -340,9 +340,13 @@ describe('Mang dữ liệu đi', () => {
     renderPage();
     await screen.findByText('Đại học Cần Thơ');
 
-    fireEvent.click(screen.getByRole('button', { name: /Xuất toàn bộ/ }));
+    const exportButton = screen.getByRole('button', { name: /Xuất toàn bộ/ });
+    expect(exportButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Tôi cam kết/ }));
+    expect(exportButton).toBeEnabled();
+    fireEvent.click(exportButton);
 
-    await waitFor(() => expect(requestExport).toHaveBeenCalledWith('ctu', 'full'));
+    await waitFor(() => expect(requestExport).toHaveBeenCalledWith('ctu', 'full', true));
     expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/Đã nhận yêu cầu/));
   });
 });

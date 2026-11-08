@@ -32,13 +32,13 @@ import uuid
 import numpy as np
 import pytest
 
-from app.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID, TENANT_COLUMN
 
 
 @pytest.fixture
 def lop_cua_tenant_khac():
     """`ClassMetadata` thuộc một tenant KHÁC tenant khởi tạo."""
-    from app.dataset_manager import ClassMetadata
+    from app.modules.dataset.catalog import ClassMetadata
 
     tag = uuid.uuid4().hex[:8]
     return ClassMetadata(
@@ -61,7 +61,7 @@ def bat_dong_ghi(monkeypatch):
     Không chạm đĩa và không chạm cơ sở dữ liệu: điều đang kiểm là hình dạng của
     dòng, không phải việc ghi tệp có chạy không.
     """
-    from app import dataset_samples as ds
+    from app.modules.dataset import samples as ds
 
     bat: dict = {}
     monkeypatch.setattr(ds, "append_sample_row", lambda row: bat.update(csv=dict(row)))
@@ -73,7 +73,7 @@ def bat_dong_ghi(monkeypatch):
 
 
 def _thu_mot_mau(class_meta, meta=None):
-    from app.dataset_samples import save_sequence_npz
+    from app.modules.dataset.samples import save_sequence_npz
 
     seq = np.zeros((60, 126), dtype=np.float32)
     return save_sequence_npz(class_meta, seq, meta=meta or {}, augment_id=0,
@@ -123,7 +123,7 @@ class TestTenantDiTheoLop:
 
         Không có bài này, một bản vá viết cứng `"truong-xyz"` cũng xanh.
         """
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
 
         tag = uuid.uuid4().hex[:8]
         goc = ClassMetadata(

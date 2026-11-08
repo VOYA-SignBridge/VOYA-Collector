@@ -21,8 +21,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import app.dataset_samples as ds
-from app.dataset_samples import (
+import app.modules.dataset.samples as ds
+from app.modules.dataset.samples import (
     load_display_sequence,
     load_world_sequence,
     raw_archive_path,

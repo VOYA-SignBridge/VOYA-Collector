@@ -34,7 +34,7 @@ from __future__ import annotations
 import csv
 import sys
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 results: list[tuple[str, str, str]] = []
@@ -205,7 +205,7 @@ def main() -> int:
         from app.config import settings
         from app.storage.authz_schema import missing_objects
         from app.storage.metadata_db import _cursor, _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with _cursor() as cur:
             missing_authz = missing_objects(cur.connection)
@@ -278,7 +278,7 @@ def main() -> int:
     # thuận nào. Phép kiểm này là chỗ duy nhất tình trạng đó lộ ra trước khi có
     # người hỏi bằng chứng.
     try:
-        from app import legal
+        from app.modules.legal import legal
 
         missing_legal = legal.missing_for_registration()
         record(FAIL if missing_legal else PASS, "van ban phap ly",
@@ -301,9 +301,9 @@ def main() -> int:
     # (di sản v1, hoặc một lần công bố đi vòng qua `register_document`), và
     # thân có mà băm không khớp (bảng đã bị sửa tay).
     try:
-        from app import legal
+        from app.modules.legal import legal
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("verify: kho van ban phap ly"):
             rows = _fetch_all(
@@ -342,9 +342,9 @@ def main() -> int:
     # `dataset/legal`. Bảng đầy đủ, mọi con trỏ đều có, và không đường nào trong
     # ứng dụng phát hiện ra cho tới khi có người bấm vào một tài liệu.
     try:
-        from app import legal_store
+        from app.modules.legal import legal_store
         from app.storage.metadata_db import _fetch_all
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("verify: kho tai lieu tren dia"):
             docs = _fetch_all(
@@ -438,7 +438,9 @@ def main() -> int:
         record(PASS if n == 0 else FAIL, label, f"{n} hang")
 
     # ---- 4. CSV mirrors vs DB (startup sync would undo cleanup) ----------
-    n_classes = scalar("SELECT count(*) FROM classes")
+    # Lớp trong thùng rác (deleted_at) bị ẩn khỏi labels.csv theo thiết kế —
+    # đếm cả chúng thì "CSV thiếu dữ liệu" báo giả mỗi lần ai đó xoá mềm một lớp.
+    n_classes = scalar("SELECT count(*) FROM classes WHERE deleted_at IS NULL")
     n_samples = scalar("SELECT count(*) FROM samples")
     for label, path, db_n in (
         ("labels.csv vs classes", "/dataset/labels.csv", n_classes),
@@ -519,13 +521,14 @@ def main() -> int:
         record(PASS, "file .npz tren dia", f"{len(rows)}/{len(rows)} co mat")
 
     # ---- 6. class_idx sane for training ----------------------------------
-    n_idx = scalar("SELECT count(DISTINCT class_idx) FROM classes WHERE class_idx IS NOT NULL")
-    n_cls = scalar("SELECT count(*) FROM classes")
+    n_idx = scalar("SELECT count(DISTINCT class_idx) FROM classes WHERE class_idx IS NOT NULL AND deleted_at IS NULL")
+    n_cls = scalar("SELECT count(*) FROM classes WHERE deleted_at IS NULL")
     record(PASS if n_idx == n_cls else FAIL, "class_idx duy nhat", f"{n_idx} idx / {n_cls} lop")
 
     empty = scalar(
         "SELECT count(*) FROM (SELECT c.class_uid FROM classes c "
-        "LEFT JOIN samples s ON s.class_uid = c.class_uid "
+        "LEFT JOIN samples s ON s.class_uid = c.class_uid AND s.deleted_at IS NULL "
+        "WHERE c.deleted_at IS NULL "
         "GROUP BY c.class_uid HAVING count(s.sample_uid) = 0) d")
     record(WARN if empty else PASS, "lop rong",
            f"{empty} lop khong co mau — moi lop van chiem 1 o dau ra cua model" if empty else "0")
@@ -549,7 +552,7 @@ def main() -> int:
         import shutil
 
         from app.config import settings as _settings
-        from app.monitoring import DISK_CRIT_PCT, DISK_WARN_PCT
+        from app.modules.monitoring.service import DISK_CRIT_PCT, DISK_WARN_PCT
 
         usage = shutil.disk_usage(str(_settings.dataset_root))
         pct = 100.0 * usage.used / usage.total if usage.total else 0.0
@@ -612,7 +615,7 @@ def main() -> int:
     # missing or unreadable" — nen ngay 2026-08-09 no bao di tim cai card dang
     # nam yen trong may, trong khi loi that la stack dung thieu overlay GPU.
     try:
-        from app.monitoring import read_gpu_snapshot
+        from app.modules.monitoring.gpu import read_gpu_snapshot
 
         snap = read_gpu_snapshot()
         if not snap.get("available"):
@@ -681,7 +684,7 @@ def main() -> int:
         from pathlib import Path as _Path
 
         from app.config import settings as _settings
-        from app.consent_gate import SnapshotUnusable, load_snapshot
+        from app.modules.security.consent_gate import SnapshotUnusable, load_snapshot
 
         snap_path = _Path(_settings.dataset_root) / "consent_snapshot.json"
         try:

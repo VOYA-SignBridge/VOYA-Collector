@@ -4,8 +4,8 @@ import argparse
 import numpy as np
 from collections import defaultdict
 
-from app.dataset_manager import _load_all_labels_unscoped, ClassMetadata
-from app.tenancy import tenant_id_of
+from app.modules.dataset.catalog import _load_all_labels_unscoped, ClassMetadata
+from app.modules.saas.tenancy import tenant_id_of
 from app.config import settings
 
 SEQ_LEN = int(getattr(settings, 'seq_len', 60))

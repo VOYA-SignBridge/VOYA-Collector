@@ -1,7 +1,7 @@
 """Single source of truth for "is this run citable in the paper?".
 
-Both scripts/audit_checkpoint_validity.py and
-scripts/aggregate_experiment_results.py import from here. There must never be
+Both scripts/evaluation/audit_checkpoint_validity.py and
+scripts/evaluation/aggregate_experiment_results.py import from here. There must never be
 two implementations of these rules: a run that the audit calls valid and the
 aggregator silently drops (or worse, the reverse) is exactly how a broken
 number reaches a table.
@@ -107,6 +107,7 @@ def evaluate_split_metadata(meta: dict | None) -> tuple[bool, list]:
 
 
 def load_split_metadata(split_version: str, repo_root: Path | None = None) -> dict | None:
+    """Tìm và đọc split_metadata.json của một phiên bản split."""
     root = repo_root or REPO_ROOT
     if not split_version:
         return None
@@ -125,6 +126,7 @@ def load_split_metadata(split_version: str, repo_root: Path | None = None) -> di
 # --------------------------------------------------------------------------
 
 def augmentation_of(ckpt: dict) -> dict | None:
+    """Lấy cấu hình augmentation từ checkpoint theo cả schema mới và cũ."""
     tc = ckpt.get("training_config")
     if isinstance(tc, dict) and isinstance(tc.get("augmentation"), dict):
         return tc["augmentation"]
@@ -134,11 +136,13 @@ def augmentation_of(ckpt: dict) -> dict | None:
 
 
 def run_purpose_of(ckpt: dict) -> str:
+    """Đọc mục đích của run, mặc định unknown nếu checkpoint không ghi."""
     tc = ckpt.get("training_config") if isinstance(ckpt.get("training_config"), dict) else {}
     return str(ckpt.get("run_purpose") or tc.get("run_purpose") or "").strip()
 
 
 def _sha256_file(path: Path) -> str:
+    """Tính checksum SHA-256 cho kiểm tra provenance của artifact."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -147,6 +151,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def allowed_label_prefixes(profile: str, include_common: bool = True) -> set:
+    """Trả các prefix nhãn được phép xuất hiện trong recognition profile."""
     prefixes = {"vn/common/"} if include_common else set()
     if profile == "unified":
         from processed.shared.vocabulary import RECOGNITION_PROFILES
@@ -321,6 +326,7 @@ def evaluate_checkpoint(ckpt: dict, *, split_meta: dict | None = None,
 
 
 def summarize(verdicts: Iterable[Verdict]) -> dict:
+    """Tổng hợp nhiều verdict thành số lượng hợp lệ và nhóm lý do loại."""
     out = {"true": 0, "false": 0, "unverifiable": 0}
     for v in verdicts:
         out[v.label] += 1

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from app.vocabulary_registry import slugify_dialect
+from app.modules.dataset.vocabulary_registry import slugify_dialect
 
 REPO = Path(__file__).resolve().parents[2]
 DATASET = REPO / "dataset"
@@ -31,11 +31,20 @@ def _seeded_ids() -> set:
 
 
 def _csv_dialects(name: str) -> set:
+    """Phương ngữ mà dữ liệu của tenant KHỞI TẠO dùng.
+
+    `config/dialects.seed.csv` là danh mục chung mà tenant mới được clone từ đó.
+    Phương ngữ riêng của một tổ chức (vd. `gdcbst` của trường Sóc Trăng) sống
+    trong registry của chính tổ chức ấy và cố ý KHÔNG được đưa vào danh mục
+    chung — đưa vào là mọi tenant mới đều thấy nó. Labels/samples.csv là tệp
+    chung cho mọi tenant, nên phải lọc theo `tenant_id` (ô trống = khởi tạo).
+    """
     path = DATASET / name
     if not path.is_file():
         return set()
     with path.open(newline="", encoding="utf-8-sig") as fh:
-        return {(r.get("dialect") or "").strip() for r in csv.DictReader(fh)} - {""}
+        return {(r.get("dialect") or "").strip() for r in csv.DictReader(fh)
+                if (r.get("tenant_id") or "").strip() in ("", "default")} - {""}
 
 
 # --------------------------------------------------------------------- slug
@@ -127,7 +136,7 @@ def test_t2b_snapshot_matches_its_own_shape():
 _SCAN_ROOTS = ((REPO / "backend" / "app"), (REPO / "frontend" / "src"))
 _ALLOWED = {
     "vocabulary_registry.py",   # the registry itself
-    "dataset_manager.py",       # _INPUT_ALIASES: spellings, not identities
+    "catalog.py",               # canonical home of those input aliases
     "test_vocabulary_registry.py",
     # Trang "Học ký hiệu" (14/09/2026): 'bac'/'nam'/'trung' ở đây là VÙNG của
     # từ điển QIPEDC (trục `region`), không phải phương ngữ — trùng chữ với ba
@@ -144,7 +153,7 @@ _ALLOWED = {
 # 'mien-nam', 'mien-trung') and matched nothing this test was looking for.
 # Reading the alias table means a spelling can never again be invisible here.
 def _known_dialect_ids() -> tuple:
-    from app.dataset_manager import _INPUT_ALIASES
+    from app.modules.dataset.catalog import _INPUT_ALIASES
 
     ids = set(_INPUT_ALIASES) | set(_INPUT_ALIASES.values())
     # Registered ids that no alias points at, so they are not reachable above.

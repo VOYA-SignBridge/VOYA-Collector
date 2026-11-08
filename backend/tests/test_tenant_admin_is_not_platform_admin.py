@@ -39,7 +39,7 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-from app.auth import require_admin
+from app.modules.identity._web_compat import require_admin
 from app.authorization.catalog import (
     LEGACY_SYSTEM_ADMIN_ROLE,
     LEGACY_TENANT_ROLE_MAP,

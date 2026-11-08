@@ -53,6 +53,10 @@ export interface DatasetInfo {
 export type ModelType = 'tcn' | 'cnn' | 'lstm' | 'bigru_attention' | 'hdgcn';
 
 export interface TrainingConfig {
+  /** Server đặt: job riêng của người chạy. */
+  personal?: boolean;
+  /** Lúc người chạy đề nghị dùng chung. */
+  review_requested_at?: string | null;
   model_type: ModelType;
   dialects: string[];
   languages: string[];
@@ -84,6 +88,8 @@ export interface OperationalSplit {
   generated_at: string | null;
   split_mode: string | null;
   counts: { train: number; val: number; test: number };
+  /** Tập riêng của người đang xem, có cả mẫu chưa duyệt của họ. */
+  personal?: boolean;
 }
 
 // POST /training/dataset/prepare → GET /training/dataset/prepare/{run_id}
@@ -170,6 +176,8 @@ export interface TrainingMetrics {
 
 export interface TrainingJob {
   id: string;
+  /** Người chạy job. */
+  auth_user_id?: string | null;
   status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   config: TrainingConfig;
   created_at: string;
@@ -234,6 +242,8 @@ export interface JobEvaluation {
   per_class?: JobEvaluationClass[];
   confusion_matrix?: number[][];
   labels?: string[];
+  /** khoá nhãn (class_uid) → nhãn gốc để hiển thị; khoá vắng thì lùi về slug trong khoá */
+  label_names?: Record<string, string>;
   overall?: JobEvaluationOverall;
   efficiency?: JobEvaluationEfficiency;
 }
@@ -258,13 +268,20 @@ export function useTrainingAPI() {
   const [error, setError] = useState<string | null>(null);
 
   // Tải dataset info
-  const loadDatasetInfo = useCallback(async (dialect?: string, language?: string) => {
+  const loadDatasetInfo = useCallback(async (
+    dialect?: string,
+    language?: string,
+    operationalSplitId?: string | null,
+    runPurpose?: TrainingConfig['run_purpose'],
+  ) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
       if (dialect) params.append('dialect', dialect);
       if (language) params.append('language', language);
+      if (operationalSplitId) params.append('operational_split_id', operationalSplitId);
+      if (runPurpose) params.append('run_purpose', runPurpose);
 
       const response = await axiosClient.get(`${API_PREFIX}/dataset-info`, { params });
       const data = response.data;
@@ -358,6 +375,27 @@ export function useTrainingAPI() {
   const promoteJob = useCallback(async (jobId: string): Promise<PromoteResponse | null> => {
     try {
       const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/promote`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  // Đề nghị đưa model riêng ra dùng chung, và người duyệt từ chối đề nghị đó.
+  const requestReview = useCallback(async (jobId: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/review`);
+      return response.data;
+    } catch (err) {
+      setError(friendlyError(err));
+      return null;
+    }
+  }, []);
+
+  const rejectReview = useCallback(async (jobId: string, reason: string): Promise<TrainingJob | null> => {
+    try {
+      const response = await axiosClient.post(`${API_PREFIX}/jobs/${jobId}/review/reject`, { reason });
       return response.data;
     } catch (err) {
       setError(friendlyError(err));
@@ -460,6 +498,8 @@ export function useTrainingAPI() {
     listJobs,
     cancelTraining,
     promoteJob,
+    requestReview,
+    rejectReview,
     getJobEvaluation,
     getResearchSplits,
     getOperationalSplits,

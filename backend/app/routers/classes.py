@@ -1,22 +1,19 @@
 from typing import Optional, Dict, Any
-import json
 import unicodedata
-from pathlib import Path
-from filelock import FileLock
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from app import audit
-from app.rate_limit_deps import limit_catalog
-from app.dataset_manager import (
+from app.modules.security import audit
+from app.modules.security.rate_limit_deps import limit_catalog
+from app.modules.dataset.catalog import (
     get_or_register_class,
     list_classes,
     normalize_dialect,
     normalize_region,
 )
 from app.processing.class_registry import AlphabetLabelError, is_alphabet_dialect
-from app.dataset_samples import list_samples
-from app.balancer import build_balance_plan
-from app.api_validation import validate_label, validate_language, validate_dialect
-from app.catalog_sync import (
+from app.modules.dataset.samples import list_samples
+from app.modules.dataset.balancing import build_balance_plan
+from app.core.http_validation import validate_label, validate_language, validate_dialect
+from app.modules.dataset.catalog_sync import (
     CatalogSyncError,
     sync_update_class,
     sync_soft_delete_class,
@@ -28,39 +25,17 @@ from app.catalog_sync import (
     empty_class_trash,
 )
 from app.config import settings
-from app.auth import get_current_user, require_admin, require_tenant_editor
-from app.tenant_context import require_tenant
-from app.quota_deps import tenant_of
-from app.webhooks import emit
+from app.modules.identity._web_compat import (
+    get_current_user,
+    require_tenant_curator,
+    require_tenant_editor,
+)
+from app.modules.saas.tenant_context import require_tenant
+from app.services import preferences
+
+from app.modules.saas.webhooks import emit
 
 router = APIRouter(prefix="/classes", tags=["classes"])
-
-# ---------------------------------------------------------------------------
-# Preferences file (replaces localStorage on frontend)
-# ---------------------------------------------------------------------------
-_PREFS_PATH = Path(settings.dataset_root) / "user_preferences.json"
-_PREFS_LOCK = str(_PREFS_PATH) + ".lock"
-
-
-def _load_prefs() -> dict:
-    if not _PREFS_PATH.exists():
-        return {}
-    try:
-        with open(_PREFS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_prefs(data: dict) -> None:
-    # Callers MUST already hold the prefs FileLock (set_preference does). This
-    # helper deliberately does NOT re-acquire it: FileLock is not reentrant
-    # across instances in the same process, so a nested acquire self-deadlocks
-    # (the request hangs forever, leaking a thread-pool worker + poisoning the
-    # lock for every later preference write).
-    _PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_PREFS_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +83,7 @@ def register_class(
     # Ràng buộc dữ liệu duy nhất là dung lượng — xem `plans.USAGE_METRICS`.
     label = validate_label(payload.get("label"))
     language = validate_language(payload.get("language", "vn"))
-    dialect = validate_dialect(normalize_dialect(payload.get("dialect", "")))
+    dialect = validate_dialect(normalize_dialect(payload.get("dialect", ""), tenant_id=require_tenant()))
     is_common_global = bool(payload.get("is_common_global", False))
     is_common_language = bool(payload.get("is_common_language", False))
     # Vùng của KÝ HIỆU, trục riêng với `dialect`. Bỏ trống thì `unclassified`,
@@ -131,8 +106,10 @@ def register_class(
         # accepted as a new class that would collide with a real letter.
         raise HTTPException(status_code=422, detail=str(exc))
 
+    # Sự kiện thuộc tổ chức sở hữu LỚP, không phải tổ chức nhà của người gọi: trước
+    # 18/10/2026 lớp của VOYA tạo bởi người có nhà ở trường B bị gửi tới webhook của B.
     emit(
-        tenant_of(current_user), "class.created",
+        meta.tenant_id, "class.created",
         {
             "class_uid": meta.class_uid, "slug": meta.slug,
             "label": meta.label_original, "language": meta.language,
@@ -142,10 +119,73 @@ def register_class(
     return {
         "success": True,
         "class_uid": meta.class_uid,
+        "class_idx": meta.class_idx,
         "slug": meta.slug,
+        "label_original": meta.label_original,
         "language": meta.language,
         "dialect": meta.dialect,
         "region": meta.region,
+    }
+
+
+@router.post("/request", dependencies=[Depends(limit_catalog)])
+def request_class(
+    request: Request,
+    payload: dict = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Allow a signed-in contributor to add a usable label in this tenant.
+
+    The existing `/register` contract remains editor-only. This separate door
+    avoids widening that catalogue-management permission while making label
+    creation available from collection screens.
+
+    What keeps it from becoming an unreviewed catalogue door (17/10/2026):
+
+    * `is_common_language` — a catalogue-wide classification — is honoured
+      only for an admin/editor of this tenant; a member's request is always a
+      plain label in the chosen dialect.
+    * every NEW label is written to the audit log with who asked, so a tenant
+      admin can find and remove junk labels (Trash) — there is no approval
+      state on classes, and adding one would make the label unusable on the
+      capture screen that asked for it.
+    * samples recorded into it still start `pending` and only reach the tenant
+      through moderation, exactly like samples of any other label.
+    """
+    from app.modules.dataset.sample_access import can_manage_tenant_samples
+
+    tenant = require_tenant()
+    manager = can_manage_tenant_samples(current_user, tenant)
+    label = validate_label(payload.get("label"))
+    language = validate_language(payload.get("language", "vn"))
+    dialect = validate_dialect(normalize_dialect(payload.get("dialect", ""), tenant_id=tenant))
+    region = normalize_region(payload.get("region"))
+    before = {m.class_uid for m in list_classes(tenant_id=tenant)}
+    try:
+        meta = get_or_register_class(
+            label_original=label, language=language, dialect=dialect,
+            is_common_language=bool(manager and payload.get("is_common_language", False)),
+            region=region,
+        )
+    except AlphabetLabelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if meta.class_uid not in before:
+        audit.record("data.class.request", actor=current_user, request=request,
+                     target_type="class", target_id=meta.class_uid,
+                     detail={"label": meta.label_original, "dialect": meta.dialect,
+                             "region": meta.region, "by_manager": manager})
+    # Sự kiện thuộc tổ chức sở hữu LỚP, không phải tổ chức nhà của người gọi: trước
+    # 18/10/2026 lớp của VOYA tạo bởi người có nhà ở trường B bị gửi tới webhook của B.
+    emit(meta.tenant_id, "class.requested", {
+        "class_uid": meta.class_uid, "slug": meta.slug,
+        "label": meta.label_original, "language": meta.language,
+        "dialect": meta.dialect, "region": meta.region,
+        "requested_by": str(current_user.get("id") or ""),
+    })
+    return {
+        "success": True, "class_uid": meta.class_uid, "class_idx": meta.class_idx,
+        "slug": meta.slug, "label_original": meta.label_original,
+        "language": meta.language, "dialect": meta.dialect, "region": meta.region,
     }
 
 
@@ -274,7 +314,7 @@ def _prefs_bucket(current_user: Dict[str, Any]) -> str:
     có tenant trong khoá khiến việc xoá sạch một tenant lúc purge thành một
     phép lọc tiền tố thay vì phải dò từng id người dùng.
     """
-    from app.tenancy import normalize_tenant_id
+    from app.modules.saas.tenancy import normalize_tenant_id
 
     tho = (current_user.get("tenant_id") or "").strip()
     if not tho:
@@ -294,15 +334,8 @@ def get_preference(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Get a user preference value by key."""
-    prefs = _load_prefs()
-    mine = prefs.get(_prefs_bucket(current_user)) or {}
-    if key in mine:
-        return {"key": key, "value": mine[key]}
-    # Rơi về giá trị cũ ở mức trên cùng, MỘT LẦN: những khoá đó do bản trước
-    # v4 ghi và là tuỳ chọn thật của ai đó. Đọc được nhưng không ghi vào nữa,
-    # nên chúng tắt dần khi mỗi người lưu lại lựa chọn của mình.
-    legacy = prefs.get(key)
-    return {"key": key, "value": legacy if not isinstance(legacy, dict) else None}
+    value = preferences.get_scoped_value(_prefs_bucket(current_user), key)
+    return {"key": key, "value": value}
 
 
 @router.post("/preferences")
@@ -316,18 +349,7 @@ def set_preference(
     if not key:
         raise HTTPException(status_code=400, detail="Key is required")
 
-    bucket = _prefs_bucket(current_user)
-    lock = FileLock(_PREFS_LOCK)
-    with lock:
-        prefs = _load_prefs()
-        mine = prefs.get(bucket)
-        # Một khoá cũ ở mức trên cùng có thể trùng tên với một ngăn; kiểm kiểu
-        # ở đây để dữ liệu cũ không biến thành ngăn của ai đó.
-        if not isinstance(mine, dict):
-            mine = {}
-        mine[key] = value
-        prefs[bucket] = mine
-        _save_prefs(prefs)
+    preferences.set_scoped_value(_prefs_bucket(current_user), key, value)
 
     return {"success": True, "key": key, "value": value}
 
@@ -418,7 +440,7 @@ def community_stats():
     #
     # `contributors_count` là chỗ rò rõ nhất: nó đếm người, nên một người vừa
     # gửi mẫu đầu tiên sẽ làm con số nhích lên trước khi có ai duyệt gì.
-    from app import moderation
+    from app.modules.admin import moderation
 
     samples = moderation.filter_rows(list_samples(cong_bo), viewer_id=None).kept
 
@@ -450,7 +472,7 @@ def balance_plan(target: int | None = None):
 def update_class(
     class_ref: str,
     payload: dict = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     try:
         result = sync_update_class(class_ref, payload, tenant_id=require_tenant())
@@ -484,10 +506,10 @@ def _reject_if_nothing_done(result: Dict[str, Any]) -> None:
 
 
 @router.get("/trash")
-def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
-    """List soft-deleted classes (Trash). Admin only."""
+def list_class_trash(current_user: Dict[str, Any] = Depends(require_tenant_curator)):
+    """List soft-deleted classes (Trash) of the working tenant."""
     try:
-        items = list_trash_classes()
+        items = list_trash_classes(require_tenant())
         return {"count": len(items), "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Kh\u00f4ng \u0111\u1ecdc \u0111\u01b0\u1ee3c th\u00f9ng r\u00e1c: {exc}")
@@ -496,7 +518,7 @@ def list_class_trash(current_user: Dict[str, Any] = Depends(require_admin)):
 @router.post("/trash/restore", dependencies=[Depends(limit_catalog)])
 def bulk_restore_classes_endpoint(
     payload: dict = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Restore several soft-deleted classes at once. Body: {class_uids: [...]}."""
     uids = payload.get("class_uids") or []
@@ -509,12 +531,12 @@ def bulk_restore_classes_endpoint(
 def bulk_purge_classes_endpoint(
     request: Request,
     payload: dict = Body(default={}),
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Permanently delete classes. Body: {class_uids: [...]} for a selection, or
     {all: true} to empty the whole class trash. Irreversible."""
     if payload.get("all"):
-        result = empty_class_trash()
+        result = empty_class_trash(require_tenant())
     else:
         result = bulk_purge_classes(payload.get("class_uids") or [])
     _reject_if_nothing_done(result)
@@ -531,7 +553,7 @@ def bulk_purge_classes_endpoint(
 def delete_class(
     class_ref: str,
     request: Request,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Soft-delete a class to Trash (restorable). Files/Drive are kept until purge."""
     try:
@@ -558,7 +580,7 @@ def delete_class(
 @router.post("/{class_uid}/restore", dependencies=[Depends(limit_catalog)])
 def restore_class_endpoint(
     class_uid: str,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Restore a soft-deleted class from Trash."""
     try:
@@ -572,7 +594,7 @@ def restore_class_endpoint(
 def purge_class_endpoint(
     class_uid: str,
     request: Request,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(require_tenant_curator),
 ):
     """Permanently delete a class (files + Drive + DB). Irreversible.
 

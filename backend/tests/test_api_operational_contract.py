@@ -43,7 +43,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.auth import get_current_user, require_admin  # noqa: E402
+from app.modules.identity._web_compat import get_current_user, require_admin  # noqa: E402
+from app.modules.dataset import provenance as dataset_provenance  # noqa: E402
 from app.routers import training as tr  # noqa: E402
 from app.routers.training import router, training_jobs  # noqa: E402
 
@@ -70,7 +71,11 @@ FEATURES = REPO_ROOT / "dataset" / "features"
 #: điều nó muốn chứng minh: hai đường gặp nhau trên cùng một hiện vật — chỉ khác
 #: là hiện vật ấy do bộ ca dựng, biết chắc chủ, và dọn được.
 SPLIT_ID = "test-owned-operational-a"
-TENANT = "iso_a"
+#: Chủ hiện vật phải là chủ của DỮ LIỆU nó rót vào. Bộ ca dựng từ
+#: `dataset/samples.csv` thật, nơi mọi dòng thuộc tenant khởi tạo; từ 17/10/2026
+#: `make_splits` chỉ rót mẫu của đúng chủ, nên chủ `iso_a` trên dữ liệu ấy cho
+#: một hiện vật RỖNG — đúng điều cổng tổ chức sinh ra để chặn.
+TENANT = "default"
 ARTIFACT = SPLITS / "operational" / SPLIT_ID
 SO_LOP = 7
 PHUONG_NGU = "hoa-de"
@@ -147,9 +152,9 @@ def hien_vat_cua_bo_test():
 #: Ở đây điền một tenant thật để bộ ca này kiểm ĐÚNG thứ nó sinh ra để kiểm:
 #: cổng ghim hiện vật, chứ không phải danh tính.
 USER = {"id": "u-1", "username": "researcher", "role": "user",
-        "tenant_id": "iso_a"}
+        "tenant_id": TENANT}
 ADMIN = {"id": "a-1", "username": "boss", "role": "admin",
-         "tenant_id": "iso_a"}
+         "tenant_id": TENANT}
 
 
 @pytest.fixture
@@ -160,10 +165,18 @@ def client(monkeypatch):
     đường dẫn của container trainer, không tồn tại trong container test.
     """
     monkeypatch.setattr(tr, "SPLITS_DIR", SPLITS)
+    from app.modules.training import tasks as training_tasks
+    monkeypatch.setattr(training_tasks, "SPLITS_DIR", SPLITS)
 
     app = FastAPI()
     app.include_router(router)
+    # Router huấn luyện đọc tổ chức từ PHẠM VI REQUEST (18/10/2026), nên app con
+    # cần đúng middleware đặt phạm vi đó — người dùng ở đây làm việc tại nhà.
+    import app.modules.saas.tenant_middleware as tm
+    monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: TENANT)
+    app.add_middleware(tm.TenantScopeMiddleware)
     app.dependency_overrides[get_current_user] = lambda: USER
+    monkeypatch.setattr(tr, "_duyet_duoc", lambda _u, _t: True)
     app.dependency_overrides[require_admin] = lambda: ADMIN
 
     async def _khong_ghi_db(job, auth_user_id=None):
@@ -184,7 +197,7 @@ def khai_bao():
 def _gui(client, **cau_hinh):
     goc = {"model_type": "tcn", "epochs": 1, "batch_size": 32}
     goc.update(cau_hinh)
-    with patch("app.training_tasks.run_training_job"):
+    with patch("app.modules.training.tasks.run_training_job"):
         return client.post("/training/start", json=goc)
 
 
@@ -256,8 +269,8 @@ class TestCongSoiDungHienVatDaGhim:
         lớp yếu); hiện vật vận hành chứa 7. Nếu cổng vẫn đọc `SPLITS_DIR` thì
         nó sẽ duyệt trên tập 8 lớp — đúng tập mà trainer KHÔNG đọc.
         """
-        theo_hien_vat = tr._split_class_uids([PHUONG_NGU], ARTIFACT)
-        theo_goc = tr._split_class_uids([PHUONG_NGU], SPLITS)
+        theo_hien_vat = dataset_provenance.split_class_uids([PHUONG_NGU], ARTIFACT)
+        theo_goc = dataset_provenance.split_class_uids([PHUONG_NGU], SPLITS)
 
         assert len(theo_hien_vat) == SO_LOP
         assert len(theo_goc) > SO_LOP, (
@@ -281,12 +294,12 @@ class TestLenhMangDungBaTepDo:
 
     @pytest.fixture(autouse=True)
     def _tro_ve_kho_that(self, monkeypatch):
-        from app import training_tasks as tt
+        from app.modules.training import tasks as tt
 
         monkeypatch.setattr(tt, "SPLITS_DIR", SPLITS)
 
     def test_van_hanh_truyen_duong_dan_tuong_minh(self):
-        from app.training_tasks import _build_cmd
+        from app.modules.training.tasks import _build_cmd
 
         cmd = _build_cmd(
             {"model_type": "tcn", "run_purpose": "operational",
@@ -308,7 +321,7 @@ class TestLenhMangDungBaTepDo:
         con — chứ không dựng lại từ config. Dựng lại là bản cài đặt thứ hai của
         cùng một quy tắc, và bản nào sai thì cổng soi nhầm tệp.
         """
-        from app.training_tasks import _build_cmd, _split_csvs_of
+        from app.modules.training.tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd(
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
@@ -326,7 +339,7 @@ class TestLenhMangDungBaTepDo:
         lúc duyệt và lúc chạy. Worker phân giải lại, và cũng fail-closed.
         """
         from processed.train_utils.split_artifact import SplitArtifactError
-        from app.training_tasks import _build_cmd
+        from app.modules.training.tasks import _build_cmd
 
         with pytest.raises(SplitArtifactError):
             _build_cmd({"run_purpose": "operational"}, Path("m.jsonl"),
@@ -339,7 +352,7 @@ class TestLenhMangDungBaTepDo:
         **không lượt huấn luyện legacy nào từng được cổng đồng thuận soi**. Giờ
         legacy cũng đi qua resolver và nói ra ba tệp nó dùng.
         """
-        from app.training_tasks import _build_cmd, _split_csvs_of
+        from app.modules.training.tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd({"model_type": "tcn", "dialects": [PHUONG_NGU]},
                          Path("m.jsonl"), tenant_id=TENANT)
@@ -369,7 +382,7 @@ class TestArgvLaThamQuyenCuoiCung:
 
     @pytest.fixture(autouse=True)
     def _tro_ve_kho_that(self, monkeypatch):
-        from app import training_tasks as tt
+        from app.modules.training import tasks as tt
 
         monkeypatch.setattr(tt, "SPLITS_DIR", SPLITS)
 
@@ -382,7 +395,7 @@ class TestArgvLaThamQuyenCuoiCung:
         """
         import inspect
 
-        from app.training_tasks import run_training_job
+        from app.modules.training.tasks import run_training_job
 
         ma = inspect.getsource(run_training_job)
         assert "_build_cmd(" in ma and "Popen(" in ma, (
@@ -406,7 +419,7 @@ class TestArgvLaThamQuyenCuoiCung:
         khớp — báo cả A lẫn B cho cổng đồng thuận. Cổng soi hai tệp, trainer đọc
         một, và cả hai đều "không sai".
         """
-        from app.training_tasks import _build_cmd
+        from app.modules.training.tasks import _build_cmd
 
         for cau_hinh in (
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
@@ -424,7 +437,7 @@ class TestArgvLaThamQuyenCuoiCung:
         của cả hai đều "đúng" ở tệp của nó, nhưng lượt chạy thì không thuộc
         hiện vật nào.
         """
-        from app.training_tasks import _build_cmd, _split_csvs_of
+        from app.modules.training.tasks import _build_cmd, _split_csvs_of
 
         cmd = _build_cmd(
             {"run_purpose": "operational", "operational_split_id": SPLIT_ID},
@@ -439,7 +452,7 @@ class TestChayThatBangChinhLenhAPIDung:
 
     def test_toan_chuoi_tu_API_toi_checkpoint(self, tmp_path, monkeypatch,
                                               khai_bao):
-        from app import training_tasks as tt
+        from app.modules.training import tasks as tt
 
         monkeypatch.setattr(tt, "SPLITS_DIR", SPLITS)
         monkeypatch.setenv("FEATURES_ROOT", str(FEATURES))

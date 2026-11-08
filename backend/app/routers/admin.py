@@ -4,13 +4,23 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from app.auth import get_current_user, require_admin, require_tenant_editor
-from app.sudo_mode import require_sudo
-from app.sync_tasks import download_missing_files_to_local
-from app.monitoring import collect_resources
-from app import activity
+from app.modules.identity._web_compat import get_current_user, require_admin
+from app.modules.security.sudo_mode import require_sudo
+from app.modules.admin import recovery_service
+from app.modules.admin.user_service import list_users, set_user_admin_role
+from app.modules.monitoring.service import collect_resources
+from app.modules.security import account_controls, activity_monitor, audit_log, ip_controls
+from app.routers import admin_data as _admin_data
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+router.include_router(_admin_data.router)
+
+# Compatibility exports for callers that historically imported these handlers
+# from ``app.routers.admin``. Their implementation and route registration now
+# have one owner: ``admin_data``.
+get_data_report = _admin_data.get_data_report
+sync_local_files = _admin_data.sync_local_files
+get_sync_status = _admin_data.get_sync_status
 
 
 # ---------------------------------------------------------------- sudo mode
@@ -33,7 +43,7 @@ def elevate_privileges(
     current_user: Dict[str, Any] = Depends(require_admin),
 ) -> Dict[str, Any]:
     """Xác thực lại bằng mật khẩu để mở cửa sổ nâng quyền 5 phút."""
-    from app import audit, sudo_mode
+    from app.modules.security import audit, sudo_mode
 
     try:
         ttl = sudo_mode.elevate(current_user, payload.password)
@@ -60,7 +70,7 @@ def drop_privileges(
     cách duy nhất là chờ hết 5 phút — và người vận hành cẩn thận sẽ không có
     cách nào dọn sau khi xong việc.
     """
-    from app import audit, sudo_mode
+    from app.modules.security import audit, sudo_mode
 
     sudo_mode.revoke(str(current_user["id"]))
     audit.record("sudo.revoke", actor=current_user, request=request)
@@ -77,7 +87,8 @@ def read_settings(
     đổi gì, và bắt nâng quyền để xem sẽ khiến người ta nâng quyền theo thói quen
     — đúng thứ làm cho bước xác thực lại mất ý nghĩa.
     """
-    from app import platform_settings, sudo_mode
+    from app.modules.admin import platform_settings
+    from app.modules.security import sudo_mode
 
     return {
         "settings": platform_settings.current(),
@@ -98,7 +109,8 @@ def write_setting(
     tự phụ thuộc `require_admin` và khai báo cả hai sẽ chạy phép kiểm quản trị
     hai lần — vô hại nhưng khó đọc, và dễ khiến người sau bỏ một trong hai đi.
     """
-    from app import audit, platform_settings, sudo_mode
+    from app.modules.admin import platform_settings
+    from app.modules.security import audit, sudo_mode
 
     if sudo_mode.seconds_remaining(str(current_user["id"])) <= 0:
         raise HTTPException(
@@ -152,41 +164,17 @@ class WarnUser(BaseModel):
 def get_all_users(current_user: Dict[str, Any] = Depends(require_admin)):
     """Người dùng CỦA TENANT hiện tại (Chỉ Admin).
 
-    Đi qua `_fetch_all` chứ không mở kết nối trần. `users` mang chính sách
-    row-level security (`storage/rls.py`), và chính sách đó đọc GUC
-    `app.tenant_id`. Một kết nối trần chưa từng gọi `apply_scope()` thì GUC rỗng,
-    `tenant_id = ''` không khớp dòng nào, và câu lệnh trả về **danh sách rỗng —
-    không phải lỗi**. Đó chính là kiểu hỏng mà `docs/` gọi là RLS fail-open ở mặt
-    phẳng danh tính: màn hình ghi "Không có người dùng." trong khi cơ sở dữ liệu
-    có mười tài khoản, và không có gì trong nhật ký để lần ra.
+    Persistence và response shaping nằm ở `modules.admin.user_service`; router
+    chỉ giữ cổng quyền HTTP. Service vẫn gọi `apply_scope()` trước truy vấn để
+    danh sách tuân theo tenant hiện hành thay vì âm thầm trả rỗng dưới RLS.
     """
-    from app.storage.metadata_db import _fetch_all
-
-    users = _fetch_all(
-        """
-        SELECT id, username, email, is_active, is_admin, created_at
-        FROM users
-        ORDER BY created_at DESC
-        """
-    )
-    locked = activity.list_locked_users()
-    warned = activity.list_warned_users()
-    # Chuyển đổi UUID/datetime sang string để FastAPI tự serialize
-    for u in users:
-        u["id"] = str(u["id"])
-        if u["created_at"]:
-            u["created_at"] = u["created_at"].isoformat()
-        lk = locked.get(u["id"])
-        u["locked"] = bool(lk)
-        u["lock_reason"] = (lk or {}).get("reason", "")
-        u["lock_until"] = (lk or {}).get("until", 0)
-        u["has_warning"] = u["id"] in warned
-    return users
+    return list_users()
 
 @router.put("/users/{user_id}/role")
 def update_user_role(
     user_id: str,
     payload: UserRoleUpdate,
+    current_user: Dict[str, Any] = Depends(require_admin),
     # Mặc định `None`, KHÔNG bọc `Optional[Request]`: FastAPI chỉ nhận diện
     # được kiểu tiêm-thẳng đặc biệt này khi chú thích kiểu là ĐÚNG `Request`,
     # và `Optional[Request]` làm nó rơi vào nhánh dựng field Pydantic bình
@@ -196,7 +184,6 @@ def update_user_role(
     # mà không truyền `request`; FastAPI vẫn tiêm đúng đối tượng thật khi chạy
     # qua HTTP dù tham số có giá trị mặc định.
     request: Request = None,
-    current_user: Dict[str, Any] = Depends(require_admin)
 ):
     """Cấp hoặc gỡ quyền QUẢN TRỊ NỀN TẢNG (`users.is_admin`) — Chỉ Admin.
 
@@ -206,7 +193,7 @@ def update_user_role(
     gì cả — một tài khoản có thể được nâng lên quản trị nền tảng mà không ai
     tra lại được ai đã cấp, lúc nào.
     """
-    from app import audit
+    from app.modules.security import audit
 
     # Không cho phép tự gỡ quyền admin của chính mình
     if str(user_id) == str(current_user["id"]) and not payload.is_admin:
@@ -215,22 +202,12 @@ def update_user_role(
             detail="Không thể tự gỡ quyền Admin của chính mình."
         )
 
-    # Cùng lý do với `get_all_users`: kết nối trần không đặt `app.tenant_id`, nên
-    # `WHERE id = %s` khớp 0 dòng và endpoint này trả 404 "Không tìm thấy người
-    # dùng" cho một tài khoản đang tồn tại — một lỗi 404 nói dối về nguyên nhân.
-    from app.storage.metadata_db import _fetch_all
-
-    rows = _fetch_all(
-        "UPDATE users SET is_admin = %s WHERE id = %s "
-        "RETURNING id, username, is_admin",
-        (payload.is_admin, user_id),
-    )
-    if not rows:
+    updated = set_user_admin_role(user_id, payload.is_admin)
+    if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Không tìm thấy người dùng"
         )
-    updated = rows[0]
     # `is_admin_moi` trong `detail` chứ không chỉ hành động: "cấp quyền" và
     # "gỡ quyền" là hai câu chuyện khác hẳn nhau, cùng lý do đã ghi ở
     # `tenant.member_role_changed` trong routers/tenants.py.
@@ -266,8 +243,8 @@ def get_attention(current_user: Dict[str, Any] = Depends(require_admin)):
     phiếu hỗ trợ của tổ chức khác không phải việc của họ, và nội dung phiếu là
     dữ liệu của tenant kia.
     """
-    from app.admin_attention import collect
-    from app.tenant_context import current_tenant
+    from app.modules.admin.admin_attention import collect
+    from app.modules.saas.tenant_context import current_tenant
 
     return {"counts": collect(current_tenant() or current_user.get("tenant_id") or "")}
 
@@ -275,7 +252,7 @@ def get_attention(current_user: Dict[str, Any] = Depends(require_admin)):
 @router.get("/activity")
 def get_activity(current_user: Dict[str, Any] = Depends(require_admin)):
     """Active sessions (IP, user, location, usage) + anomalies + blocklist."""
-    return activity.activity_report(limit=150)
+    return activity_monitor.activity_report(limit=150)
 
 
 @router.post("/block-ip")
@@ -286,9 +263,9 @@ def block_ip(payload: IPAction, request: Request,
     if not ip:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thiếu địa chỉ IP")
     by = current_user.get("username", "")
-    ok = activity.block_ip(ip, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
+    ok = ip_controls.block_ip(ip, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
     if ok:
-        activity.log_security_event("block_ip", actor=by, target=ip, reason=payload.reason,
+        audit_log.log_security_event("block_ip", actor=by, target=ip, reason=payload.reason,
                                     extra={"duration_seconds": payload.duration_seconds},
                                     actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "ip": ip, "blocked": ok}
@@ -301,9 +278,9 @@ def unblock_ip(payload: IPAction, request: Request,
     ip = (payload.ip or "").strip()
     if not ip:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thiếu địa chỉ IP")
-    ok = activity.unblock_ip(ip)
+    ok = ip_controls.unblock_ip(ip)
     if ok:
-        activity.log_security_event("unblock_ip", actor=current_user.get("username", ""),
+        audit_log.log_security_event("unblock_ip", actor=current_user.get("username", ""),
                                     target=ip, actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "ip": ip, "blocked": False}
 
@@ -319,8 +296,8 @@ def force_logout(payload: ForceLogout, request: Request,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Không thể tự đăng xuất chính mình bằng công cụ này")
     by = current_user.get("username", "")
-    activity.force_logout_user(uid, by=by, reason=payload.reason)
-    activity.log_security_event("force_logout", actor=by, target=uid, reason=payload.reason,
+    account_controls.force_logout_user(uid, by=by, reason=payload.reason)
+    audit_log.log_security_event("force_logout", actor=by, target=uid, reason=payload.reason,
                                 actor_user=current_user, request=request)
     return {"status": "success", "user_id": uid}
 
@@ -336,9 +313,9 @@ def lock_user_account(user_id: str, payload: LockUser, request: Request,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Không thể tự khóa tài khoản của chính mình")
     by = current_user.get("username", "")
-    ok = activity.lock_user(uid, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
+    ok = account_controls.lock_user(uid, by=by, reason=payload.reason, duration_seconds=payload.duration_seconds)
     if ok:
-        activity.log_security_event("lock_user", actor=by, target=uid, reason=payload.reason,
+        audit_log.log_security_event("lock_user", actor=by, target=uid, reason=payload.reason,
                                     extra={"duration_seconds": payload.duration_seconds},
                                     actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": uid, "locked": ok}
@@ -348,9 +325,9 @@ def lock_user_account(user_id: str, payload: LockUser, request: Request,
 def unlock_user_account(user_id: str, request: Request,
                         current_user: Dict[str, Any] = Depends(require_admin)):
     """Re-enable a locked user account."""
-    ok = activity.unlock_user(user_id)
+    ok = account_controls.unlock_user(user_id)
     if ok:
-        activity.log_security_event("unlock_user", actor=current_user.get("username", ""),
+        audit_log.log_security_event("unlock_user", actor=current_user.get("username", ""),
                                     target=user_id, actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": user_id, "locked": False}
 
@@ -398,11 +375,8 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
        người tố cáo — và người duy nhất có thể tố cáo lại chính là người không
        được báo.
     """
-    from app import audit, notifications, two_factor
-    from app.auth import request_password_reset
-    from app.email_service import send_password_reset_email
-    from app.public_url import resolve_frontend_base_url
-    from app.storage.metadata_db import _fetch_all
+    from app.modules.security import audit
+    from app.core.public_url import resolve_frontend_base_url
 
     action = (payload.action or "").strip()
     if action not in {"reset_link", "clear_2fa"}:
@@ -415,38 +389,22 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Cần ghi lý do (ít nhất 5 ký tự).")
 
-    # Đi qua `_fetch_all` để RLS áp: một quản trị viên chỉ hỗ trợ được người
-    # trong tenant của mình. Xem `get_all_users` về vì sao kết nối trần là bẫy.
-    rows = _fetch_all("SELECT id, username, email FROM users WHERE id = %s",
-                      (user_id,))
-    if not rows:
+    try:
+        target = recovery_service.assist(
+            user_id,
+            action,
+            reason=reason,
+            operator_name=str(operator.get("username") or ""),
+            resolve_frontend_base_url=lambda: resolve_frontend_base_url(request),
+            enqueue=background_tasks.add_task,
+        )
+    except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail="Không tìm thấy người dùng")
-    target = rows[0]
-
-    if action == "clear_2fa":
-        two_factor.disable(str(target["id"]))
-        title = "Quản trị viên đã gỡ xác thực hai bước"
-        body = (f"Do {operator.get('username', 'quản trị viên')} thực hiện. "
-                f"Lý do: {reason}. Nếu không phải bạn yêu cầu, hãy đổi mật khẩu "
-                f"và báo ngay.")
-    else:
-        result = request_password_reset(str(target["email"] or ""))
-        if result:
-            user, token = result
-            link = f"{resolve_frontend_base_url(request)}/reset-password?token={token}"
-            background_tasks.add_task(
-                send_password_reset_email, user["email"], user["username"], link)
-        title = "Quản trị viên đã gửi lại liên kết đặt lại mật khẩu"
-        body = (f"Do {operator.get('username', 'quản trị viên')} thực hiện. "
-                f"Lý do: {reason}. Kiểm tra hộp thư của bạn.")
-
-    notifications.notify(str(target["id"]), "security", title, body=body,
-                         link="/settings/security", severity="warning")
+                            detail="Không tìm thấy người dùng") from None
     audit.record("account.recovery.assisted", actor=operator,
                  target_type="user", target_id=str(target["id"]),
                  detail={"action": action, "reason": reason}, request=request)
-    activity.log_security_event(
+    audit_log.log_security_event(
         f"recovery.{action}", actor=operator.get("username", ""),
         target=str(target["id"]), reason=reason,
         actor_user=operator, request=request)
@@ -463,9 +421,9 @@ def warn_user_account(user_id: str, payload: WarnUser, request: Request,
     if not msg:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Thiếu nội dung cảnh báo")
     by = current_user.get("username", "")
-    ok = activity.warn_user(user_id, by=by, message=msg)
+    ok = account_controls.warn_user(user_id, by=by, message=msg)
     if ok:
-        activity.log_security_event("warn_user", actor=by, target=user_id, reason=msg,
+        audit_log.log_security_event("warn_user", actor=by, target=user_id, reason=msg,
                                     actor_user=current_user, request=request)
     return {"status": "success" if ok else "error", "user_id": user_id}
 
@@ -477,7 +435,7 @@ def get_security_log(current_user: Dict[str, Any] = Depends(require_admin)):
     Đọc từ danh sách Redis: nhanh, và **có thể mất dòng** (cắt còn 500 mục,
     Redis chạy `volatile-lru`). Cần bản đầy đủ thì dùng `/admin/audit-log`.
     """
-    return {"events": activity.list_security_log(limit=150)}
+    return {"events": audit_log.list_security_log(limit=150)}
 
 
 @router.get("/audit-log")
@@ -501,7 +459,7 @@ def get_audit_log(
     xem `test_no_router_crosses_the_boundary_except_the_documented_one`.
     """
     from app.storage import metadata_db as db
-    from app.tenant_context import current_tenant
+    from app.modules.saas.tenant_context import current_tenant
 
     rows = db.list_audit_log(limit=limit, action_prefix=action_prefix or None)
     # Nói ra phạm vi thay vì để người đọc suy đoán. Dòng tầng nền tảng
@@ -517,156 +475,6 @@ def get_audit_log(
     }
 
 
-@router.get("/data-report")
-def get_data_report(current_user: Dict[str, Any] = Depends(require_tenant_editor)):
-    """Dataset dashboard: totals, per-label / per-region / per-source breakdowns,
-    top contributors, and the most recent samples.
-
-    CỔNG PHẢI KHỚP PHÂN LOẠI — sửa 16/08/2026
-    =========================================
-    Endpoint này được phân loại TENANT_ADMIN và dữ liệu của nó đã thu về phạm vi
-    tenant người gọi. Nhưng cổng vẫn là `require_admin`, mà cổng ấy kiểm cờ
-    `users.is_admin` — tức `platform_administrator`
-    (docs/03-security/AUTHORIZATION.md §247). Ghép lại thành một endpoint không
-    phục vụ đúng ai cả:
-
-        quản trị TENANT   -> 403, dù đây là bảng điều khiển của chính tổ chức họ
-        quản trị NỀN TẢNG -> qua, nhưng chỉ thấy tenant NHÀ của mình
-
-    Ba thứ phải nhất quán, và trước bản vá này chúng lệch nhau:
-
-        chủ thể   quyền   phạm vi   ngữ nghĩa endpoint
-
-    `require_tenant_editor` là bậc quyền đúng: nó cấp theo VAI TRONG TENANT NHÀ
-    (`tenant_members.role`), và vẫn cho quản trị nền tảng qua. Không endpoint
-    nào ở bậc này nhận tenant từ người gọi, nên không có gì để giả mạo.
-
-    Nếu sau này cần một bảng điều khiển TOÀN NỀN TẢNG thì đó là endpoint riêng
-    với một quyền hệ thống tường minh — không nới cổng này ra.
-    """
-    from collections import Counter
-    from app.dataset_manager import list_classes
-    from app.dataset_samples import list_samples
-    from app.tenant_context import require_tenant
-
-    # PHÂN LOẠI (16/08/2026): TENANT_ADMIN + DISPLAY/AGGREGATION -> theo phạm vi.
-    #
-    # `require_admin` chỉ kiểm cờ boolean `is_admin`, không phải một quyền có
-    # phạm vi. Nghĩa là ở cổng này hệ thống KHÔNG phân biệt được:
-    #
-    #     quản trị viên CỦA MỘT TENANT   vs   người vận hành NỀN TẢNG
-    #
-    # Bản trước đọc toàn bộ kho, nên bất kỳ ai mang cờ ấy đều thấy được tổng số
-    # lớp/mẫu, phân rã theo vùng/nguồn, và DANH SÁCH NGƯỜI ĐÓNG GÓP của mọi tổ
-    # chức — cùng loại rò đã gỡ ở ô tìm kiếm người đóng góp.
-    #
-    # Hai lý do chọn phạm vi tenant thay vì giữ toàn cục:
-    #   1. `is_admin` là quyền cao TRONG tenant, không phải quyền vượt ranh giới
-    #      tenant. Quyền hành động lớn hơn không có nghĩa phạm vi rộng hơn.
-    #   2. Endpoint anh em ngay trên (`/admin/audit`) ĐÃ theo phạm vi và nói
-    #      thẳng điều đó trong phản hồi (`scope`, `excludes_platform_rows`). Để
-    #      hai endpoint cạnh nhau trả lời hai kiểu là chỗ để hiểu nhầm.
-    #
-    # Nếu về sau cần bảng điều khiển TOÀN NỀN TẢNG thì đó là một endpoint RIÊNG
-    # với một quyền hệ thống tường minh, không phải nới endpoint này ra. Không
-    # tạo ngoại lệ hệ thống chỉ vì tệp có tên `admin.py`.
-    scope = require_tenant()
-    metas = list_classes(tenant_id=scope)
-    samples = list_samples(scope)
-
-    label_c: Counter = Counter()
-    region_c: Counter = Counter()
-    source_c: Counter = Counter()
-    contrib_c: Counter = Counter()
-    for s in samples:
-        label_c[(s.get("label_original") or s.get("slug") or "?").strip() or "?"] += 1
-        region_c[(s.get("dialect") or "").strip() or "khác"] += 1
-        source_c[(s.get("source_type") or "").strip() or "khác"] += 1
-        uid = (s.get("user_id") or "").strip()
-        if uid:
-            contrib_c[uid] += 1
-
-    regions = {(getattr(m, "dialect", "") or "").strip() for m in metas}
-    regions.discard("")
-
-    top_ids = [uid for uid, _ in contrib_c.most_common(10)]
-    umap = activity._resolve_usernames(set(top_ids))
-    top_contributors = [
-        {"user_id": uid, "username": (umap.get(uid) or {}).get("username") or uid[:8], "count": cnt}
-        for uid, cnt in contrib_c.most_common(10)
-    ]
-
-    recent = sorted(samples, key=lambda s: str(s.get("created_at") or ""), reverse=True)[:12]
-    recent_out = [{
-        "label": r.get("label_original") or r.get("slug"),
-        "dialect": r.get("dialect"),
-        "source": r.get("source_type"),
-        "created_at": str(r.get("created_at") or ""),
-    } for r in recent]
-
-    return {
-        "labels_count": len(metas),
-        "total_samples": len(samples),
-        "contributors_count": len(contrib_c),
-        "regions_count": len(regions),
-        "top_labels": [{"label": l, "count": c} for l, c in label_c.most_common(12)],
-        "by_region": [{"region": r, "count": c} for r, c in region_c.most_common()],
-        "by_source": [{"source": s, "count": c} for s, c in source_c.most_common()],
-        "top_contributors": top_contributors,
-        "recent": recent_out,
-    }
-
-
-@router.post("/sync-local")
-def sync_local_files(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Trigger task tải các file feature và raw video thiếu từ Google Drive về local"""
-    task = download_missing_files_to_local.delay()
-    return {
-        "status": "success",
-        "message": "Đã bắt đầu quá trình đồng bộ hóa file về server",
-        "task_id": task.id
-    }
-
-@router.get("/sync-status/{task_id}")
-def get_sync_status(task_id: str, current_user: Dict[str, Any] = Depends(require_admin)):
-    """Kiểm tra trạng thái tiến trình đồng bộ"""
-    from celery.result import AsyncResult
-    task = AsyncResult(task_id)
-    
-    if task.state == 'PENDING':
-        response = {
-            'state': task.state,
-            'current': 0,
-            'total': 1,
-            'status': 'Pending...'
-        }
-    elif task.state == 'PROGRESS':
-        response = {
-            'state': task.state,
-            'current': task.info.get('current', 0),
-            'total': task.info.get('total', 1),
-            'downloaded': task.info.get('downloaded', 0),
-            'skipped': task.info.get('skipped', 0),
-            'errors': task.info.get('errors', 0)
-        }
-    elif task.state == 'SUCCESS':
-        response = {
-            'state': task.state,
-            'current': task.info.get('current', 1),
-            'total': task.info.get('total', 1),
-            'downloaded': task.info.get('downloaded', 0),
-            'skipped': task.info.get('skipped', 0),
-            'errors': task.info.get('errors', 0)
-        }
-    else:
-        # FAILURE or others
-        response = {
-            'state': task.state,
-            'status': str(task.info)
-        }
-    
-    return response
-
 class IgnoreHardwarePayload(BaseModel):
     resource: str
     ignore: bool
@@ -677,7 +485,7 @@ def ignore_hardware_alert(
     current_user: Dict[str, Any] = Depends(require_admin)
 ):
     """Bật/tắt cảnh báo (mute) cho phần cứng bị thiếu thông qua Redis (Chỉ Admin)"""
-    from app.monitoring import _redis_client
+    from app.infrastructure.redis.connection import get_redis_client as _redis_client
     r = _redis_client()
     if not r:
         raise HTTPException(status_code=500, detail="Redis unavailable")

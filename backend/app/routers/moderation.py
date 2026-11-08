@@ -18,9 +18,10 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
-from app import audit, moderation_admin
-from app.auth import get_current_user
-from app.tenant_context import require_tenant
+from app.modules.admin import moderation_admin
+from app.modules.security import audit
+from app.modules.identity._web_compat import get_current_user
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/moderation", tags=["moderation"])
@@ -32,7 +33,9 @@ def require_moderator(current_user: Dict[str, Any] = Depends(get_current_user)):
     Vỏ giao diện ẩn mục Kiểm duyệt với người không có quyền, nhưng ẩn không
     phải chặn — một lệnh `curl` không đọc thanh bên.
     """
-    if not moderation_admin.can_moderate(current_user):
+    # Theo tenant ĐANG thao tác: vai duyệt ở trường A không cho duyệt hàng đợi
+    # của tenant B, kể cả khi người ấy cũng là thành viên của B.
+    if not moderation_admin.can_moderate(current_user, require_tenant()):
         raise HTTPException(
             status_code=403,
             detail="Bạn không có quyền kiểm duyệt dữ liệu.",

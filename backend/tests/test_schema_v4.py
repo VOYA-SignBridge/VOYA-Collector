@@ -134,6 +134,23 @@ class TestPlanColumnCannotBeNull:
 
 
 class TestSeededPlans:
+    def test_env_example_defaults_to_a_seeded_self_serve_plan(self):
+        """Máy mới copy .env.example; default đó phải tồn tại sau migration."""
+        from pathlib import Path
+
+        env_example = Path(__file__).resolve().parents[2] / ".env.example"
+        configured = next(
+            line.split("=", 1)[1].strip()
+            for line in env_example.read_text(encoding="utf-8").splitlines()
+            if line.startswith("SELF_SERVE_PLAN_CODE=")
+        )
+        rows = db._fetch_all(
+            "SELECT plan_code, is_self_serve FROM plans WHERE plan_code = %s",
+            (configured,),
+        )
+        assert rows, f".env.example trỏ tới gói không được seed: {configured!r}"
+        assert rows[0]["is_self_serve"] is True
+
     def test_the_four_plans_are_present(self):
         codes = {r["plan_code"] for r in db._fetch_all("SELECT plan_code FROM plans")}
         assert {"enterprise", "free", "plus", "pro"} <= codes
@@ -157,7 +174,7 @@ class TestSeededPlans:
     def test_the_default_tenant_is_on_the_unlimited_plan(self):
         """Nó giữ dữ liệu thật và không bao giờ nên bị một hạn mức thương mại
         chặn giữa chừng."""
-        from app.tenancy import DEFAULT_TENANT_ID
+        from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
         row = db._fetch_all(
             "SELECT plan_code FROM tenants WHERE tenant_id = %s", (DEFAULT_TENANT_ID,)
@@ -185,13 +202,13 @@ class TestPurgeOrderIsSharedNotCopied:
         thật trên sản xuất, không phải ở đây."""
         from conftest import _TENANT_PURGE_ORDER
 
-        from app.tenant_lifecycle import PURGE_ORDER
+        from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
         assert _TENANT_PURGE_ORDER is PURGE_ORDER
 
     def test_children_come_before_parents(self):
         """Thứ tự LÀ một phần của tính đúng, không phải sở thích."""
-        from app.tenant_lifecycle import PURGE_ORDER
+        from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
         position = {table: i for i, table in enumerate(PURGE_ORDER)}
         rows = db._fetch_all(

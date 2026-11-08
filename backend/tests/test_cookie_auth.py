@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from fastapi import Response
 
-from app import cookie_auth
+from app.modules.identity import cookies as cookie_auth
 
 
 def _set_cookie_headers(resp: Response) -> list[str]:

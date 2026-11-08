@@ -22,7 +22,7 @@ import sys
 
 sys.path.insert(0, "/app")
 from app.storage.metadata_db import _execute, _fetch_all  # noqa: E402
-from app.tenant_context import system_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope  # noqa: E402
 
 USERNAMES = ["Minh123", "Minh1234", "minh12345", "Minh Huy"]
 APPLY = "--apply" in sys.argv
@@ -66,7 +66,7 @@ if not APPLY:
     print("(xem trước; thêm --apply để xoá)")
     sys.exit(0)
 
-from app import tenant_admin as ta  # noqa: E402
+from app.modules.saas import tenant_admin as ta  # noqa: E402
 
 # Tổ chức thử: XOÁ MỀM (mất chủ, không đăng nhập vào được). Xoá vĩnh viễn phải
 # chờ hết ân hạn 30 ngày của lifecycle (mốc in ra bên dưới) — lúc đó bấm "Xoá
@@ -81,7 +81,7 @@ for t in tenants:
         print("đã xoá mềm tổ chức", t["tenant_id"])
     else:
         print("tổ chức đã xoá mềm từ trước:", t["tenant_id"])
-    from app.tenant_lifecycle import purge_preview
+    from app.modules.saas.tenant_lifecycle import purge_preview
     print("   xoá vĩnh viễn được từ:", (purge_preview(t["tenant_id"]).get("blockers") or ["ngay bây giờ"])[0])
 
 with system_scope("xoa tai khoan thu nghiem: go tham chieu va xoa"):

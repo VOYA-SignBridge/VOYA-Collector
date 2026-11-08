@@ -11,6 +11,8 @@ import type { TrainingJobListItem } from '../../../hooks/useTrainingAPI';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner';
 import { CrownIcon, RocketIcon, TrashIcon } from '../../../components/ui/Icons';
 import { useI18n } from "../../../i18n";
+import { canEditTenant } from '../../../api/auth';
+import { useAuth } from '../../../hooks/useAuth';
 
 interface Props {
   jobs: TrainingJobListItem[];
@@ -59,6 +61,8 @@ const fmtDate = (iso?: string): string => {
 };
 
 const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh, onDeleteJob }) => {
+  const { user } = useAuth();
+  const canEdit = canEditTenant(user);
   const { t } = useI18n();
   // So sánh model theo dialect: chỉ jobs completed có test_acc,
   // mỗi (dialect, model) giữ run tốt nhất
@@ -173,7 +177,7 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
               <tbody>
                 {jobs.map((job) => {
                   const badge = STATUS_BADGE[job.status] || STATUS_BADGE.queued;
-                  const deletable = isDeletable(job.status);
+                  const deletable = isDeletable(job.status) && (canEdit || job.auth_user_id === user?.id);
                   return (
                     <tr
                       key={job.id}
@@ -192,6 +196,11 @@ const TrainingHistory: React.FC<Props> = ({ jobs, loading, onOpenJob, onRefresh,
                 aria-label={t("Đã đưa vào Realtime lúc {p1}", { p1: fmtDate(job.promoted_at) })}
               />
                         )}
+                        {job.config?.review_requested_at ? (
+                          <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-800">{t("Chờ duyệt dùng chung")}</span>
+                        ) : job.config?.personal ? (
+                          <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{t("Riêng")}</span>
+                        ) : null}
                       </td>
                       <td className="px-3 py-3 text-slate-600 max-w-[160px] truncate" title={t(dialectKey(job))}>
                         {t(dialectKey(job))}

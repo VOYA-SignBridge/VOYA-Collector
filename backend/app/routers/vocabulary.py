@@ -13,9 +13,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app import audit
-from app import vocabulary_registry as vr
-from app.auth import get_current_user, get_current_user_optional, require_admin
+from app.modules.security import audit
+from app.modules.dataset import vocabulary_registry as vr
+from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vocabulary", tags=["vocabulary"])
@@ -28,10 +29,13 @@ def get_registry(current_user: Optional[Dict[str, Any]] = Depends(get_current_us
     `registry_version` lets a client cache and know when to refetch.
     """
     viewer = str((current_user or {}).get("id") or "") or None
+    # Public callers use the bootstrap catalogue; authenticated callers must
+    # always read the catalogue of the tenant bound to this request.
+    tenant_id = require_tenant() if current_user else vr.DEFAULT_TENANT
     return {
-        "registry_version": vr.registry_version(),
-        "dialects": vr.list_dialects(viewer_id=viewer),
-        "profiles": vr.list_profiles(),
+        "registry_version": vr.registry_version(tenant_id=tenant_id),
+        "dialects": vr.list_dialects(tenant_id=tenant_id, viewer_id=viewer),
+        "profiles": vr.list_profiles(tenant_id=tenant_id),
         # Vùng miền đi kèm ở đây thay vì một lời gọi riêng: màn hình nào dựng
         # ô chọn phương ngữ thì cũng cần ô chọn vùng, và hai thứ phải đến từ
         # cùng một ảnh chụp — lệch nhau thì người dùng thấy một tổ hợp không
@@ -56,6 +60,7 @@ def create_dialect(
             str(payload.get("display_name") or ""),
             language=str(payload.get("language") or "vn"),
             created_by=str(current_user.get("id") or "") or None,
+            tenant_id=require_tenant(),
             auto_approve=bool(current_user.get("is_admin")),
         )
     except vr.DialectConflict as exc:
@@ -75,16 +80,7 @@ def create_dialect(
 
 @router.get("/dialects/pending")
 def list_pending(_: Dict[str, Any] = Depends(require_admin)):
-    from app.storage.metadata_db import _fetch_all
-
-    return {
-        "items": _fetch_all(
-            "SELECT d.*, u.username AS created_by_username FROM dialects d "
-            "LEFT JOIN users u ON u.id = d.created_by "
-            "WHERE d.tenant_id = %s AND d.status = 'pending' ORDER BY d.created_at",
-            (vr.DEFAULT_TENANT,),
-        )
-    }
+    return {"items": vr.list_pending_dialects()}
 
 
 @router.post("/dialects/{dialect_id}/approve")
@@ -123,7 +119,7 @@ def reject(
                             detail=f"Phương ngữ đích '{merge_into}' không tồn tại.")
 
     vr.record_merge(dialect_id, merge_into, str(admin.get("id") or ""))
-    from app.catalog_migrations import merge_dialect_task
+    from app.modules.dataset.catalog_migrations import merge_dialect_task
 
     merge_dialect_task.delay(old_id=dialect_id, new_id=merge_into)
 
@@ -166,11 +162,16 @@ def update_dialect(
 ):
     """Rename (display only) or retire. `dialect_id` itself is never editable —
     it names directories, checkpoints and published split manifests."""
-    _require_registry_editor(current_user)
+    # MỘT tenant cho cả câu hỏi quyền lẫn câu ghi. Trước 17/10/2026 quyền được
+    # hỏi ở tenant của người gọi nhưng hai câu UPDATE chạy ở tenant mặc định:
+    # dưới RLS chúng khớp 0 dòng và endpoint vẫn trả ok — admin trường đổi tên
+    # phương ngữ của trường mà không có gì đổi.
+    tenant_id = require_tenant()
+    _require_registry_editor(current_user, tenant_id=tenant_id)
     if "display_name" in payload:
-        vr.rename_dialect(dialect_id, str(payload["display_name"]))
+        vr.rename_dialect(dialect_id, str(payload["display_name"]), tenant_id=tenant_id)
     if "is_active" in payload:
-        vr.set_dialect_active(dialect_id, bool(payload["is_active"]))
+        vr.set_dialect_active(dialect_id, bool(payload["is_active"]), tenant_id=tenant_id)
     return {"dialect_id": dialect_id, "ok": True}
 
 
@@ -185,7 +186,7 @@ def update_dialect(
 # /vocabulary/community, which was wrong twice over: this holds no contributed
 # data — no video, no landmarks, no consent record, no attribution — and it
 # squatted on the namespace the real commons needs. "Community" in
-# CTU-SignBridge means data people contributed and the governance around it
+# CTU.SignBridge means data people contributed and the governance around it
 # (submission, review, licence, grants, withdrawal); see
 # docs/01-architecture/COMMUNITY_DATA_COMMONS.md. The physical tables are still named
 # community_* because renaming them is a migration, not a rename — the domain
@@ -371,9 +372,6 @@ def clone_to_tenant(
     # tenant nobody can reach, while the `UPDATE tenants SET
     # cloned_from_community_version` silently matches zero rows and the
     # provenance is lost. Refuse before writing anything.
-    from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import tenant_scope
-
     # Phạm vi của TENANT ĐÍCH — KHÔNG phải `system_scope`.
     #
     # Khi `tenants` bật RLS (15/08/2026), phép kiểm này chạy dưới phạm vi của
@@ -391,12 +389,7 @@ def clone_to_tenant(
     #
     # Cùng phạm vi ấy được `clone_catalog_to_tenant` dùng lại cho toàn bộ phép
     # ghi, nên cả endpoint chạy dưới đúng một phạm vi: tenant đích.
-    with tenant_scope(tenant_id):
-        co_tenant = _fetch_all(
-            "SELECT 1 FROM tenants WHERE tenant_id = %s AND deleted_at IS NULL",
-            (tenant_id,))
-
-    if not co_tenant:
+    if not vr.tenant_exists(tenant_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Tenant '{tenant_id}' không tồn tại.")
 

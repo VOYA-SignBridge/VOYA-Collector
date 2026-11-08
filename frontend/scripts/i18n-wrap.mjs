@@ -60,7 +60,7 @@ const files = process.argv
   .slice(2)
   .filter((a) => !a.startsWith("--"))
   // Không bao giờ tự sửa mô-đun định nghĩa `t()`. Xem cảnh báo ở đầu tệp.
-  .filter((a) => !/[/\]i18n[/\]/.test(a));
+  .filter((a) => !/[\\/]i18n[\\/]/.test(a));
 
 /** Vùng chú thích, để không bọc chữ trong đó. */
 function commentRanges(src) {

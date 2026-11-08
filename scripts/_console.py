@@ -8,6 +8,7 @@ import sys
 
 
 def force_utf8() -> None:
+    """Buộc stdin/stdout/stderr dùng UTF-8 khi chạy script trên Windows."""
     for stream in (sys.stdout, sys.stderr):
         try:
             if stream.encoding and stream.encoding.lower() not in ("utf-8", "utf8"):

@@ -28,11 +28,12 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-from app import notifications, otp
+from app.modules.security import otp
+from app.modules.support import notifications
 from app.routers import auth as auth_router
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 PASSWORD = "correct horse battery"
 
@@ -46,7 +47,7 @@ class _Req:
 
 
 def _make_account(prefix: str) -> dict:
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"{prefix}{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -108,7 +109,7 @@ class TestGuiMa:
             sent["to"] = to_email
             sent["code"] = code
 
-        monkeypatch.setattr("app.email_service.send_verification_code_email",
+        monkeypatch.setattr("app.services.email.send_verification_code_email",
                             fake_send)
         new = f"moi{uuid.uuid4().hex[:6]}@example.test"
         out = _start(account, new_email=new)
@@ -118,7 +119,7 @@ class TestGuiMa:
 
     def test_sai_mat_khau_thi_403_va_khong_gui_gi(self, account, scope, monkeypatch):
         called: list = []
-        monkeypatch.setattr("app.email_service.send_verification_code_email",
+        monkeypatch.setattr("app.services.email.send_verification_code_email",
                             lambda *a, **k: called.append(1))
         with pytest.raises(HTTPException) as exc:
             _start(account, new_email="ai-do@example.test", password="sai")

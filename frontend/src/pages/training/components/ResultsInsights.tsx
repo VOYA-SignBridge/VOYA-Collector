@@ -19,6 +19,7 @@ import {
   PlayCircleIcon,
   ArrowUpCircleIcon,
 } from '../../../components/ui/Icons';
+import { canEditTenant } from '../../../api/auth';
 import { useAuth } from '../../../hooks/useAuth';
 import { useI18n } from "../../../i18n";
 
@@ -26,10 +27,16 @@ interface Props {
   metrics: TrainingMetrics[];
   job: TrainingJob | null;
   onPromote?: () => Promise<PromoteResponse | null>;
+  /** Người chạy đề nghị đưa model riêng ra dùng chung. */
+  onRequestReview?: () => Promise<void>;
+  /** Người duyệt từ chối đề nghị. */
+  onRejectReview?: (reason: string) => Promise<void>;
 }
 
-/** "vn/hoa-de/rang-muoi" → "rang-muoi" */
-const prettyLabel = (labelKey: string): string => {
+/** "vn/hoa-de/rang-muoi" → "rang-muoi"; khoá class_uid → nhãn gốc nếu backend trả `names`. */
+const prettyLabel = (labelKey: string, names?: Record<string, string>): string => {
+  const named = names?.[labelKey];
+  if (named) return named;
   const parts = String(labelKey || '').replace(/\\/g, '/').split('/');
   return parts[parts.length - 1] || labelKey;
 };
@@ -78,10 +85,16 @@ const ProvenanceRow: React.FC<{
   );
 };
 
-const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
+const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote, onRequestReview, onRejectReview }) => {
   const { t } = useI18n();
   const [showTestModal, setShowTestModal] = useState(false);
-  const { isAdmin } = useAuth();
+  const { user } = useAuth();
+  const canEdit = canEditTenant(user);
+  const isOwner = !!user?.id && job?.auth_user_id === user.id;
+  const isPersonal = !!job?.config?.personal;
+  const waitingReview = !!job?.config?.review_requested_at;
+  // Máy chủ chỉ cho người duyệt thấy job riêng của người khác.
+  const reviewing = waitingReview && !isOwner;
   const { getJobEvaluation, getJobProvenance } = useTrainingAPI();
   const [promoting, setPromoting] = useState(false);
   const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
@@ -273,7 +286,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                                   aria-label={t("F1 dưới 0.5 — lớp yếu")}
                                 />
                               )}
-                              {prettyLabel(c.label_key)}
+                              {prettyLabel(c.label_key, evaluation.label_names)}
                             </span>
                           </td>
                           <td className="py-2 px-3 text-right tabular-nums text-slate-700">{(c.precision * 100).toFixed(1)}%</td>
@@ -291,7 +304,7 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
           </div>
 
           {evaluation.confusion_matrix && evaluation.labels && (
-            <ConfusionMatrixHeatmap labels={evaluation.labels} matrix={evaluation.confusion_matrix} />
+            <ConfusionMatrixHeatmap labels={evaluation.labels} matrix={evaluation.confusion_matrix} names={evaluation.label_names} />
           )}
         </div>
       )}
@@ -456,15 +469,19 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                   <PlayCircleIcon className="h-3.5 w-3.5" />
                   {t("Kiểm tra model (Realtime)")}
                 </button>
-                {isAdmin && onPromote && job.status === 'completed' && !job.promoted_at && (
+                {(canEdit || isOwner || reviewing) && onPromote && job.status === 'completed' && (!job.promoted_at || reviewing) && (
                   <button
                     onClick={async () => {
-                      if (!window.confirm(t('Đưa model này vào tab nhận diện realtime? Model sẽ hiển thị cho tất cả người dùng.'))) return;
+                      if (!window.confirm(reviewing
+                        ? t('Duyệt model này cho mọi người dùng? Model có thể học từ mẫu chưa kiểm duyệt của người chạy, và sẽ thay model cùng phương ngữ đang chạy.')
+                        : isPersonal
+                          ? t('Đưa model này vào tab nhận diện realtime cho riêng bạn? Người khác không thấy model này.')
+                          : t('Đưa model này vào tab nhận diện realtime? Model sẽ thay model cùng phương ngữ đang chạy của tổ chức bạn.'))) return;
                       setPromoting(true);
                       setPromoteMessage(null);
                       try {
                         const res = await onPromote();
-                        setPromoteMessage(res ? res.message : t('Không thể đưa vào Realtime — kiểm tra quyền admin hoặc log backend'));
+                        setPromoteMessage(res ? res.message : t('Không thể đưa vào Realtime. Hãy thử lại sau.'));
                       } finally {
                         setPromoting(false);
                       }
@@ -473,10 +490,44 @@ const ResultsInsights: React.FC<Props> = ({ metrics, job, onPromote }) => {
                     className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-700 text-white font-medium transition shadow-sm disabled:opacity-60"
                   >
                     <ArrowUpCircleIcon className="h-3.5 w-3.5" />
-                    {promoting ? t('Đang đưa vào Realtime...') : t('Đưa vào Realtime')}
+                    {promoting ? t('Đang đưa vào Realtime...') : t(reviewing ? 'Duyệt dùng chung' : 'Đưa vào Realtime')}
+                  </button>
+                )}
+                {reviewing && onRejectReview && (
+                  <button
+                    onClick={async () => {
+                      const reason = window.prompt(t('Lý do từ chối (không bắt buộc):'));
+                      if (reason === null) return;
+                      await onRejectReview(reason);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-medium transition"
+                  >
+                    {t('Từ chối')}
+                  </button>
+                )}
+                {isOwner && isPersonal && !waitingReview && onRequestReview && job.status === 'completed' && (
+                  <button
+                    onClick={async () => {
+                      if (window.confirm(t('Gửi model này cho quản trị viên xét duyệt để mọi người cùng dùng? Trong lúc chờ bạn vẫn dùng được cho riêng mình.'))) await onRequestReview();
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-sky-300 bg-white hover:bg-sky-50 text-sky-700 font-medium transition"
+                  >
+                    {t('Đề nghị dùng chung')}
                   </button>
                 )}
               </div>
+              {isOwner && waitingReview && (
+                <div className="flex items-center gap-1.5 rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-xs text-sky-800">
+                  <InfoCircleIcon className="h-3.5 w-3.5 shrink-0" />
+                  {t('Đã gửi đề nghị dùng chung, đang chờ quản trị viên xét duyệt.')}
+                </div>
+              )}
+              {isPersonal && !waitingReview && (
+                <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
+                  <InfoCircleIcon className="h-3.5 w-3.5 shrink-0" />
+                  {t('Model riêng: chỉ bạn thấy và dùng được.')}
+                </div>
+              )}
               {job.promoted_at && (
                 <div className="flex items-center gap-1.5 rounded-lg bg-sky-50 border border-sky-200 px-3 py-2 text-xs text-sky-800">
                   <CheckCircleIcon className="h-3.5 w-3.5 shrink-0" />
@@ -653,7 +704,7 @@ function MetricCard({
  * samples predicted as each column (row-normalized). The diagonal (correct
  * predictions) is marked structurally with a ring, not a different hue.
  */
-function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: number[][] }) {
+function ConfusionMatrixHeatmap({ labels, matrix, names }: { labels: string[]; matrix: number[][]; names?: Record<string, string> }) {
   const { t } = useI18n();
   const n = labels.length;
   if (n === 0) return null;
@@ -684,7 +735,7 @@ function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: 
               return (
                 <tr key={i}>
                   <th className="pr-2 py-0.5 text-right text-[11px] font-normal text-slate-600 whitespace-nowrap">
-                    <span className="text-slate-400">{i}</span> · {prettyLabel(labels[i])}
+                    <span className="text-slate-400">{i}</span> · {prettyLabel(labels[i], names)}
                   </th>
                   {row.map((v, j) => {
                     const share = rowTotal > 0 ? v / rowTotal : 0;
@@ -692,7 +743,7 @@ function ConfusionMatrixHeatmap({ labels, matrix }: { labels: string[]; matrix: 
                     return (
                       <td
                         key={j}
-                        title={`Thật: ${prettyLabel(labels[i])} → Dự đoán: ${prettyLabel(labels[j])}\n${v} mẫu (${(share * 100).toFixed(0)}% của lớp thật)`}
+                        title={`Thật: ${prettyLabel(labels[i], names)} → Dự đoán: ${prettyLabel(labels[j], names)}\n${v} mẫu (${(share * 100).toFixed(0)}% của lớp thật)`}
                         className={`h-8 w-8 min-w-8 text-center align-middle text-[10px] tabular-nums ${
                           isDiag ? 'ring-1 ring-inset ring-slate-500' : ''
                         }`}

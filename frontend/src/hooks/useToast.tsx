@@ -16,6 +16,13 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+const makeToast = (addToast: ToastContextValue["addToast"]) => ({
+  success: (message: string) => addToast(message, "success"),
+  error: (message: string) => addToast(message, "error"),
+  warning: (message: string) => addToast(message, "warning"),
+  info: (message: string) => addToast(message, "info"),
+});
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -57,15 +64,14 @@ export function useToast() {
   // xếp thông báo vô hạn. Có 23 chỗ trên 7 trang đưa `toast` vào deps; sửa ở
   // đây thì cả lớp lỗi hết, không phải đi vá từng chỗ.
   const { addToast } = ctx;
-  const toast = useMemo(
-    () => ({
-      success: (message: string) => addToast(message, "success"),
-      error: (message: string) => addToast(message, "error"),
-      warning: (message: string) => addToast(message, "warning"),
-      info: (message: string) => addToast(message, "info"),
-    }),
-    [addToast],
-  );
+  const toast = useMemo(() => makeToast(addToast), [addToast]);
 
   return { toasts: ctx.toasts, removeToast: ctx.removeToast, toast };
+}
+
+/** Toast suy giảm an toàn cho các vỏ có thể được dựng ngoài ToastProvider. */
+export function useOptionalToast() {
+  const ctx = useContext(ToastContext);
+  const addToast = ctx?.addToast;
+  return useMemo(() => (addToast ? makeToast(addToast) : null), [addToast]);
 }

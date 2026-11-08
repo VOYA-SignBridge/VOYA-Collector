@@ -1,4 +1,4 @@
-"""Standalone tests for scripts/migrate_legacy_vocabulary_schema.py.
+"""Standalone tests for scripts/migration/migrate_legacy_vocabulary_schema.py.
 
 Run:  python tests/test_migration_vocab.py
 Uses a temp workspace — never touches the real dataset. Pure stdlib.
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "migrate_legacy_vocabulary_schema.py"
+SCRIPT = REPO_ROOT / "scripts" / "migration" / "migrate_legacy_vocabulary_schema.py"
 MAPPING = REPO_ROOT / "config" / "legacy_vocabulary_mapping.json"
 
 PASSED: list = []

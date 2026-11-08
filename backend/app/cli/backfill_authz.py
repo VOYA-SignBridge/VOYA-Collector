@@ -78,7 +78,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from app.authorization.catalog import LEGACY_SYSTEM_ADMIN_ROLE, LEGACY_TENANT_ROLE_MAP
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 logger = logging.getLogger("backfill.authz")
 
@@ -460,7 +460,7 @@ def run(actor: str, apply: bool, tenants: Optional[List[str]]) -> int:
     # Đây là MỘT hành động quản trị — "dịch quyền cũ sang mô hình mới" — và
     # ghi 400 dòng sẽ vùi lấp nhật ký đúng ngày người ta cần đọc nó nhất. Chi
     # tiết từng dòng nằm ở chính các bảng gán, kèm `assigned_at`.
-    from app import audit
+    from app.modules.security import audit
 
     audit.record(
         "authz.backfill",

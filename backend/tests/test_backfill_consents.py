@@ -18,10 +18,10 @@ import uuid
 
 import pytest
 
-from app import legal
+from app.modules.legal import legal
 from app.cli.backfill_consents import main
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -55,7 +55,7 @@ def published():
 
 @pytest.fixture
 def account():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"bfc{uuid.uuid4().hex[:9]}"
     user = create_user(username=name, email=f"{name}@example.test",

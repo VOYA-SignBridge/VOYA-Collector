@@ -216,6 +216,8 @@ class Settings(BaseSettings):
     db_pool_min: int = int(os.getenv("DB_POOL_MIN", "1"))
     db_pool_max: int = int(os.getenv("DB_POOL_MAX", "8"))
     db_connect_timeout: int = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
+    # How long a request waits for a free pooled connection before failing.
+    db_pool_wait_seconds: float = float(os.getenv("DB_POOL_WAIT_SECONDS", "10"))
 
     # Celery memory hygiene: recycle prefork children to release native
     # memory held by MediaPipe/OpenCV. Tune per host RAM.
@@ -253,6 +255,9 @@ class Settings(BaseSettings):
     google_drive_download_chunk_mb: int = int(os.getenv("GOOGLE_DRIVE_DOWNLOAD_CHUNK_MB", "10"))
     google_drive_simple_upload_threshold_mb: int = int(os.getenv("GOOGLE_DRIVE_SIMPLE_UPLOAD_THRESHOLD_MB", "64"))
     gdrive_filename_suffix: str = os.getenv("GDRIVE_FILENAME_SUFFIX", "")
+    # Bố cục trên Drive: "legacy" (soi đúng cây trên đĩa) | "tenant" (tenants/<id>/…).
+    # Chỉ bật "tenant" sau khi đã dời dữ liệu cũ trên Drive — xem app/storage/drive_layout.py.
+    gdrive_layout: str = os.getenv("GDRIVE_LAYOUT", "legacy")
     google_sheets_labels_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_LABELS_SPREADSHEET_ID", "")
     google_sheets_labels_sheet_gid: int = int(os.getenv("GOOGLE_SHEETS_LABELS_SHEET_GID", "0"))
     google_sheets_samples_spreadsheet_id: str = os.getenv("GOOGLE_SHEETS_SAMPLES_SPREADSHEET_ID", "")

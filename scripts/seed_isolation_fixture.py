@@ -55,8 +55,8 @@ _nap_duong_dan_app()
 
 from app.auth import get_password_hash                    # noqa: E402
 from app.storage.metadata_db import _cursor               # noqa: E402
-from app.tenant_admin import create_tenant                # noqa: E402
-from app.tenant_context import system_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenant_admin import create_tenant                # noqa: E402
+from app.modules.saas.tenant_context import system_scope, tenant_scope  # noqa: E402
 
 MAT_KHAU = "IsoProbe!2026"
 
@@ -232,7 +232,7 @@ def _gan_tu_cach_thanh_vien(tenant_id: str, user_id: str,
     Mặc định của `add_member` KHÔNG đổi. Chỗ cần vai là fixture này, không phải
     cả hệ thống.
     """
-    from app import tenant_admin
+    from app.modules.saas import tenant_admin
 
     tenant_admin.add_member(tenant_id, user_id, role=role)
 

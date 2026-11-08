@@ -1,7 +1,7 @@
 """Who the app thinks you are, when a proxy is telling it.
 
 client_ip() is not a logging nicety. Its return value keys the per-IP flood
-block, the generic per-IP limiter, and activity.get_block() — the list of
+block, the generic per-IP limiter, and ip_controls.get_block() — the list of
 addresses an admin has banned. Anything a caller can choose here, a caller can
 use to reset all three on every request.
 
@@ -24,7 +24,7 @@ import pytest
 
 from starlette.requests import Request
 
-from app.rate_limit import client_ip
+from app.modules.security._web_compat import client_ip
 
 
 def _request(*, real_ip: str | None = None, xff: str | None = None,

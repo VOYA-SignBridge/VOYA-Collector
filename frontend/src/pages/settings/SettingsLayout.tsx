@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import { canEditTenant } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 import { useI18n } from "../../i18n";
 import {
@@ -6,6 +7,7 @@ import {
   ShieldCheckIcon, ShieldIcon, UserIcon,
 } from "../../components/ui/Icons";
 import type { ReactNode } from "react";
+import { getReturnPath } from "../../hooks/useReturnPath";
 
 /**
  * Trung tâm Cài đặt — một cửa cho mọi thứ thuộc về "tài khoản của tôi".
@@ -63,10 +65,20 @@ const ITEMS: Item[] = [
 export default function SettingsLayout() {
   const { user } = useAuth();
   const { t } = useI18n();
-  const items = ITEMS.filter((i) => !i.adminOnly || user?.is_admin);
+  const items = ITEMS.filter((i) => !i.adminOnly || canEditTenant(user));
+  // Đọc một lần lúc dựng: đổi mục bên trong Cài đặt không được đổi đích quay lại.
+  const returnTo = getReturnPath();
 
   return (
     <div className="mx-auto w-full max-w-6xl">
+      {/* Về đúng trang người dùng đang làm việc trước khi rẽ vào đây — không
+          phải lùi một bước lịch sử (xem hooks/useReturnPath.ts). */}
+      <Link
+        to={returnTo}
+        className="mb-3 inline-flex items-center gap-1 rounded-md text-sm font-medium text-slate-600 hover:text-ctu-blue focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue focus-visible:ring-offset-2"
+      >
+        {t("← Quay lại")}
+      </Link>
       <h1 className="mb-6 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
         {t("Cài đặt")}
       </h1>

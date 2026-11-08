@@ -68,6 +68,20 @@ def _viet_csv(path: Path, nguoi_ky, *, cot=None) -> None:
             w.writerow(row)
 
 
+def _ma(ten: str) -> str:
+    """Mã người ký của một tên, đọc từ CHÍNH sổ gộp mà `_split_provenance` dùng.
+
+    Không chép số cứng vào đây: ngày 15/09/2026 sổ được đánh số lại cho khớp sổ
+    người ký của ứng dụng (Trân S001 -> S015, Khoa S013 -> S002, Minh S002 ->
+    S014), và ba bài ở tệp này đỏ suốt một tháng vì những con số chép tay ấy —
+    trong khi hành vi chúng bảo vệ (áp bảng gộp, `user_id` thắng) vẫn đúng.
+    """
+    import json
+
+    so = json.loads((REPO_ROOT / "config" / "legacy_signer_mapping.json").read_text(encoding="utf-8"))
+    return so["legacy_name_to_signer_id"][ten]
+
+
 @pytest.fixture
 def hien_vat(tmp_path, monkeypatch):
     """Thay `_resolve_for_run` bằng một hiện vật giả trỏ vào CSV trong tmp.
@@ -89,7 +103,7 @@ def hien_vat(tmp_path, monkeypatch):
             split_id=split_id, purpose=purpose,
             train_csv=d / "train.csv", val_csv=d / "val.csv", test_csv=d / "test.csv",
             tenant_id="default", owner_state=owner_state)
-        import app.training_tasks as tt
+        from app.modules.training import tasks as tt
         monkeypatch.setattr(tt, "_resolve_for_run", lambda cfg, *, tenant_id: art)
         return art
 
@@ -147,8 +161,9 @@ def test_bang_gop_chinh_ta_duoc_ap_dung(hien_vat):
     hien_vat(["Trân"], [], ["Tran"])
     p = tr._split_provenance(tenant_id="default")
 
-    assert p.signers["train"] == ["S001"], "bảng gộp không được áp ở phía train"
-    assert p.signers["test"] == ["S001"], "bảng gộp không được áp ở phía test"
+    assert _ma("Trân") == _ma("Tran"), "sổ gộp không còn gộp hai biến thể"
+    assert p.signers["train"] == [_ma("Trân")], "bảng gộp không được áp ở phía train"
+    assert p.signers["test"] == [_ma("Trân")], "bảng gộp không được áp ở phía test"
     assert p.signer_disjoint is False
     assert p.warning and "người ký xuất hiện ở cả" in p.warning
 
@@ -171,8 +186,8 @@ def test_uu_tien_user_id_chu_khong_phai_signer_id(hien_vat):
     assert p.identity_column == "user_id"
     # `S012` / `S013`, không phải "Nhung" / "Khoa": bảng gộp được áp SAU khi
     # `user_id` thắng, nên hai phép biến đổi cùng được khoá trong một khẳng định.
-    assert p.signers["train"] == ["S012"]
-    assert p.signers["test"] == ["S013"]
+    assert p.signers["train"] == [_ma("Nhung")]
+    assert p.signers["test"] == [_ma("Khoa")]
     assert p.signer_disjoint is True, (
         "đang đọc theo signer_id: hai người khác nhau bị gộp thành một và split "
         "bị chấm nhầm là có rò rỉ")
@@ -196,7 +211,7 @@ def test_split_tach_nguoi_that_thi_khong_canh_bao(hien_vat):
     """
     hien_vat(["Minh"], ["Trâm"], ["Khoa"])
     p = tr._split_provenance(tenant_id="default")
-    assert p.signers == {"train": ["S002"], "val": ["S003"], "test": ["S013"]}
+    assert p.signers == {"train": [_ma("Minh")], "val": [_ma("Trâm")], "test": [_ma("Khoa")]}
     assert p.signer_disjoint is True
     assert p.warning is None
 
@@ -227,7 +242,7 @@ def test_khong_phan_giai_duoc_thi_noi_ra_chu_khong_no(monkeypatch):
     dựng — trong khi thứ người dùng cần đọc lúc ấy chính là lý do. Phần CHẶN
     thật nằm ở chỗ phái job và vẫn chặn nguyên.
     """
-    import app.training_tasks as tt
+    from app.modules.training import tasks as tt
 
     def _no(cfg, *, tenant_id):
         raise RuntimeError("hiện vật không xác minh được")
@@ -256,7 +271,7 @@ def test_tra_None_thi_noi_la_mac_dinh_trainer(monkeypatch):
     Không được đoán hộ rằng đó là ba tệp gốc: nhánh nghiên cứu ghim
     `split_version` cũng trả None, và hai trường hợp ấy đọc hai nơi khác nhau.
     """
-    import app.training_tasks as tt
+    from app.modules.training import tasks as tt
 
     monkeypatch.setattr(tt, "_resolve_for_run", lambda cfg, *, tenant_id: None)
     p = tr._split_provenance(tenant_id="default")

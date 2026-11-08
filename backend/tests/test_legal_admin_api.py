@@ -19,9 +19,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app import legal
+from app.modules.legal import legal
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -41,7 +41,7 @@ def admin_account():
     các tệp khác — `lambda: {"id": "t", ...}` — sẽ làm câu INSERT đổ vỡ vì `"t"`
     không phải UUID. Lỗi đó rất dễ đọc nhầm thành lỗi của endpoint.
     """
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"lgadm{uuid.uuid4().hex[:8]}"
     user = create_user(username=name, email=f"{name}@example.test",
@@ -54,7 +54,7 @@ def admin_account():
 
 @pytest.fixture
 def client(admin_account):
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
 
     app.dependency_overrides[require_admin] = lambda: admin_account
@@ -64,7 +64,7 @@ def client(admin_account):
 
 @pytest.fixture
 def with_sudo(admin_account):
-    from app import sudo_mode
+    from app.modules.security import sudo_mode
 
     sudo_mode.grant(str(admin_account["id"]))
     yield
@@ -250,7 +250,7 @@ class TestReadingAUsersConsentHistory:
                                            cleanup_versions):
         """Câu hỏi bảng này tồn tại để trả lời là "đã đồng ý những gì, lúc nào",
         và câu đó chỉ trả lời được nếu các câu trả lời cũ còn nguyên."""
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         name = f"lghist{uuid.uuid4().hex[:8]}"
@@ -281,7 +281,7 @@ class TestReadingAUsersConsentHistory:
         """Băm địa chỉ là bằng chứng để đối chiếu, không phải thông tin để hiển
         thị: hiện nó trên màn hình không nói với người xem điều gì, mà lại là
         một mẩu dữ liệu cá nhân nữa đi ra ngoài."""
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
         from conftest import purge_registered_account
 
         name = f"lgip{uuid.uuid4().hex[:8]}"

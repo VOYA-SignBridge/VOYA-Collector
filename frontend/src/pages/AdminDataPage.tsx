@@ -73,7 +73,7 @@ export default function AdminDataPage() {
       const res = await apiClient.get<DataReport>("/api/v1/admin/data-report");
       setData(res.data);
       setError(null);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(friendlyError(e, t("Không tải được báo cáo dữ liệu")));
     } finally {
       setLoading(false);

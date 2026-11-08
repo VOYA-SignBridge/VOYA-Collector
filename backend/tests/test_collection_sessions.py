@@ -48,7 +48,7 @@ def cur():
     `test_tenant_foreign_keys.rollback_cursor`.
     """
     from app.storage.rls import apply_scope
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     conn = psycopg2.connect(db.settings.database_url)
     conn.autocommit = False
@@ -271,7 +271,7 @@ def test_bang_co_tenant_id_phai_co_mat_o_ca_ba_so_dang_ky():
     Test này biến danh sách kiểm ấy thành thứ máy nhớ hộ.
     """
     from app.storage.rls import RLS_TABLES
-    from app.tenant_lifecycle import PURGE_ORDER
+    from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
     scoped = set(db.TENANT_SCOPED_TABLES)
     assert scoped - set(RLS_TABLES) == set(), "bảng tenant-scoped thiếu policy RLS"
@@ -318,7 +318,7 @@ def test_vai_ung_dung_voi_toi_duoc_moi_bang_tenant_scoped(cur):
 
 def test_buoi_thu_bi_xoa_truoc_khi_xoa_nguoi_ky():
     """Thứ tự trong `PURGE_ORDER` là một phần của tính đúng, không phải thẩm mỹ."""
-    from app.tenant_lifecycle import PURGE_ORDER
+    from app.modules.saas.tenant_lifecycle import PURGE_ORDER
 
     thu_tu = list(PURGE_ORDER)
     assert thu_tu.index("capture_sessions") < thu_tu.index("collection_sessions"), \

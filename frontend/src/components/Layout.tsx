@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthToken } from "../api/axiosClient";
 import { logout as apiLogout, isTenantAdmin } from "../api/auth";
@@ -15,6 +15,7 @@ import { BuildingIcon, ChipIcon, ClipboardCheckIcon, GearIcon, GraduationCapIcon
 import Footer from "./Footer";
 import { prefetchProps } from "../routes/prefetch";
 import { useI18n } from "../i18n";
+import { rememberReturnPath } from "../hooks/useReturnPath";
 
 const AUTH_EVENT = "voya:auth-change";
 
@@ -27,7 +28,7 @@ export type FlatNavItem = {
 export type NavSection = {
   section: true;
   name: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   children: FlatNavItem[];
 };
 export type AnyNavItem = FlatNavItem | NavSection;
@@ -35,6 +36,35 @@ export type AnyNavItem = FlatNavItem | NavSection;
 export default function Layout({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const closeSidebar = useCallback(() => {
+    setSidebarOpen(false);
+    menuButtonRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const mobile = window.innerWidth < 1024;
+    if (mobile) sidebarRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeSidebar();
+      if (event.key !== "Tab" || window.innerWidth >= 1024) return;
+      const elements = sidebarRef.current?.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+      const visible = Array.from(elements ?? []).filter((element) => element.getClientRects().length);
+      const first = visible[0];
+      const last = visible[visible.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [sidebarOpen, closeSidebar]);
   const navigate = useNavigate();
   const location = useLocation();
   // User comes from the single shared AuthProvider (no duplicate /auth/me here).
@@ -69,6 +99,11 @@ export default function Layout({ children }: { children: ReactNode }) {
     location.pathname === "/admin" ||
     location.pathname.startsWith("/admin/");
 
+  // Trang cuối cùng NGOÀI khu Cài đặt — nút "← Quay lại" ở /settings/* trỏ về đây.
+  useEffect(() => {
+    rememberReturnPath(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+
   useEffect(() => {
     const syncAuthState = () => {
       setHasToken(hasSessionHint());
@@ -84,7 +119,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, []);
 
   const navIconClass = "h-5 w-5";
-  const baseNavigation: AnyNavItem[] = [
+  const baseNavigation: FlatNavItem[] = [
     { name: "Trang chủ", href: "/", icon: <HomeIcon className={navIconClass} />, end: true },
     // Học ký hiệu đứng NGAY sau Trang chủ và có cả với khách: học sinh, phụ
     // huynh không có tài khoản là đối tượng chính của nó.
@@ -216,12 +251,15 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const navigation: AnyNavItem[] = user
     ? [
-        ...baseNavigation,
-        ...(coKiemDuyet ? [moderationItem] : []),
-        ...(isTenantAdmin(user) ? [consoleItem] : [organizationItem]),
-        userTrashItem,
-        settingsItem,
-        supportItem,
+        ...baseNavigation.slice(0, 2),
+        { section: true, name: "Dữ liệu", children: [
+          ...baseNavigation.slice(2, 4), ...(coKiemDuyet ? [moderationItem] : []),
+        ] },
+        { section: true, name: "Công cụ", children: baseNavigation.slice(4) },
+        { section: true, name: "Cá nhân", children: [
+          isTenantAdmin(user) ? consoleItem : organizationItem,
+          userTrashItem, settingsItem, supportItem,
+        ] },
       ]
     : baseNavigation;
 
@@ -244,62 +282,35 @@ export default function Layout({ children }: { children: ReactNode }) {
   const NavItem = ({ item }: { item: FlatNavItem }) => (
     <NavLink
       to={item.href}
-      end={item.end}
+      end={item.href === "/settings" && /^\/settings\/(support|organization)(\/|$)/.test(location.pathname) ? true : item.end}
       className={({ isActive }) =>
-        `group flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${isActive
-          ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
-          : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/60"
+        `relative flex min-h-11 items-center gap-3 px-3 py-2 text-sm rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue ${isActive
+          ? "bg-sky-50 text-ctu-navy font-semibold before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r before:bg-ctu-blue"
+          : "font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100"
         }`
       }
-      onClick={() => setSidebarOpen(false)}
+      onClick={() => { if (window.innerWidth < 1024) closeSidebar(); }}
       {...prefetchProps(item.href)}
     >
-      <span className="mr-3 flex items-center">{item.icon}</span>
-      {t(item.name)}
+      <span className="flex shrink-0 items-center" aria-hidden="true">{item.icon}</span>
+      <span className="flex-1">{t(item.name)}</span>
       {item.badge ? (
         <span className="ml-2 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-ctu-blue px-1.5 py-0.5 text-xs font-semibold text-white">
           {item.badge > 99 ? "99+" : item.badge}
         </span>
       ) : null}
-      <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-      </div>
     </NavLink>
   );
 
   const SectionNavItem = ({ item }: { item: NavSection }) => (
-    <div className="mt-3">
-      <div className="px-4 py-2 flex items-center gap-2">
-        <div className="flex-1 h-px bg-slate-200" />
-        <span className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0">
-          {item.icon}
-          {t(item.name)}
-        </span>
-        <div className="flex-1 h-px bg-slate-200" />
-      </div>
-      <div className="space-y-1">
+    <section aria-label={t(item.name)} className="border-t border-slate-100 pt-2">
+      <h2 className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t(item.name)}</h2>
+      <div className="space-y-0.5">
         {item.children.map((child) => (
-          <NavLink
-            key={child.href}
-            to={child.href}
-            end={child.end}
-            className={({ isActive }) =>
-              `group flex items-center pl-8 pr-4 py-2.5 text-sm font-medium rounded-xl transition-all duration-200 ${isActive
-                ? "bg-gradient-to-r from-ctu-navy to-ctu-blue text-white shadow-lg shadow-ctu-navy/25"
-                : "text-slate-500 hover:text-slate-900 hover:bg-slate-100/60"
-              }`
-            }
-            onClick={() => setSidebarOpen(false)}
-            {...prefetchProps(child.href)}
-          >
-            <span className="mr-3 flex items-center">{child.icon}</span>
-            {t(child.name)}
-          </NavLink>
+          <NavItem key={child.href} item={child} />
         ))}
       </div>
-    </div>
+    </section>
   );
 
   if (isAuthPage) {
@@ -323,18 +334,24 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       {hasToken && (
         <aside
-          className={`fixed inset-y-0 left-0 z-50 w-[min(18rem,82vw)] max-w-72 transform border-r border-slate-200/60 bg-white/80 shadow-xl backdrop-blur-xl transition-all duration-300 ease-in-out overflow-y-auto ${sidebarOpen ? "translate-x-0" : "-translate-x-full"
-            } lg:static lg:translate-x-0 lg:overflow-visible ${sidebarOpen ? "lg:w-72 lg:max-w-72" : "lg:w-0 lg:max-w-0"}`}
+          id="main-sidebar"
+          ref={sidebarRef}
+          inert={!sidebarOpen}
+          aria-hidden={!sidebarOpen}
+          className={`fixed inset-y-0 left-0 z-50 w-[min(16rem,88vw)] max-w-64 transform border-r border-slate-200 bg-white transition-all duration-200 motion-reduce:transition-none overflow-hidden ${sidebarOpen ? "translate-x-0" : "-translate-x-full"
+            } lg:static lg:translate-x-0 ${sidebarOpen ? "lg:w-64 lg:max-w-64 lg:overflow-visible" : "lg:w-0 lg:max-w-0"}`}
         >
           <div className="flex h-dvh lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto flex-col">
-          <div className="flex items-center justify-between h-16 px-6 border-b border-slate-200/50">
+          {/* Đầu và chân thanh bên mang màu navy CTU; phần điều hướng ở giữa giữ nền
+              trắng cho dễ đọc (yêu cầu 18/10/2026). */}
+          <div className="flex shrink-0 items-center justify-between h-16 px-4 bg-ctu-navy text-white">
             <div className="flex items-center min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-ctu-navy to-ctu-blue rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
+              <div className="w-10 h-10 bg-ctu-blue ring-1 ring-white/25 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
                 {user?.username ? user.username.charAt(0).toUpperCase() : "C"}
               </div>
               <div className="ml-3 min-w-0">
-                <div className="text-slate-800 font-semibold text-lg truncate">{user?.username ?? "CTU"}</div>
-                <div className="text-slate-500 text-xs truncate">SignBridge</div>
+                <div className="text-white font-semibold text-lg truncate">{user?.username ?? "CTU"}</div>
+                <div className="text-blue-200/70 text-xs truncate">SignBridge</div>
               </div>
             </div>
 
@@ -345,8 +362,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                 được, bất kể có phím tắt nào khác hay không. */}
             <button
               type="button"
-              onClick={() => setSidebarOpen(false)}
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              onClick={closeSidebar}
+              className="rounded-lg p-2 text-blue-100/80 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue-light"
               aria-label={t("Đóng thanh bên")}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -355,7 +372,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </button>
           </div>
 
-          <nav className="flex-1 px-4 py-6 space-y-2">
+          <nav aria-label={t("Điều hướng chính")} className="flex-1 px-3 py-3 space-y-1">
             {navigation.map((item) =>
               "section" in item && item.section ? (
                 <SectionNavItem key={item.name} item={item} />
@@ -365,36 +382,11 @@ export default function Layout({ children }: { children: ReactNode }) {
             )}
           </nav>
 
-          <div className="mt-auto border-t border-slate-200/50 p-4">
-            <div className="space-y-3 lg:hidden">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <div className={`w-2 h-2 rounded-full ${hasToken ? "bg-sky-400 animate-pulse" : "bg-slate-300"}`} />
-                <span>{hasToken ? t("Đã đăng nhập") : t("Chế độ khách")}</span>
-              </div>
-
-              {hasToken ? (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={handleLogout}
-                  className="w-full justify-center px-3 py-2 text-xs sm:text-sm"
-                >
-                  {t("Đăng xuất")}
-                </Button>
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  <Button size="sm" onClick={() => navigate("/login")} className="w-full justify-center px-3 py-2 text-xs sm:text-sm">
-                    {t("Đăng nhập")}
-                  </Button>
-                  <Button size="sm" onClick={() => navigate("/register")} className="w-full justify-center px-3 py-2 text-xs sm:text-sm">
-                    {t("Đăng ký")}
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            <div className="hidden lg:block pt-4 text-xs text-slate-500 text-center">
-              {t("Dự án nghiên cứu khoa học - Trường Công nghệ Thông tin và Truyền thông")}
+          <div className="mt-auto bg-ctu-navy p-4 text-white">
+            {/* Không đặt Đăng xuất ở đây (yêu cầu 18/10/2026). Trên màn hẹp nút ấy
+                nằm ở header — xem khối `md:hidden` cuối header. */}
+            <div className="text-xs text-blue-200/70">
+              CTU · SignBridge
             </div>
           </div>
         </div>
@@ -402,15 +394,23 @@ export default function Layout({ children }: { children: ReactNode }) {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 pt-14">
-        <header className="fixed top-0 left-0 right-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-slate-200/60 bg-white/80 px-3 shadow-sm backdrop-blur-xl sm:px-4 lg:px-8">
+        {/* Từ `lg` thanh bên là một CỘT (static, z-50) chứ không còn là ngăn kéo
+            phủ lên trang. Header `fixed left-0` trải từ mép màn hình nên nửa trái
+            của nó — nút ☰ và tên trang — nằm DƯỚI cột ấy, và cách duy nhất để
+            đóng thanh bên là dấu X bên trong nó. Lùi mép trái đúng bằng bề rộng
+            cột (`lg:w-64`) và chuyển động cùng nhịp; dưới `lg` thanh bên vẫn là
+            ngăn kéo phủ lên, header giữ `left-0`. */}
+        <header className={`fixed top-0 right-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-slate-200/60 bg-white/80 px-3 shadow-sm backdrop-blur-xl transition-[left] duration-200 motion-reduce:transition-none sm:px-4 lg:px-8 left-0 ${hasToken && sidebarOpen ? "lg:left-64" : ""}`}>
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             {hasToken && (
               <button
+                ref={menuButtonRef}
                 type="button"
                 onClick={() => setSidebarOpen((current) => !current)}
                 className="btn btn-ghost p-2 text-slate-600 hover:text-slate-900"
                 aria-label={t("Mở hoặc đóng thanh điều hướng")}
                 aria-expanded={sidebarOpen}
+                aria-controls="main-sidebar"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -482,6 +482,20 @@ export default function Layout({ children }: { children: ReactNode }) {
                   {t("Đăng ký")}
                 </Button>
               </div>
+            )}
+          </div>
+
+          {/* Màn hẹp: cụm bên phải ở trên bị ẩn (`hidden md:flex`), nên lối đăng
+              xuất/đăng nhập phải nằm ở đây — không còn ở chân thanh bên. */}
+          <div className="flex md:hidden items-center">
+            {hasToken ? (
+              <Button size="sm" variant="secondary" onClick={handleLogout} className="whitespace-nowrap px-3 py-1.5 text-xs">
+                {t("Đăng xuất")}
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => navigate("/login")} className="whitespace-nowrap px-3 py-1.5 text-xs">
+                {t("Đăng nhập")}
+              </Button>
             )}
           </div>
         </header>

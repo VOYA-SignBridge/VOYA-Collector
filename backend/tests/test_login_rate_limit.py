@@ -1,6 +1,6 @@
 """Login throttling + registration cap — against the real DB + redis.
 
-Contract (see app/rate_limit.py for the reasoning):
+Contract (see app/modules/security/_web_compat.py for the reasoning):
   - the pair (identifier, client IP) gets 10 free failures; the 11th arms a
     30s wait, then 2m, 5m, 15m as the streak continues
   - a wait refuses even the CORRECT password, and does not grow while it runs
@@ -26,9 +26,9 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth
+from app.modules.identity import _web_compat as auth
 from app.main import app
-from app.rate_limit import (
+from app.modules.security._web_compat import (
     LOGIN_PAIR_BACKOFF_STEPS,
     LOGIN_PAIR_FREE_FAILURES,
     REGISTER_REQUESTS_PER_MINUTE,

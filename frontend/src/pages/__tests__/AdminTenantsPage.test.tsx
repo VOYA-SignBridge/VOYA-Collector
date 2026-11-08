@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom/vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
@@ -125,7 +126,7 @@ beforeEach(() => {
 
 describe('Xoá vĩnh viễn một tổ chức', () => {
   it('hiện số dòng sẽ mất trước khi hỏi xác nhận', async () => {
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Cài đặt/);
 
@@ -135,7 +136,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
   });
 
   it('bỏ qua bảng có 0 dòng để không lấp con số thật', async () => {
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Cài đặt/);
 
@@ -144,7 +145,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
   });
 
   it('nút xoá bị khoá cho tới khi gõ đúng mã tổ chức', async () => {
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Cài đặt/);
 
@@ -161,7 +162,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
 
   it('gửi đúng mã tổ chức làm chuỗi xác nhận', async () => {
     (purgeTenant as any).mockResolvedValue({});
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Cài đặt/);
 
@@ -179,7 +180,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
       blockers: ['Tổ chức chưa bị xoá mềm. Hãy xoá mềm trước.'],
       can_purge: false,
     });
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Cài đặt/);
 
@@ -189,7 +190,7 @@ describe('Xoá vĩnh viễn một tổ chức', () => {
 
   it('vẫn cảnh báo khi chưa có bản xuất nào sẵn sàng', async () => {
     (fetchPurgePreview as any).mockResolvedValue({ ...PREVIEW_READY, has_ready_export: false });
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Cài đặt/);
 
@@ -203,7 +204,7 @@ describe('Một phần bị từ chối không làm hỏng cả trang', () => {
      * `purge-preview` (vòng nền tảng). Với `Promise.all`, lỗi 403 dự kiến đó
      * sẽ xoá sạch cả ba mục kia và trang trông như rỗng. */
     (fetchPurgePreview as any).mockRejectedValue({ response: { status: 403 } });
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
 
     // Thành viên vẫn còn (tab mặc định)…
@@ -235,7 +236,7 @@ describe('Tranh chấp khi đổi tổ chức nhanh', () => {
       return Promise.resolve([{ ...MEMBER, user_id: 'u-b', username: 'nguoi-cua-B' }]);
     });
 
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     const buttons = await screen.findAllByRole('button', { name: 'Mở tổ chức' });
 
     fireEvent.click(buttons[0]);                       // chọn A — treo
@@ -261,7 +262,7 @@ describe('Lời mời', () => {
       accepted_at: null, revoked_at: null, token: 'ma-moi-rat-bi-mat',
       accept_url: ACCEPT_URL, email_sent: false, ...over,
     });
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Lời mời/);
     fireEvent.change(await screen.findByLabelText('Email được mời'),
@@ -311,7 +312,7 @@ describe('Lời mời', () => {
       role: 'admin', created_at: '2026-08-08T00:00:00Z', expires_at: null,
       accepted_at: null, revoked_at: null,
     }]);
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Lời mời/);
 
@@ -327,7 +328,7 @@ describe('Lời mời', () => {
 describe('Chi tiết tổ chức — TEN-03', () => {
   it('thành viên tải LỖI thì nói lỗi + "Thử lại", KHÔNG nói "chưa có thành viên"', async () => {
     (fetchMembers as any).mockRejectedValueOnce(new Error('network down'));
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
@@ -350,7 +351,7 @@ describe('Chi tiết tổ chức — TEN-03', () => {
         : new Promise((res) => { releaseC = res; }),
     );
 
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     fireEvent.click((await screen.findAllByRole('button', { name: 'Mở tổ chức' }))[0]);
     expect(await screen.findByText('giaovien')).toBeInTheDocument();
 
@@ -372,7 +373,7 @@ describe('Bố cục Đợt 2 — đơn giản cho người mới', () => {
   it('tìm theo TÊN lọc được danh sách; không khớp thì nói rõ', async () => {
     const TENANT_C = { ...TENANT, tenant_id: 'truong-c', display_name: 'Trường C', slug: 'truong-c' };
     (fetchTenants as any).mockResolvedValue([TENANT, TENANT_C]);
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await waitFor(() => expect(fetchTenants).toHaveBeenCalled());
     await screen.findByText('Trường C', {}, { timeout: 3000 });
 
@@ -385,7 +386,7 @@ describe('Bố cục Đợt 2 — đơn giản cho người mới', () => {
   });
 
   it('vùng xoá vĩnh viễn KHÔNG nằm cạnh việc thường ngày: chỉ ở tab Cài đặt', async () => {
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     expect(await screen.findByText('giaovien')).toBeInTheDocument();
     expect(screen.queryByText('Vùng nguy hiểm')).not.toBeInTheDocument();
@@ -398,7 +399,7 @@ describe('Bố cục Đợt 2 — đơn giản cho người mới', () => {
 
 describe('Vai nói bằng hệ quả', () => {
   it('dưới ô chọn vai có câu "vai này cho phép làm gì", đổi theo lựa chọn', async () => {
-    render(<AdminTenantsPage />);
+    render(<MemoryRouter><AdminTenantsPage /></MemoryRouter>);
     await openTenant();
     await openTab(/Lời mời/);
 

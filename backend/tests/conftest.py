@@ -4,12 +4,12 @@ Two jobs, both needed for `pytest backend/tests` to mean what it looks like it
 means.
 
 1. Environment. A bare `pytest` on the HOST is pointed at the localhost stack
-   (the compose test-ports override publishes postgres:5432 + redis:6379) and at
-   the repo's Google Drive credentials — so the suite runs with NO skips and no
-   "forgot to export an env var" false failures. Only UNSET values are filled,
-   so the real container env (postgres:/redis: hostnames, /gdrive paths) and
-   anything exported explicitly are never overridden. On a machine without
-   gdrive credentials the SOT integration tests still skip gracefully.
+   (the compose test-ports override publishes postgres:5432 + redis:6379) — so
+   the suite runs without "forgot to export an env var" false failures. Only
+   UNSET values are filled, so the real container env (postgres:/redis:
+   hostnames) and anything exported explicitly are never overridden. Real
+   Google Drive/Sheets is blocked outright (see `_CHAN_GOOGLE_API_THAT`); the
+   SOT integration tests that need it skip.
 
 2. Collection. Most research-pipeline suites are STANDALONE scripts: pure-stdlib
    files with a main() that prints PASS/FAIL and returns an exit code, runnable
@@ -28,6 +28,14 @@ import tempfile
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
+
+# Research/split tests must not depend on a generated snapshot left behind by a
+# particular developer machine. Point them at a small, committed registry whose
+# identities cover the profiles exercised by those tests. Individual missing-
+# snapshot tests can still override this variable explicitly.
+os.environ["VOCABULARY_REGISTRY_PATH"] = str(
+    Path(__file__).resolve().parent / "fixtures" / "vocabulary_registry.fixture"
+)
 
 # The standalone suites import from both the repo root and backend/.
 for _p in (_REPO, _REPO / "backend"):
@@ -72,14 +80,11 @@ _LEGAL_STORE_FOR_TESTS = Path(tempfile.gettempdir()) / "voya-test-legal-store"
 _LEGAL_STORE_FOR_TESTS.mkdir(parents=True, exist_ok=True)
 os.environ["LEGAL_STORE_ROOT"] = str(_LEGAL_STORE_FOR_TESTS)
 
-# 2. Point Google Drive at the repo's gdrive/ (host absolute path) so the SOT
-#    integration tests find the credentials and RUN instead of skipping. If the
-#    files aren't present (e.g. CI), we leave it alone and those tests skip.
-_gdrive = _REPO / "gdrive"
-if (_gdrive / "credentials.json").exists():
-    os.environ.setdefault("GOOGLE_DRIVE_CREDENTIALS", str(_gdrive / "credentials.json"))
-if (_gdrive / "token.json").exists():
-    os.environ.setdefault("GOOGLE_DRIVE_TOKEN", str(_gdrive / "token.json"))
+# 2. Google Drive: KHÔNG trỏ bộ test vào thông tin đăng nhập thật nữa. Trước
+#    18/10/2026 chỗ này trỏ vào gdrive/ của repo để test tích hợp SOT chạy với
+#    Drive thật — và bộ test để lại thư mục SOT_PYIT, dời `hoa-de` ra gốc My
+#    Drive, tạo `pho-thong` 342 mục trên Drive sản xuất. Chặn hẳn: xem
+#    `_CHAN_GOOGLE_API_THAT` bên dưới.
 
 # 2b. A real hand-sign clip for the video->npz extraction test. Point it at the
 #     first clip in a known sample folder if present, so the test RUNS (no skip)
@@ -91,13 +96,14 @@ if (_gdrive / "token.json").exists():
 #     were purged. Mounting a clip folder read-only at /testvideos is what keeps
 #     this test running rather than skipping:
 #
-#       -v "E:\CTU_ProjectOutside\Videos:/testvideos:ro"
+#       -v "E:\CTU_ProjectOutside\qipedc_mau:/testvideos:ro"
 if not os.environ.get("VOYA_TEST_VIDEO"):
     _vids = []
     for _cand in (
         Path("/testvideos"),
         _REPO / "sample_clips",
-        Path("E:/CTU_ProjectOutside/Videos"),
+        # `Videos` was a byte-identical copy of qipedc_mau (removed 16/10/2026).
+        Path("E:/CTU_ProjectOutside/qipedc_mau"),
     ):
         try:
             _vids = sorted(_cand.glob("*.mp4")) if _cand.exists() else []
@@ -205,7 +211,7 @@ class _MirroringOverrides(dict):
 
     def __setitem__(self, key, value):
         super().__setitem__(key, value)
-        from app.auth import get_current_user, get_current_user_optional, require_admin
+        from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
 
         if key is get_current_user:
             super().__setitem__(get_current_user_optional, value)
@@ -224,7 +230,7 @@ class _MirroringOverrides(dict):
         return result
 
     def _drop_mirror(self, key):
-        from app.auth import get_current_user, get_current_user_optional, require_admin
+        from app.modules.identity._web_compat import get_current_user, get_current_user_optional, require_admin
 
         if key in (require_admin, get_current_user):
             super().pop(get_current_user_optional, None)
@@ -347,7 +353,7 @@ def _platform_scope():
     case, so the fail-closed behaviour is still asserted directly rather than
     inherited from the ambient state.
     """
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("pytest: suite runs as platform"):
         yield
@@ -439,7 +445,7 @@ def registration_consents() -> dict:
     documents went live: they were written before enforcement existed and
     registration quietly started requiring something they never sent.
     """
-    from app import legal
+    from app.modules.legal import legal
 
     if legal.missing_for_registration():
         return {}
@@ -482,7 +488,56 @@ def registration_consents() -> dict:
 #: đây mà lộ ra lúc xoá tenant thật trên sản xuất. `tenant_lifecycle.PURGE_ORDER`
 #: giờ là nguồn duy nhất; `test_tenant_purge_order_covers_every_tenant_table`
 #: vẫn canh nó khớp `metadata_db.TENANT_SCOPED_TABLES`.
-from app.tenant_lifecycle import PURGE_ORDER as _TENANT_PURGE_ORDER  # noqa: E402
+from app.modules.saas.tenant_lifecycle import PURGE_ORDER as _TENANT_PURGE_ORDER  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Bộ test không bao giờ gọi Google Drive/Sheets thật
+#
+# Hai lớp, cùng kiểu với chặn SMTP ở trên, chạy ngay lúc nạp conftest (trước khi
+# tệp test nào được nạp) chứ không đợi fixture:
+#   1. không dựng được `GoogleDriveClient` — `get_gdrive_client()` ném lỗi, nên
+#      test tích hợp cần Drive thật tự bỏ qua (xem `_infra_available`);
+#   2. mọi lệnh gọi HTTP của `googleapiclient` ném lỗi — bắt cả đường nào dựng
+#      dịch vụ Google bằng cách khác.
+# Test cần Drive thì thay `get_gdrive_client` bằng client giả, như vẫn làm.
+_CHAN_GOOGLE_API_THAT = (
+    "Bộ test không được gọi Google Drive/Sheets thật — "
+    "monkeypatch `get_gdrive_client` bằng một client giả."
+)
+
+
+def _tu_choi_google_api(*_a, **_kw):
+    raise RuntimeError(_CHAN_GOOGLE_API_THAT)
+
+
+import app.storage.gdrive_client as _gdrive_client_module  # noqa: E402
+import googleapiclient.http as _googleapiclient_http  # noqa: E402
+
+def _duoc_dung_drive_that() -> bool:
+    """Chỉ lượt `test_sot_integration` của bộ kiểm thử, trong thư mục sandbox riêng.
+
+    Cờ thôi là chưa đủ: root phải KHÁC gốc Drive thật trong `.env`, để một lượt đặt
+    nhầm biến không thể ghi lên thư mục dùng chung.
+    """
+    if os.environ.get("VOYA_TEST_DRIVE_THAT") != "1":
+        return False
+    goc_that = ""
+    envf = _REPO / ".env"
+    if envf.exists():
+        for dong in envf.read_text(encoding="utf-8").splitlines():
+            if dong.startswith("GOOGLE_DRIVE_ROOT_FOLDER_ID="):
+                goc_that = dong.split("=", 1)[1].strip()
+    goc = os.environ.get("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
+    if not goc or goc == goc_that:
+        pytest.exit("TU CHOI: Drive that chi chay trong thu muc sandbox.", returncode=3)
+    return True
+
+
+if not _duoc_dung_drive_that():
+    _gdrive_client_module.GoogleDriveClient.__init__ = _tu_choi_google_api
+    _gdrive_client_module._gdrive_client = None
+    _googleapiclient_http.HttpRequest.execute = _tu_choi_google_api
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +641,7 @@ def _purge_append_only(table: str, key_expr: str, keys: list) -> int:
 def _artifact_snapshot() -> dict:
     """Tập khoá chính của mỗi bảng theo dõi. Bảng chưa tồn tại thì bỏ qua."""
     from app.storage import metadata_db as db
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     out = {}
     with system_scope("test ledger: chup anh truoc/sau suite"):
@@ -913,7 +968,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         return
 
     from app.storage import metadata_db as db
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     # Xoá theo LÔ bằng `= ANY(%s)`, không phải một câu mỗi hàng: một lượt chạy
     # tạo vài trăm hàng thì vài trăm vòng round-trip biến bước dọn thành phần
@@ -999,11 +1054,18 @@ def corpus_row_to_poke():
     import uuid as _uuid
 
     from app.storage import metadata_db as db
-    from app.tenancy import DEFAULT_TENANT_ID
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test: bảo đảm corpus có dòng để thử ràng buộc"):
-        if db._fetch_all("SELECT 1 FROM samples LIMIT 1"):
+        # Hỏi đúng thứ các test cần, không hỏi "bảng có rỗng không": chúng đâm vào
+        # một mẫu CỦA `default` và một NGƯỜI KÝ. Trên CI, fixture cách ly đã gieo
+        # mẫu cho `iso_a`/`iso_b`, nên câu hỏi cũ trả lời "đã có dữ liệu" và không
+        # gieo gì — năm test đỏ với "DID NOT RAISE" / "cannot unpack NoneType".
+        co_mau_default = db._fetch_all(
+            "SELECT 1 FROM samples WHERE tenant_id = %s LIMIT 1", (DEFAULT_TENANT_ID,))
+        co_nguoi_ky = db._fetch_all("SELECT 1 FROM signers LIMIT 1")
+        if co_mau_default and co_nguoi_ky:
             yield None          # đã có dữ liệu thật — không đụng vào
             return
 
@@ -1046,6 +1108,48 @@ def corpus_row_to_poke():
                 pass
 
 
+@pytest.fixture(scope="session")
+def isolation_tenants():
+    """Provide the two tenant parents used by the cross-tenant proof suites.
+
+    Older local test databases inherited these rows from a production clone.
+    A database built from migrations is intentionally empty, so the proof data
+    must own its parent rows just like it owns its jobs, metrics and users.
+    Create them through the domain service: since schema v4 a live tenant must
+    carry a plan and exactly one open subscription, so a bare INSERT leaves an
+    invalid parent that breaks whichever schema/SOT test happens to run later.
+    """
+    from app.modules.saas import tenant_admin
+    from app.storage import metadata_db as db
+    from app.modules.saas.tenant_context import system_scope
+
+    wanted = ("iso_a", "iso_b")
+    with system_scope("test: seed cross-tenant proof parents"):
+        existing = {
+            row["tenant_id"]
+            for row in db._fetch_all(
+                "SELECT tenant_id FROM tenants WHERE tenant_id = ANY(%s)",
+                (list(wanted),),
+            )
+        }
+        created = [tenant for tenant in wanted if tenant not in existing]
+        for tenant in created:
+            tenant_admin.create_tenant(
+                tenant,
+                display_name=tenant,
+                slug=tenant,
+                clone_catalog=False,
+            )
+
+    yield wanted
+
+    # The proof suites may now leave durable audit/notification rows behind.
+    # Use the shared leaf-to-root purge order instead of deleting only the
+    # parent row, otherwise the tenant foreign keys correctly reject teardown.
+    for tenant in reversed(created):
+        purge_tenant(tenant)
+
+
 @pytest.fixture
 def rollback_cursor():
     """Con trỏ luôn được rollback, buộc vào SYSTEM scope.
@@ -1065,7 +1169,7 @@ def rollback_cursor():
 
     from app.storage import metadata_db as db
     from app.storage.rls import apply_scope
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     conn = psycopg2.connect(db.settings.database_url)
     conn.autocommit = False
@@ -1082,8 +1186,8 @@ def rollback_cursor():
 def purge_tenant(tenant_id: str) -> None:
     """Remove a throwaway tenant and everything pointing at it."""
     from app.storage import metadata_db as db
-    from app.tenancy import DEFAULT_TENANT_ID
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: remove a throwaway tenant"):
         for table in _TENANT_PURGE_ORDER:
@@ -1127,8 +1231,8 @@ def purge_registered_account(username: str) -> None:
     fixture khác, và xoá nó là dọn sang phần của người khác.
     """
     from app.storage import metadata_db as db
-    from app.tenancy import DEFAULT_TENANT_ID
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: find the account and the tenant it created"):
         rows = db._fetch_all(
@@ -1213,9 +1317,9 @@ def free_legal_kinds():
     con người, và một fixture không được phép quyết định thay họ. Chọn một chỗ
     trống khác thì rẻ hơn và không mất gì.
     """
-    from app import legal
+    from app.modules.legal import legal
     from app.storage.metadata_db import _fetch_all
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test setup: tim loai van ban con trong"):
         rows = _fetch_all(

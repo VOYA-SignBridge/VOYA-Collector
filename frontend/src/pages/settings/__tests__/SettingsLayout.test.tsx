@@ -11,7 +11,7 @@
  *    403 — một ngõ cụt có sẵn nhãn.
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -63,18 +63,25 @@ describe("SettingsLayout", () => {
     // hai khẳng định dưới đây đỏ từ trước. Sửa số chứ không gỡ khẳng định:
     // chính nó là thứ bắt người thêm mục phải dừng lại một nhịp.
     renderSettings(true);
-    expect(screen.getAllByRole("link")).toHaveLength(9);
+    expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(9);
   });
 
   it("giấu Tích hợp với người dùng thường — trang đó chắc chắn 403", () => {
     renderSettings(false);
     expect(screen.queryByText("Tích hợp")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link")).toHaveLength(8);
+    expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(8);
   });
 
   it("dịch nhãn mục sang tiếng Anh", () => {
     renderSettings(false, "en");
     expect(screen.getByText("Security")).toBeInTheDocument();
     expect(screen.queryByText("Bảo mật")).not.toBeInTheDocument();
+  });
+
+  it("có nút quay lại trỏ về trang vừa xem trước khi vào Cài đặt", () => {
+    window.sessionStorage.setItem("voya.settings.returnTo", "/labels?dialect=hoa-de");
+    renderSettings(false);
+    const back = screen.getByRole("link", { name: "← Quay lại" });
+    expect(back).toHaveAttribute("href", "/labels?dialect=hoa-de");
   });
 });

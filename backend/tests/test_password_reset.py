@@ -23,7 +23,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth
+from app.modules.identity import _web_compat as auth
 from app.main import app
 from app.storage.metadata_db import _execute, _fetch_all
 from conftest import LoopbackPeer, fresh_client_ip
@@ -78,7 +78,10 @@ def _forgot_capture(identifier, ip=None):
         cap["reset_link"] = reset_link
         cap["token"] = reset_link.split("token=")[-1]
 
-    with patch("app.routers.auth.send_password_reset_email", side_effect=fake_send) as m:
+    with patch(
+        "app.modules.identity.account_workflows.email.send_password_reset_email",
+        side_effect=fake_send,
+    ) as m:
         resp = _forgot(identifier, ip)
     return resp, cap, m
 

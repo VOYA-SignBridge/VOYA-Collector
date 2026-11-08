@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pytest
 
-from app.tenancy import (
+from app.modules.saas.tenancy import (
     DEFAULT_TENANT_ID,
     TENANT_COLUMN,
     is_valid_tenant_id,
@@ -272,7 +272,7 @@ def test_sample_fields_never_shift_existing_columns():
     `test_label_fields_never_shift_existing_columns` đã đi qua đúng chuyện này
     ngày 14/08 khi thêm cột `region`. Ghim theo VỊ TRÍ, không theo "đứng cuối".
     """
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.modules.dataset.samples import SAMPLE_FIELDS
 
     assert SAMPLE_FIELDS.count(TENANT_COLUMN) == 1
     # 32 là vị trí của tenant_id từ khi nó được thêm; thay đổi số này nghĩa là
@@ -294,7 +294,7 @@ def test_label_fields_never_shift_existing_columns():
     Nên ghim thứ hai thứ: `tenant_id` vẫn ở đúng chỉ số cũ (không bị đẩy), và
     cột mới nhất đứng cuối.
     """
-    from app.dataset_manager import LABEL_FIELDS
+    from app.modules.dataset.catalog import LABEL_FIELDS
 
     assert LABEL_FIELDS.count(TENANT_COLUMN) == 1
     # 19 là vị trí của tenant_id từ khi nó được thêm; thay đổi số này nghĩa là
@@ -303,19 +303,26 @@ def test_label_fields_never_shift_existing_columns():
     assert LABEL_FIELDS[-1] == "region"
 
 
-def test_raw_upload_fields_end_with_tenant_id():
-    from app.raw_uploads import RAW_UPLOAD_FIELDS
+def test_raw_upload_fields_keep_tenant_id_in_place():
+    """Cùng quy tắc với LABEL_FIELDS ngay trên: cột mới chỉ được NỐI vào cuối.
 
-    assert RAW_UPLOAD_FIELDS[-1] == TENANT_COLUMN
+    `tenant_id` từng là cột cuối; từ khi có `visibility` (bản xuất cá nhân &
+    phạm vi chia sẻ) nó đứng ngay trước. Điều phải giữ là nó không bị dời đi
+    và không có cột nào chen vào giữa — không phải nó mãi là cột cuối.
+    """
+    from app.modules.dataset.raw_uploads import RAW_UPLOAD_FIELDS
+
     assert RAW_UPLOAD_FIELDS.count(TENANT_COLUMN) == 1
+    assert RAW_UPLOAD_FIELDS.index(TENANT_COLUMN) == 15
+    assert RAW_UPLOAD_FIELDS[-1] == "visibility"
 
 
 @pytest.mark.parametrize(
     "module,attr,table",
     [
-        ("app.dataset_samples", "SAMPLE_FIELDS", "samples"),
-        ("app.dataset_manager", "LABEL_FIELDS", "classes"),
-        ("app.raw_uploads", "RAW_UPLOAD_FIELDS", "raw_uploads"),
+        ("app.modules.dataset.samples", "SAMPLE_FIELDS", "samples"),
+        ("app.modules.dataset.catalog", "LABEL_FIELDS", "classes"),
+        ("app.modules.dataset.raw_uploads", "RAW_UPLOAD_FIELDS", "raw_uploads"),
     ],
 )
 def test_sot_manifest_promises_every_csv_column(module, attr, table):
@@ -339,7 +346,7 @@ def test_sot_manifest_promises_every_csv_column(module, attr, table):
 
 @pytest.fixture
 def csv_module(tmp_path, monkeypatch):
-    import app.dataset_samples as ds
+    import app.modules.dataset.samples as ds
 
     path = tmp_path / "samples.csv"
     monkeypatch.setattr(ds, "SAMPLES_CSV", path)
@@ -517,7 +524,7 @@ class TestWritersStampTenant:
         assert TENANT_COLUMN not in caller_dict
 
     def test_label_row_gets_the_bootstrap_tenant(self, tmp_path, monkeypatch):
-        import app.dataset_manager as dm
+        import app.modules.dataset.catalog as dm
 
         path = tmp_path / "labels.csv"
         monkeypatch.setattr(dm, "MASTER_LABELS", path)
@@ -530,7 +537,7 @@ class TestWritersStampTenant:
             assert next(csv.DictReader(f))[TENANT_COLUMN] == DEFAULT_TENANT_ID
 
     def test_class_metadata_defaults_and_honours_the_tenant(self):
-        from app.dataset_manager import ClassMetadata
+        from app.modules.dataset.catalog import ClassMetadata
 
         common = dict(
             slug="xin-chao", label_original="Xin chào", language="vn",
@@ -547,7 +554,7 @@ class TestWritersStampTenant:
 class TestRawUploadsMigration:
     @pytest.fixture
     def raw_module(self, tmp_path, monkeypatch):
-        import app.raw_uploads as ru
+        import app.modules.dataset.raw_uploads as ru
 
         path = tmp_path / "uploads.csv"
         monkeypatch.setattr(ru, "RAW_UPLOADS_CSV", path)
@@ -559,15 +566,18 @@ class TestRawUploadsMigration:
         a header for an EMPTY file — so a 15-column file gaining a 16-column row
         would put every value one place left of its name."""
         ru, path = raw_module
-        old_header = [c for c in ru.RAW_UPLOAD_FIELDS if c != TENANT_COLUMN]
+        old_header = [c for c in ru.RAW_UPLOAD_FIELDS if c not in (TENANT_COLUMN, "visibility")]
         _write(path, [old_header, ["u1"] + [""] * (len(old_header) - 1)])
 
         assert ru._upgrade_raw_uploads_header() is True
 
         rows = _read(path)
         assert rows[0] == list(ru.RAW_UPLOAD_FIELDS)
-        assert rows[1][0] == "u1"
-        assert rows[1][-1] == DEFAULT_TENANT_ID
+        row = dict(zip(rows[0], rows[1]))
+        assert row["upload_uid"] == "u1"
+        assert row[TENANT_COLUMN] == DEFAULT_TENANT_ID
+        # Dòng cũ mặc định KÍN, khớp `DEFAULT 'private'` của cột DB.
+        assert row["visibility"] == "private"
 
     def test_header_upgrade_is_idempotent(self, raw_module):
         ru, path = raw_module
@@ -588,7 +598,7 @@ class TestRawUploadsMigration:
 
 class TestProjections:
     def test_sample_projection_forces_a_tenant(self):
-        from app.dataset_samples import _db_row_to_csv_row
+        from app.modules.dataset.samples import _db_row_to_csv_row
 
         assert _db_row_to_csv_row({"sample_uid": "a"})[TENANT_COLUMN] == DEFAULT_TENANT_ID
         assert _db_row_to_csv_row(
@@ -596,7 +606,7 @@ class TestProjections:
         )[TENANT_COLUMN] == "truong-b"
 
     def test_class_projection_forces_a_tenant(self):
-        from app.catalog_sync import _db_class_row_to_label_row
+        from app.modules.dataset.catalog_sync import _db_class_row_to_label_row
 
         assert _db_class_row_to_label_row({"class_uid": "c"})[
             TENANT_COLUMN
@@ -889,7 +899,7 @@ class TestAgainstPostgres:
 
     def test_projection_of_a_real_db_row_keeps_the_tenant(self, tenant_b):
         """Ties the reconcile query to the CSV projection end to end."""
-        from app.dataset_samples import _db_row_to_csv_row
+        from app.modules.dataset.samples import _db_row_to_csv_row
         from app.storage.metadata_db import list_active_samples
 
         row = next(r for r in list_active_samples() if r["sample_uid"] == SAMPLE_UID)
@@ -911,10 +921,10 @@ class TestRebuildFromCsv:
         def run(sample_row):
             # Wipe only the SAMPLE; the class stays so the FK is satisfiable.
             _execute("DELETE FROM samples WHERE sample_uid = %s", (SAMPLE_UID,))
-            import app.dataset_manager as dm
-            import app.dataset_samples as ds
-            import app.raw_uploads as ru
-            from app.db import sync_missing_data_on_startup
+            from app.modules.dataset import catalog as dm
+            from app.modules.dataset import raw_uploads as ru
+            from app.modules.dataset import samples as ds
+            from app.bootstrap.database import sync_missing_data_on_startup
 
             # Vá các hàm ĐỌC TOÀN KHO, không phải bản có phạm vi.
             #

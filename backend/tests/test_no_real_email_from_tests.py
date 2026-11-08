@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import email_service as es
+from app.services import email as es
 
 
 def test_lop_chan_thay_hai_lop_smtp(_ensure_no_real_smtp=None):
@@ -93,7 +93,7 @@ def test_email_service_khong_duoc_bind_thang_lop_SMTP():
     """
     import inspect
 
-    from app import email_service
+    from app.services import email as email_service
 
     nguon = inspect.getsource(email_service)
     assert "from smtplib import" not in nguon, (

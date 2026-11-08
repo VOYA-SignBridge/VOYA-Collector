@@ -22,9 +22,9 @@ import uuid
 
 import pytest
 
-from app import workspace_admin as wa
+from app.modules.admin import workspace_admin as wa
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -35,7 +35,7 @@ def _ensure_schema():
 @pytest.fixture
 def tenant_plus():
     """Tenant gói `plus` — cần một gói CÓ trần để phép kiểm vượt trần có nghĩa."""
-    from app import plans, tenant_admin
+    from app.modules.saas import plans, tenant_admin
     from conftest import purge_tenant
 
     tenant_id = f"ws{uuid.uuid4().hex[:10]}"

@@ -190,7 +190,7 @@ class TestDuongNangCap:
         của cùng một từ cùng tồn tại được, và bản trùng thật thì vẫn bị chặn.
         """
         from app.storage.metadata_db import _execute, _fetch_all, migrate_database
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         migrate_database(note="test: đường nâng cấp trước-region", stamp=False)
 

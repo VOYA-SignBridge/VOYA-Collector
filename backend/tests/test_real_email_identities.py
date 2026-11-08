@@ -29,7 +29,7 @@ from accounts import (
     username_for,
 )
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 # --------------------------------------------------------------------------- hạ tầng
@@ -107,7 +107,7 @@ def tai_khoan_that(request):
     phá dữ liệu của người khác, kể cả trên bản sao.
     """
     refuse_to_touch_production()
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     email = request.param
     with system_scope("test: tim tai khoan san co"):
@@ -137,15 +137,16 @@ class TestMotDiaChiMotTaiKhoan:
     người dùng phụ thuộc vào một thứ không xác định.
     """
 
-    @pytest.mark.parametrize("email", ALL_EMAILS)
-    def test_tra_cuu_khong_phan_biet_hoa_thuong(self, email):
+    @pytest.mark.parametrize("tai_khoan_that", ALL_EMAILS, indirect=True)
+    def test_tra_cuu_khong_phan_biet_hoa_thuong(self, tai_khoan_that):
         """Đăng nhập bằng ĐỊA CHỈ VIẾT HOA phải ra đúng tài khoản đó."""
-        from app.auth import _fetch_user_by_login
+        from app.modules.identity._web_compat import _fetch_user_by_login
 
+        user, _ = tai_khoan_that
+        email = user["email"]
         thuong = _fetch_user_by_login(email)
         hoa = _fetch_user_by_login(email.upper())
-        if thuong is None:
-            pytest.skip(f"{email} chưa có tài khoản trong cơ sở dữ liệu này")
+        assert thuong is not None
         assert hoa is not None, "viết hoa địa chỉ làm mất tài khoản"
         assert hoa["id"] == thuong["id"]
 
@@ -200,14 +201,14 @@ class TestTenMienBonCap:
         assert req.email == EMAIL_UNIVERSITY
 
     def test_khong_bi_cat_khi_chuan_hoa(self):
-        from app.auth import _normalize_login
+        from app.modules.identity._web_compat import _normalize_login
 
         assert _normalize_login(f"  {EMAIL_UNIVERSITY.upper()}  ") == EMAIL_UNIVERSITY
 
     def test_dung_duoc_lam_dich_cua_ma_xac_minh(self):
         """`verification_codes.destination` là nơi địa chỉ được lưu nguyên văn;
         một chỗ cắt chuỗi ở đây sẽ khiến mã gửi đi không bao giờ khớp lại."""
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         digest = hash_code("123456", purpose="verify_email",
                            subject=EMAIL_UNIVERSITY)
@@ -232,7 +233,7 @@ class TestKhongLoMa:
             self, email, monkeypatch, caplog):
         import logging
 
-        from app import email_service as es
+        from app.services import email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         ma = "424242"
@@ -246,7 +247,7 @@ class TestKhongLoMa:
         """Sáu chữ số chỉ có một triệu khả năng: băm trần là duyệt cạn trong
         một giây. Bảng chỉ được giữ HMAC khoá bằng pepper ngoài cơ sở dữ liệu.
         """
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         moi_kha_nang = {
             hash_code(f"{n:06d}", purpose="verify_email", subject=email)
@@ -271,7 +272,7 @@ class TestMaKhongDungCheo:
     """
 
     def test_ma_gan_chat_voi_dia_chi_nhan(self):
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         ma = "135790"
         cho_gmail = hash_code(ma, purpose="verify_email", subject=EMAIL_GMAIL)
@@ -281,7 +282,7 @@ class TestMaKhongDungCheo:
 
     def test_ma_gan_chat_voi_muc_dich(self):
         """Mã xác minh email không được dùng làm mã đặt lại mật khẩu."""
-        from app.tokens import hash_code
+        from app.modules.security.tokens import hash_code
 
         ma = "135790"
         assert (hash_code(ma, purpose="verify_email", subject=EMAIL_OWNER)
@@ -333,8 +334,11 @@ class TestKhongLoDanhSach:
     def test_quen_mat_khau_tra_loi_giong_nhau_cho_dia_chi_co_va_khong(
             self, email, client):
         khong_co = f"khong-ton-tai-{uuid.uuid4().hex[:10]}@gmail.com"
-        a = client.post("/api/v1/auth/forgot-password", json={"email": email})
-        b = client.post("/api/v1/auth/forgot-password", json={"email": khong_co})
+        a = client.post("/api/v1/auth/forgot-password", json={"identifier": email})
+        b = client.post("/api/v1/auth/forgot-password", json={"identifier": khong_co})
+        # Trường này từng gửi sai tên: cả hai lượt cùng 422, giống hệt nhau, và ca đạt
+        # mà chưa bao giờ chạm tới đường tra tài khoản.
+        assert a.status_code == 200, a.text
         assert a.status_code == b.status_code, (
             "mã trạng thái khác nhau giữa địa chỉ có và không có đăng ký"
         )
@@ -354,17 +358,17 @@ class TestMotHopThuMotTaiKhoan:
         ("ai.do+x@outlook.com", "ai.do@outlook.com"),
     ])
     def test_canonical_email_gop_bi_danh(self, a, b):
-        from app.auth import canonical_email
+        from app.modules.identity._web_compat import canonical_email
         assert canonical_email(a) == canonical_email(b)
 
     def test_dau_cham_KHONG_bi_bo_ngoai_gmail(self):
-        from app.auth import canonical_email
+        from app.modules.identity._web_compat import canonical_email
         assert canonical_email("ai.do@ctu.edu.vn") != canonical_email("aido@ctu.edu.vn")
 
     def test_dang_ky_lan_hai_bang_bi_danh_bi_tu_choi_409(self):
         refuse_to_touch_production()
         from fastapi import HTTPException
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         tag = uuid.uuid4().hex[:8]
         base = f"hopthu{tag}@gmail.com"
@@ -382,7 +386,7 @@ class TestMotHopThuMotTaiKhoan:
         """Gõ `hop.thu@gmail.com` khi đăng ký bằng `hopthu@gmail.com` — cùng hộp
         thư, phải tìm ra tài khoản (đây là lỗi 'khôi phục mật khẩu' ngày 14/09)."""
         refuse_to_touch_production()
-        from app.auth import _fetch_user_by_login, create_user
+        from app.modules.identity._web_compat import _fetch_user_by_login, create_user
 
         tag = uuid.uuid4().hex[:8]
         first = create_user(username=f"hopthu{tag}", email=f"hopthu{tag}@gmail.com", password=PASSWORD)
@@ -398,7 +402,7 @@ class TestMotHopThuMotTaiKhoan:
         người quên mật khẩu đi đăng ký lại thay vì khôi phục."""
         refuse_to_touch_production()
         from fastapi import HTTPException
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         tag = uuid.uuid4().hex[:8]
         first = create_user(username=f"trung{tag}", email=f"trung{tag}@example.test", password=PASSWORD)

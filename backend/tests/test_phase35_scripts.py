@@ -17,6 +17,8 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"
+DATASET_SCRIPTS = SCRIPTS / "dataset"
+MIGRATION_SCRIPTS = SCRIPTS / "migration"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -38,8 +40,8 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         raise AssertionError(f"{name}" + (f"  -> {detail}" if detail else ""))
 
 
-def _run(script: str, *argv):
-    return subprocess.run([sys.executable, str(SCRIPTS / script), *map(str, argv)],
+def _run(script: Path, *argv):
+    return subprocess.run([sys.executable, str(script), *map(str, argv)],
                           capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT))
 
 
@@ -67,7 +69,7 @@ def test_coverage_report(ws: Path):
                  "signer_id": "S001", "session_id": "", "raw_landmarks_available": "0",
                  "quality_status": "unknown"})
     _write_csv(mdir / "dataset_manifest_t.csv", fields, rows)
-    r = _run("report_dataset_coverage.py", "--version", "t", "--manifest-dir", mdir,
+    r = _run(DATASET_SCRIPTS / "report_dataset_coverage.py", "--version", "t", "--manifest-dir", mdir,
              "--json-out", ws / "cov.json")
     check("coverage exit 0 (warnings allowed)", r.returncode == 0, r.stderr[-300:])
     rep = json.loads((ws / "cov.json").read_text(encoding="utf-8"))
@@ -78,7 +80,7 @@ def test_coverage_report(ws: Path):
     check("warns class_imbalance", "class_imbalance" in types, types)
     check("profiles include common + hoa_de",
           set(rep["profiles"]) >= {"common", "hoa_de"}, rep["profiles"].keys())
-    r = _run("report_dataset_coverage.py", "--version", "t", "--manifest-dir", mdir, "--strict")
+    r = _run(DATASET_SCRIPTS / "report_dataset_coverage.py", "--version", "t", "--manifest-dir", mdir, "--strict")
     check("--strict exits 1 with warnings", r.returncode == 1)
 
 
@@ -105,7 +107,7 @@ def test_pilot_validation(ws: Path):
                         left_hand_valid_mask=np.any(seq[:, :63] != 0.0, axis=1),
                         right_hand_valid_mask=np.any(seq[:, 63:] != 0.0, axis=1))
     # Mirrors exactly what the camera path writes: routers/upload.py builds the
-    # QC + provenance meta and dataset_samples.save_sequence_npz stamps
+    # QC + provenance meta and the dataset samples module stamps
     # storage_contract_version.
     good.with_suffix(".json").write_text(json.dumps({
         "signer_id": "S001", "session_id": "sess-1", "collection_campaign": "pilot_t",
@@ -132,10 +134,10 @@ def test_pilot_validation(ws: Path):
     _write_csv(signers, ["signer_id", "display_name", "is_active"],
                [{"signer_id": "S001", "display_name": "Trân", "is_active": "1"}])
 
-    r = _run("validate_pilot_samples.py", "--paths", good, "--features-root", ws / "features",
+    r = _run(DATASET_SCRIPTS / "validate_pilot_samples.py", "--paths", good, "--features-root", ws / "features",
              "--labels-csv", labels, "--signers-csv", signers, "--campaign", "pilot_t")
     check("valid v2 sample passes", r.returncode == 0, r.stdout[-300:])
-    r = _run("validate_pilot_samples.py", "--paths", bad, "--features-root", ws / "features",
+    r = _run(DATASET_SCRIPTS / "validate_pilot_samples.py", "--paths", bad, "--features-root", ws / "features",
              "--labels-csv", labels, "--signers-csv", signers)
     check("legacy sample fails gate", r.returncode == 1, r.stdout[-300:])
     check("missing keys reported", "npz missing keys" in r.stdout, r.stdout[-300:])
@@ -160,7 +162,7 @@ def test_quarantine(ws: Path):
 import sys, runpy
 sys.argv = ['quarantine_files.py', '--decisions', r'{decisions}', '--quarantine-root', r'{ws / 'dataset' / 'quarantine'}']
 import importlib.util
-spec = importlib.util.spec_from_file_location('q', r'{SCRIPTS / 'quarantine_files.py'}')
+spec = importlib.util.spec_from_file_location('q', r'{MIGRATION_SCRIPTS / 'quarantine_files.py'}')
 m = importlib.util.module_from_spec(spec)
 m.__dict__['__name__'] = 'q'
 spec.loader.exec_module(m)

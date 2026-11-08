@@ -24,8 +24,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth
+from app.modules.identity import _web_compat as auth
 from app.main import app
+from app.modules.training.schemas import SplitProvenance
 from app.storage.metadata_db import _execute, _fetch_all
 
 PW = "PipePass12!"
@@ -154,11 +155,11 @@ def _post_video(c, *, label="xin chào", upload_uid=None, extra=None):
 def test_video_upload_stores_raw_and_returns_uid(user_client):
     c, _ = user_client
     captured = {}
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
-         patch("app.routers.upload.save_upload_with_limit", return_value=(17, "/dataset/raw/clip.mp4")), \
-         patch("app.routers.upload.append_raw_upload_row", side_effect=lambda row: captured.update(row)), \
+    with patch("app.modules.dataset.raw_video_upload_service.get_or_register_class", return_value=_fake_class()), \
+         patch("app.modules.dataset.raw_video_upload_service.save_upload_with_limit", return_value=(17, "/dataset/raw/clip.mp4")), \
+         patch("app.modules.dataset.raw_video_upload_service.append_raw_upload_row", side_effect=lambda row: captured.update(row)), \
          patch("app.storage.metadata_db.insert_raw_upload") as ins, \
-         patch("app.routers.upload.find_raw_upload", return_value=None):
+         patch("app.modules.dataset.raw_video_upload_service.find_raw_upload", return_value=None):
         r = _post_video(c)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -175,7 +176,7 @@ def test_video_upload_is_idempotent_on_upload_uid(user_client):
     c, _ = user_client
     uid = uuid.uuid4().hex  # valid 32-hex
     existing = {"upload_uid": uid, "session_id": "s1", "storage_url": "/dataset/x.mp4"}
-    with patch("app.routers.upload.find_raw_upload", return_value=existing):
+    with patch("app.modules.dataset.raw_video_upload_service.find_raw_upload", return_value=existing):
         r = _post_video(c, upload_uid=uid)
     assert r.status_code == 200
     body = r.json()
@@ -183,10 +184,19 @@ def test_video_upload_is_idempotent_on_upload_uid(user_client):
     assert body["upload_uid"] == uid
 
 
+def test_video_retry_returns_before_revalidating_fields(user_client):
+    c, _ = user_client
+    uid = uuid.uuid4().hex
+    existing = {"upload_uid": uid, "session_id": "s1", "storage_url": "/dataset/x.mp4"}
+    with patch("app.modules.dataset.raw_video_upload_service.find_raw_upload", return_value=existing):
+        r = _post_video(c, label="   ", upload_uid=uid)
+    assert r.status_code == 200
+    assert r.json()["duplicate"] is True
+
+
 def test_video_upload_rejects_empty_label(user_client):
     c, _ = user_client
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()):
-        r = _post_video(c, label="   ")
+    r = _post_video(c, label="   ")
     assert r.status_code == 422
 
 
@@ -204,7 +214,7 @@ def test_process_single_upload_uid_enqueues(user_client):
     c, _ = user_client
     uid = uuid.uuid4().hex
     row = {"upload_uid": uid, "storage_url": "/dataset/x.mp4", "label_original": "x"}
-    with patch("app.routers.upload.find_raw_upload", return_value=row), \
+    with patch("app.modules.dataset.video_processing_service.find_raw_upload", return_value=row), \
          patch("app.tasks.enqueue_process_video", _fake_task()):
         r = c.post("/api/v1/upload/video/process", json={"upload_uid": uid}, headers=_csrf(c))
     assert r.status_code == 200
@@ -214,7 +224,7 @@ def test_process_single_upload_uid_enqueues(user_client):
 
 def test_process_reports_invalid_and_missing_uids(user_client):
     c, _ = user_client
-    with patch("app.routers.upload.find_raw_upload", return_value=None), \
+    with patch("app.modules.dataset.video_processing_service.find_raw_upload", return_value=None), \
          patch("app.tasks.enqueue_process_video", _fake_task()):
         r = c.post("/api/v1/upload/video/process",
                    json={"upload_uids": ["zzz", uuid.uuid4().hex]}, headers=_csrf(c))
@@ -231,7 +241,10 @@ def test_process_requires_some_selector(user_client):
 
 def test_process_by_class_404_when_no_uploads(user_client):
     c, _ = user_client
-    with patch("app.routers.upload.find_raw_uploads_by_class", return_value=[]):
+    with patch(
+        "app.modules.dataset.video_processing_service.find_raw_uploads_by_class",
+        return_value=[],
+    ):
         r = c.post("/api/v1/upload/video/process",
                    json={"class_uid": "nope"}, headers=_csrf(c))
     assert r.status_code == 404
@@ -262,8 +275,13 @@ def test_camera_valid_frames_build_a_seqlen_x_126_sequence(user_client):
         seen["shape"] = seq.shape
         return "/dataset/samples/x.npz"
 
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
-         patch("app.routers.upload.save_sequence_npz", side_effect=_capture):
+    with patch(
+        "app.modules.dataset.camera_capture_service.get_or_register_class",
+        return_value=_fake_class(),
+    ), patch(
+        "app.modules.dataset.camera_capture_service.save_sequence_npz",
+        side_effect=_capture,
+    ):
         r = c.post("/api/v1/upload/camera",
                    json={"label": "xin chào", "frames": [_good_frame() for _ in range(60)]},
                    headers=_csrf(c))
@@ -286,8 +304,13 @@ def test_camera_all_zero_frames_rejected_by_quality_gate(user_client):
     # 200 {"success": false} — the old shape gave the client nothing to branch
     # on and left no record of WHY the capture was refused.
     c, _ = user_client
-    with patch("app.routers.upload.get_or_register_class", return_value=_fake_class()), \
-         patch("app.routers.upload.save_sequence_npz", return_value="/x.npz"):
+    with patch(
+        "app.modules.dataset.camera_capture_service.get_or_register_class",
+        return_value=_fake_class(),
+    ), patch(
+        "app.modules.dataset.camera_capture_service.save_sequence_npz",
+        return_value="/x.npz",
+    ):
         r = c.post("/api/v1/upload/camera",
                    json={"label": "x", "frames": [_zero_frame() for _ in range(60)]},
                    headers=_csrf(c))
@@ -299,8 +322,10 @@ def test_camera_all_zero_frames_rejected_by_quality_gate(user_client):
 
 def test_camera_too_many_frames_rejected(user_client, monkeypatch):
     c, _ = user_client
-    from app.routers import upload as up
-    monkeypatch.setattr(up.settings, "max_camera_frames", 5, raising=False)
+    from app.modules.dataset import camera_capture_service
+    monkeypatch.setattr(
+        camera_capture_service.settings, "max_camera_frames", 5, raising=False
+    )
     r = c.post("/api/v1/upload/camera",
                json={"label": "x", "frames": [_good_frame() for _ in range(6)]},
                headers=_csrf(c))
@@ -312,9 +337,21 @@ def test_camera_too_many_frames_rejected(user_client, monkeypatch):
 # training start + promote (model export) — lifecycle guards
 # ===========================================================================
 
+def _usable_training_split(**_kwargs):
+    """This module tests dispatch/persistence, not split artifact validation."""
+    return SplitProvenance(
+        split_id="test-operational-split",
+        purpose="operational",
+        owner_state="owned",
+        identity_column="user_id",
+        signer_disjoint=True,
+        counts={"train": 2, "val": 1, "test": 1},
+    )
+
 def test_training_start_dispatches_and_persists(user_client):
     c, _ = user_client
-    with patch("app.training_tasks.run_training_job", _fake_task()):
+    with patch("app.routers.training._split_provenance", _usable_training_split), \
+         patch("app.modules.training.tasks.run_training_job", _fake_task()):
         r = c.post("/api/v1/training/start", json={"epochs": 3}, headers=_csrf(c))
     assert r.status_code == 200, r.text
     job = r.json()
@@ -342,7 +379,8 @@ def test_training_start_returns_503_when_dispatch_fails(user_client):
     broken = MagicMock()
     broken.apply_async.side_effect = RuntimeError("redis down")
     try:
-        with patch("app.training_tasks.run_training_job", broken):
+        with patch("app.routers.training._split_provenance", _usable_training_split), \
+             patch("app.modules.training.tasks.run_training_job", broken):
             r = c.post("/api/v1/training/start", json={}, headers=_csrf(c))
         assert r.status_code == 503
         assert ("trainer" in r.json()["detail"].lower()
@@ -370,7 +408,10 @@ def test_promote_unknown_job_is_404(admin_client):
 
 
 def test_promote_requires_admin(user_client):
-    c, _ = user_client  # normal user
+    c, u = user_client
+    # Fixture cấp vai `editor`, mà editor của tổ chức được promote. Người không có
+    # vai ở tổ chức mới là người phải bị chặn.
+    _execute("UPDATE memberships SET legacy_role = NULL WHERE user_id = %s", (u["id"],))
     r = c.post("/api/v1/training/jobs/whatever/promote", headers=_csrf(c))
     assert r.status_code == 403
 
@@ -433,7 +474,7 @@ def test_promote_completed_tcn_job_deploys_model(admin_client, tmp_path, monkeyp
                    return_value=str(tmp_path / "deployed" / "model.pt")), \
              patch("app.routers.training._update_registry", return_value=True), \
              patch("app.routers.training._notify_realtime_service_reload", return_value=True), \
-             patch("app.training_tasks.backup_promoted_checkpoint_task", _fake_task()):
+             patch("app.modules.training.tasks.backup_promoted_checkpoint_task", _fake_task()):
             r = c.post(f"/api/v1/training/jobs/{job_id}/promote", headers=_csrf(c))
         assert r.status_code == 200, r.text
         body = r.json()

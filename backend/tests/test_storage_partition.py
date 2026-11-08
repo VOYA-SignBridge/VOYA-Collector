@@ -17,15 +17,15 @@ from __future__ import annotations
 
 import pytest
 
-from app import dataset_manager
-from app.dataset_manager import (
+from app.modules.dataset import catalog as dataset_manager
+from app.modules.dataset.catalog import (
     ClassMetadata,
     ambient_tenant,
     ambient_tenant_features_root,
     tenant_features_root,
 )
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import no_scope, system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import no_scope, system_scope, tenant_scope
 
 
 def features_root():
@@ -92,7 +92,7 @@ class TestLayout:
 
     def test_tenant_id_cannot_escape_the_root(self):
         """`../` in a tenant id would write outside the dataset entirely. The
-        restricted alphabet in `app.tenancy` is what prevents it, so this pins
+        restricted alphabet in `app.modules.saas.tenancy` is what prevents it, so this pins
         that the storage layer actually relies on the validator rather than
         constructing the path first and checking later."""
         for bad in ("../etc", "a/b", "..", "a\\b"):
@@ -114,7 +114,7 @@ class TestAmbientTenant:
 
     def test_system_scope_writes_as_the_bootstrap_tenant(self):
         """Platform work — the CSV import, a CLI — creates rows that provably
-        predate multi-tenancy. Same answer `app.tenancy` gives for an absent
+        predate multi-tenancy. Same answer `app.modules.saas.tenancy` gives for an absent
         value everywhere else."""
         with system_scope("test"):
             assert ambient_tenant() == DEFAULT_TENANT_ID
@@ -153,19 +153,19 @@ class TestOwnerSurvivesEveryRoundTrip:
     }
 
     def test_labels_csv_row(self):
-        from app.dataset_manager import _build_meta_from_row
+        from app.modules.dataset.catalog import _build_meta_from_row
 
         assert _build_meta_from_row(dict(self.ROW)).tenant_id == "truong-b"
 
     def test_catalog_sync_row(self):
-        from app.catalog_sync import _build_class_meta_from_row
+        from app.modules.dataset.catalog_sync import _build_class_meta_from_row
 
         assert _build_class_meta_from_row(dict(self.ROW)).tenant_id == "truong-b"
 
     def test_blank_tenant_means_the_bootstrap_tenant(self):
         """Rows written before the column existed. Consistent with every other
-        absent-value decision in `app.tenancy`."""
-        from app.dataset_manager import _build_meta_from_row
+        absent-value decision in `app.modules.saas.tenancy`."""
+        from app.modules.dataset.catalog import _build_meta_from_row
 
         row = dict(self.ROW, tenant_id="")
         assert _build_meta_from_row(row).tenant_id == DEFAULT_TENANT_ID
@@ -173,7 +173,7 @@ class TestOwnerSurvivesEveryRoundTrip:
     def test_path_follows_the_owner_not_the_caller(self):
         """The decisive property: a platform job acting for nobody must still
         write tenant B's class into tenant B's tree."""
-        from app.dataset_manager import _build_meta_from_row
+        from app.modules.dataset.catalog import _build_meta_from_row
 
         meta = _build_meta_from_row(dict(self.ROW))
         with system_scope("test"):
@@ -183,7 +183,7 @@ class TestOwnerSurvivesEveryRoundTrip:
 
 class TestAuditToleratesThePartition:
     def test_scan_does_not_report_the_partition_dir_as_a_language(self, tmp_path):
-        from app.feature_structure_audit import scan
+        from scripts.migration.feature_structure_audit import scan
 
         (tmp_path / "_tenants" / "truong-b" / "vn" / "bac" / "class_x").mkdir(parents=True)
         (tmp_path / "vn" / "bac" / "class_y").mkdir(parents=True)

@@ -43,7 +43,7 @@ if str(REPO_ROOT) not in sys.path:
 def hai_tenant():
     """Hai tenant thật, dọn sạch sau. Tên có tiền tố để không lẫn dữ liệu khác."""
     from app.storage.metadata_db import _execute
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     # Chữ thường, khớp `_TENANT_ID_RE = \A[a-z0-9][a-z0-9_-]{0,62}\Z`.
     # `normalize_tenant_id` TỪ CHỐI id sai dạng thay vì sửa ngầm, đúng thiết kế
@@ -70,7 +70,7 @@ def _doc(sql, params=None):
 class TestDocTrongPhamViTenant:
     def test_khong_co_ngu_canh_thi_KHONG_THAY_GI(self, hai_tenant):
         """Hỏng-thì-đóng. Thiếu ngữ cảnh phải là 0 dòng, không phải mọi dòng."""
-        from app.tenant_context import no_scope
+        from app.modules.saas.tenant_context import no_scope
 
         with no_scope():
             assert _doc("SELECT tenant_id FROM tenants") == []
@@ -81,7 +81,7 @@ class TestDocTrongPhamViTenant:
         Câu SQL dưới đây KHÔNG có `WHERE tenant_id` — đúng kiểu lỗi đã gây ba
         sự cố fail-open ở mặt phẳng danh tính. RLS phải bù vào chỗ đó.
         """
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         a, b = hai_tenant
         with tenant_scope(a):
@@ -91,7 +91,7 @@ class TestDocTrongPhamViTenant:
 
     def test_hoi_DICH_DANH_tenant_khac_van_KHONG_thay(self, hai_tenant):
         """Đoán id của tenant khác không mở được gì."""
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         a, b = hai_tenant
         with tenant_scope(a):
@@ -107,7 +107,7 @@ class TestGhiTrongPhamViTenant:
     """
 
     def _cua_b(self, b):
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: đọc lại bằng phạm vi nền tảng"):
             r = _doc("SELECT display_name, tenant_id FROM tenants WHERE tenant_id = %s", (b,))
@@ -115,7 +115,7 @@ class TestGhiTrongPhamViTenant:
 
     def test_UPDATE_tenant_khac_khong_cham_duoc_dong_nao(self, hai_tenant):
         from app.storage.metadata_db import _execute
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         a, b = hai_tenant
         truoc = self._cua_b(b)
@@ -128,7 +128,7 @@ class TestGhiTrongPhamViTenant:
 
     def test_DELETE_tenant_khac_khong_cham_duoc_dong_nao(self, hai_tenant):
         from app.storage.metadata_db import _execute
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         a, b = hai_tenant
         with tenant_scope(a):
@@ -139,7 +139,7 @@ class TestGhiTrongPhamViTenant:
     def test_INSERT_mao_danh_tenant_khac_bi_TU_CHOI(self, hai_tenant):
         """Vế WITH CHECK. Thiếu nó thì A tạo được dòng mang nhãn B."""
         from app.storage.metadata_db import _execute
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         a, _ = hai_tenant
         gia = f"ISO-FAKE-{uuid.uuid4().hex[:8]}"
@@ -183,7 +183,7 @@ class TestGhiTrongPhamViTenant:
         một tài nguyên từ A sang B".
         """
         from app.storage.metadata_db import _execute
-        from app.tenant_context import tenant_scope
+        from app.modules.saas.tenant_context import tenant_scope
 
         a, b = hai_tenant
         with tenant_scope(a):
@@ -198,7 +198,7 @@ class TestDuongDieuKhien_VanChayDuoc:
     """Bật RLS mà làm chết đường điều khiển thì là đổi lỗi này lấy lỗi khác."""
 
     def test_pham_vi_nen_tang_van_liet_ke_duoc_moi_tenant(self, hai_tenant):
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         a, b = hai_tenant
         with system_scope("test: đường điều khiển liệt kê mọi tenant"):
@@ -214,7 +214,7 @@ class TestDuongDieuKhien_VanChayDuoc:
         trả 0 dòng và endpoint kết luận "Tenant không tồn tại" — một cái 404
         nghe hợp lý cho một tenant vẫn đang ở đó.
         """
-        from app.tenant_context import system_scope, tenant_scope
+        from app.modules.saas.tenant_context import system_scope, tenant_scope
 
         a, b = hai_tenant
         with tenant_scope(a):

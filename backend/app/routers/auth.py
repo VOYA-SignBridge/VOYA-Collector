@@ -6,9 +6,9 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status, Depends  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.config import settings
-from app.auth import (
+from app.modules.identity._web_compat import (
     _fetch_user_by_id,
     authenticate_user,
     create_access_token,
@@ -18,20 +18,21 @@ from app.auth import (
     new_session_family,
     create_user,
     get_current_user,
-    request_password_reset,
     reset_password_with_token,
     revoke_refresh_token,
     rotate_refresh_token,
     verify_password,
 )
-from app.cookie_auth import (
+from app.modules.identity.cookies import (
     REFRESH_COOKIE,
     clear_auth_cookies,
     generate_csrf_token,
     set_auth_cookies,
 )
-from app.public_url import resolve_frontend_base_url
-from app.rate_limit import (
+from app.modules.identity import account_workflows
+from app.modules.security import account_controls, audit_log
+from app.core.public_url import resolve_frontend_base_url
+from app.modules.security._web_compat import (
     check_login_allowed,
     check_register_allowed,
     client_ip,
@@ -40,8 +41,6 @@ from app.rate_limit import (
     register_failed_login,
     reset_login_attempts,
 )
-from app.email_service import send_password_reset_email
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -130,6 +129,11 @@ class UserOut(BaseModel):
     # mục Kiểm duyệt sẽ giấu nó khỏi đúng những người nó sinh ra để phục vụ.
     can_moderate: bool = False
 
+    # Cùng tính chất với `can_moderate`, và cần vì `tenant_role` không thay được:
+    # `tenant_role` đọc tổ chức NHÀ, còn `require_tenant_editor` xét tổ chức ĐANG
+    # LÀM VIỆC. Người có nhà ở A làm việc ở B sẽ thấy nút theo vai ở A rồi ăn 403.
+    can_edit_tenant: bool = False
+
 
 class MessageResponse(BaseModel):
     message: str
@@ -147,9 +151,29 @@ def _public_user(user: dict) -> dict:
     dạng (hồ sơ hoặc vé hai bước) đã vô tình gỡ luôn bộ lọc, và băm bcrypt đi ra
     theo mọi lượt đăng nhập thành công.
     """
-    return UserOut(**_with_capabilities(user)).model_dump() \
+    return UserOut(**_with_capabilities_at_work(user)).model_dump() \
         if hasattr(UserOut, "model_dump") \
-        else UserOut(**_with_capabilities(user)).dict()
+        else UserOut(**_with_capabilities_at_work(user)).dict()
+
+
+def _with_capabilities_at_work(user: dict) -> dict:
+    """`_with_capabilities` cho đường chưa có vé còn hạn: `/login`, `/login/2fa`, `/refresh`.
+
+    Các đường này vào với phạm vi khách, nên `can_moderate` và `can_edit_tenant` đọc ra
+    quyền ở Community thay vì ở nơi người đó đang làm việc, và lệch với `/me`.
+    """
+    from app.modules.saas.tenant_context import tenant_scope
+    from app.modules.saas.tenant_middleware import _tenant_of_user
+
+    try:
+        noi_lam_viec = _tenant_of_user(str(user.get("id") or ""))
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được nơi làm việc của %s", user.get("id"))
+        noi_lam_viec = None
+    if not noi_lam_viec:
+        return _with_capabilities(user)
+    with tenant_scope(noi_lam_viec):
+        return _with_capabilities(user)
 
 
 def _with_capabilities(user: dict) -> dict:
@@ -182,7 +206,7 @@ def _with_capabilities(user: dict) -> dict:
     cuối mà giao diện gọi trước mọi thứ khác, và để nó ngã vì một chi tiết
     trang trí là đổi một mục menu thiếu lấy một màn hình trắng.
     """
-    from app.vocabulary_registry import tenant_role
+    from app.modules.dataset.vocabulary_registry import tenant_role
 
     out = dict(user)
     try:
@@ -197,12 +221,27 @@ def _with_capabilities(user: dict) -> dict:
     # thuộc đó, và thêm một lượt đọc bảng vào nó để phục vụ một mục menu là trả
     # giá trên từng request.
     try:
-        from app.moderation_admin import can_moderate
+        from app.modules.admin.moderation_admin import can_moderate
+        from app.modules.saas.tenant_context import current_tenant
 
-        out["can_moderate"] = can_moderate(out)
+        # Cùng tenant mà `/moderation/*` sẽ kiểm, để mục menu không hiện ra
+        # rồi trả 403 ở tenant người dùng không có vai duyệt.
+        out["can_moderate"] = can_moderate(
+            out, current_tenant() or str(out.get("tenant_id") or "") or None)
     except Exception:  # noqa: BLE001
         logger.warning("[AUTH] không tra được quyền kiểm duyệt cho %s", out.get("id"))
         out["can_moderate"] = False
+
+    try:
+        from app.modules.saas.tenant_context import current_tenant
+        from app.modules.dataset.vocabulary_registry import can_edit_registry
+
+        out["can_edit_tenant"] = can_edit_registry(
+            current_tenant() or str(out.get("tenant_id") or ""),
+            str(out.get("id") or ""), bool(out.get("is_admin")))
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được quyền biên tập cho %s", out.get("id"))
+        out["can_edit_tenant"] = False
     return out
 
 
@@ -227,7 +266,7 @@ def _validate_consents(payload: "RegisterRequest") -> dict:
     tầng khác: `verify_deployment` báo ĐỎ khi thiếu văn bản bắt buộc, nên nó lộ
     ra lúc triển khai chứ không lộ ra ở toà.
     """
-    from app import legal
+    from app.modules.legal import legal
 
     if legal.missing_for_registration():
         # Deployment chưa công bố điều khoản. Ghi ở mức WARNING chứ không im
@@ -280,8 +319,8 @@ def _record_consents(user_id: str, consents: dict, request: Request) -> None:
     không", và câu hỏi đó chỉ cần SO SÁNH. Lưu địa chỉ thô là thu thêm dữ liệu
     cá nhân cho một mục đích không đòi hỏi nó.
     """
-    from app import legal
-    from app.rate_limit import client_ip
+    from app.modules.legal import legal
+    from app.modules.security._web_compat import client_ip
 
     ip_hash = hashlib.sha256(
         f"{client_ip(request)}|{user_id}".encode("utf-8")).hexdigest()
@@ -289,66 +328,6 @@ def _record_consents(user_id: str, consents: dict, request: Request) -> None:
     for kind, version in consents.items():
         legal.record_consent(user_id, kind, version,
                              ip_hash=ip_hash, user_agent=agent)
-
-
-def _send_welcome_verification(user: dict) -> None:
-    """Gửi mã xác minh ngay khi tài khoản vừa tạo.
-
-    Không có bước này thì `REQUIRE_EMAIL_VERIFICATION` là một cái bẫy: người
-    dùng đăng ký xong, đăng nhập, bị từ chối vì chưa xác minh — và không có gì
-    trong hộp thư để họ xác minh bằng. Mã phải đi CÙNG lúc tài khoản ra đời,
-    không phải chờ họ tự tìm ra một nút ở đâu đó.
-
-    **Không bao giờ làm hỏng việc đăng ký.** Tài khoản đã tồn tại và giao dịch
-    đã xong; ném lỗi ở đây trả về 500 cho một request đã thành công, và người
-    dùng sẽ thử đăng ký lại rồi đụng chính username họ vừa chiếm. SMTP hỏng là
-    việc của người vận hành, và luôn còn đường `/auth/verify/send`.
-    """
-    from app import otp
-    from app.email_service import send_verification_code_email
-
-    try:
-        _, code = otp.issue(
-            user_id=user["id"], purpose="verify_email",
-            channel="email", destination=user["email"],
-        )
-        send_verification_code_email(user["email"], code, "verify_email")
-    except Exception as exc:
-        # Chỉ ghi TÊN LOẠI ngoại lệ. Thông điệp của một lỗi SMTP có thể mang
-        # theo cả nội dung thư — và nội dung thư ở đây chính là mã.
-        logger.warning(
-            "[REGISTER] không gửi được mã xác minh cho %s: %s",
-            user["id"], type(exc).__name__,
-        )
-
-
-def _deactivate_stranded_account(user_id: str, *, reason: str) -> None:
-    """Đóng một tài khoản vừa tạo mà không gắn được vào tổ chức nào.
-
-    Nó vẫn đang mang tenant gốc, và đó là trạng thái duy nhất không được phép
-    tồn tại ở dạng SỐNG. Vô hiệu hoá là thao tác nhỏ nhất đạt được điều đó —
-    xoá hẳn thì mất luôn dấu vết chấp thuận điều khoản vừa ghi, thứ có thể cần
-    tới nếu người dùng khiếu nại.
-
-    Nuốt lỗi có chủ ý: hàm này chạy trong nhánh xử lý một lỗi khác, và để nó
-    ném tiếp sẽ thay thế nguyên nhân thật bằng một lỗi thứ cấp.
-    """
-    try:
-        from app.storage.metadata_db import _execute
-
-        _execute("UPDATE users SET is_active = FALSE WHERE id = %s", (str(user_id),))
-        logger.error(
-            "[REGISTER] tài khoản %s bị vô hiệu hoá vì không tạo được tổ chức: %s",
-            user_id, reason,
-        )
-    except Exception as exc:
-        # Đây là trường hợp xấu nhất: một tài khoản sống trong tenant gốc.
-        # Không im lặng được — nó phải hiện ra ở cảnh báo để có người xử lý.
-        logger.critical(
-            "[REGISTER] KHÔNG vô hiệu hoá được tài khoản %s đang kẹt trong tenant "
-            "gốc (%s); cần xử lý bằng tay",
-            user_id, type(exc).__name__,
-        )
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -438,35 +417,36 @@ def register(payload: RegisterRequest, request: Request):
         # Re-read so the response carries the tenant the account actually ended
         # up in, not the one it was created in a moment ago.
         user = _fetch_user_by_id(user["id"]) or user
-    else:
-        # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
-        #
-        # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
-        # mời. Điều đó sai ở hai mức:
-        #
-        #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
-        #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
-        #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
-        #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
-        #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
-        #
-        # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
-        # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
-        # được ngay cả khi bước gắn vai bên dưới trượt.
-        #
-        # Nhưng gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì
-        # `access_gate` từ chối mọi lượt ghi — họ đăng nhập được, xem được, và
-        # không quay được. Trạng thái đó trông như hỏng chứ không như bị chặn,
-        # nên nó vào log ở mức ERROR chứ không im lặng.
-        try:
-            tenant_admin.join_community(user["id"])
-        except Exception:
-            logger.exception(
-                "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
-                "không ghi được gì cho tới khi có người cấp vai", user["id"])
-        user = _fetch_user_by_id(user["id"]) or user
+    # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
+    #
+    # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
+    # mời. Điều đó sai ở hai mức:
+    #
+    #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
+    #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
+    #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
+    #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
+    #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
+    #
+    # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
+    # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
+    # được ngay cả khi bước gắn vai bên dưới trượt.
+    #
+    # Cả người đăng ký qua lời mời cũng vào: lời mời không kèm vai không cấp gì, và
+    # bản trước bỏ qua họ, nên họ không ghi được gì tới lần backend khởi động lại.
+    #
+    # Gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì `access_gate`
+    # từ chối mọi lượt ghi — họ đăng nhập được, xem được, và không quay được. Trạng
+    # thái đó trông như hỏng chứ không như bị chặn, nên nó vào log ở mức ERROR.
+    try:
+        tenant_admin.join_community(user["id"])
+    except Exception:
+        logger.exception(
+            "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
+            "không ghi được gì cho tới khi có người cấp vai", user["id"])
+    user = _fetch_user_by_id(user["id"]) or user
 
-    _send_welcome_verification(user)
+    account_workflows.send_welcome_verification(user)
 
     register_account_created(ip)
     return user
@@ -543,13 +523,11 @@ def login(payload: LoginRequest, request: Request, response: Response):
 
     # Correct password but the account is locked by an admin → say so clearly.
     try:
-        from app import activity
-
-        lock = activity.get_user_lock(user["id"])
+        lock = account_controls.get_user_lock(user["id"])
         if lock:
             reason = lock.get("reason") or "vi phạm quy định"
             msg = f"Tài khoản của bạn đã bị khóa. Lý do: {reason}"
-            until = activity._fmt_until(lock.get("until") or 0)
+            until = account_controls.format_until(lock.get("until") or 0)
             if until:
                 msg += f" (mở lại lúc {until})"
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=msg)
@@ -633,7 +611,7 @@ def login_two_factor(payload: TwoFactorLoginRequest,
     mất điện thoại mà không có đường vào nào khác thì 2FA đã biến từ lớp bảo vệ
     thành cách tự khoá mình ra ngoài.
     """
-    from app import two_factor
+    from app.modules.security import two_factor
 
     ip = client_ip(request)
     # Cùng bộ đếm với bước một: không có nó, kẻ tấn công đã có mật khẩu chỉ cần
@@ -668,17 +646,13 @@ def login_two_factor(payload: TwoFactorLoginRequest,
 @router.get("/my-notice")
 def my_notice(current_user: dict = Depends(get_current_user)):
     """Pending admin notice (warning) for the logged-in user, if any."""
-    from app import activity
-
-    return {"warning": activity.get_user_warning(current_user["id"])}
+    return {"warning": account_controls.get_user_warning(current_user["id"])}
 
 
 @router.post("/my-notice/ack")
 def ack_my_notice(current_user: dict = Depends(get_current_user)):
     """Dismiss the pending warning after the user has read it."""
-    from app import activity
-
-    activity.ack_user_warning(current_user["id"])
+    account_controls.ack_user_warning(current_user["id"])
     return {"status": "ok"}
 
 
@@ -708,7 +682,7 @@ def refresh(request: Request, response: Response):
     # Cùng hình dạng với `/login` và `/me`. Giao diện gọi điểm cuối này khi vé
     # ngắn hạn hết hạn, và nếu nó trả hồ sơ NGHÈO hơn thì mỗi lần làm mới phiên
     # là một lần người dùng lặng lẽ mất mục Kiểm duyệt trên thanh điều hướng.
-    return _with_capabilities(user)
+    return _with_capabilities_at_work(user)
 
 
 @router.post("/logout", response_model=MessageResponse)
@@ -726,8 +700,8 @@ def logout(request: Request, response: Response):
     Chặn theo `jti` chứ không gọi `force_logout_user`: hàm kia đá MỌI thiết bị,
     nên đăng xuất trên điện thoại sẽ làm văng phiên trên máy tính.
     """
-    from app.auth import deny_this_access_token
-    from app.cookie_auth import ACCESS_COOKIE
+    from app.modules.identity._web_compat import deny_this_access_token
+    from app.modules.identity.cookies import ACCESS_COOKIE
 
     revoke_refresh_token(request.cookies.get(REFRESH_COOKIE) or "")
     deny_this_access_token(request.cookies.get(ACCESS_COOKIE) or "")
@@ -773,8 +747,8 @@ def update_me(
     `legal_document_events.actor_label` là bằng chứng lịch sử, sửa chúng theo
     tên mới là viết lại lịch sử.
     """
-    from app import audit
-    from app.account_rename import RenameError, rename_user
+    from app.modules.security import audit
+    from app.modules.admin.account_rename import RenameError, rename_user
 
     try:
         result = rename_user(str(current_user["id"]), payload.username)
@@ -815,16 +789,14 @@ def forgot_password(
 ):
     # Throttle per IP so nobody can spam reset emails / probe accounts.
     enforce_ip_limit(request, "forgot", max_calls=5, window=3600)
-    result = request_password_reset(payload.identifier.strip())
-    if result:
-        user, token = result
-        # Built from THIS request's host when that host is allowlisted, so a
-        # moved tunnel URL mails a working link without a redeploy; otherwise
-        # (or on a forged Host) it falls back to FRONTEND_BASE_URL.
-        reset_link = f"{resolve_frontend_base_url(request)}/reset-password?token={token}"
-        background_tasks.add_task(
-            send_password_reset_email, user["email"], user["username"], reset_link
-        )
+    # The workflow keeps account lookup and email dispatch outside the HTTP
+    # boundary.  Its boolean result is deliberately ignored to prevent user
+    # enumeration.
+    account_workflows.queue_password_reset(
+        payload.identifier,
+        resolve_frontend_base_url(request),
+        background_tasks.add_task,
+    )
 
     # Always the same response, whether or not the account exists.
     return {"message": _FORGOT_PASSWORD_GENERIC_MESSAGE}
@@ -881,8 +853,7 @@ def change_password(
     khẩu là "tôi nghi có người vào được tài khoản" — giữ lại các phiên cũ là bỏ
     sót đúng cái mình định đuổi. Giao diện phải nói trước điều này.
     """
-    from app import activity, audit, two_factor
-    from app.auth import _apply_password_reset, _identity_cursor
+    from app.modules.security import audit, two_factor
 
     # Chặn dò mật khẩu bằng cách gọi thẳng endpoint này với một access token đã
     # chiếm được. Cùng ngưỡng với `/reset-password`.
@@ -890,7 +861,7 @@ def change_password(
 
     if not verify_password(payload.current_password,
                            current_user.get("password_hash") or ""):
-        activity.log_security_event(
+        audit_log.log_security_event(
             "password.change_rejected", actor=current_user.get("username", ""),
             target=str(current_user["id"]), actor_user=current_user, request=request)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
@@ -917,14 +888,15 @@ def change_password(
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                     detail="Mã xác thực không đúng.")
 
-    with _identity_cursor() as cur:
-        _apply_password_reset(cur, str(current_user["id"]), payload.new_password)
+    account_workflows.apply_password_change(
+        str(current_user["id"]), payload.new_password
+    )
 
     audit.record(
         "account.password.change", actor=current_user, target_type="user",
         target_id=str(current_user["id"]),
         detail={"used_recovery_code": used_recovery}, request=request)
-    activity.log_security_event(
+    audit_log.log_security_event(
         "password.changed", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
 
@@ -1008,11 +980,9 @@ class ChangeEmailConfirmResponse(BaseModel):
 
 
 def _guard_email_change(current_user, password: str, request: Request) -> None:
-    from app import activity
-
     enforce_ip_limit(request, "change-email", max_calls=10, window=3600)
     if not verify_password(password, current_user.get("password_hash") or ""):
-        activity.log_security_event(
+        audit_log.log_security_event(
             "email.change_rejected", actor=current_user.get("username", ""),
             target=str(current_user["id"]), actor_user=current_user, request=request)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
@@ -1025,47 +995,21 @@ def change_email_start(
     request: Request,
     current_user=Depends(get_current_user),
 ):
-    from app import otp
-    from app.auth import _identity_cursor
-    from app.email_service import EmailNotConfigured, send_verification_code_email
+    from app.modules.security import otp
+    from app.services.email import EmailNotConfigured
 
     _guard_email_change(current_user, payload.current_password, request)
 
-    new_email = str(payload.new_email).strip().lower()
-    if new_email == str(current_user.get("email") or "").strip().lower():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail="Địa chỉ mới trùng địa chỉ đang dùng.")
-
-    # Kiểm trùng ở mặt phẳng DANH TÍNH, không phải trong tenant: `users.email` là
-    # khoá đăng nhập của cả nền tảng, nên "chưa ai dùng" phải đúng trên toàn hệ
-    # thống. Hỏi trong phạm vi tenant sẽ báo "chưa ai dùng" cho một địa chỉ đang
-    # thuộc tổ chức khác, rồi câu INSERT vỡ vì ràng buộc UNIQUE — một lỗi 500 ở
-    # bước cuối thay vì một câu trả lời rõ ràng ở bước đầu.
-    with _identity_cursor() as cur:
-        cur.execute("SELECT 1 FROM users WHERE lower(email) = %s AND id <> %s",
-                    (new_email, str(current_user["id"])))
-        if cur.fetchone():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="Địa chỉ này đã có tài khoản khác dùng.")
-    # Và cùng HỘP THƯ viết bằng bí danh — cùng quy tắc với đăng ký.
-    from app.auth import find_user_with_same_mailbox
-    if find_user_with_same_mailbox(new_email, exclude_user_id=str(current_user["id"])):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Hộp thư này đã có tài khoản khác dùng (địa chỉ viết khác nhưng cùng hộp thư).")
-
     try:
-        challenge_id, code = otp.issue(
-            user_id=current_user["id"], purpose="verify_email",
-            channel="email", destination=new_email)
+        result = account_workflows.begin_email_change(current_user, payload.new_email)
+    except account_workflows.AccountWorkflowError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except otp.OtpError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-
-    try:
-        send_verification_code_email(new_email, code, "verify_email")
     except EmailNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    return {"challenge_id": challenge_id, "sent_to": new_email,
+    return {"challenge_id": result["challenge_id"], "sent_to": result["sent_to"],
             "expires_in_minutes": settings.otp_ttl_minutes}
 
 
@@ -1075,48 +1019,21 @@ def change_email_confirm(
     request: Request,
     current_user=Depends(get_current_user),
 ):
-    from app import activity, audit, notifications, otp
-    from app.auth import _identity_cursor
+    from app.modules.security import audit, otp
 
     _guard_email_change(current_user, payload.current_password, request)
 
     try:
-        result = otp.verify(user_id=current_user["id"], purpose="verify_email",
-                            code=payload.code)
+        changed = account_workflows.confirm_email_change(current_user, payload.code)
     except otp.OtpError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    new_email = str(result["destination"]).strip().lower()
-    old_email = str(current_user.get("email") or "")
-
-    # Chỉ MỘT câu UPDATE, và đó là câu đúng — khác hẳn đổi tên đăng nhập.
-    #
-    # `rename_user` phải chạm vào năm bảng cộng `samples.csv` vì cái TÊN được
-    # chép vào dữ liệu ngay lúc ghi. Địa chỉ email thì không: cả lược đồ chỉ có
-    # hai cột mang email, `users.email` và `tenant_invitations.email`.
-    #
-    # Và cột thứ hai **cố ý không đổi theo**. Nó ghi lại địa chỉ mà lời mời đã
-    # được gửi TỚI — một sự kiện đã xảy ra, không phải một thuộc tính hiện tại
-    # của tài khoản. Viết lại nó theo địa chỉ mới là sửa lịch sử, cùng lý do
-    # `audit_log.actor_label` giữ nguyên tên cũ sau khi đổi tên đăng nhập.
-    with _identity_cursor() as cur:
-        cur.execute(
-            "UPDATE users SET email = %s, email_verified_at = NOW() WHERE id = %s",
-            (new_email, str(current_user["id"])))
-
-    # Báo cho chính chủ, và ghi cả hai nhật ký. Đổi địa chỉ nhận thư khôi phục
-    # là thao tác biến một phiên bị chiếm thành mất tài khoản vĩnh viễn — nếu
-    # chủ tài khoản không bao giờ biết, họ không có gì để tố cáo.
-    notifications.notify(
-        str(current_user["id"]), "security", "Địa chỉ email đã được đổi",
-        body=f"Từ {old_email} sang {new_email}.",
-        link="/settings/security", severity="critical")
     audit.record("account.email.change", actor=current_user, target_type="user",
                  target_id=str(current_user["id"]),
-                 detail={"old_email": old_email, "new_email": new_email},
+                 detail=changed,
                  request=request)
-    activity.log_security_event(
+    audit_log.log_security_event(
         "email.changed", actor=current_user.get("username", ""),
         target=str(current_user["id"]), actor_user=current_user, request=request)
 
-    return {"email": new_email, "email_verified": True}
+    return {"email": changed["new_email"], "email_verified": True}

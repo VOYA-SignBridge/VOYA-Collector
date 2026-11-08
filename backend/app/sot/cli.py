@@ -281,7 +281,7 @@ def main(argv=None) -> int:
     # would be rejected by the write policy — both silently, since each already
     # tolerates per-statement failures. Scoping the whole CLI is correct here in
     # a way it would not be for a request handler.
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope(f"sot cli: {getattr(args, 'cmd', 'unknown')}"):
         return args.func(args)

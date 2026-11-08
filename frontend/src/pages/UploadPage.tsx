@@ -1,5 +1,5 @@
 import { useState, Suspense, lazy, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import UploadVideoForm from "../components/UploadVideoForm";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
@@ -28,8 +28,12 @@ export default function UploadPage() {
   ] as const;
   const [pageTab, setPageTab] = useUrlTab("tab", UPLOAD_TABS, "capture");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialLabel = searchParams.get("label") || "";
+  const initialClassUid = searchParams.get("class_uid") || undefined;
   const { loading: authLoading, isAuthenticated } = useAuth();
-  const [tab, setTab] = useState<"video" | "camera">("camera");
+  const initialMethod = searchParams.get("method") === "video" ? "video" : "camera";
+  const [tab, setTab] = useState<"video" | "camera">(initialMethod);
   // Start with camera for faster data collection
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -209,7 +213,7 @@ export default function UploadPage() {
 
       {isAuthenticated && (
         <>
-          {tab === "video" && <UploadVideoForm onError={(m) => setError(m)} />}
+          {tab === "video" && <UploadVideoForm onError={(m) => setError(m)} initialLabel={initialLabel} initialClassUid={initialClassUid} />}
           {tab === "camera" && (
             <Suspense fallback={
               <div className="card">
@@ -222,6 +226,8 @@ export default function UploadPage() {
               <CaptureCamera
                 onError={(m: string) => setError(m)}
                 onSuccess={(m: string) => setFeedback({ type: 'success', message: m })}
+                initialLabel={initialLabel}
+                initialClassUid={initialClassUid}
               />
             </Suspense>
           )}

@@ -9,7 +9,7 @@ then ignored.
 
 These endpoints were first written at /vocabulary/community. That was wrong:
 this plane holds dialect and profile CONFIGURATION — no video, no landmarks, no
-consent record, no attribution — while "Community" in CTU-SignBridge means
+consent record, no attribution — while "Community" in CTU.SignBridge means
 contributed data and its governance (docs/01-architecture/COMMUNITY_DATA_COMMONS.md).
 The namespace has been handed back; the physical tables keep their
 `community_*` names until a migration renames them.
@@ -27,7 +27,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app import vocabulary_registry as vr
+from app.modules.dataset import vocabulary_registry as vr
 from app.storage import metadata_db as db
 
 
@@ -38,7 +38,7 @@ def _ensure_schema():
 
 @pytest.fixture
 def client():
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
 
     app.dependency_overrides[require_admin] = lambda: {
@@ -58,7 +58,7 @@ def tenant_user_client():
     alone would be enough to let a tenant user read the template if the other
     were ever relaxed.
     """
-    from app.auth import require_admin
+    from app.modules.identity._web_compat import require_admin
     from app.main import app
 
     app.dependency_overrides[require_admin] = lambda: {
@@ -614,7 +614,7 @@ def test_tenant_moi_nhan_duoc_phuong_ngu_vua_them(client):
     Đây là điều duy nhất thật sự quan trọng: thêm vào khuôn mà tenant mới không
     nhận được thì cửa ghi này vô nghĩa.
     """
-    from app import tenant_admin
+    from app.modules.saas import tenant_admin
     from conftest import purge_tenant
 
     ten = f"Kiem Tra {uuid.uuid4().hex[:6]}"

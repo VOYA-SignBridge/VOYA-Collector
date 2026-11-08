@@ -87,7 +87,7 @@ video thô **không bắt buộc rời khỏi máy người dùng**.
 | B2 | Danh sách gợi ý nhãn | — | Ô tìm "Tìm..."; rỗng thì "Không tìm thấy" |
 | B3 | Nút nhập bằng giọng nói | — | `SpeechInputButton`, nhãn "Giọng nói" |
 | B4 | Chỉ báo nhãn | — | **"Đã có {n} mẫu"** hoặc **"Nhãn mới ({n} nhãn hiện có)"** |
-| B5 | Ô nhập văn bản **(bắt buộc)** | rỗng | **"Người thực hiện \*"**, gợi ý "Ví dụ: Trân"; tên được làm sạch khi gõ |
+| B5 | Ô nhập văn bản **(bắt buộc)** | rỗng | **"Người thực hiện \*"**, gợi ý "Ví dụ: Nguyễn Văn A"; tên được làm sạch khi gõ |
 | B6 | Nút nhập bằng giọng nói | — | Cho ô B5 |
 | B7 | Hộp chọn | theo tuỳ chọn tài khoản | **"Ngôn ngữ"** |
 | B8 | Hộp chọn | theo tuỳ chọn tài khoản | **"Phương ngữ"** |
@@ -274,7 +274,7 @@ CN2.1: một mẫu đã trích đặc trưng.
 | B1 | Tiêu đề khối | — | **"Giá trị mặc định (áp dụng cho file mới)"** |
 | B2 | Ô nhập | rỗng | **"Nhãn mặc định"**, gợi ý "ví dụ: đi bộ" |
 | B3 | Nút giọng nói | — | "Dùng giọng nói để điền nhãn mặc định" |
-| B4 | Ô nhập | rỗng | **"Người ký hiệu"**, gợi ý "ví dụ: Trân" |
+| B4 | Ô nhập | rỗng | **"Người ký hiệu"**, gợi ý "ví dụ: Nguyễn Văn A" |
 | B5 | Nút giọng nói | — | "Dùng giọng nói để điền tên người ký hiệu" |
 | B6 | Dòng gợi ý | — | **"Gợi ý:"** + danh sách tên đã dùng |
 | B7 | Hộp chọn | — | **"Bộ ngôn ngữ"**, có mục **"+ Thêm mới..."** |

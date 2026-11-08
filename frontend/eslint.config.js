@@ -49,4 +49,12 @@ export default [
       'no-undef': 'off',
     },
   },
+  {
+    // Test doubles intentionally model partial and malformed values. Requiring
+    // production-grade types for every mock obscures what each test exercises.
+    files: ['**/*.{test,spec}.{ts,tsx}', '**/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 ]

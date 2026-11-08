@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass, registerClass } from "../api/dataset";
+import { getLabels, getClassesList, getClassesStats, updateClass, deleteClass, registerClass, requestClass } from "../api/dataset";
 import type { Label, ClassRow } from "../types";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/ui/PageHeader";
@@ -11,17 +11,20 @@ import LoadingScreen from "../components/LoadingScreen";
 import Badge from "../components/ui/Badge";
 import Modal from "../components/ui/Modal";
 import { SearchIcon, TagIcon } from "../components/ui/Icons";
+import { canEditTenant } from "../api/auth";
 import { useAuth } from "../hooks/useAuth";
 import { dialectLabel } from "../config/dialectLabels";
 import DialectBadge from "../components/DialectBadge";
 import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
 import { StarIcon, XIcon, GlobeIcon } from "../components/ui/Icons";
 import { useI18n } from "../i18n";
+import { catalogCSV } from "../utils/catalogExport";
 
 export default function LabelsPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const { loading: authLoading, isAdmin } = useAuth();
+  const { loading: authLoading, user } = useAuth();
+  const canEdit = canEditTenant(user);
   // The four dialect pickers below used to be four hand-written <option> lists
   // that disagreed with each other and could never offer a newly approved
   // dialect. They all read this now.
@@ -244,7 +247,7 @@ export default function LabelsPage() {
   }, [language]); // Chỉ phụ thuộc language, KHÔNG phụ thuộc dialect
 
   const exportJSON = () => {
-    const data = JSON.stringify(classes && classes.length > 0 ? classes : labels, null, 2);
+    const data = JSON.stringify(classes ?? labels, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -255,17 +258,11 @@ export default function LabelsPage() {
   };
 
   const exportCSV = useMemo(() => {
-    const rows = ['class_idx,label_original,slug'];
-    if (classes && classes.length > 0) {
-      classes.forEach(c => rows.push(`${c.class_idx},"${String(c.label_original).replace(/"/g, '""')}",${c.slug}`));
-    } else {
-      labels.forEach(l => rows.push(`${l.class_idx},"${l.label_original.replace(/"/g, '""')}",${l.slug}`));
-    }
-    return rows.join('\n');
+    return catalogCSV(classes ?? labels);
   }, [labels, classes]);
 
   const downloadCSV = () => {
-    const blob = new Blob([exportCSV], { type: 'text/csv' });
+    const blob = new Blob([exportCSV], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -329,14 +326,17 @@ export default function LabelsPage() {
     setError(null);
     setShowOperationLogs(false);
     try {
-      const result = await registerClass({
+      const payload = {
         label: nextLabel,
         language: createLanguage,
         dialect: createDialect,
         region: createRegion,
         is_common_language: createDialect === "common",
         is_common_global: false,
-      });
+      };
+      const result = canEdit
+        ? await registerClass(payload)
+        : await requestClass(payload);
       if (!result.ok) {
         setError(result.error || t("Không thể tạo nhãn."));
         return;
@@ -543,24 +543,29 @@ export default function LabelsPage() {
             </h2>
 
             <div className="flex items-center gap-2">
-              {!loading && renderItems.length > 0 && (
+              {!loading && (
                 <>
-                  {isAdmin && (
+                  {Boolean(user) && (
                     <Button variant="primary" size="sm" onClick={() => setCreateTarget(true)}>
-                      <span className="text-xs">{t("Tạo nhãn mới")}</span>
+                      <span className="text-xs">{t(canEdit ? "Tạo nhãn mới" : "Đề xuất nhãn mới")}</span>
                     </Button>
                   )}
-                  <Button variant="secondary" size="sm" onClick={exportJSON}>
-                    <span className="text-xs">{t("Xuất JSON")}</span>
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={downloadCSV}>
-                    <span className="text-xs">{t("Xuất CSV")}</span>
-                  </Button>
+                  {renderItems.length > 0 && <>
+                    <Button variant="secondary" size="sm" onClick={exportJSON}>
+                      <span className="text-xs">{t("Xuất JSON")}</span>
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={downloadCSV}>
+                      <span className="text-xs">{t("Xuất CSV")}</span>
+                    </Button>
+                  </>}
                 </>
               )}
             </div>
           </div>
           
+          <p className="mb-3 text-xs text-slate-500">
+            {t("JSON/CSV chỉ chứa danh mục nhãn. Để huấn luyện trên máy khác, tải gói dữ liệu NPZ trong Đóng góp dữ liệu.")}
+          </p>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center">
             <div className="min-w-0">
               <select className="input text-sm py-2.5" value={language} onChange={(e) => setLanguage(e.target.value)}>
@@ -777,7 +782,7 @@ export default function LabelsPage() {
                     </div>
                   )}
 
-                  {isAdmin ? (
+                  {canEdit ? (
                     <div className={`mt-3 grid grid-cols-3 gap-2 ${viewMode === 'list' ? 'sm:justify-end' : ''}`}>
                       <Button
                         variant="primary"
@@ -833,7 +838,7 @@ export default function LabelsPage() {
       <Modal
         isOpen={createTarget}
         onClose={() => !createSaving && setCreateTarget(false)}
-        title={t("Tạo nhãn mới")}
+        title={t(canEdit ? "Tạo nhãn mới" : "Đề xuất nhãn mới")}
       >
         <div className="space-y-4">
           <div className="rounded-lg border border-ctu-blue/30 bg-ctu-blue/10 p-4 text-sm text-ctu-navy">

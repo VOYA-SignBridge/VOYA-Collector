@@ -373,7 +373,7 @@ def augment_config_dict(profile: str, overrides: Optional[dict] = None) -> dict:
     Carries AUGMENTATION_CONTRACT_VERSION so a checkpoint records WHICH mirror
     semantics produced it: runs stamped "v1_image_space_mirror" (or carrying no
     version at all) were trained with the broken x -> 1-x mirror and are not
-    research-valid. See scripts/audit_checkpoint_validity.py.
+    research-valid. See scripts/evaluation/audit_checkpoint_validity.py.
     """
     base = AUGMENTATION_PROFILES.get(profile)
     if base is None:

@@ -18,11 +18,11 @@ import uuid
 
 import pytest
 
-from app import moderation_admin
-from app.moderation import APPROVED, PENDING, REJECTED
+from app.modules.admin import moderation_admin
+from app.modules.admin.moderation import APPROVED, PENDING, REJECTED
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -43,7 +43,7 @@ def tai_khoan():
     tao: list[str] = []
 
     def _make(*, is_admin: bool = False) -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = f"md{uuid.uuid4().hex[:10]}"
         u = create_user(username=name, email=f"{name}@example.test",
@@ -110,8 +110,8 @@ def phien_cho_duyet(tai_khoan):
         # quay THẬT, và một lần quay luôn thuộc về một lớp.
         db._execute(
             "INSERT INTO capture_sessions (capture_session_id, tenant_id, class_uid, "
-            "                              session_id, auth_user_id) "
-            "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+            "                              session_id, auth_user_id, visibility) "
+            "VALUES (%s,%s,%s,%s,%s,'tenant') ON CONFLICT DO NOTHING",
             (session_id, DEFAULT_TENANT_ID, class_uid, f"s-{tag}", str(nguoi["id"])))
         for i, uid in enumerate(uids):
             db._execute(
@@ -184,6 +184,32 @@ class TestAiDuocDuyet:
 
     def test_khong_co_id_thi_tu_choi(self):
         assert moderation_admin.can_moderate({}) is False
+
+    def test_admin_truong_CHI_duyet_duoc_tenant_cua_minh(self, tai_khoan):
+        """Đo 16/10/2026: admin một trường, cũng là thành viên VOYA như mọi tài
+        khoản, đổi tenant đang dùng sang VOYA là duyệt được dữ liệu VOYA."""
+        u = tai_khoan()
+        with system_scope("test: vai admin o so cu"):
+            db._execute(
+                "INSERT INTO memberships (user_id, scope_level, tenant_id, legacy_role, "
+                "                         status, joined_at) "
+                "VALUES (%s, 'TENANT', %s, 'admin', 'ACTIVE', NOW())",
+                (str(u["id"]), DEFAULT_TENANT_ID))
+
+        assert moderation_admin.can_moderate(u, DEFAULT_TENANT_ID) is True
+        assert moderation_admin.can_moderate(u, "mot-tenant-khac-0000") is False
+
+    def test_vai_v5_cung_bi_gioi_han_theo_tenant(self, tai_khoan):
+        from app.storage.authz_schema import COMMUNITY_TENANT_ID
+
+        u = tai_khoan()
+        _cap_vai_v5(str(u["id"]), "community_reviewer")
+
+        assert moderation_admin.can_moderate(u, COMMUNITY_TENANT_ID) is True
+        assert moderation_admin.can_moderate(u, "mot-tenant-khac-0000") is False
+
+    def test_quan_tri_nen_tang_duyet_moi_tenant(self, tai_khoan):
+        assert moderation_admin.can_moderate(tai_khoan(is_admin=True), "bat-ky-tenant") is True
 
 
 # ---------------------------------------------------------------------------

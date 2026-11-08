@@ -21,9 +21,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app import otp
+from app.modules.security import otp
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -40,7 +40,7 @@ def _pepper(monkeypatch):
 
 @pytest.fixture
 def account():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
 
     name = f"otp{uuid.uuid4().hex[:10]}"
     user = create_user(
@@ -90,7 +90,7 @@ def _access_token_for(user) -> str:
     when an access COOKIE is present, so this keeps the test about the endpoint
     under examination instead of about CSRF plumbing.
     """
-    from app.auth import create_access_token
+    from app.modules.identity._web_compat import create_access_token
 
     return create_access_token(data={
         "sub": user["id"], "username": user["username"],
@@ -416,7 +416,7 @@ class TestRecoveryEndpointRevealsNothing:
     def test_a_correct_code_resets_the_password_and_kills_sessions(
         self, client, account
     ):
-        from app.auth import authenticate_user
+        from app.modules.identity._web_compat import authenticate_user
 
         _, code = otp.issue(user_id=account["id"], purpose="reset_password",
                             channel="email", destination=account["email"])
@@ -491,7 +491,7 @@ class TestRecoveryInTwoSteps:
         assert wrong.json() == unknown.json()
 
     def test_the_ticket_resets_the_password_and_kills_sessions(self, client, account):
-        from app.auth import authenticate_user
+        from app.modules.identity._web_compat import authenticate_user
 
         ticket = client.post(
             "/api/v1/auth/recover/verify",
@@ -528,7 +528,7 @@ class TestRecoveryInTwoSteps:
     def test_a_2fa_challenge_is_not_a_reset_ticket(self, account):
         """And the other direction: passing the two-token check in one place
         must not pass it in the other."""
-        from app.auth import create_2fa_challenge, verify_password_reset_ticket
+        from app.modules.identity._web_compat import create_2fa_challenge, verify_password_reset_ticket
 
         assert verify_password_reset_ticket(create_2fa_challenge(account["id"])) is None
 
@@ -621,7 +621,7 @@ class TestUnconfiguredEmailNeverLeaksTheCode:
     def test_sending_a_code_without_smtp_raises_instead_of_logging(
         self, monkeypatch, caplog
     ):
-        import app.email_service as es
+        import app.services.email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         with caplog.at_level(logging.WARNING):
@@ -633,7 +633,7 @@ class TestUnconfiguredEmailNeverLeaksTheCode:
     def test_a_reset_link_may_still_fall_back_to_the_log(self, monkeypatch, caplog):
         """The documented dev convenience stays. The token is 32 bytes and
         single-use, which is a different risk from a six-digit code."""
-        import app.email_service as es
+        import app.services.email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         with caplog.at_level(logging.WARNING):
@@ -646,7 +646,7 @@ class TestUnconfiguredEmailNeverLeaksTheCode:
     ):
         """A misconfigured deployment is not the caller's fault, and the person
         needs to learn about it now rather than by never receiving a code."""
-        import app.email_service as es
+        import app.services.email as es
 
         monkeypatch.setattr(es.settings, "smtp_host", "")
         token = _access_token_for(account)

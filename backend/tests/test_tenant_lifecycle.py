@@ -20,10 +20,10 @@ from fastapi.testclient import TestClient
 
 from conftest import registration_consents
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -69,7 +69,7 @@ def account():
     created = []
 
     def _make(username: str = "", *, is_admin: bool = False) -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = username or f"t{uuid.uuid4().hex[:10]}"
         user = create_user(
@@ -230,6 +230,12 @@ class TestMembership:
         member = tenant_admin.list_members(tenant)[0]
         assert member["role"] is None
 
+    def test_modelReviewers_organisation_areItsAdminsAndEditorsOnly(self, tenant, account):
+        bien_tap, thanh_vien = account(), account()
+        tenant_admin.add_member(tenant, bien_tap["id"], "editor")
+        tenant_admin.add_member(tenant, thanh_vien["id"])
+        assert tenant_admin.model_reviewer_ids(tenant) == [str(bien_tap["id"])]
+
     def test_membership_without_a_tenant_role_is_a_real_membership(self, tenant, account):
         """Không vai KHÔNG phải không có mặt.
 
@@ -238,7 +244,7 @@ class TestMembership:
         `None` — chứ không phải chuỗi `"None"`, vốn là một vai không tồn tại đi
         thẳng vào bản đồ role cũ.
         """
-        from app.vocabulary_registry import tenant_role
+        from app.modules.dataset.vocabulary_registry import tenant_role
 
         user = account()
         tenant_admin.add_member(tenant, user["id"])
@@ -617,6 +623,28 @@ class TestRegistration:
         finally:
             self._cleanup(name)
 
+    def test_invitationWithoutRole_newAccount_canStillWrite(self, anon_client, tenant):
+        """Lời mời không kèm vai không cấp gì; không vào Cộng đồng thì `access_gate`
+        chặn mọi lượt ghi của người này tới lần backend khởi động lại."""
+        from app.modules.security.access_gate import _has_any_tenant_grant
+
+        name = f"t{uuid.uuid4().hex[:10]}"
+        email = f"{name}@example.test"
+        _, token = tenant_admin.create_invitation(tenant, email, None)
+        try:
+            res = anon_client.post("/api/v1/auth/register", json={
+                "username": name, "email": email,
+                "password": "correct horse battery",
+                **registration_consents(),
+                "invitation_token": token,
+            })
+            assert res.status_code == 201, res.text
+            assert res.json()["tenant_id"] == tenant, "nhà của họ vẫn là tổ chức đã mời"
+            assert tenant_admin.list_members(tenant)[0]["role"] is None
+            assert _has_any_tenant_grant({"id": res.json()["id"]}) is True
+        finally:
+            self._cleanup(name)
+
     def test_email_mismatch_creates_no_account(self, anon_client, tenant):
         """Rejected BEFORE the insert. Creating first and failing after would
         leave a real account stranded in the public tenant, and the caller —
@@ -700,7 +728,7 @@ class TestRouterAuthorisation:
 
     @staticmethod
     def _client(user):
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
@@ -716,7 +744,7 @@ class TestRouterAuthorisation:
 
     @staticmethod
     def _reset():
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -817,7 +845,7 @@ class TestTheLinkAndTheMail:
 
     @staticmethod
     def _client(user):
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
@@ -826,7 +854,7 @@ class TestTheLinkAndTheMail:
 
     @staticmethod
     def _reset():
-        from app.auth import get_current_user, require_admin
+        from app.modules.identity._web_compat import get_current_user, require_admin
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -881,7 +909,7 @@ class TestTheLinkAndTheMail:
         The invitation is already in the table and the link is in this response,
         so the admin can still send it by hand — failing the request would throw
         away a perfectly good invitation."""
-        from app import email_service
+        from app.services import email as email_service
 
         def _explode(*_a, **_kw):
             raise email_service.EmailNotConfigured("no smtp here")
@@ -900,7 +928,7 @@ class TestTheLinkAndTheMail:
         """`email_sent` decides which sentence the admin page shows. Saying
         "sent" when nothing was sent leaves the invited person waiting for a
         message that does not exist."""
-        from app import email_service
+        from app.services import email as email_service
 
         seen = {}
 
@@ -924,7 +952,7 @@ class TestTheLinkAndTheMail:
         nothing at all."""
         import logging
 
-        from app import email_service
+        from app.services import email as email_service
 
         monkeypatch.setattr(email_service.settings, "smtp_host", "", raising=False)
         with caplog.at_level(logging.DEBUG):
@@ -955,14 +983,14 @@ class TestNhanLoiMoiBangTaiKhoanDaCo:
     """
 
     def _client(self, user):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
         return TestClient(app)
 
     def _reset(self):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -1074,14 +1102,14 @@ class TestLietKeMoiToChucCuaToi:
     """
 
     def _client(self, user):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides[get_current_user] = lambda: user
         return TestClient(app)
 
     def _reset(self):
-        from app.auth import get_current_user
+        from app.modules.identity._web_compat import get_current_user
         from app.main import app
 
         app.dependency_overrides.pop(get_current_user, None)

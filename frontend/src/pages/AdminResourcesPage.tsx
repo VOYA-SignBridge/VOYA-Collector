@@ -174,7 +174,7 @@ export default function AdminResourcesPage() {
       try {
         const res = await apiClient.get<ResourceReport>("/api/v1/admin/resources");
         if (!cancelled) { setData(res.data); setError(null); }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) setError(friendlyError(e, tr("Không tải được số liệu tài nguyên")));
       }
     };
@@ -195,7 +195,7 @@ export default function AdminResourcesPage() {
       await apiClient.post("/api/v1/admin/config/ignore-hardware", { resource, ignore: true });
       // Fast refresh
       apiClient.get<ResourceReport>("/api/v1/admin/resources").then((res) => setData(res.data)).catch(console.error);
-    } catch (err: any) {
+    } catch (err: unknown) {
       // `err.message` của axios là chuỗi kỹ thuật ("Request failed with status
       // code 500") — nó nói với người vận hành đúng bằng không, và nó là đường
       // rò cuối cùng còn lại trong tệp này.

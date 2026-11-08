@@ -20,10 +20,10 @@ import uuid
 
 import pytest
 
-from app import tenant_admin
+from app.modules.saas import tenant_admin
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -47,7 +47,7 @@ def accounts():
     created = []
 
     def _make() -> dict:
-        from app.auth import create_user
+        from app.modules.identity._web_compat import create_user
 
         name = f"t{uuid.uuid4().hex[:10]}"
         user = create_user(
@@ -247,7 +247,7 @@ class TestUsersAreConstrainedInTheDataPlane:
         than being 'cleaned up' later by someone who sees a system_scope call
         and assumes it is an oversight.
         """
-        from app.auth import authenticate_user
+        from app.modules.identity._web_compat import authenticate_user
 
         _, b = two_tenants
         user = accounts()
@@ -263,7 +263,7 @@ class TestStoragePartition:
     """A4: the tenant also decides where the .npz files land."""
 
     def test_each_tenant_gets_its_own_feature_root(self, two_tenants):
-        from app.dataset_manager import FEATURES_ROOT, tenant_features_root
+        from app.modules.dataset.catalog import FEATURES_ROOT, tenant_features_root
 
         a, b = two_tenants
         assert tenant_features_root(a) == FEATURES_ROOT
@@ -273,7 +273,7 @@ class TestStoragePartition:
     def test_the_ambient_scope_picks_the_root(self, two_tenants):
         """The path comes from the scope, not from an argument — so a handler
         cannot write into another tenant's tree by passing the wrong string."""
-        from app.dataset_manager import ambient_tenant_features_root, tenant_features_root
+        from app.modules.dataset.catalog import ambient_tenant_features_root, tenant_features_root
 
         _, b = two_tenants
         with tenant_scope(b):

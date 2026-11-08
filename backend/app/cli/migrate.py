@@ -38,7 +38,7 @@ import logging
 import os
 import sys
 
-from app.logging_config import configure_logging
+from app.bootstrap.logging import configure_logging
 from app.storage.metadata_db import EXPECTED_DATABASE_ENV
 from app.storage.schema_version import (
     APP_SCHEMA_VERSION,

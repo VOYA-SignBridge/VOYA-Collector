@@ -19,8 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.auth import get_current_user
-import app.catalog_sync as cs
+from app.modules.identity._web_compat import get_current_user
+import app.modules.dataset.catalog_sync as cs
 import app.routers.classes as classes_router
 import app.routers.dataset as dataset_router
 
@@ -44,7 +44,7 @@ def test_bulk_passes_request_tenant_to_each_call(monkeypatch):
             raise RuntimeError("no ho")
         return {"restored": uid}
 
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     with tenant_scope("truong-b"):
         result = cs._bulk(fake, ["a", "hong", "b"])
@@ -55,7 +55,7 @@ def test_bulk_passes_request_tenant_to_each_call(monkeypatch):
 
 
 def test_bulk_refuses_without_tenant_scope():
-    from app.tenant_context import TenantScopeError
+    from app.modules.saas.tenant_context import TenantScopeError
 
     with pytest.raises(TenantScopeError):
         cs._bulk(lambda uid, *, tenant_id: None, ["a"])
@@ -112,6 +112,7 @@ def purge_seams(monkeypatch, tmp_path):
         label_original = "lop-thu"
         language = "vn"
         dialect = "can-tho"
+        tenant_id = "default"  # như ClassMetadata thật; dọn Drive cần tenant cho raw_videos/
 
         def hierarchy_path(self):
             return tmp_path / "features" / "lop-thu"
@@ -128,7 +129,7 @@ def purge_seams(monkeypatch, tmp_path):
                  "db_delete_capture_sessions_by_class", "db_delete_class"):
         monkeypatch.setattr(cs, name, (lambda n: (lambda uid: calls.append((n, uid))))(name))
     monkeypatch.setattr(cs, "_invalidate_tts_cache", lambda label: None)
-    monkeypatch.setattr(cs, "_dispatch_gdrive_folder_delete", lambda paths: None)
+    monkeypatch.setattr(cs, "_dispatch_gdrive_folder_delete", lambda paths, tenant_id=None: None)
     monkeypatch.setattr(cs, "_sync_drive_and_sheets_versioned_tables", lambda *a, **k: None)
     monkeypatch.setattr(cs, "ensure_tables", lambda: None)
     return calls

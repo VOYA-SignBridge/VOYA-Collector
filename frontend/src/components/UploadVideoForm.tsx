@@ -6,11 +6,13 @@
  */
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
 import { uploadVideo } from "../api/upload";
+import { getClassesList } from "../api/dataset";
 import { pollJobUntilDone } from "../api/jobs";
 import Button from "./ui/Button";
 import Badge from "./ui/Badge";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
+import CreateLabelModal from "./CreateLabelModal";
 import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
 import { AlertTriangleIcon, LightbulbIcon } from "./ui/Icons";
 import { Trans, useI18n } from "../i18n";
@@ -41,18 +43,23 @@ type ValidationError = {
 type Props = {
   onError?: (msg: string) => void;
   onSuccess?: (results: Array<{ fileId: string; uploadedId: string | number }>) => void;
+  initialLabel?: string;
+  initialClassUid?: string;
 };
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
+export default function UploadVideoFormV2({ onError, onSuccess, initialLabel = "", initialClassUid }: Props) {
   const { t } = useI18n();
   // ========== STATE ==========
   const [files, setFiles] = useState<FileItem[]>([]);
-  const [defaultLabel, setDefaultLabel] = useState("");
-  const [defaultClassUid, setDefaultClassUid] = useState<string | undefined>(undefined);
+  const [defaultLabel, setDefaultLabel] = useState(initialLabel);
+  const [defaultClassUid, setDefaultClassUid] = useState<string | undefined>(initialClassUid);
+  const [showCreateLabelModal, setShowCreateLabelModal] = useState(false);
+  const [visibility, setVisibility] = useState<"private" | "tenant" | "community">("private");
+  const [catalog, setCatalog] = useState<Array<{ class_uid: string; label_original: string }>>([]);
   const [defaultUser, setDefaultUser] = useState(() => localStorage.getItem('lastUser') || '');
   // The value picked here is sent verbatim as the `dialect` field of the
   // upload. It must therefore be a dialect ID ("bac"), never a display name.
@@ -72,11 +79,22 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     [registryDialects]
   );
 
+  useEffect(() => {
+    getClassesList("vn", "").then((res) => {
+      if (res.ok) setCatalog(res.data.items.map((c) => ({ class_uid: c.class_uid, label_original: c.label_original })));
+    }).catch(() => undefined);
+  }, []);
+
   // Once the registry lands, adopt a valid default if the remembered one is
   // gone (or was one of the old display names).
   useEffect(() => {
     if (dialectList.length === 0) return;
-    setDefaultDialect((prev) => (prev && dialectList.includes(prev) ? prev : dialectList[0]));
+    setDefaultDialect((prev) => {
+      if (prev && dialectList.includes(prev) && prev !== "bang-chu-cai") return prev;
+      return dialectList.includes("common")
+        ? "common"
+        : (dialectList.find((item) => item !== "bang-chu-cai") || dialectList[0]);
+    });
   }, [dialectList]);
   
   const [uploadingAll, setUploadingAll] = useState(false);
@@ -359,7 +377,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
     try {
       const res = await uploadVideo(item.file, item.user, item.label, item.dialect, (pct) => {
         updateFile(item.id, { progress: pct });
-      });
+      }, { class_uid: item.class_uid, visibility });
       const result = res as {
         ok?: boolean;
         data?: { id?: string | number; job_id?: string | null };
@@ -412,7 +430,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
       updateFile(item.id, { status: 'error', message: msg });
       return false;
     }
-  }, [validateFile, updateFile, t]);
+  }, [validateFile, updateFile, t, visibility]);
   
   const uploadAll = useCallback(async () => {
     const pendingFiles = files.filter(f => f.status === 'pending');
@@ -605,12 +623,20 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                 <input
                   type="text"
                   value={defaultLabel}
-                  onChange={(e) => setDefaultLabel(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setDefaultLabel(next);
+                    setDefaultClassUid(catalog.find((c) => c.label_original === next)?.class_uid);
+                  }}
                   placeholder={t("ví dụ: đi bộ")}
+                  list="upload-label-catalog"
                   className="input text-sm flex-1"
                 />
+                <button type="button" onClick={() => setShowCreateLabelModal(true)} className="shrink-0 rounded-lg border border-ctu-blue px-2 py-2 text-xs font-medium text-ctu-blue hover:bg-ctu-blue/10">
+                  {t("Tạo nhãn mới")}
+                </button>
                 <SpeechInputButton
-                  onText={(text) => setDefaultLabel(text)}
+                  onText={(text) => { setDefaultLabel(text); setDefaultClassUid(catalog.find((c) => c.label_original === text)?.class_uid); }}
                   title={t("Dùng giọng nói để điền nhãn mặc định")}
                 />
               </div>
@@ -657,6 +683,7 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                     setShowAddDialectModal(true);
                   } else {
                     setDefaultDialect(v);
+                    setDefaultClassUid(undefined);
                   }
                 }}
                 className="input text-sm"
@@ -665,8 +692,32 @@ export default function UploadVideoFormV2({ onError, onSuccess }: Props) {
                 <option value="__add_new__">{t("+ Thêm mới...")}</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">{t("Phạm vi dữ liệu")}</label>
+              <select className="input text-sm" value={visibility} onChange={(e) => setVisibility(e.target.value as typeof visibility)}>
+                <option value="private">{t("Riêng tư")}</option>
+                <option value="tenant">{t("Cả tổ chức")}</option>
+                <option value="community">{t("Cộng đồng")}</option>
+              </select>
+            </div>
           </div>
         </div>
+
+        <datalist id="upload-label-catalog">
+          {catalog.map((c) => <option key={c.class_uid} value={c.label_original} />)}
+        </datalist>
+
+        <CreateLabelModal
+          isOpen={showCreateLabelModal}
+          onClose={() => setShowCreateLabelModal(false)}
+          initialDialect={defaultDialect || "common"}
+          onCreated={(row) => {
+            setDefaultLabel(row.label_original);
+            setDefaultClassUid(row.class_uid);
+            setDefaultDialect(row.dialect || defaultDialect || "common");
+            setCatalog((prev) => [{ class_uid: row.class_uid, label_original: row.label_original }, ...prev.filter((c) => c.class_uid !== row.class_uid)]);
+          }}
+        />
 
         <AddDialectModal
           isOpen={showAddDialectModal}

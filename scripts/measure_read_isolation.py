@@ -159,7 +159,7 @@ def them_du_lieu_cho_B(dsn: str, tenant_b: str, dialect: str) -> dict:
     sys.path.insert(0, "/app")
     sys.path.insert(0, "/src/backend")
     from app.storage.metadata_db import _cursor
-    from app.tenant_context import tenant_scope
+    from app.modules.saas.tenant_context import tenant_scope
 
     hs = uuid.uuid4().hex[:6]
     cls = f"read{hs}"
@@ -337,8 +337,8 @@ def main() -> int:
     }
 
     # ------------------------------------- READ-5 không rơi về "default" --
-    from app.dataset_samples import TenantScopeRequired, list_samples
-    from app.dataset_manager import load_labels
+    from app.modules.dataset.samples import TenantScopeRequired, list_samples
+    from app.modules.dataset.catalog import load_labels
     for ten, fn in (("list_samples", list_samples), ("load_labels", load_labels)):
         for gt in (None, "", "   "):
             try:

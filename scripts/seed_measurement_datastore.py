@@ -190,8 +190,8 @@ def main() -> int:
             raise SystemExit(f"--owner tro toi tenant la: {t!r} (chi co {BEN})")
         chu_so_huu[t] = u
 
-    from app.dataset_manager import LABEL_FIELDS
-    from app.dataset_samples import SAMPLE_FIELDS
+    from app.modules.dataset.catalog import LABEL_FIELDS
+    from app.modules.dataset.samples import SAMPLE_FIELDS
 
     base = Path(args.base)
     base.mkdir(parents=True, exist_ok=True)

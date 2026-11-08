@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from app import legal_store
+from app.modules.legal import legal_store
 
 
 @pytest.fixture(autouse=True)

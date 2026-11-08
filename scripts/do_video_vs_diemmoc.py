@@ -13,7 +13,7 @@ MediaPipe mà nền tảng dùng khi thu, rồi so từng cặp.
 GIỚI HẠN PHẢI NÊU TRONG LUẬN VĂN
 --------------------------------
 Video QIPEDC là bản quay studio đã qua hậu kỳ và nén để phát trên web, KHÔNG
-phải luồng webcam mà CTU-SignBridge thu. Vì vậy tỉ lệ đo được đặc trưng cho
+phải luồng webcam mà CTU.SignBridge thu. Vì vậy tỉ lệ đo được đặc trưng cho
 "video như QIPEDC phân phối", không phải "video như nền tảng thu". Đây vẫn là
 một mốc so sánh CÓ TÊN và TÁI LẬP ĐƯỢC — hơn hẳn một bitrate giả định — nhưng
 đừng phát biểu nó như thể đã đo trên dữ liệu của chính hệ thống.
@@ -111,7 +111,7 @@ def tai(ma, thu_muc, van_tay):
         try:
             c = _ket_noi(van_tay)
             c.request("GET", "/videos/%s.mp4" % (ma + hau),
-                      headers={"User-Agent": "CTU-SignBridge thesis measurement",
+                      headers={"User-Agent": "CTU.SignBridge thesis measurement",
                                "Accept": "video/mp4"})
             r = c.getresponse()
             data = r.read()

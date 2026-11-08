@@ -42,7 +42,7 @@ import uuid
 import pytest
 
 from app.storage import metadata_db as db
-from app.tenancy import DEFAULT_TENANT_ID
+from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -85,7 +85,7 @@ def _signed_in_client(*, is_admin: bool):
     from fastapi.testclient import TestClient
 
     from conftest import LoopbackPeer, fresh_client_ip
-    from app import auth
+    from app.modules.identity import _web_compat as auth
     from app.main import app
 
     name = _unique("sgn")
@@ -157,7 +157,7 @@ def registered_class():
     created: list[str] = []
     yield created
 
-    from app.tenant_context import system_scope
+    from app.modules.saas.tenant_context import system_scope
 
     with system_scope("test cleanup: gỡ lớp vừa đăng ký"):
         for class_uid in reversed(created):
@@ -182,7 +182,7 @@ def _drop_class_from_labels_csv(class_uid: str) -> None:
     """
     import csv
 
-    from app.dataset_manager import MASTER_LABELS
+    from app.modules.dataset.catalog import MASTER_LABELS
 
     if not MASTER_LABELS.exists():
         return
@@ -223,7 +223,7 @@ def _register(anon_client, *, username: str, email: str, org: str | None = None)
     thật. Viết cứng sẽ cho ra 409 `stale_version` và test đỏ vì một lý do
     không liên quan gì tới thứ nó đang kiểm.
     """
-    from app import legal
+    from app.modules.legal import legal
 
     body = {"username": username, "email": email, "password": PW}
     for kind in ("terms", "privacy"):
@@ -251,7 +251,7 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         chốt vế đầu — vào đúng chỗ, và không đẻ ra tổ chức nào.
         """
         from app.storage.authz_schema import COMMUNITY_TENANT_ID
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: dem to chuc truoc"):
             truoc = db._fetch_all("SELECT count(*) AS n FROM tenants")[0]["n"]
@@ -320,8 +320,9 @@ class TestSignupNeverLandsInTheBootstrapTenant:
         biết hoá đơn gửi cho ai.
         """
         from conftest import purge_tenant
-        from app import auth, tenant_admin
-        from app.tenant_context import system_scope
+        from app.modules.saas import tenant_admin
+        from app.modules.identity import _web_compat as auth
+        from app.modules.saas.tenant_context import system_scope
 
         name = _unique("owner")
         user = auth.create_user(username=name, email=f"{name}@example.com",
@@ -356,32 +357,36 @@ class TestSignupNeverLandsInTheBootstrapTenant:
                 purge_tenant(t["tenant_id"])
             _drop_account(name)
 
-    def test_ma_to_chuc_KHONG_lo_ai_da_lap_truoc(self):
-        """Hai tổ chức TRÙNG TÊN phải ra hai mã không đoán được.
+    def test_ten_to_chuc_trung_bi_tu_choi(self):
+        """Tên tổ chức là duy nhất (18/10/2026): lần lập thứ hai cùng tên bị từ chối.
 
-        Một bộ đếm (`truong-b`, `truong-b-2`) biến ô tên thành máy dò: thử một
-        cái tên và xem hậu tố trả về là biết đã có bao nhiêu tổ chức trùng tên
-        trên nền tảng.
-
-        Dời từ đường đăng ký sang đường tự lập, cùng lý do như bài trên.
+        Trước đây hai tổ chức trùng tên được hai mã mang hậu tố ngẫu nhiên. Nay
+        mã chính là khoá của tên, và cũng là tên thư mục trên Drive — trùng tên
+        là chung thư mục — nên lần thứ hai phải nhận 409, kể cả khi chỉ khác
+        hoa/thường và dấu.
         """
         from conftest import purge_tenant
-        from app import auth, tenant_admin
+        from app.modules.saas import tenant_admin
+        from app.modules.identity import _web_compat as auth
 
         ten_tk, tao = [], []
         try:
-            for _ in range(2):
+            ten = f"Truong Trung Ten {_unique('t')}"
+            for i in range(2):
                 n = _unique("dup")
                 u = auth.create_user(username=n, email=f"{n}@example.com",
                                      password=PW)
                 ten_tk.append(n)
-                tao.append(tenant_admin.create_self_serve_tenant(
-                    str(u["id"]), display_name="Truong Trung Ten")["tenant_id"])
+                if i == 0:
+                    tao.append(tenant_admin.create_self_serve_tenant(
+                        str(u["id"]), display_name=ten)["tenant_id"])
+                else:
+                    with pytest.raises(tenant_admin.TenantError) as exc:
+                        tenant_admin.create_self_serve_tenant(
+                            str(u["id"]), display_name=ten.upper())
+                    assert exc.value.status_code == 409
 
-            assert tao[0] != tao[1], "hai to chuc trung ten ra cung mot ma"
-            assert not tao[1].endswith("-2"), (
-                "hau to la mot BO DEM — o ten tro thanh may do so to chuc "
-                "trung ten da co tren nen tang")
+            assert tao[0] == tenant_admin.tenant_name_key(ten), "ma to chuc khong phai khoa cua ten"
         finally:
             for tid in tao:
                 purge_tenant(tid)
@@ -405,7 +410,7 @@ class TestSignupNeverLandsInTheBootstrapTenant:
 
         assert response.status_code == 403, response.text
 
-        from app.tenant_context import system_scope
+        from app.modules.saas.tenant_context import system_scope
 
         with system_scope("test: prove the refused signup created nothing"):
             rows = db._fetch_all(

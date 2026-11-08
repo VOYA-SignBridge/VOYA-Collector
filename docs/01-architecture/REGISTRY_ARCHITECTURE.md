@@ -38,7 +38,7 @@ chuẩn bị multitenant.
 > **ĐỔI TÊN 2026-08-06.** Mặt phẳng này trước đây gọi là "Community". Sai: nó
 > chứa **cấu hình** (phương ngữ nào, profile nào tồn tại), không chứa dữ liệu ai
 > đóng góp — không video, không landmark, không consent, không attribution.
-> "Community" trong CTU-SignBridge là **Community Data Commons**, một thứ khác
+> "Community" trong CTU.SignBridge là **Community Data Commons**, một thứ khác
 > hẳn và **chưa tồn tại**: xem `COMMUNITY_DATA_COMMONS.md`.
 >
 > Hàm và endpoint đã đổi sang `*_catalog_*` / `/vocabulary/catalog`. **Tên bảng

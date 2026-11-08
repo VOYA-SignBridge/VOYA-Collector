@@ -5,9 +5,9 @@ xong. Đo trên `signdb`, lần cuối 24/08/2026.
 
 | hiện vật | vai trò |
 |---|---|
-| [evidence/signer_resolution_matrix.csv](evidence/signer_resolution_matrix.csv) | **bảng làm việc chính** — 266 khối cần duyệt |
-| [evidence/legacy_signer_review.csv](evidence/legacy_signer_review.csv) | từ điển 15 nhãn, hỗ trợ nhận diện biến thể tên |
-| [evidence/v6_collection_signer_evidence.csv](evidence/v6_collection_signer_evidence.csv) | ảnh chụp trước khi v6 gỡ `collection_sessions.signer_id` |
+| `signer_resolution_matrix.csv` (không để trong repo: chứa tên người ký) | **bảng làm việc chính** — 266 khối cần duyệt |
+| `legacy_signer_review.csv` (không để trong repo: chứa tên người ký) | từ điển 15 nhãn, hỗ trợ nhận diện biến thể tên |
+| `v6_collection_signer_evidence.csv` (không để trong repo: chứa tên người ký) | ảnh chụp trước khi v6 gỡ `collection_sessions.signer_id` |
 
 ## Đơn vị duyệt được SUY RA từ dữ liệu, không chọn trước
 

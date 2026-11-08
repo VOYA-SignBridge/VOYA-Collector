@@ -53,7 +53,7 @@ def client():
 
 @pytest.fixture
 def tai_khoan():
-    from app.auth import create_user
+    from app.modules.identity._web_compat import create_user
     from conftest import purge_registered_account
 
     ten = f"lg{uuid.uuid4().hex[:8]}"

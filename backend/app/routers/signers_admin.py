@@ -1,6 +1,6 @@
 """API quản lý hồ sơ NGƯỜI KÝ (UC11 — Manage Signers).
 
-Sổ đăng ký người ký đã có từ lược đồ v2 (`app/signers.py`, `dataset/signers.csv`
+Sổ đăng ký người ký đã có từ lược đồ v2 (`modules/dataset/signers.py`, `dataset/signers.csv`
 mirror sang bảng `signers`), nhưng cho tới nay chỉ có ĐƯỜNG GHI TỰ ĐỘNG: một
 tài khoản đóng góp mẫu đầu tiên thì `resolve_signer_for_user` lập hồ sơ cho họ.
 Không có đường nào để con người xem, sửa, hay nói "hai id này là một người" —
@@ -24,12 +24,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
-from app import activity, signers as signer_registry
-from app.auth import require_tenant_editor
-from app.consent_gate import SCOPE_LADDER, load_consents
-from app.dataset_samples import list_samples
+from app.modules.dataset import signers as signer_registry
+from app.modules.security import audit_log
+from app.modules.identity._web_compat import require_tenant_editor
+from app.modules.security.consent_gate import SCOPE_LADDER, load_consents
+from app.modules.dataset.samples import list_samples
 from app.storage.metadata_db import _execute, _fetch_all
-from app.tenant_context import require_tenant
+from app.modules.saas.tenant_context import require_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +182,7 @@ def update_signer_api(signer_id: str, body: UpdateSignerBody, request: Request,
     if updated is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Không có người ký {signer_id}")
 
-    activity.log_security_event(
+    audit_log.log_security_event(
         "signer.updated", actor=str(current_user.get("username", "")),
         target=signer_id,
         # `.dict()`, KHÔNG phải `.model_dump()` — dự án này chạy pydantic 1.10.
@@ -242,7 +243,7 @@ def merge_signer_api(signer_id: str, body: MergeSignerBody, request: Request,
 
     signer_registry.update_signer(signer_id, is_active=False)
 
-    activity.log_security_event(
+    audit_log.log_security_event(
         "signer.merged", actor=str(current_user.get("username", "")),
         target=signer_id, reason=body.reason.strip(),
         extra={"new_signer_id": target, "tenant_id": scope},

@@ -57,7 +57,7 @@ from typing import Any, Dict
 # Module level, not inside apply_scope: that function runs once per database
 # transaction — hundreds of times during a single video upload — and
 # tenant_context is dependency-free precisely so this import is safe here.
-from app.tenant_context import current_tenant, in_system_scope
+from app.modules.saas.tenant_context import current_tenant, in_system_scope
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +345,76 @@ def rls_ddl() -> list[str]:
     return statements
 
 
+def _policy_plans() -> list[tuple[str, str, list[str]]]:
+    plans = [(t, POLICY_NAME, policy_statements(t)) for t in RLS_TABLES]
+    plans += [(t, CATALOGUE_POLICY_NAME, shared_catalogue_statements(t))
+              for t in SHARED_CATALOGUE_TABLES]
+    return plans
+
+
+def policy_fingerprint(statements: list[str]) -> str:
+    """Stored as the policy's COMMENT: 'already installed exactly like this'."""
+    import hashlib
+
+    return "voya-rls:" + hashlib.sha256("\n".join(statements).encode()).hexdigest()[:16]
+
+
+_POLICY_STATE_SQL = (
+    "SELECT c.relrowsecurity AND c.relforcerowsecurity, "
+    "       (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid "
+    "          AND p.polname IN (%s, %s)), "
+    "       (SELECT obj_description(p.oid, 'pg_policy') FROM pg_policy p "
+    "          WHERE p.polrelid = c.oid AND p.polname = %s) "
+    "  FROM pg_class c WHERE c.oid = to_regclass(%s)"
+)
+
+
+def install_rls(cur) -> dict:
+    """Install tenant isolation WITHOUT a moment where a table has no policy.
+
+    `policy_statements()` is DROP POLICY then CREATE POLICY. Run statement by
+    statement on an autocommit connection — as every boot did — there is a
+    window in which the table has RLS enabled and NO policy, which Postgres
+    treats as deny-all. Gunicorn starts several workers at once; a worker
+    already past `ensure_tables()` and seeding the registry hit another
+    worker's window and read zero dialects (freezing an EMPTY registry version)
+    or had its INSERT refused ("new row violates row-level security policy").
+    Measured on production 16/10/2026 and reproduced on signdb_test.
+
+    Two changes close it:
+
+      * unchanged -> no DDL at all. The policy carries a fingerprint of the
+        exact statements as its COMMENT; a boot that finds it current skips the
+        table (no lock, no window).
+      * changed -> one transaction per table. Other sessions keep seeing the
+        old policy until COMMIT; they never see "no policy".
+    """
+    installed = unchanged = failed = 0
+    for table, name, statements in _policy_plans():
+        mark = policy_fingerprint(statements)
+        other = CATALOGUE_POLICY_NAME if name == POLICY_NAME else POLICY_NAME
+        cur.execute(_POLICY_STATE_SQL, (name, other, name, table))
+        state = cur.fetchone()
+        if state and state[0] and state[1] == 1 and state[2] == mark:
+            unchanged += 1
+            continue
+        try:
+            cur.execute("BEGIN")
+            for stmt in statements:
+                cur.execute(stmt)
+            cur.execute(f"COMMENT ON POLICY {name} ON {table} IS %s", (mark,))
+            cur.execute("COMMIT")
+            installed += 1
+        except Exception as exc:  # A table missing on an old schema: same as before, log and go on.
+            cur.execute("ROLLBACK")
+            failed += 1
+            logger.warning("[RLS] policy install failed on %s (ignored): %s",
+                           table, getattr(exc, "pgerror", None) or exc)
+    logger.info("[RLS] policies: %d installed, %d unchanged, %d failed",
+                installed, unchanged, failed)
+    return {"installed": installed, "unchanged": unchanged, "failed": failed}
+
+
 class IsolationPostureError(RuntimeError):
     """Raised at boot when RLS is on but the connected role can ignore it."""
 
@@ -357,7 +427,7 @@ def isolation_posture(conn) -> Dict[str, Any]:
     Kept as data rather than a bare bool so the caller can log the specifics and
     a test can assert on them.
     """
-    from app.storage.postgres_connection import current_role_privileges, rls_enabled_tables
+    from app.infrastructure.database.connection import current_role_privileges, rls_enabled_tables
 
     privileges = current_role_privileges(conn)
     # Both shapes count: a shared-catalogue table with RLS switched off is just
@@ -446,7 +516,7 @@ def apply_scope(cur) -> None:
 
     Called from the two functions in ``storage/metadata_db`` that every metadata
     query goes through, and explicitly from the handful of places that open
-    their own connection. It reads the scope from `app.tenant_context` rather
+    their own connection. It reads the scope from `app.modules.saas.tenant_context` rather
     than taking it as an argument, so no caller can pass a tenant that differs
     from the one the surrounding code believes it is acting for.
     """

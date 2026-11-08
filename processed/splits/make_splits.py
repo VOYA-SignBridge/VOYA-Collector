@@ -781,6 +781,12 @@ def class_mapping_checksum(mapping) -> str:
     tính metadata bằng `canonical_mapping_hash` thay vì chạy qua `make_splits`.
     Một quy ước chỉ có một định nghĩa thì không có gì để lệch.
     """
+    # Chạy như script thì sys.path[0] là processed/splits/, không phải gốc repo:
+    # không có đoạn này, `processed` chỉ import được khi người gọi tự đặt PYTHONPATH.
+    import sys as _sys
+    _repo_root = Path(__file__).resolve().parents[2]
+    if str(_repo_root) not in _sys.path:
+        _sys.path.insert(0, str(_repo_root))
     from processed.train_utils.label_mapping import canonical_mapping_hash
 
     return canonical_mapping_hash({str(k): int(i) for k, i in mapping})
@@ -1446,6 +1452,10 @@ def main():
                              'KHÔNG suy ra được về sau từ lượt huấn luyện đầu '
                              'tiên muốn dùng hiện vật, vì như vậy là ai hỏi '
                              'trước thì thành chủ. Không có mặc định.')
+    parser.add_argument('--viewer_id', type=str, default='',
+                        help='Tai khoan dung tap nay cho rieng minh: mau chua duyet CUA HO '
+                             'cung duoc tinh, va hien vat ghi ten ho nen chi ho thay. '
+                             'Chi dung voi --operational_split_id.')
     parser.add_argument('--min_classes', type=int, default=DEFAULT_MIN_CLASSES,
                         help=f'Số lớp tối thiểu SAU khi lọc; dưới ngưỡng thì DỪNG và '
                              f'không ghi split (mặc định {DEFAULT_MIN_CLASSES}, 0 = tắt). '
@@ -1475,6 +1485,8 @@ def main():
             'Chủ sở hữu đến từ ngữ cảnh tạo split. Không tìm được ngữ cảnh thì '
             'DỪNG — không dùng tenant khởi tạo, không dùng tenant của lượt '
             'huấn luyện sẽ tiêu thụ nó.')
+    if str(args.viewer_id or '').strip() and not args.operational_split_id:
+        raise SystemExit('--viewer_id chi dung voi --operational_split_id.')
     if str(args.tenant_id or '').strip() and not args.operational_split_id:
         raise SystemExit(
             '--tenant_id chỉ dùng với --operational_split_id. Bản khai ở gốc '
@@ -1539,6 +1551,24 @@ def main():
         enriched.append(r)
     rows = enriched
 
+    # Cổng TỔ CHỨC: hiện vật vận hành có chủ thì chỉ chứa mẫu của đúng chủ ấy.
+    #
+    # `samples.csv` là MỘT tệp chung cho mọi tenant. Trước 17/10/2026 cờ
+    # `--tenant_id` chỉ được đóng dấu vào bản khai, còn dòng thì không lọc: kiểm
+    # chứng hai tenant cho thấy split của B chứa 60 mẫu của B CỘNG 60 mẫu của A —
+    # cách ly ở API đúng, nhưng dữ liệu của A vẫn chảy vào mô hình của B qua đây.
+    # Ô trống là dữ liệu có từ trước đa tenant, thuộc tenant khởi tạo.
+    if str(args.tenant_id or '').strip():
+        try:
+            from app.modules.saas.tenancy import normalize_tenant_id, tenant_id_of
+        except ImportError as exc:            # pragma: no cover - lỗi cấu hình
+            raise SystemExit(f"Khong import duoc app.modules.saas.tenancy nen khong loc duoc theo to chuc: {exc}")
+        # `tenant_id_of` — cùng bộ đọc ô tenant với mọi bên đọc CSV khác.
+        _chu = normalize_tenant_id(str(args.tenant_id).strip())
+        _truoc = len(rows)
+        rows = [r for r in rows if tenant_id_of(r) == _chu]
+        print(f'[TENANT] {_chu}: giữ {len(rows)}/{_truoc} mẫu của đúng tổ chức này')
+
     # Cổng KIỂM DUYỆT, áp trước mọi bộ lọc khác.
     #
     # Vì sao ở ĐÂY chứ không ở trainer
@@ -1555,23 +1585,23 @@ def main():
     # một lớp có 12 mẫu — 9 đã duyệt, 3 đang chờ — vượt sàn 10 rồi mới rụng
     # xuống 9, và split được dựng trên một lớp không đủ điều kiện.
     #
-    # KHÔNG có người xem
-    # -------------------
-    # Dựng split là bước đóng gói dữ liệu cho một lượt huấn luyện hoặc một bản
-    # phát hành — nó rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ.
-    # Chỉ `approved` đi tiếp.
+    # Người xem
+    # ---------
+    # Tập dùng chung rời khỏi phạm vi một cá nhân, nên không ai để mà miễn trừ:
+    # chỉ `approved` đi tiếp. Tập riêng (`--viewer_id`) thì có: chủ dùng được dữ
+    # liệu của chính mình ngay, và hiện vật mang tên họ nên không ai khác ghim được.
     try:
-        from app.moderation import filter_rows as _loc_kiem_duyet
+        from app.modules.admin.moderation import filter_rows as _loc_kiem_duyet
     except ImportError as exc:            # pragma: no cover - lỗi cấu hình
         # Hỏng-thì-ĐÓNG. Nuốt lỗi ở đây và chạy tiếp nghĩa là dựng một split
         # KHÔNG qua kiểm duyệt mà không ai biết — đúng thứ cổng này sinh ra để
         # chặn. Thà không chạy được còn hơn chạy mà bỏ cổng.
         raise SystemExit(
-            "Khong import duoc app.moderation nen khong ap duoc cong kiem duyet. "
+            "Khong import duoc app.modules.admin.moderation nen khong ap duoc cong kiem duyet. "
             "Chay script nay o noi `app` import duoc (container trainer/backend). "
             f"Chi tiet: {exc}")
 
-    _kq_kd = _loc_kiem_duyet(rows, viewer_id=None)
+    _kq_kd = _loc_kiem_duyet(rows, viewer_id=str(args.viewer_id or '').strip() or None)
     if _kq_kd.withheld:
         print(f"[kiem-duyet] {_kq_kd.summary()}")
     rows = _kq_kd.kept
@@ -1706,7 +1736,9 @@ def main():
             # Phạm vi phải nằm TRONG hiện vật: đọc lại sau ba tháng, "7 lớp"
             # một mình không nói được đây là 7 lớp của hoa-de hay 7 lớp còn
             # sót của toàn bộ từ vựng.
-            extra={'scope': {'dialects': pn_muon}} if pn_muon else None,
+            extra={**({'scope': {'dialects': pn_muon}} if pn_muon else {}),
+                   **({'auth_user_id': str(args.viewer_id).strip()}
+                      if str(args.viewer_id or '').strip() else {})} or None,
         )
         print('Split summary:')
         for k, v in summary.items():

@@ -46,6 +46,18 @@ DB_URL="$(env_get DATABASE_URL)"
 APP_PW="$(printf '%s' "$DB_URL" | sed -E 's#^[a-z]+://[^:]+:([^@]*)@.*#\1#')"
 [ -n "$APP_PW" ] || { echo "error: khong doc duoc mat khau tu DATABASE_URL" >&2; exit 2; }
 
+# Máy mới thường bắt đầu từ .env.example, nên DATABASE_URL vẫn chứa CHANGE_ME.
+# Ở chế độ --force (đã là yêu cầu xoay credential), tự sinh bí mật đủ mạnh thay
+# vì tạo role bằng placeholder hoặc buộc người vận hành chép bí mật ra terminal.
+if [ "${#APP_PW}" -lt 16 ]; then
+  if [ "$FORCE" -ne 1 ]; then
+    echo "error: mat khau trong DATABASE_URL phai co it nhat 16 ky tu" >&2
+    echo "       dung --force de sinh credential moi va dong bo lai .env" >&2
+    exit 2
+  fi
+  APP_PW="$(openssl rand -hex 24)"
+fi
+
 CTRL_PW="$(openssl rand -hex 24)"
 
 SECRETS="$(mktemp)"
@@ -59,32 +71,45 @@ echo "==> cap phat vai voya_app / voya_control"
 # Gắn mã nguồn CLI vào container: ảnh có thể còn cũ hơn cây mã, và lượt cấp
 # phát này phải chạy đúng bản vừa sửa chứ không phải bản đã nướng vào ảnh.
 docker compose run --rm --no-deps \
-  --env-file "$SECRETS" \
+  --env-from-file "$SECRETS" \
   -v "$(pwd)/backend/app/cli/provision_db_roles.py:/app/app/cli/provision_db_roles.py:ro" \
   backend python -m app.cli.provision_db_roles
 
 # DSN dựng bằng chính hàm của ứng dụng, không nối chuỗi ở shell: host, cổng và
 # tên cơ sở dữ liệu lấy nguyên từ DSN hiện có.
-CTRL_URL="$(
+URLS="$(
   docker compose run --rm --no-deps -T \
-    --env-file "$SECRETS" \
+    --env-from-file "$SECRETS" \
     -v "$(pwd)/backend/app/cli/provision_db_roles.py:/app/app/cli/provision_db_roles.py:ro" \
     backend python -c '
 import os
-from app.cli.provision_db_roles import control_database_url
-print(control_database_url(os.environ["VOYA_CONTROL_DB_PASSWORD"]))
-' 2>/dev/null | tr -d '\r' | grep '^postgresql' | head -1
+from app.cli.provision_db_roles import app_database_url, control_database_url
+print("DATABASE_URL=" + app_database_url(os.environ["VOYA_APP_DB_PASSWORD"]))
+print("CONTROL_DATABASE_URL=" + control_database_url(os.environ["VOYA_CONTROL_DB_PASSWORD"]))
+' 2>/dev/null | tr -d '\r' | grep '_URL=postgresql'
 )"
 
+APP_URL="$(printf '%s\n' "$URLS" | sed -n 's/^DATABASE_URL=//p' | head -1)"
+CTRL_URL="$(printf '%s\n' "$URLS" | sed -n 's/^CONTROL_DATABASE_URL=//p' | head -1)"
+
+[ -n "$APP_URL" ] || { echo "error: khong dung duoc DATABASE_URL" >&2; exit 3; }
 [ -n "$CTRL_URL" ] || { echo "error: khong dung duoc CONTROL_DATABASE_URL" >&2; exit 3; }
 
-# Ghi vào .env: thay dòng cũ nếu có, không thì nối thêm.
-if grep -q '^CONTROL_DATABASE_URL=' "$ENV_FILE"; then
+# Ghi vào .env: thay dòng cũ nếu có, không thì nối thêm. Cả DSN và biến
+# provision phải cùng một bí mật để lần chạy lại không vô tình xoay lệch role.
+env_set() {
+  key="$1"
+  value="$2"
   tmp="$(mktemp)"
-  grep -v '^CONTROL_DATABASE_URL=' "$ENV_FILE" > "$tmp"
+  grep -v "^${key}=" "$ENV_FILE" > "$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
   mv "$tmp" "$ENV_FILE"
-fi
-printf 'CONTROL_DATABASE_URL=%s\n' "$CTRL_URL" >> "$ENV_FILE"
+}
 
-echo "==> da ghi CONTROL_DATABASE_URL vao .env (vai voya_control)"
+env_set DATABASE_URL "$APP_URL"
+env_set CONTROL_DATABASE_URL "$CTRL_URL"
+env_set VOYA_APP_DB_PASSWORD "$APP_PW"
+env_set VOYA_CONTROL_DB_PASSWORD "$CTRL_PW"
+
+echo "==> da dong bo DATABASE_URL / CONTROL_DATABASE_URL trong .env"
 echo "    kiem lai:  docker compose run --rm --no-deps backend python -m app.cli.provision_db_roles --check"

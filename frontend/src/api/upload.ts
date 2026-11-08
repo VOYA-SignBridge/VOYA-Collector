@@ -98,6 +98,7 @@ export const uploadVideo = async (
   label: string,
   dialect?: string,
   onProgress?: (percent: number) => void,
+  options?: { class_uid?: string; language?: string; visibility?: "private" | "tenant" | "community" },
 ): Promise<Result<UploadResult>> => {
   const startTime = Date.now();
   const sessionId = Math.random().toString(36).substring(7);
@@ -108,6 +109,9 @@ export const uploadVideo = async (
   formData.append("label", label);
   formData.append("upload_uid", uploadUid);
   if (dialect) formData.append('dialect', dialect);
+  if (options?.language) formData.append('language', options.language);
+  if (options?.class_uid) formData.append('class_uid', options.class_uid);
+  if (options?.visibility) formData.append('visibility', options.visibility);
 
   // Log start
   logDebugOperation('UPLOAD_VIDEO', 'IN_PROGRESS', {

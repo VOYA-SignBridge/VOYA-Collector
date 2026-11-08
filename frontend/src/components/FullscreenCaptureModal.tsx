@@ -15,6 +15,7 @@ import {
 } from "../config/capture";
 import SpeechInputButton from "./SpeechInputButton";
 import AddDialectModal from "./AddDialectModal";
+import CreateLabelModal from "./CreateLabelModal";
 import { getClassesList, getClassesStats } from "../api/dataset";
 import { fetchLabelSuggestions, fetchCollectorSuggestions, getPreference, setPreference } from "../api/preferences";
 import { useBackClosesOverlay } from "../hooks/useBackClosesOverlay";
@@ -403,9 +404,12 @@ interface FullscreenCaptureModalProps {
       language?: string;
       /** Số tay dùng khi thu: lựa chọn thủ công 1/2, hoặc số suy ra từ warmup ở chế độ Auto. */
       hands_used?: number | null;
+      class_uid?: string;
+      visibility?: "private" | "tenant" | "community";
     }
   ) => void;
   initialLabel?: string;
+  initialClassUid?: string;
   initialUser?: string;
   targetFrames?: number;
   captureCount?: number;
@@ -425,6 +429,7 @@ interface FullscreenCaptureModalProps {
    * che toàn bộ ToastContainer global. `key` tăng dần để re-trigger auto-dismiss.
    */
   qualityNotice?: { kind: "warning" | "error"; message: string; key: number } | null;
+  visibility?: "private" | "tenant" | "community";
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +440,7 @@ export default function FullscreenCaptureModal({
   onClose,
   onSampleCapture,
   initialLabel = "",
+  initialClassUid = "",
   initialUser = "",
   targetFrames = 60,
   captureCount = 1,
@@ -445,6 +451,7 @@ export default function FullscreenCaptureModal({
   capturedSummary = {},
   connectionIssue = null,
   qualityNotice = null,
+  visibility: initialVisibility = "private",
 }: FullscreenCaptureModalProps) {
   const { t } = useI18n();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -465,6 +472,8 @@ export default function FullscreenCaptureModal({
   const [catalogRows, setCatalogRows] = useState<ClassRow[]>([]);
   const [catalogStatsByUid, setCatalogStatsByUid] = useState<Record<string, number>>({});
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedClassUid, setSelectedClassUid] = useState("");
+  const [visibility, setVisibility] = useState<"private" | "tenant" | "community">(initialVisibility);
 
   // Source of truth for which dialects exist. Includes ones an admin approved
   // but that have no samples yet, which the class catalog alone cannot know.
@@ -475,7 +484,10 @@ export default function FullscreenCaptureModal({
   );
   const [catalogError, setCatalogError] = useState<string>("");
   const [countdown, setCountdown] = useState(0);
+  // "Sẵn sàng" nghĩa là ĐÃ NHẬN DẠNG được khung đầu tiên, không phải camera đã mở:
+  // bộ nhận dạng ~10 MB tải sau đó, và trong lúc ấy chưa thu được khung nào.
   const [isReady, setIsReady] = useState(false);
+  const isReadyRef = useRef(false);
   const [paused, setPaused] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
@@ -533,6 +545,7 @@ export default function FullscreenCaptureModal({
   const [mode, setMode] = useState<"IDLE" | "COUNTDOWN" | "RECORD">("IDLE");
   const [handsVisible, setHandsVisible] = useState(false);
   const [showAddDialectModal, setShowAddDialectModal] = useState(false);
+  const [showCreateLabelModal, setShowCreateLabelModal] = useState(false);
 
   // --- Debounced label suggestions from server ---
   const [serverLabelSuggestions, setServerLabelSuggestions] = useState<string[]>([]);
@@ -558,6 +571,8 @@ export default function FullscreenCaptureModal({
   const userRef = useRef(user);
   const dialectRef = useRef(dialect);
   const languageRef = useRef(language);
+  const classUidRef = useRef(selectedClassUid);
+  const visibilityRef = useRef(visibility);
   const targetFramesRef = useRef(targetFrames);
   const onSampleCaptureRef = useRef(onSampleCapture);
   const connectionIssueRef = useRef(connectionIssue);
@@ -592,6 +607,8 @@ export default function FullscreenCaptureModal({
   useEffect(() => { labelRef.current = label; }, [label]);
   useEffect(() => { dialectRef.current = dialect; }, [dialect]);
   useEffect(() => { languageRef.current = language; }, [language]);
+  useEffect(() => { classUidRef.current = selectedClassUid; }, [selectedClassUid]);
+  useEffect(() => { visibilityRef.current = visibility; }, [visibility]);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onSampleCaptureRef.current = onSampleCapture; }, [onSampleCapture]);
@@ -603,7 +620,9 @@ export default function FullscreenCaptureModal({
     if (!isOpen) return;
     setLabel(initialLabel);
     setUser(sanitizeCollectorName(initialUser));
-  }, [isOpen, initialLabel, initialUser]);
+    setSelectedClassUid(initialClassUid);
+    setVisibility(initialVisibility);
+  }, [isOpen, initialLabel, initialClassUid, initialUser, initialVisibility]);
 
   // PHASE 1A: Reset temporal stabilization refs when recording starts
   useEffect(() => {
@@ -892,7 +911,7 @@ export default function FullscreenCaptureModal({
       if (!ok) return;
     }
     setRecording(false); setMode("IDLE"); setFrames([]);
-    expectedHandsRef.current = null; setCountdown(0); setIsReady(false);
+    expectedHandsRef.current = null; setCountdown(0); setIsReady(false); isReadyRef.current = false;
     setCurrentCaptureIndex(0); setCompletedCaptures(0); setCameraError(null);
     try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* ignore */ }
     stopCameraResources();
@@ -965,12 +984,15 @@ export default function FullscreenCaptureModal({
           )
         );
 
-        // Registry first (it is the source of truth and includes dialects that
-        // have no samples yet), then whatever the class catalog knows about.
-        const mergedDialects = Array.from(new Set([
-          ...registryDialectIds,
-          ...serverDialects,
-        ]));
+        // Registry là nguồn sự thật: nó có cả phương ngữ đã duyệt mà chưa có
+        // mẫu, và KHÔNG có phương ngữ đã bị gộp/từ chối. Danh mục lớp chỉ được
+        // dùng để bù khi registry trống (mất kết nối) — gộp cả hai như trước
+        // thì một phương ngữ đã gộp (vd `test` → `bang-chu-cai`, 22/08) vẫn
+        // hiện trong dropdown vì lớp cũ còn mang tên nó; người thu chọn vào,
+        // máy chủ đưa sang bảng chữ cái và từ chối nhãn nhiều chữ (lỗi 16/09).
+        const mergedDialects = registryDialectIds.length > 0
+          ? [...registryDialectIds]
+          : serverDialects;
         const mergedLanguages = Array.from(new Set([
           ...serverLanguages,
           ...DEFAULT_LANGUAGES,
@@ -1002,13 +1024,16 @@ export default function FullscreenCaptureModal({
               .map((row) => displayDialectLabel(row.dialect))
               .filter((item): item is string => Boolean(item))
           )
-        );
+        ).filter((d) => mergedDialects.includes(d)); // lớp cũ của phương ngữ đã gộp không kéo nó trở lại
 
+        const preferredWordDialect = availableDialectsForLanguage.includes("common")
+          ? "common"
+          : (availableDialectsForLanguage.find((item) => !ALPHABET_DIALECT_KEYS.has(item)) || "");
         const nextDialect = storedSel && mergedDialects.includes(storedSel) && (
           availableDialectsForLanguage.length === 0 || availableDialectsForLanguage.includes(storedSel)
         )
           ? storedSel
-          : (availableDialectsForLanguage[0] || mergedDialects[0] || "");
+          : (preferredWordDialect || mergedDialects.find((item) => !ALPHABET_DIALECT_KEYS.has(item)) || mergedDialects[0] || "");
 
         setLanguage(nextLanguage);
         setDialect(nextDialect);
@@ -1056,6 +1081,24 @@ export default function FullscreenCaptureModal({
     // `hands_required` chỉ là gợi ý từ catalog, không được khóa cứng vì cùng
     // một nhãn có thể xuất hiện 1 tay ở đầu và 2 tay ở đoạn sau.
     const suggestedHands = typeof matchingCatalogRow?.hands_required === "number" ? matchingCatalogRow.hands_required : null;
+
+  // Label text is only a display value; class_uid is the identity sent to the
+  // API. Restore it whenever a typed/pasted label matches this tenant's
+  // catalog, otherwise a stale dialect preference can route a word label into
+  // the fingerspelling validation path.
+  useEffect(() => {
+    if (catalogLoading || catalogError) return;
+    if (initialClassUid && label === initialLabel && !matchingCatalogRow) {
+      // A deep link already carries the canonical identity. Keep it while the
+      // catalog is filtered by a stale dialect preference; changing the label
+      // still clears the UID in the input handler below.
+      setSelectedClassUid((current) => current === initialClassUid ? current : initialClassUid);
+      return;
+    }
+    const nextUid = matchingCatalogRow?.class_uid || "";
+    setSelectedClassUid((current) => current === nextUid ? current : nextUid);
+  }, [catalogLoading, catalogError, initialClassUid, initialLabel, label, matchingCatalogRow?.class_uid]);
+
     // In-modal QC toast: auto-dismiss sau 5s, re-trigger theo notice.key
     const [visibleNotice, setVisibleNotice] = useState<typeof qualityNotice>(null);
   useEffect(() => {
@@ -1069,7 +1112,7 @@ export default function FullscreenCaptureModal({
   // Capture handlers
   // -------------------------------------------------------------------------
   const handleQuickCapture = useCallback(() => {
-    if (!labelRef.current || !userRef.current || connectionIssueRef.current) return;
+    if (!labelRef.current || !userRef.current || connectionIssueRef.current || !isReadyRef.current) return;
     setFrames([]); framesRef.current = [];
     expectedHandsRef.current = expectedHandsOptionRef.current;
     // If user explicitly selected 1/2 hands, skip warmup and accept frames immediately
@@ -1111,6 +1154,8 @@ export default function FullscreenCaptureModal({
         dialect: dialectRef.current,
         language: languageRef.current,
         hands_used: expectedHandsOptionRef.current ?? expectedHandsRef.current,
+        class_uid: classUidRef.current || undefined,
+        visibility: visibilityRef.current,
       });
       setFrames([]); framesRef.current = [];
       expectedHandsRef.current = expectedHandsOptionRef.current;
@@ -1175,6 +1220,7 @@ export default function FullscreenCaptureModal({
     hands.setOptions({ ...HAND_TRACKING_OPTIONS });
 
     hands.onResults((results: unknown) => {
+      if (!isReadyRef.current) { isReadyRef.current = true; setIsReady(true); }
       const r = results as {
         multiHandLandmarks?: MediaPipeLandmark[][];
         // MediaPipe's metric 3D output, parallel to multiHandLandmarks and
@@ -1543,6 +1589,8 @@ export default function FullscreenCaptureModal({
           dialect: dialectRef.current,
           language: languageRef.current,
           hands_used: deriveHandsUsed(capturedFrames),
+          class_uid: classUidRef.current || undefined,
+          visibility: visibilityRef.current,
         });
 
         completedCapturesRef.current = newCompleted;
@@ -1624,10 +1672,10 @@ export default function FullscreenCaptureModal({
 
     cameraRef.current = camera;
     camera.start()
-      .then(() => { setIsReady(true); setCameraError(null); })
+      .then(() => { setCameraError(null); })
       .catch((error: unknown) => {
         const errorMsg = getCameraErrorMessage(error);
-        setCameraError(errorMsg); setIsReady(false);
+        setCameraError(errorMsg); setIsReady(false); isReadyRef.current = false;
       });
 
     return () => {
@@ -1723,6 +1771,9 @@ export default function FullscreenCaptureModal({
                 quality_info: quality,
                 dialect: dialectRef.current,
                 hands_used: deriveHandsUsed(framesRef.current),
+                language: languageRef.current,
+                class_uid: classUidRef.current || undefined,
+                visibility: visibilityRef.current,
               });
               setFrames([]); framesRef.current = [];
               expectedHandsRef.current = expectedHandsOptionRef.current;
@@ -1884,7 +1935,9 @@ export default function FullscreenCaptureModal({
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row pt-0 sm:pt-20 overflow-hidden">
         {/* Camera Feed */}
         <div className="flex-1 relative flex items-center justify-center bg-gray-900 w-full min-h-[42svh] sm:min-h-[50vh] lg:h-full overflow-hidden">
-          <video ref={videoRef} autoPlay muted playsInline className="hidden" />
+          {/* Hiện hình camera ngay trong lúc tải bộ nhận dạng; canvas chỉ có hình sau đó. */}
+          <video ref={videoRef} autoPlay muted playsInline style={{ transform: "scaleX(-1)" }}
+            className={isReady ? "hidden" : "absolute inset-0 h-full w-full object-contain"} />
           <canvas
             ref={canvasRef}
             width={CAPTURE_FRAME_WIDTH}
@@ -1892,6 +1945,15 @@ export default function FullscreenCaptureModal({
             className="block w-full h-full max-w-full max-h-full object-cover sm:object-contain border border-gray-600 rounded-lg bg-gray-950"
             style={{ minHeight: "200px" }}
           />
+
+          {!isReady && !cameraError && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none" data-testid="capture-loading">
+              <div className="bg-black/70 text-white px-4 py-2 rounded-lg text-center" role="status">
+                <div className="font-semibold">{t("Đang tải bộ nhận dạng bàn tay...")}</div>
+                <div className="text-xs mt-0.5 text-gray-300">{t("Lần đầu có thể mất vài chục giây. Chưa thu được cho tới khi tải xong.")}</div>
+              </div>
+            </div>
+          )}
 
           {recording && !handsVisible && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2072,11 +2134,14 @@ export default function FullscreenCaptureModal({
                 <PencilIcon className="inline h-3.5 w-3.5 mr-1 -mt-0.5" aria-hidden="true" />
                 {t("Nhãn *")}
               </label>
-                <div className="relative">
-                  <input type="text" value={label} onChange={(e) => { setLabel(e.target.value); setLabelConfirmed(false); }} onFocus={() => setLabelFocused(true)} onBlur={() => setTimeout(() => setLabelFocused(false), 150)} placeholder={t("vd: xin chào, cảm ơn")} className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                  <input type="text" value={label} onChange={(e) => { setLabel(e.target.value); setSelectedClassUid(""); setLabelConfirmed(false); }} onFocus={() => setLabelFocused(true)} onBlur={() => setTimeout(() => setLabelFocused(false), 150)} placeholder={t("vd: xin chào, cảm ơn")} className="w-full pr-10 px-2.5 py-1.5 sm:px-3 sm:py-2 bg-gray-800/80 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm" disabled={recording || countdown > 0} />
                   <div className="absolute inset-y-0 right-1.5 flex items-center">
                     <SpeechInputButton onText={(text) => setLabel(text)} title={t("Giọng nói")} className="h-7 w-7" />
                   </div>
+                </div>
+                  <button type="button" onClick={() => setShowCreateLabelModal(true)} disabled={recording || countdown > 0} className="shrink-0 self-start rounded-lg border border-blue-400/60 px-2 py-2 text-[10px] font-medium text-blue-200 hover:bg-blue-900/60 disabled:opacity-40">{t("Tạo nhãn mới")}</button>
                 </div>
                 {labelFocused && !catalogLoading && !catalogError && labelSuggestions.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -2139,9 +2204,11 @@ export default function FullscreenCaptureModal({
                           .map((row) => displayDialectLabel(row.dialect))
                           .filter((item): item is string => Boolean(item))
                       )
-                    );
+                    ).filter((d) => dialectList.includes(d));
                     if (availableDialectsForLanguage.length > 0 && !availableDialectsForLanguage.includes(dialect)) {
-                      const fallbackDialect = availableDialectsForLanguage[0];
+                      const fallbackDialect = availableDialectsForLanguage.includes("common")
+                        ? "common"
+                        : (availableDialectsForLanguage.find((item) => !ALPHABET_DIALECT_KEYS.has(item)) || availableDialectsForLanguage[0]);
                       setDialect(fallbackDialect);
                       setPreference("dialectSelected", fallbackDialect);
                     }
@@ -2159,6 +2226,14 @@ export default function FullscreenCaptureModal({
                   }}
                   disabled={recording || countdown > 0}
                 />
+                <label className="text-[11px] sm:text-xs font-medium text-blue-300">
+                  {t("Phạm vi dữ liệu")}
+                  <select value={visibility} onChange={(e) => setVisibility(e.target.value as typeof visibility)} disabled={recording || countdown > 0} className="mt-1 w-full rounded-lg border border-gray-600 bg-gray-800/80 px-2 py-1.5 text-xs text-white">
+                    <option value="private">{t("Riêng tư")}</option>
+                    <option value="tenant">{t("Cả tổ chức")}</option>
+                    <option value="community">{t("Cộng đồng")}</option>
+                  </select>
+                </label>
               </div>
               <div className="text-[10px] text-blue-200/60">
                 {catalogLoading ? t("Đang tải...") : t("{p1} / {p2} • {currentCatalogLabelCount} nhãn", { p1: displayLanguageLabel(language), p2: displayDialectLabel(dialect), currentCatalogLabelCount })}
@@ -2255,6 +2330,20 @@ export default function FullscreenCaptureModal({
               setPreference("dialectSelected", dialectId);
               void refreshRegistry();
             }} />
+            <CreateLabelModal
+              isOpen={showCreateLabelModal}
+              onClose={() => setShowCreateLabelModal(false)}
+              initialLanguage={language}
+              initialDialect={dialect || "common"}
+              onCreated={(row) => {
+                setLabel(row.label_original);
+                setSelectedClassUid(row.class_uid);
+                setLanguage(row.language || language);
+                setDialect(row.dialect || dialect || "common");
+                setCatalogRows((prev) => [row, ...prev.filter((r) => r.class_uid !== row.class_uid)]);
+                setLabelConfirmed(true);
+              }}
+            />
 
             {/* Status — desktop only */}
             <div className="bg-gray-800 rounded-lg p-3 hidden sm:block">

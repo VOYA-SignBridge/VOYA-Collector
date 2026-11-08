@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import apiClient from "../api/axiosClient";
 import { useVisiblePoll } from "./useVisiblePoll";
 import { tr } from "../i18n";
-import { useToast } from "./useToast";
+import { useOptionalToast } from "./useToast";
 
 /**
  * Việc đang chờ quản trị viên, theo từng mục console — kèm pop-up khi TĂNG.
@@ -47,26 +47,20 @@ export function useAdminAttention(active = true) {
   const [counts, setCounts] = useState<AttentionCounts>({});
   const seen = useRef<AttentionCounts | null>(null);
 
-  // `useToast()` dựng một object MỚI mỗi lần dựng lại. Để `toast` trong mảng
+  // Toast phải ổn định giữa các lần dựng. Để `toast` trong mảng
   // phụ thuộc của `refresh` thì `refresh` cũng mới mỗi lần, và cái `useEffect`
   // ở dưới chạy lại sau MỌI lần dựng — tức mỗi lần đặt state lại kéo thêm một
   // lượt gọi máy chủ, kéo thêm một lần đặt state. Bộ test bắt được ngay: hai
   // câu trả lời giả bị dùng hết trong một lần dựng đầu tiên.
   //
-  // `useToast()` NÉM khi không có `<ToastProvider>` bao ngoài. Đúng với phần
-  // lớn chỗ gọi, nhưng sai với chỗ này: hook đang nằm trong VỎ của console
+  // Hook này có thể nằm trong VỎ của console trước `<ToastProvider>`, nên
   // quản trị, nên một provider thiếu sẽ không tắt mất pop-up — nó làm trắng cả
   // console. Huy hiệu là tín hiệu chính và nó không cần toast; chạy thiếu
   // pop-up là suy giảm chấp nhận được, còn màn hình trắng thì không.
   //
-  // `useContext` bên trong vẫn được gọi VÔ ĐIỀU KIỆN, nên thứ tự hook không
-  // đổi — cái `try` này chỉ chặn phép kiểm ném lỗi ở cuối.
-  let toast: ReturnType<typeof useToast>["toast"] | null = null;
-  try {
-    toast = useToast().toast;
-  } catch {
-    toast = null;
-  }
+  // `useOptionalToast` vẫn luôn gọi hook theo cùng thứ tự và trả `null` khi
+  // provider chưa tồn tại, thay vì dùng try/catch quanh một hook.
+  const toast = useOptionalToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 

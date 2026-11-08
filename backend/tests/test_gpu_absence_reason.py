@@ -16,7 +16,7 @@ import time
 
 import pytest
 
-from app import monitoring
+from app.modules.monitoring import gpu as monitoring
 
 
 class _FakeRedis:

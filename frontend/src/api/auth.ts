@@ -28,6 +28,12 @@ export type AuthUser = {
    * `require_tenant_admin` cưỡng chế ở từng điểm cuối.
    */
   tenant_role?: string | null;
+  /**
+   * Có quyền biên tập ở tổ chức ĐANG LÀM VIỆC hay không — do máy chủ tính bằng
+   * đúng phép kiểm của `require_tenant_editor`. Đừng suy từ `tenant_role`: trường
+   * đó đọc tổ chức NHÀ, nên người làm việc ở tổ chức khác sẽ thấy nút sai.
+   */
+  can_edit_tenant?: boolean;
 };
 
 /**
@@ -46,6 +52,15 @@ export function isTenantAdmin(user: AuthUser | null | undefined): boolean {
   return TENANT_ADMIN_ROLES.includes(
     (user.tenant_role ?? "") as (typeof TENANT_ADMIN_ROLES)[number],
   );
+}
+
+/**
+ * Vẽ các nút biên tập của tổ chức: sửa/xoá nhãn, thùng rác nhãn, đưa model vào
+ * realtime. Khác `isTenantAdmin` ở chỗ gồm cả vai `editor`, và khác `is_admin`
+ * ở chỗ đó là việc của tổ chức, không phải của người vận hành nền tảng.
+ */
+export function canEditTenant(user: AuthUser | null | undefined): boolean {
+  return Boolean(user?.is_admin || user?.can_edit_tenant);
 }
 
 export type RegisterPayload = {

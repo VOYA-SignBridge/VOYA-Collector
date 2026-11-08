@@ -69,7 +69,7 @@ def test_training_metrics_cannot_orphan_itself(rollback_cursor):
     `rollback_cursor` cảnh báo: ở đó một test xanh vì sai lý do, ở đây một test
     đỏ vì sai lý do — cùng một hậu quả là ràng buộc dưới thử nghiệm không chạy.
     """
-    from app.tenancy import DEFAULT_TENANT_ID
+    from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
     with pytest.raises(psycopg2.errors.ForeignKeyViolation):
         rollback_cursor.execute(

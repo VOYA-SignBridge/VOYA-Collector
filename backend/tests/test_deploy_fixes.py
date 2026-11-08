@@ -215,7 +215,7 @@ def test_all_rows_ok_reports_zero_failures(tmp_path):
     ],
 )
 def test_host_port_parsing(monkeypatch, smtp_host, smtp_port, expected):
-    import app.email_service as es
+    import app.services.email as es
 
     monkeypatch.setattr(es.settings, "smtp_host", smtp_host)
     monkeypatch.setattr(es.settings, "smtp_port", smtp_port)

@@ -34,12 +34,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from app.tenant_context import platform_command
+from app.modules.saas.tenant_context import platform_command
 
 
 @platform_command("cli: công bố văn bản pháp lý")
 def main(argv: List[str] | None = None) -> int:
-    from app import legal
+    from app.modules.legal import legal
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true",

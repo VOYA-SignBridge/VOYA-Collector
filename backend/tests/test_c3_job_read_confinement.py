@@ -64,7 +64,7 @@ from app.storage.metadata_db import (  # noqa: E402
     _migration_cursor,
     upsert_training_job,
 )
-from app.tenant_context import system_scope, tenant_scope  # noqa: E402
+from app.modules.saas.tenant_context import system_scope, tenant_scope  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
@@ -74,7 +74,7 @@ UID_B = "c3bbbbbb-0000-4000-8000-00000000000b"
 
 
 @pytest.fixture(scope="module")
-def hai_nguoi_dung():
+def hai_nguoi_dung(isolation_tenants):
     """Hai tài khoản THẬT trong `users`, hai tenant khác nhau.
 
     Không dùng `dependency_overrides[get_current_user]` với một `dict` giả, và
@@ -121,7 +121,7 @@ def app_client(hai_nguoi_dung):
     tượng nó đang đo. Báo một lỗ hổng sản xuất dựa trên một app thiếu tầng bảo
     vệ của sản xuất là báo sai — và báo sai về bảo mật thì đắt cả hai chiều.
     """
-    from app.tenant_middleware import TenantScopeMiddleware
+    from app.modules.saas.tenant_middleware import TenantScopeMiddleware
 
     app = FastAPI()
     app.include_router(router)
@@ -134,13 +134,13 @@ def app_client(hai_nguoi_dung):
 
 def _nhu(uid: str) -> Dict[str, str]:
     """Header của một phiên THẬT. Middleware và `get_current_user` cùng đọc nó."""
-    from app import auth
+    from app.modules.identity import _web_compat as auth
 
     return {"Authorization": f"Bearer {auth.create_access_token({'sub': uid})}"}
 
 
 @pytest.fixture
-def job_cua_A():
+def job_cua_A(isolation_tenants):
     """Một job ĐÃ HOÀN THÀNH thuộc `iso_a`, ghi thật vào Postgres."""
     jid = str(uuid.uuid4())
     row = {

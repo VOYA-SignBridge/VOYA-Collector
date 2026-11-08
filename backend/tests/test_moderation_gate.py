@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.moderation import (
+from app.modules.admin.moderation import (
     APPROVED, PENDING, REASON_PENDING, REASON_REJECTED, REJECTED,
     filter_rows, status_of,
 )
@@ -138,7 +138,7 @@ class TestDocLapVoiCongDongThuan:
         """
         import inspect
 
-        from app import moderation
+        from app.modules.admin import moderation
 
         src = inspect.getsource(moderation)
         assert "signer_id" not in src

@@ -45,7 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app import training_tasks as tt  # noqa: E402
+from app.modules.training import tasks as tt  # noqa: E402
 
 A = "iso_a"
 B = "iso_b"
@@ -107,7 +107,7 @@ class TestC3_S4_HopDongDatTen:
         khác nhau — và loại quan trọng hơn (trọng số mô hình) lại là loại không
         có định danh.
         """
-        nguon = (REPO_ROOT / "backend" / "app" / "training_tasks.py").read_text(
+        nguon = (REPO_ROOT / "backend" / "app" / "modules" / "training" / "tasks.py").read_text(
             encoding="utf-8")
         assert 'f"{job_id}.metrics.jsonl"' in nguon
         assert 'f"{job_id}.log"' in nguon
@@ -156,7 +156,7 @@ class TestC3_S6_DuPhongChonNhamHienVat:
         đúng được, và bước kế tiếp sẽ đi tìm một tệp không tồn tại. Kiểm bằng
         cấu trúc: nhánh xử lý phải đặt `status="failed"` và leo thang.
         """
-        nguon = (REPO_ROOT / "backend" / "app" / "training_tasks.py").read_text(
+        nguon = (REPO_ROOT / "backend" / "app" / "modules" / "training" / "tasks.py").read_text(
             encoding="utf-8")
         i = nguon.index("_fallback_checkpoint()\n")
         than = nguon[i:i + 1400]
@@ -262,7 +262,7 @@ class TestC3_S5_LuotDonXuyenToChuc:
         "20 checkpoint mới nhất" là một câu hỏi chỉ có nghĩa khi hỏi trong phạm
         vi một tổ chức.
         """
-        nguon = (REPO_ROOT / "backend" / "app" / "training_tasks.py").read_text(
+        nguon = (REPO_ROOT / "backend" / "app" / "modules" / "training" / "tasks.py").read_text(
             encoding="utf-8")
         i = nguon.index("def cleanup_training_artifacts")
         than = nguon[i:i + 2000]
@@ -339,7 +339,10 @@ class TestC3_S1_S2_S3_DuongDoc:
         Mà hàng job thì đã nằm dưới RLS và dưới cổng cache đã vá ở C3. Nên
         đường ĐỌC được canh bởi tầng logic, không bởi vị trí tệp.
         """
-        nguon = (REPO_ROOT / "backend" / "app" / "routers" / "training.py").read_text(
+        nguon = (
+            REPO_ROOT / "backend" / "app" / "modules" / "training" /
+            "inference_service.py"
+        ).read_text(
             encoding="utf-8")
         # Mọi lượt đọc `checkpoint_path` đều đi từ đối tượng job, không từ tham
         # số đường dẫn của request.

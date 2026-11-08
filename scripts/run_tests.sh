@@ -101,13 +101,14 @@ echo "==> dich test: $(printf '%s' "$app_dsn" | sed -E 's#://([^:]+):[^@]*@#://\
 # --------------------------------------------------------------------------
 extra=""
 
-# 1) Google Drive. `gdrive_client` tìm ĐÚNG /gdrive/credentials.json; mount
-#    read-only vì bộ test chỉ cần đọc chứng thư, không cần ghi đè nó.
-if [ -f "$REPO/gdrive/credentials.json" ]; then
-  extra="$extra -v ${REPO_MOUNT}/gdrive:/gdrive:ro"
-else
-  echo "==> khong co gdrive/credentials.json — 13 ca SOT se skip"
-fi
+# Bí mật CỐ ĐỊNH chỉ dùng trong container test. `.env` thật cố ý được phép để
+# trống trên máy mới, nhưng OTP từ chối hash mã sáu chữ số khi thiếu pepper.
+# Override ở đây giữ production fail-closed mà vẫn làm test tự đủ điều kiện.
+extra="$extra -e OTP_PEPPER=voya-test-only-pepper-not-for-production-2026"
+
+# 1) Google Drive: KHÔNG mount gdrive/ vào container test (từ 18/10/2026). Bộ
+#    test từng ghi thẳng lên Drive sản xuất qua đường này; conftest giờ chặn
+#    mọi lệnh gọi Google API, và 13 ca SOT tích hợp skip.
 
 # 2) Một clip thật để chạy trích đặc trưng đầu-đến-cuối. `skipif` bám vào BIẾN
 #    MÔI TRƯỜNG chứ không vào sự tồn tại của thư mục, nên mount không thôi là
@@ -206,6 +207,23 @@ VOYA_TEST_CMD="${VOYA_TEST_CMD:-python -m pytest}"
 # đi không được.
 # --------------------------------------------------------------------------
 extra="$extra -e SMTP_HOST=smtp.test.invalid"
+
+# Redis riêng. `--env-file` mang theo `redis://redis:6379/0` của stack đang chạy,
+# nên tới 06/11/2026 bộ đếm rate-limit của test và của người dùng thật chung một
+# chỗ, trái với điều TESTING.md §1.1 ghi. Đo được: db 0 có khoá, db 13 trống.
+for _k in REDIS_URL CELERY_BROKER_URL CELERY_RESULT_BACKEND TTS_REDIS_URL; do
+  extra="$extra -e $_k=redis://redis:6379/13"
+done
+
+# Ba giá trị của `.env` làm đỏ giả khi máy đặt cấu hình triển khai.
+#
+# `COOKIE_SECURE=1`: TestClient chạy http nên không gửi cookie `Secure`, mọi ca
+# đăng nhập nhận 401. Đo 06/11/2026: 27 ca đỏ, đặt về 0 thì xanh.
+# `GDRIVE_LAYOUT=tenant`: test dựa trên mặc định `legacy` của config.py; ca nào cần
+# bố cục `tenant` tự đặt lấy.
+# `USE_GOOGLE_DRIVE=0`: máy phát triển tắt Drive, nhưng test viết cho đường có Drive;
+# Google vẫn bị chặn ở `conftest`, trừ lượt sandbox.
+extra="$extra -e COOKIE_SECURE=0 -e GDRIVE_LAYOUT=legacy -e USE_GOOGLE_DRIVE=1"
 
 exec docker run --rm \
   --network "$NETWORK" \

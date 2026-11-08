@@ -349,6 +349,12 @@ function App() {
                 <Route path="realtime" element={<OrgRealtimePage />} />
                 <Route path="training" element={<OrgTrainingPage />} />
                 <Route path="members" element={<OrganizationPage />} />
+                {/* Cùng thành phần với `/admin/*`: đây là lối vào cho vai biên tập
+                    của tổ chức. Quyền vẫn do `require_tenant_editor` ở máy chủ. */}
+                <Route path="data" element={<AdminDataPage />} />
+                <Route path="signers" element={<AdminSignersPage />} />
+                <Route path="processing" element={<AdminProcessingPage />} />
+                <Route path="trash" element={<TrashPage />} />
                 <Route path="settings" element={<OrgSettingsLayout />}>
                   <Route index element={<WorkspacesPage />} />
                   <Route path="allocations" element={<ConsoleAllocationsPage />} />

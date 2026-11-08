@@ -27,9 +27,9 @@ from pathlib import Path
 
 import pytest
 
-from app import storage_quota as sq
+from app.modules.saas import storage_quota as sq
 from app.storage import metadata_db as db
-from app.tenant_context import system_scope, tenant_scope
+from app.modules.saas.tenant_context import system_scope, tenant_scope
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -40,8 +40,8 @@ def _ensure_schema():
 @pytest.fixture
 def to_chuc():
     """Tenant thật, gói Free (2 GB), dọn sạch cả DB lẫn ĐĨA sau bài."""
-    from app import tenant_admin
-    from app.dataset_manager import tenant_features_root
+    from app.modules.saas import tenant_admin
+    from app.modules.dataset.catalog import tenant_features_root
     from conftest import purge_tenant
 
     tid = f"stq{uuid.uuid4().hex[:9]}"
@@ -67,7 +67,7 @@ def _dat_bo_dem(tid: str, n: int) -> None:
 
 
 def _tran(tid: str) -> int:
-    from app.plans import plan_for_tenant
+    from app.modules.saas.plans import plan_for_tenant
     return int(plan_for_tenant(tid)["max_storage_mb"]) * 1024 * 1024
 
 
@@ -80,7 +80,7 @@ def _so_khoan_giu_cho(tid: str) -> int:
 
 def _ghi_tep(tid: str, ten: str, n: int) -> Path:
     """Ghi `n` byte vào cây đặc trưng của tenant — hiện vật TÍNH PHÍ thật."""
-    from app.dataset_manager import tenant_features_root
+    from app.modules.dataset.catalog import tenant_features_root
 
     p = tenant_features_root(tid) / "vn" / "common" / "class_test_0000" / ten
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -224,7 +224,7 @@ def test_mien_tru_billing_thi_khong_co_tran(to_chuc):
     with system_scope("test: mien tru"):
         db._execute("UPDATE tenants SET billing_exempt = TRUE WHERE tenant_id = %s",
                     (to_chuc,))
-    from app.plans import _clear_caches
+    from app.modules.saas.plans import _clear_caches
     _clear_caches()
     _dat_bo_dem(to_chuc, _tran(to_chuc) * 10)
     giu = sq.reserve(to_chuc, 10 * 1024 * 1024 * 1024)
@@ -319,7 +319,7 @@ def test_sau_luot_ghi_dong_thoi_chi_ba_luot_qua(to_chuc):
 
 
 def test_bo_dem_cua_hai_to_chuc_khong_dinh_vao_nhau(to_chuc):
-    from app import tenant_admin
+    from app.modules.saas import tenant_admin
     from conftest import purge_tenant
 
     khac = f"stq{uuid.uuid4().hex[:9]}"
@@ -388,7 +388,7 @@ def test_doi_chieu_khong_keu_khi_khong_lech(to_chuc, caplog):
 def test_doi_chieu_dem_ca_KHO_RAW_khong_chi_dac_trung(to_chuc):
     """Một mẫu là hai tệp ở hai cây. Bỏ kho raw ra là tính thiếu ~1/3 mỗi mẫu —
     và nó là nửa KHÔNG tái tạo được, tức nửa đắt hơn."""
-    from app.dataset_samples import raw_archive_path
+    from app.modules.dataset.samples import raw_archive_path
 
     dac_trung = _ghi_tep(to_chuc, "sample_dddddddddd.npz", 2000)
     kho = raw_archive_path(dac_trung)
@@ -413,7 +413,7 @@ def test_doi_chieu_KHONG_xoa_gi_khi_to_chuc_dang_vuot_tran(to_chuc, caplog):
     tep = _ghi_tep(to_chuc, "sample_eeeeeeeeee.npz", 4096)
     with system_scope("test: ha goi xuong mot tran rat nho"):
         db._execute("UPDATE plans SET max_storage_mb = 0 WHERE plan_code = 'free'")
-    from app.plans import _clear_caches
+    from app.modules.saas.plans import _clear_caches
     _clear_caches()
     try:
         with caplog.at_level(logging.WARNING):
@@ -443,7 +443,7 @@ def test_doi_chieu_van_do_tenant_mien_tru(to_chuc):
     with system_scope("test: mien tru"):
         db._execute("UPDATE tenants SET billing_exempt = TRUE WHERE tenant_id = %s",
                     (to_chuc,))
-    from app.plans import _clear_caches
+    from app.modules.saas.plans import _clear_caches
     _clear_caches()
 
     _ghi_tep(to_chuc, "sample_ffffffffff.npz", 5555)

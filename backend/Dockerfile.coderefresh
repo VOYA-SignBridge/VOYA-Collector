@@ -1,0 +1,25 @@
+# Cập nhật CODE backend mà không tải lại thư viện (torch/CUDA ~3 GB).
+#
+# Bước cuối của Dockerfile chính cũng chỉ là `COPY app/`, nên kết quả tương đương
+# một lần build đầy đủ. Build đầy đủ từng kẹt 6 giờ (16/10/2026) vì DNS tới
+# pypi.nvidia.com chập chờn, và mỗi lượt làm ổ ảo Docker to thêm ~30 GB.
+#
+# `requirements.txt` được áp lại: pip chỉ tải gói đã đổi (đo 06/11: chỉ edge-tts,
+# 38 KB). Riêng khi đổi `torch` thì phải `--full`: torch cài từ index cu128 ở
+# Dockerfile chính, bản lấy từ PyPI ở đây sẽ kéo thêm ~2,6 GB `nvidia-*`.
+#
+# Xoá hẳn /app/app rồi chép lại, để tệp đã xoá trong repo không sống tiếp trong
+# ảnh. BASE là ảnh đã build đầy đủ (mặc định voya_backend:base, xem scripts/voya.py).
+#
+#   docker build -f Dockerfile.coderefresh --build-arg BASE=voya_backend:base -t voya_backend:latest .
+ARG BASE=voya_backend:base
+FROM ${BASE}
+USER root
+COPY requirements.txt /tmp/requirements.txt
+USER appuser
+# Trước `COPY app/`: đặt sau thì mỗi lần đổi code pip lại rà toàn bộ gói qua mạng.
+RUN python -m pip install --no-cache-dir --user -r /tmp/requirements.txt
+USER root
+RUN rm -rf /app/app
+COPY --chown=appuser:appuser app/ /app/app/
+USER appuser
