@@ -31,6 +31,20 @@ except Exception:  # pragma: no cover
 REPO = pathlib.Path(__file__).resolve().parents[1]
 DICH = REPO / "backend" / "app" / "data" / "qipedc_catalog.json"
 
+# Lỗi gõ có sẵn trong định nghĩa của nguồn; sửa ở đây để dựng lại không đưa chúng về.
+LOI_GO_NGUON = {
+    "ngưởi con gái": "người con gái",
+    "chỗ naỳ": "chỗ này",
+    "ngôn gữ": "ngôn ngữ",
+    "nilôngv.v": "nilông, v.v.",
+}
+
+
+def sua_loi_go(text: str) -> str:
+    for sai, dung in LOI_GO_NGUON.items():
+        text = text.replace(sai, dung)
+    return text
+
 
 def slugify(text: str) -> str:
     t = text.replace("đ", "d").replace("Đ", "D")
@@ -60,7 +74,7 @@ def main() -> int:
             "region": (r.get("vung") or "").strip(),   # bac | trung | nam | khong_ghi
             "pos": (r.get("tu_loai") or "").strip(),
             "kind": (r.get("loai_von_tu") or "").strip(),
-            "definition": (r.get("dinh_nghia") or "").strip(),
+            "definition": sua_loi_go((r.get("dinh_nghia") or "").strip()),
         })
     DICH.parent.mkdir(parents=True, exist_ok=True)
     DICH.write_bytes(json.dumps(out, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))

@@ -111,7 +111,7 @@ Không lưu `/api/workspaces/ws_123/projects/prj_456`, mà lưu
 ## 3. Kiến trúc
 
 ```
-        CTU-SignBridge:  Web API   Background Worker   Recognition Service
+        CTU.SignBridge:  Web API   Background Worker   Recognition Service
                              │            │                    │
                              └────────────┴────────┬───────────┘
                                                    │  OpenTelemetry SDK (OTLP)

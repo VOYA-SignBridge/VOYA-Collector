@@ -152,9 +152,29 @@ def _public_user(user: dict) -> dict:
     dạng (hồ sơ hoặc vé hai bước) đã vô tình gỡ luôn bộ lọc, và băm bcrypt đi ra
     theo mọi lượt đăng nhập thành công.
     """
-    return UserOut(**_with_capabilities(user)).model_dump() \
+    return UserOut(**_with_capabilities_at_work(user)).model_dump() \
         if hasattr(UserOut, "model_dump") \
-        else UserOut(**_with_capabilities(user)).dict()
+        else UserOut(**_with_capabilities_at_work(user)).dict()
+
+
+def _with_capabilities_at_work(user: dict) -> dict:
+    """`_with_capabilities` cho đường chưa có vé còn hạn: `/login`, `/login/2fa`, `/refresh`.
+
+    Các đường này vào với phạm vi khách, nên `can_moderate` và `can_edit_tenant` đọc ra
+    quyền ở Community thay vì ở nơi người đó đang làm việc, và lệch với `/me`.
+    """
+    from app.tenant_context import tenant_scope
+    from app.tenant_middleware import _tenant_of_user
+
+    try:
+        noi_lam_viec = _tenant_of_user(str(user.get("id") or ""))
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được nơi làm việc của %s", user.get("id"))
+        noi_lam_viec = None
+    if not noi_lam_viec:
+        return _with_capabilities(user)
+    with tenant_scope(noi_lam_viec):
+        return _with_capabilities(user)
 
 
 def _with_capabilities(user: dict) -> dict:
@@ -729,7 +749,7 @@ def refresh(request: Request, response: Response):
     # Cùng hình dạng với `/login` và `/me`. Giao diện gọi điểm cuối này khi vé
     # ngắn hạn hết hạn, và nếu nó trả hồ sơ NGHÈO hơn thì mỗi lần làm mới phiên
     # là một lần người dùng lặng lẽ mất mục Kiểm duyệt trên thanh điều hướng.
-    return _with_capabilities(user)
+    return _with_capabilities_at_work(user)
 
 
 @router.post("/logout", response_model=MessageResponse)

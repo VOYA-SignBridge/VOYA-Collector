@@ -247,6 +247,32 @@ def test_withCapabilities_workingElsewhere_reportsWorkingTenantRights(monkeypatc
         assert auth_router._with_capabilities(nguoi)["can_edit_tenant"] is False
 
 
+def test_withCapabilitiesAtWork_guestScope_reportsWorkingTenantRights(monkeypatch):
+    """`/login` và `/refresh` vào với phạm vi khách mà phải trả lời giống `/me`."""
+    from app import tenant_middleware
+    from app.routers import auth as auth_router
+
+    _roles(monkeypatch, {(TENANT_A, EDITOR["id"]): "editor"})
+    monkeypatch.setattr(tenant_middleware, "_tenant_of_user", lambda _id: TENANT_A)
+    with tenant_scope(TENANT_B):
+        assert auth_router._with_capabilities(EDITOR)["can_edit_tenant"] is False
+        assert auth_router._with_capabilities_at_work(EDITOR)["can_edit_tenant"] is True
+
+
+def test_withCapabilitiesAtWork_lookupFails_stillAnswers(monkeypatch):
+    """Tra nơi làm việc hỏng không được làm ngã đăng nhập."""
+    from app import tenant_middleware
+    from app.routers import auth as auth_router
+
+    def hong(_id):
+        raise RuntimeError("db")
+
+    _roles(monkeypatch, {})
+    monkeypatch.setattr(tenant_middleware, "_tenant_of_user", hong)
+    with tenant_scope(TENANT_B):
+        assert auth_router._with_capabilities_at_work(EDITOR)["can_edit_tenant"] is False
+
+
 # --------------------------------------------------------------------------- thùng rác
 
 

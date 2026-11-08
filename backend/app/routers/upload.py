@@ -272,7 +272,7 @@ async def upload_video(
         log.warning("[UPLOAD][video] tu choi: khong nhan ra chu ky container video")
         raise HTTPException(
             status_code=415,
-            detail="Tep khong phai dinh dang video duoc ho tro (MP4/MOV/WebM/MKV/AVI).",
+            detail="Tệp không phải định dạng video được hỗ trợ (MP4/MOV/WebM/MKV/AVI).",
         )
 
     max_mb = int(getattr(settings, "max_upload_mb", 1024))

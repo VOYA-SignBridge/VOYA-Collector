@@ -1406,7 +1406,7 @@ def sync_set_review_status(
         uids = {str(r["sample_uid"]) for r in thuoc_phien}
         if not uids:
             raise CatalogSyncError(
-                f"Khong tim thay phien thu {sid}", status_code=404,
+                f"Không tìm thấy phiên thu {sid}", status_code=404,
                 error_code="CAPTURE_SESSION_NOT_FOUND")
 
         # TUẦN TỰ HOÁ.

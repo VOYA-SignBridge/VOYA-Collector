@@ -1,4 +1,4 @@
-# Tài liệu CTU-SignBridge
+# Tài liệu CTU.SignBridge
 
 Sắp xếp lại 14/08/2026. Mỗi thư mục trả lời **một loại câu hỏi**; số thứ tự chỉ để
 giữ trật tự hiển thị, không hàm ý thứ tự đọc. Cấu trúc trùng quy ước của

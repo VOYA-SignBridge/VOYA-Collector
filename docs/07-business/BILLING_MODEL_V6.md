@@ -325,7 +325,7 @@ một tenant dùng Free là xoá đúng thứ không được phép xoá.
 
 ## 8. External API và Webhook là quota tích hợp
 
-Hai thứ này **không liên quan** tới frontend của CTU-SignBridge. Free không có
+Hai thứ này **không liên quan** tới frontend của CTU.SignBridge. Free không có
 External API vẫn dùng giao diện chính bình thường.
 
 * **External API** — phần mềm bên ngoài gọi vào bằng API key.
