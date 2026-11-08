@@ -1,0 +1,65 @@
+# Dependabot: mỗi thứ Hai mở PR cập nhật gói; CI kiểm PR đó như mọi PR khác.
+#
+# Vì sao cần: gói trôi theo ngày dù không ai push. `kombu 5.7` (03/11/2026) làm
+# hỏng mọi lần dựng mới mà không ai hay cho tới khi CI đỏ. Với Dependabot, bản
+# mới đến dưới dạng một PR có tên rõ ràng, CI chạy trên nó, và người duyệt quyết
+# định gộp hay không — thay vì đến lặng lẽ trong một lần dựng ảnh.
+#
+# Các cập nhật nhỏ (minor/patch) gộp chung một PR mỗi hệ sinh thái, để không
+# thành hai chục PR mỗi tuần. Bản lớn (major) vẫn tách riêng vì hay phá vỡ.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python-nho:
+        update-types: [minor, patch]
+    ignore:
+      # Cài từ index riêng của PyTorch trong backend/Dockerfile, kèm CUDA; nâng
+      # tay và đo trên cả hai đời GPU (docs/06-operations/DEPLOY_SECOND_MACHINE.md).
+      - dependency-name: torch
+      # kombu >= 5.7 đòi redis-py >= 6.1; repo đang ghim redis 4.5.1. Bỏ dòng
+      # này khi nâng redis (xem chú thích trong backend/requirements.txt).
+      - dependency-name: kombu
+        versions: [">=5.7"]
+
+  - package-ecosystem: pip
+    directory: /backend/realtime_service
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      realtime-nho:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      frontend-nho:
+        update-types: [minor, patch]
+
+  # Ảnh gốc được ghim theo digest (xem chú thích đầu các Dockerfile). Dependabot
+  # đề xuất digest mới; gộp PR đó nghĩa là chấp nhận một lần tải lại lớp nặng.
+  - package-ecosystem: docker
+    directories: [/backend, /backend/realtime_service, /frontend]
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

@@ -124,9 +124,12 @@ jobs:
       # Ba lỗi `rules-of-hooks` trong `DataSplitVisualization.tsx` là lỗi thật
       # (hook gọi sau early-return), không phải chuyện văn phong. Sửa xong
       # nhóm đó thì đổi `continue-on-error` thành `false`.
-      - name: Lint (tư vấn, chưa chặn)
-        continue-on-error: true
-        run: npm run lint
+      #
+      # 08/11/2026: nợ đã trả, đo được 0 lỗi và 54 cảnh báo. Từ đây lint CHẶN:
+      # lỗi nào cũng đỏ, và số cảnh báo không được vượt trần 54. Sửa bớt cảnh
+      # báo thì hạ trần xuống theo; không bao giờ nâng trần lên để cho qua.
+      - name: Lint (chặn lỗi; cảnh báo không được tăng)
+        run: npm run lint -- --max-warnings 54
 
       - name: Nộp báo cáo test
         if: always()
@@ -185,6 +188,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Bước "Nâng cấp từ lược đồ của main" cần mã của `main` để dựng lược
+          # đồ cũ; checkout nông chỉ có đúng một commit.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -277,6 +284,49 @@ jobs:
           print('schema_debt:', debt)
           assert not any(debt.values()), f'luoc do dung moi con no: {debt}'
           "
+
+      # Máy chạy web không bao giờ dựng lược đồ từ số không: nó NÂNG từ lược đồ
+      # mà bản trước đã dựng. Các bước trên chỉ kiểm đường từ số không, nên một
+      # bước nâng cấp viết sai (chỉ đúng khi bảng còn trống, quên một cột mà bản
+      # cũ chưa có) vẫn xanh ở đây và chỉ hỏng trên máy thật.
+      #
+      # Bước này dựng một CSDL riêng bằng MÃ của bản trước (commit cha trên
+      # `main`, hoặc điểm rẽ nhánh với `main` ở nhánh khác), rồi nâng lên bằng
+      # mã hiện tại và kiểm nợ lược đồ. Chỉ lấy mã cũ bằng git worktree, không
+      # tải ảnh nào, nên chỉ tốn vài chục giây.
+      - name: Nâng cấp từ lược đồ của bản trước
+        working-directory: backend
+        env:
+          UPGRADE_DB: signdb_pytest_upgrade
+          PGPASSWORD: admin
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ] && [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            base=$(git rev-parse HEAD^1)
+          else
+            git fetch --no-tags --quiet origin main
+            base=$(git merge-base HEAD origin/main)
+          fi
+          echo "ban truoc: $(git log -1 --format='%h %s' "$base")"
+          psql -h localhost -U admin -d postgres -c "CREATE DATABASE $UPGRADE_DB"
+          git worktree add --detach /tmp/ban_truoc "$base"
+          dsn="postgresql://admin:admin@localhost:5432/$UPGRADE_DB"
+          cu=$(cd /tmp/ban_truoc/backend && PYTHONPATH=/tmp/ban_truoc/backend python -c "from app.storage.schema_version import APP_SCHEMA_VERSION; print(APP_SCHEMA_VERSION)")
+          moi=$(python -c "from app.storage.schema_version import APP_SCHEMA_VERSION; print(APP_SCHEMA_VERSION)")
+          echo "luoc do: v$cu (ban truoc) -> v$moi (ban nay)"
+          (cd /tmp/ban_truoc/backend && PYTHONPATH=/tmp/ban_truoc/backend \
+             MIGRATION_DATABASE_URL="$dsn" DATABASE_URL="$dsn" EXPECTED_DATABASE="$UPGRADE_DB" \
+             python -m app.cli.migrate --to "$cu")
+          MIGRATION_DATABASE_URL="$dsn" DATABASE_URL="$dsn" EXPECTED_DATABASE="$UPGRADE_DB" \
+            python -m app.cli.migrate --to "$moi"
+          MIGRATION_DATABASE_URL="$dsn" DATABASE_URL="$dsn" python -c "
+          from app.storage.metadata_db import schema_debt
+          from app.modules.saas.tenant_context import system_scope
+          with system_scope('ci: kiem no sau nang cap'):
+              debt = schema_debt()
+          print('schema_debt sau nang cap:', debt)
+          assert not any(debt.values()), f'nang cap tu ban truoc con no: {debt}'
+          "
+          git worktree remove --force /tmp/ban_truoc
 
       # `VOYA_TEST_VIDEO` cố ý KHÔNG đặt: kho clip 2,7 GB không có trên runner,
       # nên test trích npz từ video sẽ skip. Đó là lần skip DUY NHẤT được chấp

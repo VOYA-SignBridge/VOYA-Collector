@@ -1,0 +1,119 @@
+# Quét bảo mật: lỗ hổng trong gói phụ thuộc và trong ảnh, bí mật lọt vào git.
+#
+# CHẾ ĐỘ CẢNH BÁO: mọi job ở đây `continue-on-error`, nên không chặn PR nào.
+# Kết quả ghi vào trang tóm tắt (Summary) của từng lượt chạy.
+#
+# Vì sao chưa chặn: lượt đo đầu tiên ngày 08/11/2026 cho thấy nợ có sẵn
+#   - Python (backend): 20/153 gói có lỗ hổng đã công bố, trong đó có
+#     python-multipart, starlette, fastapi (đường tải tệp lên và mọi request),
+#     python-jose (JWT), pillow;
+#   - npm (frontend): 8 lỗ hổng ở gói chạy thật, 7 mức cao;
+#   - gitleaks: 0 bí mật thật (5 báo nhầm, đã khai trong .gitleaks.toml).
+# Chặn ngay thì mọi PR đỏ vì nợ cũ, và phản xạ của người đang vội là tắt cổng.
+# Trả nợ xong nhóm nào thì bỏ `continue-on-error` của nhóm đó.
+name: Security
+
+on:
+  schedule:
+    # Thứ Hai 01:00 UTC = 08:00 giờ Việt Nam, cùng ngày Dependabot mở PR.
+    - cron: '0 1 * * 1'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Bí mật lọt vào git (gitleaks)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # PR: chỉ các commit mới của PR. Lịch hằng tuần: toàn bộ lịch sử, vì một
+      # bí mật đã từng vào git thì vẫn đọc được dù commit sau đã xoá tệp.
+      - name: Quét
+        run: |
+          set +e   # ghi tóm tắt kể cả khi có phát hiện
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            range="--log-opts=origin/${GITHUB_BASE_REF}..HEAD"
+            git fetch --no-tags --quiet origin "${GITHUB_BASE_REF}"
+          else
+            range=""
+          fi
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.3 \
+            git /repo --config /repo/.gitleaks.toml --no-banner --redact $range \
+            | tee gitleaks.txt
+          status=${PIPESTATUS[0]}
+          { echo "### gitleaks"; echo '```'; tail -20 gitleaks.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  python:
+    name: Lỗ hổng gói Python (pip-audit)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Quét backend/requirements.txt
+        run: |
+          set +e   # ghi tóm tắt kể cả khi có phát hiện
+          python -m pip install --quiet pip-audit
+          pip-audit -r backend/requirements.txt --progress-spinner off --desc -f markdown \
+            > pip-audit.md
+          status=$?
+          { echo "### pip-audit (backend)"; cat pip-audit.md; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  npm:
+    name: Lỗ hổng gói frontend (npm audit)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Chỉ gói chạy thật (`--omit=dev`): công cụ dựng không vào ảnh phục vụ người dùng.
+      - name: Quét package-lock.json
+        run: |
+          set +e   # ghi tóm tắt kể cả khi có phát hiện
+          npm audit --package-lock-only --omit=dev --audit-level=high | tee npm-audit.txt
+          status=${PIPESTATUS[0]}
+          { echo "### npm audit (frontend, gói chạy thật)"; echo '```'; tail -40 npm-audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  images:
+    name: Lỗ hổng trong ảnh đã phát hành (Trivy) — ${{ matrix.image }}
+    # Chỉ theo lịch và chạy tay: phải tải ảnh 4,5 GB, không đáng làm cho mỗi PR.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [voya_backend, voya_frontend, voya_realtime_service]
+    steps:
+      - name: Quét ${{ matrix.image }}:latest
+        env:
+          NS: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          set +e   # ghi tóm tắt kể cả khi có phát hiện
+          docker run --rm aquasec/trivy:0.57.0 image --scanners vuln \
+            --severity HIGH,CRITICAL --ignore-unfixed --no-progress --exit-code 1 \
+            "$NS/${{ matrix.image }}:latest" | tee trivy.txt
+          status=${PIPESTATUS[0]}
+          { echo "### Trivy: ${{ matrix.image }}"; echo '```'; tail -60 trivy.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

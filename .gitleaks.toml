@@ -1,0 +1,22 @@
+# Cấu hình gitleaks (dùng trong .github/workflows/security.yml).
+#
+# Giữ toàn bộ luật mặc định; chỉ bỏ qua những chỗ ĐÃ KIỂM là không phải bí mật.
+# Đo 08/11/2026 trên cây mã: 5 phát hiện, cả 5 thuộc danh sách dưới. Thêm một
+# mục vào đây phải kèm lý do, giống các mục đang có.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Dữ liệu mẫu và vector chuẩn đã kiểm, không phải bí mật"
+regexes = [
+  # tests/test_totp.py: khoá bí mật trong vector kiểm thử của RFC 4226/6238,
+  # công bố công khai trong chính văn bản RFC.
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
+  # tests/test_observability.py: giá trị giả để kiểm rằng log CHE được khoá.
+  '''sk-1234567890''',
+  '''eyJhbGciOiJIUzI1NiIsInR5\.\.\.''',
+  # audit.py: nhãn minh hoạ trong chú thích.
+  '''voya_3f9a2b1c''',
+  # scripts/doi_khoa_trichdan.py: khoá trích dẫn tài liệu, không phải khoá API.
+  '''nist_sp800_63b_2025''',
+]

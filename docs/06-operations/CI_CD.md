@@ -30,8 +30,8 @@ Riêng push lên `main` thì `build_docker.yml` gọi lại tệp này trước 
 
 | Job | Kiểm gì | Thời gian |
 |---|---|---|
-| `frontend` | Kiểu, i18n, test, dựng | ~2 phút |
-| `backend` | Phụ thuộc không xung đột, migration, phân quyền, pytest trên CSDL mới | ~15 phút |
+| `frontend` | Kiểu, i18n, test, dựng, lint (chặn lỗi, trần 54 cảnh báo) | ~2 phút |
+| `backend` | Phụ thuộc không xung đột, migration, phân quyền, **nâng cấp từ lược đồ bản trước**, pytest trên CSDL mới | ~15 phút |
 | `wiring` | Script, cấu hình, tài liệu khớp với mã (xem dưới) | ~2 phút |
 | `images` | Dựng thử 3 ảnh, không đẩy. Chỉ chạy ở PR và nhánh khác `main` | ~10 phút |
 | `hygiene` | LF, `.env`, lớp phủ registry, sao lưu/khôi phục | ~3 phút |
@@ -76,7 +76,7 @@ loại này.
 |---|---|---|
 | `actionlint` | Workflow sai cú pháp, sai biểu thức, `needs` trỏ vào job không có | |
 | `scripts/check_app_imports.py` | Mã **ngoài** `backend/app` (CI, script, PowerShell, test) gọi module hoặc tên không tồn tại | Đợt tái cấu trúc dời 9 module; CI và công cụ chuyển server vẫn gọi đường cũ |
-| `scripts/check_compose_contracts.py` | Chuỗi bảo trì `voya.py` → `nginx.conf.d/` → mount → `nginx.conf` còn nối; tệp cấu hình được gắn vào container phải có trong git | Mất dòng gắn `nginx.conf.d`: người dùng nhận lỗi 502 thay vì trang bảo trì |
+| `scripts/check_compose_contracts.py` | Chuỗi bảo trì `voya.py` → `nginx.conf.d/` → mount → `nginx.conf` còn nối; tệp cấu hình được gắn vào container phải có trong git; mọi `COPY` trong Dockerfile trỏ vào tệp có thật | Mất dòng gắn `nginx.conf.d`: người dùng nhận lỗi 502 thay vì trang bảo trì |
 | `scripts/check_docs.py` | Không có luận văn, báo cáo hay tên người ký trong repo; không có email thật; không có tệp lẻ ở gốc `docs/`; không có liên kết hỏng (trừ `11-worklog/`) | Tài liệu công khai từng chứa email sinh viên và tên người ký |
 | Cú pháp Python, shell, PowerShell | Lỗi cú pháp trong script chỉ chạy tay | |
 | `docker compose config` | 5 tổ hợp tệp compose mà máy thật dùng phải gộp được với `.env.example` | |
@@ -89,6 +89,43 @@ python scripts/check_app_imports.py
 python scripts/check_compose_contracts.py
 python scripts/check_docs.py
 ```
+
+### Nâng cấp từ lược đồ bản trước (trong job `backend`)
+
+Máy chạy web không dựng lược đồ từ số không mà **nâng** từ lược đồ bản trước. Bước này lấy mã của bản trước bằng `git worktree`: commit cha nếu đang ở `main`, hoặc điểm rẽ nhánh với `main` nếu ở nhánh khác. Mã đó dựng một CSDL riêng, rồi mã hiện tại nâng nó lên và kiểm nợ lược đồ. Không tải ảnh nào, chỉ tốn vài chục giây.
+
+## 2b. `security.yml`: quét bảo mật (chế độ cảnh báo)
+
+Chạy mỗi thứ Hai, ở mỗi PR vào `main`, và chạy tay được. **Không chặn PR nào**: kết quả ghi vào trang Summary của lượt chạy.
+
+| Job | Quét gì |
+|---|---|
+| gitleaks | Bí mật lọt vào git. PR: chỉ commit mới. Hằng tuần: toàn bộ lịch sử. Báo nhầm đã kiểm khai trong `.gitleaks.toml` |
+| pip-audit | Lỗ hổng đã công bố trong `backend/requirements.txt` |
+| npm audit | Lỗ hổng trong gói frontend chạy thật |
+| Trivy | Lỗ hổng trong 3 ảnh đã phát hành trên Docker Hub (chỉ theo lịch) |
+
+Lượt đo đầu tiên (08/11/2026):
+
+| Nguồn | Kết quả |
+|---|---|
+| Python | 20/153 gói có lỗ hổng. Đáng lo nhất: `python-multipart 0.0.6`, `starlette 0.27`, `fastapi 0.95` (đường tải tệp lên và mọi request), `python-jose 3.3.0` (JWT), `pillow` |
+| npm | 8 lỗ hổng ở gói chạy thật, 7 mức cao |
+| gitleaks | 0 bí mật thật |
+| Trivy, ảnh frontend | 0 lỗ hổng mức cao |
+
+Trả xong nợ nhóm nào thì bỏ `continue-on-error` của job đó để nó bắt đầu chặn.
+
+## 2c. Dependabot (`.github/dependabot.yml`)
+
+Mỗi thứ Hai, Dependabot mở PR cập nhật gói (pip, npm, ảnh gốc Docker; GitHub Actions thì mỗi tháng). Bản nhỏ gộp một PR cho mỗi hệ sinh thái. CI kiểm các PR này như mọi PR khác. `torch` và `kombu >= 5.7` bị loại có chủ ý; lý do ghi ngay trong tệp.
+
+## 2d. Ảnh ổn định giữa các lần dựng
+
+- Cache dựng ảnh nằm trên Docker Hub (`:buildcache`), không ở cache của GitHub (giới hạn 10 GB, mà riêng lớp thư viện backend đã 8 GB).
+- Ảnh gốc (python, node, nginx) ghim theo digest; Dependabot đề xuất digest mới.
+
+Nhờ hai điều này, lớp thư viện nặng chỉ đổi khi danh sách gói đổi. Máy chạy web bật chế độ kéo ảnh (`VOYA_REGISTRY_NS` trong `.env`, xem [TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 7) thì mỗi lần cập nhật chỉ tải lớp mã.
 
 ### `hygiene`
 
@@ -216,9 +253,8 @@ ngoài phạm vi.
   năng không mở SSH vào từ ngoài, nên đường tự động sẽ cần self-hosted runner —
   chưa làm.
 - **Lint chưa phải cổng chặn** (85 lỗi tồn đọng).
-- **Chưa quét bí mật** ngoài phép kiểm `.env` đơn giản. `pip check` chỉ bắt xung
-  đột phiên bản đã khai, không bắt lỗ hổng bảo mật của gói.
+- **Quét bảo mật mới ở chế độ cảnh báo** (mục 2b): còn nợ lỗ hổng gói cần trả.
 - **Chưa chạy Playwright (E2E)** trong CI: cần dựng cả stack. Vẫn chạy tay bằng
   `VOYA_UI.bat`.
-- **`Dockerfile.coderefresh`** (đường `voya update-code`) chưa được dựng thử trong
-  CI, vì nó cần ảnh nền đã dựng trên máy.
+- **`Dockerfile.coderefresh`** không được dựng thử (phải tải ảnh 13 GB mỗi lượt).
+  Thay vào đó, `check_compose_contracts.py` kiểm mọi đường `COPY` của nó.
