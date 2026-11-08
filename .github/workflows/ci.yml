@@ -452,9 +452,10 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: false
-          # Chỉ ĐỌC cache của build_docker.yml; không ghi để nhánh thử nghiệm
-          # không đẩy cache của `main` ra ngoài.
-          cache-from: type=gha,scope=${{ matrix.image }}
+          # Chỉ ĐỌC cache của build_docker.yml (trên Docker Hub, công khai nên
+          # không cần đăng nhập); không ghi để nhánh thử nghiệm không làm bẩn
+          # cache của `main`. Thiếu secret (PR từ fork) thì buildx chỉ cảnh báo và dựng không cache.
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache
 
   hygiene:
     name: Vệ sinh kho — thứ mà test không bao giờ bắt được

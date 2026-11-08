@@ -1,4 +1,8 @@
-FROM python:3.11-slim
+# Ảnh gốc ghim theo DIGEST, không chỉ theo tag. Tag `3.11-slim` di chuyển vài lần mỗi
+# tháng; mỗi lần nó di chuyển thì mọi lớp phía sau (torch/CUDA, 4,3 GB nén) bị dựng lại
+# với digest mới, và máy chạy web phải tải lại cả khối thay vì vài chục MB mã.
+# Dependabot (.github/dependabot.yml) mở PR khi có digest mới: cập nhật có chủ ý.
+FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
 
 WORKDIR /app
 

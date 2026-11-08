@@ -1,4 +1,8 @@
-FROM node:20-alpine AS builder
+# Ảnh gốc ghim theo DIGEST, không chỉ theo tag. Tag `3.11-slim` di chuyển vài lần mỗi
+# tháng; mỗi lần nó di chuyển thì mọi lớp phía sau (torch/CUDA, 4,3 GB nén) bị dựng lại
+# với digest mới, và máy chạy web phải tải lại cả khối thay vì vài chục MB mã.
+# Dependabot (.github/dependabot.yml) mở PR khi có digest mới: cập nhật có chủ ý.
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
 
 WORKDIR /app
 
@@ -13,7 +17,7 @@ COPY . .
 
 RUN npm run build
 
-FROM nginx:alpine
+FROM nginx:alpine@sha256:713fc2ebfd92e8217db451477182ee91944b123d2b1ee9fd5a8c6e91ca6c3a11
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf

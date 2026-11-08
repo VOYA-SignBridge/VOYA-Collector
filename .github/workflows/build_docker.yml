@@ -115,10 +115,21 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.tags.outputs.list }}
-          # Cache dùng chung theo tên ảnh, không theo nhánh — ba nhánh dựng
-          # cùng một backend thì không có lý do gì dựng lại từ đầu ba lần.
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          # Nhãn chuẩn OCI: ảnh tự nói nó dựng từ commit nào. `voya` đọc nhãn này
+          # để biết máy đang chạy đúng commit đã kéo về hay không.
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          # Cache nằm trên Docker Hub (`:buildcache`), KHÔNG ở cache của GitHub.
+          #
+          # Cache của GitHub chứa tối đa 10 GB cho cả repo, mà riêng lớp thư viện
+          # của backend đã 8 GB. Đo 08/11/2026: hai ảnh backend liên tiếp không
+          # dùng chung lớp nào ngoài ảnh gốc, vì cache bị đẩy ra giữa hai lần dựng.
+          # Nghĩa là máy chạy web kéo ảnh sẽ tải lại 4,5 GB mỗi lần cập nhật.
+          # Với cache trên registry, lớp thư viện chỉ dựng lại khi requirements,
+          # Dockerfile hoặc ảnh gốc (đã ghim digest) đổi; còn lại máy chỉ tải lớp mã.
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache,mode=max
 
       - name: Ghi lại ảnh vừa đẩy
         run: |
