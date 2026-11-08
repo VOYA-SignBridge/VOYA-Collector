@@ -681,6 +681,25 @@ def join_community(user_id: str) -> bool:
     return True
 
 
+def model_reviewer_ids(tenant_id: str) -> List[str]:
+    """Tài khoản nhận đề nghị đưa model riêng ra dùng chung ở `tenant_id`.
+
+    Slot của Community mọi tổ chức cùng dùng nên chỉ quản trị nền tảng duyệt; ở tổ chức
+    khác là admin và editor của chính nó, khớp `training._duyet_duoc`.
+    """
+    from app import realtime_slots
+    from app.storage.metadata_db import _fetch_all
+
+    with system_scope("tenant admin: tim nguoi duyet model dung chung"):
+        if realtime_slots.is_shared(tenant_id):
+            rows = _fetch_all("SELECT id AS user_id FROM users WHERE is_admin AND is_active")
+        else:
+            rows = _fetch_all(
+                "SELECT user_id FROM tenant_members WHERE tenant_id = %s AND status = 'ACTIVE' "
+                "AND removed_at IS NULL AND role IN ('admin', 'editor')", (tenant_id,))
+    return [str(r["user_id"]) for r in rows]
+
+
 def tenant_owned_by(user_id: str) -> Optional[Dict[str, Any]]:
     """Tổ chức mà tài khoản này ĐANG SỞ HỮU, hoặc None.
 

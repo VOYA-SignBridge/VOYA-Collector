@@ -711,6 +711,28 @@ def require_tenant_editor(
     return current_user
 
 
+def require_tenant_curator(
+    current_user: Dict[str, Any] = Depends(require_tenant_editor),
+) -> Dict[str, Any]:
+    """Như `require_tenant_editor`, nhưng chỉ dành cho NGƯỜI, không cho khoá API.
+
+    Dùng cho các thao tác mà danh mục quyền cấp cho vai tổ chức nhưng không cho
+    khoá API (`training.promote`, `class.update`, `class.delete` không có
+    `api_assignable`): xoá một lớp cùng toàn bộ mẫu, hay đưa một mô hình vào
+    phục vụ, không phải việc một khoá tích hợp nên làm được.
+
+    Trước 05/11/2026 các route này gác bằng `require_admin`, tức là chỉ người
+    vận hành nền tảng làm được, trái với danh mục: quản trị viên một trường
+    huấn luyện xong không tự đưa được mô hình của mình vào dùng.
+    """
+    if current_user.get("auth_method") == "api_key":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Khoá API không dùng được cho thao tác này.",
+        )
+    return current_user
+
+
 # ============================================================================
 # Forgot / reset password
 # ============================================================================

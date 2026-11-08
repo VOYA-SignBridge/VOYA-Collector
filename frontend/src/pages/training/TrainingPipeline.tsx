@@ -437,6 +437,16 @@ const TrainingPipeline: React.FC = () => {
                   if (res?.job) setJob(res.job);
                   return res;
                 }}
+                onRequestReview={async () => {
+                  if (!job) return;
+                  const moi = await api.requestReview(job.id);
+                  if (moi) setJob(moi);
+                }}
+                onRejectReview={async (reason) => {
+                  if (!job) return;
+                  const moi = await api.rejectReview(job.id, reason);
+                  if (moi) setJob(moi);
+                }}
               />
             )}
           </div>

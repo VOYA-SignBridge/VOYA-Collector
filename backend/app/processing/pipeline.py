@@ -91,6 +91,10 @@ def process_video_job(video_path: str, user: str, label: str, session_id: str, d
                 return {
                     "status": "skipped_cap",
                     "reason": "class_cap_reached",
+                    # Giao diện hiện đúng câu này. Thiếu nó thì trang rơi về "không
+                    # nhận diện được bàn tay", và người dùng quay lại mãi vô ích.
+                    "message": (f"Nhãn này đã đủ {max_per_class} mẫu ({existing_total} mẫu hiện có) "
+                                "nên video không được thêm vào. Hãy chọn nhãn khác."),
                     "saved": [],
                     "windows": 0,
                     "kept": 0,

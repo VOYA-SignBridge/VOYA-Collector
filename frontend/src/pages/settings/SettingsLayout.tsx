@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
+import { canEditTenant } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 import { useI18n } from "../../i18n";
 import {
@@ -64,7 +65,7 @@ const ITEMS: Item[] = [
 export default function SettingsLayout() {
   const { user } = useAuth();
   const { t } = useI18n();
-  const items = ITEMS.filter((i) => !i.adminOnly || user?.is_admin);
+  const items = ITEMS.filter((i) => !i.adminOnly || canEditTenant(user));
   // Đọc một lần lúc dựng: đổi mục bên trong Cài đặt không được đổi đích quay lại.
   const returnTo = getReturnPath();
 

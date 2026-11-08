@@ -153,6 +153,7 @@ def _job_from_db_row(row: Dict[str, Any]) -> TrainingJob:
         promoted_at=_iso(row.get("promoted_at")),
         superseded_at=_iso(row.get("superseded_at")),
         split_provenance=_split_prov_from_row(row.get("split_provenance")),
+        auth_user_id=(str(row["auth_user_id"]) if row.get("auth_user_id") else None),
     )
 
 

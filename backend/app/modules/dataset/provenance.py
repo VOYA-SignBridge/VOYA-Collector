@@ -231,7 +231,10 @@ def split_snapshot(splits_dir: Path = SPLITS_DIR) -> dict[str, Any]:
 
 
 def operational_splits(
-    tenant_id: str, splits_dir: Path = SPLITS_DIR, workspace_root: Path = WORKSPACE_ROOT
+    tenant_id: str,
+    splits_dir: Path = SPLITS_DIR,
+    workspace_root: Path = WORKSPACE_ROOT,
+    user_id: str = "",
 ) -> list[dict[str, Any]]:
     """List only immutable operational artifacts owned by the active tenant."""
     workspace = str(workspace_root)
@@ -255,6 +258,9 @@ def operational_splits(
         except SplitArtifactError:
             continue
         metadata = artifact.metadata or {}
+        personal_owner = str(metadata.get("auth_user_id") or "")
+        if personal_owner and personal_owner != user_id:
+            continue
         classes = metadata.get("classes") or []
         dialects = sorted(
             {str(item.get("dialect") or "") for item in classes if item.get("dialect")}
@@ -274,6 +280,7 @@ def operational_splits(
             "generated_at": metadata.get("generated_at"),
             "split_mode": metadata.get("split_mode"),
             "counts": counts,
+            "personal": bool(personal_owner),
         })
     output.sort(key=lambda row: str(row.get("generated_at") or ""), reverse=True)
     return output

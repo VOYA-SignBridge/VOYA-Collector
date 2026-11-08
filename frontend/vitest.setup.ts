@@ -28,3 +28,8 @@ Object.defineProperty(window, '__ENV__', {
   },
   writable: true
 });
+
+// Báo cáo kiểm thử: ghi kết quả từng phép so. Chạy test bình thường không đi qua đây.
+if (process.env.KT_KET_QUA) {
+  await import("./vitest.ket-qua");
+}

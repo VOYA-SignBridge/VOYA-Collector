@@ -341,3 +341,6 @@ nginx.conf.d/maintenance.on
 
 # Ghi chú, log và script kiểm tạm của từng phiên làm việc — không phải mã của dự án.
 scratchpad/
+
+# Báo cáo và tệp tạm của bộ kiểm thử (scripts/kiem_thu.py).
+reports/kiem-thu/

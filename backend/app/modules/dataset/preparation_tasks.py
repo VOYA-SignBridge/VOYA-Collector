@@ -233,6 +233,7 @@ def prepare_dataset(
     with_research: bool = False,
     profiles: Optional[List[str]] = None,
     requested_by: str = "",
+    viewer_id: str = "",
 ) -> Dict[str, Any]:
     dialects = [str(d).strip() for d in (dialects or []) if str(d).strip()]
     floor = int(min_samples_per_class or 0)
@@ -266,7 +267,8 @@ def prepare_dataset(
             f"operational_split:{d}",
             ["python", "processed/splits/make_splits.py",
              "--operational_split_id", split_id, "--tenant_id", tenant_id,
-             "--dialects", d, "--min_samples_per_class", str(floor), "--seed", str(seed)],
+             "--dialects", d, "--min_samples_per_class", str(floor), "--seed", str(seed),
+             *(["--viewer_id", viewer_id] if viewer_id else [])],
             report, run_id)
         desc = _describe_operational(split_id)
         desc["dialect"] = d

@@ -43,6 +43,8 @@
   button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
   button:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  a.guide { font-size: 13px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--line); color: var(--accent); text-decoration: none; white-space: nowrap; }
+  a.guide:hover { border-color: var(--accent); background: var(--accent-bg); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .log { font: 12px/1.55 var(--mono); background: var(--bg); border-radius: 0 0 12px 12px; padding: 10px 12px; height: 430px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
   .loghead { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--line); }
@@ -64,7 +66,11 @@
     <h1>Bảng điều khiển máy chủ VOYA</h1>
     <div class="faint" id="gitline">…</div>
   </div>
-  <span class="pill p-safe" title="Chỉ mở được trên chính máy này (127.0.0.1)">Chỉ máy này</span>
+  <div style="display:flex;align-items:center;gap:10px">
+    <a class="guide" href="/docs/HUONG_DAN_DEV.html" target="_blank" rel="noopener"
+       title="Cài đặt, cấu hình, thêm chức năng, sửa lỗi — mở ở tab mới">Hướng dẫn cho Dev</a>
+    <span class="pill p-safe" title="Chỉ mở được trên chính máy này (127.0.0.1)">Chỉ máy này</span>
+  </div>
 </header>
 <main>
   <div id="alerts"></div>

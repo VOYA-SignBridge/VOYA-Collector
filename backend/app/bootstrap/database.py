@@ -177,6 +177,11 @@ def _init_db(full_resync: bool | None = None) -> bool:
         )
 
         ensure_tables()
+        # Bootstrap has already paid the full schema cost in this process.
+        # Prevent the first catalog request from repeating it.
+        from app.modules.dataset import catalog_sync
+
+        catalog_sync._SCHEMA_ENSURED = True
         check_isolation_posture()
 
         try:

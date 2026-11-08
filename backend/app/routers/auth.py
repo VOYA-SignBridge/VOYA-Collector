@@ -129,6 +129,11 @@ class UserOut(BaseModel):
     # mục Kiểm duyệt sẽ giấu nó khỏi đúng những người nó sinh ra để phục vụ.
     can_moderate: bool = False
 
+    # Cùng tính chất với `can_moderate`, và cần vì `tenant_role` không thay được:
+    # `tenant_role` đọc tổ chức NHÀ, còn `require_tenant_editor` xét tổ chức ĐANG
+    # LÀM VIỆC. Người có nhà ở A làm việc ở B sẽ thấy nút theo vai ở A rồi ăn 403.
+    can_edit_tenant: bool = False
+
 
 class MessageResponse(BaseModel):
     message: str
@@ -146,9 +151,29 @@ def _public_user(user: dict) -> dict:
     dạng (hồ sơ hoặc vé hai bước) đã vô tình gỡ luôn bộ lọc, và băm bcrypt đi ra
     theo mọi lượt đăng nhập thành công.
     """
-    return UserOut(**_with_capabilities(user)).model_dump() \
+    return UserOut(**_with_capabilities_at_work(user)).model_dump() \
         if hasattr(UserOut, "model_dump") \
-        else UserOut(**_with_capabilities(user)).dict()
+        else UserOut(**_with_capabilities_at_work(user)).dict()
+
+
+def _with_capabilities_at_work(user: dict) -> dict:
+    """`_with_capabilities` cho đường chưa có vé còn hạn: `/login`, `/login/2fa`, `/refresh`.
+
+    Các đường này vào với phạm vi khách, nên `can_moderate` và `can_edit_tenant` đọc ra
+    quyền ở Community thay vì ở nơi người đó đang làm việc, và lệch với `/me`.
+    """
+    from app.modules.saas.tenant_context import tenant_scope
+    from app.modules.saas.tenant_middleware import _tenant_of_user
+
+    try:
+        noi_lam_viec = _tenant_of_user(str(user.get("id") or ""))
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được nơi làm việc của %s", user.get("id"))
+        noi_lam_viec = None
+    if not noi_lam_viec:
+        return _with_capabilities(user)
+    with tenant_scope(noi_lam_viec):
+        return _with_capabilities(user)
 
 
 def _with_capabilities(user: dict) -> dict:
@@ -206,6 +231,17 @@ def _with_capabilities(user: dict) -> dict:
     except Exception:  # noqa: BLE001
         logger.warning("[AUTH] không tra được quyền kiểm duyệt cho %s", out.get("id"))
         out["can_moderate"] = False
+
+    try:
+        from app.modules.saas.tenant_context import current_tenant
+        from app.modules.dataset.vocabulary_registry import can_edit_registry
+
+        out["can_edit_tenant"] = can_edit_registry(
+            current_tenant() or str(out.get("tenant_id") or ""),
+            str(out.get("id") or ""), bool(out.get("is_admin")))
+    except Exception:  # noqa: BLE001
+        logger.warning("[AUTH] không tra được quyền biên tập cho %s", out.get("id"))
+        out["can_edit_tenant"] = False
     return out
 
 
@@ -381,33 +417,34 @@ def register(payload: RegisterRequest, request: Request):
         # Re-read so the response carries the tenant the account actually ended
         # up in, not the one it was created in a moment ago.
         user = _fetch_user_by_id(user["id"]) or user
-    else:
-        # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
-        #
-        # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
-        # mời. Điều đó sai ở hai mức:
-        #
-        #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
-        #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
-        #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
-        #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
-        #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
-        #
-        # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
-        # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
-        # được ngay cả khi bước gắn vai bên dưới trượt.
-        #
-        # Nhưng gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì
-        # `access_gate` từ chối mọi lượt ghi — họ đăng nhập được, xem được, và
-        # không quay được. Trạng thái đó trông như hỏng chứ không như bị chặn,
-        # nên nó vào log ở mức ERROR chứ không im lặng.
-        try:
-            tenant_admin.join_community(user["id"])
-        except Exception:
-            logger.exception(
-                "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
-                "không ghi được gì cho tới khi có người cấp vai", user["id"])
-        user = _fetch_user_by_id(user["id"]) or user
+    # KHÔNG lập tổ chức cho người vừa đăng ký. Họ vào CỘNG ĐỒNG.
+    #
+    # Bản trước tự lập một tổ chức riêng cho mỗi tài khoản không có lời
+    # mời. Điều đó sai ở hai mức:
+    #
+    #   sản phẩm  một người chỉ muốn đóng góp vài cử chỉ không cần một tổ
+    #             chức mang tên mình. Lập tổ chức là việc CÓ CHỦ ĐÍCH, làm
+    #             sau khi đăng nhập, ở trang Tổ chức, có chọn gói.
+    #   dữ liệu   mỗi tài khoản sinh một tenant rỗng kèm một bản sao danh
+    #             mục từ vựng. Mười người thử nền tảng là mười tenant rác.
+    #
+    # Không lập tổ chức thì cũng KHÔNG có gì để hỏng, nên nhánh này không
+    # còn `_deactivate_stranded_account`: tài khoản đã tồn tại và đã dùng
+    # được ngay cả khi bước gắn vai bên dưới trượt.
+    #
+    # Cả người đăng ký qua lời mời cũng vào: lời mời không kèm vai không cấp gì, và
+    # bản trước bỏ qua họ, nên họ không ghi được gì tới lần backend khởi động lại.
+    #
+    # Gắn vai TRƯỢT là chuyện phải kêu: thiếu `community_member` thì `access_gate`
+    # từ chối mọi lượt ghi — họ đăng nhập được, xem được, và không quay được. Trạng
+    # thái đó trông như hỏng chứ không như bị chặn, nên nó vào log ở mức ERROR.
+    try:
+        tenant_admin.join_community(user["id"])
+    except Exception:
+        logger.exception(
+            "[REGISTER] tài khoản %s KHÔNG gắn được vào cộng đồng — họ sẽ "
+            "không ghi được gì cho tới khi có người cấp vai", user["id"])
+    user = _fetch_user_by_id(user["id"]) or user
 
     account_workflows.send_welcome_verification(user)
 
@@ -645,7 +682,7 @@ def refresh(request: Request, response: Response):
     # Cùng hình dạng với `/login` và `/me`. Giao diện gọi điểm cuối này khi vé
     # ngắn hạn hết hạn, và nếu nó trả hồ sơ NGHÈO hơn thì mỗi lần làm mới phiên
     # là một lần người dùng lặng lẽ mất mục Kiểm duyệt trên thanh điều hướng.
-    return _with_capabilities(user)
+    return _with_capabilities_at_work(user)
 
 
 @router.post("/logout", response_model=MessageResponse)

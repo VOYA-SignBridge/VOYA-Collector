@@ -514,9 +514,30 @@ def _tu_choi_google_api(*_a, **_kw):
 import app.storage.gdrive_client as _gdrive_client_module  # noqa: E402
 import googleapiclient.http as _googleapiclient_http  # noqa: E402
 
-_gdrive_client_module.GoogleDriveClient.__init__ = _tu_choi_google_api
-_gdrive_client_module._gdrive_client = None
-_googleapiclient_http.HttpRequest.execute = _tu_choi_google_api
+def _duoc_dung_drive_that() -> bool:
+    """Chỉ lượt `test_sot_integration` của bộ kiểm thử, trong thư mục sandbox riêng.
+
+    Cờ thôi là chưa đủ: root phải KHÁC gốc Drive thật trong `.env`, để một lượt đặt
+    nhầm biến không thể ghi lên thư mục dùng chung.
+    """
+    if os.environ.get("VOYA_TEST_DRIVE_THAT") != "1":
+        return False
+    goc_that = ""
+    envf = _REPO / ".env"
+    if envf.exists():
+        for dong in envf.read_text(encoding="utf-8").splitlines():
+            if dong.startswith("GOOGLE_DRIVE_ROOT_FOLDER_ID="):
+                goc_that = dong.split("=", 1)[1].strip()
+    goc = os.environ.get("GOOGLE_DRIVE_ROOT_FOLDER_ID", "")
+    if not goc or goc == goc_that:
+        pytest.exit("TU CHOI: Drive that chi chay trong thu muc sandbox.", returncode=3)
+    return True
+
+
+if not _duoc_dung_drive_that():
+    _gdrive_client_module.GoogleDriveClient.__init__ = _tu_choi_google_api
+    _gdrive_client_module._gdrive_client = None
+    _googleapiclient_http.HttpRequest.execute = _tu_choi_google_api
 
 
 # ---------------------------------------------------------------------------

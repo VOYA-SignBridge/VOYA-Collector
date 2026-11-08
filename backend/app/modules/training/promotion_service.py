@@ -9,10 +9,13 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
+from filelock import FileLock
 
+from app import realtime_slots
+from app.processing.utils import atomic_write_json
 from app.modules.training.schemas import PromoteResponse
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,10 @@ class PromotionStorageError(RuntimeError):
     pass
 
 
+class ReloadRejected(RuntimeError):
+    """The realtime service inspected the model and rejected it."""
+
+
 def _copy_checkpoint_to_deployment(
     src_path: Path,
     model_id: str,
@@ -78,22 +85,81 @@ def _copy_checkpoint_to_deployment(
     return None
 
 
-def _registry_display_name(dialect: str) -> str:
+def _registry_display_name(
+    dialect: str,
+    owner: Optional[str] = None,
+    *,
+    registry_path: Optional[Path] = None,
+) -> str:
     """Return the current display name for a dialect, if one is registered."""
+    path = registry_path or REGISTRY_PATH
     try:
-        if not REGISTRY_PATH.exists():
+        if not path.exists():
             return ""
-        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+        registry_data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("Không đọc được registry để lấy tên hiển thị: %s", exc)
         return ""
 
     for model in registry_data.get("models", []):
-        if isinstance(model, dict) and model.get("dialect") == dialect:
+        if (
+            isinstance(model, dict)
+            and model.get("dialect") == dialect
+            and realtime_slots.slot_owner(model.get("id")) == owner
+        ):
             name = str(model.get("name") or "").strip()
             if name:
                 return name
     return ""
+
+
+def _registry_lock(registry_path: Optional[Path] = None) -> FileLock:
+    path = registry_path or REGISTRY_PATH
+    return FileLock(str(path) + ".lock", timeout=30)
+
+
+def _entries_of_slot(
+    model_id: str,
+    dialect: str,
+    *,
+    registry_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Return registry entries replaced by a promotion of ``model_id``."""
+    path = registry_path or REGISTRY_PATH
+    if not path.exists():
+        return []
+    owner = realtime_slots.slot_owner(model_id)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        model
+        for model in data.get("models", [])
+        if isinstance(model, dict)
+        and (
+            model.get("id") == model_id
+            or (
+                model.get("dialect") == dialect
+                and realtime_slots.slot_owner(model.get("id")) == owner
+            )
+        )
+    ]
+
+
+def _restore_slot(
+    model_id: str,
+    entries: List[Dict[str, Any]],
+    *,
+    registry_path: Optional[Path] = None,
+) -> None:
+    """Restore one slot without overwriting concurrent changes to other slots."""
+    path = registry_path or REGISTRY_PATH
+    with _registry_lock(path):
+        registry_data = json.loads(path.read_text(encoding="utf-8"))
+        registry_data["models"] = [
+            model
+            for model in registry_data.get("models", [])
+            if not (isinstance(model, dict) and model.get("id") == model_id)
+        ] + entries
+        atomic_write_json(path, registry_data)
 
 
 def _update_registry(
@@ -103,21 +169,20 @@ def _update_registry(
     ckpt: Dict[str, Any],
     dialect: str,
     language: str,
+    *,
+    registry_path: Optional[Path] = None,
 ) -> bool:
-    """Replace the realtime registry entry for a dialect with this checkpoint."""
+    """Replace only the same owner's realtime slot, using an atomic locked write."""
+    path = registry_path or REGISTRY_PATH
     try:
-        if not REGISTRY_PATH.exists():
-            logger.error("Registry not found: %s", REGISTRY_PATH)
+        if not path.exists():
+            logger.error("Registry not found: %s", path)
             return False
 
-        registry_data = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
         seq_len = int(ckpt.get("seq_len", 60))
         feature_dim = int(ckpt.get("feature_dim", 126))
-        existing = [
-            model for model in registry_data.get("models", [])
-            if isinstance(model, dict)
-        ]
-        kept_name = _registry_display_name(dialect)
+        owner = realtime_slots.slot_owner(model_id)
+        kept_name = _registry_display_name(dialect, owner, registry_path=path)
 
         model_entry = {
             "id": model_id,
@@ -143,15 +208,23 @@ def _update_registry(
             },
         }
 
-        registry_data["models"] = [
-            model for model in existing
-            if model.get("id") != model_id and model.get("dialect") != dialect
-        ]
-        registry_data["models"].append(model_entry)
-        REGISTRY_PATH.write_text(
-            json.dumps(registry_data, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        with _registry_lock(path):
+            registry_data = json.loads(path.read_text(encoding="utf-8"))
+            existing = [
+                model for model in registry_data.get("models", [])
+                if isinstance(model, dict)
+            ]
+            registry_data["models"] = [
+                model
+                for model in existing
+                if model.get("id") != model_id
+                and not (
+                    model.get("dialect") == dialect
+                    and realtime_slots.slot_owner(model.get("id")) == owner
+                )
+            ]
+            registry_data["models"].append(model_entry)
+            atomic_write_json(path, registry_data)
         logger.info("Registry updated: %s", model_id)
         return True
     except Exception as exc:
@@ -188,7 +261,11 @@ def _notify_realtime_service_reload(
                 response.status_code,
                 response.text[:500],
             )
+            if 400 <= response.status_code < 500:
+                raise ReloadRejected(response.text[:300])
             return False
+    except ReloadRejected:
+        raise
     except Exception as exc:
         logger.error("Failed to notify realtime service: %s", exc)
         return False
@@ -208,15 +285,27 @@ def deploy_checkpoint(
     notify_reload: Callable[..., bool] = _notify_realtime_service_reload,
     checkpoints_dir: Path = REALTIME_CHECKPOINTS_DIR,
     container_checkpoints_dir: str = REALTIME_CONTAINER_CHECKPOINTS,
+    model_id: Optional[str] = None,
+    personal: bool = False,
 ) -> DeploymentResult:
     """Copy, register and hot-reload one completed training checkpoint."""
-    model_id = dialect
+    model_id = model_id or dialect
     deployed_path = copy_checkpoint(src_path, model_id, checkpoints_dir)
     if not deployed_path:
         raise CheckpointCopyError("Copy checkpoint sang realtime service thất bại")
 
     filename = Path(deployed_path).name
-    display_name = registry_display_name(dialect) or f"{model_type.upper()} {dialect} ({job_id})"
+    owner = realtime_slots.slot_owner(model_id)
+    try:
+        kept_name = registry_display_name(dialect, owner)
+    except TypeError:  # compatibility with older injected test doubles
+        kept_name = registry_display_name(dialect)
+    display_name = kept_name or (
+        f"Của tôi: {dialect} ({job_id})"
+        if personal
+        else f"{model_type.upper()} {dialect} ({job_id})"
+    )
+    replaced = _entries_of_slot(model_id, dialect)
     registry_updated = update_registry(
         model_id,
         f"checkpoints/{filename}",
@@ -225,15 +314,21 @@ def deploy_checkpoint(
         dialect,
         language,
     )
-    realtime_reloaded = notify_reload(
-        model_id,
-        f"{container_checkpoints_dir}/{filename}",
-        f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-        dialect,
-        language,
-    )
+    try:
+        realtime_reloaded = notify_reload(
+            model_id,
+            f"{container_checkpoints_dir}/{filename}",
+            f"{model_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            dialect,
+            language,
+        )
+    except ReloadRejected:
+        _restore_slot(model_id, replaced)
+        raise
 
-    if realtime_reloaded:
+    if realtime_reloaded and personal:
+        message = "Model đã vào Realtime, chỉ riêng bạn thấy và dùng được"
+    elif realtime_reloaded:
         message = "Model đã được đưa vào realtime và sẵn sàng sử dụng ngay"
     elif registry_updated:
         message = "Model đã ghi vào registry — sẽ hoạt động sau khi realtime service khởi động lại"
@@ -263,6 +358,9 @@ async def promote_job(
     notify_reload: Callable[..., bool] = _notify_realtime_service_reload,
     checkpoints_dir: Path = REALTIME_CHECKPOINTS_DIR,
     container_checkpoints_dir: str = REALTIME_CONTAINER_CHECKPOINTS,
+    model_id: Optional[str] = None,
+    personal: bool = False,
+    tenant_id: Optional[str] = None,
 ) -> PromoteResponse:
     """Validate and deploy a completed training job to the realtime service."""
     job_info = await ensure_job(job_id)
@@ -308,9 +406,15 @@ async def promote_job(
             notify_reload=notify_reload,
             checkpoints_dir=checkpoints_dir,
             container_checkpoints_dir=container_checkpoints_dir,
+            model_id=model_id,
+            personal=personal,
         )
     except CheckpointCopyError as exc:
         raise PromotionStorageError(str(exc)) from exc
+    except ReloadRejected as exc:
+        raise PromotionValidationError(
+            "Realtime từ chối model này, model đang chạy được giữ nguyên: " + str(exc)
+        ) from exc
 
     job.promoted_at = datetime.now().isoformat()
     job.checkpoint_path = deployment.deployed_path
@@ -319,16 +423,18 @@ async def promote_job(
     try:
         from app.modules.training.tasks import backup_promoted_checkpoint_task
 
-        backup_promoted_checkpoint_task.delay(
-            job_id=job_id,
-            checkpoint_path=deployment.deployed_path,
-            model_id=deployment.model_id,
-            display_name=deployment.display_name,
-            dialect=dialect,
-            language=language,
-            promoted_at=job.promoted_at,
-        )
-        logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
+        if not personal:
+            backup_promoted_checkpoint_task.delay(
+                job_id=job_id,
+                checkpoint_path=deployment.deployed_path,
+                model_id=deployment.model_id,
+                display_name=deployment.display_name,
+                dialect=dialect,
+                language=language,
+                promoted_at=job.promoted_at,
+                tenant_id=tenant_id,
+            )
+            logger.info("job=%s GDrive backup dispatched for promoted model", job_id)
     except Exception as exc:
         logger.warning(
             "job=%s GDrive backup dispatch failed (promotion vẫn OK): %s",

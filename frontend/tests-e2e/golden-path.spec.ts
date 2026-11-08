@@ -103,7 +103,14 @@ test.describe("Golden-path browser E2E", () => {
 
     // Clean up: cancel immediately rather than occupying the single GPU
     // trainer slot for a full run neither this test nor the thesis needs.
+    //
+    // The button asks `window.confirm`, which Playwright dismisses by default, so
+    // this cancel never ran: the job kept training over the next case, which needs
+    // the CPU for hand tracking and timed out. Wait for the API, not for the click.
+    page.once("dialog", (d) => d.accept());
+    const huy = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith("/cancel"));
     await cancelButton.click();
+    expect((await huy).status()).toBe(200);
   });
 
   test("3. open a completed job and see its evaluation", async ({ page }) => {

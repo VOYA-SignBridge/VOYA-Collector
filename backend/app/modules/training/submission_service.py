@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import uuid
 from datetime import datetime
@@ -93,7 +94,16 @@ async def submit_training_job(
     split_provenance: Optional[SplitProvenance] = None
     if config.run_purpose != "research":
         try:
-            split_provenance = resolve_provenance(config=config, tenant_id=tenant_id)
+            parameters = inspect.signature(resolve_provenance).parameters.values()
+            accepts_user = any(
+                parameter.name == "user_id"
+                or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+            provenance_kwargs = {"config": config, "tenant_id": tenant_id}
+            if accepts_user:
+                provenance_kwargs["user_id"] = auth_user_id or ""
+            split_provenance = resolve_provenance(**provenance_kwargs)
         except Exception as exc:
             raise SubmissionValidationError(str(exc)) from exc
         if not split_provenance.counts.get("train") or not split_provenance.counts.get("test"):
@@ -124,6 +134,7 @@ async def submit_training_job(
     job_id = str(uuid.uuid4())[:8]
     job = TrainingJob(
         id=job_id,
+        auth_user_id=auth_user_id,
         status="queued",
         config=config,
         created_at=datetime.now().isoformat(),

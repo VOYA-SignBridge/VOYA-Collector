@@ -24,6 +24,7 @@ def queue_preparation(
     minimum_samples: int = 25,
     with_research: bool = False,
     requested_by: str = "",
+    viewer_id: str = "",
     create_report: Optional[Callable[..., Any]] = None,
     next_version: Optional[Callable[[], str]] = None,
     dispatch: Optional[Callable[..., Any]] = None,
@@ -87,6 +88,7 @@ def queue_preparation(
         with_research=with_research,
         profiles=resolved_profiles,
         requested_by=requested_by,
+        viewer_id=viewer_id,
     )
     return {
         "run_id": run_id,

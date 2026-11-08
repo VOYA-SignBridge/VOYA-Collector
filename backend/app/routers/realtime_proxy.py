@@ -9,9 +9,12 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ValidationError, root_validator, validator
 
 from app.config import settings
+from app import realtime_slots
+from app.modules.saas.tenant_context import current_tenant
 from app.modules.security.rate_limit_deps import limit_predict
 
 logger = logging.getLogger("realtime_proxy")
@@ -131,9 +134,18 @@ class RealtimeProxyResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
+async def _caller_id(request: Request) -> Optional[str]:
+    """Resolve the authenticated caller only for personal realtime slots."""
+    from app.modules.security.access_gate import _resolve_user
+
+    user = await run_in_threadpool(_resolve_user, request)
+    return str(user.get("id")) if user else None
+
+
 @router.get("/models")
-async def proxy_models(response: Response) -> Any:
-    """Pure passthrough to inference service /models.
+async def proxy_models(request: Request, response: Response) -> Any:
+    """Return only realtime models visible to the active tenant and caller.
 
     No caching, mutation, or reordering in backend.
     Cache-Control: no-store prevents stale browser model list.
@@ -150,7 +162,18 @@ async def proxy_models(response: Response) -> Any:
 
     if upstream.status_code == 200:
         response.headers["Cache-Control"] = "no-store"
-        return upstream.json()
+        models = upstream.json()
+        tenant = current_tenant()
+        caller = (
+            await _caller_id(request)
+            if any(realtime_slots.is_personal(model.get("id")) for model in models)
+            else None
+        )
+        return [
+            model
+            for model in models
+            if realtime_slots.visible_to(model.get("id"), tenant, caller)
+        ]
 
     logger.error(
         "[REALTIME_PROXY] event=UPSTREAM_ERROR endpoint=models status=%d",
@@ -237,6 +260,15 @@ async def proxy_predict(request: Request, response: Response) -> RealtimeProxyRe
     # 5. Generate request_id if absent
     request_id = (body.request_id or "").strip() or uuid.uuid4().hex
     model_id = body.model_id
+
+    caller = await _caller_id(request) if realtime_slots.is_personal(model_id) else None
+    if not realtime_slots.visible_to(model_id, current_tenant(), caller):
+        logger.warning(
+            "[REALTIME_PROXY] req=%s model=%s event=FOREIGN_SLOT",
+            request_id,
+            model_id,
+        )
+        raise HTTPException(status_code=404, detail="Model not found")
 
     logger.info(
         "[REALTIME_PROXY] req=%s model=%s event=REQUEST",

@@ -3,6 +3,7 @@
 from app.infrastructure.celery.app import beat_schedule, celery_app
 from app.infrastructure.celery.registry import register_task_modules
 from app.infrastructure.celery.signals import (
+    audit_task_failure,
     release_memory_after_task as _release_memory_after_task,
     start_resource_monitor as _start_resource_monitor,
 )
@@ -22,4 +23,5 @@ __all__ = [
     "stamp_tenant_on_task",
     "setup_structlog_context",
     "clear_structlog_context",
+    "audit_task_failure",
 ]

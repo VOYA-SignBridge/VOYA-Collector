@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import Modal from "./ui/Modal";
 import Button from "./ui/Button";
 import { useI18n } from "../i18n";
+import { canEditTenant } from "../api/auth";
 import { useAuth } from "../hooks/useAuth";
 import { useVocabularyRegistry } from "../hooks/useVocabularyRegistry";
 import { dialectLabel } from "../config/dialectLabels";
@@ -22,7 +23,8 @@ export default function CreateLabelModal({
   isOpen, onClose, onCreated, initialLanguage = "vn", initialDialect = "common",
 }: Props) {
   const { t } = useI18n();
-  const { isAdmin } = useAuth();
+  const { user } = useAuth();
+  const canEdit = canEditTenant(user);
   const { dialects, regions } = useVocabularyRegistry();
   const [value, setValue] = useState("");
   const [language, setLanguage] = useState(initialLanguage);
@@ -44,7 +46,7 @@ export default function CreateLabelModal({
     setSaving(true); setError("");
     let result: Awaited<ReturnType<typeof requestClass>>;
     try {
-      result = isAdmin
+      result = canEdit
         ? await registerClass({ label, language, dialect, region, is_common_language: dialect === "common" })
         : await requestClass({ label, language, dialect, region, is_common_language: dialect === "common" });
     } catch (err) {

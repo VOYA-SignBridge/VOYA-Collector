@@ -150,7 +150,7 @@ const OperationalSplitPicker: React.FC<Props> = ({
           >
             {matching.map((s) => (
               <option key={s.split_id} value={s.split_id}>
-                {s.split_id}
+                {s.split_id}{s.personal ? ` (${t('tập riêng của bạn')})` : ''}
               </option>
             ))}
           </select>

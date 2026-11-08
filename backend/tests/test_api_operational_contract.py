@@ -176,6 +176,7 @@ def client(monkeypatch):
     monkeypatch.setattr(tm, "resolve_tenant", lambda cookie, bearer: TENANT)
     app.add_middleware(tm.TenantScopeMiddleware)
     app.dependency_overrides[get_current_user] = lambda: USER
+    monkeypatch.setattr(tr, "_duyet_duoc", lambda _u, _t: True)
     app.dependency_overrides[require_admin] = lambda: ADMIN
 
     async def _khong_ghi_db(job, auth_user_id=None):

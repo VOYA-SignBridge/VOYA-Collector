@@ -64,12 +64,15 @@ class TrainingConfig(BaseModel):
     operational_split_id: Optional[str] = None
     dataset_version: Optional[str] = None
     recognition_profile: Optional[str] = None
+    personal: bool = False
+    review_requested_at: Optional[str] = None
 
 
 class TrainingJob(BaseModel):
     """Thông tin training job"""
 
     id: str
+    auth_user_id: Optional[str] = None
     status: str
     config: TrainingConfig
     created_at: str

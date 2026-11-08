@@ -43,7 +43,7 @@ def working_in_voya(monkeypatch):
 
 def test_operational_split_list_is_the_working_tenants(working_in_voya, monkeypatch):
     seen = []
-    monkeypatch.setattr(tr, "_operational_splits", lambda tenant_id: seen.append(tenant_id) or [])
+    monkeypatch.setattr(tr, "_operational_splits", lambda tenant_id, _nguoi="": seen.append(tenant_id) or [])
     r = client.get("/training/splits/operational")
     assert r.status_code == 200, r.text
     assert seen == [WORKING]
@@ -74,7 +74,7 @@ def test_dataset_preparation_is_owned_by_the_working_tenant(working_in_voya, mon
     from app.modules.dataset import preparation_tasks as dp
 
     reports, dispatched = [], []
-    monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid: None)
+    monkeypatch.setattr(tr, "assert_can_use_dialect", lambda d, uid, tenant=None: None)
     monkeypatch.setattr(dp, "create_pending_report", lambda run_id, **kw: reports.append(kw["tenant_id"]))
     monkeypatch.setattr(dp.prepare_dataset, "delay", lambda **kw: dispatched.append(kw["tenant_id"]))
 

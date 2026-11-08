@@ -137,15 +137,16 @@ class TestMotDiaChiMotTaiKhoan:
     người dùng phụ thuộc vào một thứ không xác định.
     """
 
-    @pytest.mark.parametrize("email", ALL_EMAILS)
-    def test_tra_cuu_khong_phan_biet_hoa_thuong(self, email):
+    @pytest.mark.parametrize("tai_khoan_that", ALL_EMAILS, indirect=True)
+    def test_tra_cuu_khong_phan_biet_hoa_thuong(self, tai_khoan_that):
         """Đăng nhập bằng ĐỊA CHỈ VIẾT HOA phải ra đúng tài khoản đó."""
         from app.modules.identity._web_compat import _fetch_user_by_login
 
+        user, _ = tai_khoan_that
+        email = user["email"]
         thuong = _fetch_user_by_login(email)
         hoa = _fetch_user_by_login(email.upper())
-        if thuong is None:
-            pytest.skip(f"{email} chưa có tài khoản trong cơ sở dữ liệu này")
+        assert thuong is not None
         assert hoa is not None, "viết hoa địa chỉ làm mất tài khoản"
         assert hoa["id"] == thuong["id"]
 
@@ -333,8 +334,11 @@ class TestKhongLoDanhSach:
     def test_quen_mat_khau_tra_loi_giong_nhau_cho_dia_chi_co_va_khong(
             self, email, client):
         khong_co = f"khong-ton-tai-{uuid.uuid4().hex[:10]}@gmail.com"
-        a = client.post("/api/v1/auth/forgot-password", json={"email": email})
-        b = client.post("/api/v1/auth/forgot-password", json={"email": khong_co})
+        a = client.post("/api/v1/auth/forgot-password", json={"identifier": email})
+        b = client.post("/api/v1/auth/forgot-password", json={"identifier": khong_co})
+        # Trường này từng gửi sai tên: cả hai lượt cùng 422, giống hệt nhau, và ca đạt
+        # mà chưa bao giờ chạm tới đường tra tài khoản.
+        assert a.status_code == 200, a.text
         assert a.status_code == b.status_code, (
             "mã trạng thái khác nhau giữa địa chỉ có và không có đăng ký"
         )

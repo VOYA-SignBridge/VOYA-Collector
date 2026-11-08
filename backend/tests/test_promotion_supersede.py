@@ -178,3 +178,11 @@ def test_serving_is_promoted_and_not_superseded():
     assert serving({**base, "promoted_at": "T1", "superseded_at": None}) is True
     assert serving({**base, "promoted_at": "T1", "superseded_at": "T2"}) is False
     assert serving({**base, "promoted_at": None, "superseded_at": None}) is False
+
+
+def test_only_the_jobs_pushed_out_of_the_slot_are_retired(cursor):
+    """Một tổ chức có slot chung và slot riêng của từng thành viên cho cùng phương ngữ."""
+    cur = cursor(retiring=["job-old"])
+    mdb.supersede_other_promotions("job-new", "hoa-de", "truong-a", ["tcn_1.pt"])
+    assert "ANY" in cur.statements[0]
+    assert cur.params[0]["names"] == ["tcn_1.pt"]

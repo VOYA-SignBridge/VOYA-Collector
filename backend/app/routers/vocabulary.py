@@ -186,7 +186,7 @@ def update_dialect(
 # /vocabulary/community, which was wrong twice over: this holds no contributed
 # data — no video, no landmarks, no consent record, no attribution — and it
 # squatted on the namespace the real commons needs. "Community" in
-# CTU-SignBridge means data people contributed and the governance around it
+# CTU.SignBridge means data people contributed and the governance around it
 # (submission, review, licence, grants, withdrawal); see
 # docs/01-architecture/COMMUNITY_DATA_COMMONS.md. The physical tables are still named
 # community_* because renaming them is a migration, not a rename — the domain

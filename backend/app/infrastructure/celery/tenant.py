@@ -32,7 +32,7 @@ TENANT_HEADER = "voya_tenant"
 
 
 @before_task_publish.connect
-def stamp_tenant_on_task(headers=None, **_kwargs):
+def stamp_tenant_on_task(headers=None, body=None, **_kwargs):
     """Record which tenant asked for this task, at dispatch time.
 
     Only a real tenant scope is stamped. Platform work (beat schedules, CLI,
@@ -42,6 +42,12 @@ def stamp_tenant_on_task(headers=None, **_kwargs):
     tenant = current_tenant()
     if tenant and headers is not None:
         headers[TENANT_HEADER] = tenant
+        task_id = headers.get("id") or (
+            body.get("id") if isinstance(body, dict) else None
+        )
+        from app import task_registry
+
+        task_registry.record_owner(task_id, tenant)
 
 
 @task_prerun.connect

@@ -397,7 +397,7 @@ export default function TestTrainedModelModal({
               <div className="text-center py-4">
                 <div className="text-2xl text-slate-300 mb-2">–</div>
                 <div className="text-sm text-slate-500">
-                  {running ? t('Chờ dữ liệu...') : t('Chưa bắt đầu')}
+                  {running ? t('Đang gom khung hình, hãy giữ tay trong khung vài giây...') : t('Chưa bắt đầu')}
                 </div>
               </div>
             )}

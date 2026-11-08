@@ -8,15 +8,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from pydantic import BaseModel
 
+from app import realtime_slots
 from app.infrastructure.redis.connection import get_redis_client
-from app.modules.identity._web_compat import get_current_user, get_user_from_token, require_admin
+from app.modules.identity._web_compat import get_current_user, get_user_from_token
 from app.modules.dataset import catalog_service, preparation_service, provenance as dataset_provenance, research_catalog
-from app.modules.dataset.vocabulary_registry import assert_can_use_dialect
+from app.modules.dataset.vocabulary_registry import (
+    assert_can_use_dialect,
+    can_edit_registry,
+    dialect_owner,
+)
 from app.modules.security.quota_deps import guard_quota, tenant_of
 from app.modules.security.rate_limit_deps import limit_training
 from app.modules.saas.tenant_context import require_tenant
@@ -63,8 +70,10 @@ from app.modules.training.promotion_service import (
     REALTIME_CONTAINER_CHECKPOINTS,
     CheckpointCopyError,
     _copy_checkpoint_to_deployment,
+    _entries_of_slot,
     _notify_realtime_service_reload,
     _registry_display_name,
+    _restore_slot,
     _update_registry,
     deploy_checkpoint,
 )
@@ -137,10 +146,82 @@ def _split_snapshot(thu_muc=None):
     )
 
 
-def _operational_splits(tenant_id: str) -> List[Dict[str, Any]]:
+def _operational_splits(tenant_id: str, user_id: str = "") -> List[Dict[str, Any]]:
     return dataset_provenance.operational_splits(
-        tenant_id, SPLITS_DIR, WORKSPACE_ROOT
+        tenant_id, SPLITS_DIR, WORKSPACE_ROOT, user_id
     )
+
+
+def _cho_xem(job: Any, user_id: str, is_reviewer: bool) -> bool:
+    """Personal jobs are visible only to their owner and requested reviewers."""
+    config = getattr(job, "config", None)
+    if not getattr(config, "personal", False):
+        return True
+    if str(getattr(job, "auth_user_id", "") or "") == user_id:
+        return True
+    return is_reviewer and bool(getattr(config, "review_requested_at", None))
+
+
+def _la_bien_tap(user: Dict[str, Any], tenant_id: str) -> bool:
+    return can_edit_registry(
+        tenant_id,
+        user.get("id"),
+        bool(user.get("is_admin")),
+    )
+
+
+def _duyet_duoc(user: Dict[str, Any], tenant_id: str) -> bool:
+    """Whether this caller may publish to the tenant's shared realtime slot."""
+    if user.get("auth_method") == "api_key":
+        return False
+    return _la_bien_tap(user, tenant_id) and (
+        not realtime_slots.is_shared(tenant_id) or bool(user.get("is_admin"))
+    )
+
+
+def _la_nguoi_chay_job(job_id: str, user_id: str) -> bool:
+    from app.storage.metadata_db import get_training_job
+
+    row = get_training_job(job_id) or {}
+    return bool(user_id) and str(row.get("auth_user_id") or "") == user_id
+
+
+async def _job_cua(job_id: str, user: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Load a tenant-confined job and hide another user's personal job as 404."""
+    job_info = await _ensure_job_loaded(job_id)
+    job = (job_info or {}).get("job")
+    if job is None or not getattr(getattr(job, "config", None), "personal", False):
+        return job_info
+
+    # Terminal jobs are cached per backend process. Refresh the mutable review
+    # flags so a request handled by another process becomes visible immediately.
+    from app.storage.metadata_db import get_training_job
+
+    row = await asyncio.to_thread(get_training_job, job_id)
+    if row:
+        job.config = _job_from_db_row(row).config
+        if not getattr(job, "auth_user_id", None):
+            job.auth_user_id = str(row.get("auth_user_id") or "") or None
+    user_id = str(user.get("id") or "")
+    tenant_id = str(job_info.get("tenant_id") or "")
+    reviewer = await asyncio.to_thread(_duyet_duoc, user, tenant_id)
+    return job_info if _cho_xem(job, user_id, reviewer) else None
+
+
+async def _chi_chu_hoac_bien_tap(
+    job_id: str,
+    user: Dict[str, Any],
+    tenant_id: str,
+) -> None:
+    if await asyncio.to_thread(_la_bien_tap, user, tenant_id):
+        return
+    if not await asyncio.to_thread(
+        _la_nguoi_chay_job, job_id, str(user.get("id") or "")
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn chỉ huỷ hoặc xoá được job của chính mình.",
+        )
 
 
 def _split_provenance(**kwargs) -> SplitProvenance:
@@ -192,6 +273,12 @@ def _split_provenance(**kwargs) -> SplitProvenance:
 
         if operational:
             metadata = getattr(artifact, "metadata", {}) or {}
+            personal_owner = str(metadata.get("auth_user_id") or "")
+            user_id = str(kwargs.get("user_id") or "")
+            if personal_owner and personal_owner != user_id:
+                raise ValueError(
+                    f"Không tìm thấy tập chia '{getattr(artifact, 'split_id', '')}'."
+                )
             scope = list((metadata.get("scope") or {}).get("dialects") or [])
             requested = [value for value in (config.get("dialects") or []) if value]
             outside = sorted(set(requested) - set(scope))
@@ -264,7 +351,7 @@ def _profiles_for_dialects(
 @router.post("/dataset/prepare")
 async def start_dataset_preparation(
     body: DatasetPrepareRequest,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     """Sinh manifest + split triển khai + split nghiên cứu + fold LOSO.
 
@@ -297,6 +384,9 @@ async def start_dataset_preparation(
             minimum_samples=body.min_samples_per_class or 25,
             with_research=body.with_research,
             requested_by=user_id or "",
+            viewer_id="" if await asyncio.to_thread(
+                _duyet_duoc, current_user, tenant_id
+            ) else (user_id or ""),
         )
     except preparation_service.UnsupportedDialectsError as exc:
         raise HTTPException(
@@ -308,7 +398,7 @@ async def start_dataset_preparation(
             ),
         ) from exc
     logger.info(
-        "[PREP] admin=%s tenant=%s bắt đầu run=%s",
+        "[PREP] user=%s tenant=%s bắt đầu run=%s",
         current_user.get("username"), tenant_id, result["run_id"],
     )
     return result
@@ -348,7 +438,11 @@ async def list_research_splits(
 async def list_operational_splits(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> List[Dict[str, Any]]:
-    return await asyncio.to_thread(_operational_splits, require_tenant())
+    return await asyncio.to_thread(
+        _operational_splits,
+        require_tenant(),
+        str(current_user.get("id") or ""),
+    )
 
 
 # ============================================================================
@@ -454,9 +548,18 @@ async def start_training(
         guard_quota(current_user, "training_jobs_queued", tenant_id=working_tenant)
     for dialect in config.dialects or []:
         try:
-            assert_can_use_dialect(dialect, str(current_user.get("id") or ""))
+            assert_can_use_dialect(
+                dialect,
+                str(current_user.get("id") or ""),
+                working_tenant,
+            )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    config.personal = not await asyncio.to_thread(
+        _duyet_duoc, current_user, working_tenant
+    )
+    config.review_requested_at = None
 
     try:
         return await submission_service.submit_training_job(
@@ -488,9 +591,22 @@ async def list_jobs(
 ) -> List[Dict[str, Any]]:
     """Lịch sử training jobs (mới nhất trước), kèm username người chạy."""
     try:
-        return await job_service.list_job_history(limit)
+        items = await job_service.list_job_history(limit)
     except job_service.JobStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    user_id = str(current_user.get("id") or "")
+    reviewer = await asyncio.to_thread(
+        _duyet_duoc, current_user, require_tenant()
+    )
+    visible: List[Dict[str, Any]] = []
+    for item in items:
+        try:
+            job = TrainingJob(**item)
+        except Exception:
+            continue
+        if _cho_xem(job, user_id, reviewer):
+            visible.append(item)
+    return visible
 
 
 @router.get("/jobs/{job_id}", response_model=TrainingJob)
@@ -500,9 +616,12 @@ async def get_job_status(
 ) -> TrainingJob:
     """Lấy trạng thái training job (fallback sang DB nếu không có trong memory)"""
     try:
+        async def ensure_visible(_job_id: str):
+            return await _job_cua(_job_id, current_user)
+
         return await job_service.load_job_status(
             job_id,
-            ensure_job=_ensure_job_loaded,
+            ensure_job=ensure_visible,
             persist_job=_persist_job,
             load_checkpoint=load_checkpoint,
         )
@@ -517,7 +636,10 @@ async def get_job_metrics(
 ) -> List[TrainingMetrics]:
     """Lấy metrics của training job (fallback sang DB nếu không có trong memory)"""
     try:
-        return await job_service.load_job_metrics(job_id, ensure_job=_ensure_job_loaded)
+        async def ensure_visible(_job_id: str):
+            return await _job_cua(_job_id, current_user)
+
+        return await job_service.load_job_metrics(job_id, ensure_job=ensure_visible)
     except job_service.JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -533,7 +655,10 @@ async def get_job_evaluation(
     (các job train trước khi tính năng evaluation được thêm).
     """
     try:
-        return await job_service.load_job_evaluation(job_id, ensure_job=_ensure_job_loaded)
+        async def ensure_visible(_job_id: str):
+            return await _job_cua(_job_id, current_user)
+
+        return await job_service.load_job_evaluation(job_id, ensure_job=ensure_visible)
     except job_service.JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except job_service.JobStorageError as exc:
@@ -553,9 +678,12 @@ async def get_job_provenance(
     cách endpoint evaluation xử lý.
     """
     try:
+        async def ensure_visible(_job_id: str):
+            return await _job_cua(_job_id, current_user)
+
         return await provenance_service.load_job_provenance(
             job_id,
-            ensure_job=_ensure_job_loaded,
+            ensure_job=ensure_visible,
             load_checkpoint=load_checkpoint,
             workspace_root=WORKSPACE_ROOT,
         )
@@ -584,12 +712,24 @@ async def cancel_training_job(
     DB được đánh dấu cancelled ngay để UI phản hồi tức thì.
     """
     logger.info("job=%s cancel requested by user=%s", job_id, current_user.get("username"))
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    await _chi_chu_hoac_bien_tap(
+        job_id,
+        current_user,
+        str(job_info.get("tenant_id") or "") or require_tenant(),
+    )
+
+    async def ensure_visible(_job_id: str):
+        return job_info if _job_id == job_id else None
+
     try:
         return await job_service.cancel_job(
             job_id,
             current_user.get("username", "user"),
             redis_client=redis_client or get_redis_client(),
-            ensure_job=_ensure_job_loaded,
+            ensure_job=ensure_visible,
             persist_job=_persist_job,
         )
     except job_service.JobNotFoundError as exc:
@@ -609,8 +749,20 @@ async def delete_training_job_endpoint(
     chạy/đang chờ phải hủy trước (xem cancel_training_job). Không xóa
     checkpoint file trên đĩa (xem delete_training_job trong metadata_db.py).
     """
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    await _chi_chu_hoac_bien_tap(
+        job_id,
+        current_user,
+        str(job_info.get("tenant_id") or "") or require_tenant(),
+    )
+
+    async def ensure_visible(_job_id: str):
+        return job_info if _job_id == job_id else None
+
     try:
-        await job_service.delete_job(job_id, ensure_job=_ensure_job_loaded)
+        await job_service.delete_job(job_id, ensure_job=ensure_visible)
     except job_service.JobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except job_service.JobConflictError as exc:
@@ -621,21 +773,73 @@ async def delete_training_job_endpoint(
     return {"success": True, "job_id": job_id}
 
 
-@router.post("/jobs/{job_id}/promote", response_model=PromoteResponse)
+@router.post(
+    "/jobs/{job_id}/promote",
+    response_model=PromoteResponse,
+    dependencies=[Depends(limit_training)],
+)
 async def promote_training_job(
     job_id: str,
-    current_user: Dict[str, Any] = Depends(require_admin),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> PromoteResponse:
-    """Promote model của job lên tab nhận diện realtime (ADMIN ONLY).
+    """Publish a completed job to a shared or caller-only realtime slot."""
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
 
-    Luồng: copy đúng checkpoint của job → config/checkpoints của realtime
-    service → ghi entry vào models.json (bền qua restart) → gọi /reload để
-    hot-swap → ghi promoted_at vào DB.
-    """
+    if current_user.get("auth_method") == "api_key":
+        raise HTTPException(
+            status_code=403,
+            detail="Khoá API không dùng được cho thao tác này.",
+        )
+
+    job = job_info["job"]
+    tenant_id = str(job_info.get("tenant_id") or "") or require_tenant()
+    user_id = str(current_user.get("id") or "")
+    personal = not _duyet_duoc(current_user, tenant_id)
+    if personal and not await asyncio.to_thread(
+        _la_nguoi_chay_job, job_id, user_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn chỉ đưa được model do chính mình huấn luyện vào Realtime.",
+        )
+
+    if job.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Chỉ promote được job đã hoàn thành (trạng thái hiện tại: {job.status})",
+        )
+
+    dialect = job.config.dialects[0] if job.config.dialects else "multi"
+    pending_owner = await asyncio.to_thread(dialect_owner, dialect, tenant_id)
+    if pending_owner is not None and not (personal and pending_owner == user_id):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Phương ngữ '{dialect}' đang chờ duyệt nên model của nó chỉ "
+                "người tạo dùng được. Duyệt phương ngữ trước, rồi mới promote."
+            ),
+        )
+
+    model_id = realtime_slots.slot_id(
+        dialect,
+        tenant_id,
+        user_id if personal else None,
+    )
+    replaced_entries = await asyncio.to_thread(
+        promotion_service._entries_of_slot,
+        model_id,
+        dialect,
+    )
+
+    async def ensure_visible(_job_id: str):
+        return job_info if _job_id == job_id else None
+
     try:
         response = await promotion_service.promote_job(
             job_id,
-            ensure_job=_ensure_job_loaded,
+            ensure_job=ensure_visible,
             persist_job=_persist_job,
             load_checkpoint=load_checkpoint,
             model_name_map=_MODEL_NAME_TO_REGISTRY_KEY,
@@ -645,6 +849,9 @@ async def promote_training_job(
             notify_reload=_notify_realtime_service_reload,
             checkpoints_dir=REALTIME_CHECKPOINTS_DIR,
             container_checkpoints_dir=REALTIME_CONTAINER_CHECKPOINTS,
+            model_id=model_id,
+            personal=personal,
+            tenant_id=tenant_id,
         )
     except promotion_service.PromotionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -655,8 +862,196 @@ async def promote_training_job(
     except promotion_service.PromotionStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    logger.info("job=%s promoted by admin=%s", job_id, current_user.get("username"))
+    if not personal and getattr(job.config, "personal", False):
+        job.config.personal = False
+        job.config.review_requested_at = None
+        await _ghi_trang_thai_duyet(
+            job,
+            tenant_id,
+            "Đề nghị dùng chung đã được duyệt",
+            f"Model {job_id} giờ mọi người trong tổ chức dùng được.",
+            "success",
+        )
+
+    try:
+        from app.storage.metadata_db import supersede_other_promotions
+
+        retired = await asyncio.to_thread(
+            supersede_other_promotions,
+            job_id,
+            dialect,
+            tenant_id,
+            [
+                Path(str(entry.get("checkpoint_path") or "")).name
+                for entry in replaced_entries
+                if entry.get("checkpoint_path")
+            ],
+        )
+        stamp = datetime.now().isoformat()
+        for old_id in retired:
+            cached = training_jobs.get(old_id)
+            if cached:
+                cached["job"].superseded_at = stamp
+    except Exception as exc:
+        logger.warning("job=%s không đánh dấu được promotion cũ: %s", job_id, exc)
+
+    from app.modules.security import audit
+
+    audit.record(
+        "training.promote",
+        actor=current_user,
+        target_type="training_job",
+        target_id=job_id,
+        tenant_id=tenant_id,
+        detail={
+            "model_id": response.model_id,
+            "dialect": dialect,
+            "registry_updated": response.registry_updated,
+            "realtime_reloaded": response.realtime_reloaded,
+        },
+    )
+    logger.info(
+        "job=%s promoted by user=%s slot=%s",
+        job_id,
+        current_user.get("username"),
+        response.model_id,
+    )
     return response
+
+
+async def _ghi_trang_thai_duyet(
+    job: TrainingJob,
+    tenant_id: str,
+    title: str,
+    body: str,
+    severity: str = "info",
+) -> None:
+    from app.modules.support import notifications
+    from app.storage.metadata_db import update_training_job_config
+
+    await asyncio.to_thread(
+        update_training_job_config,
+        job.id,
+        {
+            "personal": job.config.personal,
+            "review_requested_at": job.config.review_requested_at,
+        },
+    )
+    if job.auth_user_id:
+        await asyncio.to_thread(
+            notifications.notify,
+            job.auth_user_id,
+            "training",
+            title,
+            body,
+            "/training",
+            severity,
+            tenant_id,
+        )
+
+
+class ReviewReject(BaseModel):
+    reason: str = ""
+
+
+@router.post(
+    "/jobs/{job_id}/review",
+    response_model=TrainingJob,
+    dependencies=[Depends(limit_training)],
+)
+async def request_shared_review(
+    job_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
+    """Let the job owner request publication to the tenant's shared slot."""
+    from app.modules.saas import tenant_admin
+    from app.modules.security import audit
+    from app.modules.support import notifications
+    from app.storage.metadata_db import update_training_job_config
+
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    job = job_info["job"]
+    if str(job.auth_user_id or "") != str(current_user.get("id") or ""):
+        raise HTTPException(status_code=403, detail="Chỉ người chạy job mới đề nghị được.")
+    if not job.config.personal:
+        raise HTTPException(status_code=409, detail="Model này không phải model riêng.")
+    if job.status != "completed":
+        raise HTTPException(status_code=409, detail="Chỉ đề nghị được với job đã hoàn thành.")
+    if job.config.review_requested_at:
+        return job
+
+    tenant_id = str(job_info.get("tenant_id") or "") or require_tenant()
+    job.config.review_requested_at = datetime.now().isoformat()
+    await asyncio.to_thread(
+        update_training_job_config,
+        job_id,
+        {"review_requested_at": job.config.review_requested_at},
+    )
+    reviewers = await asyncio.to_thread(tenant_admin.model_reviewer_ids, tenant_id)
+    await asyncio.to_thread(
+        notifications.notify_many,
+        reviewers,
+        kind="training",
+        title="Có model chờ duyệt dùng chung",
+        body=f"{current_user.get('username')} đề nghị dùng chung model {job_id}.",
+        link="/training",
+        tenant_id=tenant_id,
+    )
+    audit.record(
+        "training.review.request",
+        actor=current_user,
+        target_type="training_job",
+        target_id=job_id,
+        tenant_id=tenant_id,
+        detail={"reviewer_count": len(reviewers)},
+    )
+    return job
+
+
+@router.post(
+    "/jobs/{job_id}/review/reject",
+    response_model=TrainingJob,
+    dependencies=[Depends(limit_training)],
+)
+async def reject_shared_review(
+    job_id: str,
+    body: ReviewReject,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> TrainingJob:
+    """Reject a sharing request while leaving the owner's personal model intact."""
+    from app.modules.security import audit
+
+    job_info = await _job_cua(job_id, current_user)
+    if not job_info:
+        raise HTTPException(status_code=404, detail=f"Training job {job_id} không tìm thấy")
+    job = job_info["job"]
+    tenant_id = str(job_info.get("tenant_id") or "") or require_tenant()
+    if not await asyncio.to_thread(_duyet_duoc, current_user, tenant_id):
+        raise HTTPException(status_code=403, detail="Bạn không có quyền duyệt model dùng chung.")
+    if not job.config.review_requested_at:
+        raise HTTPException(status_code=409, detail="Job này không có đề nghị nào đang chờ.")
+
+    job.config.review_requested_at = None
+    reason = body.reason.strip()[:300]
+    await _ghi_trang_thai_duyet(
+        job,
+        tenant_id,
+        "Đề nghị dùng chung chưa được duyệt",
+        f"Model {job_id} vẫn là model riêng của bạn."
+        + (f" Lý do: {reason}" if reason else ""),
+        "warning",
+    )
+    audit.record(
+        "training.review.reject",
+        actor=current_user,
+        target_type="training_job",
+        target_id=job_id,
+        tenant_id=tenant_id,
+        detail={"reason": reason},
+    )
+    return job
 
 
 @router.websocket("/ws/{job_id}")
@@ -690,7 +1085,7 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
     # not pass through that middleware, so keep the same active-tenant scope for
     # both the ownership check and every subsequent progress read.
     with tenant_scope(working_tenant):
-        job_info = await _ensure_job_loaded(job_id)
+        job_info = await _job_cua(job_id, user)
         if not job_info:
             await websocket.close(code=4004, reason="Job not found")
             return
@@ -698,10 +1093,13 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
         await websocket.accept()
 
         try:
+            async def ensure_visible(_job_id: str):
+                return job_info if _job_id == job_id else None
+
             await progress_service.stream_job_progress(
                 job_id,
                 websocket.send_json,
-                ensure_job=_ensure_job_loaded,
+                ensure_job=ensure_visible,
             )
         except WebSocketDisconnect:
             pass
@@ -729,10 +1127,13 @@ async def predict_trained_model(
     Load checkpoint locally and run inference without requiring registry entry.
     """
     try:
+        async def ensure_visible(_job_id: str):
+            return await _job_cua(_job_id, current_user)
+
         return await inference_service.predict_job(
             job_id,
             request_data.frames,
-            ensure_job=_ensure_job_loaded,
+            ensure_job=ensure_visible,
             predict=inference_service.predict_checkpoint,
             workspace_root=WORKSPACE_ROOT,
             labels_csv=LABELS_CSV,

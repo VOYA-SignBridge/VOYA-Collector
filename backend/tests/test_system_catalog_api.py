@@ -9,7 +9,7 @@ then ignored.
 
 These endpoints were first written at /vocabulary/community. That was wrong:
 this plane holds dialect and profile CONFIGURATION — no video, no landmarks, no
-consent record, no attribution — while "Community" in CTU-SignBridge means
+consent record, no attribution — while "Community" in CTU.SignBridge means
 contributed data and its governance (docs/01-architecture/COMMUNITY_DATA_COMMONS.md).
 The namespace has been handed back; the physical tables keep their
 `community_*` names until a migration renames them.

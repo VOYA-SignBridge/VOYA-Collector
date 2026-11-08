@@ -181,7 +181,7 @@ async def store_raw_video(
     _log_pipeline_config()
     if not looks_like_video(peek_head(file.file)):
         raise InvalidVideoFormatError(
-            "Tep khong phai dinh dang video duoc ho tro (MP4/MOV/WebM/MKV/AVI)."
+            "Tệp không phải định dạng video được hỗ trợ (MP4/MOV/WebM/MKV/AVI)."
         )
 
     max_mb = int(getattr(settings, "max_upload_mb", 1024))

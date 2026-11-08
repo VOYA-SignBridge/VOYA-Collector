@@ -30,6 +30,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from app.modules.saas import tenant_admin
+from app.modules.saas.tenant_context import tenant_scope
 from app.modules.security import audit
 from app.modules.identity._web_compat import get_current_user, require_admin
 from app.modules.security.rate_limit_deps import limit_catalog
@@ -246,10 +247,11 @@ def switch_active_tenant(
     except tenant_admin.NotAMember as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    audit.record("tenant.active.switched", actor=current_user, request=request,
-                 target_type="tenant", target_id=result["tenant_id"],
-                 tenant_id=result["tenant_id"],
-                 detail={"is_home": result["is_home"]})
+    with tenant_scope(result["tenant_id"]):
+        audit.record("tenant.active.switched", actor=current_user, request=request,
+                     target_type="tenant", target_id=result["tenant_id"],
+                     tenant_id=result["tenant_id"],
+                     detail={"is_home": result["is_home"]})
     return result
 
 

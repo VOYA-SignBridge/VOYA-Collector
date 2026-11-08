@@ -18,7 +18,7 @@ and recognition profiles exist by default) that a new tenant is cloned from.
 They contain no contributed data — no video, no landmarks, no consent record,
 no attribution, no licence.
 
-That is NOT what "Community" means in CTU-SignBridge. The Community Data
+That is NOT what "Community" means in CTU.SignBridge. The Community Data
 Commons is data people contributed plus the governance around it: submission,
 rights and consent review, immutable releases, licences, access grants,
 attribution, withdrawal. It does not exist yet; see

@@ -163,6 +163,9 @@ export default function RealtimeRuntime({
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [selectionWarning, setSelectionWarning] = useState<string | null>(null);
+  // Không lấy được âm thanh thì phải nói ra: lỗi này từng chỉ hiện thành "không có
+  // tiếng", không ai biết là dịch vụ đọc đang hỏng (edge-tts 403, 06/11/2026).
+  const [ttsFailed, setTtsFailed] = useState(false);
   const [speechEnabled, setSpeechEnabled] = useState<boolean>(() => {
     try {
       const stored = localStorage.getItem("realtimeSpeechEnabled");
@@ -259,6 +262,7 @@ export default function RealtimeRuntime({
 
     const p = (async () => {
       const blob = await fetchTTSAudio(label, ttsVoiceId);
+      setTtsFailed(!blob);
       if (blob) {
         const url = URL.createObjectURL(blob);
         ttsBlobCacheRef.current.set(cacheKey, url);
@@ -1103,6 +1107,11 @@ export default function RealtimeRuntime({
                 />
               </button>
             </div>
+            {speechEnabled && ttsFailed && (
+              <p className="text-xs text-red-700" role="status" data-testid="tts-failed">
+                {t("Không đọc được thành tiếng: dịch vụ giọng đọc đang lỗi. Nhận dạng vẫn hoạt động.")}
+              </p>
+            )}
 
             {speechEnabled && (
               <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">

@@ -13,3 +13,9 @@ build
 *.log
 .vscode
 .idea
+# Tailwind quet ca thu muc tim ten class va chi tranh thu .gitignore liet ke, ma .gitignore
+# khong vao anh: tep camera gia 159 MB tung lam `vite build` mat 2m43 thay vi 25 giay.
+tests-e2e
+playwright-report
+test-results
+coverage
