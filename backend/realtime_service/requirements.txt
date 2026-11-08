@@ -4,4 +4,4 @@ pydantic>=1.10,<2.0
 numpy>=1.26,<3.0
 # Step 0 requires checkpoint loading + model warmup lifecycle.
 # Pin in production once you standardize runtime.
-torch>=2.2,<3.0
+torch>=2.15.0,<3.0
