@@ -108,6 +108,8 @@ processed/splits
 # fafde53) là dấu hiệu luật thiếu ngoại lệ, không phải người hay quên.
 !docs/02-data/db/evidence/
 !docs/02-data/db/evidence/*.csv
+# ...trừ bằng chứng có tên người ký: đó là dữ liệu cá nhân, chỉ giữ ở máy duyệt.
+docs/02-data/db/evidence/*signer*.csv
 
 *.md
 *.txt
@@ -176,32 +178,6 @@ deploy/public_hosts.txt
 *.env.example
 
 
-# ---------------------------------------------------------------------------
-# Research release policy (ISDS 2026 paper pipeline)
-#
-# The blanket *.json / *.csv / *.md rules above keep datasets and trained
-# artifacts out of git, but they also swallow the research RECORDS the paper
-# depends on. Those are re-included explicitly below.
-#
-#   commit  -> records that justify a claim (why legacy checkpoints are
-#              invalid; the exact augmentation config the methodology cites)
-#   ignore  -> anything regenerable from artifacts (result tables, determinism
-#              logs, per-run audits, coverage dumps, pilot outputs)
-# ---------------------------------------------------------------------------
-
-# Generated / regenerable -> never committed
-reports/experiment_results.csv
-reports/experiment_results.tex
-reports/determinism_report.json
-reports/duplicate_audit.json
-reports/duplicate_audit.md
-reports/coverage_*.json
-reports/pilot_*.json
-reports/pilot_*.md
-reports/quality_stats_*.json
-reports/release_log_*.json
-reports/determinism/
-
 # Source files caught by the blanket *.txt rule
 !backend/requirements.txt
 !backend/requirements-dev.txt
@@ -209,22 +185,11 @@ reports/determinism/
 !processed/requirements-train.txt
 !processed/requirements-realtime.txt
 
-# Research records -> committed (negate the blanket rules above)
+# Tài liệu kỹ thuật -> committed (negate the blanket rules above)
 !docs/
 !docs/**/*.md
 !scripts/**/README.md
 
-# Lược đồ AS-BUILT. Luật `*.json` ở trên nuốt tệp này, nên nó CHƯA BAO GIỜ vào
-# lịch sử — trong khi quyển luận văn trích dẫn nó kèm tên revision ("ảnh chụp
-# 05bd8ea"). Một tạo tác được trích dẫn mà không tra lại được ở đúng revision ấy
-# thì câu trích dẫn không có gì chống lưng, và đó đúng là điều mà chính tệp
-# `ASBUILT_INVENTORY.md` cạnh nó cảnh báo. Bản kê đi kèm là `.md` nên vẫn được
-# theo dõi — hai nửa của cùng một phép chụp mà chỉ một nửa vào git là trạng thái
-# tệ nhất, vì nó trông như đã được lưu.
-!docs/00-thesis/asbuilt/asbuilt_schema.json
-!reports/checkpoint_validity.md
-!reports/augmentation_contract.md
-!reports/augmentation_contract.json
 !release/
 !release/*.json
 
@@ -236,8 +201,10 @@ processed/mobile/artifacts/
 
 .codegraph
 
-# Documentation and reports are maintained in a separate repository.
-/docs/
+# Luận văn, bài báo và báo cáo nghiên cứu KHÔNG nằm trong repo: repo công khai và
+# chỉ giữ tài liệu kỹ thuật. Giữ bản riêng ở Extra_docs/ trên máy cá nhân.
+/docs/00-thesis/
+/docs/CTU_SignBridge/
 /reports/
 /Extra_docs/
 
@@ -277,17 +244,8 @@ backend/dataset/
 # Báo cáo test do CI sinh — không commit
 junit-*.xml
 
-# Bản PDF đính kèm do Zotero xuất ra (26 MB). Danh mục `.bib` cạnh nó ĐƯỢC theo
-# dõi vì đó mới là thứ quyển luận văn trích dẫn; các tệp PDF chỉ là bản sao của
-# tài liệu đã xuất bản, tải lại được, và không nên nằm trong lịch sử git.
-docs/00-thesis/SignBridge_Reference/files/
-
-# Bản xuất Zotero đã bị chính người dùng đánh dấu KHÔNG DÙNG.
-docs/00-thesis/SignBridge_Reference/*KHONG_DUNG*
-
 # Thư mục làm việc của các lượt đo: vân tay mã nguồn, ảnh chụp mã, chứng cứ thô
-# theo từng lượt chạy. Kết quả đã CÔNG BỐ nằm ở docs/00-thesis/MEASUREMENT_*,
-# nên thư mục này là scratch chứ không phải hồ sơ.
+# theo từng lượt chạy. Không phải hồ sơ, không vào git.
 .measurement/
 *.bak2
 

@@ -467,6 +467,10 @@ services:
       - "${DEBUG_BIND_HOST:-127.0.0.1}:${NGINX_HEALTH_PORT:-8001}:8001"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # Tệp cờ bảo trì (voya tạo/xoá) và trang maintenance.html. Thiếu dòng này
+      # thì `voya update-*` bật bảo trì mà nginx không thấy: người dùng nhận lỗi
+      # thay vì trang "đang bảo trì" trong lúc cập nhật.
+      - ./nginx.conf.d:/etc/nginx/conf.d:ro
     depends_on:
       - frontend
       - backend
