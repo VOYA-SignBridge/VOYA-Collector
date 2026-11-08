@@ -19,10 +19,22 @@ thì có vẻ đã có cổng kiểm. Thực tế:
 Một cổng không bao giờ kích hoạt không phải cổng lỏng — nó là cổng **không tồn
 tại**, và tệ hơn ở chỗ nhìn vào kho thì tưởng là có.
 
-## 2. Ba job của `ci.yml`
+## 2. Các job của `ci.yml`
 
-Kích hoạt: PR vào `main`, push vào `main` **và các nhánh `deploy_ctu_*`**, hoặc
-chạy tay bằng `workflow_dispatch`.
+Kích hoạt:
+- **mọi lần push lên bất kỳ nhánh nào** (từ 08/11/2026);
+- PR vào `main`;
+- chạy tay bằng `workflow_dispatch`.
+
+Riêng push lên `main` thì `build_docker.yml` gọi lại tệp này trước khi dựng ảnh.
+
+| Job | Kiểm gì | Thời gian |
+|---|---|---|
+| `frontend` | Kiểu, i18n, test, dựng | ~2 phút |
+| `backend` | Phụ thuộc không xung đột, migration, phân quyền, pytest trên CSDL mới | ~15 phút |
+| `wiring` | Script, cấu hình, tài liệu khớp với mã (xem dưới) | ~2 phút |
+| `images` | Dựng thử 3 ảnh, không đẩy. Chỉ chạy ở PR và nhánh khác `main` | ~10 phút |
+| `hygiene` | LF, `.env`, lớp phủ registry, sao lưu/khôi phục | ~3 phút |
 
 ### `frontend`
 
@@ -53,6 +65,30 @@ Postgres 16 + Redis 7 dựng mới → `app.cli.migrate --to <APP_SCHEMA_VERSION
 - Phiên bản đích hỏi chính mã chứ không viết cứng trong YAML: một con số trong
   workflow sẽ trôi khỏi `APP_SCHEMA_VERSION` ngay lần bump đầu tiên, và trôi
   trong im lặng.
+
+### `wiring`: những thứ nằm giữa các phần
+
+Không bộ test nào của backend hay frontend đọc những thứ này, nên chúng hỏng
+mà không ai biết cho tới lúc dùng. Cả ba lỗi của ngày 08/11/2026 đều thuộc
+loại này.
+
+| Bước | Bắt lỗi gì | Lỗi thật đã gặp |
+|---|---|---|
+| `actionlint` | Workflow sai cú pháp, sai biểu thức, `needs` trỏ vào job không có | |
+| `scripts/check_app_imports.py` | Mã **ngoài** `backend/app` (CI, script, PowerShell, test) gọi module hoặc tên không tồn tại | Đợt tái cấu trúc dời 9 module; CI và công cụ chuyển server vẫn gọi đường cũ |
+| `scripts/check_compose_contracts.py` | Chuỗi bảo trì `voya.py` → `nginx.conf.d/` → mount → `nginx.conf` còn nối; tệp cấu hình được gắn vào container phải có trong git | Mất dòng gắn `nginx.conf.d`: người dùng nhận lỗi 502 thay vì trang bảo trì |
+| `scripts/check_docs.py` | Không có luận văn, báo cáo hay tên người ký trong repo; không có email thật; không có tệp lẻ ở gốc `docs/`; không có liên kết hỏng (trừ `11-worklog/`) | Tài liệu công khai từng chứa email sinh viên và tên người ký |
+| Cú pháp Python, shell, PowerShell | Lỗi cú pháp trong script chỉ chạy tay | |
+| `docker compose config` | 5 tổ hợp tệp compose mà máy thật dùng phải gộp được với `.env.example` | |
+| `nginx -t` | Cấu hình nginx hợp lệ | |
+
+Chạy trên máy mình trước khi push:
+
+```bash
+python scripts/check_app_imports.py
+python scripts/check_compose_contracts.py
+python scripts/check_docs.py
+```
 
 ### `hygiene`
 
@@ -180,4 +216,9 @@ ngoài phạm vi.
   năng không mở SSH vào từ ngoài, nên đường tự động sẽ cần self-hosted runner —
   chưa làm.
 - **Lint chưa phải cổng chặn** (85 lỗi tồn đọng).
-- **Chưa quét phụ thuộc / bí mật** ngoài phép kiểm `.env` đơn giản.
+- **Chưa quét bí mật** ngoài phép kiểm `.env` đơn giản. `pip check` chỉ bắt xung
+  đột phiên bản đã khai, không bắt lỗ hổng bảo mật của gói.
+- **Chưa chạy Playwright (E2E)** trong CI: cần dựng cả stack. Vẫn chạy tay bằng
+  `VOYA_UI.bat`.
+- **`Dockerfile.coderefresh`** (đường `voya update-code`) chưa được dựng thử trong
+  CI, vì nó cần ảnh nền đã dựng trên máy.

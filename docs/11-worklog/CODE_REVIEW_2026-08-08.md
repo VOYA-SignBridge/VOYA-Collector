@@ -151,7 +151,7 @@ các gốc cho phép, chặn symlink trỏ ra ngoài, rồi mới thử chế đ
 `ensure_tables()` và ghi bằng `db._execute` thay vì con trỏ rollback.
 
 **Vì sao là lỗi.** Chạy trên cơ sở dữ liệu chưa có ràng buộc, câu `INSERT` chữ
-hoa **thành công**, và hàng `MAINHATMINH1004@GMAIL.COM` nằm lại. Test khẳng
+hoa **thành công**, và hàng `USER@EXAMPLE.COM` (email thật viết hoa) nằm lại. Test khẳng
 định "cơ sở dữ liệu phải từ chối" mà lúc nó không từ chối thì lại để lại hậu
 quả — đó là test tự phá dữ liệu.
 

@@ -1,0 +1,5 @@
+# Nhãn của máy chạy tự host dùng cho bước triển khai (build_docker.yml, job
+# deploy). Khai ở đây để actionlint không báo nhầm là nhãn lạ.
+self-hosted-runner:
+  labels:
+    - voya-prod

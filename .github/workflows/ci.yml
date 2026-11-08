@@ -41,7 +41,16 @@ name: CI
 #
 # Nên gác cả hai: `main` (đích của mọi PR) và `deploy_ctu_**` (nơi mã thật sự
 # được viết). `**` khớp cả `deploy_ctu_ver-2.2.1` lẫn các nhánh phát hành sau.
+#
+# Và MỌI nhánh khác khi push (08/11/2026). `son_arrange_repo2` — đợt tái cấu
+# trúc 88 commit — chưa từng chạy CI lần nào vì nó không phải PR cũng không phải
+# `deploy_ctu_**`. Lần đầu nó được kiểm là lúc đã gộp vào `main`, và đỏ ngay ở
+# bước đầu. Chạy trên mỗi lần push nghĩa là người làm nhánh biết hỏng từ hôm
+# đó, không phải từ hôm gộp. `main`/`deploy_ctu_**` bị loại ở đây vì
+# build_docker.yml đã gọi tệp này cho chúng.
 on:
+  push:
+    branches-ignore: [main, 'deploy_ctu_**']
   pull_request:
     branches: [main, 'deploy_ctu_**']
   # Push releases run this workflow through build_docker.yml's required checks
@@ -188,6 +197,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      # Gói cài MỚI phải khớp nhau. CI là nơi duy nhất cài từ số không mỗi lần,
+      # nên cũng là nơi duy nhất thấy gói gián tiếp trôi theo ngày (kombu 5.7,
+      # 03/11/2026, đòi redis-py mới hơn bản đang ghim). `pip check` đọc ràng
+      # buộc đã khai của mọi gói đã cài và báo cặp nào lệch.
+      - name: Phụ thuộc không xung đột
+        run: pip check
+
       # `app.cli.migrate`, KHÔNG phải `ensure_tables()`.
       #
       # Từ 12/08/2026 `ensure_tables()` chỉ còn THÊM: phần một chiều (bỏ bảng
@@ -325,6 +341,120 @@ jobs:
         with:
           name: junit-backend
           path: backend/junit-backend.xml
+
+  # Những thứ nằm GIỮA các phần: script gọi vào backend, compose nối nginx với
+  # công cụ vận hành, tài liệu trỏ vào tệp. Không bộ test nào của backend hay
+  # frontend đọc chúng, nên chúng hỏng mà không ai hay cho tới lúc dùng. Cả ba
+  # lỗi của ngày 08/11/2026 thuộc loại này: CI và công cụ chuyển server gọi
+  # module đã dời chỗ, compose mất dòng gắn thư mục bảo trì, tài liệu công khai
+  # còn email và tên thật. Job này chạy nhanh (dưới 2 phút) và không cần CSDL.
+  wiring:
+    name: Nối dây — script, cấu hình, tài liệu khớp với mã
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cài công cụ kiểm
+        run: python -m pip install --quiet pyyaml
+
+      # Chính các workflow này: sai tên khoá, sai biểu thức `${{ }}`, job `needs`
+      # trỏ vào job không có. Lỗi kiểu đó chỉ lộ khi GitHub từ chối chạy.
+      - name: Workflow GitHub Actions hợp lệ
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color -shellcheck= -pyflakes=
+
+      - name: Mã ngoài backend gọi đúng module app.*
+        run: python scripts/check_app_imports.py
+
+      - name: Hợp đồng compose / nginx / voya
+        run: python scripts/check_compose_contracts.py
+
+      - name: Tài liệu công khai — không tài liệu riêng, email thật, liên kết hỏng
+        run: python scripts/check_docs.py
+
+      - name: Cú pháp Python (backend, processed, scripts)
+        run: python -m compileall -q backend processed scripts
+
+      - name: Cú pháp shell
+        run: |
+          bad=0
+          for f in $(git ls-files '*.sh'); do
+            bash -n "$f" || { echo "::error file=$f::loi cu phap shell"; bad=1; }
+          done
+          exit $bad
+
+      # Công cụ chuyển server và cài máy mới viết bằng PowerShell; lỗi cú pháp
+      # ở đó chỉ lộ ra trên máy Windows vào đúng ngày chuyển máy.
+      - name: Cú pháp PowerShell
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in (git ls-files '*.ps1')) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors)
+            if ($errors) { $bad = 1; Write-Output "::error file=$f::$($errors[0].Message)" }
+          }
+          exit $bad
+
+      # Mọi tổ hợp tệp compose mà máy thật dùng phải gộp được. `.env.example`
+      # đóng vai `.env`: nếu nó thiếu một biến mà compose đòi, máy mới cài theo
+      # hướng dẫn cũng sẽ thiếu.
+      - name: Cấu hình compose gộp được
+        env:
+          VOYA_REGISTRY_NS: ci
+          VOYA_IMAGE_TAG: sha-ci
+        run: |
+          cp .env.example .env
+          for combo in             "docker-compose.yml"             "docker-compose.yml docker-compose.prod.yml"             "docker-compose.yml docker-compose.prod.yml docker-compose.gpu.yml"             "docker-compose.yml docker-compose.prod.yml docker-compose.registry.yml"             "docker-compose.yml docker-compose.staging.yml"; do
+            args=""; for f in $combo; do args="$args -f $f"; done
+            echo "== $combo"
+            docker compose $args config -q
+          done
+
+      - name: Cấu hình nginx hợp lệ
+        run: |
+          docker run --rm             -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro"             -v "$PWD/nginx.conf.d:/etc/nginx/conf.d:ro"             nginx:alpine nginx -t
+
+  # Dựng thử ba ảnh, KHÔNG đẩy. Trên `main`/`deploy_ctu_**` build_docker.yml đã
+  # dựng (và đẩy) sau khi job kiểm qua, nên ở đó job này tự bỏ qua. Ở mọi nhánh
+  # khác và mọi PR, đây là chỗ duy nhất bắt được Dockerfile hỏng — ví dụ một
+  # đường COPY trỏ vào thư mục vừa bị dời trong một đợt tái cấu trúc — TRƯỚC
+  # khi gộp, thay vì sau khi `main` đã không dựng được ảnh.
+  images:
+    name: Dựng thử ảnh — ${{ matrix.name }}
+    if: github.event_name == 'pull_request' || !(github.ref_name == 'main' || startsWith(github.ref_name, 'deploy_ctu_'))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            image: voya_backend
+          - name: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            image: voya_frontend
+          - name: realtime_service
+            context: ./backend/realtime_service
+            dockerfile: ./backend/realtime_service/Dockerfile
+            image: voya_realtime_service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Dựng (không đẩy)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          # Chỉ ĐỌC cache của build_docker.yml; không ghi để nhánh thử nghiệm
+          # không đẩy cache của `main` ra ngoài.
+          cache-from: type=gha,scope=${{ matrix.image }}
 
   hygiene:
     name: Vệ sinh kho — thứ mà test không bao giờ bắt được
