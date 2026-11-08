@@ -6,11 +6,20 @@
 # định gộp hay không — thay vì đến lặng lẽ trong một lần dựng ảnh.
 #
 # Các cập nhật nhỏ (minor/patch) gộp chung một PR mỗi hệ sinh thái, để không
-# thành hai chục PR mỗi tuần. Bản lớn (major) vẫn tách riêng vì hay phá vỡ.
+# thành hai chục PR mỗi tuần.
+#
+# 08/11/2026, sau lượt chạy đầu tiên (15 PR trong một buổi):
+# - **Bỏ hẳn bản lớn (major).** Lượt đầu đề xuất eslint 10, node 25, pytest 9,
+#   torch 2.15... Bản lớn hay phá vỡ và cần người nâng có chủ đích, đo kỹ; để
+#   Dependabot mở PR cho chúng chỉ tạo tiếng ồn. Nâng bản lớn thì làm tay.
+# - **PR nhắm vào `son_arrange_repo2`, không vào `main`.** `main` là nhánh triển
+#   khai, chỉ nhận mã đã thử trên `son_arrange_repo2`
+#   (docs/06-operations/CHUYEN_SANG_MAIN.md). Gói mới cũng đi đường đó.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /backend
+    target-branch: son_arrange_repo2
     schedule:
       interval: weekly
       day: monday
@@ -26,9 +35,12 @@ updates:
       # này khi nâng redis (xem chú thích trong backend/requirements.txt).
       - dependency-name: kombu
         versions: [">=5.7"]
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: pip
     directory: /backend/realtime_service
+    target-branch: son_arrange_repo2
     schedule:
       interval: weekly
       day: monday
@@ -36,9 +48,15 @@ updates:
     groups:
       realtime-nho:
         update-types: [minor, patch]
+    ignore:
+      # Cùng lý do với torch của backend: nâng tay, đo trên GPU thật.
+      - dependency-name: torch
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /frontend
+    target-branch: son_arrange_repo2
     schedule:
       interval: weekly
       day: monday
@@ -46,20 +64,32 @@ updates:
     groups:
       frontend-nho:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   # Ảnh gốc được ghim theo digest (xem chú thích đầu các Dockerfile). Dependabot
   # đề xuất digest mới; gộp PR đó nghĩa là chấp nhận một lần tải lại lớp nặng.
   - package-ecosystem: docker
     directories: [/backend, /backend/realtime_service, /frontend]
+    target-branch: son_arrange_repo2
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+    ignore:
+      # node 20 -> 25, python 3.11 -> 3.13 là đổi nền, không phải vá.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: son_arrange_repo2
     schedule:
       interval: monthly
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]

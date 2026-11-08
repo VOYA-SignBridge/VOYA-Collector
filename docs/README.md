@@ -7,7 +7,7 @@ Thư mục này chỉ chứa **tài liệu kỹ thuật** của hệ thống. Lu
 | Bạn cần | Đọc |
 |---|---|
 | Dựng web trên một máy mới | [06-operations/TRIEN_KHAI_TU_DAU.md](06-operations/TRIEN_KHAI_TU_DAU.md) |
-| Cập nhật máy chạy web, làm việc với nhánh `main`, xử lý xung đột | [06-operations/CHUYEN_SANG_MAIN.md](06-operations/CHUYEN_SANG_MAIN.md) |
+| Hai nhánh `son_arrange_repo2` (thử mã) và `main` (triển khai), cập nhật máy chạy web, xử lý xung đột | [06-operations/CHUYEN_SANG_MAIN.md](06-operations/CHUYEN_SANG_MAIN.md) |
 | Bắt đầu viết code (cài môi trường, chạy test, cấu trúc mã) | [HUONG_DAN_DEV.html](HUONG_DAN_DEV.html), mở bằng trình duyệt |
 | Hiểu hệ thống chạy thế nào | [01-architecture/CONCEPTS.md](01-architecture/CONCEPTS.md), rồi [01-architecture/MULTITENANT_ARCHITECTURE.md](01-architecture/MULTITENANT_ARCHITECTURE.md) |
 | Biết lỗi nào đang tồn tại | [10-issues/KNOWN_ISSUES.md](10-issues/KNOWN_ISSUES.md) |

@@ -21,9 +21,13 @@ tại**, và tệ hơn ở chỗ nhìn vào kho thì tưởng là có.
 
 ## 2. Các job của `ci.yml`
 
+Hai nhánh (từ 08/11/2026): `son_arrange_repo2` là nhánh thử mã, `main` là
+nhánh triển khai và chỉ nhận mã từ `son_arrange_repo2`
+(xem [CHUYEN_SANG_MAIN.md](CHUYEN_SANG_MAIN.md)).
+
 Kích hoạt:
-- **mọi lần push lên bất kỳ nhánh nào** (từ 08/11/2026);
-- PR vào `main`;
+- **mọi lần push lên bất kỳ nhánh nào**, trừ `dependabot/**` (PR của nó đã kích hoạt CI);
+- PR vào `son_arrange_repo2` hoặc `main`;
 - chạy tay bằng `workflow_dispatch`.
 
 Riêng push lên `main` thì `build_docker.yml` gọi lại tệp này trước khi dựng ảnh.
@@ -96,7 +100,7 @@ Máy chạy web không dựng lược đồ từ số không mà **nâng** từ 
 
 ## 2b. `security.yml`: quét bảo mật (chế độ cảnh báo)
 
-Chạy mỗi thứ Hai, ở mỗi PR vào `main`, và chạy tay được. **Không chặn PR nào**: kết quả ghi vào trang Summary của lượt chạy.
+Chạy mỗi thứ Hai, ở mỗi PR vào `son_arrange_repo2` hoặc `main`, và chạy tay được. **Không chặn PR nào**: kết quả ghi vào trang Summary của lượt chạy.
 
 | Job | Quét gì |
 |---|---|
@@ -118,7 +122,11 @@ Trả xong nợ nhóm nào thì bỏ `continue-on-error` của job đó để n�
 
 ## 2c. Dependabot (`.github/dependabot.yml`)
 
-Mỗi thứ Hai, Dependabot mở PR cập nhật gói (pip, npm, ảnh gốc Docker; GitHub Actions thì mỗi tháng). Bản nhỏ gộp một PR cho mỗi hệ sinh thái. CI kiểm các PR này như mọi PR khác. `torch` và `kombu >= 5.7` bị loại có chủ ý; lý do ghi ngay trong tệp.
+Mỗi thứ Hai, Dependabot mở PR cập nhật gói (pip, npm, ảnh gốc Docker; GitHub Actions thì mỗi tháng) **vào `son_arrange_repo2`**. Bản nhỏ gộp một PR cho mỗi hệ sinh thái. CI kiểm các PR này như mọi PR khác.
+
+Bị loại có chủ ý (lý do ghi ngay trong tệp):
+- **mọi bản lớn (major)**: lượt đầu mở 15 PR, gồm eslint 10, node 25, pytest 9, torch 2.15. Nâng bản lớn thì làm tay;
+- `torch` (cả backend lẫn realtime) và `kombu >= 5.7`.
 
 ## 2d. Ảnh ổn định giữa các lần dựng
 

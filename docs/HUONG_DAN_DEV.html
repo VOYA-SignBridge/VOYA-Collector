@@ -201,7 +201,7 @@
     <p class="lede">Mọi thứ một lập trình viên mới cần để cài, chạy, sửa và thêm chức năng cho hệ thống thu thập và nhận diện Ngôn ngữ Ký hiệu Việt Nam. Viết bằng lời dễ hiểu. Mỗi việc đều chỉ rõ sửa tệp nào và làm theo thứ tự nào.</p>
     <div class="facts">
       <span>Cập nhật <b>23/10/2026</b></span>
-      <span>Nhánh triển khai <b><code>deploy_ctu_ver-2.2.1</code></b></span>
+      <span>Nhánh thử mã <b><code>son_arrange_repo2</code></b>, triển khai <b><code>main</code></b></span>
       <span>Lược đồ CSDL <b>v8</b></span>
       <span>Dịch vụ Docker <b>15</b></span>
       <span>Một khung hình = <b>126 số</b> (21 điểm mốc × 3 toạ độ × 2 bàn tay)</span>
@@ -518,9 +518,9 @@ docker exec voya_backend python -m app.cli.verify_deployment</code></pre></div>
 
       <h3>Nhánh git</h3>
       <ul>
-        <li><code>deploy_ctu_ver-2.2.1</code>: nhánh đang chạy trên máy chủ. Máy chủ cập nhật bằng <code>VOYA update-git</code>.</li>
-        <li><code>main</code>: nhánh chính để mở pull request.</li>
-        <li>Làm tính năng mới: tạo nhánh riêng (<code>feature/ten-tinh-nang</code>), mở pull request, CI phải xanh.</li>
+        <li><code>son_arrange_repo2</code>: nhánh thử mã. Mọi thay đổi push vào đây trước; CI chạy ở mỗi lần push.</li>
+        <li><code>main</code>: nhánh triển khai. Chỉ nhận mã từ <code>son_arrange_repo2</code> khi CI xanh; mỗi commit lên <code>main</code> được CI dựng thành ảnh. Máy chủ chạy <code>main</code> và cập nhật bằng <code>VOYA update-git</code>.</li>
+        <li>Việc lớn: tạo nhánh riêng, mở pull request vào <code>son_arrange_repo2</code>, CI phải xanh.</li>
         <li>Đặt tên commit theo dạng <code>loại(phạm vi): mô tả</code>, như lịch sử đang dùng: <code>fix(drive): …</code>, <code>feat(training): …</code>, <code>chore: …</code>.</li>
       </ul>
       <div class="note warn"><b>Nhánh cũ</b><p>Đừng merge thẳng <code>experiment/feature-v2</code>: đó là ảnh chụp tháng 8, có hàng chục xung đột. Muốn lấy gì thì cherry-pick từng commit.</p></div>
@@ -1337,7 +1337,7 @@ docker exec voya_postgres psql -U &lt;POSTGRES_USER&gt; -d postgres -c "CREATE D
       <div class="note warn"><b>Đỏ hàng loạt thì nghi môi trường trước</b>
         <p>Hàng trăm lỗi cùng lúc gần như luôn là do môi trường, không phải do mã: <code>signdb_test</code> chưa tồn tại hoặc rỗng; thiếu vai test; stack Docker vừa tắt (log có <code>host lookup failed</code>); ổ đĩa trên 95% đầy. Kiểm mấy thứ này trước khi đọc traceback.</p>
         <p>Hai test là "danh sách cho phép" và đỏ có chủ ý khi bạn thêm thứ mới: <code>test_tenant_isolation::test_boundary_crossings_are_an_allowlist</code> (thêm <code>system_scope</code>) và <code>test_celery_tenant_propagation</code> (thêm tác vụ <code>platform_wide</code>). Thêm một dòng lý do là xong.</p></div>
-      <p>Chi tiết: <a class="doc" href="08-testing/TESTING.md">08-testing/TESTING.md</a>.</p>
+      <p>Cách đưa mã lên <code>main</code> và xử lý xung đột: <a class="doc" href="06-operations/CHUYEN_SANG_MAIN.md">06-operations/CHUYEN_SANG_MAIN.md</a>. Chạy test: <a class="doc" href="08-testing/TESTING.md">08-testing/TESTING.md</a>.</p>
     </section>
 
     <!-- ============================================================ -->
@@ -1347,7 +1347,7 @@ docker exec voya_postgres psql -U &lt;POSTGRES_USER&gt; -d postgres -c "CREATE D
 
       <h3>Đưa code mới lên máy chủ</h3>
       <ol class="steps">
-        <li>Đẩy code lên nhánh <code>deploy_ctu_ver-2.2.1</code> (sau khi CI xanh).</li>
+        <li>Push lên <code>son_arrange_repo2</code>; CI xanh thì đưa lên <code>main</code> (<code>git push origin origin/son_arrange_repo2:main</code>) và chờ CI dựng ảnh xong.</li>
         <li>Trên máy chủ: <code>VOYA update-git</code>. Lệnh tự xem tệp nào đổi để chọn cách dựng: chỉ <code>backend/app</code> → dựng nhanh; <code>requirements.txt</code> → dựng đầy đủ; <code>frontend/</code> → dựng frontend; chỉ <code>processed/</code>, <code>scripts/</code>, <code>config/</code> → không cần dựng.</li>
         <li>Thứ tự lệnh tự làm: tạo mốc quay lui → sao lưu CSDL → bật trang bảo trì → dựng → bật → kiểm sức khoẻ → <b>hỏng thì tự quay lui</b> và báo → tắt trang bảo trì.</li>
         <li>Sau đó: <code>VOYA fresh</code> (code đang chạy có đúng là code mới) và <code>VOYA verify</code>.</li>

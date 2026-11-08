@@ -48,11 +48,16 @@ name: CI
 # bước đầu. Chạy trên mỗi lần push nghĩa là người làm nhánh biết hỏng từ hôm
 # đó, không phải từ hôm gộp. `main`/`deploy_ctu_**` bị loại ở đây vì
 # build_docker.yml đã gọi tệp này cho chúng.
+#
+# `son_arrange_repo2` là nhánh thử mã, `main` là nhánh triển khai (từ
+# 08/11/2026). PR vào `son_arrange_repo2` (Dependabot, nhánh tính năng) vì thế
+# cũng được kiểm. Nhánh `dependabot/**` bị loại khỏi `push` vì PR của chính nó
+# đã kích hoạt CI; không loại thì mỗi bản cập nhật gói chạy CI hai lần.
 on:
   push:
-    branches-ignore: [main, 'deploy_ctu_**']
+    branches-ignore: [main, 'deploy_ctu_**', 'dependabot/**']
   pull_request:
-    branches: [main, 'deploy_ctu_**']
+    branches: [main, son_arrange_repo2, 'deploy_ctu_**']
   # Push releases run this workflow through build_docker.yml's required checks
   # job, avoiding two complete test runs for the same push.
   # Chạy lại bằng tay khi cần xác nhận một commit cũ vẫn xanh.
