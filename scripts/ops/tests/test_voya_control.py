@@ -39,13 +39,46 @@ def quiet():
 
 
 class UpdatePlanTests(unittest.TestCase):
-    def test_requirements_change_needs_a_full_build(self):
-        plan = voya.plan_from_changes(["backend/requirements.txt"])
+    def test_torch_change_needs_a_full_build(self):
+        plan = voya.plan_from_changes(["backend/requirements.txt"], "-torch==2.6.0\n+torch==2.7.0\n")
         self.assertTrue(plan["backend"] and plan["full"])
+
+    def test_other_package_only_needs_a_code_refresh(self):
+        """Đo 06/11: một gói edge-tts 38 KB từng kéo theo dựng đầy đủ ~3 GB."""
+        plan = voya.plan_from_changes(["backend/requirements.txt"], "-edge-tts==7.2.8\n+edge-tts==7.3.1\n")
+        self.assertTrue(plan["backend"])
+        self.assertFalse(plan["full"])
+
+    def test_dockerfile_change_needs_a_full_build(self):
+        self.assertTrue(voya.plan_from_changes(["backend/Dockerfile"])["full"])
+
+    def test_refresh_dockerfile_change_rebuilds_without_full(self):
+        plan = voya.plan_from_changes(["backend/Dockerfile.coderefresh"])
+        self.assertTrue(plan["backend"])
+        self.assertFalse(plan["full"])
 
     def test_app_code_only_needs_a_code_refresh(self):
         plan = voya.plan_from_changes(["backend/app/routers/x.py"])
-        self.assertEqual(plan, {"backend": True, "full": False, "frontend": False, "nginx": False})
+        self.assertEqual(plan, {"backend": True, "full": False, "frontend": False, "nginx": False,
+                                "realtime_image": False, "restart": (), "compose": False})
+
+    def test_realtime_code_restarts_the_service_without_an_image(self):
+        plan = voya.plan_from_changes(["backend/realtime_service/app/startup.py"])
+        self.assertEqual(plan["restart"], ("realtime_service",))
+        self.assertFalse(plan["backend"] or plan["realtime_image"])
+
+    def test_realtime_requirements_rebuild_its_image(self):
+        self.assertTrue(voya.plan_from_changes(["backend/realtime_service/requirements.txt"])["realtime_image"])
+
+    def test_monitoring_config_restarts_only_its_service(self):
+        plan = voya.plan_from_changes(["logging/grafana/alerting/policies.yml", "logging/prometheus.yml"])
+        self.assertEqual(plan["restart"], ("grafana", "prometheus"))
+
+    def test_compose_change_is_not_a_file_only_update(self):
+        self.assertTrue(voya.plan_from_changes(["docker-compose.yml"])["compose"])
+
+    def test_nginx_include_reloads_nginx(self):
+        self.assertTrue(voya.plan_from_changes(["nginx.conf.d/maintenance.conf"])["nginx"])
 
     def test_mounted_files_and_frontend_tests_need_no_image(self):
         plan = voya.plan_from_changes(["processed/splits/make_splits.py", "scripts/voya.py",

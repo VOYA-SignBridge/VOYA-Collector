@@ -15,8 +15,11 @@
 ARG BASE=voya_backend:base
 FROM ${BASE}
 USER root
-RUN rm -rf /app/app
-COPY --chown=appuser:appuser app/ /app/app/
 COPY requirements.txt /tmp/requirements.txt
 USER appuser
+# Trước `COPY app/`: đặt sau thì mỗi lần đổi code pip lại rà toàn bộ gói qua mạng.
 RUN python -m pip install --no-cache-dir --user -r /tmp/requirements.txt
+USER root
+RUN rm -rf /app/app
+COPY --chown=appuser:appuser app/ /app/app/
+USER appuser

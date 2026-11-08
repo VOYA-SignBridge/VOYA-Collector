@@ -22,6 +22,7 @@ import sys
 import time
 import urllib.request
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,8 @@ IMAGE = "voya_backend_test:latest"
 NHAN = "voya.kiem-thu=1"
 NETWORK = "voya-collector_voya_network"
 CSDL_E2E = "signdb_pytest_e2e"
+#: Drive chỉ chờ mạng, nên chạy song song với backend, trên CSDL riêng để không đụng nhau.
+CSDL_DRIVE = "signdb_pytest_drive"
 CONG_E2E = 18080
 GIU_LAI_LUOT = 10
 REDIS_TEST = "13"
@@ -72,7 +75,7 @@ def run(args, *, cwd=ROOT, env=None, capture=False, check=False):
     return r
 
 
-def chay_va_ghi(args, tep_log: Path, *, cwd=ROOT, env=None) -> int:
+def chay_va_ghi(args, tep_log: Path, *, cwd=ROOT, env=None, in_ra=True) -> int:
     """Chạy, vừa in ra vừa ghi tệp: bảng điều khiển thấy tiến độ, báo cáo đọc được sau."""
     with tep_log.open("w", encoding="utf-8") as log:
         p = subprocess.Popen([str(a) for a in args], cwd=cwd, env=dict(os.environ, **(env or {})), text=True,
@@ -80,7 +83,8 @@ def chay_va_ghi(args, tep_log: Path, *, cwd=ROOT, env=None) -> int:
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         for dong in p.stdout:
             log.write(dong)
-            print(dong, end="", flush=True)
+            if in_ra:
+                print(dong, end="", flush=True)
         return p.wait()
 
 
@@ -197,8 +201,9 @@ def chay_drive(thu_muc: Path, sandbox: str) -> dict:
     ma = chay_va_ghi(
         [_bash(), "scripts/run_tests.sh", "backend/tests/test_sot_integration.py",
          "-q", "-p", "no:cacheprovider", "--timeout=300"],
-        thu_muc / "drive.log",
-        env={"VOYA_TEST_CMD": _lenh_pytest(rel, "drive-ket-qua.jsonl", them), "MSYS_NO_PATHCONV": "1"})
+        thu_muc / "drive.log", in_ra=False,
+        env={"VOYA_TEST_CMD": _lenh_pytest(rel, "drive-ket-qua.jsonl", them), "MSYS_NO_PATHCONV": "1",
+             "VOYA_TEST_DATABASE": CSDL_DRIVE})
     return {"ma_thoat": ma, **_dem_pytest(thu_muc / "drive-ket-qua.jsonl")}
 
 
@@ -225,9 +230,15 @@ def _psql(sql: str) -> str:
                check=True, capture=True).stdout
 
 
-def _xoa_csdl_e2e() -> None:
-    _psql(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='{CSDL_E2E}'")
-    _psql(f"DROP DATABASE IF EXISTS {CSDL_E2E}")
+def _xoa_csdl(ten: str) -> None:
+    _psql(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='{ten}'")
+    _psql(f"DROP DATABASE IF EXISTS {ten}")
+
+
+def _tao_csdl_tu_test(ten: str) -> None:
+    _xoa_csdl(ten)
+    _psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='signdb_test'")
+    _psql(f"CREATE DATABASE {ten} WITH TEMPLATE signdb_test")
 
 
 def _ten_container(cid: str) -> str:
@@ -285,7 +296,7 @@ def _tat_moi_truong_tam(backend) -> None:
             run(["docker", "rm", "-f", cid], capture=True)
     if backend is not None:
         backend.wait(timeout=30)
-    _xoa_csdl_e2e()
+    _xoa_csdl(CSDL_E2E)
 
 
 def chay_trinh_duyet(thu_muc: Path, xem_truc_tiep: bool) -> dict:
@@ -300,9 +311,7 @@ def chay_trinh_duyet(thu_muc: Path, xem_truc_tiep: bool) -> dict:
     realtime = _chay_realtime_that()
 
     print("Tao CSDL tam tu signdb_test...", flush=True)
-    _xoa_csdl_e2e()
-    _psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='signdb_test'")
-    _psql(f"CREATE DATABASE {CSDL_E2E} WITH TEMPLATE signdb_test")
+    _tao_csdl_tu_test(CSDL_E2E)
 
     log = (thu_muc / "backend-tam.log").open("w", encoding="utf-8")
     backend = subprocess.Popen(
@@ -391,6 +400,8 @@ def don_va_kiem(thu_muc: Path, truoc: dict, sandbox: str | None) -> list[dict]:
     ghi("Container test", not _docker_ps(f"ancestor={IMAGE}") and not _docker_ps(f"label={NHAN}"))
 
     ghi(f"CSDL tạm {CSDL_E2E}", not _psql(f"SELECT 1 FROM pg_database WHERE datname='{CSDL_E2E}'").strip())
+    _xoa_csdl(CSDL_DRIVE)
+    ghi(f"CSDL tạm {CSDL_DRIVE}", not _psql(f"SELECT 1 FROM pg_database WHERE datname='{CSDL_DRIVE}'").strip())
 
     _redis_test("flushdb")
     ghi(f"Redis test (db {REDIS_TEST})", _redis_test("dbsize") == "0")
@@ -459,9 +470,12 @@ def toan_bo(xem_truc_tiep: bool = True, chi_trinh_duyet: bool = False) -> int:
     cac_buoc: list[dict] = []
     try:
         if not chi_trinh_duyet:
-            cac_buoc.append(buoc("Toàn bộ backend", "pytest", lambda: chay_backend(thu_muc)))
-            cac_buoc.append(buoc("Drive thật (sandbox)", "pytest", lambda: chay_drive(thu_muc, sandbox)))
-            cac_buoc.append(buoc("Toàn bộ frontend", "vitest", lambda: chay_vitest(thu_muc)))
+            _tao_csdl_tu_test(CSDL_DRIVE)
+            with ThreadPoolExecutor(1) as nen:
+                drive = nen.submit(buoc, "Drive thật (sandbox)", "pytest", lambda: chay_drive(thu_muc, sandbox))
+                cac_buoc.append(buoc("Toàn bộ backend", "pytest", lambda: chay_backend(thu_muc)))
+                cac_buoc.append(buoc("Toàn bộ frontend", "vitest", lambda: chay_vitest(thu_muc)))
+                cac_buoc.insert(1, drive.result())
             cac_buoc.append(buoc("Kiểm kiểu", "tsc", lambda: chay_lenh([_npm(), "run", "typecheck"], fe, thu_muc / "kiem-kieu.log")))
             cac_buoc.append(buoc("Cổng i18n", "i18n-gate", lambda: chay_lenh(["node", "scripts/i18n-gate.mjs"], fe, thu_muc / "i18n.log")))
             cac_buoc.append(buoc("Dựng thử", "vite build", lambda: chay_lenh(

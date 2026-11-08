@@ -554,7 +554,8 @@ def unhealthy_services() -> list[str]:
     return sorted(bad)
 
 
-def build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, label: str) -> bool:
+def build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, label: str,
+                     realtime_image: bool = False, restart: tuple = ()) -> bool:
     """Dựng → triển khai → kiểm; hỏng thì TỰ QUAY LUI về image vừa chạy.
 
     Thứ tự là nội dung: mốc quay lui và bản sao lưu có TRƯỚC khi đụng vào gì cả,
@@ -562,10 +563,12 @@ def build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, 
     tắt ở `finally` — kể cả khi dựng hỏng giữa chừng.
     """
     with deploy_lock():
-        return _build_and_deploy(backend=backend, full=full, frontend=frontend, nginx=nginx, label=label)
+        return _build_and_deploy(backend=backend, full=full, frontend=frontend, nginx=nginx, label=label,
+                                 realtime_image=realtime_image, restart=restart)
 
 
-def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, label: str) -> bool:
+def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool, label: str,
+                      realtime_image: bool = False, restart: tuple = ()) -> bool:
     clear_stopped()
     tag = tag_rollback_point()
     print(f"Moc quay lui: {tag}")
@@ -585,9 +588,13 @@ def _build_and_deploy(*, backend: bool, full: bool, frontend: bool, nginx: bool,
                 "-t", "voya_backend:latest", "."], cwd=ROOT / "backend", env=BUILD_ENV)
         if frontend:
             compose("build", "frontend", env=BUILD_ENV)
+        if realtime_image:
+            compose("build", "realtime_service", env=BUILD_ENV)
         compose("up", "-d", "--no-build")
         if nginx:
             compose("exec", "-T", "nginx", "nginx", "-s", "reload", check=False)
+        if restart:
+            compose("restart", *restart, check=False)
         problems = problems_after_deploy()
         if problems:
             print("!! Trien khai HONG: " + "; ".join(problems))
@@ -614,21 +621,49 @@ def cmd_update_code(args):
     if not confirm("Dung lai he thong voi code hien tai tren may? Gian doan 1-3 phut "
                    "(co sao luu DB truoc, hong thi tu quay lui)."):
         return
+    # Mã realtime gắn thẳng vào container, không nằm trong ảnh: không khởi động lại
+    # thì nó chạy tiếp bản cũ dù `update-code` báo xong.
     ok = build_and_deploy(backend=True, full="--full" in args, frontend="--frontend" in args,
-                          nginx=False, label="update-code")
+                          nginx=False, label="update-code", restart=("realtime_service",))
     if not ok:
         raise SystemExit(1)
 
 
-def plan_from_changes(changed: list[str]) -> dict:
-    """Từ danh sách tệp đổi → cần dựng gì. Pure: testable."""
-    full = any(f in ("backend/requirements.txt", "backend/Dockerfile") for f in changed)
+#: Tệp gắn thẳng vào container: kéo về là đổi trên đĩa, nhưng tiến trình đang chạy
+#: chỉ đọc lúc khởi động. `up -d` không khởi động lại vì cấu hình compose không đổi.
+RESTART_ON_CHANGE = (
+    ("backend/realtime_service/", "realtime_service"),
+    ("logging/loki-config.yaml", "loki"),
+    ("logging/promtail-config.yaml", "promtail"),
+    ("logging/prometheus.yml", "prometheus"),
+    ("logging/grafana/", "grafana"),
+)
+#: Đổi một trong các gói này mới cần dựng đầy đủ: chúng cài từ index riêng ở
+#: `backend/Dockerfile`. Gói khác `Dockerfile.coderefresh` tự cập nhật.
+FULL_BUILD_PACKAGE = re.compile(r"^[+-]\s*(torch|nvidia)", re.MULTILINE)
+
+
+def plan_from_changes(changed: list[str], requirements_diff: str = "") -> dict:
+    """Từ danh sách tệp đổi → cần dựng gì. Pure: testable.
+
+    `requirements_diff` là `git diff` của `backend/requirements.txt`. Dựng đầy đủ tải
+    lại torch/CUDA ~3 GB và từng kẹt 6 giờ, nên chỉ chọn khi thật sự cần.
+    """
+    full = "backend/Dockerfile" in changed or bool(FULL_BUILD_PACKAGE.search(requirements_diff))
     return {
-        "backend": full or any(f.startswith("backend/app/") for f in changed),
+        "backend": full or any(f.startswith("backend/app/")
+                               or f in ("backend/requirements.txt", "backend/Dockerfile.coderefresh")
+                               for f in changed),
         "full": full,
         "frontend": any(f.startswith("frontend/") and "/__tests__/" not in f
                         and not f.endswith((".test.ts", ".test.tsx")) for f in changed),
-        "nginx": "nginx.conf" in changed,
+        "nginx": any(f == "nginx.conf" or f.startswith("nginx.conf.d/") for f in changed),
+        "realtime_image": any(f in ("backend/realtime_service/Dockerfile", "backend/realtime_service/requirements.txt")
+                              for f in changed),
+        "restart": tuple(sorted({service for prefix, service in RESTART_ON_CHANGE
+                                 if any(f.startswith(prefix) for f in changed)})),
+        # `up -d` áp cấu hình mới; không có khoá này thì đổi compose bị coi là "chỉ tệp".
+        "compose": any(f.startswith("docker-compose") for f in changed),
         # `processed/`, `scripts/`, `config/` được gắn vào container qua /workspace:
         # có hiệu lực ngay khi kéo về, không cần dựng image.
     }
@@ -653,7 +688,9 @@ def cmd_update_git(args):
         return
     print("Commit moi se keo ve:\n" + incoming)
     changed = sh(["git", "diff", "--name-only", "HEAD", "@{u}"], capture=True).stdout.split()
-    plan = plan_from_changes(changed)
+    requirements_diff = sh(["git", "diff", "HEAD", "@{u}", "--", "backend/requirements.txt"],
+                           capture=True, check=False).stdout
+    plan = plan_from_changes(changed, requirements_diff)
     print("Ke hoach: " + (", ".join(k for k, v in plan.items() if v)
                           or "chi cap nhat tep (khong dung image)"))
     if not confirm("Keo code moi va trien khai? Gian doan 1-3 phut (dung day du thi lau hon)."):
@@ -663,6 +700,7 @@ def cmd_update_git(args):
         record_deploy("update-git (tep)")
         print("OK: chi cap nhat tep gan vao container, khong can dung image.")
         return
+    plan.pop("compose")
     if not build_and_deploy(label="update-git", **plan):
         raise SystemExit("Image da quay lui; code tren o dia VAN la ban moi -> sua loi roi chay lai.")
 

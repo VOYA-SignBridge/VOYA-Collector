@@ -1792,11 +1792,8 @@ có trần số slot và chưa có đường gỡ.
 | `task_failure` từ tiến trình cha của worker | Lỗi nặng nhất (hết RAM) không vào "Việc hỏng gần đây" | Tra chủ việc ở sổ ghi, không có thì system scope |
 | `/realtime/predict` tra người dùng hai lần mỗi khung | Thêm tải ở đường nóng | Nhớ trên `request.state` |
 
-Còn mở:
-
-* `/login` và `/refresh` trả `can_edit_tenant` theo phạm vi khách, không theo nơi làm việc.
-  Chưa ảnh hưởng ai vì giao diện gọi lại `/me`; `_fetch_user_by_id` không chọn `active_tenant_id`
-  nên sửa đúng phải thêm một truy vấn.
+`/login` và `/refresh` trả `can_edit_tenant` theo phạm vi khách, không theo nơi làm việc: đã sửa
+07/11/2026 bằng `_with_capabilities_at_work`, thêm một truy vấn mỗi lượt đăng nhập.
 
 ### Model riêng của thành viên (07/11/2026)
 
@@ -1820,3 +1817,17 @@ chưa kiểm duyệt của người chạy; hộp xác nhận nói rõ điều �
 | `/admin/processing` | 4,19 s | 2,12 s | Hai lệnh `inspect` chạy song song |
 | `/admin/sot/remote` | 5,8 s | 7,5 s trở lên | 11 lượt Drive × ~350 ms, không phải lỗi mã; ô này tải riêng, không chặn trang |
 | 8 API của một trang | 181 ms | 202 ms | `access_gate` vào threadpool không làm nhanh hơn; giữ để truy vấn chậm không chặn event loop |
+
+### CI đỏ dù máy phát triển xanh (08/11/2026)
+
+`Build & push images` đỏ từ 06/11, nên GitHub gửi thư báo lỗi và không dựng ảnh của các commit đó.
+Nguyên nhân không nằm ở mã: `kombu 5.7.0` ra ngày 03/11 đòi `redis-py >= 6.1`, trong khi repo ghim
+`redis 4.5.1` và `celery 5.3.1` không đặt trần cho `kombu`. Máy này không thấy vì ảnh test dựng từ
+trước đó. Bản dựng đầy đủ trên máy mới cũng trúng lỗi này: worker không nối được Redis.
+Đã ghim `kombu==5.6.2`.
+
+`kiem-du` chạy trên ảnh có sẵn, nên nó KHÔNG phát hiện được gói gián tiếp đổi phiên bản. Muốn biết
+thì so `pip install --dry-run --ignore-installed --report` với ảnh. Hôm đo có 37 gói không phải
+`nvidia-*` khác ảnh, gồm `python-dateutil 4`, `pillow 13`, `oauthlib 4`; bộ test đạt với cả 37
+sau khi trả `kombu` về bản ghim. Các gói gián tiếp vẫn chưa ghim hết.
+
