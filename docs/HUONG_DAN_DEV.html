@@ -866,7 +866,7 @@ def summarize_notes(self, user_id: str):
           <li>Có healthcheck. Gọi <code>127.0.0.1</code>, không gọi <code>localhost</code> (có thể ra IPv6 và báo lỗi giả). Image không có <code>curl</code> thì dùng <code>python -c</code> hoặc <code>wget</code>.</li>
           <li>Không mở cổng ra ngoài. Cần truy cập từ máy thì gắn vào <code>127.0.0.1</code>; người dùng chỉ vào qua nginx.</li>
           <li>Đặt trần RAM trong <code>docker-compose.prod.yml</code>.</li>
-          <li>Chạy <code>python scripts/check_registry_overlay.py</code> (CI cũng chạy) để chắc lớp phủ registry không bỏ sót dịch vụ mới.</li>
+          <li>Dịch vụ tự dựng ảnh phải dùng một trong các ảnh <code>voya_backend</code>, <code>voya_frontend</code>, <code>voya_realtime_service</code> (chế độ kéo ảnh chỉ kéo ba ảnh này). <code>python scripts/check_compose_contracts.py</code> kiểm điều đó, CI cũng chạy.</li>
           <li><code>VOYA start</code>, rồi <code>VOYA status</code> phải thấy dịch vụ <b>healthy</b>.</li>
         </ol>
       </div>

@@ -469,12 +469,9 @@ jobs:
       # đóng vai `.env`: nếu nó thiếu một biến mà compose đòi, máy mới cài theo
       # hướng dẫn cũng sẽ thiếu.
       - name: Cấu hình compose gộp được
-        env:
-          VOYA_REGISTRY_NS: ci
-          VOYA_IMAGE_TAG: sha-ci
         run: |
           cp .env.example .env
-          for combo in             "docker-compose.yml"             "docker-compose.yml docker-compose.prod.yml"             "docker-compose.yml docker-compose.prod.yml docker-compose.gpu.yml"             "docker-compose.yml docker-compose.prod.yml docker-compose.registry.yml"             "docker-compose.yml docker-compose.staging.yml"; do
+          for combo in             "docker-compose.yml"             "docker-compose.yml docker-compose.prod.yml"             "docker-compose.yml docker-compose.prod.yml docker-compose.gpu.yml"                         "docker-compose.yml docker-compose.staging.yml"; do
             args=""; for f in $combo; do args="$args -f $f"; done
             echo "== $combo"
             docker compose $args config -q
@@ -581,15 +578,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      # Lớp phủ registry phải phủ HẾT service tự dựng ảnh. Thêm một service mới
-      # mà quên nó thì không có gì hỏng lúc triển khai — service ấy lặng lẽ
-      # chạy ảnh cục bộ giữa một stack đã ghim tag, và vẫn báo "healthy". Đó là
-      # cùng lớp lỗi với lần quên `celery-beat` trong một danh sách viết tay.
-      - name: Lớp phủ registry không được bỏ sót service
-        run: |
-          python -m pip install --quiet pyyaml
-          python scripts/check_registry_overlay.py
 
       - name: Backup / deploy contract and safety tests
         run: python -m unittest discover -s scripts/ops/tests -v

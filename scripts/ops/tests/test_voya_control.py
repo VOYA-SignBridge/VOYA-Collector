@@ -291,6 +291,27 @@ class RegistryPullTests(unittest.TestCase):
         tidy_build.assert_not_called()                # không có gì để dọn: không dựng
         self.assertFalse(voya.MAINT_FLAG.exists())
 
+    def test_update_git_refuses_when_compose_file_lists_a_file_the_new_commit_deleted(self):
+        calls: list = []
+        base = self._git_and_docker(True, calls)
+
+        def fake_sh(args, **kw):
+            r = base(args, **kw)
+            if args[:3] == ["git", "cat-file", "-e"] and args[3].endswith("docker-compose.registry.yml"):
+                r.returncode = 1
+            return r
+        env = {"COMPOSE_FILE": "docker-compose.yml:docker-compose.registry.yml",
+               "COMPOSE_PATH_SEPARATOR": ":"}
+        with patch.object(voya, "env_value", side_effect=lambda k: env.get(k, "")), \
+                patch.object(voya, "registry_ns", return_value="ns"), \
+                patch.object(voya, "sh", side_effect=fake_sh), \
+                patch.object(voya, "build_and_deploy") as deploy, quiet(), \
+                self.assertRaises(SystemExit) as err:
+            voya.cmd_update_git([])
+        self.assertIn("docker-compose.registry.yml", str(err.exception))
+        self.assertNotIn(["git", "pull", "--ff-only"], calls)
+        deploy.assert_not_called()
+
     def test_without_registry_update_git_still_builds_locally(self):
         calls: list = []
         os.environ["VOYA_CONFIRMED"] = "co"

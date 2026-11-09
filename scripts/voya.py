@@ -442,8 +442,8 @@ KEEP_AUTO_ROLLBACKS = 3
 # Chế độ KÉO ẢNH: máy chạy web dùng đúng ảnh CI đã dựng và đã kiểm, không dựng.
 #
 # Bật bằng một dòng trong `.env`:  VOYA_REGISTRY_NS=<tài khoản Docker Hub của CI>
-# (cùng tên biến mà scripts/deploy.sh và docker-compose.registry.yml đã dùng).
-# Không có dòng đó thì `update-git` dựng tại chỗ như trước.
+# Không có dòng đó thì `update-git` dựng tại chỗ như trước. Đây là đường DUY NHẤT
+# dùng ảnh CI để cập nhật máy chạy web (deploy.sh chỉ dựng tại chỗ).
 #
 # Ảnh kéo về được gắn lại đúng tên cục bộ mà compose đang dùng
 # (`voya_backend:latest`, ...). Nhờ vậy mốc quay lui, kiểm container chạy ảnh cũ,
@@ -465,6 +465,22 @@ def remote_images(ns: str, commit: str) -> list[tuple[str, str]]:
     `git pull`, trong khi `processed/`, `scripts/` và mã realtime được gắn thẳng
     từ thư mục làm việc. Ảnh và thư mục PHẢI cùng một commit."""
     return [(f"{ns}/{repo}:sha-{commit}", f"{repo}:latest") for repo in ROLLBACK_REPOS]
+
+
+def compose_files_missing_in(commit: str) -> list[str]:
+    """Tệp trong COMPOSE_FILE (.env) mà `commit` không có.
+
+    Compose đọc COMPOSE_FILE ở MỌI lệnh, kể cả lệnh quay lui. Kéo về một commit đã
+    xoá một tệp còn nằm trong danh sách đó thì mọi lệnh compose chết, giữa lúc
+    đang cập nhật. Vì vậy kiểm trước khi kéo mã.
+    """
+    try:
+        value = env_value("COMPOSE_FILE")
+        sep = env_value("COMPOSE_PATH_SEPARATOR") or os.pathsep
+    except OSError:
+        return []
+    return [f for f in value.split(sep) if f.strip() and
+            sh(["git", "cat-file", "-e", f"{commit}:{f.strip()}"], capture=True, check=False).returncode != 0]
 
 
 def missing_remote_images(pairs: list[tuple[str, str]]) -> list[str]:
@@ -744,6 +760,11 @@ def cmd_update_git(args):
     requirements_diff = sh(["git", "diff", "HEAD", "@{u}", "--", "backend/requirements.txt"],
                            capture=True, check=False).stdout
     plan = plan_from_changes(changed, requirements_diff)
+    gone = compose_files_missing_in("@{u}")
+    if gone:
+        raise SystemExit(
+            f"COMPOSE_FILE trong .env con tro toi {', '.join(gone)}, ma ban moi khong con tep nay.\n"
+            "Sua dong COMPOSE_FILE trong .env (bo ten tep do) roi chay lai. Chua keo code, chua dung vao gi.")
     ns = registry_ns()
     pulled: list[tuple[str, str]] = []
     target = ""

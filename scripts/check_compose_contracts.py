@@ -121,13 +121,29 @@ def main() -> int:
     # 3. Dockerfile chỉ chép những gì có thật.
     problems += dockerfile_copy_problems(files)
 
+    # 4. Chế độ kéo ảnh (voya update-git) chỉ kéo và gắn lại ROLLBACK_REPOS. Một
+    #    service tự dựng ảnh mang tên khác sẽ lặng lẽ chạy ảnh cũ cục bộ giữa một
+    #    stack đã cập nhật, mà vẫn báo healthy.
+    m = re.search(r"ROLLBACK_REPOS\s*=\s*\(([^)]*)\)", voya)
+    pulled = set(re.findall(r'"([^"]+)"', m.group(1))) if m else set()
+    if not pulled:
+        problems.append("scripts/voya.py: không đọc được ROLLBACK_REPOS")
+    for compose in COMPOSE_FILES:
+        services = (yaml.safe_load(compose.read_text(encoding="utf-8")) or {}).get("services") or {}
+        for svc, spec in services.items():
+            spec = spec or {}
+            repo = str(spec.get("image", "")).split(":")[0]
+            if spec.get("build") and repo not in pulled:
+                problems.append(f"{compose.name}: service `{svc}` tự dựng ảnh `{repo or '?'}` nhưng "
+                                "ROLLBACK_REPOS trong voya.py không có; chế độ kéo ảnh sẽ bỏ sót nó")
+
     if problems:
         print("Hợp đồng compose / nginx / voya bị phá:")
         for p in problems:
             print(f"  - {p}")
         return 1
     print(f"OK: {len(COMPOSE_FILES)} tệp compose, mount cấu hình đều có trong git, chuỗi bảo trì còn nối, "
-          "mọi COPY trong Dockerfile trỏ vào tệp có thật.")
+          "mọi COPY trong Dockerfile trỏ vào tệp có thật, mọi ảnh tự dựng đều được kéo.")
     return 0
 
 

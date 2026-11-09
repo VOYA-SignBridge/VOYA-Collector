@@ -26,8 +26,8 @@
 #
 # Ảnh này dùng ở đâu
 # -------------------
-# `docker-compose.registry.yml` + `scripts/deploy.py`. Xem
-# docs/06-operations/HOST_TRANSFER.md cho backup, chuyển host và cấu hình CD.
+# Máy chạy web kéo về bằng `VOYA.bat update-git` (VOYA_REGISTRY_NS trong .env),
+# bằng tay hoặc qua job `deploy` dưới đây. Xem docs/06-operations/CI_CD.md.
 
 name: Build & push images
 

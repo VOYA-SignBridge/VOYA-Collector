@@ -152,28 +152,15 @@ def missing_built_images(stack) -> list[str]:
     return sorted(set(missing))
 
 
-def deploy(stack, *, backup_dir=None, prepared_backup=None, restored=False,
-           image_tag=None, accept_external=False, use_local_images=False):
+def deploy(stack, *, backup_dir=None, restored=False,
+           accept_external=False, use_local_images=False):
     preflight(stack)
-    if prepared_backup:
-        manifest = verify(prepared_backup)
-        if (set(stack.running()) != {"postgres"} or any(
-                stack.counts(name) != info["counts"] for name, info in manifest["databases"].items())):
-            raise Failure("Prepared backup requires all writers stopped and unchanged table counts.")
-    elif not restored:
+    if not restored:
         # Do not modify a host with unresolved source-data/permission failures.
         stack.audit()
         if backup_dir is None:
             raise Failure("An existing deployment requires --backup-dir (new path outside workspace).")
-    if image_tag:
-        if not re.fullmatch(r"sha-[0-9a-f]{40}", image_tag):
-            raise Failure("Registry deployments require a full 40-character commit SHA tag.")
-        if run(["git", "rev-parse", "HEAD"], cwd=stack.root) != image_tag[4:]:
-            raise Failure("Bind-mounted source commit does not match the requested image.")
-        if run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=stack.root):
-            raise Failure("Registry deployment requires a clean tracked worktree.")
-        stack.call("pull")
-    elif use_local_images and not missing_built_images(stack):
+    if use_local_images and not missing_built_images(stack):
         # Image ĐÚNG như máy nguồn đang chạy, nạp từ gói chuyển server (`docker
         # load`). Dựng lại thì phải tải torch/CUDA vài GB (30–60 phút, cần mạng)
         # và còn có thể ra một bản khác bản đã chạy ổn trên máy nguồn.
@@ -188,7 +175,7 @@ def deploy(stack, *, backup_dir=None, prepared_backup=None, restored=False,
                "import tempfile; from pathlib import Path; "
                "paths=['/dataset','/gdrive','/workspace/processed']; "
                "[(lambda f: f.close())(tempfile.TemporaryFile(dir=p)) for p in paths]")
-    if not restored and not prepared_backup:
+    if not restored:
         backup(stack, backup_dir, accept_external=accept_external, resume=False)
     # After this point failures leave writers stopped. Never roll a DB back
     # automatically: schema changes may not be reversible.

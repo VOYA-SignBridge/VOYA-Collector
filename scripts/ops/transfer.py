@@ -123,7 +123,7 @@ def rotate_bootstrap_password(stack):
 
 
 class Stack:
-    def __init__(self, root, *, gpu=False, image_tag=None):
+    def __init__(self, root, *, gpu=False):
         self.root = Path(root).resolve()
         self.args = ["docker", "compose", "--project-directory", str(self.root),
                      "--env-file", str(self.root / ".env"),
@@ -131,9 +131,6 @@ class Stack:
                      "-f", str(self.root / "docker-compose.prod.yml")]
         if gpu:
             self.args += ["-f", str(self.root / "docker-compose.gpu.yml")]
-        if image_tag:
-            os.environ["VOYA_IMAGE_TAG"] = image_tag
-            self.args += ["-f", str(self.root / "docker-compose.registry.yml")]
         self.config = json.loads(self.call("config", "--format", "json"))
         self.db = self.config["services"]["postgres"]["environment"]
         self.pg_image = self.config["services"]["postgres"]["image"]

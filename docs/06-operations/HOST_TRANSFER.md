@@ -151,7 +151,7 @@ python3 scripts/deploy.py --check
 python3 scripts/deploy.py --backup-dir /secure/backups/unique-release-name --allow-downtime --accept-external-storage
 ```
 
-Đã có image registry: thêm `--image-tag sha-<40-character-commit>` và `VOYA_REGISTRY_NS` trong `.env`/environment. Commit source bind-mount phải khớp image, tracked worktree phải sạch. Không sử dụng tag `latest` cho deploy tự động.
+Cập nhật thường ngày bằng ảnh CI không đi qua `deploy.py`: dùng `VOYA.bat update-git` với `VOYA_REGISTRY_NS` trong `.env` (xem CI_CD.md mục 5).
 
 Khi lỗi sau migration, giữ maintenance để chẩn đoán. Khôi phục bản trước vào **thư mục/project mới** theo lệnh restore ở trên, kiểm tra rồi chuyển proxy/traffic; đổi riêng image không đảo được migration. Không xóa project lỗi trước khi giữ đủ log/bản lưu.
 
@@ -161,7 +161,7 @@ Khi lỗi sau migration, giữ maintenance để chẩn đoán. Khôi phục b�
 - `build_docker.yml` gọi CI cùng commit; tất cả job CI pass mới push đủ 3 image, SHA đầy đủ. CD chỉ chạy sau khi cả 3 image pass.
 - CD **opt-in, cần bấm duyệt** (từ 09/11/2026 viết cho máy chạy web Windows): runner tự host nhãn `self-hosted, Windows, voya-prod`, chạy `voya update-git` ở chế độ kéo ảnh. Không tự triển khai khi đổi `APP_SCHEMA_VERSION`. Cài và bật: [TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 9.
 - Variables: `ENABLE_AUTO_DEPLOY=true`, `DEPLOY_BRANCH=main` (biến repo); `DEPLOY_ROOT` (thư mục web đang phục vụ, biến của environment `production`). Không chạy `actions/checkout`/clean vào thư mục dữ liệu live.
-- Đường `deploy.py --prepared-backup` (máy Linux, sao lưu toàn host) vẫn còn trong `scripts/` cho việc chuyển máy, nhưng không còn được CD gọi.
+- `deploy.py` chỉ còn dùng cho chuyển máy (`--restore`) và kiểm (`--check`); các cờ `--image-tag`, `--prepared-backup` của CD cũ đã gỡ ngày 09/11/2026.
 - Thêm workflow **không đồng nghĩa CD đã được kích hoạt**: tới 09/11/2026 chưa cài runner và chưa tạo environment.
 
 ## Kết quả thực tế 2026-09-21/22 (không thay thế lần kiểm tra mới)

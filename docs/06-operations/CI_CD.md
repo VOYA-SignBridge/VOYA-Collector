@@ -146,8 +146,6 @@ Ba thứ mà không bài test nào bắt được:
    frontend crash-loop; mã đúng, tệp đúng, hai byte vô hình sai.
 2. **Không có `.env` nào bị cam kết.** `.gitignore` chỉ ngăn `git add` vô ý — nó
    không ngăn `git add -f`, và không nói gì về tệp đã lỡ vào kho từ trước.
-3. **`docker-compose.registry.yml` phủ hết service tự dựng ảnh**
-   (`scripts/check_registry_overlay.py`).
 
 ## 3. Vì sao bước cấp vai KHÔNG còn là `GRANT` viết tay
 
@@ -201,41 +199,20 @@ khi bật bản mới; CI không chạy smoke toàn stack.
 Không tự triển khai khi bản mới đổi `APP_SCHEMA_VERSION`. Cách cài và bật:
 [TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 9.
 
-## 5. Triển khai một ảnh đã ghim
+## 5. Cập nhật máy chạy web bằng ảnh CI
 
-```bash
-# Trên máy deploy, một lần: đặt namespace Docker Hub
-echo 'VOYA_REGISTRY_NS=<ten-tai-khoan-docker-hub>' >> .env
+Chỉ có **một** đường: `VOYA.bat update-git` với `VOYA_REGISTRY_NS` trong `.env`
+([TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 7). Nó kéo ảnh `sha-<commit>`
+trong lúc web vẫn chạy, gắn lại thành `voya_*:latest`, rồi đi đúng quy trình như
+khi dựng tại chỗ: mốc quay lui, sao lưu, trang bảo trì, kiểm sức khoẻ, tự quay về.
+Job `deploy` của `build_docker.yml` cũng chỉ gọi lệnh này.
 
-# Mỗi lần triển khai
-bash scripts/deploy.sh --image-tag=sha-6be6843
-```
+`scripts/deploy.sh` chỉ dựng tại chỗ (máy mới, dựng lại). Chế độ `--image-tag`
+cùng tệp `docker-compose.registry.yml` đã gỡ ngày 09/11/2026 vì làm trùng việc
+với `update-git` mà thiếu trang bảo trì và tự quay về.
 
-Đây là **một chế độ của `deploy.sh`**, không phải script riêng — có chủ ý. Mọi
-thứ đắt giá trong `deploy.sh` nằm ngoài lệnh `up`: pre-flight bắt lỗi cấu hình
-trước khi tốn 15 phút dựng ảnh, dò GPU thật, ghi `COMPOSE_FILE` vào `.env`,
-**dừng ứng dụng trước migration**, và cổng kiểm lược đồ **hai lần** (trước và sau
-khi ứng dụng lên). Một script thứ hai sẽ phải chép lại tất cả, và bản chép sẽ
-trôi khỏi bản gốc ngay lần đầu có ai sửa một guard ở đây mà quên cái kia.
-
-Chế độ này:
-
-- thêm `-f docker-compose.registry.yml`, bỏ `--build`;
-- **kéo ảnh trước khi dừng bất cứ thứ gì** — tag gõ sai, hết hạn đăng nhập hay
-  mạng chết đều làm lệnh dừng lại *trong khi hệ thống cũ vẫn đang chạy*;
-- in ra tag đang chạy trước lần này, kèm đúng lệnh để lùi về;
-- ghi `VOYA_IMAGE_TAG` vào `.env` — vừa để lệnh `docker compose` trần còn dùng
-  được (lớp phủ dùng cú pháp biến **bắt buộc**, thiếu biến là mọi lệnh compose
-  trần trong thư mục này chết, kể cả `ps` và `logs`), vừa để `.env` ghi lại máy
-  này đang chạy tag nào, đọc được bằng một lệnh `grep`.
-
-Không cắt đường lùi `.tar` ở chế độ này: đường lùi chính là tag trước đó, nằm
-trên registry, bất biến, và `docker_gc.sh` không chạm tới được — đúng lý do khối
-`save_rollback` phải ghi ra ngoài kho ảnh (một tag **cục bộ** thì GC xoá được, và
-đã xoá thật hôm 15/08).
-
-`scripts/deploy.sh` không kèm cờ này thì vẫn dựng tại chỗ như cũ. Đường đang chạy
-tốt không đổi; đường mới phải tự chứng minh trước.
+`check_compose_contracts.py` canh một điều kiện của chế độ kéo ảnh: mọi service
+tự dựng ảnh phải dùng một trong các ảnh `voya.py` kéo về (`ROLLBACK_REPOS`).
 
 ## 6. Bộ test sẽ đỏ ở đâu trong lượt CI đầu tiên
 
