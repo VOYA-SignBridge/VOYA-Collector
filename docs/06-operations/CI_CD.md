@@ -38,27 +38,25 @@ Riêng push lên `main` thì `build_docker.yml` gọi lại tệp này trước 
 | `backend` | Phụ thuộc không xung đột, migration, phân quyền, **nâng cấp từ lược đồ bản trước**, pytest trên CSDL mới | ~15 phút |
 | `wiring` | Script, cấu hình, tài liệu khớp với mã (xem dưới) | ~2 phút |
 | `images` | Dựng thử 3 ảnh, không đẩy. Chỉ chạy ở PR và nhánh khác `main` | ~10 phút |
-| `hygiene` | LF, `.env`, lớp phủ registry, sao lưu/khôi phục | ~3 phút |
+| `hygiene` | LF, `.env`, sao lưu/khôi phục | ~3 phút |
 
 ### `frontend`
 
-`npm ci` → kiểm kiểu → **cổng i18n** → vitest → dựng → lint (tư vấn).
+`npm ci` → kiểm kiểu → **cổng i18n** → vitest → dựng → lint.
 
 - Dùng `npm run typecheck`, **không** `npx tsc --noEmit`: lệnh sau đọc
   `tsconfig.json` gốc (`files: []` + hai project reference) nên kiểm **không tệp
   nào**, thoát 0, và trông y hệt một lượt kiểm sạch.
 - Bước **dựng thật** giữ lại vì `tsc -b` bắt được lớp lỗi mà `typecheck` không
   bắt, và kho này đã từng ở trạng thái dựng-không-được trong khi kiểm kiểu xanh.
-- Lint chạy nhưng `continue-on-error: true`. Đo 11/09: **85 lỗi, 55 cảnh báo**.
-  Bật chặn ngay thì mọi PR đỏ vì nợ có sẵn, và phản ứng tất yếu của người đang
-  vội là tắt cổng — mất luôn cả những cổng đang có ích. Ba lỗi `rules-of-hooks`
-  trong `DataSplitVisualization.tsx` là lỗi thật; sửa xong nhóm đó thì đổi
-  `continue-on-error` thành `false`.
+- Lint **chặn** từ 08/11/2026: lỗi nào cũng đỏ, cảnh báo không vượt trần 54.
+  Sửa bớt cảnh báo thì hạ trần (`--max-warnings` trong `ci.yml`), không nâng.
 
 ### `backend`
 
-Postgres 16 + Redis 7 dựng mới → `app.cli.migrate --to <APP_SCHEMA_VERSION>` →
-**cấp vai bằng `app.cli.provision_db_roles`** → kiểm nợ lược đồ → pytest.
+Postgres 17 + Redis 7 dựng mới → `pip check` → `app.cli.migrate --to <APP_SCHEMA_VERSION>` →
+**cấp vai bằng `app.cli.provision_db_roles`** → kiểm nợ lược đồ → nâng cấp từ
+lược đồ bản trước → gieo danh mục và fixture cách ly → pytest bằng ba vai test.
 
 - Dùng `app.cli.migrate`, **không** `ensure_tables()`: từ 12/08 `ensure_tables()`
   chỉ còn THÊM; phần một chiều (bỏ bảng cũ, chép dữ liệu sang `memberships`, bỏ
@@ -80,10 +78,10 @@ loại này.
 |---|---|---|
 | `actionlint` | Workflow sai cú pháp, sai biểu thức, `needs` trỏ vào job không có | |
 | `scripts/check_app_imports.py` | Mã **ngoài** `backend/app` (CI, script, PowerShell, test) gọi module hoặc tên không tồn tại | Đợt tái cấu trúc dời 9 module; CI và công cụ chuyển server vẫn gọi đường cũ |
-| `scripts/check_compose_contracts.py` | Chuỗi bảo trì `voya.py` → `nginx.conf.d/` → mount → `nginx.conf` còn nối; tệp cấu hình được gắn vào container phải có trong git; mọi `COPY` trong Dockerfile trỏ vào tệp có thật | Mất dòng gắn `nginx.conf.d`: người dùng nhận lỗi 502 thay vì trang bảo trì |
+| `scripts/check_compose_contracts.py` | Chuỗi bảo trì `voya.py` → `nginx.conf.d/` → mount → `nginx.conf` còn nối; tệp cấu hình được gắn vào container phải có trong git; mọi `COPY` trong Dockerfile trỏ vào tệp có thật; mọi ảnh tự dựng đều được chế độ kéo ảnh kéo về | Mất dòng gắn `nginx.conf.d`: người dùng nhận lỗi 502 thay vì trang bảo trì |
 | `scripts/check_docs.py` | Không có luận văn, báo cáo hay tên người ký trong repo; không có email thật; không có tệp lẻ ở gốc `docs/`; không có liên kết hỏng (trừ `11-worklog/`) | Tài liệu công khai từng chứa email sinh viên và tên người ký |
 | Cú pháp Python, shell, PowerShell | Lỗi cú pháp trong script chỉ chạy tay | |
-| `docker compose config` | 5 tổ hợp tệp compose mà máy thật dùng phải gộp được với `.env.example` | |
+| `docker compose config` | 4 tổ hợp tệp compose mà máy thật dùng phải gộp được với `.env.example` | |
 | `nginx -t` | Cấu hình nginx hợp lệ | |
 
 Chạy trên máy mình trước khi push:
@@ -97,6 +95,18 @@ python scripts/check_docs.py
 ### Nâng cấp từ lược đồ bản trước (trong job `backend`)
 
 Máy chạy web không dựng lược đồ từ số không mà **nâng** từ lược đồ bản trước. Bước này lấy mã của bản trước bằng `git worktree`: commit cha nếu đang ở `main`, hoặc điểm rẽ nhánh với `main` nếu ở nhánh khác. Mã đó dựng một CSDL riêng, rồi mã hiện tại nâng nó lên và kiểm nợ lược đồ. Không tải ảnh nào, chỉ tốn vài chục giây.
+
+### `hygiene`
+
+Ba thứ mà không bài test nào bắt được:
+
+1. **Script shell phải là LF.** Đọc `git ls-files --eol` (byte đã cam kết),
+   không `grep` trên thư mục làm việc — trên Windows cùng một blob LF checkout
+   ra CRLF, nên đọc thư mục làm việc là hỏi máy của người chạy chứ không hỏi
+   kho. Sự cố 27/08: entrypoint CRLF → `exec: no such file or directory`,
+   frontend crash-loop; mã đúng, tệp đúng, hai byte vô hình sai.
+2. **Không có `.env` nào bị cam kết.** `.gitignore` chỉ ngăn `git add` vô ý — nó
+   không ngăn `git add -f`, và không nói gì về tệp đã lỡ vào kho từ trước.
 
 ## 2b. `security.yml`: quét bảo mật (chế độ cảnh báo)
 
@@ -135,17 +145,24 @@ Bị loại có chủ ý (lý do ghi ngay trong tệp):
 
 Nhờ hai điều này, lớp thư viện nặng chỉ đổi khi danh sách gói đổi. Máy chạy web bật chế độ kéo ảnh (`VOYA_REGISTRY_NS` trong `.env`, xem [TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 7) thì mỗi lần cập nhật chỉ tải lớp mã.
 
-### `hygiene`
+## 2e. Vì sao có từng bước: sự cố gốc
 
-Ba thứ mà không bài test nào bắt được:
+`ci.yml` chỉ giữ một hai dòng lý do cho mỗi bước. Câu chuyện đầy đủ ở đây.
 
-1. **Script shell phải là LF.** Đọc `git ls-files --eol` (byte đã cam kết),
-   không `grep` trên thư mục làm việc — trên Windows cùng một blob LF checkout
-   ra CRLF, nên đọc thư mục làm việc là hỏi máy của người chạy chứ không hỏi
-   kho. Sự cố 27/08: entrypoint CRLF → `exec: no such file or directory`,
-   frontend crash-loop; mã đúng, tệp đúng, hai byte vô hình sai.
-2. **Không có `.env` nào bị cam kết.** `.gitignore` chỉ ngăn `git add` vô ý — nó
-   không ngăn `git add -f`, và không nói gì về tệp đã lỡ vào kho từ trước.
+| Bước | Sự cố hoặc phép đo sinh ra nó |
+|---|---|
+| Chạy ở **mọi** lần push | `son_arrange_repo2` (88 commit tái cấu trúc) chưa từng chạy CI; lần đầu được kiểm là lúc đã gộp vào `main`, và đỏ ngay bước đầu (08/11/2026). Trước đó cổng chỉ gác `main` trong khi mã thật nằm trên `deploy_ctu_*`, đi trước 253 commit (mục 1) |
+| Bỏ `dependabot/**` khỏi `push` | PR của Dependabot đã kích hoạt CI; không bỏ thì mỗi bản cập nhật gói chạy hai lần |
+| Cổng i18n `--self-test` | Bản đầu của cổng đọc `perFile` như map trong khi công cụ trả về mảng, tổng luôn 0, nên luôn báo đạt. Ngưỡng là 0 tuyệt đối: với 2188 chuỗi, một chuỗi trần mới vẫn làm tròn thành 100,0% |
+| Tên CSDL `signdb_pytest_ci` | Tên cũ `signdb_ci` không qua cổng tên của `conftest.py`: pytest tự dừng mã 3 trước khi chạy ca nào, job đỏ hai tháng mà không kiểm gì |
+| Mật khẩu vai từ 16 ký tự | `provision_db_roles` từ chối mật khẩu ngắn hơn; bản trước dùng `ci_password` (11 ký tự) nên bước cấp vai thoát 2 ngay |
+| `pip check` | `kombu 5.7` (03/11/2026) đòi `redis-py` mới hơn bản đang ghim; chỉ lộ ở lần cài từ số không |
+| Kiểm nợ lược đồ trước pytest | Lần đầu chạy suite trên CSDL dựng mới: 22 test đỏ, do `ensure_tables()` dựng thiếu 2 bảng, 3 khoá ngoại, 14 cột so với máy đang chạy (10/08/2026) |
+| Nâng cấp từ lược đồ bản trước | Các bước khác chỉ kiểm đường dựng từ số không; máy thật thì nâng từ bản trước |
+| Ba vai test | `test_db_role_isolation` và `test_control_plane` đỏ 13 ca trước 18/10/2026 khi chạy bằng vai sản xuất |
+| Fixture `iso_a`/`iso_b` | CSDL dựng mới chỉ có tenant `default`; ~30 ca ghi cho `iso_a` đổ khoá ngoại `fk_*_tenant` |
+| Khoá JWT ngẫu nhiên, email trên miền ví dụ | Mã không còn giá trị mặc định cho bí mật (09/11/2026); mật khẩu và email thật từng nằm trong test |
+| LF bằng `git ls-files --eol` | Phép kiểm bằng `grep` ký tự CR từng đi tìm CHỮ `r` ở môi trường không diễn giải chuỗi ANSI-C, nên không bao giờ đúng |
 
 ## 3. Vì sao bước cấp vai KHÔNG còn là `GRANT` viết tay
 

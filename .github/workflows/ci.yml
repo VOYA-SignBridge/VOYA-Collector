@@ -1,70 +1,23 @@
-# Cổng kiểm cho mỗi pull request: lint kiểu, dựng frontend, chạy cả hai bộ test.
+# Cổng kiểm: mã này có chạy được không. Không đẩy gì lên đâu cả.
 #
-# Vì sao tách khỏi `build_docker.yml`
-# -----------------------------------
-# Workflow kia chạy trên pull request và **đẩy ảnh `latest` lên Docker Hub** —
-# tức một PR bất kỳ, chưa ai duyệt, ghi đè ảnh mà máy sản xuất đang kéo về. Đó
-# là việc phải sửa ở chính tệp kia (chuyển sang `on: push: branches: [main]`).
-# Tệp này không đẩy gì cả: nó chỉ trả lời "mã này có chạy được không".
-#
-# Vì sao có bước cấp vai — và vì sao thiếu nó thì mọi thứ đỏ
-# ---------------------------------------------------------
-# Bộ test chạy dưới vai `voya_app`, KHÔNG phải `postgres`/`admin`: vai
-# superuser được miễn row-level security vô điều kiện, nên chạy suite bằng nó
-# sẽ làm mọi test cô lập tenant xanh một cách vô nghĩa.
-#
-# Nhưng `ensure_tables()` dựng bảng bằng vai DDL (`MIGRATION_DATABASE_URL`), và
-# Postgres KHÔNG tự cấp quyền trên bảng mới cho vai khác. Thiếu bước GRANT thì
-# mọi test chết với `permission denied for table users` — một thông báo trỏ
-# thẳng vào mã ứng dụng trong khi nguyên nhân nằm ở phân quyền. Đo 2026-08-10:
-# thiếu GRANT → 41 lỗi chỉ trong 3 tệp; có GRANT → 0.
-#
-# Vì sao chạy trên CSDL TRỐNG là điều đáng làm, không phải điều phải né
-# ---------------------------------------------------------------------
-# Suốt từ trước, bộ test luôn chạy trên một BẢN SAO của cơ sở dữ liệu sản xuất.
-# Lần đầu chạy nó trên một CSDL dựng từ số không (chính là điều CI buộc phải
-# làm) cho ra **22 test đỏ**, và không cái nào là lỗi của test: `ensure_tables()`
-# dựng ra một lược đồ thiếu 2 bảng, 3 khoá ngoại và 14 cột so với máy đang chạy.
-# Nghĩa là mọi máy triển khai MỚI đều nhận một lược đồ yếu hơn, im lặng. Đã vá
-# ở `storage/metadata_db.py`; job này là thứ giữ cho nó không tái diễn.
+# Năm job chạy song song: frontend, backend, wiring (nối dây), images (dựng thử
+# ảnh), hygiene (vệ sinh kho). Vì sao có từng bước, và sự cố nào sinh ra nó:
+# docs/06-operations/CI_CD.md, mục 2 và 2e.
 
 name: CI
 
-# Kích hoạt: `main` KHÔNG đủ, và đó là lý do tệp này nằm im 253 commit.
-#
-# Bản trước chỉ gác `main`. Nhưng công việc thật của kho này chưa bao giờ đi
-# qua `main`: nó nằm trên nhánh `deploy_ctu_*`, và tính tới 11/09/2026 nhánh
-# đang chạy đi trước `main` đúng 253 commit — bốn tháng mã sản xuất mà cổng
-# kiểm chưa soi một dòng nào. Một cổng không bao giờ kích hoạt thì không phải
-# là cổng lỏng, nó là cổng KHÔNG TỒN TẠI, và tệ hơn ở chỗ nhìn vào kho thì
-# tưởng là có.
-#
-# Nên gác cả hai: `main` (đích của mọi PR) và `deploy_ctu_**` (nơi mã thật sự
-# được viết). `**` khớp cả `deploy_ctu_ver-2.2.1` lẫn các nhánh phát hành sau.
-#
-# Và MỌI nhánh khác khi push (08/11/2026). `son_arrange_repo2` — đợt tái cấu
-# trúc 88 commit — chưa từng chạy CI lần nào vì nó không phải PR cũng không phải
-# `deploy_ctu_**`. Lần đầu nó được kiểm là lúc đã gộp vào `main`, và đỏ ngay ở
-# bước đầu. Chạy trên mỗi lần push nghĩa là người làm nhánh biết hỏng từ hôm
-# đó, không phải từ hôm gộp. `main`/`deploy_ctu_**` bị loại ở đây vì
-# build_docker.yml đã gọi tệp này cho chúng.
-#
-# `son_arrange_repo2` là nhánh thử mã, `main` là nhánh triển khai (từ
-# 08/11/2026). PR vào `son_arrange_repo2` (Dependabot, nhánh tính năng) vì thế
-# cũng được kiểm. Nhánh `dependabot/**` bị loại khỏi `push` vì PR của chính nó
-# đã kích hoạt CI; không loại thì mỗi bản cập nhật gói chạy CI hai lần.
+# `son_arrange_repo2` là nhánh thử mã, `main` là nhánh triển khai. Chạy ở mọi lần
+# push (trừ `main`/`deploy_ctu_**`: build_docker.yml đã gọi tệp này, và
+# `dependabot/**`: PR của nó đã kích hoạt) để người làm nhánh biết hỏng ngay hôm đó.
 on:
   push:
     branches-ignore: [main, 'deploy_ctu_**', 'dependabot/**']
   pull_request:
     branches: [main, son_arrange_repo2, 'deploy_ctu_**']
-  # Push releases run this workflow through build_docker.yml's required checks
-  # job, avoiding two complete test runs for the same push.
-  # Chạy lại bằng tay khi cần xác nhận một commit cũ vẫn xanh.
   workflow_dispatch:
   workflow_call:
 
-# Một PR đẩy liên tiếp vài commit thì chỉ lượt cuối cần chạy.
+# Đẩy liên tiếp vài commit thì chỉ lượt cuối cần chạy.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -87,23 +40,11 @@ jobs:
 
       - run: npm ci
 
-      # `npm run typecheck`, KHÔNG phải `npx tsc --noEmit`. Lệnh sau chạy một
-      # tsconfig khác và kiểm **không tệp nào** — nó từng báo sạch trong khi
-      # `npm run build` hỏng, và giấu 14 lỗi kiểu.
+      # Đúng `npm run typecheck`: `npx tsc --noEmit` dùng tsconfig khác và kiểm 0 tệp.
       - name: Kiểm kiểu
         run: npm run typecheck
 
-      # Cổng i18n, và cổng tự chứng minh mình trước.
-      #
-      # `--self-test` gieo một chuỗi tiếng Việt còn trần rồi đòi chính cổng ấy
-      # phải ĐỎ. Nghe thừa, nhưng bản đầu của cổng này báo ĐẠT trong khi có
-      # chuỗi trần thật: nó đọc `perFile` như một map trong khi công cụ trả về
-      # một mảng, nên tổng luôn bằng 0. Không có bước này thì cổng i18n sẽ nằm
-      # trong workflow suốt nhiều tháng, luôn xanh, và không gác gì cả — đúng
-      # cái cách mà con số "đã phủ 100%" đã sai hai lần trước đây.
-      #
-      # Ngưỡng là 0 tuyệt đối chứ không phải phần trăm: với 2188 chuỗi đã dịch,
-      # một chuỗi trần mới vẫn in ra "100.0%" sau khi làm tròn.
+      # Cổng phải tự chứng minh mình bắt được lỗi trước (bản đầu luôn báo đạt).
       - name: Cổng i18n tự kiểm
         run: node scripts/i18n-gate.mjs --self-test
 
@@ -113,26 +54,11 @@ jobs:
       - name: Test
         run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-frontend.xml
 
-      # Dựng thật. `tsc -b` bắt được lớp lỗi mà `typecheck` không bắt (ví dụ
-      # "parameter property" dưới `erasableSyntaxOnly`), và kho này đã từng ở
-      # trạng thái dựng-không-được trong khi kiểm kiểu vẫn xanh.
+      # `tsc -b` của bước dựng bắt lỗi mà `typecheck` bỏ sót.
       - name: Dựng
         run: npm run build
 
-      # Lint chạy nhưng KHÔNG chặn, và đó là một lựa chọn tạm thời có hạn dùng.
-      #
-      # Đo 11/09/2026: 85 lỗi + 55 cảnh báo. Bật chặn ngay hôm nay thì mọi PR
-      # đỏ vì nợ có sẵn, và phản ứng tất yếu của người đang vội là tắt cổng —
-      # mất luôn cả những cổng đang có ích. Để nó chạy và hiện số ra là bước
-      # duy nhất khiến con số ấy giảm được một cách có kiểm chứng.
-      #
-      # Ba lỗi `rules-of-hooks` trong `DataSplitVisualization.tsx` là lỗi thật
-      # (hook gọi sau early-return), không phải chuyện văn phong. Sửa xong
-      # nhóm đó thì đổi `continue-on-error` thành `false`.
-      #
-      # 08/11/2026: nợ đã trả, đo được 0 lỗi và 54 cảnh báo. Từ đây lint CHẶN:
-      # lỗi nào cũng đỏ, và số cảnh báo không được vượt trần 54. Sửa bớt cảnh
-      # báo thì hạ trần xuống theo; không bao giờ nâng trần lên để cho qua.
+      # Lỗi nào cũng đỏ; cảnh báo không vượt trần. Sửa bớt cảnh báo thì hạ trần, đừng nâng.
       - name: Lint (chặn lỗi; cảnh báo không được tăng)
         run: npm run lint -- --max-warnings 54
 
@@ -147,16 +73,15 @@ jobs:
     name: Backend — pytest trên CSDL dựng mới
     runs-on: ubuntu-latest
 
+    # Mật khẩu dưới đây chỉ dùng cho CSDL tạm của lượt chạy, không phải bí mật.
     services:
       postgres:
         image: postgres:17
         env:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: admin
-          # Tên phải qua cổng của tests/conftest.py (signdb_test | tiền tố signdb_pytest_).
-          # `signdb_ci` KHÔNG qua: từ 13/08/2026 pytest tự dừng với mã 3 trước khi chạy
-          # ca nào, nên job này đỏ ở bước Test suốt hai tháng mà không kiểm được gì.
-          # Đổi tên ở đây, đừng nới danh sách cho phép trong conftest.
+          # Phải qua cổng tên của tests/conftest.py (signdb_test | signdb_pytest_*).
+          # Đổi tên ở đây, đừng nới cổng.
           POSTGRES_DB: signdb_pytest_ci
         ports: ['5432:5432']
         options: >-
@@ -170,19 +95,12 @@ jobs:
           --health-interval 10s --health-timeout 5s --health-retries 10
 
     env:
-      # Vai ứng dụng, không phải superuser — xem chú thích đầu tệp.
-      #
-      # Mat khau dai 16+ ky tu vi `provision_db_roles` TU CHOI mat khau ngan hon
-      # (vai nay doc duoc kho cua moi tenant, va Postgres mo voi moi container
-      # trong mang compose). Ban truoc dung `ci_password` — 11 ky tu — nen lenh
-      # cap vai that se thoat 2 ngay lap tuc.
+      # Vai ứng dụng và vai điều khiển, như sản xuất (không phải superuser: nó
+      # được miễn RLS nên mọi test cách ly sẽ xanh vô nghĩa). provision_db_roles
+      # đòi mật khẩu từ 16 ký tự, và hai vai phải khác mật khẩu.
       DATABASE_URL: postgresql://voya_app:ci_password_16_chars_min@localhost:5432/signdb_pytest_ci
       MIGRATION_DATABASE_URL: postgresql://admin:admin@localhost:5432/signdb_pytest_ci
       VOYA_APP_DB_PASSWORD: ci_password_16_chars_min
-
-      # Vai DIEU KHIEN, tach khoi vai ung dung va BAT BUOC khac mat khau.
-      # `test_rls_covers_every_tenant_table` kiem dung ranh gioi nay: vai ung
-      # dung khong duoc co quyen truc tiep tren `tenant_purges`.
       VOYA_CONTROL_DB_PASSWORD: ci_control_password_16_min
       CONTROL_DATABASE_URL: postgresql://voya_control:ci_control_password_16_min@localhost:5432/signdb_pytest_ci
       REDIS_URL: redis://localhost:6379/12
@@ -190,9 +108,8 @@ jobs:
       CELERY_RESULT_BACKEND: redis://localhost:6379/12
       TTS_REDIS_URL: redis://localhost:6379/12
       PYTHONPATH: ${{ github.workspace }}/backend
-      # Ba địa chỉ cho tests/test_real_email_identities.py, CÙNG HÌNH DẠNG với địa
-      # chỉ thật (Gmail; tên miền bốn cấp) nhưng trên miền ví dụ: không gửi thư
-      # nào (lớp chặn SMTP của conftest) và không lộ hộp thư thật nào.
+      # Cùng hình dạng với địa chỉ thật (Gmail; tên miền bốn cấp) nhưng trên miền
+      # ví dụ. conftest chặn SMTP nên không thư nào được gửi.
       VOYA_TEST_EMAIL_GMAIL: ci.gmail.test@example.com
       VOYA_TEST_EMAIL_UNIVERSITY: ci.sinhvien@student.ctu.example.com
       VOYA_TEST_EMAIL_OWNER: ci.owner.test@example.com
@@ -200,12 +117,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Bước "Nâng cấp từ lược đồ của main" cần mã của `main` để dựng lược
-          # đồ cũ; checkout nông chỉ có đúng một commit.
-          fetch-depth: 0
+          fetch-depth: 0   # bước nâng cấp cần mã của bản trước
 
-      # Khoá ký JWT không có giá trị mặc định trong mã. Sinh ngẫu nhiên mỗi lượt:
-      # không có gì để lộ, và test nào lỡ phụ thuộc vào một khoá cố định sẽ đỏ.
+      # Mã không có khoá mặc định; sinh mới mỗi lượt nên không có gì để lộ.
       - name: Khoá ký JWT ngẫu nhiên cho lượt này
         run: echo "AUTH_TOKEN_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
@@ -220,29 +134,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
-      # Gói cài MỚI phải khớp nhau. CI là nơi duy nhất cài từ số không mỗi lần,
-      # nên cũng là nơi duy nhất thấy gói gián tiếp trôi theo ngày (kombu 5.7,
-      # 03/11/2026, đòi redis-py mới hơn bản đang ghim). `pip check` đọc ràng
-      # buộc đã khai của mọi gói đã cài và báo cặp nào lệch.
+      # Chỉ CI cài từ số không mỗi lần, nên chỉ ở đây thấy gói gián tiếp trôi.
       - name: Phụ thuộc không xung đột
         run: pip check
 
-      # `app.cli.migrate`, KHÔNG phải `ensure_tables()`.
-      #
-      # Từ 12/08/2026 `ensure_tables()` chỉ còn THÊM: phần một chiều (bỏ bảng
-      # cũ, chép dữ liệu sang `memberships`, bỏ chỉ mục toàn cục) chỉ chạy dưới
-      # lệnh migration. Một máy CI dựng từ số không cần đúng phần đó — gọi
-      # `ensure_tables()` ở đây sẽ để lại `tenant_members` là BẢNG chứ không
-      # phải view, và bộ test sẽ đỏ theo cách không nói ra nguyên nhân.
-      #
-      # `EXPECTED_DATABASE` bắt buộc, và ở đây nó cũng có ích thật: nếu ai đó
-      # đổi DSN trong workflow mà quên đổi chỗ này, lệnh huỷ thay vì migrate
-      # nhầm cơ sở dữ liệu.
-      #
-      # Phiên bản đích hỏi chính MÃ chứ không viết cứng ở đây, giống hệt
-      # `scripts/deploy.sh` hỏi ảnh. Một con số trong tệp workflow sẽ trôi khỏi
-      # `APP_SCHEMA_VERSION` đúng vào lần bump đầu tiên, và nó trôi trong im
-      # lặng cho tới khi ai đó đọc log CI.
+      # Đúng lệnh migration của sản xuất (ensure_tables() chỉ THÊM, thiếu phần
+      # một chiều). Phiên bản đích hỏi chính mã, không viết cứng ở đây.
       - name: Dựng lược đồ (lệnh migration rõ ràng)
         working-directory: backend
         env:
@@ -252,27 +149,8 @@ jobs:
           echo "luoc do dich: v$target"
           python -m app.cli.migrate --to "$target"
 
-      # Cap vai bang CHINH lenh ma san xuat dung, khong phai GRANT viet tay.
-      #
-      # Ban truoc tu `CREATE ROLE voya_app` roi `GRANT SELECT, INSERT, UPDATE,
-      # DELETE ON ALL TABLES`. No lam bo test chay duoc, va no cung lang le pha
-      # mot thu ma bo test co nhiem vu canh: `tenant_purges` thuoc mat phang
-      # DIEU KHIEN, va `test_vai_ung_dung_khong_cham_duoc_bang_dieu_khien` doi
-      # vai ung dung KHONG co quyen truc tiep tren no. Mot cau GRANT quet sach
-      # moi bang thi cap luon ca bang do.
-      #
-      # Do 11/09/2026 tren may: dung test ay do voi thong bao "vai ung dung VAN
-      # co quyen truc tiep tren bang dieu khien: {'voya_app.tenant_purges': [...]}"
-      # va no xanh tro lai ngay sau khi chay duong cap vai that. Neu de nguyen
-      # khoi GRANT, CI se do o dung cho ay — va cach "sua" hien nhien nhat (cap
-      # them quyen) chinh la cach xoa mat ranh gioi.
-      #
-      # Nguyen tac rong hon tep nay: moi truong CI phai dung bang cung duong ma
-      # san xuat dung. Mot loi tat trong CI khong chi kiem thieu — no kiem mot
-      # he thong KHAC.
-      #
-      # Chay SAU migration: lenh nay cap quyen tren cac bang dang co, va dat
-      # `ALTER DEFAULT PRIVILEGES` cho bang sinh them ve sau.
+      # Cấp vai bằng CHÍNH lệnh của sản xuất, không GRANT viết tay (GRANT quét
+      # sạch sẽ cấp cả bảng điều khiển cho vai ứng dụng). Chạy sau migration.
       - name: Cấp vai ứng dụng và vai điều khiển (đường của sản xuất)
         working-directory: backend
         run: python -m app.cli.provision_db_roles
@@ -281,14 +159,8 @@ jobs:
         working-directory: backend
         run: python -m app.cli.provision_db_roles --check
 
-      # Cổng thật, và cố ý đứng TRƯỚC pytest: nó bắt đúng lớp lỗi mà 22 test đỏ
-      # hôm 10/08 đã phơi ra — lược đồ dựng mới khác lược đồ máy đang chạy — và
-      # bắt bằng một thông báo nói thẳng ra cái thiếu, thay vì bằng hai chục
-      # test đỏ rải rác mà mỗi cái nói về một triệu chứng khác nhau.
-      #
-      # Chạy SAU bước GRANT, không phải chung với bước dựng lược đồ: hàm này
-      # đọc qua `DATABASE_URL` (vai `voya_app`), và vai đó chưa có quyền gì cho
-      # tới khi GRANT chạy xong.
+      # Lược đồ dựng mới phải khớp lược đồ máy đang chạy. Đứng trước pytest để
+      # báo thẳng cái thiếu thay vì hàng chục test đỏ rải rác.
       - name: Kiểm nợ lược đồ
         working-directory: backend
         run: |
@@ -301,15 +173,9 @@ jobs:
           assert not any(debt.values()), f'luoc do dung moi con no: {debt}'
           "
 
-      # Máy chạy web không bao giờ dựng lược đồ từ số không: nó NÂNG từ lược đồ
-      # mà bản trước đã dựng. Các bước trên chỉ kiểm đường từ số không, nên một
-      # bước nâng cấp viết sai (chỉ đúng khi bảng còn trống, quên một cột mà bản
-      # cũ chưa có) vẫn xanh ở đây và chỉ hỏng trên máy thật.
-      #
-      # Bước này dựng một CSDL riêng bằng MÃ của bản trước (commit cha trên
-      # `main`, hoặc điểm rẽ nhánh với `main` ở nhánh khác), rồi nâng lên bằng
-      # mã hiện tại và kiểm nợ lược đồ. Chỉ lấy mã cũ bằng git worktree, không
-      # tải ảnh nào, nên chỉ tốn vài chục giây.
+      # Máy chạy web NÂNG từ lược đồ của bản trước, không dựng từ số không. Dựng
+      # một CSDL riêng bằng mã bản trước (cha trên main, hoặc điểm rẽ với main),
+      # nâng bằng mã hiện tại, rồi kiểm nợ.
       - name: Nâng cấp từ lược đồ của bản trước
         working-directory: backend
         env:
@@ -344,13 +210,8 @@ jobs:
           "
           git worktree remove --force /tmp/ban_truoc
 
-      # `VOYA_TEST_VIDEO` cố ý KHÔNG đặt: kho clip 2,7 GB không có trên runner,
-      # nên test trích npz từ video sẽ skip. Đó là lần skip DUY NHẤT được chấp
-      # nhận ở đây, và nó hiện ra trong báo cáo chứ không biến mất.
-      # Máy cài mới gieo danh mục hệ thống (phương ngữ, profile từ config/*.seed.csv)
-      # lúc backend khởi động, qua `init_db` -> `seed_from_csv`. CI không khởi động
-      # backend, nên tenant `default` không có phương ngữ nào và `create_tenant`
-      # của fixture không có gì để nhân bản. Gọi đúng hàm đó, cùng vai ứng dụng.
+      # Backend gieo danh mục hệ thống lúc khởi động; CI không khởi động backend
+      # nên gọi đúng hàm đó.
       - name: Gieo danh mục hệ thống (như lúc khởi động)
         working-directory: backend
         run: |
@@ -361,10 +222,7 @@ jobs:
               print('dialects:', seed_from_csv())
           "
 
-      # Cùng đường với máy dev (`scripts/run_tests.sh`): suite chạy bằng BA VAI
-      # TEST, không phải `voya_app`/`admin`. `test_db_role_isolation` và
-      # `test_control_plane` khẳng định đúng điều đó (13 ca đỏ trước 18/10/2026),
-      # và chạy bằng vai sản xuất thì các phép đo RLS đo nhầm chủ thể.
+      # Suite chạy bằng ba vai test, cùng script với máy dev (scripts/run_tests.sh).
       - name: Cấp vai test (cùng script với máy dev)
         env:
           VOYA_PG_CONTAINER: "-"
@@ -375,9 +233,7 @@ jobs:
           VOYA_TEST_CONTROL_PASSWORD: ci_test_control_password_16
         run: bash scripts/provision_test_db_roles.sh
 
-      # Hai tenant đối kháng `iso_a`/`iso_b` cùng người dùng và một lớp mỗi bên.
-      # CSDL dựng mới không có tenant nào ngoài `default`, nên ~30 ca ghi job /
-      # người dùng cho `iso_a` đổ khoá ngoại `fk_*_tenant` trước khi kiểm được gì.
+      # Hai tenant đối kháng iso_a/iso_b; thiếu chúng thì ~30 ca đổ khoá ngoại.
       - name: Gieo fixture cách ly
         working-directory: backend
         env:
@@ -386,6 +242,8 @@ jobs:
           CONTROL_DATABASE_URL: postgresql://voya_test_control:ci_test_control_password_16@localhost:5432/signdb_pytest_ci
         run: python ../scripts/seed_isolation_fixture.py
 
+      # VOYA_TEST_VIDEO cố ý không đặt (kho clip 2,7 GB không có ở đây): test
+      # trích npz từ video là ca skip duy nhất được chấp nhận.
       - name: Test
         working-directory: backend
         env:
@@ -396,9 +254,7 @@ jobs:
           VOYA_TEST_APP_PASSWORD: ci_test_app_password_16_x
           VOYA_TEST_CONTROL_PASSWORD: ci_test_control_password_16
           SMTP_HOST: smtp.test.invalid
-          # `run_tests.sh` đặt biến này; ca đối chứng dương của test_db_role_isolation
-          # đọc nó để biết CSDL test tên gì.
-          POSTGRES_DB: signdb_pytest_ci
+          POSTGRES_DB: signdb_pytest_ci   # ca đối chứng của test_db_role_isolation đọc biến này
         run: python -m pytest -q --junitxml=junit-backend.xml
 
       - name: Nộp báo cáo test
@@ -408,12 +264,8 @@ jobs:
           name: junit-backend
           path: backend/junit-backend.xml
 
-  # Những thứ nằm GIỮA các phần: script gọi vào backend, compose nối nginx với
-  # công cụ vận hành, tài liệu trỏ vào tệp. Không bộ test nào của backend hay
-  # frontend đọc chúng, nên chúng hỏng mà không ai hay cho tới lúc dùng. Cả ba
-  # lỗi của ngày 08/11/2026 thuộc loại này: CI và công cụ chuyển server gọi
-  # module đã dời chỗ, compose mất dòng gắn thư mục bảo trì, tài liệu công khai
-  # còn email và tên thật. Job này chạy nhanh (dưới 2 phút) và không cần CSDL.
+  # Chỗ nối giữa các phần (script ↔ backend, compose ↔ nginx ↔ voya, tài liệu ↔
+  # tệp): không bộ test nào đọc chúng, nên hỏng mà không ai hay. Dưới 2 phút.
   wiring:
     name: Nối dây — script, cấu hình, tài liệu khớp với mã
     runs-on: ubuntu-latest
@@ -427,8 +279,6 @@ jobs:
       - name: Cài công cụ kiểm
         run: python -m pip install --quiet pyyaml
 
-      # Chính các workflow này: sai tên khoá, sai biểu thức `${{ }}`, job `needs`
-      # trỏ vào job không có. Lỗi kiểu đó chỉ lộ khi GitHub từ chối chạy.
       - name: Workflow GitHub Actions hợp lệ
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color -shellcheck= -pyflakes=
 
@@ -452,8 +302,7 @@ jobs:
           done
           exit $bad
 
-      # Công cụ chuyển server và cài máy mới viết bằng PowerShell; lỗi cú pháp
-      # ở đó chỉ lộ ra trên máy Windows vào đúng ngày chuyển máy.
+      # Công cụ chuyển máy viết bằng PowerShell; lỗi cú pháp chỉ lộ vào ngày chuyển máy.
       - name: Cú pháp PowerShell
         shell: pwsh
         run: |
@@ -465,13 +314,15 @@ jobs:
           }
           exit $bad
 
-      # Mọi tổ hợp tệp compose mà máy thật dùng phải gộp được. `.env.example`
-      # đóng vai `.env`: nếu nó thiếu một biến mà compose đòi, máy mới cài theo
-      # hướng dẫn cũng sẽ thiếu.
+      # `.env.example` đóng vai `.env`: thiếu biến mà compose đòi thì máy mới cũng thiếu.
       - name: Cấu hình compose gộp được
         run: |
           cp .env.example .env
-          for combo in             "docker-compose.yml"             "docker-compose.yml docker-compose.prod.yml"             "docker-compose.yml docker-compose.prod.yml docker-compose.gpu.yml"                         "docker-compose.yml docker-compose.staging.yml"; do
+          for combo in \
+            "docker-compose.yml" \
+            "docker-compose.yml docker-compose.prod.yml" \
+            "docker-compose.yml docker-compose.prod.yml docker-compose.gpu.yml" \
+            "docker-compose.yml docker-compose.staging.yml"; do
             args=""; for f in $combo; do args="$args -f $f"; done
             echo "== $combo"
             docker compose $args config -q
@@ -479,13 +330,13 @@ jobs:
 
       - name: Cấu hình nginx hợp lệ
         run: |
-          docker run --rm             -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro"             -v "$PWD/nginx.conf.d:/etc/nginx/conf.d:ro"             nginx:alpine nginx -t
+          docker run --rm \
+            -v "$PWD/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "$PWD/nginx.conf.d:/etc/nginx/conf.d:ro" \
+            nginx:alpine nginx -t
 
-  # Dựng thử ba ảnh, KHÔNG đẩy. Trên `main`/`deploy_ctu_**` build_docker.yml đã
-  # dựng (và đẩy) sau khi job kiểm qua, nên ở đó job này tự bỏ qua. Ở mọi nhánh
-  # khác và mọi PR, đây là chỗ duy nhất bắt được Dockerfile hỏng — ví dụ một
-  # đường COPY trỏ vào thư mục vừa bị dời trong một đợt tái cấu trúc — TRƯỚC
-  # khi gộp, thay vì sau khi `main` đã không dựng được ảnh.
+  # Dựng thử ba ảnh, không đẩy, để Dockerfile hỏng lộ ra TRƯỚC khi gộp. Trên
+  # main/deploy_ctu_** thì bỏ qua: build_docker.yml dựng và đẩy ở đó.
   images:
     name: Dựng thử ảnh — ${{ matrix.name }}
     if: github.event_name == 'pull_request' || !(github.ref_name == 'main' || startsWith(github.ref_name, 'deploy_ctu_'))
@@ -515,9 +366,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: false
-          # Chỉ ĐỌC cache của build_docker.yml (trên Docker Hub, công khai nên
-          # không cần đăng nhập); không ghi để nhánh thử nghiệm không làm bẩn
-          # cache của `main`. Thiếu secret (PR từ fork) thì buildx chỉ cảnh báo và dựng không cache.
+          # Chỉ ĐỌC cache của main (công khai, không cần đăng nhập); không ghi.
           cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/${{ matrix.image }}:buildcache
 
   hygiene:
@@ -526,33 +375,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Sự cố CRLF, 27/08/2026. `core.autocrlf=true` trên Windows làm
-      # `docker-entrypoint.sh` được cam kết với đầu dòng CRLF; shebang
-      # `#!/bin/sh\r` không phải đường dẫn nào cả, và Docker báo lỗi là
-      # "exec: no such file or directory" — trỏ vào chính tệp đang tồn tại.
-      # Frontend crash-loop, và không có bài test nào ở bất kỳ tầng nào bắt
-      # được: tệp đúng, mã đúng, chỉ có hai byte vô hình là sai.
-      #
-      # `.gitattributes` đã ghim `*.sh text eol=lf`. Bước này kiểm rằng cái ghim
-      # đó thật sự có hiệu lực trên NHỮNG BYTE ĐÃ CAM KẾT, vì một tệp đã vào
-      # kho trước khi có luật thì luật không hồi tố cho nó.
+      # Script CRLF chết trong container Linux ("exec: no such file"). Đọc byte
+      # ĐÃ CAM KẾT (`i/`), không đọc thư mục làm việc.
       - name: Script shell phải là LF
         run: |
-          # `git ls-files --eol` chu KHONG phai `grep` tren thu muc lam viec.
-          #
-          # Hai ly do, ca hai deu la loi that da mac phai khi viet buoc nay:
-          #
-          # 1. Thu muc lam viec KHONG phai thu can kiem. Tren Windows, cung mot
-          #    blob LF duoc checkout ra CRLF; doc thu muc lam viec la hoi may
-          #    cua nguoi chay chu khong hoi kho. `i/` la byte da cam ket.
-          #
-          # 2. Mot phep kiem bang `grep` tim ky tu CR khong dang tin qua cac
-          #    tang shell: o mot so moi truong chuoi ANSI-C khong duoc dien giai
-          #    va grep di tim CHU CAI 'r' — khop gan nhu moi tep, nen phep kiem
-          #    do khong bao gio dung.
-          #    `git ls-files --eol` tra ve `i/crlf` hoac `i/lf`, khong co cho
-          #    cho hieu nham.
-          bad=$(git ls-files --eol -- '*.sh' 'Dockerfile*' '**/Dockerfile*'                 | grep -E '^i/crlf' || true)
+          bad=$(git ls-files --eol -- '*.sh' 'Dockerfile*' '**/Dockerfile*' | grep -E '^i/crlf' || true)
           if [ -n "$bad" ]; then
             echo "::error::Cac tep sau duoc CAM KET voi dau dong CRLF, se hong trong container Linux:"
             echo "$bad" | sed 's/^/  /'
@@ -561,10 +388,7 @@ jobs:
           fi
           echo "Tat ca script shell va Dockerfile deu duoc cam ket la LF."
 
-      # `.env` của kho này chứa mật khẩu cơ sở dữ liệu, khoá SMTP và
-      # `AUTH_TOKEN_SECRET_KEY` thật. Nó đang được gitignore, nhưng gitignore
-      # chỉ ngăn `git add` vô ý — nó KHÔNG ngăn `git add -f`, và không nói gì
-      # về một tệp đã lỡ vào kho từ trước.
+      # .gitignore không chặn `git add -f` hay tệp đã lỡ vào kho từ trước.
       - name: Không có bí mật nào bị cam kết
         run: |
           leaked=$(git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(prod|production|local)$' || true)
