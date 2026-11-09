@@ -14,7 +14,9 @@ from app.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, max_retries=2, default_retry_delay=15)
+# Tên cũ, để tin nhắn đã xếp hàng trước lần cập nhật vẫn chạy được.
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=15,
+                 name="app.preview_tasks.render_session_preview_task")
 def render_session_preview_task(self, class_uid: str, session_id: str,
                                 tenant_id: str):
     """`tenant_id` là tham số của TÁC VỤ, không phải thứ suy ra lúc chạy.

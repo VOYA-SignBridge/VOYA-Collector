@@ -55,6 +55,9 @@ async def startup() -> None:
     )
 
     realtime_proxy.init_client()
+    from app.modules.monitoring.snapshots import start_cpu_monitor
+
+    start_cpu_monitor()
     await init_tts()
 
     if settings.tts_prewarm_on_startup:

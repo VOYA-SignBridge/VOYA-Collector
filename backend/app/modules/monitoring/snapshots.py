@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import shutil
-from typing import Any, Dict, Optional
+import threading
+import time
+from typing import Any, Dict, List, Optional
 
 from app.config import settings
 from app.infrastructure.redis.connection import get_redis_client
@@ -21,10 +23,52 @@ def _iso(value: Any) -> Optional[str]:
         return str(value)
 
 
+#: Cửa sổ đo CPU. Đo 0,15 giây: 12 lần đọc trung bình 1,55%; đo 1 giây: cả 12
+#: lần trên 0, trung bình 12,8%. Trang quản trị từng báo 0-1% khi máy đang bận.
+CPU_SAMPLE_INTERVAL = 2.0
+_cpu_lock = threading.Lock()
+_cpu_latest: List[float] = []
+_cpu_started = False
+
+
+def _cpu_sampler_loop() -> None:
+    global _cpu_latest
+    import psutil
+
+    while True:
+        try:
+            per_core = psutil.cpu_percent(interval=CPU_SAMPLE_INTERVAL, percpu=True)
+            with _cpu_lock:
+                _cpu_latest = list(per_core)
+        except Exception as exc:
+            logger.debug("[MONITOR] cpu sampler tick error: %s", exc)
+            time.sleep(CPU_SAMPLE_INTERVAL)
+
+
+def start_cpu_monitor() -> None:
+    """Bật luồng đo CPU một lần, trong tiến trình phục vụ trang tài nguyên."""
+    global _cpu_started
+    with _cpu_lock:
+        if _cpu_started:
+            return
+        _cpu_started = True
+    try:
+        import psutil  # noqa: F401
+    except Exception:
+        logger.info("[MONITOR] psutil missing — CPU sampler disabled")
+        return
+    threading.Thread(target=_cpu_sampler_loop, name="cpu-monitor", daemon=True).start()
+    logger.info("[MONITOR] CPU sampler started (interval=%ss)", CPU_SAMPLE_INTERVAL)
+
+
 def host_snapshot() -> Dict[str, Any]:
     try:
         import psutil
-        per_core = psutil.cpu_percent(interval=0.15, percpu=True)
+        with _cpu_lock:
+            per_core = list(_cpu_latest)
+        if not per_core:
+            # Luồng đo chưa có số (request đầu sau khi bật): đọc một lần, đủ dài.
+            per_core = psutil.cpu_percent(interval=1.0, percpu=True)
         cpu = round(sum(per_core) / len(per_core), 1) if per_core else 0.0
         vm = psutil.virtual_memory()
         return {

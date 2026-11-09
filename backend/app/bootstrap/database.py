@@ -7,6 +7,7 @@ import os
 import time
 
 from app.storage.rls import IsolationPostureError
+from app.storage.schema_version import SchemaVersionError
 
 logger = logging.getLogger("db.init")
 
@@ -177,6 +178,15 @@ def _init_db(full_resync: bool | None = None) -> bool:
         )
 
         ensure_tables()
+        # Cổng phiên bản lược đồ: SAU ensure_tables() (nơi tạo schema_migrations)
+        # và TRƯỚC mọi bước ghi bên dưới. Lược đồ và mã lệch nhau thì ném lỗi,
+        # không cảnh báo: sự cố 12/08/2026 "lược đồ mới, mã cũ" không hỏng ồn ào.
+        # Đọc bằng DSN migration vì vai ứng dụng chưa chắc đọc được bảng ấy.
+        from app.storage.metadata_db import _migration_cursor
+        from app.storage.schema_version import assert_startup_compatible
+
+        with _migration_cursor() as cur:
+            assert_startup_compatible(cur)
         # Bootstrap has already paid the full schema cost in this process.
         # Prevent the first catalog request from repeating it.
         from app.modules.dataset import catalog_sync
@@ -270,6 +280,10 @@ def _init_db(full_resync: bool | None = None) -> bool:
             logger.error("[DB_INIT] Retry sync failed after schema rebuild.")
             return False
         return True
+    except SchemaVersionError:
+        # "DB là tuỳ chọn" chỉ đúng khi KHÔNG có Postgres. Có Postgres mà lược đồ
+        # lệch mã thì mỗi lượt ghi là ghi sai hình dạng: không được khởi động.
+        raise
     except IsolationPostureError:
         raise
     except Exception:

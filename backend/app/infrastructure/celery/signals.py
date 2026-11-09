@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import logging
 
-from celery.signals import task_failure, task_postrun, worker_ready
+from celery.signals import setup_logging, task_failure, task_postrun, worker_ready
 
 from app.infrastructure.celery.memory import release_memory
 
 logger = logging.getLogger(__name__)
+
+
+@setup_logging.connect
+def config_loggers(*_args, **_kwargs) -> None:
+    """Không để Celery tự cấu hình log: dùng log JSON chung để Loki đọc được nhãn."""
+    from app.bootstrap.logging import configure_logging
+
+    configure_logging()
 
 
 @task_failure.connect

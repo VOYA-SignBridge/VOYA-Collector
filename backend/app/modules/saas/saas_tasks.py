@@ -20,7 +20,9 @@ from app.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, max_retries=2, default_retry_delay=300, platform_wide=True)
+# Mọi task ở đây mang tên CŨ `app.saas_tasks.*` (trước khi dời vào modules/):
+# beat phái bằng chuỗi, và việc xuất dữ liệu đã xếp hàng phải còn chạy sau cập nhật.
+@celery_app.task(bind=True, max_retries=2, default_retry_delay=300, platform_wide=True, name="app.saas_tasks.rollup_usage_daily")
 def rollup_usage_daily(self, day: str | None = None):
     """Gộp số đo mức dùng của ngày hôm qua cho mọi tenant.
 
@@ -39,7 +41,7 @@ def rollup_usage_daily(self, day: str | None = None):
         raise self.retry(exc=exc)
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.deliver_webhooks")
 def deliver_webhooks(self, limit: int = 50):
     """Giao những webhook đang chờ tới hạn.
 
@@ -57,7 +59,7 @@ def deliver_webhooks(self, limit: int = 50):
         return {"sent": 0, "failed": 0, "error": type(exc).__name__}
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.run_tenant_export")
 def run_tenant_export(self, export_id: str):
     """Dựng gói zip cho một yêu cầu xuất."""
     from app.modules.saas.tenant_lifecycle import run_export
@@ -72,7 +74,7 @@ def run_tenant_export(self, export_id: str):
         raise
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, name="app.saas_tasks.run_personal_export")
 def run_personal_export(self, export_id: str):
     """Dựng gói zip cho một yêu cầu xuất dữ liệu CÁ NHÂN.
 
@@ -92,7 +94,7 @@ def run_personal_export(self, export_id: str):
         raise
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.sweep_subscriptions")
 def sweep_subscriptions(self):
     """Một lượt vòng đời đăng ký: nhắc → gia hạn → ân hạn → khoá mềm.
 
@@ -115,7 +117,7 @@ def sweep_subscriptions(self):
         return {"loi": 1}
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.cleanup_saas_artifacts")
 def cleanup_saas_artifacts(self, delivery_history_days: int = 30):
     """Dọn định kỳ: bản xuất hết hạn và lịch sử giao webhook cũ.
 
@@ -144,7 +146,7 @@ def cleanup_saas_artifacts(self, delivery_history_days: int = 30):
     return out
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.cleanup_refresh_tokens")
 def cleanup_refresh_tokens(self, retain_days: int = 7):
     """Dọn refresh token đã hết hạn. Logic ở `auth.purge_expired_refresh_tokens`.
 
@@ -163,7 +165,7 @@ def cleanup_refresh_tokens(self, retain_days: int = 7):
         return {"loi": 1}
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.sweep_support_backlog")
 def sweep_support_backlog(self):
     """Một lượt kiểm tồn đọng kênh hỗ trợ.
 
@@ -185,7 +187,7 @@ def sweep_support_backlog(self):
         return {"loi": 1}
 
 
-@celery_app.task(bind=True, platform_wide=True, max_retries=3)
+@celery_app.task(bind=True, platform_wide=True, max_retries=3, name="app.saas_tasks.send_support_ticket_emails")
 def send_support_ticket_emails(self, ticket_id: str, tenant_id: str,
                                subject: str, category: str, requester: str):
     """Gửi thư báo phiếu mới cho người trực — NGOÀI luồng yêu cầu.
@@ -224,7 +226,7 @@ def send_support_ticket_emails(self, ticket_id: str, tenant_id: str,
         return {"loi": 1}
 
 
-@celery_app.task(bind=True, platform_wide=True)
+@celery_app.task(bind=True, platform_wide=True, name="app.saas_tasks.reconcile_storage_quota")
 def reconcile_storage_quota(self):
     """Lớp ba của hạn mức dung lượng: đối chiếu bộ đếm với đĩa.
 
