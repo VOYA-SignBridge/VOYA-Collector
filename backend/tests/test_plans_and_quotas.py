@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 
+from accounts import PASSWORD
 from app.modules.saas import plans
 from app.storage import metadata_db as db
 from app.modules.saas.tenant_context import system_scope
@@ -158,14 +159,14 @@ class TestSeats:
             for _ in range(3):
                 name = f"seat{uuid.uuid4().hex[:9]}"
                 user = auth.create_user(
-                    username=name, email=f"{name}@example.com", password="@Minh123456"
+                    username=name, email=f"{name}@example.com", password=PASSWORD
                 )
                 created.append(user["id"])
                 tenant_admin.add_member(throwaway_tenant, user["id"])
 
             name = f"seat{uuid.uuid4().hex[:9]}"
             extra = auth.create_user(
-                username=name, email=f"{name}@example.com", password="@Minh123456"
+                username=name, email=f"{name}@example.com", password=PASSWORD
             )
             created.append(extra["id"])
             # Người thứ TƯ, vượt `max_seats = 3` của gói Free. Phải vào được.
@@ -199,7 +200,7 @@ class TestSeats:
         _set_plan(throwaway_tenant, "free")
         name = f"seat{uuid.uuid4().hex[:9]}"
         user = auth.create_user(
-            username=name, email=f"{name}@example.com", password="@Minh123456"
+            username=name, email=f"{name}@example.com", password=PASSWORD
         )
         try:
             tenant_admin.add_member(throwaway_tenant, user["id"])

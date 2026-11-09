@@ -65,7 +65,7 @@ python -c "import secrets; print(secrets.token_hex(32))"
 | `VOYA_CONTROL_DB_PASSWORD` | Mật khẩu khác nữa. Điền cùng giá trị vào `CONTROL_DATABASE_URL` |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | Tài khoản quản trị đầu tiên, được tự tạo lúc khởi động |
 | `GRAFANA_ADMIN_PASSWORD` | Mật khẩu trang giám sát |
-| `FRONTEND_BASE_URL` | Địa chỉ web, ví dụ `https://signbridge.mainhatminh.id.vn`. Chạy trong máy thì để `http://localhost` |
+| `FRONTEND_BASE_URL` | Địa chỉ web, ví dụ `https://web.example.com`. Chạy trong máy thì để `http://localhost` |
 | `CORS_ALLOWED_ORIGINS` | Thêm địa chỉ web vào cuối dòng, cách nhau bằng dấu phẩy |
 | `APP_ENV` | `production` khi mở ra Internet |
 
@@ -124,8 +124,10 @@ Mặc định, mỗi lần cập nhật máy chạy web **tự dựng ảnh**: t
 Thêm một dòng vào `.env`:
 
 ```
-VOYA_REGISTRY_NS=tamb2203579
+VOYA_REGISTRY_NS=<tai-khoan-docker-hub>
 ```
+
+Thay `<tai-khoan-docker-hub>` bằng tài khoản Docker Hub mà CI đẩy ảnh lên (secret `DOCKER_USERNAME` trên GitHub; hỏi người phụ trách repo).
 
 Từ đó `VOYA.bat update-git` sẽ:
 1. Kiểm commit mới đã có ảnh trên Docker Hub chưa. Chưa có, tức CI chưa xong hoặc đang đỏ, thì **dừng, không đụng vào gì**.

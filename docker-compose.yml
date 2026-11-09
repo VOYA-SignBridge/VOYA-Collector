@@ -597,6 +597,8 @@ services:
       # this to SMTP_FROM (the same mailbox the backend sends as).
       - GF_SMTP_FROM_ADDRESS=${SMTP_FROM:-${SMTP_USER}}
       - GF_SMTP_FROM_NAME=VOYA Alerts
+      # Người NHẬN cảnh báo (logging/grafana/alerting/contact-points.yml).
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-${SMTP_FROM:-${SMTP_USER}}}
     restart: unless-stopped
     networks:
       - voya_network

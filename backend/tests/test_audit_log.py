@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 
+from accounts import PASSWORD
 from app.storage import metadata_db as db
 from app.modules.saas.tenant_context import system_scope
 
@@ -27,7 +28,7 @@ def test_audit_redacts_secrets():
     from app.modules.security import audit
 
     cleaned = audit._redact({
-        "password": "@Minh123456",
+        "password": PASSWORD,
         "otp": "123456",
         "X-Auth-Token": "abc",
         "nested": {"user_password": "x", "ten": "giữ lại"},

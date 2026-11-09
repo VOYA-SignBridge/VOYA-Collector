@@ -1,4 +1,4 @@
-"""Đường đi của email, kiểm bằng BA ĐỊA CHỈ THẬT chứ không phải `@example.test`.
+"""Đường đi của email, kiểm bằng ba địa chỉ thật (lấy từ biến môi trường) chứ không phải `@example.test`.
 
 Mỗi test ở đây tương ứng một loại lỗi đã hoặc có thể xảy ra với địa chỉ thật,
 không phải để chạy cho có:
@@ -26,8 +26,11 @@ from accounts import (
     EMAIL_UNIVERSITY,
     PASSWORD,
     refuse_to_touch_production,
+    require_test_emails,
     username_for,
 )
+
+require_test_emails()
 from app.storage import metadata_db as db
 from app.modules.saas.tenant_context import system_scope
 
@@ -161,9 +164,8 @@ class TestMotDiaChiMotTaiKhoan:
 
         Lần chạy đầu tiên của test này ĐỎ, và nó đỏ đúng cách: ràng buộc chưa
         tồn tại, câu INSERT chữ hoa thành công, và
-        `MAINHATMINH1004@GMAIL.COM` xuất hiện bên cạnh
-        `mainhatminh1004@gmail.com` — hai tài khoản cho một người, đúng thứ
-        đang được mô tả.
+        bản chữ hoa của một địa chỉ xuất hiện bên cạnh bản chữ thường — hai
+        tài khoản cho một người, đúng thứ đang được mô tả.
         """
         import psycopg2
 
@@ -185,7 +187,7 @@ class TestMotDiaChiMotTaiKhoan:
 # --------------------------------------------------------- tên miền bốn cấp
 
 class TestTenMienBonCap:
-    """`minhb2203567@student.ctu.edu.vn` — bốn cấp tên miền.
+    """Địa chỉ tên miền trường (`VOYA_TEST_EMAIL_UNIVERSITY`) — bốn cấp tên miền.
 
     Đây là địa chỉ hay làm vỡ nhất trong ba, vì regex kiểm định địa chỉ viết
     vội thường chỉ chấp nhận `ten@mien.tld` hoặc giới hạn phần đuôi 2–3 ký tự.
@@ -196,7 +198,7 @@ class TestTenMienBonCap:
     def test_pydantic_chap_nhan(self):
         from app.routers.auth import RegisterRequest
 
-        req = RegisterRequest(username="minhb2203567", email=EMAIL_UNIVERSITY,
+        req = RegisterRequest(username=username_for(EMAIL_UNIVERSITY), email=EMAIL_UNIVERSITY,
                               password=PASSWORD)
         assert req.email == EMAIL_UNIVERSITY
 

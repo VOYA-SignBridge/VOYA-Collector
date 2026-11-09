@@ -7,11 +7,11 @@ contactPoints:
       - uid: admin-email-receiver
         type: email
         settings:
-          # Hộp thư NHẬN cảnh báo. Đổi 25/08/2026 khỏi địa chỉ sinh viên
-          # (@student.ctu.edu.vn) theo yêu cầu: hộp thư ấy đang bị dồn thư tự
-          # động. Đây là người NHẬN, khác với tài khoản GỬI ở `SMTP_*` trong
-          # `.env` — hai thứ đó độc lập và đổi cái này không đụng cái kia.
-          addresses: minhyukichi@gmail.com
+          # Hộp thư NHẬN cảnh báo, lấy từ `ALERT_EMAIL_TO` trong `.env` (Grafana
+          # tự thay `$ALERT_EMAIL_TO` lúc nạp tệp). Không ghi địa chỉ ở đây: repo
+          # công khai. Chưa đặt thì docker-compose.yml dùng `SMTP_FROM`, rồi
+          # `SMTP_USER` (tài khoản gửi), để cảnh báo không rơi vào hư không.
+          addresses: $ALERT_EMAIL_TO
           singleEmail: true
           subject: '{{ template "email.voya.subject" . }}'
           message: '{{ template "email.voya.message" . }}'

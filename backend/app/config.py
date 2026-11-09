@@ -25,8 +25,10 @@ class Settings(BaseSettings):
     cors_allowed_origins_raw: str = os.getenv("CORS_ALLOWED_ORIGINS", "*")
 
     # Postgres/PostgreSQL configuration
-    postgres_user: str = os.getenv("POSTGRES_USER", "admin")
-    postgres_password: str = os.getenv("POSTGRES_PASSWORD", "admin")
+    # Không có giá trị mặc định: thiếu biến thì kết nối báo lỗi xác thực ngay,
+    # thay vì lặng lẽ thử một tài khoản đoán sẵn.
+    postgres_user: str = os.getenv("POSTGRES_USER", "")
+    postgres_password: str = os.getenv("POSTGRES_PASSWORD", "")
     postgres_db: str = os.getenv("POSTGRES_DB", "signdb")
     postgres_host: str = os.getenv("POSTGRES_HOST", "postgres")
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -354,9 +356,11 @@ class Settings(BaseSettings):
     speed_variants: List[float] = [1.0, 1.2, 0.8]
 
     # ===== AUTH / JWT =====
+    # Không có giá trị mặc định: thiếu cả hai biến thì backend từ chối khởi
+    # động (bootstrap/lifecycle.py), ở MỌI môi trường.
     secret_key: str = os.getenv(
         "SECRET_KEY",
-        os.getenv("AUTH_TOKEN_SECRET_KEY", "change-me-in-production"),
+        os.getenv("AUTH_TOKEN_SECRET_KEY", ""),
     )
     auth_token_secret_key: str = os.getenv("AUTH_TOKEN_SECRET_KEY", secret_key)
 

@@ -190,6 +190,12 @@ jobs:
       CELERY_RESULT_BACKEND: redis://localhost:6379/12
       TTS_REDIS_URL: redis://localhost:6379/12
       PYTHONPATH: ${{ github.workspace }}/backend
+      # Ba địa chỉ cho tests/test_real_email_identities.py, CÙNG HÌNH DẠNG với địa
+      # chỉ thật (Gmail; tên miền bốn cấp) nhưng trên miền ví dụ: không gửi thư
+      # nào (lớp chặn SMTP của conftest) và không lộ hộp thư thật nào.
+      VOYA_TEST_EMAIL_GMAIL: ci.gmail.test@example.com
+      VOYA_TEST_EMAIL_UNIVERSITY: ci.sinhvien@student.ctu.example.com
+      VOYA_TEST_EMAIL_OWNER: ci.owner.test@example.com
 
     steps:
       - uses: actions/checkout@v4
@@ -197,6 +203,11 @@ jobs:
           # Bước "Nâng cấp từ lược đồ của main" cần mã của `main` để dựng lược
           # đồ cũ; checkout nông chỉ có đúng một commit.
           fetch-depth: 0
+
+      # Khoá ký JWT không có giá trị mặc định trong mã. Sinh ngẫu nhiên mỗi lượt:
+      # không có gì để lộ, và test nào lỡ phụ thuộc vào một khoá cố định sẽ đỏ.
+      - name: Khoá ký JWT ngẫu nhiên cho lượt này
+        run: echo "AUTH_TOKEN_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with:

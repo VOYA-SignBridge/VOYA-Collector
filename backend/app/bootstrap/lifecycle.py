@@ -10,7 +10,12 @@ from app.services.tts_prewarm import prewarm_tts_cache
 from app.services.tts_service import close_tts, init_tts
 
 
-_INSECURE_DEFAULT_SECRET = "change-me-in-production"
+#: Giá trị mẫu từng nằm trong mã hoặc trong `.env.example`. Máy cũ có thể vẫn
+#: còn chúng trong `.env`, nên vẫn chặn khi chạy sản xuất.
+_PLACEHOLDER_SECRETS = {
+    "change-me-in-production",
+    "REPLACE_WITH_RANDOM_SECRET__DO_NOT_USE_IN_PRODUCTION",
+}
 
 
 async def startup() -> None:
@@ -19,12 +24,17 @@ async def startup() -> None:
     logger.setLevel(logging.INFO)
     started_at = time.time()
 
+    if not settings.secret_key or not settings.auth_token_secret_key:
+        raise RuntimeError(
+            "SECRET_KEY/AUTH_TOKEN_SECRET_KEY is not set. Put a random value in "
+            ".env (python -c \"import secrets; print(secrets.token_hex(32))\")."
+        )
     if settings.app_env == "production" and (
-        settings.secret_key == _INSECURE_DEFAULT_SECRET
-        or settings.auth_token_secret_key == _INSECURE_DEFAULT_SECRET
+        settings.secret_key in _PLACEHOLDER_SECRETS
+        or settings.auth_token_secret_key in _PLACEHOLDER_SECRETS
     ):
         raise RuntimeError(
-            "SECRET_KEY/AUTH_TOKEN_SECRET_KEY is still the insecure default "
+            "SECRET_KEY/AUTH_TOKEN_SECRET_KEY is still the example value "
             "with APP_ENV=production. Set a real secret before starting."
         )
 

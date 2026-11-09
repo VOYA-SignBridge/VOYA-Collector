@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from accounts import PASSWORD
 from app.modules.saas import tenant_lifecycle, usage
 from app.storage import metadata_db as db
 from app.modules.saas.tenancy import DEFAULT_TENANT_ID
@@ -306,7 +307,7 @@ class TestPurgeExecution:
 
         name = f"both{uuid.uuid4().hex[:8]}"
         user = auth.create_user(
-            username=name, email=f"{name}@example.com", password="@Minh123456"
+            username=name, email=f"{name}@example.com", password=PASSWORD
         )
         try:
             tenant_admin.set_home_tenant(user["id"], doomed_tenant, role="admin")

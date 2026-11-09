@@ -41,6 +41,7 @@ import uuid
 
 import pytest
 
+from accounts import PASSWORD
 from app.storage import metadata_db as db
 from app.modules.saas.tenancy import DEFAULT_TENANT_ID
 
@@ -50,7 +51,7 @@ def _ensure_schema():
     db.ensure_tables()
 
 
-PW = "@Minh123456"
+PW = PASSWORD
 
 
 def _unique(prefix: str) -> str:

@@ -6,7 +6,7 @@ Ngày kiểm tra: 13/10/2026. Đây là kế hoạch dựa trên kiểm kê ngu�
 
 - Nguồn: `E:\CTU_ProjectOutside\VOYA-Collector`, Windows + Docker Linux containers.
 - Đích: PC Windows RTX 5060 tại trường; thao tác qua UltraViewer, không cần SSH.
-- Giữ đúng URL của web: `https://signbridge.mainhatminh.id.vn`. Tên cũ gõ sai `signbrigde` giữ lại theo mục "Đổi tên miền" bên dưới.
+- Giữ đúng URL của web: `https://<ten-mien-web>`. Tên cũ (gõ sai) giữ lại theo mục "Đổi tên miền" bên dưới.
 - Dùng lại Cloudflare Tunnel hiện có. Giữ DNS/hostname nếu route hiện tại vẫn đúng.
 - Restore vào thư mục và Compose project mới; giữ nguyên bản cũ trên cả hai máy.
 - Chuyển toàn bộ dữ liệu ứng dụng, mọi tenant, dữ liệu cloud liên quan và lịch sử backup. Không coi việc chỉ chép source hoặc dump một DB là hoàn tất.
@@ -125,7 +125,7 @@ Ví dụ dưới đây chỉ dùng SAU KHI lỗi cấu hình đã được giả
 ```powershell
 # Chạy từ thư mục công cụ đã mang sang máy trường.
 python scripts/backup.py D:/SignBridge-transfer/ctu-final-20261013 --verify-only
-python scripts/deploy.py --restore D:/SignBridge-transfer/ctu-final-20261013 --root D:/SignBridge/ctu-20261013 --project signbridge-ctu-20261013 --public-url https://signbridge.mainhatminh.id.vn --allow-downtime --accept-external-storage
+python scripts/deploy.py --restore D:/SignBridge-transfer/ctu-final-20261013 --root D:/SignBridge/ctu-20261013 --project signbridge-ctu-20261013 --public-url https://<ten-mien-web> --allow-downtime --accept-external-storage
 ```
 
 Script khôi phục database/roles, so số dòng từng bảng và phục hồi declared named volumes; sau đó build/migrate/kiểm tra và khởi động ứng dụng. Nó không khôi phục các bản sao bổ sung hoặc cài cloudflared. Nó có thể bắt đầu worker/beat trước khi tunnel bật; chỉ làm trên bản cuối khi nguồn đã ngừng ghi.
@@ -163,7 +163,7 @@ Nếu có lỗi, giữ project/thư mục lỗi để điều tra. Không `docke
 
 Tên ban đầu gõ sai thành `signbrigde`, và lỗi đó nằm ở bản ghi DNS chứ không ở mã nguồn: mã không ghi cứng tên miền, nginx không gắn `server_name`. Tên chỉ sống ở ba nơi, và phải đổi theo đúng thứ tự này, vì đổi cấu hình trước khi DNS có tên mới thì mọi liên kết gửi qua thư đều chết.
 
-1. Cloudflare Zero Trust, tunnel hiện có, Public Hostname: thêm `signbridge.mainhatminh.id.vn` trỏ vào cùng dịch vụ với tên cũ. Giữ nguyên tên cũ.
+1. Cloudflare Zero Trust, tunnel hiện có, Public Hostname: thêm `<ten-mien-web>` trỏ vào cùng dịch vụ với tên cũ. Giữ nguyên tên cũ.
 2. Máy đang chạy web, `.env`: đổi `FRONTEND_BASE_URL` sang tên mới, thêm tên mới vào `CORS_ALLOWED_ORIGINS` và giữ tên cũ.
 3. Máy đó, `deploy/public_hosts.txt`: thêm tên mới, giữ tên cũ. Tệp này có hiệu lực ngay.
 4. `VOYA.bat start` để backend đọc lại `.env`. `restart` không đọc lại.
