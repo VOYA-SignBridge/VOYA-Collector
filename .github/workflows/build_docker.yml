@@ -51,8 +51,37 @@ jobs:
   checks:
     uses: ./.github/workflows/ci.yml
 
+  # `main` là nhánh triển khai và chỉ nhận mã đã thử trên `son_arrange_repo2`
+  # (docs/06-operations/CHUYEN_SANG_MAIN.md). Repo không bật bảo vệ nhánh, nên
+  # đây là chỗ chặn: một commit viết thẳng vào `main` thì không có ảnh, và máy
+  # chạy web (chế độ kéo ảnh) từ chối cập nhật lên commit chưa có ảnh.
+  # Commit gộp (PR "Create a merge commit") được chấp nhận; chỉ commit có nội
+  # dung mà `son_arrange_repo2` không có mới bị chặn.
+  promoted:
+    name: main chỉ nhận mã từ son_arrange_repo2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Mọi commit trên main đã đi qua son_arrange_repo2
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "Nhanh ${GITHUB_REF_NAME}: khong ap dung."
+            exit 0
+          fi
+          git fetch --no-tags --quiet origin son_arrange_repo2
+          extra=$(git log --no-merges --oneline origin/son_arrange_repo2..HEAD)
+          if [ -n "$extra" ]; then
+            echo "::error::Cac commit sau nam tren main nhung KHONG co tren son_arrange_repo2:"
+            echo "$extra" | sed 's/^/  /'
+            echo "Dua chung vao son_arrange_repo2, cho CI xanh, roi dua len main (CHUYEN_SANG_MAIN.md muc 1)."
+            exit 1
+          fi
+          echo "OK: main khong co commit nao ngoai son_arrange_repo2."
+
   build:
-    needs: checks
+    needs: [checks, promoted]
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     strategy:
@@ -140,47 +169,105 @@ jobs:
             echo "${{ steps.tags.outputs.list }}"
             echo '```'
             echo ""
-            echo "Triển khai đúng ảnh này trên máy deploy:"
+            echo "Cập nhật máy chạy web lên commit này (máy đã bật VOYA_REGISTRY_NS):"
             echo ""
             echo '```bash'
-            echo "python scripts/deploy.py --image-tag sha-${{ steps.tags.outputs.short }} --backup-dir /secure/backups/UNIQUE-NAME --allow-downtime"
+            echo 'cmd //c "VOYA.bat update-git"'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Triển khai lên máy chạy web (KHOA: Windows, Docker Desktop, Git Bash).
+  #
+  # Thiết kế (09/11/2026), theo đúng máy đang chạy chứ không theo một máy Linux
+  # giả định như bản trước:
+  # - **Bấm duyệt mới chạy.** Environment `production` đặt *Required reviewers*;
+  #   GitHub dừng job ở nút *Review deployments* cho tới khi có người duyệt, nên
+  #   người duyệt chọn được giờ ít người dùng.
+  # - **Không tự viết lại quy trình triển khai.** Job chỉ gọi `voya update-git`,
+  #   đúng lệnh người vận hành vẫn gõ tay: mốc quay lui, sao lưu DB, trang bảo
+  #   trì, kéo ảnh CI, kiểm sức khoẻ (đây là bước smoke, chạy trên máy thật), hỏng
+  #   thì tự quay về. Một đường triển khai, hai cách bấm.
+  # - **Chỉ kéo ảnh, không bao giờ dựng trên máy chạy web**: `.env` phải có
+  #   `VOYA_REGISTRY_NS`, thiếu thì dừng.
+  # - **Đổi lược đồ CSDL thì không tự triển khai.** Quay về ảnh cũ không đảo được
+  #   migration, nên commit đổi `APP_SCHEMA_VERSION` phải làm tay.
+  # - Chỉ chạy khi push lên `DEPLOY_BRANCH` (không bao giờ ở PR) và khi biến
+  #   `ENABLE_AUTO_DEPLOY` = `true`. Mặc định tắt.
+  #
+  # Cài máy chạy (runner) trên KHOA: docs/06-operations/TRIEN_KHAI_TU_DAU.md, bước 9.
+  # Script dùng PowerShell 5.1 và chữ không dấu (giống voya.py) để không vướng mã
+  # hoá; `ErrorActionPreference=Continue` vì git ghi tiến độ ra stderr, và mọi
+  # lỗi được bắt qua `$LASTEXITCODE`.
   deploy:
-    name: Production (opt-in, protected environment)
+    name: Triển khai lên máy chạy web (cần bấm duyệt)
     needs: [checks, build]
     if: vars.ENABLE_AUTO_DEPLOY == 'true' && github.ref_name == vars.DEPLOY_BRANCH
-    runs-on: [self-hosted, linux, voya-prod]
+    runs-on: [self-hosted, windows, voya-prod]
     environment: production
+    timeout-minutes: 120
     concurrency:
       group: voya-production-deploy
       cancel-in-progress: false
     env:
       DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT }}
-      BACKUP_ROOT: ${{ vars.BACKUP_ROOT }}
-      VOYA_REGISTRY_NS: ${{ secrets.DOCKER_USERNAME }}
       RELEASE_SHA: ${{ github.sha }}
-      ACCEPT_EXTERNAL_STORAGE: ${{ vars.ACCEPT_EXTERNAL_STORAGE }}
+      PYTHONIOENCODING: utf-8
+    defaults:
+      run:
+        shell: powershell
     steps:
-      # No checkout action in the live directory: it can clean untracked data.
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Snapshot, pin source, migrate and verify
-        shell: bash
+      # Không dùng actions/checkout: thư mục của web là thư mục đang chạy thật,
+      # có dữ liệu không nằm trong git. Mọi lệnh chạy ngay trong DEPLOY_ROOT.
+      - name: Kiem may chay web truoc khi dong vao
+        id: pre
         run: |
-          set -euo pipefail
-          test -n "$DEPLOY_ROOT" && test -n "$BACKUP_ROOT"
-          cd "$DEPLOY_ROOT"
-          test -z "$(git status --porcelain --untracked-files=no)"
-          git fetch origin "$RELEASE_SHA"
-          test "$(git rev-parse FETCH_HEAD)" = "$RELEASE_SHA"
-          python3 scripts/deploy.py --check
-          bundle="$BACKUP_ROOT/${RELEASE_SHA}-$(date -u +%Y%m%dT%H%M%SZ)"
-          external=()
-          if [ "$ACCEPT_EXTERNAL_STORAGE" = true ]; then external+=(--accept-external-storage); fi
-          python3 scripts/backup.py "$bundle" --allow-downtime --keep-stopped "${external[@]}"
-          git checkout --detach "$RELEASE_SHA"
-          python3 scripts/deploy.py --prepared-backup "$bundle" --image-tag "sha-$RELEASE_SHA" --allow-downtime
+          $ErrorActionPreference = 'Continue'
+          function Fail($msg) { Write-Output "::error::$msg"; exit 1 }
+          if (-not $env:DEPLOY_ROOT) { Fail 'Chua dat bien DEPLOY_ROOT (vd D:\VOYA-Collector) trong Settings > Environments > production.' }
+          Set-Location $env:DEPLOY_ROOT
+          $branch = (git rev-parse --abbrev-ref HEAD).Trim()
+          if ($branch -ne 'main') { Fail "May dang o nhanh '$branch', khong phai main. Chuyen theo CHUYEN_SANG_MAIN.md muc 2." }
+          $ns = Select-String -Path .env -Pattern '^\s*VOYA_REGISTRY_NS\s*=\s*\S' -Quiet
+          if (-not $ns) { Fail '.env chua co VOYA_REGISTRY_NS: CD chi keo anh, khong dung tren may chay web (TRIEN_KHAI_TU_DAU.md buoc 7).' }
+          git fetch --quiet origin main
+          if ($LASTEXITCODE -ne 0) { Fail 'Khong fetch duoc tu GitHub.' }
+          $latest = (git rev-parse origin/main).Trim()
+          if ($latest -ne $env:RELEASE_SHA) {
+            Write-Output "main da co commit moi hon ($latest). Bo qua luot nay; luot cua commit do se trien khai."
+            [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "skip=true`n")
+            exit 0
+          }
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -eq $env:RELEASE_SHA) {
+            Write-Output 'May da o dung commit nay, khong co gi de trien khai.'
+            [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "skip=true`n")
+            exit 0
+          }
+          git merge-base --is-ancestor $head $env:RELEASE_SHA
+          if ($LASTEXITCODE -ne 0) { Fail "Commit dang chay ($head) khong nam tren duong cua main. Kiem tay tren may." }
+          git diff --quiet $head $env:RELEASE_SHA -- backend/app/storage/schema_version.py
+          if ($LASTEXITCODE -ne 0) {
+            Fail 'Ban nay doi luoc do CSDL (APP_SCHEMA_VERSION). Quay ve anh cu khong dao duoc migration nen khong tu trien khai: lam tay theo DEPLOY_SECOND_MACHINE.md (muc migration) roi chay VOYA.bat update-git.'
+          }
+          Write-Output "San sang: $head -> $env:RELEASE_SHA"
+          exit 0
+
+      - name: Cap nhat (voya update-git, keo anh CI)
+        if: steps.pre.outputs.skip != 'true'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location $env:DEPLOY_ROOT
+          # update-git hỏi xác nhận; người duyệt trên GitHub đã xác nhận rồi.
+          $env:VOYA_CONFIRMED = 'co'
+          python scripts\voya.py update-git
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output '::error::update-git bao loi (xem log ben tren). Neu no da tu quay lui thi web van chay ban cu.'
+            exit 1
+          }
+          $now = (git rev-parse HEAD).Trim()
+          if ($now -ne $env:RELEASE_SHA) {
+            Write-Output "::error::Sau update-git may o $now, khong phai $env:RELEASE_SHA."
+            exit 1
+          }
+          python scripts\voya.py status
+          exit 0

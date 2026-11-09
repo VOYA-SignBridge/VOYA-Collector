@@ -144,6 +144,43 @@ Chỉ làm trên máy chạy web thật:
 cmd //c "VOYA.bat autostart install"
 ```
 
+### 9. Cập nhật bằng nút bấm trên GitHub (tuỳ chọn)
+
+Sau khi bật, mỗi lần `main` có bản mới và CI dựng ảnh xong, GitHub hiện nút **Review deployments**. Người được phép bấm **Approve** thì máy chạy web tự chạy `VOYA.bat update-git`: kéo ảnh, bật trang bảo trì, kiểm sức khoẻ, hỏng thì tự quay về. Không ai cần mở máy để gõ lệnh, mà vẫn chọn được giờ cập nhật.
+
+Hai trường hợp **không** tự cập nhật, job dừng và báo lý do:
+- bản mới **đổi lược đồ CSDL**: phải làm tay, vì quay về ảnh cũ không đảo được migration;
+- máy chưa ở nhánh `main`, chưa có `VOYA_REGISTRY_NS`, hoặc có tệp sửa dở.
+
+**Điều kiện trước khi bật:** đã làm bước 7, máy chạy `main` ([CHUYEN_SANG_MAIN.md](CHUYEN_SANG_MAIN.md) mục 2), và đã chạy `VOYA.bat update-git` bằng tay ít nhất một lần thành công.
+
+**A. Trên GitHub** (người có quyền admin repo):
+
+| # | Vào đâu | Làm gì |
+|---|---|---|
+| 1 | **Settings → Environments → New environment** | Tên `production`. Bật **Required reviewers**, thêm người được duyệt. Ở **Deployment branches** chọn *Selected branches*, thêm `main` |
+| 2 | Trong environment `production` → **Environment variables** | `DEPLOY_ROOT` = `D:\VOYA-Collector` (thư mục web trên máy) |
+| 3 | **Settings → Secrets and variables → Actions → Variables** (biến của repo, không phải của environment) | `ENABLE_AUTO_DEPLOY` = `true`, `DEPLOY_BRANCH` = `main` |
+| 4 | **Settings → Actions → General → Fork pull request workflows** | Chọn **Require approval for all outside collaborators** |
+
+Bước 4 bắt buộc. Repo công khai, nên ai cũng mở được PR, và một PR có thể sửa workflow để chạy lệnh trên máy chạy web. Bật bước 4 thì PR của người ngoài nhóm chỉ chạy CI khi có người trong nhóm duyệt. **Đọc kỹ thay đổi trong `.github/` trước khi duyệt.**
+
+**B. Trên máy chạy web**, cài máy chạy (runner) của GitHub:
+
+1. Trên GitHub: **Settings → Actions → Runners → New self-hosted runner**, chọn **Windows**, **x64**. Trang này hiện sẵn các lệnh tải và cấu hình kèm một mã dùng một lần. **Không gửi mã đó cho ai.**
+2. Mở PowerShell **Run as administrator**, chạy các lệnh trên trang, cài vào `C:\actions-runner`. **Không** cài vào trong thư mục web.
+3. Khi `config.cmd` hỏi:
+   - *labels*: gõ `voya-prod`;
+   - *run as service*: `Y`;
+   - *user account for the service*: tài khoản Windows **đang chạy Docker Desktop** trên máy này, kèm mật khẩu. Đừng để mặc định `NETWORK SERVICE`, vì tài khoản đó không dùng được Docker Desktop.
+4. Trên GitHub, mục **Runners** phải thấy máy ở trạng thái **Idle**, nhãn có `self-hosted`, `Windows`, `voya-prod`.
+
+**Thử:** đưa một thay đổi nhỏ lên `main` ([CHUYEN_SANG_MAIN.md](CHUYEN_SANG_MAIN.md) mục 1). Trong tab **Actions**, lượt *Build & push images* dựng ảnh xong sẽ dừng ở job **Triển khai lên máy chạy web**. Bấm **Review deployments → Approve**, rồi theo dõi log.
+
+**Tắt:** đổi `ENABLE_AUTO_DEPLOY` thành `false`. Máy quay về cập nhật bằng tay như cũ.
+
+Docker Desktop chỉ chạy khi tài khoản đó đã đăng nhập Windows. Nếu tài khoản bị đăng xuất, job báo lỗi ở bước cập nhật và web không bị đụng tới.
+
 ## Đường 2. Chuyển web sang máy mới, mang theo dữ liệu
 
 **Máy cũ:** bấm đúp `VOYA.bat`, chạy lần lượt:

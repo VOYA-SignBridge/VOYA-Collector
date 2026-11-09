@@ -159,11 +159,10 @@ Khi lỗi sau migration, giữ maintenance để chẩn đoán. Khôi phục b�
 
 - `ci.yml`: frontend typecheck/i18n/tests/build; backend test trên PostgreSQL **17**, migration/provision/RLS; kiểm overlay; unit test ops + bài dump/restore PostgreSQL thật cô lập. Lint frontend vẫn advisory do nợ có sẵn, không được hiểu là lint đã sạch.
 - `build_docker.yml` gọi CI cùng commit; tất cả job CI pass mới push đủ 3 image, SHA đầy đủ. CD chỉ chạy sau khi cả 3 image pass.
-- CD **opt-in**: self-hosted runner Linux với labels `self-hosted, linux, voya-prod`, Python3.11+, Docker và quyền repo/registry. Chỉ cho nhánh tin cậy; không chạy PR tùy ý trên runner production.
-- GitHub environment `production`: cấu hình approval/protected branches. Variables: `ENABLE_AUTO_DEPLOY=true`, `DEPLOY_BRANCH` (`main`, xem CHUYEN_SANG_MAIN.md), `DEPLOY_ROOT` (checkout thật đang phục vụ), `BACKUP_ROOT` (ngoài checkout), `ACCEPT_EXTERNAL_STORAGE=true` chỉ khi chấp nhận cùng Drive. Secrets: `DOCKER_USERNAME`, `DOCKER_PASSWORD` (token quyền push/pull).
-- Bootstrap các script mới lên host trước khi bật CD. Host phải có checkout sạch và `.env` riêng; không chạy `actions/checkout`/clean vào thư mục dữ liệu live.
-- CD: audit → full backup với writer dừng → checkout đúng SHA → pull image → migration → audit → mở gateway. Không cancel lượt production đang chạy. `--prepared-backup` là giao thức nội bộ cho CD, yêu cầu writer còn dừng và số dòng chưa đổi.
-- Chưa xác nhận runner/secrets/environment trên GitHub của host này; thêm workflow **không đồng nghĩa CD đã được kích hoạt**.
+- CD **opt-in, cần bấm duyệt** (từ 09/11/2026 viết cho máy chạy web Windows): runner tự host nhãn `self-hosted, Windows, voya-prod`, chạy `voya update-git` ở chế độ kéo ảnh. Không tự triển khai khi đổi `APP_SCHEMA_VERSION`. Cài và bật: [TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 9.
+- Variables: `ENABLE_AUTO_DEPLOY=true`, `DEPLOY_BRANCH=main` (biến repo); `DEPLOY_ROOT` (thư mục web đang phục vụ, biến của environment `production`). Không chạy `actions/checkout`/clean vào thư mục dữ liệu live.
+- Đường `deploy.py --prepared-backup` (máy Linux, sao lưu toàn host) vẫn còn trong `scripts/` cho việc chuyển máy, nhưng không còn được CD gọi.
+- Thêm workflow **không đồng nghĩa CD đã được kích hoạt**: tới 09/11/2026 chưa cài runner và chưa tạo environment.
 
 ## Kết quả thực tế 2026-09-21/22 (không thay thế lần kiểm tra mới)
 

@@ -184,7 +184,22 @@ ma trận, đẩy lên Docker Hub.
 `latest` chỉ di chuyển từ `main`. Một commit trên nhánh phát hành vẫn triển khai
 được (ghim theo sha) mà không bao giờ tự động đổi thứ máy sản xuất kéo về.
 
+Trên `main`, job `promoted` chặn dựng ảnh nếu `main` có commit (không tính
+commit gộp) mà `son_arrange_repo2` không có. Repo không bật bảo vệ nhánh, nên
+đây là chỗ bảo đảm máy chạy web chỉ nhận mã đã qua nhánh thử.
+
 **Secret cần có trên GitHub:** `DOCKER_USERNAME`, `DOCKER_PASSWORD`.
+
+### Job `deploy`: cập nhật máy chạy web bằng nút bấm
+
+Tắt mặc định. Bật thì sau khi dựng ảnh, job dừng chờ người bấm duyệt (environment
+`production`), rồi chạy `voya update-git` ngay trên máy chạy web qua runner tự
+host (Windows, nhãn `voya-prod`). Smoke test (API trả 200, mọi container
+healthy, đúng ảnh mới) là bước có sẵn của `update-git` và chạy trên máy thật sau
+khi bật bản mới; CI không chạy smoke toàn stack.
+
+Không tự triển khai khi bản mới đổi `APP_SCHEMA_VERSION`. Cách cài và bật:
+[TRIEN_KHAI_TU_DAU.md](TRIEN_KHAI_TU_DAU.md) bước 9.
 
 ## 5. Triển khai một ảnh đã ghim
 
@@ -256,11 +271,10 @@ ngoài phạm vi.
 
 ## 7. Còn thiếu gì
 
-- **Không có CD tự động.** Có chủ ý (quyết định 11/09): CI dựng và gắn tag ảnh,
-  còn triển khai vẫn do người chạy `deploy.sh` trên máy đích. Máy CTU nhiều khả
-  năng không mở SSH vào từ ngoài, nên đường tự động sẽ cần self-hosted runner —
-  chưa làm.
-- **Lint chưa phải cổng chặn** (85 lỗi tồn đọng).
+- **Triển khai cần người bấm duyệt**, có chủ ý: chỉ có một máy chạy web với người
+  dùng thật, nên người duyệt chọn giờ cập nhật. Job `deploy` đã viết cho máy đó
+  nhưng **chưa bật** (chưa cài runner, chưa tạo environment).
+- **Lint chặn lỗi**, nhưng còn 54 cảnh báo (trần hiện tại).
 - **Quét bảo mật mới ở chế độ cảnh báo** (mục 2b): còn nợ lỗ hổng gói cần trả.
 - **Chưa chạy Playwright (E2E)** trong CI: cần dựng cả stack. Vẫn chạy tay bằng
   `VOYA_UI.bat`.
