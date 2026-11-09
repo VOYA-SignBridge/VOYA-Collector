@@ -42,28 +42,35 @@ Cách khác: mở PR trên GitHub với `base: main` ← `compare: son_arrange_r
 
 ## 2. Chuyển máy chạy web sang `main` (làm một lần)
 
-Làm vào giờ ít người dùng. Web gián đoạn vài phút.
+Máy **tải ảnh CI đã dựng** thay vì tự dựng. Lần đầu tải khoảng 4,5 GB, nhưng web vẫn chạy trong lúc tải; chỉ gián đoạn vài phút lúc đổi sang bản mới. Làm vào giờ ít người dùng.
+
+Trước khi bắt đầu, trên GitHub, tab **Actions**: lượt *Build & push images* mới nhất của `main` phải xanh.
 
 | # | Lệnh | Đúng khi thấy |
 |---|---|---|
 | 1 | `cd /d/VOYA-Collector` | |
-| 2 | `git status` | `working tree clean`. Nếu không sạch: **dừng**, báo người phụ trách |
-| 3 | `git fetch --all --prune` | Không có `error` hay `fatal` |
-| 4 | `git switch main` | `Switched to branch 'main'` |
-| 5 | `git pull --ff-only` | `Fast-forward` hoặc `Already up to date`. Nếu `fatal`: **dừng**, báo người phụ trách |
-| 6 | `cmd //c "VOYA.bat update-code --frontend"` | Chạy xong không lỗi (5–10 phút) |
-| 7 | `cmd //c "VOYA.bat status"` | Mọi dịch vụ `healthy` |
+| 2 | `git status` | `working tree clean`. Không sạch: **dừng**, báo người phụ trách |
+| 3 | `grep -c -e REPLACE_WITH_RANDOM_SECRET -e change-me-in-production .env` | `0`. Khác 0: thay `SECRET_KEY` và `AUTH_TOKEN_SECRET_KEY` bằng khoá ngẫu nhiên trước, nếu không backend mới từ chối khởi động |
+| 4 | `grep "^VOYA_REGISTRY_NS=" .env` | Có một dòng. Chưa có thì thêm: `printf '\nVOYA_REGISTRY_NS=<tai-khoan-docker-hub>\n' >> .env` |
+| 5 | `git fetch origin` | Không có `error` hay `fatal` |
+| 6 | `git merge-base --is-ancestor HEAD origin/main && echo OK` | `OK`. Không in gì: **dừng**, báo người phụ trách |
+| 7 | `git switch -C main` | `Switched to and reset branch 'main'`. Nhánh `main` trên máy đứng đúng bản đang chạy |
+| 8 | `git branch -u origin/main` | `branch 'main' set up to track 'origin/main'` |
+| 9 | `cmd //c "VOYA.bat update-git"` | Liệt kê commit mới, báo `Che do keo anh`. Gõ `co` để tiếp tục. Chờ tới `OK: update-git` |
+| 10 | `cmd //c "VOYA.bat status"` | Mọi dịch vụ `healthy` |
+
+Lệnh 7–8 là mẹo để `update-git` thấy toàn bộ khác biệt giữa bản đang chạy và `main`, rồi đi đúng quy trình thường ngày: sao lưu DB, bật trang bảo trì, kéo ảnh, kiểm sức khoẻ, hỏng thì tự quay về.
 
 Xong thì mở web, đăng nhập và thử vài chức năng.
 
-**Quay về nếu hỏng:**
+**Quay về nếu hỏng** (khi `update-git` chưa tự quay về):
 
 ```bash
 git switch deploy_ctu_ver-2.2.1
-cmd //c "VOYA.bat update-code --frontend"
+cmd //c "VOYA.bat rollback"
 ```
 
-Dữ liệu không mất, vì `main` không đổi cấu trúc DB so với `deploy_ctu_ver-2.2.1` (đã kiểm ngày 08/11/2026). Điều này chỉ đúng cho lần chuyển này.
+Dữ liệu không mất, vì `main` không đổi cấu trúc DB so với `deploy_ctu_ver-2.2.1` (cùng lược đồ v8, kiểm ngày 10/11/2026). Điều này chỉ đúng cho lần chuyển này.
 
 ## 3. Máy có bản luận văn: cất ra trước khi chuyển nhánh
 
