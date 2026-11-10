@@ -42,42 +42,49 @@ Cách khác: mở PR trên GitHub với `base: main` ← `compare: son_arrange_r
 
 ## 2. Chuyển máy chạy web sang `main` (làm một lần)
 
-Máy **tải ảnh CI đã dựng** thay vì tự dựng. Lần đầu tải khoảng 4,5 GB, nhưng web vẫn chạy trong lúc tải; chỉ gián đoạn vài phút lúc đổi sang bản mới. Làm vào giờ ít người dùng.
+Máy **tải ảnh CI đã dựng** thay vì tự dựng. Lần đầu tải khoảng 5 GB (nén), nhưng web vẫn chạy trong lúc tải; chỉ gián đoạn vài phút lúc đổi sang bản mới. Làm vào giờ ít người dùng.
 
 Trước khi bắt đầu, trên GitHub, tab **Actions**: lượt *Build & push images* mới nhất của `main` phải xanh.
 
 | # | Lệnh | Đúng khi thấy |
 |---|---|---|
 | 1 | `cd /d/VOYA-Collector` | |
-| 2 | `git status` | `working tree clean`. Không sạch: **dừng**, báo người phụ trách |
-| 3 | `grep -c -e REPLACE_WITH_RANDOM_SECRET -e change-me-in-production .env` | `0`. Khác 0: thay `SECRET_KEY` và `AUTH_TOKEN_SECRET_KEY` bằng khoá ngẫu nhiên trước, nếu không backend mới từ chối khởi động |
-| 4 | `grep "^VOYA_REGISTRY_NS=" .env` | Có một dòng. Chưa có thì thêm: `printf '\nVOYA_REGISTRY_NS=<tai-khoan-docker-hub>\n' >> .env` |
-| 5 | `git fetch origin` | Không có `error` hay `fatal` |
-| 6 | `git merge-base --is-ancestor HEAD origin/main && echo OK` | `OK`. Không in gì: **dừng**, báo người phụ trách |
-| 7 | `git switch -C main` | `Switched to and reset branch 'main'`. Nhánh `main` trên máy đứng đúng bản đang chạy |
-| 8 | `git branch -u origin/main` | `branch 'main' set up to track 'origin/main'` |
-| 9 | `git show origin/main:scripts/voya.py > scripts/voya_main.py` | Không in gì |
-| 10 | `cmd //c "python scripts\voya_main.py update-git"` | Liệt kê commit mới, báo `Che do keo anh`. Gõ `co` để tiếp tục. Chờ tới `OK: update-git` |
-| 11 | `rm scripts/voya_main.py` | |
-| 12 | `cmd //c "VOYA.bat status"` | Mọi dịch vụ `healthy` |
+| 2 | `git branch --show-current` | `deploy_ctu_ver-2.2.1`. Tên khác thì **ghi lại**, dùng tên đó ở phần quay về |
+| 3 | `git status --short --untracked-files=no` | Không in gì. Có tệp: **dừng**, báo người phụ trách |
+| 4 | `grep -c -e "^SECRET_KEY=." -e "^AUTH_TOKEN_SECRET_KEY=." .env` | `1` hoặc `2`. Ra `0`: thêm `AUTH_TOKEN_SECRET_KEY=<khoá ngẫu nhiên 64 ký tự>` vào `.env` trước, nếu không backend mới từ chối khởi động |
+| 5 | `grep -c -e REPLACE_WITH_RANDOM_SECRET -e change-me-in-production .env` | `0`. Khác 0: thay giá trị mẫu đó bằng khoá ngẫu nhiên |
+| 6 | `grep "^VOYA_REGISTRY_NS=" .env` | Có một dòng. Chưa có thì thêm: `printf '\nVOYA_REGISTRY_NS=<tai-khoan-docker-hub>\n' >> .env` |
+| 7 | `df -h /c /d` | Ổ chứa dữ liệu Docker (Docker Desktop → *Settings* → *Resources*) còn trống **ít nhất 20 GB** |
+| 8 | `git fetch origin` | Không có `error` hay `fatal` |
+| 9 | `git merge-base --is-ancestor HEAD origin/main && echo OK` | `OK`. Không in gì: **dừng**, báo người phụ trách |
+| 10 | `git switch -C main` | `Switched to a new branch 'main'` (máy đã có nhánh `main` thì `Switched to and reset branch 'main'`) |
+| 11 | `git branch -u origin/main` | `branch 'main' set up to track 'origin/main'` |
+| 12 | `git show origin/main:scripts/voya.py > scripts/voya_main.py` | Không in gì |
+| 13 | `cmd //c "python scripts\voya_main.py update-git"` | Liệt kê commit mới, báo `Che do keo anh`. Gõ `co` để tiếp tục. Chờ tới `OK: update-git` |
+| 14 | `git restore --source=deploy_ctu_ver-2.2.1 --worktree -- processed/train_utils/outputs` | Không in gì (tên nhánh ở lệnh 2 khác thì thay vào) |
+| 15 | `rm scripts/voya_main.py` | |
+| 16 | `cmd //c "VOYA.bat status"` | Mọi dịch vụ `healthy` |
 
-Lệnh 7–8 là mẹo để `update-git` thấy toàn bộ khác biệt giữa bản đang chạy và `main`, rồi đi đúng quy trình thường ngày: sao lưu DB, tải ảnh trong lúc web vẫn chạy, bật trang bảo trì, đổi bản, kiểm sức khoẻ, hỏng thì tự quay về ảnh cũ.
+Giải thích:
 
-Lệnh 9–11 chỉ cần cho lần chuyển này. `scripts/voya.py` trên máy vẫn là bản của `deploy_ctu_ver-2.2.1`, chưa có chế độ kéo ảnh: chạy `VOYA.bat update-git` lúc này sẽ **dựng lại toàn bộ tại chỗ** (tải lại torch khoảng 3 GB, từng kẹt nhiều giờ). Tệp tạm `voya_main.py` là `voya.py` của `main`; git bỏ qua nó vì chưa theo dõi. Từ lần sau chỉ cần `cmd //c "VOYA.bat update-git"`.
-
-Lệnh 10 báo `chua co anh tren Docker Hub` mà tab Actions đã xanh: thường do mạng chập chờn lúc hỏi Docker Hub. Lệnh dừng trước khi đụng vào gì, chạy lại là được.
+- **Lệnh 10–11** là mẹo để `update-git` thấy toàn bộ khác biệt giữa bản đang chạy và `main`, rồi đi đúng quy trình thường ngày: sao lưu DB, tải ảnh trong lúc web vẫn chạy, bật trang bảo trì, đổi bản, kiểm sức khoẻ, hỏng thì tự quay về ảnh cũ.
+- **Lệnh 12, 13, 15** chỉ cần cho lần chuyển này. `scripts/voya.py` trên máy vẫn là bản của `deploy_ctu_ver-2.2.1`, chưa có chế độ kéo ảnh: chạy `VOYA.bat update-git` lúc này sẽ **dựng lại toàn bộ tại chỗ** (tải lại torch khoảng 3 GB, từng kẹt nhiều giờ). Tệp tạm `voya_main.py` là `voya.py` của `main`; git bỏ qua nó vì chưa theo dõi. Từ lần sau chỉ cần `cmd //c "VOYA.bat update-git"`.
+- **Lệnh 13** báo `chua co anh tren Docker Hub` mà tab Actions đã xanh: thường do mạng chập chờn lúc hỏi Docker Hub. Lệnh dừng trước khi đụng vào gì, chạy lại là được.
+- **Lệnh 14:** `main` không còn giữ trong git các kết quả huấn luyện tháng 5–6 (`processed/train_utils/outputs/subset_*`), nên `git pull` ở lệnh 13 xoá chúng khỏi đĩa. Lệnh này chép lại từ nhánh cũ; `main` bỏ qua thư mục đó nên cây làm việc vẫn sạch. Kết quả huấn luyện chưa từng nằm trong git thì không bị đụng tới.
+- Cũng ở lệnh 13, git xoá luận văn và báo cáo (`docs/00-thesis`, `reports/`, ...) khỏi đĩa máy này. Máy chạy web không dùng chúng; bản gốc vẫn còn trong lịch sử git.
 
 Xong thì mở web, đăng nhập và thử vài chức năng.
 
-**Quay về nếu hỏng.** `update-git` hỏng ở bước kiểm sức khoẻ thì tự gắn lại ảnh cũ, nhưng mã trên đĩa vẫn là `main`. Để về hẳn bản cũ (cả lúc nó tự quay về lẫn lúc phát hiện lỗi sau đó):
+**Quay về nếu hỏng.** `update-git` hỏng ở bước kiểm sức khoẻ thì tự gắn lại ảnh cũ, nhưng mã trên đĩa vẫn là `main`. Để về hẳn bản cũ (cả lúc nó tự quay về lẫn lúc phát hiện lỗi sau đó), dùng tên nhánh ở lệnh 2:
 
 ```bash
+cd /d/VOYA-Collector
 git switch deploy_ctu_ver-2.2.1
 cmd //c "VOYA.bat rollback"
 cmd //c "VOYA.bat status"
 ```
 
-`rollback` không đối số chọn mốc mới nhất, chính là ảnh đang chạy ngay trước lần cập nhật. Gõ `quay lui` để xác nhận.
+`rollback` in danh sách mốc rồi hỏi có quay về mốc mới nhất không. Mốc đó phải trùng dòng `Moc quay lui: rollback-auto-...` mà lệnh 13 đã in (mốc mới nhất). Đúng thì gõ `quay lui`.
 
 Dữ liệu không mất, vì `main` không đổi cấu trúc DB so với `deploy_ctu_ver-2.2.1` (cùng lược đồ v8, kiểm ngày 10/11/2026). Điều này chỉ đúng cho lần chuyển này.
 
@@ -198,6 +205,6 @@ Sửa code, commit, rồi `git push`. CI tự chạy; xem kết quả ở tab **
 |---|---|
 | `deploy_ctu_ver-2.2.1` | Giữ vài tuần để quay về khi cần, rồi xoá |
 | `hoanganh_pytorch2tflie` | Bỏ qua, không có gì cần gộp |
-| `experiment/feature-v2`, `feature/vocab-schema-v2` | Không còn gì riêng, có thể xoá |
-| `dependabot/...` | Do Dependabot tạo và tự xoá khi PR đóng |
+| `experiment/feature-v2`, `feature/vocab-schema-v2`, `son_arrange_repo` | Đã nằm trọn trong `main`, có thể xoá |
+| `dependabot/...` | Do Dependabot tạo và tự xoá khi PR đóng. PR nào nhắm `main` (tạo trước khi Dependabot chuyển sang `son_arrange_repo2`) thì **đóng, đừng gộp**: gộp vào `main` làm `main` có commit mà `son_arrange_repo2` thiếu, và CI sẽ từ chối dựng ảnh |
 | Các nhánh còn lại | Hỏi người tạo trước khi xoá |
