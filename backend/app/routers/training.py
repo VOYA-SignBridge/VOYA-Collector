@@ -140,6 +140,114 @@ def _split_evidence_problems(dialects, nguong, thu_muc=None):
     )
 
 
+async def _kiem_truoc_khi_nop(config: TrainingConfig, current_user: Dict[str, Any], working_tenant: str) -> None:
+    """Các chốt của `POST /training/start` mà bản tái cấu trúc đã đánh rơi.
+
+    Khôi phục nguyên hành vi của bản chạy trên máy web trước 10/11/2026: không
+    test nào gọi tới chúng nên CI vẫn xanh khi chúng biến mất.
+
+    1. Hiện vật vận hành CÁ NHÂN của người khác: trả "không tìm thấy".
+    2. Phạm vi phương ngữ của lượt chạy phải nằm trong hiện vật; để trống thì
+       lấy đúng phạm vi hiện vật (nhờ vậy chốt quyền ở bước 3 soi được nó).
+    3. Quyền dùng từng phương ngữ — soi SAU bước 2, không phải trước.
+    4. Sàn mẫu mỗi lớp (`MIN_SAMPLES_PER_CLASS_FOR_TRAINING`), đọc trên đúng tập
+       mà trainer sẽ đọc.
+    """
+    hien_vat: Optional[Path] = None
+    split_id = str(config.operational_split_id or "").strip()
+    if split_id and config.run_purpose != "research":
+        import sys
+
+        workspace = str(WORKSPACE_ROOT)
+        if workspace not in sys.path:
+            sys.path.insert(0, workspace)
+        from processed.train_utils.split_artifact import (
+            PURPOSE_OPERATIONAL, SplitArtifactError, resolve_split_artifact,
+        )
+
+        try:
+            art = await asyncio.to_thread(
+                lambda: resolve_split_artifact(
+                    purpose=PURPOSE_OPERATIONAL, splits_root=SPLITS_DIR,
+                    split_id=split_id, tenant_id=working_tenant),
+            )
+        except SplitArtifactError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        chu_rieng = str((art.metadata or {}).get("auth_user_id") or "")
+        if chu_rieng and chu_rieng != str(current_user.get("id") or ""):
+            raise HTTPException(status_code=400, detail=f"Không tìm thấy tập chia '{split_id}'.")
+        hien_vat = Path(art.train_csv).parent
+
+        pham_vi = list(((art.metadata or {}).get("scope") or {}).get("dialects") or [])
+        xin = [d for d in (config.dialects or []) if d]
+        if xin and pham_vi and set(xin) - set(pham_vi):
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Hiện vật '{split_id}' chỉ chứa phương ngữ {pham_vi}, nhưng lượt "
+                        f"chạy xin {sorted(set(xin))}. Lọc thêm sẽ làm checkpoint học một "
+                        f"tập nhỏ hơn tập hiện vật khai báo."),
+            )
+        if not xin:
+            config.dialects = pham_vi
+
+    selected = [] if config.run_purpose == "research" else [d for d in (config.dialects or []) if d]
+    for dialect in selected:
+        try:
+            assert_can_use_dialect(dialect, str(current_user.get("id") or ""), working_tenant)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not selected:
+        return
+
+    from app.config import settings as _cfg
+
+    nguong = int(_cfg.min_samples_per_class_for_training or 0)
+    if nguong <= 0:
+        return
+    du = await asyncio.to_thread(_eligible_class_counts, selected, nguong)
+    ngheo = [d for d in selected if du.get(d, 0) < 2]
+    if ngheo:
+        chi_tiet = ", ".join(f"{d} ({du.get(d, 0)} lớp đạt)" for d in ngheo)
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Không đủ lớp đã thu đủ mẫu để huấn luyện: {chi_tiet}. Một lớp phải "
+                    f"có ≥{nguong} npz (≈{nguong // 5} lần quay) mới được tính, và mỗi "
+                    f"phương ngữ cần ≥2 lớp như vậy."),
+        )
+
+    lan = await asyncio.to_thread(_split_classes_below_floor, selected, nguong, hien_vat)
+    if lan:
+        khai = _split_snapshot(hien_vat)
+        san_split = khai.get("min_samples_per_class")
+        vi_du = "; ".join(f"{ten} ({n} mẫu)" for ten, _uid, n in lan[:5])
+        them = f" và {len(lan) - 5} lớp nữa" if len(lan) > 5 else ""
+        if san_split is None:
+            ly_do = "Tập chia hiện tại không khai báo sàn nào (dựng trước khi có cơ chế này)."
+        elif int(san_split or 0) < nguong:
+            ly_do = f"Tập chia được dựng với sàn {san_split}, thấp hơn sàn đang áp ({nguong})."
+        else:
+            ly_do = (f"Tập chia khai sàn {san_split} nhưng dữ liệu đã đổi từ lúc chia — "
+                     f"có mẫu bị xoá sau đó.")
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Tập chia còn {len(lan)} lớp chưa đủ {nguong} mẫu: {vi_du}{them}. {ly_do} "
+                    f"Hãy chia lại trước khi huấn luyện: python processed/splits/make_splits.py "
+                    f"--min_samples_per_class={nguong}. Hệ thống KHÔNG tự lọc các lớp này ra, "
+                    f"vì một checkpoint huấn luyện trên tập nhỏ hơn tệp split khai báo là một "
+                    f"checkpoint nói sai về nguồn gốc của nó."),
+        )
+
+    bang_chung = await asyncio.to_thread(_split_evidence_problems, selected, nguong, hien_vat)
+    if bang_chung:
+        raise HTTPException(
+            status_code=400,
+            detail=("Nội dung tập chia không khớp với chính sách nó khai báo: "
+                    + "; ".join(bang_chung)
+                    + f". Chia lại: python processed/splits/make_splits.py "
+                      f"--min_samples_per_class={nguong}."),
+        )
+
+
 def _split_snapshot(thu_muc=None):
     return dataset_provenance.split_snapshot(
         Path(thu_muc) if thu_muc is not None else SPLITS_DIR
@@ -546,15 +654,7 @@ async def start_training(
     if working_tenant != tenant_of(current_user):
         guard_quota(current_user, "training_jobs_running", tenant_id=working_tenant)
         guard_quota(current_user, "training_jobs_queued", tenant_id=working_tenant)
-    for dialect in config.dialects or []:
-        try:
-            assert_can_use_dialect(
-                dialect,
-                str(current_user.get("id") or ""),
-                working_tenant,
-            )
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    await _kiem_truoc_khi_nop(config, current_user, working_tenant)
 
     config.personal = not await asyncio.to_thread(
         _duyet_duoc, current_user, working_tenant

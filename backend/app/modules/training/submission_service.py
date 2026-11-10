@@ -147,17 +147,38 @@ async def submit_training_job(
     try:
         from app.modules.training.tasks import run_training_job
 
-        await asyncio.to_thread(
-            run_training_job.apply_async,
-            kwargs={"job_id": job_id},
-            queue="training",
-        )
+        # Redis chập chờn một nhịp không được đánh hỏng lượt chạy: thử 3 lần,
+        # lùi 0,5s rồi 1s (bản chạy trước tái cấu trúc làm vậy; bản tách service
+        # chỉ thử một lần).
+        for attempt in range(3):
+            try:
+                await asyncio.to_thread(
+                    run_training_job.apply_async,
+                    kwargs={"job_id": job_id},
+                    queue="training",
+                )
+                break
+            except Exception as exc:
+                logger.warning("job=%s dispatch attempt %d/3 failed: %s", job_id, attempt + 1, exc)
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
         logger.info("job=%s dispatched to trainer by user=%s", job_id, username)
     except Exception as exc:
         job.status = "failed"
         job.completed_at = datetime.now().isoformat()
         job.error_message = f"Không gửi được job tới trainer (Redis/Celery down?): {exc}"
         await persist_job(job)
+        # Gửi không được luôn là lỗi hệ thống, không phải lỗi dữ liệu của người dùng.
+        try:
+            from app.modules.training.training_alerts import notify_admins_training_failure
+
+            notify_admins_training_failure(
+                job_id=job_id, actor=str(username or auth_user_id or ""),
+                error=job.error_message, source="dispatch",
+            )
+        except Exception:
+            logger.exception("job=%s could not alert admins about the dispatch failure", job_id)
         raise QueueUnavailableError from exc
 
     return job
