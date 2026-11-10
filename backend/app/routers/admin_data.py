@@ -5,8 +5,11 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends
 
-from app.modules.identity._web_compat import require_tenant_editor
-from app.modules.identity import require_admin
+# Cùng cổng xác thực với mọi router khác. `app.modules.identity.require_admin`
+# đứng trên một `get_current_user` rút gọn: không soát token đã đăng xuất (jti),
+# họ token bị thu hồi, mốc vô hiệu phiên sau đổi mật khẩu, hay khoá API — nên một
+# phiên quản trị đã thu hồi vẫn gọi được /sync-local cho tới khi token hết hạn.
+from app.modules.identity._web_compat import require_admin, require_tenant_editor
 from app.modules.security.account_controls import resolve_usernames
 from app.modules.google_sync.restore_tasks import download_missing_files_to_local
 
