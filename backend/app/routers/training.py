@@ -1093,8 +1093,13 @@ async def websocket_training_progress(websocket: WebSocket, job_id: str, token: 
         await websocket.accept()
 
         try:
+            # Đọc LẠI job ở mỗi vòng poll: trainer chạy ở container khác và chỉ
+            # ghi trạng thái vào Postgres. Trả lại `job_info` lúc kết nối thì
+            # trạng thái đứng mãi ở "running", trang không bao giờ sang bước kết
+            # quả, và thanh tiến độ kẹt ở epoch cuối (10/11/2026: dừng sớm ở
+            # epoch 18/80 -> "23%" dù job đã xong).
             async def ensure_visible(_job_id: str):
-                return job_info if _job_id == job_id else None
+                return await _job_cua(_job_id, user) if _job_id == job_id else None
 
             await progress_service.stream_job_progress(
                 job_id,

@@ -152,3 +152,29 @@ def test_progress_websocket_uses_the_working_tenant(monkeypatch):
         first = ws.receive_json()
     assert first["type"] == "status" and first["data"]["status"] == "completed"
     assert set(seen_scopes) == {WORKING}
+
+
+def test_progress_websocket_reports_completion_of_a_running_job(monkeypatch):
+    """Trainer ghi trạng thái vào Postgres ở container khác; WS phải đọc LẠI job.
+
+    10/11/2026: endpoint trả mãi `job_info` lúc kết nối, nên "completed" không bao
+    giờ tới trình duyệt — trang kẹt ở 23% (dừng sớm epoch 18/80) dù job đã xong.
+    """
+    monkeypatch.setattr(tr, "get_user_from_token",
+                        lambda token: {"id": "u-minh67", "username": "Minh67", "tenant_id": HOME})
+    monkeypatch.setattr(tm, "_tenant_of_user", lambda user_id: WORKING)
+
+    states = iter(["running", "running", "completed"])
+
+    async def _load(job_id):
+        status = next(states, "completed")
+        return {"job": tr.TrainingJob(id="job-r", status=status, config=tr.TrainingConfig(),
+                                      created_at="2026-11-10T00:00:00"),
+                "tenant_id": WORKING}
+
+    monkeypatch.setattr(tr, "_ensure_job_loaded", _load)
+    monkeypatch.setattr("app.storage.metadata_db.list_training_metrics", lambda job_id: [])
+
+    with client.websocket_connect("/training/ws/job-r?token=t") as ws:
+        seen = [ws.receive_json()["data"]["status"], ws.receive_json()["data"]["status"]]
+    assert seen == ["running", "completed"]
