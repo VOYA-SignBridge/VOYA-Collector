@@ -56,19 +56,28 @@ Trước khi bắt đầu, trên GitHub, tab **Actions**: lượt *Build & push 
 | 6 | `git merge-base --is-ancestor HEAD origin/main && echo OK` | `OK`. Không in gì: **dừng**, báo người phụ trách |
 | 7 | `git switch -C main` | `Switched to and reset branch 'main'`. Nhánh `main` trên máy đứng đúng bản đang chạy |
 | 8 | `git branch -u origin/main` | `branch 'main' set up to track 'origin/main'` |
-| 9 | `cmd //c "VOYA.bat update-git"` | Liệt kê commit mới, báo `Che do keo anh`. Gõ `co` để tiếp tục. Chờ tới `OK: update-git` |
-| 10 | `cmd //c "VOYA.bat status"` | Mọi dịch vụ `healthy` |
+| 9 | `git show origin/main:scripts/voya.py > scripts/voya_main.py` | Không in gì |
+| 10 | `cmd //c "python scripts\voya_main.py update-git"` | Liệt kê commit mới, báo `Che do keo anh`. Gõ `co` để tiếp tục. Chờ tới `OK: update-git` |
+| 11 | `rm scripts/voya_main.py` | |
+| 12 | `cmd //c "VOYA.bat status"` | Mọi dịch vụ `healthy` |
 
-Lệnh 7–8 là mẹo để `update-git` thấy toàn bộ khác biệt giữa bản đang chạy và `main`, rồi đi đúng quy trình thường ngày: sao lưu DB, bật trang bảo trì, kéo ảnh, kiểm sức khoẻ, hỏng thì tự quay về.
+Lệnh 7–8 là mẹo để `update-git` thấy toàn bộ khác biệt giữa bản đang chạy và `main`, rồi đi đúng quy trình thường ngày: sao lưu DB, tải ảnh trong lúc web vẫn chạy, bật trang bảo trì, đổi bản, kiểm sức khoẻ, hỏng thì tự quay về ảnh cũ.
+
+Lệnh 9–11 chỉ cần cho lần chuyển này. `scripts/voya.py` trên máy vẫn là bản của `deploy_ctu_ver-2.2.1`, chưa có chế độ kéo ảnh: chạy `VOYA.bat update-git` lúc này sẽ **dựng lại toàn bộ tại chỗ** (tải lại torch khoảng 3 GB, từng kẹt nhiều giờ). Tệp tạm `voya_main.py` là `voya.py` của `main`; git bỏ qua nó vì chưa theo dõi. Từ lần sau chỉ cần `cmd //c "VOYA.bat update-git"`.
+
+Lệnh 10 báo `chua co anh tren Docker Hub` mà tab Actions đã xanh: thường do mạng chập chờn lúc hỏi Docker Hub. Lệnh dừng trước khi đụng vào gì, chạy lại là được.
 
 Xong thì mở web, đăng nhập và thử vài chức năng.
 
-**Quay về nếu hỏng** (khi `update-git` chưa tự quay về):
+**Quay về nếu hỏng.** `update-git` hỏng ở bước kiểm sức khoẻ thì tự gắn lại ảnh cũ, nhưng mã trên đĩa vẫn là `main`. Để về hẳn bản cũ (cả lúc nó tự quay về lẫn lúc phát hiện lỗi sau đó):
 
 ```bash
 git switch deploy_ctu_ver-2.2.1
 cmd //c "VOYA.bat rollback"
+cmd //c "VOYA.bat status"
 ```
+
+`rollback` không đối số chọn mốc mới nhất, chính là ảnh đang chạy ngay trước lần cập nhật. Gõ `quay lui` để xác nhận.
 
 Dữ liệu không mất, vì `main` không đổi cấu trúc DB so với `deploy_ctu_ver-2.2.1` (cùng lược đồ v8, kiểm ngày 10/11/2026). Điều này chỉ đúng cho lần chuyển này.
 
