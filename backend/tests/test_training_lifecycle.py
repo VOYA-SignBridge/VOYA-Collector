@@ -182,6 +182,20 @@ def test_submit_resolves_provenance_from_the_exact_run_config(client, monkeypatc
         )
 
     monkeypatch.setattr(training_module, "_split_provenance", _capture)
+    # The start gate resolves the pinned artifact itself (owner, dialect scope,
+    # sample floor), so the artifact has to exist for the run to be accepted.
+    import sys
+
+    repo_root = str(Path(__file__).resolve().parents[2])
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    import processed.train_utils.split_artifact as split_artifact
+
+    root = Path("/khong-ton-tai/operational/sp-42")
+    monkeypatch.setattr(split_artifact, "resolve_split_artifact", lambda **_: split_artifact.SplitArtifact(
+        split_id="sp-42", purpose="operational", train_csv=root / "train.csv",
+        val_csv=root / "val.csv", test_csv=root / "test.csv",
+        metadata={"scope": {"dialects": ["hoa-de"]}}, tenant_id=USER["tenant_id"], owner_state="owned"))
     with patch("app.modules.training.tasks.run_training_job"):
         response = client.post(
             "/training/start",
