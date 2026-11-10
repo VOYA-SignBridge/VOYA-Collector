@@ -21,7 +21,10 @@ from app.modules.security.geo import (
     location_label,
 )
 from app.modules.security.ip_controls import block_key, get_block, list_blocked
-from app.modules.security.rate_limits import LOGIN_MAX_ATTEMPTS, client_ip
+# Ngưỡng cảnh báo theo IP (200), không phải trần theo tài khoản (5): cả trường
+# đứng sau một IP, nên 5 lần gõ sai mật khẩu ở một phòng máy không phải "dò mật khẩu".
+from app.modules.security._web_compat import LOGIN_IP_WARN_ATTEMPTS
+from app.modules.security.rate_limits import client_ip
 
 ONLINE_TTL = int(os.getenv("ACTIVITY_ONLINE_TTL", "600"))
 ONLINE_ACTIVE_SECONDS = int(os.getenv("ACTIVITY_ACTIVE_SECONDS", "120"))
@@ -247,7 +250,7 @@ def detect_anomalies(sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     count = int(client.get(key) or 0)
                 except Exception:
                     continue
-                if count >= LOGIN_MAX_ATTEMPTS:
+                if count >= LOGIN_IP_WARN_ATTEMPTS:
                     ip = key.split(":")[-1]
                     location = location_label(geo_lookup(ip))
                     output.append({

@@ -24,16 +24,16 @@ KEY_PREFIX = "ratelimit:"
 
 
 def client_ip(request: Request) -> str:
-    """Return the first trusted gateway IP header, then the socket peer."""
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        first = forwarded_for.split(",")[0].strip()
-        if first:
-            return first
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    return (request.client.host if request.client else "unknown") or "unknown"
+    """The one client-address rule: headers count only from our own proxies.
+
+    Bản tách cũ của hàm này tin ngay mục ĐẦU của `X-Forwarded-For` — chính mục
+    người gọi tự viết được. Nó canh danh sách IP bị chặn ở middleware hoạt động,
+    nên một IP đã bị quản trị chặn chỉ cần gửi `X-Forwarded-For: 1.2.3.4` là
+    qua (10/11/2026). Mọi nơi phải dùng cùng một quy tắc: của `_web_compat`.
+    """
+    from app.modules.security._web_compat import client_ip as trusted_client_ip
+
+    return trusted_client_ip(request)
 
 
 def increment_with_window(key: str, window: int) -> Tuple[int, int]:

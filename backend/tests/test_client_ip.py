@@ -165,3 +165,34 @@ def test_rightmost_untrusted_hop_wins_over_a_forged_one_on_the_left():
     """
     req = _request(real_ip=None, xff="1.2.3.4, 198.51.100.4, 10.0.0.5", peer="10.0.0.9")
     assert client_ip(req) == "198.51.100.4"
+
+
+# ===========================================================================
+# one rule for every caller
+# ===========================================================================
+
+@pytest.mark.parametrize("req", [
+    _request(real_ip="203.0.113.7", xff="1.2.3.4, 203.0.113.7"),
+    _request(real_ip="203.0.113.7", xff="1.2.3.4", peer="198.51.100.77"),
+    _request(xff="1.2.3.4"),
+])
+def test_every_client_ip_entry_point_uses_the_same_rule(req):
+    """10/11/2026: `rate_limits.client_ip` trusted the FIRST X-Forwarded-For hop.
+
+    It keys the admin IP ban in the activity middleware and the presence log, so
+    a banned address only had to send `X-Forwarded-For: 1.2.3.4` to get through.
+    """
+    from app.modules.security import activity_monitor, rate_limits
+    from app.routers import presence
+
+    expected = client_ip(req)
+    assert rate_limits.client_ip(req) == expected
+    assert activity_monitor.client_ip(req) == expected
+    assert presence.client_ip(req) == expected
+
+
+def test_a_banned_address_cannot_rename_itself_in_the_activity_guard():
+    from app.modules.security import activity_monitor
+
+    forged = _request(real_ip="203.0.113.7", xff="1.2.3.4", peer="198.51.100.77")
+    assert activity_monitor.client_ip(forged) == "198.51.100.77"
