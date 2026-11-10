@@ -152,6 +152,14 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(len(self._watch([])), 1)                    # hết lỗi: báo "đã ổn"
         self.assertEqual(self._watch([]), [])
 
+    def test_a_growing_number_is_not_a_new_problem(self):
+        self.assertEqual(len(self._watch(["ban sao luu DB moi nhat da 30 gio"])), 1)
+        self.assertEqual(self._watch(["ban sao luu DB moi nhat da 31 gio"]), [])
+        self.assertEqual(self._watch(["ban sao luu DB moi nhat da 241 gio"]), [])
+        # Lỗi KHÁC loại vẫn được báo, kể cả khi lỗi cũ còn đó.
+        sent = self._watch(["ban sao luu DB moi nhat da 242 gio", "o D:\\ chi con 12 GB"])
+        self.assertEqual(len(sent), 1)
+
     def test_image_drift_is_reported(self):
         voya._write_json(voya.DEPLOY_STATE, {"images": {"backend": "sha:new"}})
         with patch.object(voya, "compose") as compose, \

@@ -969,6 +969,11 @@ def watch_problems() -> list[str]:
     return problems
 
 
+def _problem_kind(problem: str) -> str:
+    """Loại lỗi, không kèm số đo (giờ, GB, phút) thay đổi giữa các lượt."""
+    return re.sub(r"\d+", "#", problem)
+
+
 def cmd_watch(args):
     """Canh gac (nhe): kiem va bao dong khi CO THAY DOI; --fix = tu bat lai stack neu dang tat."""
     if STOPPED_FLAG.exists():
@@ -987,7 +992,11 @@ def cmd_watch(args):
     if not problems:
         print("OK: moi thu on.")
     # Chỉ báo khi tình trạng ĐỔI — cùng một lỗi không được báo lại mỗi 30 phút.
-    new = [p for p in problems if p not in previous]
+    # So theo câu đã bỏ con số: "sao luu ... da 241 gio" và "... 242 gio" là CÙNG
+    # một lỗi. So nguyên văn thì mỗi lượt là "lỗi mới" và máy chạy web nhận ~200
+    # thông báo trong 10 ngày sao lưu trễ (31/10–10/11/2026).
+    seen = {_problem_kind(p) for p in previous}
+    new = [p for p in problems if _problem_kind(p) not in seen]
     if new:
         notify("Server VOYA co van de", "\n".join(new) + "\nXem bang dieu khien: VOYA_UI.bat")
     elif previous and not problems:
