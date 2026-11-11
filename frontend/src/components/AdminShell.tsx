@@ -34,24 +34,35 @@ import { useAdminAttention } from "../hooks/useAdminAttention";
 
 const ICON = "h-5 w-5 shrink-0";
 
-type AdminNavItem = { key: string; href: string; icon: ReactNode; end?: boolean };
+type NavGroup = "daily" | "data" | "system" | "org";
+type AdminNavItem = { key: string; href: string; icon: ReactNode; group: NavGroup; end?: boolean };
 
 const ADMIN_NAV: AdminNavItem[] = [
-  { key: "Tổng quan", href: "/admin", icon: <ChartBarIcon className={ICON} />, end: true },
-  { key: "Quản lý dữ liệu", href: "/admin/data", icon: <DatabaseIcon className={ICON} /> },
-  { key: "Quản lý người dùng", href: "/admin/users", icon: <UsersIcon className={ICON} /> },
-  { key: "Hỗ trợ", href: "/admin/support", icon: <InboxIcon className={ICON} /> },
-  { key: "Giám sát tài nguyên", href: "/admin/resources", icon: <ServerIcon className={ICON} /> },
-  { key: "Phiên hoạt động", href: "/admin/activity", icon: <HardDriveIcon className={ICON} /> },
-  { key: "SOT & thiết bị", href: "/admin/sot", icon: <GearIcon className={ICON} /> },
-  { key: "Người ký", href: "/admin/signers", icon: <UsersIcon className={ICON} /> },
-  { key: "Hàng đợi xử lý", href: "/admin/processing", icon: <ServerIcon className={ICON} /> },
-  { key: "Từ vựng & phương ngữ", href: "/admin/vocabulary", icon: <ScrollTextIcon className={ICON} /> },
-  { key: "Văn bản pháp lý", href: "/admin/legal", icon: <ScrollTextIcon className={ICON} /> },
-  { key: "Tổ chức", href: "/admin/tenants", icon: <BuildingIcon className={ICON} /> },
-  { key: "Gói & thanh toán", href: "/admin/billing", icon: <ChartBarIcon className={ICON} /> },
-  { key: "Thùng rác", href: "/admin/trash", icon: <TrashIcon className={ICON} /> },
+  { group: "daily", key: "Tổng quan", href: "/admin", icon: <ChartBarIcon className={ICON} />, end: true },
+  { group: "daily", key: "Quản lý người dùng", href: "/admin/users", icon: <UsersIcon className={ICON} /> },
+  { group: "daily", key: "Hỗ trợ", href: "/admin/support", icon: <InboxIcon className={ICON} /> },
+  { group: "data", key: "Quản lý dữ liệu", href: "/admin/data", icon: <DatabaseIcon className={ICON} /> },
+  { group: "data", key: "Từ vựng & phương ngữ", href: "/admin/vocabulary", icon: <ScrollTextIcon className={ICON} /> },
+  { group: "data", key: "Người ký", href: "/admin/signers", icon: <UsersIcon className={ICON} /> },
+  { group: "data", key: "Hàng đợi xử lý", href: "/admin/processing", icon: <ServerIcon className={ICON} /> },
+  { group: "data", key: "Thùng rác", href: "/admin/trash", icon: <TrashIcon className={ICON} /> },
+  { group: "system", key: "Giám sát tài nguyên", href: "/admin/resources", icon: <ServerIcon className={ICON} /> },
+  { group: "system", key: "Phiên hoạt động", href: "/admin/activity", icon: <HardDriveIcon className={ICON} /> },
+  { group: "system", key: "SOT & thiết bị", href: "/admin/sot", icon: <GearIcon className={ICON} /> },
+  { group: "org", key: "Tổ chức", href: "/admin/tenants", icon: <BuildingIcon className={ICON} /> },
+  { group: "org", key: "Gói & thanh toán", href: "/admin/billing", icon: <ChartBarIcon className={ICON} /> },
+  { group: "org", key: "Văn bản pháp lý", href: "/admin/legal", icon: <ScrollTextIcon className={ICON} /> },
 ];
+
+/** Nhóm theo việc người vận hành làm, không theo bảng dữ liệu phía sau. */
+function groupLabel(group: NavGroup, t: (k: string) => string): string {
+  switch (group) {
+    case "daily": return t("Hằng ngày");
+    case "data": return t("Dữ liệu");
+    case "system": return t("Hệ thống");
+    default: return t("Tổ chức & pháp lý");
+  }
+}
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -113,9 +124,14 @@ export default function AdminShell({ children }: { children: ReactNode }) {
           }`}
         >
           <nav className="flex h-full flex-col gap-1 overflow-y-auto p-3">
-            {ADMIN_NAV.map((item) => (
+            {ADMIN_NAV.map((item, index) => (
+              <div key={item.href} className="contents">
+                {item.group !== ADMIN_NAV[index - 1]?.group && (
+                  <p className="mt-4 px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500 first:mt-0">
+                    {groupLabel(item.group, t)}
+                  </p>
+                )}
               <NavLink
-                key={item.href}
                 to={item.href}
                 end={item.end}
                 onClick={() => setOpen(false)}
@@ -143,6 +159,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
                   </span>
                 ) : null}
               </NavLink>
+              </div>
             ))}
 
             {/* Bản sao cho màn hình hẹp, nơi ô ở thanh đầu bị giấu để nhường
