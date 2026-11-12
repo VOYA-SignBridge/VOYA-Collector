@@ -377,6 +377,7 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
     """
     from app.modules.security import audit
     from app.core.public_url import resolve_frontend_base_url
+    from app.config import settings
 
     action = (payload.action or "").strip()
     if action not in {"reset_link", "clear_2fa"}:
@@ -401,16 +402,33 @@ def assist_recovery(user_id: str, payload: RecoveryAssist,
     except LookupError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Không tìm thấy người dùng") from None
+    except PermissionError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Tài khoản đang bị vô hiệu, không tạo được liên kết. "
+                                   "Mở lại tài khoản trước.") from None
+    reset_link = target.get("reset_link")
+    detail: Dict[str, Any] = {"action": action, "reason": reason}
+    if reset_link:
+        # Quản trị viên CẦM được liên kết, tức về lý thuyết tự đặt được mật khẩu
+        # cho người khác. Đổi lại là cứu được người không nhận được thư. Ghi rõ
+        # vào kiểm toán để nếu có tranh chấp thì biết liên kết đã qua tay ai.
+        detail["link_shown_to_operator"] = True
+        detail["email_sent"] = bool(target.get("email_sent"))
     audit.record("account.recovery.assisted", actor=operator,
                  target_type="user", target_id=str(target["id"]),
-                 detail={"action": action, "reason": reason}, request=request)
+                 detail=detail, request=request)
     audit_log.log_security_event(
         f"recovery.{action}", actor=operator.get("username", ""),
         target=str(target["id"]), reason=reason,
         actor_user=operator, request=request)
 
-    return {"status": "success", "action": action,
-            "user_id": str(target["id"])}
+    out: Dict[str, Any] = {"status": "success", "action": action,
+                           "user_id": str(target["id"])}
+    if reset_link:
+        out.update(reset_link=reset_link,
+                   email_sent=bool(target.get("email_sent")),
+                   expires_minutes=int(settings.password_reset_token_expire_minutes))
+    return out
 
 
 @router.post("/users/{user_id}/warn")

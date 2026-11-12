@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict
 from app.modules.admin import user_service
 from app.modules.identity import account_workflows
 from app.modules.security import two_factor
+from app.services import email
 from app.modules.support import notifications
 
 
@@ -32,13 +33,26 @@ def assist(
             "Nếu không phải bạn yêu cầu, hãy đổi mật khẩu và báo ngay."
         )
     else:
-        account_workflows.queue_password_reset(
-            str(target.get("email") or ""), resolve_frontend_base_url(), enqueue
+        # Tra theo email, không có email thì theo tên đăng nhập (hàm tra khớp
+        # cả hai). Tài khoản không có email vẫn phải lấy lại được, mà đó lại
+        # đúng là ca cần quản trị viên nhất. Liên kết được trả về để quản trị
+        # viên chuyển tay qua kênh khác; thư chỉ là MỘT đường, không phải duy nhất.
+        identifier = str(target.get("email") or "").strip() or str(target.get("username") or "")
+        issued = account_workflows.issue_password_reset_link(
+            identifier, resolve_frontend_base_url()
         )
-        title = "Quản trị viên đã gửi lại liên kết đặt lại mật khẩu"
+        if issued is None:
+            raise PermissionError("inactive")
+        user, link = issued
+        mail_to = str(user.get("email") or "").strip()
+        if mail_to:
+            enqueue(email.send_password_reset_email, mail_to, user["username"], link)
+        target = {**target, "reset_link": link, "email_sent": bool(mail_to)}
+        title = "Quản trị viên đã tạo liên kết đặt lại mật khẩu cho bạn"
         body = (
             f"Do {operator_name or 'quản trị viên'} thực hiện. Lý do: {reason}. "
-            "Kiểm tra hộp thư của bạn."
+            "Liên kết được gửi vào hộp thư của bạn và có thể được quản trị viên "
+            "chuyển trực tiếp cho bạn. Nếu không phải bạn yêu cầu, hãy báo ngay."
         )
 
     notifications.notify(

@@ -67,6 +67,7 @@ describe('AdminUsersPage', () => {
   });
 
   it('gửi liên kết đặt lại mật khẩu kèm lý do', async () => {
+    post.mockResolvedValue({ data: { reset_link: 'x', email_sent: true } });
     await openSupport();
     const ok = screen.getByRole('button', { name: 'Xác nhận' });
     expect(ok).toBeDisabled();
@@ -80,6 +81,27 @@ describe('AdminUsersPage', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
   });
 
+  it('hiện liên kết để sao chép, không chỉ tin rằng thư đã tới', async () => {
+    post.mockResolvedValue({ data: { reset_link: 'https://web.vn/reset-password?token=abc', email_sent: true, expires_minutes: 30 } });
+    await openSupport();
+    fireEvent.change(screen.getByLabelText('Lý do'), { target: { value: 'Chủ nhờ qua tin nhắn' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận' }));
+    const box = await screen.findByLabelText('Liên kết đặt lại mật khẩu');
+    expect(box).toHaveValue('https://web.vn/reset-password?token=abc');
+    expect(screen.getByRole('button', { name: 'Sao chép' })).toBeInTheDocument();
+    expect(screen.getByText(/hết hạn sau 30 phút/)).toBeInTheDocument();
+  });
+
+  it('tài khoản không có email: vẫn có liên kết, nói rõ thư không đi', async () => {
+    post.mockResolvedValue({ data: { reset_link: 'https://web.vn/reset-password?token=abc', email_sent: false, expires_minutes: 30 } });
+    await openSupport();
+    fireEvent.change(screen.getByLabelText('Lý do'), { target: { value: 'Chủ nhờ qua tin nhắn' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận' }));
+    await screen.findByLabelText('Liên kết đặt lại mật khẩu');
+    expect(screen.getByText(/không có email nên không gửi thư được/)).toBeInTheDocument();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it('gỡ xác thực hai bước gửi đúng hành động', async () => {
     await openSupport();
     fireEvent.click(screen.getByRole('radio', { name: /Gỡ xác thực hai bước/ }));
@@ -90,7 +112,7 @@ describe('AdminUsersPage', () => {
   });
 
   it('hỏi mật khẩu rồi thử lại đúng một lần khi bị đòi nâng quyền', async () => {
-    post.mockRejectedValueOnce({ response: { data: { code: 'sudo_required' } } }).mockResolvedValueOnce({ data: {} });
+    post.mockRejectedValueOnce({ response: { data: { code: 'sudo_required' } } }).mockResolvedValueOnce({ data: { reset_link: 'x', email_sent: true } });
     ensureSudo.mockResolvedValue(true);
     await openSupport();
     fireEvent.change(screen.getByLabelText('Lý do'), { target: { value: 'Chủ nhờ qua tin nhắn' } });

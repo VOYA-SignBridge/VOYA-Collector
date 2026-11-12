@@ -42,17 +42,25 @@ def send_welcome_verification(user: Dict[str, Any]) -> None:
         )
 
 
+def issue_password_reset_link(identifier: str, frontend_base_url: str):
+    """Issue a reset token; return ``(user, link)`` or ``None`` (no active account)."""
+    result = identity.request_password_reset(identifier.strip())
+    if not result:
+        return None
+    user, token = result
+    return user, f"{frontend_base_url}/reset-password?token={token}"
+
+
 def queue_password_reset(
     identifier: str,
     frontend_base_url: str,
     enqueue: Callable[..., Any],
 ) -> bool:
     """Issue a reset token and enqueue its email without revealing lookup state."""
-    result = identity.request_password_reset(identifier.strip())
-    if not result:
+    issued = issue_password_reset_link(identifier, frontend_base_url)
+    if not issued:
         return False
-    user, token = result
-    reset_link = f"{frontend_base_url}/reset-password?token={token}"
+    user, reset_link = issued
     enqueue(email.send_password_reset_email, user["email"], user["username"], reset_link)
     return True
 

@@ -13,7 +13,7 @@ import {
   UnlockIcon,
 } from "../components/ui/Icons";
 import LockUserModal, { type LockPayload } from "../components/LockUserModal";
-import RecoveryModal, { type RecoveryPayload } from "../components/admin/RecoveryModal";
+import RecoveryModal, { type RecoveryPayload, type RecoveryResult } from "../components/admin/RecoveryModal";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import PageHeader from "../components/ui/PageHeader";
@@ -187,26 +187,30 @@ export default function AdminUsersPage() {
    * Hỏi mật khẩu quản trị khi bị TỪ CHỐI, không hỏi trước (xem `useSudo`):
    * phiên sudo còn hạn thì không bắt gõ lại.
    */
-  const doRecovery = async (user: UserData, payload: RecoveryPayload) => {
-    const call = () => apiClient.post(`/api/v1/admin/users/${user.id}/recovery`, payload);
+  const doRecovery = async (user: UserData, payload: RecoveryPayload): Promise<RecoveryResult | null> => {
+    const call = () => apiClient.post<RecoveryResult>(`/api/v1/admin/users/${user.id}/recovery`, payload);
     try {
+      let res;
       try {
-        await call();
+        res = await call();
       } catch (err) {
         if (!isSudoRequired(err)) throw err;
         if (!(await ensureSudo(t("Hỗ trợ tài khoản")))) {
           toast.error(t("Đã huỷ: thao tác này cần xác thực lại mật khẩu."));
-          return;
+          return null;
         }
-        await call();
+        res = await call();
       }
-      toast.success(
-        payload.action === "reset_link"
-          ? t("Đã gửi liên kết đặt lại mật khẩu tới {email}", { email: user.email })
-          : t("Đã gỡ xác thực hai bước của {name}", { name: user.username }),
-      );
+      if (payload.action === "reset_link") {
+        // Hộp thoại sẽ hiện liên kết; toast chỉ nói thư có đi hay không.
+        if (res?.data?.email_sent) toast.success(t("Đã gửi liên kết đặt lại mật khẩu tới {email}", { email: user.email }));
+        return res?.data ?? {};
+      }
+      toast.success(t("Đã gỡ xác thực hai bước của {name}", { name: user.username }));
+      return {};
     } catch (error: unknown) {
       toast.error(friendlyError(error, t("Hỗ trợ tài khoản thất bại")));
+      return null;
     }
   };
 

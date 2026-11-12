@@ -243,3 +243,61 @@ class TestAdminHoTroKhoiPhuc:
         with pytest.raises(HTTPException) as exc:
             self._call({"id": str(uuid.uuid4())}, operator, "clear_2fa")
         assert exc.value.status_code == 404
+
+
+class TestAdminResetLinkIsHandedBack:
+    """Quản trị viên phải CẦM được liên kết, không chỉ tin rằng thư đã tới.
+
+    Ca gặp thật (12/11/2026): giáo viên nhờ qua tin nhắn, email đăng ký không
+    chắc còn dùng. Bản trước chỉ xếp thư rồi trả "success" — quản trị viên không
+    có gì để chuyển tay, và không biết thư có đi hay không.
+    """
+
+    @pytest.fixture
+    def operator(self):
+        acc = _make_account("adminlk")
+        yield {**_current(acc), "is_admin": True}
+        from conftest import purge_registered_account
+
+        purge_registered_account(acc["username"])
+
+    def _call(self, account, operator):
+        from app.routers import admin as admin_router
+
+        class _BG:
+            def __init__(self):
+                self.tasks = []
+
+            def add_task(self, fn, *a, **kw):
+                self.tasks.append((fn, a))
+
+        bg = _BG()
+        payload = admin_router.RecoveryAssist(action="reset_link",
+                                              reason="chu tai khoan nho qua tin nhan")
+        out = admin_router.assist_recovery(account["id"], payload, bg, _Req(), operator)
+        return out, bg
+
+    def test_tra_lien_ket_va_van_gui_thu(self, account, scope, operator):
+        out, bg = self._call(account, operator)
+        assert "/reset-password?token=" in out["reset_link"]
+        assert out["email_sent"] is True
+        assert out["expires_minutes"] > 0
+        # Thư vẫn đi, và mang ĐÚNG liên kết vừa trả về — không phải hai token.
+        assert len(bg.tasks) == 1
+        assert bg.tasks[0][1][2] == out["reset_link"]
+
+    def test_lien_ket_dung_duoc_de_dat_mat_khau(self, account, scope, operator):
+        from app.modules.identity._web_compat import reset_password_with_token
+
+        out, _ = self._call(account, operator)
+        token = out["reset_link"].split("token=", 1)[1]
+        reset_password_with_token(token, "MatKhauMoi#2026")
+        # Dùng một lần: lần hai phải bị từ chối.
+        with pytest.raises(HTTPException):
+            reset_password_with_token(token, "MatKhauKhac#2026")
+
+    def test_nguoi_bi_tac_dong_biet_lien_ket_co_the_qua_tay_admin(self, account, scope, operator):
+        self._call(account, operator)
+        items = notifications.list_for_user(account["id"])
+        assert items and items[0]["kind"] == "security"
+        assert "quản trị viên" in items[0]["body"]
