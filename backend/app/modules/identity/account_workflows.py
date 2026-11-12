@@ -65,6 +65,51 @@ def queue_password_reset(
     return True
 
 
+def note_password_reset_by_link(user_id: str, request: Any = None) -> None:
+    """Ghi kiểm toán + báo chủ tài khoản sau khi một liên kết đặt lại được DÙNG.
+
+    Trang đặt lại mật khẩu không cần đăng nhập, nên lúc này KHÔNG có phạm vi
+    tổ chức. Cả `audit.record` lẫn `notifications.notify` đều cần một phạm vi
+    và đều nuốt lỗi — gọi trần thì dấu vết mất lặng lẽ. Nên vào đúng tổ chức
+    của chủ tài khoản trước.
+
+    Không bao giờ ném lên: mật khẩu ĐÃ đổi xong, một lỗi ghi vết không được
+    biến lượt đặt lại thành công thành "thất bại" trên màn hình.
+    """
+    try:
+        from app.modules.saas.tenant_context import tenant_scope
+        from app.modules.saas.tenant_middleware import _tenant_of_user
+        from app.modules.security import audit
+
+        tenant = _tenant_of_user(str(user_id))
+        if not tenant:
+            logger.error("[RESET] khong tim thay to chuc cua %s, bo qua ghi vet", user_id)
+            return
+        user = identity._fetch_user_by_id(str(user_id)) or {}
+        with tenant_scope(tenant):
+            audit.record(
+                "security.password.reset_by_link",
+                actor={"id": str(user_id), "username": user.get("username")},
+                target_type="user",
+                target_id=str(user_id),
+                detail={"sessions_revoked": True},
+                request=request,
+            )
+            notifications.notify(
+                str(user_id),
+                "security",
+                "Mật khẩu của bạn vừa được đặt lại",
+                body=("Mật khẩu được đặt lại bằng liên kết đặt lại mật khẩu. Mọi "
+                      "phiên đăng nhập cũ đã bị đăng xuất và liên kết không dùng "
+                      "lại được. Nếu không phải bạn, hãy báo quản trị viên ngay."),
+                link="/settings/security",
+                severity="warning",
+            )
+    except Exception as exc:  # noqa: BLE001 — xem docstring
+        logger.error("[RESET] ghi vet sau dat lai mat khau that bai: %s",
+                     exc.__class__.__name__)
+
+
 def apply_password_change(user_id: str, new_password: str) -> None:
     """Change the password and invalidate every existing session."""
     with identity._identity_cursor() as cursor:

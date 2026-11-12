@@ -291,3 +291,25 @@ def test_reset_revokes_all_existing_sessions(user):
     after = _fetch_all("SELECT revoked_at FROM refresh_tokens WHERE user_id = %s", (user["id"],))
     assert after and all(r["revoked_at"] is not None for r in after)
     client.cookies.clear()  # don't leak this session cookie into other tests
+
+
+def test_used_reset_link_is_audited_and_the_owner_is_told(user):
+    """Liên kết có thể đã qua tay quản trị viên (admin `assist_recovery` trả nó
+    về để chuyển tay). Khi nó được DÙNG, chủ tài khoản phải được báo và nhật ký
+    kiểm toán phải có dòng — kể cả khi trang đặt lại không có phiên đăng nhập,
+    tức không có phạm vi tổ chức nào sẵn."""
+    from app.modules.saas.tenant_context import system_scope
+
+    _, cap, _ = _forgot_capture(user["username"])
+    r = client.post(RESET, json={"token": cap["token"], "new_password": "AfterLink123!"},
+                    headers={"X-Forwarded-For": _ip()})
+    assert r.status_code == 200
+
+    with system_scope("test: doc vet sau dat lai mat khau"):
+        notes = _fetch_all(
+            "SELECT kind, title FROM notifications WHERE user_id = %s", (user["id"],))
+        rows = _fetch_all(
+            "SELECT action FROM audit_log WHERE target_id = %s", (str(user["id"]),))
+        _execute("DELETE FROM notifications WHERE user_id = %s", (user["id"],))
+    assert any(n["kind"] == "security" and "đặt lại" in n["title"] for n in notes)
+    assert any(row["action"] == "security.password.reset_by_link" for row in rows)

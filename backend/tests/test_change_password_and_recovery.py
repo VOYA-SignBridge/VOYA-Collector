@@ -41,7 +41,8 @@ class _Req:
     def __init__(self) -> None:
         self.client = type("C", (), {"host": f"10.0.0.{uuid.uuid4().int % 250}"})()
         self.headers = {}
-        self.url = type("U", (), {"path": "/api/v1/auth/change-password"})()
+        self.url = type("U", (), {"path": "/api/v1/auth/change-password",
+                                  "netloc": "", "scheme": "http"})()
         self.method = "POST"
 
 

@@ -770,8 +770,12 @@ def request_password_reset(identifier: str) -> Optional[Tuple[Dict[str, Any], st
     return user, token
 
 
-def reset_password_with_token(token: str, new_password: str) -> None:
-    """Validate a reset token and set the new password. Raises HTTPException on failure."""
+def reset_password_with_token(token: str, new_password: str) -> str:
+    """Validate a reset token and set the new password; return the user id.
+
+    Raises HTTPException on failure. The id lets the caller tell the account
+    owner and the audit log that the password was just changed.
+    """
     if len(new_password or "") < int(settings.min_password_length):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -805,6 +809,7 @@ def reset_password_with_token(token: str, new_password: str) -> None:
             raise invalid
 
         _apply_password_reset(cur, row["user_id"], new_password)
+    return str(row["user_id"])
 
 
 def _apply_password_reset(cur, user_id: str, new_password: str) -> None:

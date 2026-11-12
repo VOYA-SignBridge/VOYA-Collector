@@ -806,7 +806,10 @@ def forgot_password(
 def reset_password(payload: ResetPasswordRequest, request: Request):
     # Throttle token-guessing attempts per IP.
     enforce_ip_limit(request, "reset", max_calls=10, window=3600)
-    reset_password_with_token(payload.token, payload.new_password)
+    user_id = reset_password_with_token(payload.token, payload.new_password)
+    # Liên kết có thể đã qua tay quản trị viên (xem admin `assist_recovery`):
+    # chủ tài khoản phải biết mật khẩu vừa đổi, và kiểm toán phải có dòng ghi.
+    account_workflows.note_password_reset_by_link(user_id, request)
     return {"message": "Mật khẩu đã được đặt lại thành công. Vui lòng đăng nhập lại."}
 
 
