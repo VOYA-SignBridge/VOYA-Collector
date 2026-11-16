@@ -106,7 +106,9 @@ KHONG_CO_RESPONSE_MODEL = {
     # Trả về số đếm và trạng thái, không chạm hồ sơ người dùng.
     "/auth/my-notice": "không trả hồ sơ",
     "/auth/my-notice/ack": "không trả hồ sơ",
-    "/auth/me (PATCH)": "trả kết quả đổi tên, không phải hồ sơ đầy đủ",
+    "/auth/me (PATCH)": "chọn ảnh đại diện, trả khoá ảnh chứ không phải hồ sơ đầy đủ",
+    "/auth/me/avatar": "tải ảnh lên, trả khoá ảnh chứ không phải hồ sơ",
+    "/auth/avatar/{user_id}": "phát byte ảnh WebP đã chuẩn hoá, không phải hồ sơ",
 }
 
 

@@ -41,7 +41,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation, useParams } from "react-router-dom";
+import { Link, NavLink, Outlet, useParams } from "react-router-dom";
 
 import { canEditTenant } from "../../api/auth";
 import { fetchMyTenant, listMyTenants, switchTenant, type TenantMembershipRow } from "../../api/tenants";
@@ -49,18 +49,16 @@ import Button from "../../components/ui/Button";
 import { useAuth } from "../../hooks/useAuth";
 import { useI18n } from "../../i18n";
 import {
-  ArrowLeftIcon, BuildingIcon, ChartBarIcon, ChevronRightIcon, ChipIcon, ClipboardCheckIcon, DatabaseIcon,
+  ArrowLeftIcon, BuildingIcon, ChartBarIcon, ChipIcon, ClipboardCheckIcon, DatabaseIcon,
   FolderIcon, HandIcon, ServerIcon, TagIcon, TrashIcon, UploadIcon, UsersIcon,
 } from "../../components/ui/Icons";
 
 type Item = { key: string; to: string; icon: ReactNode; end?: boolean; adminOnly?: boolean };
 
-type Group = { title: string | null; items: Item[]; collapsed?: boolean };
-
 const ICON = "h-4 w-4 shrink-0";
 
 /** Nhóm mục. Tiêu đề nhóm là `null` cho nhóm đầu — nó không cần nhãn. */
-const GROUPS: Group[] = [
+const GROUPS: { title: string | null; items: Item[] }[] = [
   {
     title: null,
     items: [
@@ -80,22 +78,14 @@ const GROUPS: Group[] = [
     title: "QUẢN LÝ",
     items: [
       { key: "Thành viên", to: "members", icon: <UsersIcon className={ICON} /> },
-      { key: "Thùng rác", to: "trash", icon: <TrashIcon className={ICON} /> },
-      { key: "Cài đặt tổ chức", to: "settings", icon: <ClipboardCheckIcon className={ICON} /> },
-    ],
-  },
-  {
-    // Ba mục dưới là việc của người phụ trách dữ liệu tổ chức, làm thỉnh thoảng
-    // chứ không hằng ngày — nên gập lại và tự mở khi đang ở trong một trong ba.
-    // Máy chủ cho vai biên tập vào từ trước, nhưng chúng chỉ có route dưới
-    // `/admin`, mà cả khu đó gác bằng cờ quản trị NỀN TẢNG, nên họ không có đường
-    // nào tới.
-    title: "DỮ LIỆU",
-    collapsed: true,
-    items: [
+      // Ba mục dưới là việc của người phụ trách dữ liệu tổ chức. Máy chủ cho vai
+      // biên tập vào từ trước, nhưng chúng chỉ có route dưới `/admin`, mà cả khu
+      // đó gác bằng cờ quản trị NỀN TẢNG, nên họ không có đường nào tới.
       { key: "Quản lý dữ liệu", to: "data", icon: <DatabaseIcon className={ICON} />, adminOnly: true },
       { key: "Người ký", to: "signers", icon: <UsersIcon className={ICON} />, adminOnly: true },
       { key: "Hàng đợi xử lý", to: "processing", icon: <ServerIcon className={ICON} />, adminOnly: true },
+      { key: "Thùng rác", to: "trash", icon: <TrashIcon className={ICON} /> },
+      { key: "Cài đặt tổ chức", to: "settings", icon: <ClipboardCheckIcon className={ICON} /> },
     ],
   },
 ];
@@ -104,7 +94,6 @@ export default function OrgLayout() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { tenantId = "" } = useParams<{ tenantId: string }>();
-  const { pathname } = useLocation();
 
   const [rows, setRows] = useState<TenantMembershipRow[]>([]);
   const [row, setRow] = useState<TenantMembershipRow | null>(null);
@@ -241,12 +230,15 @@ export default function OrgLayout() {
       {!unverified && !mismatch && (
       <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
         <nav aria-label={t("Mục của tổ chức")} className="lg:sticky lg:top-6 lg:self-start">
-          {GROUPS.map((group) => {
-            const items = group.items.filter((item) => !item.adminOnly || canEditTenant(user));
-            if (items.length === 0) return null;
-            const list = (
+          {GROUPS.map((group) => (
+            <div key={group.title ?? "_"} className={group.title ? "mt-5" : ""}>
+              {group.title && (
+                <p className="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  {t(group.title)}
+                </p>
+              )}
               <ul className="space-y-1">
-                {items.map((item) => (
+                {group.items.filter((item) => !item.adminOnly || canEditTenant(user)).map((item) => (
                   <li key={item.to || "_index"}>
                     <NavLink
                       to={item.to}
@@ -265,33 +257,8 @@ export default function OrgLayout() {
                   </li>
                 ))}
               </ul>
-            );
-            if (!group.collapsed) {
-              return (
-                <div key={group.title ?? "_"} className={group.title ? "mt-5" : ""}>
-                  {group.title && (
-                    <p className="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                      {t(group.title)}
-                    </p>
-                  )}
-                  {list}
-                </div>
-              );
-            }
-            // Nhóm gập: `<details>` gốc nên bàn phím và trình đọc màn hình dùng được
-            // không cần mã thêm. `key` đổi khi đi vào/ra khỏi nhóm để nó tự mở đúng
-            // lúc, mà vẫn cho người dùng tự mở/đóng trong lúc ở yên một trang.
-            const inside = items.some((item) => pathname.split("/").includes(item.to));
-            return (
-              <details key={`${group.title}-${inside}`} open={inside} className="group mt-5">
-                <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 hover:bg-slate-100 [&::-webkit-details-marker]:hidden">
-                  {t(group.title ?? "")}
-                  <ChevronRightIcon className="h-3.5 w-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                </summary>
-                <div className="mt-1.5">{list}</div>
-              </details>
-            );
-          })}
+            </div>
+          ))}
 
           <Link
             to="/"

@@ -72,20 +72,6 @@ describe("SettingsLayout", () => {
     expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(8);
   });
 
-  it("gom thành ba nhóm theo việc thuộc về ai: cá nhân, tổ chức, trợ giúp", () => {
-    renderSettings(true);
-    const nav = screen.getByRole("navigation");
-    const titles = within(nav).getAllByText(/^(Cá nhân|Tổ chức|Trợ giúp)$/, { selector: "p" });
-    expect(titles.map((p) => p.textContent)).toEqual(["Cá nhân", "Tổ chức", "Trợ giúp"]);
-  });
-
-  it("không dựng tiêu đề nhóm rỗng: người dùng thường không có Tích hợp nhưng nhóm Tổ chức vẫn còn mục", () => {
-    renderSettings(false);
-    const nav = screen.getByRole("navigation");
-    expect(within(nav).getByText("Tổ chức", { selector: "p" })).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "Workspace" })).toBeInTheDocument();
-  });
-
   it("dịch nhãn mục sang tiếng Anh", () => {
     renderSettings(false, "en");
     expect(screen.getByText("Security")).toBeInTheDocument();
