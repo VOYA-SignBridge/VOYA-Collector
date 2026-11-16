@@ -3,9 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { login, loginTwoFactor } from "../api/auth";
 import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
-import AuthInput, { LockIcon, UserIcon } from "../components/auth/AuthInput";
+import AuthInput, { UserIcon } from "../components/auth/AuthInput";
+import PasswordInput from "../components/auth/PasswordInput";
+import RememberMeCheckbox from "../components/auth/RememberMeCheckbox";
 import LoadingScreen from "../components/LoadingScreen";
 import { friendlyError } from "../lib/errors";
+import { readRememberedLogin, saveRememberedLogin } from "../lib/rememberedLogin";
 import { Trans, useI18n } from "../i18n";
 
 type FormState = {
@@ -16,11 +19,11 @@ type FormState = {
 export default function LoginPage() {
   const { t } = useI18n();
   const navigate = useNavigate();
-  const [form, setForm] = useState<FormState>({ identifier: "", password: "" });
+  const [form, setForm] = useState<FormState>(() => ({ identifier: readRememberedLogin(), password: "" }));
+  const [remember, setRemember] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showLoading, setShowLoading] = useState(false);
   const [error, setError] = useState<string>("");
-  const [showPassword, setShowPassword] = useState(false);
   /** Vé bước hai. Khác rỗng = mật khẩu đã đúng, đang chờ mã. */
   const [challenge, setChallenge] = useState("");
   const [code, setCode] = useState("");
@@ -29,6 +32,41 @@ export default function LoginPage() {
     () => form.identifier.trim().length > 0 && form.password.trim().length > 0 && !loading,
     [form.identifier, form.password, loading]
   );
+
+  /**
+   * Vào ứng dụng sau khi đã có phiên. Một chỗ cho cả hai bước đăng nhập: hai bản
+   * sao của đoạn này là cách một trong hai đường lặng lẽ lệch khỏi đường kia.
+   *
+   * Bản trước ngồi chờ ĐÚNG 3 GIÂY rồi mới chuyển trang. Ba giây đó không làm gì
+   * cả: `login()` đã trả về, cookie đã đặt, không có việc nền nào đang chạy.
+   *
+   * Nhưng xoá thẳng nó thì để lộ một vấn đề khác: `/upload` là chunk nạp lười,
+   * nên chuyển ngay sẽ rơi vào khoảng trống của `<Suspense>`. Nên: nạp trước chunk
+   * đích NGAY BÂY GIỜ và chỉ chờ đúng bằng thời gian nó cần. Sàn 400 ms để màn
+   * hình chờ không nhấp nháy trên máy nhanh; trần 2,5 giây để mạng chậm không
+   * biến nó thành ngõ cụt.
+   */
+  const enterApp = async () => {
+    saveRememberedLogin(form.identifier.trim(), remember);
+    notifyAuthChange();
+    setShowLoading(true);
+    const warmup = import("./UploadPage").catch(() => undefined);
+    const floor = new Promise((r) => setTimeout(r, 400));
+    const ceiling = new Promise((r) => setTimeout(r, 2500));
+    await Promise.all([floor, Promise.race([warmup, ceiling])]);
+    navigate("/upload", { replace: true });
+  };
+
+  /**
+   * `userMessage` là chuỗi do `axiosClient` tự gắn cho vài trường hợp đã biết nên
+   * được ưu tiên trước bộ lọc chung. `error.message` của axios ("Request failed
+   * with status code 401") vừa vô nghĩa với người đăng nhập vừa nói ra mã trạng
+   * thái, nên không bao giờ là nhánh dự phòng.
+   */
+  const describeError = (err: unknown, fallback: string): string => {
+    const custom = (err as { userMessage?: unknown } | null)?.userMessage;
+    return typeof custom === "string" && custom ? custom : friendlyError(err, fallback);
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -41,6 +79,7 @@ export default function LoginPage() {
       const result = await login({
         identifier: form.identifier.trim(),
         password: form.password,
+        remember,
       });
 
       // Tài khoản bật xác thực hai bước: chưa có phiên nào cả. Dừng ở đây và
@@ -53,39 +92,9 @@ export default function LoginPage() {
         return;
       }
 
-      notifyAuthChange();
-
-      // Bản trước ngồi chờ ĐÚNG 3 GIÂY rồi mới chuyển trang. Ba giây đó không
-      // làm gì cả: `login()` đã trả về, cookie đã đặt, không có việc nền nào
-      // đang chạy. Đó là 3 giây lấy của mỗi người dùng, mỗi lần đăng nhập.
-      //
-      // Nhưng xoá thẳng nó thì để lộ một vấn đề khác: `/upload` là chunk nạp
-      // lười, nên chuyển ngay sẽ rơi vào khoảng trống của `<Suspense>` — người
-      // dùng thấy màn hình chờ thứ hai ngay sau màn hình chờ thứ nhất.
-      //
-      // Nên: nạp trước chunk đích NGAY BÂY GIỜ, và chỉ chờ đúng bằng thời gian
-      // nó cần. Sàn 400 ms để màn hình chờ không nhấp nháy trên máy nhanh;
-      // trần 2,5 giây để mạng chậm không biến nó thành ngõ cụt — hết trần thì
-      // chuyển trang và để `<Suspense>` lo nốt.
-      setShowLoading(true);
-      const warmup = import("./UploadPage").catch(() => undefined);
-      const floor = new Promise((r) => setTimeout(r, 400));
-      const ceiling = new Promise((r) => setTimeout(r, 2500));
-      await Promise.all([floor, Promise.race([warmup, ceiling])]);
-      navigate("/upload", { replace: true });
+      await enterApp();
     } catch (err: unknown) {
-      // `error.message` của axios ("Request failed with status code 401") từng
-      // là nhánh dự phòng ở đây. Nó vừa vô nghĩa với người đăng nhập, vừa nói
-      // ra mã trạng thái — thứ không việc gì phải hiện trên màn hình đăng nhập.
-      //
-      // `userMessage` là chuỗi do `axiosClient` tự gắn cho vài trường hợp đã
-      // biết, nên nó vẫn được ưu tiên trước bộ lọc chung.
-      const custom = (err as { userMessage?: unknown } | null)?.userMessage;
-      setError(
-        typeof custom === "string" && custom
-          ? custom
-          : friendlyError(err, t("Không đăng nhập được. Hãy kiểm tra lại email và mật khẩu.")),
-      );
+      setError(describeError(err, t("Không đăng nhập được. Hãy kiểm tra lại email và mật khẩu.")));
     } finally {
       setLoading(false);
     }
@@ -103,21 +112,10 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      await loginTwoFactor(challenge, code.trim());
-      notifyAuthChange();
-      setShowLoading(true);
-      const warmup = import("./UploadPage").catch(() => undefined);
-      const floor = new Promise((r) => setTimeout(r, 400));
-      const ceiling = new Promise((r) => setTimeout(r, 2500));
-      await Promise.all([floor, Promise.race([warmup, ceiling])]);
-      navigate("/upload", { replace: true });
+      await loginTwoFactor(challenge, code.trim(), remember);
+      await enterApp();
     } catch (err: unknown) {
-      const custom = (err as { userMessage?: unknown } | null)?.userMessage;
-      setError(
-        typeof custom === "string" && custom
-          ? custom
-          : friendlyError(err, t("Mã không đúng hoặc đã hết hạn.")),
-      );
+      setError(describeError(err, t("Mã không đúng hoặc đã hết hạn.")));
       setLoading(false);
     }
   };
@@ -209,29 +207,19 @@ export default function LoginPage() {
           placeholder={t("vd: minh123 hoặc minh@example.com")}
         />
 
-        <AuthInput
+        <PasswordInput
           label={t("Mật khẩu")}
-          icon={<LockIcon />}
           value={form.password}
           onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-          type={showPassword ? "text" : "password"}
           autoComplete="current-password"
           placeholder="••••••••"
-          trailing={
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ctu-blue hover:bg-ctu-blue/10"
-            >
-              {showPassword ? t("Ẩn") : t("Hiện")}
-            </button>
-          }
         />
 
         {/* MỘT đường khôi phục. Trước đây có hai — một gửi liên kết, một gửi mã
             — và người vừa quên mật khẩu không có cơ sở nào để chọn giữa chúng.
             Sự khác biệt là chi tiết triển khai, không phải câu hỏi cho họ. */}
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <RememberMeCheckbox checked={remember} onChange={setRemember} />
           <Link to="/forgot-password" className="text-sm font-semibold text-ctu-blue hover:text-ctu-navy">
             {t("Quên mật khẩu?")}
           </Link>

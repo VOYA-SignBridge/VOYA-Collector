@@ -1,7 +1,8 @@
 import { type FormEvent, useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthShell from "../components/auth/AuthShell";
-import AuthInput, { LockIcon, UserIcon } from "../components/auth/AuthInput";
+import AuthInput, { UserIcon } from "../components/auth/AuthInput";
+import PasswordInput from "../components/auth/PasswordInput";
 import OtpCodeInput from "../components/auth/OtpCodeInput";
 import {
   resetPasswordWithTicket,
@@ -73,19 +74,6 @@ export default function ForgotPasswordPage() {
   const [ticket, setTicket] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  // Cùng một nút ở CẢ HAI ô mật khẩu — xem RegisterPage.
-  const togglePassword = (
-    <button
-      type="button"
-      onClick={() => setShowPassword((v) => !v)}
-      aria-label={showPassword ? t("Ẩn mật khẩu") : t("Hiện mật khẩu")}
-      aria-pressed={showPassword}
-      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ctu-blue hover:bg-ctu-blue/10"
-    >
-      {showPassword ? t("Ẩn") : t("Hiện")}
-    </button>
-  );
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -326,28 +314,22 @@ export default function ForgotPasswordPage() {
             />
           </p>
 
-          <AuthInput
+          <PasswordInput
             label={t("Mật khẩu mới")}
-            icon={<LockIcon />}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             placeholder={t("Tối thiểu 8 ký tự")}
             error={passwordError}
-            trailing={togglePassword}
           />
 
-          <AuthInput
+          <PasswordInput
             label={t("Xác nhận mật khẩu mới")}
-            icon={<LockIcon />}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             placeholder={t("Nhập lại mật khẩu mới")}
             error={confirmError}
-            trailing={togglePassword}
           />
 
           {error ? <ErrorBox message={error} /> : null}

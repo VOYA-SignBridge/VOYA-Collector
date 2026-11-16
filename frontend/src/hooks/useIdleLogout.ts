@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { logout as apiLogout } from "../api/auth";
-import { clearAuthToken } from "../api/axiosClient";
+import { clearAuthToken, isRememberedSession } from "../api/axiosClient";
 
 /**
  * Inactivity auto-logout.
@@ -14,6 +14,10 @@ import { clearAuthToken } from "../api/axiosClient";
  * Cross-tab: the last-activity timestamp lives in localStorage, so activity in
  * ANY tab keeps every tab alive, and a logout in one tab cascades to the others
  * (they lose the auth cookies and drop to the login screen on their next call).
+ *
+ * A session the user chose to remember ("Ghi nhớ đăng nhập trên thiết bị này")
+ * is exempt: its server-side lifetime is days, and a 3-hour client cap would
+ * silently cancel that choice. The server still expires it after the idle window.
  *
  * On timeout it revokes the session server-side, clears local state, and fires
  * a `voya:idle-logout` event that <SecurityNotices> turns into a friendly
@@ -43,7 +47,7 @@ export function useIdleLogout(enabled: boolean) {
   const firing = useRef(false);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || isRememberedSession()) return;
     firing.current = false;
 
     const readStamp = (): number => {

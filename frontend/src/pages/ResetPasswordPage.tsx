@@ -2,7 +2,7 @@ import { type FormEvent, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { resetPassword } from "../api/auth";
 import AuthShell from "../components/auth/AuthShell";
-import AuthInput, { LockIcon } from "../components/auth/AuthInput";
+import PasswordInput from "../components/auth/PasswordInput";
 import { useI18n } from "../i18n";
 
 export default function ResetPasswordPage() {
@@ -14,7 +14,6 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
-  const [showPassword, setShowPassword] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -96,35 +95,22 @@ export default function ResetPasswordPage() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
-          <AuthInput
+          <PasswordInput
             label={t("Mật khẩu mới")}
-            icon={<LockIcon />}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             placeholder={t("Tối thiểu 8 ký tự")}
             error={passwordError || (submitAttempted && !password ? t("Vui lòng nhập mật khẩu mới.") : "")}
           />
 
-          <AuthInput
+          <PasswordInput
             label={t("Xác nhận mật khẩu mới")}
-            icon={<LockIcon />}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            type={showPassword ? "text" : "password"}
             autoComplete="new-password"
             placeholder={t("Nhập lại mật khẩu mới")}
             error={confirmPasswordError}
-            trailing={
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ctu-blue hover:bg-ctu-blue/10"
-              >
-                {showPassword ? t("Ẩn") : t("Hiện")}
-              </button>
-            }
           />
 
           {error ? (

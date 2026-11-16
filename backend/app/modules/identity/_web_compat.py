@@ -5,7 +5,7 @@ import logging
 import secrets
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 import uuid
 
 import psycopg2
@@ -966,19 +966,37 @@ def new_session_family() -> str:
     return str(uuid.uuid4())
 
 
-def create_refresh_token(user_id: str, family_id: Optional[str] = None) -> str:
+def default_session_lifetime() -> timedelta:
+    """Idle lifetime of an ordinary (not remembered) session."""
+    return timedelta(minutes=settings.refresh_token_expire_minutes)
+
+
+def session_lifetime(remember: bool, is_admin: bool) -> timedelta:
+    """Idle lifetime a NEW login gets. Admins are capped lower than users."""
+    if not remember:
+        return default_session_lifetime()
+    days = settings.remember_me_admin_days if is_admin else settings.remember_me_days
+    return max(timedelta(days=days), default_session_lifetime())
+
+
+def create_refresh_token(
+    user_id: str,
+    family_id: Optional[str] = None,
+    lifetime: Optional[timedelta] = None,
+) -> str:
     """Issue a new opaque refresh token, storing only its hash. Returns the raw
     token (to be set as an httpOnly cookie).
 
     `family_id` omitted = a NEW login, so a new family is born. Rotation passes
     the parent's family through, which is what lets reuse detection burn every
     token descended from one stolen cookie without touching other devices.
+
+    `lifetime` omitted = the ordinary idle lifetime. A remembered login passes a
+    longer one; see `session_lifetime`.
     """
     raw = secrets.token_urlsafe(48)
     token_hash = _hash_token(raw)
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.refresh_token_expire_minutes
-    )
+    expires_at = datetime.now(timezone.utc) + (lifetime or default_session_lifetime())
     fam = str(family_id) if family_id else str(uuid.uuid4())
     with _identity_cursor(dict_rows=False) as cur:
         cur.execute(
@@ -1040,13 +1058,35 @@ def _burn_token_family(cur, family_id: Optional[str], token_hash: str,
     )
 
 
+class RotatedSession(NamedTuple):
+    """Result of a successful refresh-token rotation."""
+
+    user: Dict[str, Any]
+    refresh_token: str
+    family_id: str
+    #: Idle lifetime of the new token — what the cookies must be told to last.
+    lifetime: timedelta
+
+
 def rotate_refresh_token(
     raw_token: str,
 ) -> Optional[Tuple[Dict[str, Any], str, str]]:
+    """`rotate_session` without the lifetime: (user, new_raw_token, family_id)."""
+    rotated = rotate_session(raw_token)
+    return rotated[:3] if rotated else None
+
+
+def rotate_session(raw_token: str) -> Optional[RotatedSession]:
     """Validate a refresh token, revoke it, and mint a replacement.
 
-    Returns (user, new_raw_token, family_id) or None if the token is missing /
-    expired / belongs to a burnt family / belongs to an inactive user.
+    Returns None if the token is missing / expired / belongs to a burnt family /
+    belongs to an inactive user.
+
+    The new token INHERITS the lifetime of the one it replaces, so a session the
+    user chose to remember stays remembered across rotations without a column to
+    say so (`expires_at - created_at` already is the lifetime). The inherited
+    value is capped at what the user's CURRENT role allows, so promoting someone
+    to admin also shortens their remembered session at the next rotation.
 
     `family_id` is returned so the caller can stamp it onto the new ACCESS token
     too. Without that, reuse detection can revoke the refresh lineage but has no
@@ -1065,8 +1105,8 @@ def rotate_refresh_token(
     with _identity_cursor() as cur:
         cur.execute(
             """
-            SELECT token_hash, user_id, expires_at, revoked_at, family_id,
-                   reuse_detected_at
+            SELECT token_hash, user_id, expires_at, created_at, revoked_at,
+                   family_id, reuse_detected_at
             FROM refresh_tokens
             WHERE token_hash = %s
             """,
@@ -1116,9 +1156,12 @@ def rotate_refresh_token(
 
         new_raw = secrets.token_urlsafe(48)
         new_hash = _hash_token(new_raw)
-        new_expires = now + timedelta(
-            minutes=settings.refresh_token_expire_minutes
+        lifetime = min(
+            expires_at - row["created_at"],
+            session_lifetime(True, bool(user.get("is_admin"))),
         )
+        lifetime = max(lifetime, default_session_lifetime())
+        new_expires = now + lifetime
         # `revoked_at` giữ nguyên nếu đã có: mốc revoke đầu tiên là mốc đóng cửa
         # sổ ân hạn, ghi đè nó sẽ làm cửa sổ trượt theo mỗi lần đua và một token
         # bị trộm có thể sống mãi bằng cách gọi lại đều đặn.
@@ -1135,7 +1178,7 @@ def rotate_refresh_token(
             """,
             (new_hash, row["user_id"], new_expires, family_id),
         )
-        return user, new_raw, str(family_id or "")
+        return RotatedSession(user, new_raw, str(family_id or ""), lifetime)
 
 
 def purge_expired_refresh_tokens(retain_days: int = 7) -> int:

@@ -11,9 +11,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const apiLogout = vi.fn().mockResolvedValue(undefined);
 const clearAuthToken = vi.fn();
+let remembered = false;
 
 vi.mock('../../api/auth', () => ({ logout: () => apiLogout() }));
-vi.mock('../../api/axiosClient', () => ({ clearAuthToken: () => clearAuthToken() }));
+vi.mock('../../api/axiosClient', () => ({
+  clearAuthToken: () => clearAuthToken(),
+  isRememberedSession: () => remembered,
+}));
 
 import { useIdleLogout } from '../useIdleLogout';
 
@@ -23,6 +27,7 @@ describe('useIdleLogout — 3-hour idle cap', () => {
     localStorage.clear();
     apiLogout.mockClear();
     clearAuthToken.mockClear();
+    remembered = false;
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -43,6 +48,14 @@ describe('useIdleLogout — 3-hour idle cap', () => {
       '| clearAuthToken calls =', clearAuthToken.mock.calls.length);
     expect(apiLogout).toHaveBeenCalled();
     expect(clearAuthToken).toHaveBeenCalled();
+  });
+
+  it('never idle-logs-out a session the user chose to remember', async () => {
+    remembered = true;
+    renderHook(() => useIdleLogout(true));
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); // a whole day idle
+    expect(apiLogout).not.toHaveBeenCalled();
+    expect(clearAuthToken).not.toHaveBeenCalled();
   });
 
   it('does not log out a disabled (guest) session', async () => {

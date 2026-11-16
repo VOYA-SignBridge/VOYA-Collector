@@ -20,7 +20,8 @@ from app.modules.identity._web_compat import (
     get_current_user,
     reset_password_with_token,
     revoke_refresh_token,
-    rotate_refresh_token,
+    rotate_session,
+    session_lifetime,
     verify_password,
 )
 from app.modules.identity.cookies import (
@@ -91,6 +92,8 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     identifier: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=1, max_length=128)
+    #: "Ghi nhớ đăng nhập trên thiết bị này". Mặc định tắt: máy dùng chung.
+    remember: bool = False
 
 
 class UserOut(BaseModel):
@@ -574,13 +577,14 @@ def login(payload: LoginRequest, request: Request, response: Response):
             "challenge": create_2fa_challenge(user["id"]),
         }
 
-    _issue_session(response, request, user)
+    _issue_session(response, request, user, payload.remember)
     # `_public_user`, KHÔNG phải `user`: endpoint này không có `response_model`
     # nên không có gì lọc `password_hash` ra hộ.
     return _public_user(user)
 
 
-def _issue_session(response: Response, request: Request, user: dict) -> None:
+def _issue_session(response: Response, request: Request, user: dict,
+                   remember: bool = False) -> None:
     """Đặt bộ ba cookie cho một phiên mới. Một chỗ, hai đường gọi tới.
 
     Đăng nhập một bước và đăng nhập hai bước phải sinh ra phiên GIỐNG HỆT nhau;
@@ -588,18 +592,23 @@ def _issue_session(response: Response, request: Request, user: dict) -> None:
     và mất khả năng thu hồi theo phiên.
     """
     fam = new_session_family()
+    lifetime = session_lifetime(remember, bool(user.get("is_admin")))
     set_auth_cookies(
         response,
         access_token=_access_for(user, fam),
-        refresh_token=create_refresh_token(user["id"], family_id=fam),
+        refresh_token=create_refresh_token(user["id"], family_id=fam, lifetime=lifetime),
         csrf_token=generate_csrf_token(),
         request=request,
+        lifetime=lifetime,
     )
 
 
 class TwoFactorLoginRequest(BaseModel):
     challenge: str = Field(..., min_length=10)
     code: str = Field(..., min_length=6, max_length=11)
+    #: Lựa chọn ở bước một, giao diện gửi lại: vé bước hai chỉ chứng minh mật
+    #: khẩu đã đúng, không mang tuỳ chọn nào.
+    remember: bool = False
 
 
 @router.post("/login/2fa")
@@ -639,7 +648,7 @@ def login_two_factor(payload: TwoFactorLoginRequest,
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Tài khoản không còn hoạt động.")
 
-    _issue_session(response, request, user)
+    _issue_session(response, request, user, payload.remember)
     return _public_user(user)
 
 
@@ -664,20 +673,21 @@ def refresh(request: Request, response: Response):
     access token. A missing/expired/revoked refresh token clears the cookies so
     the client falls back to the login screen.
     """
-    result = rotate_refresh_token(request.cookies.get(REFRESH_COOKIE) or "")
+    result = rotate_session(request.cookies.get(REFRESH_COOKIE) or "")
     if not result:
         clear_auth_cookies(response)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired session",
         )
-    user, new_refresh, fam = result
+    user, new_refresh, fam, lifetime = result
     set_auth_cookies(
         response,
         access_token=_access_for(user, fam),
         refresh_token=new_refresh,
         csrf_token=generate_csrf_token(),
         request=request,
+        lifetime=lifetime,
     )
     # Cùng hình dạng với `/login` và `/me`. Giao diện gọi điểm cuối này khi vé
     # ngắn hạn hết hạn, và nếu nó trả hồ sơ NGHÈO hơn thì mỗi lần làm mới phiên

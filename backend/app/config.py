@@ -381,6 +381,14 @@ class Settings(BaseSettings):
         os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "90")
     )
 
+    # "Ghi nhớ đăng nhập trên thiết bị này": người dùng tự chọn ở trang đăng
+    # nhập, nên đây là thời hạn KHÔNG HOẠT ĐỘNG (idle) dài hơn mức mặc định
+    # ở trên, tính từ lần làm mới cuối. Quản trị viên được giữ ngắn hơn vì một
+    # phiên quản trị bị lộ gây hại nhiều hơn. Access token vẫn chỉ sống
+    # `access_token_expire_minutes`, nên ghi nhớ không kéo dài thứ bị đánh cắp.
+    remember_me_days: int = int(os.getenv("REMEMBER_ME_DAYS", "30"))
+    remember_me_admin_days: int = int(os.getenv("REMEMBER_ME_ADMIN_DAYS", "7"))
+
     # Cửa sổ ân hạn khi một refresh token vừa bị xoay lại quay về.
     #
     # Đây là chỗ hai yêu cầu kéo ngược chiều nhau, nên con số phải là một lựa

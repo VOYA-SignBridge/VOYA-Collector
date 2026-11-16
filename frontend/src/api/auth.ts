@@ -97,6 +97,8 @@ export type RegisterPayload = {
 export type LoginPayload = {
   identifier: string;
   password: string;
+  /** "Ghi nhớ đăng nhập trên thiết bị này". Mặc định tắt. */
+  remember?: boolean;
 };
 
 export async function register(payload: RegisterPayload): Promise<AuthUser> {
@@ -133,9 +135,9 @@ export async function login(payload: LoginPayload): Promise<LoginResult> {
 
 /** Bước hai: đổi vé + mã (TOTP hoặc mã khôi phục) lấy một phiên thật. */
 export async function loginTwoFactor(
-  challenge: string, code: string,
+  challenge: string, code: string, remember = false,
 ): Promise<AuthUser> {
-  const res = await axiosClient.post("/api/v1/auth/login/2fa", { challenge, code });
+  const res = await axiosClient.post("/api/v1/auth/login/2fa", { challenge, code, remember });
   return res.data as AuthUser;
 }
 

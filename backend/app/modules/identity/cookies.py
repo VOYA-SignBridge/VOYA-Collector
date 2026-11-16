@@ -16,6 +16,7 @@ cross-site POSTs from sending these cookies; the CSRF token is defense-in-depth.
 from __future__ import annotations
 
 import secrets
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import Request, Response
@@ -27,6 +28,12 @@ ACCESS_COOKIE = "voya_access"
 REFRESH_COOKIE = "voya_refresh"
 HINT_COOKIE = "voya_auth"
 CSRF_COOKIE = "voya_csrf"
+
+#: Values of HINT_COOKIE. Both are "present" to code that only asks whether the
+#: visitor is signed in; the SPA reads the difference to skip its idle logout
+#: for a session the user chose to remember.
+HINT_SESSION = "1"
+HINT_REMEMBERED = "remembered"
 
 # Refresh cookie is only sent to the auth endpoints that need it (login sets it,
 # refresh rotates it, logout clears it) — never to ordinary API calls.
@@ -73,7 +80,7 @@ def _access_max_age() -> int:
     return int(settings.access_token_expire_minutes) * 60
 
 
-def _refresh_max_age() -> int:
+def _default_refresh_max_age() -> int:
     return int(settings.refresh_token_expire_minutes) * 60
 
 
@@ -84,12 +91,16 @@ def set_auth_cookies(
     refresh_token: str,
     csrf_token: str,
     request: Optional[Request] = None,
+    lifetime: Optional[timedelta] = None,
 ) -> None:
+    """Set the cookie trio. `lifetime` is the refresh token's idle lifetime;
+    omitted means an ordinary session."""
     secure = _secure_for(request)
     samesite = settings.cookie_samesite
     domain = _domain()
     access_max = _access_max_age()
-    refresh_max = _refresh_max_age()
+    refresh_max = int(lifetime.total_seconds()) if lifetime else _default_refresh_max_age()
+    hint = HINT_REMEMBERED if refresh_max > _default_refresh_max_age() else HINT_SESSION
 
     response.set_cookie(
         ACCESS_COOKIE, access_token,
@@ -102,7 +113,7 @@ def set_auth_cookies(
         samesite=samesite, domain=domain, path=refresh_cookie_path(),
     )
     response.set_cookie(
-        HINT_COOKIE, "1",
+        HINT_COOKIE, hint,
         max_age=refresh_max, httponly=False, secure=secure,
         samesite=samesite, domain=domain, path="/",
     )

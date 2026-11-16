@@ -301,6 +301,24 @@ Những tính chất sau nên có test, chạy được với Redis + Postgres t
 
 ---
 
+## 7. Ghi nhớ đăng nhập trên thiết bị này
+
+Người dùng tự chọn ở trang đăng nhập (mặc định TẮT, bật thì giao diện hỏi xác nhận vì máy dùng chung ở trường là chuyện thường).
+
+| | Phiên thường | Phiên ghi nhớ |
+|---|---|---|
+| Thời hạn không hoạt động của refresh token | `REFRESH_TOKEN_EXPIRE_MINUTES` (180) | `REMEMBER_ME_DAYS` (30), quản trị viên `REMEMBER_ME_ADMIN_DAYS` (7) |
+| Access token | `ACCESS_TOKEN_EXPIRE_MINUTES` (60) | không đổi, nên thứ bị đánh cắp vẫn chỉ sống ngắn |
+| Tự đăng xuất phía trình duyệt sau 3 giờ | có | không (`useIdleLogout` bỏ qua) |
+
+**Không có cột nào lưu "đã ghi nhớ".** Thời hạn của một token là `expires_at - created_at`; khi xoay, token mới kế thừa thời hạn của token cũ (`rotate_session`). Vì vậy tính năng này không cần migration. Thời hạn kế thừa bị chặn trên bởi mức của vai HIỆN TẠI: người được nâng lên quản trị viên sẽ bị rút phiên ghi nhớ về 7 ngày ở lần xoay kế tiếp.
+
+Trình duyệt biết phiên nào được ghi nhớ nhờ giá trị cookie gợi ý `voya_auth` (`remembered` thay cho `1`); mọi nơi chỉ hỏi "có đăng nhập không" vẫn đọc nó là có mặt.
+
+Đường vào: `POST /auth/login` và `POST /auth/login/2fa` nhận `remember` (bước hai phải gửi lại lựa chọn vì vé bước hai chỉ chứng minh mật khẩu đã đúng). Tên đăng nhập của lần tick được giữ ở `localStorage` để điền sẵn lần sau; không bao giờ giữ mật khẩu hay token.
+
+---
+
 ## Phụ lục: chỗ code liên quan
 
 | Việc | File |

@@ -94,6 +94,11 @@ export function getCsrfToken(): string | null {
   return readCookie("voya_csrf");
 }
 
+/** Phiên hiện tại do người dùng chọn ghi nhớ? Máy chủ đổi giá trị cookie gợi ý. */
+export function isRememberedSession(): boolean {
+  return readCookie("voya_auth") === "remembered";
+}
+
 /** Cheap "might I have a session?" — a legacy token or the hint cookie. */
 function hasSessionCookie(): boolean {
   return !!getAuthToken() || readCookie("voya_auth") !== null;

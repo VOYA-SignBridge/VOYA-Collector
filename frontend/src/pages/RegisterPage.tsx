@@ -4,7 +4,8 @@ import { register, login } from "../api/auth";
 import { BuildingIcon } from "../components/ui/Icons";
 import { notifyAuthChange } from "../api/axiosClient";
 import AuthShell from "../components/auth/AuthShell";
-import AuthInput, { LockIcon, MailIcon, UserIcon } from "../components/auth/AuthInput";
+import AuthInput, { MailIcon, UserIcon } from "../components/auth/AuthInput";
+import PasswordInput from "../components/auth/PasswordInput";
 import { Trans, useI18n, tr } from "../i18n";
 import {
   LEGAL_KIND_LABEL,
@@ -82,21 +83,6 @@ export default function RegisterPage() {
   const [error, setError] = useState<string>("");
   /** `email_taken`: hiện thêm hai lối đi thay vì bắt người dùng đoán. */
   const [errorCode, setErrorCode] = useState<string | undefined>(undefined);
-  const [showPassword, setShowPassword] = useState(false);
-  // Một nút cho CẢ HAI ô mật khẩu, và nằm ở cả hai: người mới thấy dấu chấm
-  // ở ô đầu mà không có cách nào kiểm mình gõ gì (14/09/2026). Một trạng thái
-  // chung để hai ô không bao giờ lệch nhau.
-  const togglePassword = (
-    <button
-      type="button"
-      onClick={() => setShowPassword((v) => !v)}
-      aria-label={showPassword ? t("Ẩn mật khẩu") : t("Hiện mật khẩu")}
-      aria-pressed={showPassword}
-      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-ctu-blue hover:bg-ctu-blue/10"
-    >
-      {showPassword ? t("Ẩn") : t("Hiện")}
-    </button>
-  );
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [documents, setDocuments] = useState<LegalDocument[]>([]);
   // Đăng ký tự phục vụ TẠO một tổ chức. Hai ô dưới đây là phần "đăng ký tổ
@@ -254,28 +240,22 @@ export default function RegisterPage() {
           error={emailError || (submitAttempted && !email ? t("Vui lòng nhập email.") : "")}
         />
 
-        <AuthInput
+        <PasswordInput
           label={t("Mật khẩu")}
-          icon={<LockIcon />}
           value={form.password}
           onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-          type={showPassword ? "text" : "password"}
           autoComplete="new-password"
           placeholder={t("Tối thiểu 8 ký tự")}
           error={passwordError || (submitAttempted && !form.password ? t("Vui lòng nhập mật khẩu.") : "")}
-          trailing={togglePassword}
         />
 
-        <AuthInput
+        <PasswordInput
           label={t("Xác nhận mật khẩu")}
-          icon={<LockIcon />}
           value={form.confirmPassword}
           onChange={(e) => setForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-          type={showPassword ? "text" : "password"}
           autoComplete="new-password"
           placeholder={t("Nhập lại mật khẩu")}
           error={confirmPasswordError}
-          trailing={togglePassword}
         />
 
         {/* Không còn khối "Tổ chức của bạn" ở đây.
