@@ -7,6 +7,7 @@ identity-plane persistence, OTP issuance and outbound account email dispatch.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, Dict
 
 from app.modules.identity import _web_compat as identity
@@ -110,8 +111,20 @@ def note_password_reset_by_link(user_id: str, request: Any = None) -> None:
                      exc.__class__.__name__)
 
 
+#: Dạng khoá của một mẫu ảnh đại diện. Danh sách mẫu nằm ở giao diện; máy chủ chỉ
+#: bảo đảm thứ được lưu là một khoá gọn, không phải chuỗi tuỳ ý.
+_AVATAR_KEY = re.compile(r"[a-z0-9-]{1,32}")
+
+
 def set_avatar(user_id: str, avatar_key: str | None) -> None:
-    """Lưu mẫu ảnh đại diện đã chọn (`None` = bỏ chọn, dùng chữ cái đầu)."""
+    """Lưu mẫu ảnh đại diện đã chọn (`None` = bỏ chọn, dùng chữ cái đầu).
+
+    Raises ValueError nếu khoá sai dạng. Kiểm ở ĐÂY chứ không bằng ràng buộc của
+    Pydantic: tham số `pattern` của v2 bị v1 bỏ qua một cách im lặng, và ảnh này
+    chạy trên v1.
+    """
+    if avatar_key is not None and not _AVATAR_KEY.fullmatch(avatar_key):
+        raise ValueError("avatar_key")
     with identity._identity_cursor(dict_rows=False) as cursor:
         cursor.execute(
             "UPDATE users SET avatar_key = %s WHERE id = %s", (avatar_key, str(user_id))

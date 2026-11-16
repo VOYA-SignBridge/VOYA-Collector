@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from pydantic import ValidationError
+from fastapi import HTTPException
 
 from app.modules.identity import _web_compat as auth
 from app.routers import auth as auth_router
@@ -52,14 +52,18 @@ class TestChonAnhDaiDien:
         assert _avatar(account) is None
 
     @pytest.mark.parametrize("bad", ["", "Hoa", "a b", "../x", "x" * 33, "<script>"])
-    def test_khoa_sai_dang_bi_tu_choi(self, bad):
-        with pytest.raises(ValidationError):
-            auth_router.UpdateProfileRequest(avatar_key=bad)
+    def test_khoa_sai_dang_bi_tu_choi_va_khong_duoc_luu(self, account, bad):
+        with pytest.raises(HTTPException) as exc:
+            _patch(account, bad)
+        assert exc.value.status_code == 422
+        assert _avatar(account) is None
 
 
 class TestTenDangNhapKhongSuaDuoc:
     def test_yeu_cau_khong_con_truong_username(self):
-        assert "username" not in auth_router.UpdateProfileRequest.model_fields
+        model = auth_router.UpdateProfileRequest
+        fields = getattr(model, "model_fields", None) or model.__fields__  # Pydantic v2 | v1
+        assert "username" not in fields
 
     def test_gui_kem_username_cung_khong_doi_ten(self, account):
         """Trường lạ bị bỏ qua chứ không được âm thầm áp dụng."""

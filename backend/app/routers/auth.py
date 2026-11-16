@@ -737,9 +737,9 @@ def me(current_user=Depends(get_current_user)):
 
 class UpdateProfileRequest(BaseModel):
     #: Khoá một mẫu ảnh đại diện có sẵn của giao diện, hoặc null để bỏ chọn. Chỉ
-    #: kiểm DẠNG khoá: danh sách mẫu nằm ở giao diện, và khoá lạ thì giao diện vẽ
-    #: chữ cái đầu thay vì hỏng.
-    avatar_key: Optional[str] = Field(None, pattern=r"^[a-z0-9-]{1,32}$")
+    #: kiểm DẠNG khoá (ở `account_workflows.set_avatar`): danh sách mẫu nằm ở
+    #: giao diện, và khoá lạ thì giao diện vẽ chữ cái đầu thay vì hỏng.
+    avatar_key: Optional[str] = Field(None, max_length=64)
 
 
 @router.patch("/me")
@@ -754,7 +754,11 @@ def update_me(
     một lượt đổi phải kéo theo hàng nghìn dòng (xem `modules/admin/account_rename`,
     công cụ vận hành, không có đường vào từ người dùng).
     """
-    account_workflows.set_avatar(str(current_user["id"]), payload.avatar_key)
+    try:
+        account_workflows.set_avatar(str(current_user["id"]), payload.avatar_key)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Khoá ảnh đại diện không hợp lệ.") from None
     return {"avatar_key": payload.avatar_key}
 
 
