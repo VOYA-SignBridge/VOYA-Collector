@@ -3,7 +3,7 @@ import { canEditTenant } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 import { useI18n } from "../../i18n";
 import {
-  BuildingIcon, ChartBarIcon, FolderIcon, GlobeIcon, InboxIcon, LinkIcon,
+  BuildingIcon, ChartBarIcon, DownloadIcon, FolderIcon, GlobeIcon, InboxIcon, LinkIcon,
   ShieldCheckIcon, ShieldIcon, UserIcon,
 } from "../../components/ui/Icons";
 import type { ReactNode } from "react";
@@ -49,6 +49,9 @@ const ITEMS: Item[] = [
   // định có hệ quả pháp lý và mỗi lần rút là một chiều — không cùng nhịp với
   // việc sửa một chữ trong tên đăng nhập.
   { key: "Đồng thuận", href: "/settings/consents", icon: <ShieldCheckIcon className={ICON} /> },
+  // Quyền của chủ dữ liệu: tải về những gì mình đã đóng góp (trước đây là một tab
+  // lẫn trong trang Đóng góp dữ liệu).
+  { key: "Dữ liệu của tôi", href: "/settings/data", icon: <DownloadIcon className={ICON} /> },
   { key: "Tổ chức", href: "/settings/organization", icon: <BuildingIcon className={ICON} /> },
   // Workspace/Project nằm NGAY DƯỚI Tổ chức vì đó đúng là quan hệ chứa nhau:
   // tenant ⊃ workspace ⊃ project. Đặt nó ở chỗ khác trong danh sách là làm mất

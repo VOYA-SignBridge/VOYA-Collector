@@ -1,5 +1,5 @@
 /**
- * "Tải dữ liệu của tôi" — tab trong Đóng góp dữ liệu (`UploadPage`).
+ * "Tải dữ liệu của tôi" — nội dung của trang `/settings/data` (`MyDataPage`).
  *
  * Khác bản xuất tổ chức ở trang Tổ chức (chỉ quản trị viên, cả tenant): đây là
  * gói CỦA RIÊNG người đang xem — samples.csv + tệp .npz thật, chỉ những dòng

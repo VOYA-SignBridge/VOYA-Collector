@@ -191,6 +191,44 @@ export async function setAvatar(avatarKey: string | null): Promise<void> {
   await axiosClient.patch("/api/v1/auth/me", { avatar_key: avatarKey });
 }
 
+/** Một thiết bị đang đăng nhập. `current` = chính thiết bị đang gọi. */
+export type DeviceSession = {
+  id: string;
+  device: string;
+  started_at: string | null;
+  last_active: string | null;
+  remembered: boolean;
+  current: boolean;
+};
+
+export type LoginEvent = {
+  at: string;
+  device: string;
+  place: string;
+  remember: boolean;
+};
+
+export async function fetchSessions(): Promise<DeviceSession[]> {
+  const res = await axiosClient.get("/api/v1/auth/sessions");
+  return res.data as DeviceSession[];
+}
+
+/** Đăng xuất MỘT thiết bị khác (máy chủ từ chối thiết bị đang dùng). */
+export async function revokeSession(id: string): Promise<void> {
+  await axiosClient.delete(`/api/v1/auth/sessions/${encodeURIComponent(id)}`);
+}
+
+/** Đăng xuất mọi thiết bị khác; trả về số thiết bị đã đăng xuất. */
+export async function revokeOtherSessions(): Promise<number> {
+  const res = await axiosClient.post("/api/v1/auth/sessions/revoke-others");
+  return (res.data as { revoked: number }).revoked;
+}
+
+export async function fetchLoginHistory(): Promise<LoginEvent[]> {
+  const res = await axiosClient.get("/api/v1/auth/login-history");
+  return res.data as LoginEvent[];
+}
+
 export type MessageResponse = {
   message: string;
 };

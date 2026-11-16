@@ -16,6 +16,8 @@
  *     2. Xác minh liên hệ   điều kiện để lấy lại tài khoản — vô hình cho tới
  *                           lúc cần, mà lúc cần thì đã muộn
  *     3. Xác thực hai bước  lớp thêm, không phải lớp nền
+ *     4. Thiết bị           ai đang vào tài khoản này, và đăng xuất từng cái
+ *     5. Đăng nhập gần đây  để tự nhận ra một lần vào mà mình không làm
  *
  * Vì sao KHÔNG bắt buộc bật 2FA mới cho đổi mật khẩu
  * ---------------------------------------------------
@@ -33,6 +35,8 @@ import { useCallback, useState } from "react";
 
 import TwoFactorSection from "../../components/account/TwoFactorSection";
 import ContactVerificationSection from "../../components/account/ContactVerificationSection";
+import DevicesSection from "../../components/account/DevicesSection";
+import LoginHistorySection from "../../components/account/LoginHistorySection";
 import Button from "../../components/ui/Button";
 import { AlertTriangleIcon } from "../../components/ui/Icons";
 import { changePassword } from "../../api/auth";
@@ -55,6 +59,8 @@ export default function SecuritySettingsPage() {
       <PasswordSection />
       <ContactVerificationSection />
       <TwoFactorSection />
+      <DevicesSection />
+      <LoginHistorySection />
     </section>
   );
 }

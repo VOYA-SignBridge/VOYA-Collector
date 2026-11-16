@@ -985,6 +985,7 @@ def create_refresh_token(
     user_id: str,
     family_id: Optional[str] = None,
     lifetime: Optional[timedelta] = None,
+    user_agent: Optional[str] = None,
 ) -> str:
     """Issue a new opaque refresh token, storing only its hash. Returns the raw
     token (to be set as an httpOnly cookie).
@@ -994,7 +995,8 @@ def create_refresh_token(
     token descended from one stolen cookie without touching other devices.
 
     `lifetime` omitted = the ordinary idle lifetime. A remembered login passes a
-    longer one; see `session_lifetime`.
+    longer one; see `session_lifetime`. `user_agent` labels the device in the
+    signed-in-devices list; rotation carries it forward.
     """
     raw = secrets.token_urlsafe(48)
     token_hash = _hash_token(raw)
@@ -1003,10 +1005,10 @@ def create_refresh_token(
     with _identity_cursor(dict_rows=False) as cur:
         cur.execute(
             """
-            INSERT INTO refresh_tokens (token_hash, user_id, expires_at, family_id)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO refresh_tokens (token_hash, user_id, expires_at, family_id, user_agent)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (token_hash, user_id, expires_at, fam),
+            (token_hash, user_id, expires_at, fam, user_agent),
         )
     return raw
 
@@ -1108,7 +1110,7 @@ def rotate_session(raw_token: str) -> Optional[RotatedSession]:
         cur.execute(
             """
             SELECT token_hash, user_id, expires_at, created_at, revoked_at,
-                   family_id, reuse_detected_at
+                   family_id, reuse_detected_at, user_agent
             FROM refresh_tokens
             WHERE token_hash = %s
             """,
@@ -1175,10 +1177,10 @@ def rotate_session(raw_token: str) -> Optional[RotatedSession]:
         )
         cur.execute(
             """
-            INSERT INTO refresh_tokens (token_hash, user_id, expires_at, family_id)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO refresh_tokens (token_hash, user_id, expires_at, family_id, user_agent)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (new_hash, row["user_id"], new_expires, family_id),
+            (new_hash, row["user_id"], new_expires, family_id, row["user_agent"]),
         )
         return RotatedSession(user, new_raw, str(family_id or ""), lifetime)
 

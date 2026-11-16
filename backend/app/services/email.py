@@ -218,6 +218,20 @@ def send_password_reset_email(to_email: str, username: str, reset_link: str) -> 
     _send(to_email, subject, body, loggable=True)
 
 
+def send_security_notice_email(to_email: str, username: str, subject: str, message: str) -> None:
+    """Thư báo một thay đổi bảo mật của tài khoản (đổi mật khẩu, đổi email).
+
+    Chỉ MÔ TẢ việc đã xảy ra; không chứa liên kết hay mã nào. Nên `loggable=True`:
+    khi chưa cấu hình SMTP (máy phát triển) nội dung ra nhật ký thay vì mất.
+    """
+    body = (
+        f"Xin chào {username},\n\n{message}\n\n"
+        "Nếu đây không phải bạn, hãy chọn \"Quên mật khẩu\" ở trang đăng nhập để đặt "
+        "lại mật khẩu ngay, hoặc liên hệ quản trị viên.\n"
+    )
+    _send(to_email, subject, body, loggable=True)
+
+
 # ---------------------------------------------------------------------------
 # Hỗ trợ — thư cho người trực
 #

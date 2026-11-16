@@ -1,7 +1,8 @@
 import hashlib
+import uuid
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Response, UploadFile, status, Depends  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
@@ -25,12 +26,13 @@ from app.modules.identity._web_compat import (
     verify_password,
 )
 from app.modules.identity.cookies import (
+    ACCESS_COOKIE,
     REFRESH_COOKIE,
     clear_auth_cookies,
     generate_csrf_token,
     set_auth_cookies,
 )
-from app.modules.identity import account_workflows, avatar_image
+from app.modules.identity import account_workflows, avatar_image, device_sessions, login_history
 from app.modules.security import account_controls, audit_log
 from app.core.public_url import resolve_frontend_base_url
 from app.modules.security._web_compat import (
@@ -595,14 +597,17 @@ def _issue_session(response: Response, request: Request, user: dict,
     """
     fam = new_session_family()
     lifetime = session_lifetime(remember, bool(user.get("is_admin")))
+    agent = device_sessions.clip_user_agent(request.headers.get("user-agent"))
     set_auth_cookies(
         response,
         access_token=_access_for(user, fam),
-        refresh_token=create_refresh_token(user["id"], family_id=fam, lifetime=lifetime),
+        refresh_token=create_refresh_token(
+            user["id"], family_id=fam, lifetime=lifetime, user_agent=agent),
         csrf_token=generate_csrf_token(),
         request=request,
         lifetime=lifetime,
     )
+    login_history.record_login(user, request, remember)
 
 
 class TwoFactorLoginRequest(BaseModel):
@@ -805,6 +810,77 @@ def get_avatar(user_id: str, current_user=Depends(get_current_user)):
     )
 
 
+class SessionOut(BaseModel):
+    """Một thiết bị đang đăng nhập. Không mang token hay địa chỉ IP."""
+
+    id: str
+    device: str
+    started_at: Optional[datetime] = None
+    last_active: Optional[datetime] = None
+    remembered: bool = False
+    current: bool = False
+
+
+class LoginEventOut(BaseModel):
+    at: datetime
+    device: str
+    place: str = ""
+    remember: bool = False
+
+
+class RevokedOut(BaseModel):
+    revoked: int
+
+
+def _my_family(request: Request) -> Optional[str]:
+    return device_sessions.current_family(request.cookies.get(ACCESS_COOKIE))
+
+
+@router.get("/sessions", response_model=List[SessionOut])
+def list_my_sessions(request: Request, current_user=Depends(get_current_user)):
+    """Các thiết bị đang đăng nhập bằng tài khoản này, kèm cái đang gọi."""
+    return device_sessions.list_sessions(str(current_user["id"]), _my_family(request))
+
+
+@router.delete("/sessions/{family_id}", response_model=MessageResponse)
+def revoke_my_session(family_id: str, request: Request, current_user=Depends(get_current_user)):
+    """Đăng xuất MỘT thiết bị khác. Thiết bị đang dùng thì dùng nút Đăng xuất."""
+    from app.modules.security import audit
+
+    enforce_ip_limit(request, "session-revoke", max_calls=30, window=3600)
+    try:
+        uuid.UUID(family_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không có thiết bị này") from None
+    if family_id == _my_family(request):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Đây là thiết bị bạn đang dùng. Hãy dùng nút Đăng xuất.")
+    if not device_sessions.revoke_session(str(current_user["id"]), family_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không có thiết bị này")
+    audit.record("account.session.revoke", actor=current_user, target_type="user",
+                 target_id=str(current_user["id"]), detail={"scope": "one"}, request=request)
+    return {"message": "Đã đăng xuất thiết bị đó."}
+
+
+@router.post("/sessions/revoke-others", response_model=RevokedOut)
+def revoke_my_other_sessions(request: Request, current_user=Depends(get_current_user)):
+    """Đăng xuất mọi thiết bị khác, giữ thiết bị đang dùng."""
+    from app.modules.security import audit
+
+    enforce_ip_limit(request, "session-revoke", max_calls=30, window=3600)
+    count = device_sessions.revoke_other_sessions(str(current_user["id"]), _my_family(request))
+    audit.record("account.session.revoke", actor=current_user, target_type="user",
+                 target_id=str(current_user["id"]), detail={"scope": "others", "count": count},
+                 request=request)
+    return {"revoked": count}
+
+
+@router.get("/login-history", response_model=List[LoginEventOut])
+def my_login_history(current_user=Depends(get_current_user)):
+    """Mười lần đăng nhập gần nhất của chính người dùng."""
+    return login_history.recent_logins(str(current_user["id"]), limit=10)
+
+
 class ForgotPasswordRequest(BaseModel):
     identifier: str = Field(..., min_length=1, max_length=255)
 
@@ -858,6 +934,7 @@ class ChangePasswordRequest(BaseModel):
 def change_password(
     payload: ChangePasswordRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user),
 ):
     """Đổi mật khẩu khi ĐANG đăng nhập.
@@ -927,6 +1004,7 @@ def change_password(
     account_workflows.apply_password_change(
         str(current_user["id"]), payload.new_password
     )
+    account_workflows.notify_password_changed(current_user, background_tasks.add_task)
 
     audit.record(
         "account.password.change", actor=current_user, target_type="user",
@@ -1053,6 +1131,7 @@ def change_email_start(
 def change_email_confirm(
     payload: ChangeEmailConfirmRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user),
 ):
     from app.modules.security import audit, otp
@@ -1060,7 +1139,8 @@ def change_email_confirm(
     _guard_email_change(current_user, payload.current_password, request)
 
     try:
-        changed = account_workflows.confirm_email_change(current_user, payload.code)
+        changed = account_workflows.confirm_email_change(
+            current_user, payload.code, enqueue=background_tasks.add_task)
     except otp.OtpError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 

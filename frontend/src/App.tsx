@@ -72,6 +72,7 @@ const AdminHomePage = lazy(() => import("./pages/admin/AdminHomePage"));
 const AdminSupportPage = lazy(() => import("./pages/admin/AdminSupportPage"));
 const SettingsLayout = lazy(() => import("./pages/settings/SettingsLayout"));
 const SecuritySettingsPage = lazy(() => import("./pages/settings/SecuritySettingsPage"));
+const MyDataPage = lazy(() => import("./pages/settings/MyDataPage"));
 const LanguageSettingsPage = lazy(() => import("./pages/settings/LanguageSettingsPage"));
 
 
@@ -383,6 +384,7 @@ function App() {
                 <Route path="account" element={<AccountPage />} />
                 <Route path="security" element={<SecuritySettingsPage />} />
                 <Route path="consents" element={<ConsentsPage />} />
+                <Route path="data" element={<MyDataPage />} />
                 {/* `/settings/contact` giữ lại làm CHUYỂN HƯỚNG, không xoá.
                     Nó đã đi ra ngoài trong thư mời và trong thông báo bảo mật;
                     một đường dẫn cũ trả 404 là cách chắc chắn khiến người nhận

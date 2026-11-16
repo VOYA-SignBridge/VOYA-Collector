@@ -89,10 +89,20 @@ def _start(account, *, new_email, password=PASSWORD):
     return auth_router.change_email_start(payload, _Req(), _current(account))
 
 
-def _confirm(account, *, code, password=PASSWORD):
+class _BG:
+    """BackgroundTasks tối thiểu: giữ lại việc được xếp để test đọc lại."""
+
+    def __init__(self) -> None:
+        self.tasks: list = []
+
+    def add_task(self, fn, *args, **kwargs) -> None:
+        self.tasks.append((fn.__name__, args))
+
+
+def _confirm(account, *, code, password=PASSWORD, bg=None):
     payload = auth_router.ChangeEmailConfirmRequest(
         current_password=password, code=code)
-    return auth_router.change_email_confirm(payload, _Req(), _current(account))
+    return auth_router.change_email_confirm(payload, _Req(), bg or _BG(), _current(account))
 
 
 # Mã thật không đọc lại được — bảng chỉ giữ digest. Nên các bài dưới gọi thẳng
@@ -208,6 +218,20 @@ class TestXacNhan:
         assert items[0]["severity"] == "critical"
         assert account["email"] in items[0]["body"]
         assert new in items[0]["body"]
+
+    def test_thu_bao_di_toi_dia_chi_CU_chu_khong_chi_dia_chi_moi(self, account, scope):
+        """Kẻ chiếm một phiên đăng nhập trỏ email sang hộp thư của chúng; thông báo
+        trong chính tài khoản thì chủ thật không bao giờ thấy. Thư tới hộp thư CŨ —
+        nơi họ còn giữ — là đường duy nhất họ biết được."""
+        new = f"moi{uuid.uuid4().hex[:6]}@example.test"
+        bg = _BG()
+        _confirm(account, code=self._issue(account, new), bg=bg)
+
+        assert len(bg.tasks) == 1
+        name, (to, _username, _subject, message) = bg.tasks[0]
+        assert name == "send_security_notice_email"
+        assert to == account["email"], "phải tới địa chỉ CŨ"
+        assert new not in message, "không lộ nguyên địa chỉ mới trong thư"
 
     def test_KHONG_dung_duoc_lai_ma_da_tieu(self, account, scope):
         new = f"moi{uuid.uuid4().hex[:6]}@example.test"

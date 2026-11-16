@@ -219,8 +219,35 @@ def begin_email_change(user: Dict[str, Any], new_email: str) -> Dict[str, str]:
     return {"challenge_id": challenge_id, "sent_to": normalized}
 
 
-def confirm_email_change(user: Dict[str, Any], code: str) -> Dict[str, str]:
-    """Consume mailbox proof, persist the address and notify the account."""
+def _mask_email(address: str) -> str:
+    """`khanh@cantho.edu.vn` -> `k***@cantho.edu.vn`: đủ để nhận ra, không lộ cả địa chỉ."""
+    local, _, domain = address.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else address
+
+
+def notify_password_changed(user: Dict[str, Any], enqueue: Callable[..., Any]) -> None:
+    """Gửi thư báo mật khẩu vừa đổi tới email hiện tại (nếu có)."""
+    address = str(user.get("email") or "").strip()
+    if not address:
+        return
+    enqueue(
+        email.send_security_notice_email,
+        address,
+        str(user.get("username") or ""),
+        "Mật khẩu VOYA-Collector của bạn vừa được đổi",
+        "Mật khẩu của tài khoản vừa được đổi. Mọi thiết bị khác đã bị đăng xuất.",
+    )
+
+
+def confirm_email_change(
+    user: Dict[str, Any], code: str, enqueue: Callable[..., Any] | None = None
+) -> Dict[str, str]:
+    """Consume mailbox proof, persist the address and notify the account.
+
+    Với `enqueue`, còn gửi thư tới địa chỉ CŨ: kẻ chiếm được một phiên đăng nhập có
+    thể trỏ email sang hộp thư của chúng, và nếu chủ thật chỉ nhận thông báo trong
+    chính tài khoản đó thì họ không bao giờ biết — thư đi tới hộp thư họ còn giữ.
+    """
     result = otp.verify(user_id=user["id"], purpose="verify_email", code=code)
     new_email = str(result["destination"]).strip().lower()
     old_email = str(user.get("email") or "")
@@ -239,4 +266,12 @@ def confirm_email_change(user: Dict[str, Any], code: str) -> Dict[str, str]:
         link="/settings/security",
         severity="critical",
     )
+    if enqueue and old_email:
+        enqueue(
+            email.send_security_notice_email,
+            old_email,
+            str(user.get("username") or ""),
+            "Địa chỉ email của tài khoản VOYA-Collector đã được đổi",
+            f"Email của tài khoản vừa được đổi sang {_mask_email(new_email)}.",
+        )
     return {"old_email": old_email, "new_email": new_email}

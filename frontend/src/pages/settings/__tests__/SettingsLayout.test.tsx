@@ -44,6 +44,7 @@ describe("SettingsLayout", () => {
     expect(hrefs).toContain("/settings/consents");
     expect(hrefs).toContain("/settings/support");
     expect(hrefs).toContain("/settings/language");
+    expect(hrefs).toContain("/settings/data");
   });
 
   it("KHÔNG còn mục 'Xác minh liên hệ' riêng — nó nằm trong Bảo mật", () => {
@@ -57,19 +58,19 @@ describe("SettingsLayout", () => {
     expect(hrefs).not.toContain("/settings/contact");
   });
 
-  it("gom đủ 9 mục cho quản trị viên", () => {
+  it("gom đủ 10 mục cho quản trị viên", () => {
     // 20/08: 8 -> 9. Con số này đã LỆCH sẵn trước phiên sửa giao diện — mục
     // "Workspace" được thêm vào `SettingsLayout` mà không ai chỉnh test, nên
     // hai khẳng định dưới đây đỏ từ trước. Sửa số chứ không gỡ khẳng định:
     // chính nó là thứ bắt người thêm mục phải dừng lại một nhịp.
     renderSettings(true);
-    expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(9);
+    expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(10);
   });
 
   it("giấu Tích hợp với người dùng thường — trang đó chắc chắn 403", () => {
     renderSettings(false);
     expect(screen.queryByText("Tích hợp")).not.toBeInTheDocument();
-    expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(8);
+    expect(within(screen.getByRole("navigation")).getAllByRole("link")).toHaveLength(9);
   });
 
   it("dịch nhãn mục sang tiếng Anh", () => {

@@ -83,13 +83,23 @@ def scope():
         yield
 
 
+class _BG:
+    """BackgroundTasks tối thiểu: giữ lại việc được xếp để test đọc lại."""
+
+    def __init__(self) -> None:
+        self.tasks: list = []
+
+    def add_task(self, fn, *args, **kwargs) -> None:
+        self.tasks.append((fn.__name__, args))
+
+
 def _change(account, **kw):
     payload = auth_router.ChangePasswordRequest(
         current_password=kw.pop("current_password", PASSWORD),
         new_password=kw.pop("new_password", "a brand new passphrase"),
         code=kw.pop("code", None),
     )
-    return auth_router.change_password(payload, _Req(), _current(account))
+    return auth_router.change_password(payload, _Req(), kw.pop("bg", None) or _BG(), _current(account))
 
 
 class TestKhongCo2FA:
@@ -302,3 +312,17 @@ class TestAdminResetLinkIsHandedBack:
         items = notifications.list_for_user(account["id"])
         assert items and items[0]["kind"] == "security"
         assert "quản trị viên" in items[0]["body"]
+
+
+class TestThuBaoDoiMatKhau:
+    def test_doi_xong_thi_xep_thu_bao_toi_email_cua_tai_khoan(self, account, scope):
+        bg = _BG()
+        _change(account, bg=bg)
+        assert [t[0] for t in bg.tasks] == ["send_security_notice_email"]
+        assert bg.tasks[0][1][0].endswith("@example.test")
+
+    def test_doi_that_bai_thi_khong_co_thu_nao(self, account, scope):
+        bg = _BG()
+        with pytest.raises(HTTPException):
+            _change(account, current_password="sai", bg=bg)
+        assert bg.tasks == []

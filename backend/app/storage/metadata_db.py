@@ -1706,6 +1706,10 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS family_id UUID",
     "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS replaced_by TEXT",
     "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS reuse_detected_at TIMESTAMP WITH TIME ZONE",
+    # Trình duyệt/hệ điều hành của thiết bị (User-Agent, cắt 255 ký tự), để người dùng
+    # nhận ra thiết bị trong danh sách "Thiết bị đang đăng nhập". Token kế nhiệm kế
+    # thừa giá trị của token cũ khi xoay.
+    "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_invalid_before TIMESTAMP WITH TIME ZONE",
     # Token cũ (cấp trước lần triển khai này) không có họ. Gán cho mỗi cái một
     # họ RIÊNG chứ không gộp chung: gộp lại thì một lần phát hiện tái sử dụng sẽ
