@@ -15,11 +15,12 @@ import {
 } from "../components/ui/Icons";
 
 /**
- * Bộ ảnh đại diện mẫu: người dùng CHỌN một mẫu, không tải ảnh lên.
+ * Bộ ảnh đại diện MẪU: một lựa chọn cho người không muốn dùng ảnh của mình (và là
+ * lựa chọn an toàn cho cộng đồng nhạy cảm về danh tính — không lộ khuôn mặt). Người
+ * dùng cũng có thể tải ảnh riêng lên; xem `isUploadedAvatar`.
  *
- * Không tải ảnh lên là chủ ý: không cần kiểm duyệt ảnh, không lưu tệp của người
- * dùng, và không lộ khuôn mặt của một cộng đồng vốn nhạy cảm về danh tính. Máy
- * chủ chỉ lưu `key`; hình vẽ nằm ở đây, nên thêm hay đổi mẫu không cần migration.
+ * Với mẫu, máy chủ chỉ lưu `key`; hình vẽ nằm ở đây, nên thêm hay đổi mẫu không cần
+ * migration.
  *
  * Màu nền dùng các bậc 600–700 để biểu tượng trắng đạt tương phản 3:1 của WCAG
  * 1.4.11 (thành phần đồ hoạ). Lớp Tailwind phải viết nguyên chuỗi để bộ quét thấy.
@@ -44,6 +45,11 @@ export const AVATAR_PRESETS: readonly AvatarPreset[] = [
   { key: "cap", bg: "bg-lime-700", Icon: GraduationCapIcon },
   { key: "cloud", bg: "bg-slate-600", Icon: CloudIcon },
 ];
+
+/** `avatar_key` trỏ tới ảnh người dùng TẢI LÊN (máy chủ cấp, dạng `u-<epoch>`). */
+export function isUploadedAvatar(key: string | null | undefined): key is string {
+  return !!key && key.startsWith("u-");
+}
 
 export function findAvatarPreset(key: string | null | undefined): AvatarPreset | null {
   return AVATAR_PRESETS.find((p) => p.key === key) ?? null;

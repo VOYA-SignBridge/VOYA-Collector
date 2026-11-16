@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response, status, Depends  # pyright: ignore[reportMissingImports]
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Response, UploadFile, status, Depends  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field  # pyright: ignore[reportMissingImports]
 
 from app.modules.saas import tenant_admin
@@ -30,7 +30,7 @@ from app.modules.identity.cookies import (
     generate_csrf_token,
     set_auth_cookies,
 )
-from app.modules.identity import account_workflows
+from app.modules.identity import account_workflows, avatar_image
 from app.modules.security import account_controls, audit_log
 from app.core.public_url import resolve_frontend_base_url
 from app.modules.security._web_compat import (
@@ -760,6 +760,49 @@ def update_me(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="Khoá ảnh đại diện không hợp lệ.") from None
     return {"avatar_key": payload.avatar_key}
+
+
+@router.post("/me/avatar")
+async def upload_avatar(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    """Tải ảnh đại diện lên. Ảnh được vẽ lại thành WebP 256x256, không lưu bản gốc."""
+    enforce_ip_limit(request, "avatar", max_calls=20, window=3600)
+    # Đọc tối đa trần + 1 byte: đủ để biết là vượt mà không nạp cả tệp khổng lồ.
+    raw = await file.read(avatar_image.MAX_UPLOAD_BYTES + 1)
+    try:
+        key = account_workflows.store_uploaded_avatar(str(current_user["id"]), raw)
+    except avatar_image.AvatarImageError as exc:
+        status_code, message = _AVATAR_ERRORS.get(exc.code, _AVATAR_ERRORS["invalid"])
+        raise HTTPException(status_code=status_code, detail=message) from None
+    return {"avatar_key": key}
+
+
+_AVATAR_ERRORS = {
+    "too_large": (status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Ảnh lớn quá 2 MB."),
+    "unsupported": (status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Chỉ nhận ảnh JPEG, PNG hoặc WebP."),
+    "dimensions": (status.HTTP_422_UNPROCESSABLE_ENTITY, "Kích thước ảnh không hợp lệ hoặc quá lớn."),
+    "invalid": (status.HTTP_422_UNPROCESSABLE_ENTITY, "Không đọc được tệp ảnh này."),
+}
+
+
+@router.get("/avatar/{user_id}")
+def get_avatar(user_id: str, current_user=Depends(get_current_user)):
+    """Ảnh tải lên của một người trong cùng tổ chức. 404 nếu không có hoặc không thấy.
+
+    Đường dẫn giao diện gắn kèm `?v=<avatar_key>` và khoá đổi mỗi lần tải lên, nên
+    ảnh được phép nằm lâu trong bộ nhớ đệm riêng của trình duyệt.
+    """
+    image = account_workflows.read_avatar(user_id)
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không có ảnh")
+    return Response(
+        content=image,
+        media_type=avatar_image.CONTENT_TYPE,
+        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 class ForgotPasswordRequest(BaseModel):

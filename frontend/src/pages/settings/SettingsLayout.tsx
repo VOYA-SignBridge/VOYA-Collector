@@ -30,42 +30,62 @@ import { getReturnPath } from "../../hooks/useReturnPath";
  * tab lưu trong `useState` mất hết cả ba, và nó còn làm hỏng một thứ cụ thể:
  * thông báo bảo mật trỏ tới trang này bằng đường dẫn.
  *
- * @i18n-key-table — `key` của từng mục cài đặt là KHOÁ từ điển, dịch bằng
- * `t(item.key)` lúc dựng.
+ * @i18n-key-table — `key` của từng mục và `title` của từng nhóm là KHOÁ từ điển,
+ * dịch bằng `t(...)` lúc dựng.
  */
 
 type Item = { key: string; href: string; icon: ReactNode; adminOnly?: boolean };
 
+/** Ba nhóm theo ĐÂU việc này thuộc về: bản thân tôi, tổ chức của tôi, hay nhờ trợ giúp. */
+type Group = { title: string; items: Item[] };
+
 const ICON = "h-4 w-4 shrink-0";
 
-const ITEMS: Item[] = [
-  { key: "Tài khoản", href: "/settings/account", icon: <UserIcon className={ICON} /> },
-  // Bảo mật giờ gồm CẢ xác minh liên hệ. Ba việc — đổi mật khẩu, xác minh địa
-  // chỉ, bật 2FA — trả lời cùng một câu hỏi: "tôi có lấy lại được tài khoản
-  // không". Tách "Xác minh liên hệ" thành mục thứ ba, ngang hàng với Tổ chức và
-  // Gói dịch vụ, là bắt người dùng đoán xem nó thuộc nhóm nào.
-  { key: "Bảo mật", href: "/settings/security", icon: <ShieldIcon className={ICON} /> },
-  // Đồng thuận tách RA khỏi Tài khoản: ký hay rút một văn bản pháp lý là quyết
-  // định có hệ quả pháp lý và mỗi lần rút là một chiều — không cùng nhịp với
-  // việc sửa một chữ trong tên đăng nhập.
-  { key: "Đồng thuận", href: "/settings/consents", icon: <ShieldCheckIcon className={ICON} /> },
-  { key: "Tổ chức", href: "/settings/organization", icon: <BuildingIcon className={ICON} /> },
-  // Workspace/Project nằm NGAY DƯỚI Tổ chức vì đó đúng là quan hệ chứa nhau:
-  // tenant ⊃ workspace ⊃ project. Đặt nó ở chỗ khác trong danh sách là làm mất
-  // đúng thông tin mà thứ tự đang mang.
-  { key: "Workspace", href: "/settings/workspaces", icon: <FolderIcon className={ICON} /> },
-  { key: "Gói dịch vụ", href: "/settings/billing", icon: <ChartBarIcon className={ICON} /> },
-  // Tích hợp đòi vai trò biên tập ở máy chủ. Hiện nó cho người không có quyền
-  // là mời họ bấm vào một trang chắc chắn 403 — một ngõ cụt có sẵn nhãn.
-  { key: "Tích hợp", href: "/settings/integrations", icon: <LinkIcon className={ICON} />, adminOnly: true },
-  { key: "Hỗ trợ", href: "/settings/support", icon: <InboxIcon className={ICON} /> },
-  { key: "Ngôn ngữ & hiển thị", href: "/settings/language", icon: <GlobeIcon className={ICON} /> },
+const GROUPS: Group[] = [
+  {
+    title: "Cá nhân",
+    items: [
+      { key: "Tài khoản", href: "/settings/account", icon: <UserIcon className={ICON} /> },
+      // Bảo mật giờ gồm CẢ xác minh liên hệ. Ba việc — đổi mật khẩu, xác minh địa
+      // chỉ, bật 2FA — trả lời cùng một câu hỏi: "tôi có lấy lại được tài khoản
+      // không". Tách "Xác minh liên hệ" thành mục thứ ba, ngang hàng với Tổ chức và
+      // Gói dịch vụ, là bắt người dùng đoán xem nó thuộc nhóm nào.
+      { key: "Bảo mật", href: "/settings/security", icon: <ShieldIcon className={ICON} /> },
+      // Đồng thuận tách RA khỏi Tài khoản: ký hay rút một văn bản pháp lý là quyết
+      // định có hệ quả pháp lý và mỗi lần rút là một chiều — không cùng nhịp với
+      // việc sửa một chữ trong tên đăng nhập.
+      { key: "Đồng thuận", href: "/settings/consents", icon: <ShieldCheckIcon className={ICON} /> },
+      { key: "Ngôn ngữ & hiển thị", href: "/settings/language", icon: <GlobeIcon className={ICON} /> },
+    ],
+  },
+  {
+    title: "Tổ chức",
+    items: [
+      { key: "Tổ chức", href: "/settings/organization", icon: <BuildingIcon className={ICON} /> },
+      // Workspace/Project nằm NGAY DƯỚI Tổ chức vì đó đúng là quan hệ chứa nhau:
+      // tenant ⊃ workspace ⊃ project. Đặt nó ở chỗ khác trong danh sách là làm mất
+      // đúng thông tin mà thứ tự đang mang.
+      { key: "Workspace", href: "/settings/workspaces", icon: <FolderIcon className={ICON} /> },
+      { key: "Gói dịch vụ", href: "/settings/billing", icon: <ChartBarIcon className={ICON} /> },
+      // Tích hợp đòi vai trò biên tập ở máy chủ. Hiện nó cho người không có quyền
+      // là mời họ bấm vào một trang chắc chắn 403 — một ngõ cụt có sẵn nhãn.
+      { key: "Tích hợp", href: "/settings/integrations", icon: <LinkIcon className={ICON} />, adminOnly: true },
+    ],
+  },
+  {
+    title: "Trợ giúp",
+    items: [
+      { key: "Hỗ trợ", href: "/settings/support", icon: <InboxIcon className={ICON} /> },
+    ],
+  },
 ];
 
 export default function SettingsLayout() {
   const { user } = useAuth();
   const { t } = useI18n();
-  const items = ITEMS.filter((i) => !i.adminOnly || canEditTenant(user));
+  const groups = GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((i) => !i.adminOnly || canEditTenant(user)) }))
+    .filter((g) => g.items.length > 0);
   // Đọc một lần lúc dựng: đổi mục bên trong Cài đặt không được đổi đích quay lại.
   const returnTo = getReturnPath();
 
@@ -90,21 +110,30 @@ export default function SettingsLayout() {
           aria-label={t("Mục cài đặt")}
           className="-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-2 lg:mx-0 lg:w-60 lg:flex-col lg:overflow-visible lg:pb-0"
         >
-          {items.map((item) => (
-            <NavLink
-              key={item.href}
-              to={item.href}
-              className={({ isActive }) =>
-                `flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue focus-visible:ring-offset-2 ${
-                  isActive
-                    ? "bg-ctu-blue/10 text-ctu-blue"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                }`
-              }
-            >
-              {item.icon}
-              {t(item.key)}
-            </NavLink>
+          {groups.map((group) => (
+            <div key={group.title} className="flex gap-1 lg:flex-col">
+              {/* Tiêu đề nhóm chỉ hiện trên màn hình rộng: ở màn hình hẹp thanh này
+                  cuộn ngang và một tiêu đề giữa các mục chỉ làm nó dài thêm. */}
+              <p className="hidden px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-slate-400 lg:block">
+                {t(group.title)}
+              </p>
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.href}
+                  to={item.href}
+                  className={({ isActive }) =>
+                    `flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ctu-blue focus-visible:ring-offset-2 ${
+                      isActive
+                        ? "bg-ctu-blue/10 text-ctu-blue"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    }`
+                  }
+                >
+                  {item.icon}
+                  {t(item.key)}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 

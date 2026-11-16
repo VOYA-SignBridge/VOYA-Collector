@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import Avatar from '../Avatar';
 import { AVATAR_PRESETS, defaultAvatarColor, findAvatarPreset } from '../../lib/avatars';
@@ -34,6 +34,38 @@ describe('Avatar', () => {
   it('là trang trí: ẩn với trình đọc màn hình vì tên luôn nằm cạnh', () => {
     const { container } = render(<Avatar user={{ username: 'kha' }} />);
     expect(container.firstElementChild).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
+describe('Avatar — ảnh tải lên', () => {
+  const user = { id: 'u1', username: 'kha', avatar_key: 'u-1700000000' };
+
+  it('vẽ ảnh tải lên: đường dẫn mang cả id người dùng và khoá phiên bản', () => {
+    const { container } = render(<Avatar user={user} />);
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toContain('/api/v1/auth/avatar/u1?v=u-1700000000');
+    expect(img).toHaveAttribute('alt', '');
+  });
+
+  it('ảnh hỏng thì rơi về chữ cái đầu chứ không hiện ô vỡ', () => {
+    const { container } = render(<Avatar user={user} />);
+    fireEvent.error(container.querySelector('img')!);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toBe('K');
+  });
+
+  it('đổi ảnh (khoá mới) thì thử tải lại, dù ảnh trước đã hỏng', () => {
+    const { container, rerender } = render(<Avatar user={user} />);
+    fireEvent.error(container.querySelector('img')!);
+    rerender(<Avatar user={{ ...user, avatar_key: 'u-1700000999' }} />);
+    expect(container.querySelector('img')!.getAttribute('src')).toContain('v=u-1700000999');
+  });
+
+  it('khoá tải lên mà thiếu id người dùng thì không dựng đường dẫn sai', () => {
+    const { container } = render(<Avatar user={{ username: 'kha', avatar_key: 'u-1700000000' }} />);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toBe('K');
   });
 });
 

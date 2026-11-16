@@ -55,7 +55,7 @@ user_action_passcodes,user_id,8,1,0,f,f
 user_consents,consent_id,11,3,0,f,f
 user_recovery_codes,code_hash,4,1,0,f,f
 user_totp,user_id,5,1,0,f,f
-users,id,17,2,47,t,t
+users,id,18,2,47,t,t
 verification_codes,challenge_id,11,1,0,f,f
 vocabulary_groups,tenant_id+group_id,6,1,1,t,t
 vocabulary_registry_meta,tenant_id,3,2,0,t,t

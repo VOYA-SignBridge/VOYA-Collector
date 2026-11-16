@@ -1737,6 +1737,10 @@ MIGRATION_STATEMENTS = [
     # Ảnh đại diện CHỌN từ bộ mẫu có sẵn của giao diện (không tải ảnh lên). Chỉ
     # lưu khoá của mẫu; NULL = chưa chọn, giao diện vẽ chữ cái đầu của tên.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key VARCHAR(32)",
+    # Ảnh người dùng tải lên, đã chuẩn hoá thành WebP 256x256 (vài KB). `avatar_key`
+    # có dạng `u-<epoch>` khi cột này có dữ liệu. KHÔNG nằm trong các SELECT hồ sơ
+    # (chạy ở mọi request); chỉ được đọc bởi `account_workflows.read_avatar`.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_image BYTEA",
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS username TEXT",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS session_uid TEXT",

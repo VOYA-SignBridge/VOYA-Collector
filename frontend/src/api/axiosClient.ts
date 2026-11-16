@@ -112,6 +112,11 @@ if (apiBase.endsWith("/api")) {
   apiBase = apiBase.slice(0, -4);
 }
 
+/** Đường dẫn tuyệt đối tới API, cho chỗ KHÔNG đi qua axios (ví dụ `<img src>`). */
+export function apiUrl(path: string): string {
+  return apiBase + path;
+}
+
 // Request: attach the CSRF token on unsafe methods + dev logging + prepend baseUrl.
 axiosClient.interceptors.request.use((cfg) => {
   if (cfg.url && cfg.url.startsWith("/") && apiBase) {

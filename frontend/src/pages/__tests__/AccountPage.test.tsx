@@ -22,6 +22,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('../../api/auth', () => ({
   setAvatar: vi.fn(),
+  uploadAvatar: vi.fn(),
+  AVATAR_MAX_BYTES: 2 * 1024 * 1024,
+  uploadedAvatarUrl: (id: string, key: string) => `/api/v1/auth/avatar/${id}?v=${key}`,
   startEmailChange: vi.fn(),
   confirmEmailChange: vi.fn(),
 }));
@@ -48,7 +51,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 import AccountPage from '../AccountPage';
-import { confirmEmailChange, setAvatar, startEmailChange } from '../../api/auth';
+import { confirmEmailChange, setAvatar, startEmailChange, uploadAvatar } from '../../api/auth';
 import { fetchVerificationStatus } from '../../api/verification';
 import { notifyAuthChange } from '../../api/axiosClient';
 
@@ -97,6 +100,36 @@ describe('Hồ sơ: tên đăng nhập chỉ đọc, ảnh đại diện chọn 
     await screen.findByRole('radiogroup', { name: 'Chọn ảnh đại diện' });
     for (const r of screen.getAllByRole('radio')) expect(r).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByRole('button', { name: 'Dùng chữ cái đầu của tên' })).toBeDisabled();
+  });
+
+  it('tải ảnh lên: gửi đúng tệp rồi báo cho AuthProvider để đầu trang đổi theo', async () => {
+    vi.mocked(uploadAvatar).mockResolvedValue('u-1700000000');
+    renderPage();
+    const file = new File(['x'], 'toi.png', { type: 'image/png' });
+    fireEvent.change(await screen.findByLabelText('Chọn ảnh từ máy'), { target: { files: [file] } });
+
+    await waitFor(() => expect(uploadAvatar).toHaveBeenCalledWith(file));
+    expect(notifyAuthChange).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it('ảnh quá 2 MB bị chặn ngay ở trình duyệt, không gửi lên', async () => {
+    renderPage();
+    const big = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'lon.png', { type: 'image/png' });
+    fireEvent.change(await screen.findByLabelText('Chọn ảnh từ máy'), { target: { files: [big] } });
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(uploadAvatar).not.toHaveBeenCalled();
+  });
+
+  it('máy chủ từ chối ảnh thì báo lỗi và KHÔNG phát sự kiện đổi hồ sơ', async () => {
+    vi.mocked(uploadAvatar).mockRejectedValue(new Error('415'));
+    renderPage();
+    const file = new File(['x'], 'toi.gif', { type: 'image/gif' });
+    fireEvent.change(await screen.findByLabelText('Chọn ảnh từ máy'), { target: { files: [file] } });
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(notifyAuthChange).not.toHaveBeenCalled();
   });
 
   it('lưu thất bại thì báo lỗi và KHÔNG phát sự kiện đổi hồ sơ', async () => {

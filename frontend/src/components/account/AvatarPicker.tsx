@@ -1,15 +1,16 @@
-import { useState } from "react";
-import { setAvatar } from "../../api/auth";
+import { useRef, useState } from "react";
+import { AVATAR_MAX_BYTES, setAvatar, uploadAvatar } from "../../api/auth";
 import { notifyAuthChange } from "../../api/axiosClient";
 import { useAuth } from "../../contexts/AuthContext";
 import { useToast } from "../../hooks/useToast";
 import { useI18n } from "../../i18n";
 import { friendlyError } from "../../lib/errors";
 import { AVATAR_PRESETS } from "../../lib/avatars";
+import Button from "../ui/Button";
 import Avatar from "../Avatar";
 
 /**
- * Chọn ảnh đại diện từ bộ mẫu. Bấm là lưu ngay (không có nút "Lưu"), giống cách
+ * Chọn ảnh đại diện từ bộ mẫu hoặc tải ảnh của mình lên. Bấm là lưu ngay (không có nút "Lưu"), giống cách
  * các mạng xã hội làm: chọn xong thấy đổi ở đầu trang ngay.
  */
 export default function AvatarPicker() {
@@ -18,6 +19,28 @@ export default function AvatarPicker() {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const current = user?.avatar_key ?? null;
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File | undefined) => {
+    if (!file || busy) return;
+    // Kiểm sớm ở trình duyệt cho khỏi gửi cả tệp lớn rồi mới bị từ chối; máy chủ
+    // vẫn là nơi quyết định (loại tệp thật được kiểm ở đó, không tin phần mở rộng).
+    if (file.size > AVATAR_MAX_BYTES) {
+      toast.error(t("Ảnh lớn quá 2 MB. Hãy chọn ảnh nhỏ hơn."));
+      return;
+    }
+    setBusy(true);
+    try {
+      await uploadAvatar(file);
+      notifyAuthChange();
+      toast.success(t("Đã đổi ảnh đại diện."));
+    } catch (err) {
+      toast.error(friendlyError(err, t("Không tải được ảnh lên.")));
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = ""; // cho phép chọn lại đúng tệp đó
+    }
+  };
 
   const choose = async (key: string | null) => {
     if (busy || key === current) return;
@@ -57,6 +80,21 @@ export default function AvatarPicker() {
             </button>
           );
         })}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label={t("Chọn ảnh từ máy")}
+          onChange={(e) => void upload(e.target.files?.[0])}
+        />
+        <Button variant="secondary" size="sm" loading={busy} onClick={() => fileInput.current?.click()}>
+          {t("Tải ảnh của bạn lên")}
+        </Button>
+        <span className="text-xs text-slate-500">{t("JPEG, PNG hoặc WebP, tối đa 2 MB. Ảnh được cắt vuông.")}</span>
       </div>
       <button
         type="button"

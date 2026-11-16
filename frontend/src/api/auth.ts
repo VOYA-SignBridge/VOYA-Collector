@@ -1,4 +1,13 @@
-import axiosClient, { clearAuthToken, setAuthToken } from "./axiosClient";
+import axiosClient, { apiUrl, clearAuthToken, setAuthToken } from "./axiosClient";
+
+/**
+ * Địa chỉ ảnh đại diện ĐÃ TẢI LÊN của một người. `key` (= `avatar_key`) nằm trong
+ * đường dẫn vì nó đổi mỗi lần tải lên: ảnh mới là đường dẫn mới, nên trình duyệt
+ * được phép giữ ảnh lâu mà không bao giờ hiện ảnh cũ.
+ */
+export function uploadedAvatarUrl(userId: string, key: string): string {
+  return apiUrl(`/api/v1/auth/avatar/${encodeURIComponent(userId)}?v=${encodeURIComponent(key)}`);
+}
 
 export type AuthUser = {
   id: string;
@@ -157,8 +166,25 @@ export async function me(): Promise<AuthUser> {
   return res.data as AuthUser;
 }
 
+/** Trần dung lượng ảnh tải lên; khớp `avatar_image.MAX_UPLOAD_BYTES` ở máy chủ. */
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Tải ảnh đại diện lên; trả về khoá mới (`u-<epoch>`). Máy chủ vẽ lại ảnh thành
+ * 256x256 và bỏ siêu dữ liệu, nên không cần cắt hay nén ở đây.
+ *
+ * Không đặt `Content-Type` bằng tay: trình duyệt phải tự sinh `boundary` của multipart.
+ */
+export async function uploadAvatar(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await axiosClient.post("/api/v1/auth/me/avatar", form);
+  return (res.data as { avatar_key: string }).avatar_key;
+}
+
 /**
  * Chọn ảnh đại diện từ bộ mẫu của giao diện; `null` = bỏ chọn (dùng chữ cái đầu).
+ * Cả hai đều XOÁ ảnh đã tải lên.
  * Tên đăng nhập không sửa được ở đâu cả: nó là danh tính của dữ liệu đã đóng góp.
  */
 export async function setAvatar(avatarKey: string | null): Promise<void> {

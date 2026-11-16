@@ -17,6 +17,9 @@ python-dotenv==1.0.0
 pyyaml==6.0.1
 numpy==1.26.2
 opencv-python-headless==4.11.0.86
+# Chuẩn hoá ảnh đại diện tải lên (modules/identity/avatar_image.py). Trước đây chỉ
+# có gián tiếp qua matplotlib; ghim ra để không mất khi matplotlib đổi.
+Pillow==10.4.0
 mediapipe==0.10.21
 filelock==3.16.1
 google-api-python-client==2.196.0

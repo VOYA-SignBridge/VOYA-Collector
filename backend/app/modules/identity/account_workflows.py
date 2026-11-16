@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Callable, Dict
 
 from app.modules.identity import _web_compat as identity
+from app.modules.identity import avatar_image
 from app.modules.security import otp
 from app.modules.support import notifications
 from app.services import email
@@ -116,19 +118,62 @@ def note_password_reset_by_link(user_id: str, request: Any = None) -> None:
 _AVATAR_KEY = re.compile(r"[a-z0-9-]{1,32}")
 
 
+#: Tiền tố của khoá trỏ tới ẢNH TẢI LÊN. Chỉ `store_uploaded_avatar` được cấp khoá
+#: này: chọn mẫu mà gửi khoá `u-...` sẽ trỏ tới một ảnh không tồn tại.
+UPLOADED_PREFIX = "u-"
+
+
 def set_avatar(user_id: str, avatar_key: str | None) -> None:
-    """Lưu mẫu ảnh đại diện đã chọn (`None` = bỏ chọn, dùng chữ cái đầu).
+    """Chọn một mẫu ảnh đại diện (`None` = bỏ chọn, dùng chữ cái đầu).
+
+    Chọn mẫu hay bỏ chọn đều XOÁ ảnh đã tải lên: giữ lại một ảnh không còn ai
+    nhìn thấy là giữ ảnh của một người mà họ đã không muốn dùng nữa.
 
     Raises ValueError nếu khoá sai dạng. Kiểm ở ĐÂY chứ không bằng ràng buộc của
     Pydantic: tham số `pattern` của v2 bị v1 bỏ qua một cách im lặng, và ảnh này
     chạy trên v1.
     """
-    if avatar_key is not None and not _AVATAR_KEY.fullmatch(avatar_key):
+    if avatar_key is not None and (
+        not _AVATAR_KEY.fullmatch(avatar_key) or avatar_key.startswith(UPLOADED_PREFIX)
+    ):
         raise ValueError("avatar_key")
     with identity._identity_cursor(dict_rows=False) as cursor:
         cursor.execute(
-            "UPDATE users SET avatar_key = %s WHERE id = %s", (avatar_key, str(user_id))
+            "UPDATE users SET avatar_key = %s, avatar_image = NULL WHERE id = %s",
+            (avatar_key, str(user_id)),
         )
+
+
+def store_uploaded_avatar(user_id: str, raw: bytes) -> str:
+    """Chuẩn hoá ảnh tải lên, lưu, và trả về khoá mới (`u-<epoch>`).
+
+    Khoá đổi mỗi lần tải lên nên đường dẫn ảnh đổi theo: trình duyệt không bao giờ
+    giữ ảnh cũ trong bộ nhớ đệm sau khi người dùng đã thay.
+    Raises `AvatarImageError` nếu ảnh không dùng được.
+    """
+    image = avatar_image.normalise(raw)
+    key = f"{UPLOADED_PREFIX}{int(time.time())}"
+    with identity._identity_cursor(dict_rows=False) as cursor:
+        cursor.execute(
+            "UPDATE users SET avatar_key = %s, avatar_image = %s WHERE id = %s",
+            (key, image, str(user_id)),
+        )
+    return key
+
+
+def read_avatar(user_id: str) -> bytes | None:
+    """Ảnh tải lên của `user_id`, hoặc None.
+
+    Đọc theo PHẠM VI của request (RLS): người ở tổ chức khác không có hàng này,
+    nên không xem được ảnh của người ngoài tổ chức mình.
+    """
+    from app.storage.metadata_db import _fetch_all
+
+    rows = _fetch_all(
+        "SELECT avatar_image FROM users WHERE id = %s AND avatar_image IS NOT NULL",
+        (str(user_id),),
+    )
+    return bytes(rows[0]["avatar_image"]) if rows else None
 
 
 def apply_password_change(user_id: str, new_password: str) -> None:
