@@ -110,6 +110,14 @@ def note_password_reset_by_link(user_id: str, request: Any = None) -> None:
                      exc.__class__.__name__)
 
 
+def set_avatar(user_id: str, avatar_key: str | None) -> None:
+    """Lưu mẫu ảnh đại diện đã chọn (`None` = bỏ chọn, dùng chữ cái đầu)."""
+    with identity._identity_cursor(dict_rows=False) as cursor:
+        cursor.execute(
+            "UPDATE users SET avatar_key = %s WHERE id = %s", (avatar_key, str(user_id))
+        )
+
+
 def apply_password_change(user_id: str, new_password: str) -> None:
     """Change the password and invalidate every existing session."""
     with identity._identity_cursor() as cursor:

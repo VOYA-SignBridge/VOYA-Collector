@@ -138,6 +138,7 @@ users,email_verified_at,Thời điểm xác minh địa chỉ thư.,VERIFIED,Th�
 users,phone_verified_at,Thời điểm xác minh số điện thoại.,VERIFIED,
 users,sessions_invalid_before,Mốc thu hồi phiên: token phát trước thời điểm này không còn hiệu lực.,VERIFIED,Là mức thu hồi rộng nhất trong ba mức
 users,active_tenant_id,Tổ chức người dùng đang CHỌN làm ngữ cảnh làm việc.,VERIFIED,"Khác `tenant_id`: cái kia là mặc định/dự phòng, cái này là lựa chọn hiện tại"
+users,avatar_key,Khoá mẫu ảnh đại diện do người dùng chọn từ bộ mẫu của giao diện; NULL là dùng chữ cái đầu của tên.,VERIFIED,Không tải ảnh lên
 memberships,membership_id,Định danh tư cách thành viên.,VERIFIED,
 memberships,user_id,Tài khoản giữ tư cách thành viên này.,VERIFIED,
 memberships,scope_level,"Mức phạm vi: TENANT, WORKSPACE hoặc PROJECT.",VERIFIED,Quyết định hai cột workspace_id/project_id phải NULL hay NOT NULL — xem ck_memberships_shape. Ràng buộc CÂY thì ở nơi khác: ct_memberships_chain (xem parent_membership_id) mới là thứ kiểm quan hệ cha-con giữa các tầng

@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 /**
- * Trang "Tài khoản của tôi" — hồ sơ: tên đăng nhập và email.
+ * Trang "Tài khoản của tôi" — hồ sơ: ảnh đại diện, tên đăng nhập (chỉ đọc) và email.
  *
  * Phần đồng thuận pháp lý đã chuyển sang `/settings/consents` ngày 16/08/2026;
  * bài kiểm của nó nằm ở `pages/settings/__tests__/ConsentsPage.test.tsx`.
@@ -12,8 +12,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  * Hai chỗ mà một trang "trông đúng" vẫn nói dối, và là lý do các khẳng định
  * dưới đây tồn tại:
  *
- *  1. Đổi tên xong mà thanh bên vẫn giữ tên cũ — người dùng kết luận rằng việc
- *     đổi thất bại, rồi đổi lại lần nữa.
+ *  1. Chọn ảnh đại diện xong mà đầu trang vẫn giữ ảnh cũ — người dùng kết luận
+ *     rằng lượt chọn thất bại, rồi chọn lại. Và tên đăng nhập KHÔNG được có ô sửa.
  *  2. Đổi email chỉ bằng một phiên đang mở. Email là khoá khôi phục tài khoản,
  *     nên nếu một cửa sổ bỏ quên đủ để trỏ nó sang hộp thư khác thì mất tài
  *     khoản là chuyện một lần bấm. Mật khẩu phải được hỏi ở CẢ HAI bước, và mã
@@ -21,7 +21,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  */
 
 vi.mock('../../api/auth', () => ({
-  updateUsername: vi.fn(),
+  setAvatar: vi.fn(),
   startEmailChange: vi.fn(),
   confirmEmailChange: vi.fn(),
 }));
@@ -48,7 +48,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 import AccountPage from '../AccountPage';
-import { confirmEmailChange, startEmailChange, updateUsername } from '../../api/auth';
+import { confirmEmailChange, setAvatar, startEmailChange } from '../../api/auth';
 import { fetchVerificationStatus } from '../../api/verification';
 import { notifyAuthChange } from '../../api/axiosClient';
 
@@ -62,12 +62,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(updateUsername).mockResolvedValue({
-    changed: true,
-    old_username: 'nguoidung',
-    new_username: 'tenmoi',
-    rows: { 'samples.username': 12 },
-  });
+  vi.mocked(setAvatar).mockResolvedValue(undefined);
   vi.mocked(fetchVerificationStatus).mockResolvedValue({
     email: 'a@b.test',
     email_verified: true,
@@ -79,62 +74,38 @@ beforeEach(() => {
   });
 });
 
-describe('Đổi tên đăng nhập', () => {
-  it('khoá nút khi tên chưa đổi', async () => {
+describe('Hồ sơ: tên đăng nhập chỉ đọc, ảnh đại diện chọn từ bộ mẫu', () => {
+  it('tên đăng nhập chỉ hiện ra, KHÔNG có ô nào để sửa nó', async () => {
     renderPage();
-    const button = await screen.findByRole('button', { name: 'Lưu tên mới' });
-    expect(button).toBeDisabled();
-
-    fireEvent.change(screen.getByDisplayValue('nguoidung'), {
-      target: { value: 'tenmoi' },
-    });
-    expect(button).toBeEnabled();
+    expect(await screen.findByRole('heading', { name: 'nguoidung' })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('nguoidung')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Lưu tên mới' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Tên đăng nhập không đổi được/)).toBeInTheDocument();
   });
 
-  it('báo cho AuthProvider biết để thanh bên không giữ tên cũ', async () => {
-    // Không phát sự kiện thì người dùng thấy tên cũ cho tới lần tải trang sau,
-    // và kết luận rằng việc đổi tên thất bại.
+  it('chọn một mẫu thì lưu ngay và báo cho AuthProvider để đầu trang đổi theo', async () => {
     renderPage();
-    await screen.findByRole('button', { name: 'Lưu tên mới' });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Ảnh đại diện 2' }));
 
-    fireEvent.change(screen.getByDisplayValue('nguoidung'), {
-      target: { value: 'tenmoi' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu tên mới' }));
-
-    await waitFor(() => expect(updateUsername).toHaveBeenCalledWith('tenmoi'));
+    await waitFor(() => expect(setAvatar).toHaveBeenCalledWith('heart'));
     expect(notifyAuthChange).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalled();
   });
 
-  it('hiện số hàng dữ liệu đã đổi theo', async () => {
-    // Đổi tên KHÔNG phải một câu `UPDATE users`: nó chạm vào các mẫu đã đóng
-    // góp. Người bấm nút xứng đáng thấy điều đó thay vì tin lời.
+  it('chưa chọn mẫu nào thì không có nút nào đang được chọn, và nút "chữ cái đầu" khoá', async () => {
     renderPage();
-    await screen.findByRole('button', { name: 'Lưu tên mới' });
-
-    fireEvent.change(screen.getByDisplayValue('nguoidung'), {
-      target: { value: 'tenmoi' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Lưu tên mới' }));
-
-    expect(await screen.findByText('samples.username: 12')).toBeInTheDocument();
+    await screen.findByRole('radiogroup', { name: 'Chọn ảnh đại diện' });
+    for (const r of screen.getAllByRole('radio')) expect(r).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('button', { name: 'Dùng chữ cái đầu của tên' })).toBeDisabled();
   });
 
-  it('không khoe gì khi tên mới trùng tên cũ', async () => {
-    vi.mocked(updateUsername).mockResolvedValue({
-      changed: false,
-      old_username: 'nguoidung',
-      new_username: 'nguoidung',
-      rows: {},
-    });
+  it('lưu thất bại thì báo lỗi và KHÔNG phát sự kiện đổi hồ sơ', async () => {
+    vi.mocked(setAvatar).mockRejectedValue(new Error('boom'));
     renderPage();
-    await screen.findByRole('button', { name: 'Lưu tên mới' });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Ảnh đại diện 1' }));
 
-    fireEvent.change(screen.getByDisplayValue('nguoidung'), {
-      target: { value: '  nguoidung  ' },
-    });
-    // Khoảng trắng thừa không phải một cái tên mới — nút phải vẫn khoá.
-    expect(screen.getByRole('button', { name: 'Lưu tên mới' })).toBeDisabled();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(notifyAuthChange).not.toHaveBeenCalled();
   });
 });
 
@@ -219,7 +190,7 @@ describe('Nhắc xác minh', () => {
     // Một tấm thẻ xanh ghi "tất cả đã xác minh" chiếm chỗ vĩnh viễn ở đầu trang
     // để nói một điều không đòi hỏi hành động nào.
     renderPage();
-    await screen.findByRole('button', { name: 'Lưu tên mới' });
+    await screen.findByRole('heading', { name: 'nguoidung' });
     expect(screen.queryByRole('link', { name: 'Xác minh ngay' })).not.toBeInTheDocument();
   });
 

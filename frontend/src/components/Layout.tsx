@@ -10,6 +10,7 @@ import { usePresence } from "../hooks/usePresence";
 import { useIdleLogout } from "../hooks/useIdleLogout";
 import WarningBanner from "./WarningBanner";
 import type { ReactNode } from "react";
+import Avatar from "./Avatar";
 import Button from "./ui/Button";
 import { BuildingIcon, ChipIcon, ClipboardCheckIcon, GearIcon, GraduationCapIcon, HandIcon, HomeIcon, LifeBuoyIcon, ShieldIcon, TagIcon, TrashIcon, UploadIcon } from "./ui/Icons";
 import Footer from "./Footer";
@@ -346,9 +347,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               trắng cho dễ đọc (yêu cầu 18/10/2026). */}
           <div className="flex shrink-0 items-center justify-between h-16 px-4 bg-ctu-navy text-white">
             <div className="flex items-center min-w-0">
-              <div className="w-10 h-10 bg-ctu-blue ring-1 ring-white/25 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-lg shrink-0">
-                {user?.username ? user.username.charAt(0).toUpperCase() : "C"}
-              </div>
+              <Avatar user={user} />
               <div className="ml-3 min-w-0">
                 <div className="text-white font-semibold text-lg truncate">{user?.username ?? "CTU"}</div>
                 <div className="text-blue-200/70 text-xs truncate">SignBridge</div>

@@ -103,6 +103,8 @@ class UserOut(BaseModel):
     is_active: bool
     is_admin: bool
     created_at: Optional[datetime] = None
+    #: Khoá mẫu ảnh đại diện (xem `PATCH /me`); None = chưa chọn.
+    avatar_key: Optional[str] = None
     # Which institution this account belongs to. Returned so the SPA can show it
     # after registration — the person who followed an invitation link needs to
     # see they landed in the right place, and the failure mode this catches
@@ -734,52 +736,26 @@ def me(current_user=Depends(get_current_user)):
 
 
 class UpdateProfileRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=100)
+    #: Khoá một mẫu ảnh đại diện có sẵn của giao diện, hoặc null để bỏ chọn. Chỉ
+    #: kiểm DẠNG khoá: danh sách mẫu nằm ở giao diện, và khoá lạ thì giao diện vẽ
+    #: chữ cái đầu thay vì hỏng.
+    avatar_key: Optional[str] = Field(None, pattern=r"^[a-z0-9-]{1,32}$")
 
 
 @router.patch("/me")
 def update_me(
     payload: UpdateProfileRequest,
-    request: Request,
     current_user=Depends(get_current_user),
 ):
-    """Đổi tên tài khoản, và kéo theo mọi bản sao của cái tên đó.
+    """Chọn ảnh đại diện.
 
-    Vì sao không phải một câu `UPDATE users SET username`: cái tên được CHÉP vào
-    dữ liệu ngay lúc ghi — `samples.user_id`, `samples.username`,
-    `raw_uploads.*`, `signers.display_name`, và cột `user_id` trong
-    `dataset/samples.csv`. Đổi mỗi bảng `users` thì tài khoản mang tên mới còn
-    3.860 mẫu đã đóng góp vẫn mang tên cũ, và người dùng mở Thùng rác của mình
-    ra thấy tên người khác.
-
-    `app/account_rename.py` giữ danh sách chỗ nào phải đổi và — quan trọng hơn —
-    chỗ nào TUYỆT ĐỐI không được đổi: `audit_log.actor_label` và
-    `legal_document_events.actor_label` là bằng chứng lịch sử, sửa chúng theo
-    tên mới là viết lại lịch sử.
+    Tên đăng nhập KHÔNG sửa được qua đây hay bất kỳ đâu trong giao diện. Nó là
+    danh tính: được chép vào mẫu, video và tệp nguồn của dữ liệu đã đóng góp, và
+    một lượt đổi phải kéo theo hàng nghìn dòng (xem `modules/admin/account_rename`,
+    công cụ vận hành, không có đường vào từ người dùng).
     """
-    from app.modules.security import audit
-    from app.modules.admin.account_rename import RenameError, rename_user
-
-    try:
-        result = rename_user(str(current_user["id"]), payload.username)
-    except RenameError as exc:
-        raise HTTPException(status_code=exc.status_code,
-                            detail={"code": exc.code, "message": str(exc)}) from None
-
-    if result["changed"]:
-        # Đổi tên chạm hàng nghìn dòng dữ liệu sản xuất. Nó thuộc đúng loại thao
-        # tác mà sổ kiểm toán tồn tại để ghi lại.
-        audit.record(
-            "account.username.change",
-            actor=current_user,
-            target_type="user",
-            target_id=str(current_user["id"]),
-            detail={"old_username": result["old_username"],
-                    "new_username": result["new_username"],
-                    "rows": result["rows"]},
-            request=request,
-        )
-    return result
+    account_workflows.set_avatar(str(current_user["id"]), payload.avatar_key)
+    return {"avatar_key": payload.avatar_key}
 
 
 class ForgotPasswordRequest(BaseModel):

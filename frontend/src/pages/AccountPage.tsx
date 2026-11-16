@@ -15,7 +15,7 @@
  *
  * Nên từ 16/08/2026:
  *
- *     /settings/account    hồ sơ — tên đăng nhập, email
+ *     /settings/account    hồ sơ — ảnh đại diện, email (tên đăng nhập chỉ đọc)
  *     /settings/consents   đồng thuận pháp lý
  *     /settings/security   2FA, đổi mật khẩu, xác minh liên hệ
  *
@@ -31,6 +31,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import Avatar from "../components/Avatar";
+import AvatarPicker from "../components/account/AvatarPicker";
 import PageHeader from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
 import { AlertTriangleIcon, ShieldCheckIcon } from "../components/ui/Icons";
@@ -38,7 +40,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { notifyAuthChange } from "../api/axiosClient";
 import { useToast } from "../hooks/useToast";
 import { friendlyError } from "../lib/errors";
-import { confirmEmailChange, startEmailChange, updateUsername } from "../api/auth";
+import { confirmEmailChange, startEmailChange } from "../api/auth";
 import { fetchVerificationStatus, type VerificationStatus } from "../api/verification";
 import { useI18n } from "../i18n";
 
@@ -48,11 +50,11 @@ export default function AccountPage() {
     <div className="space-y-8">
       <PageHeader
         title={t("Tài khoản của tôi")}
-        subtitle={t("Sửa tên đăng nhập và địa chỉ liên hệ của bạn.")}
+        subtitle={t("Ảnh đại diện và địa chỉ liên hệ của bạn.")}
         breadcrumb={[{ label: t("Trang chủ"), href: "/" }, { label: t("Tài khoản") }]}
       />
       <VerificationHint />
-      <UsernameSection />
+      <ProfileSection />
       <EmailSection />
     </div>
   );
@@ -106,104 +108,30 @@ function VerificationHint() {
 
 // ------------------------------------------------------------ tên đăng nhập
 
-function UsernameSection() {
+/**
+ * Hồ sơ: ảnh đại diện (chọn từ bộ mẫu) và tên đăng nhập CHỈ ĐỌC.
+ *
+ * Tên đăng nhập không đổi được: nó là danh tính, được chép vào mẫu, video và tệp
+ * nguồn của dữ liệu đã đóng góp. Cần sửa một lỗi chính tả thì liên hệ quản trị.
+ */
+function ProfileSection() {
   const { t } = useI18n();
   const { user } = useAuth();
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [rows, setRows] = useState<Record<string, number> | null>(null);
-  const { toast } = useToast();
-
-  useEffect(() => {
-    setValue(user?.username ?? "");
-  }, [user?.username]);
-
-  const trimmed = value.trim();
-  const canSave =
-    !busy && trimmed.length >= 3 && trimmed !== (user?.username ?? "");
-
-  const save = useCallback(async () => {
-    if (!canSave) return;
-    setBusy(true);
-    setError("");
-    setRows(null);
-    try {
-      const result = await updateUsername(trimmed);
-      // `changed: false` nghĩa là tên mới trùng tên cũ — không phải lỗi, nhưng
-      // cũng không có gì để khoe. Nói đúng chuyện đã xảy ra.
-      if (!result.changed) {
-        toast.success(t("Tên không thay đổi."));
-        return;
-      }
-      setRows(result.rows);
-      toast.success(t("Đã đổi tên thành {new_username}.", { new_username: result.new_username }));
-      // Thanh bên và chữ ký đầu trang đang giữ tên cũ. `AuthProvider` chỉ nạp
-      // lại /auth/me khi có sự kiện này — không phát thì người dùng thấy tên cũ
-      // cho tới lần tải trang sau, và tưởng việc đổi tên thất bại.
-      notifyAuthChange();
-    } catch (err) {
-      setError(friendlyError(err, t("Không đổi được tên tài khoản.")));
-    } finally {
-      setBusy(false);
-    }
-  }, [canSave, trimmed, toast, t]);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-      <h2 className="text-lg font-semibold text-slate-900">{t("Tên đăng nhập")}</h2>
-      <p className="mt-1 text-sm text-slate-600">
-        {t("Tên này được chép vào từng mẫu bạn đã đóng góp ngay lúc ghi. Đổi tên ở đây sẽ cập nhật cả những bản sao đó, nên các mẫu cũ của bạn không mang tên cũ nữa.")}
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-end gap-3">
-        <label className="min-w-0 flex-1">
-          <span className="mb-1 block text-xs font-medium text-slate-500">
-            {t("Tên đăng nhập")}
-          </span>
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            minLength={3}
-            maxLength={100}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-ctu-blue focus:outline-none focus:ring-1 focus:ring-ctu-blue"
-          />
-        </label>
-        <Button loading={busy} disabled={!canSave} onClick={() => void save()}>
-          {t("Lưu tên mới")}
-        </Button>
-      </div>
-
-      {trimmed.length > 0 && trimmed.length < 3 && (
-        <p className="mt-2 text-xs text-amber-700">{t("Tên phải dài ít nhất 3 ký tự.")}</p>
-      )}
-
-      {error && (
-        <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Số hàng đã đổi, hiện ra chứ không giấu: đổi tên chạm vào dữ liệu đã
-          đóng góp, và người bấm nút xứng đáng thấy việc gì đã thật sự xảy ra
-          thay vì tin lời. */}
-      {rows && Object.keys(rows).length > 0 && (
-        <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          <p className="font-semibold">{t("Đã cập nhật tên ở những chỗ sau")}</p>
-          <ul className="mt-1 space-y-0.5">
-            {Object.entries(rows).map(([place, count]) => (
-              <li key={place} className="font-mono text-xs">
-                {place}: {count}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-sky-800">
-            {t("Nhật ký kiểm toán giữ nguyên tên cũ — đó là bằng chứng lịch sử về việc ai đã làm gì, và sửa nó theo tên mới là viết lại lịch sử.")}
+      <div className="flex items-center gap-4">
+        <Avatar user={user} size="lg" />
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-semibold text-slate-900">{user?.username}</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            {t("Tên đăng nhập không đổi được. Cần sửa, hãy liên hệ quản trị viên.")}
           </p>
         </div>
-      )}
+      </div>
+
+      <h3 className="mb-3 mt-6 text-sm font-semibold text-slate-700">{t("Ảnh đại diện")}</h3>
+      <AvatarPicker />
     </section>
   );
 }

@@ -7,6 +7,8 @@ export type AuthUser = {
   is_active?: boolean;
   is_admin?: boolean;
   created_at?: string | null;
+  /** Khoá mẫu ảnh đại diện (xem `lib/avatars`); null/thiếu = chữ cái đầu. */
+  avatar_key?: string | null;
   /**
    * Tổ chức nhà của tài khoản.
    *
@@ -156,27 +158,11 @@ export async function me(): Promise<AuthUser> {
 }
 
 /**
- * Kết quả một lượt đổi tên tài khoản.
- *
- * `rows` là số hàng đã đổi ở từng chỗ cái tên bị chép tới — `samples.username`,
- * `raw_uploads.*`, `signers.display_name`, cột `user_id` trong `samples.csv`.
- * Nó có mặt trong phản hồi vì đổi tên KHÔNG phải một câu `UPDATE users`: nó
- * chạm vào dữ liệu đã đóng góp, và người bấm nút xứng đáng được thấy điều đó
- * thay vì tin lời.
- *
- * `changed: false` nghĩa là tên mới trùng tên cũ — không phải lỗi, và không có
- * hàng nào bị chạm.
+ * Chọn ảnh đại diện từ bộ mẫu của giao diện; `null` = bỏ chọn (dùng chữ cái đầu).
+ * Tên đăng nhập không sửa được ở đâu cả: nó là danh tính của dữ liệu đã đóng góp.
  */
-export type RenameResult = {
-  changed: boolean;
-  old_username: string;
-  new_username: string;
-  rows: Record<string, number>;
-};
-
-export async function updateUsername(username: string): Promise<RenameResult> {
-  const res = await axiosClient.patch("/api/v1/auth/me", { username });
-  return res.data as RenameResult;
+export async function setAvatar(avatarKey: string | null): Promise<void> {
+  await axiosClient.patch("/api/v1/auth/me", { avatar_key: avatarKey });
 }
 
 export type MessageResponse = {

@@ -1734,6 +1734,9 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id UUID",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE",
+    # Ảnh đại diện CHỌN từ bộ mẫu có sẵn của giao diện (không tải ảnh lên). Chỉ
+    # lưu khoá của mẫu; NULL = chưa chọn, giao diện vẽ chữ cái đầu của tên.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key VARCHAR(32)",
     "ALTER TABLE classes ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS username TEXT",
     "ALTER TABLE samples ADD COLUMN IF NOT EXISTS session_uid TEXT",

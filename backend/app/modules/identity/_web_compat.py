@@ -189,6 +189,8 @@ def _row_to_user(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         # gọi nó chạy trên mọi request, nên một truy vấn thêm ở đây là một
         # truy vấn thêm cho toàn hệ thống.
         "sessions_invalid_before": row.get("sessions_invalid_before"),
+        # Khoá mẫu ảnh đại diện đã chọn; None = dùng chữ cái đầu của tên.
+        "avatar_key": row.get("avatar_key"),
         # Chỉ có mặt trên đường ĐĂNG NHẬP (`_fetch_user_by_login` LEFT JOIN nó).
         # `None` nghĩa là "chưa hỏi", KHÁC với `False` nghĩa là "đã hỏi, chưa
         # bật" — và `login` phân biệt hai cái đó thay vì đoán.
@@ -314,7 +316,7 @@ def _fetch_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
             """
             SELECT id, username, email, password_hash, is_active, is_admin,
                    created_at, tenant_id, email_verified_at,
-                   sessions_invalid_before
+                   sessions_invalid_before, avatar_key
             FROM users
             WHERE id = %s
             """,
@@ -334,7 +336,7 @@ def _fetch_user_by_login(identifier: str) -> Optional[Dict[str, Any]]:
             """
             SELECT u.id, u.username, u.email, u.password_hash, u.is_active,
                    u.is_admin, u.created_at, u.tenant_id, u.email_verified_at,
-                   u.sessions_invalid_before,
+                   u.sessions_invalid_before, u.avatar_key,
                    -- 2FA đi KÈM truy vấn này chứ không hỏi riêng.
                    --
                    -- Bản đầu gọi `two_factor.is_enabled()` trong `login`, tức
