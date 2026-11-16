@@ -2,7 +2,7 @@
 # tháng; mỗi lần nó di chuyển thì mọi lớp phía sau (torch/CUDA, 4,3 GB nén) bị dựng lại
 # với digest mới, và máy chạy web phải tải lại cả khối thay vì vài chục MB mã.
 # Dependabot (.github/dependabot.yml) mở PR khi có digest mới: cập nhật có chủ ý.
-FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 WORKDIR /app
 
