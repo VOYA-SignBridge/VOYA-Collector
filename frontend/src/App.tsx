@@ -73,6 +73,9 @@ const AdminSupportPage = lazy(() => import("./pages/admin/AdminSupportPage"));
 const SettingsLayout = lazy(() => import("./pages/settings/SettingsLayout"));
 const SecuritySettingsPage = lazy(() => import("./pages/settings/SecuritySettingsPage"));
 const MyDataPage = lazy(() => import("./pages/settings/MyDataPage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
+const FaqPage = lazy(() => import("./pages/FaqPage"));
+const ContactPage = lazy(() => import("./pages/ContactPage"));
 const LanguageSettingsPage = lazy(() => import("./pages/settings/LanguageSettingsPage"));
 
 
@@ -183,6 +186,10 @@ function App() {
               {/* Văn bản pháp lý: CÔNG KHAI, và phải như vậy. Ô "Tôi đồng ý" ở
                   biểu mẫu đăng ký mở ra trang này, nên đặt nó sau cổng đăng
                   nhập sẽ bắt người ta đồng ý với thứ họ không đọc được. */}
+              {/* Ba trang công khai cho người chưa có tài khoản: không bọc ProtectedRoute. */}
+              <Route path="/about" element={<AboutPage />} />
+              <Route path="/faq" element={<FaqPage />} />
+              <Route path="/contact" element={<ContactPage />} />
               <Route path="/legal/:kind" element={<LegalDocumentPage />} />
               <Route path="/legal" element={<Navigate to="/legal/terms" replace />} />
 

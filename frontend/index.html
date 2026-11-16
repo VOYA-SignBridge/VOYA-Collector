@@ -37,8 +37,12 @@
         var apiUrl = "__VITE_API_URL__";
         if (apiUrl === "__VI" + "TE_API_URL__") apiUrl = "";
 
+        var contactEmail = "__VITE_CONTACT_EMAIL__";
+        if (contactEmail === "__VI" + "TE_CONTACT_EMAIL__") contactEmail = "";
+
         window.__ENV__ = {
           VITE_API_URL: apiUrl,
+          VITE_CONTACT_EMAIL: contactEmail,
           VITE_BASE_PATH: basePath
         };
       })();

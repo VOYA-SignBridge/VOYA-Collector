@@ -20,6 +20,11 @@ API_URL="${VITE_API_URL:-}"
 echo "=> Injecting VITE_API_URL: $API_URL"
 sed -i "s|__VITE_API_URL__|$API_URL|g" /usr/share/nginx/html/index.html
 
+# 3. Public contact email (shown on the Contact page; empty = not set)
+CONTACT_EMAIL="${VITE_CONTACT_EMAIL:-}"
+echo "=> Injecting VITE_CONTACT_EMAIL: $CONTACT_EMAIL"
+sed -i "s|__VITE_CONTACT_EMAIL__|$CONTACT_EMAIL|g" /usr/share/nginx/html/index.html
+
 # Start Nginx
 echo "=> Starting Nginx..."
 exec "$@"

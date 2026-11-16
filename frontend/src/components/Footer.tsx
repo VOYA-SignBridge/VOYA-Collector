@@ -9,6 +9,9 @@ export default function Footer() {
     { name: t("Trang chủ"), href: "/" },
     { name: t("Học ký hiệu"), href: "/learn" },
     { name: t("Nhận dạng realtime"), href: "/realtime" },
+    { name: t("Giới thiệu"), href: "/about" },
+    { name: t("Hỏi đáp"), href: "/faq" },
+    { name: t("Liên hệ"), href: "/contact" },
     { name: t("Đăng nhập"), href: "/login" },
     { name: t("Đăng ký"), href: "/register" },
   ];

@@ -5,6 +5,7 @@ services:
     environment:
       - VITE_BASE_PATH=${VITE_BASE_PATH:-/}
       - VITE_API_URL=${VITE_API_URL:-}
+      - VITE_CONTACT_EMAIL=${VITE_CONTACT_EMAIL:-}
     image: voya_frontend:latest
     container_name: ${CONTAINER_PREFIX:-voya}_frontend
     mem_limit: 128m

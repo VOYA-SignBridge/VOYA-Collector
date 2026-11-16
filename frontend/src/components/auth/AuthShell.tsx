@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n";
 
 interface AuthShellProps {
@@ -54,7 +55,13 @@ export default function AuthShell({ title, children, footer }: AuthShellProps) {
             <div className="border-t border-slate-100 bg-slate-50/70 px-6 py-4 sm:px-10">{footer}</div>
           </div>
 
-          <p className="mt-6 text-center text-xs text-white/70">
+          <nav aria-label={t("Trợ giúp")} className="mt-5 flex justify-center gap-4 text-xs font-medium text-white/85">
+            <Link to="/about" className="hover:text-white hover:underline">{t("Giới thiệu")}</Link>
+            <Link to="/faq" className="hover:text-white hover:underline">{t("Hỏi đáp")}</Link>
+            <Link to="/contact" className="hover:text-white hover:underline">{t("Liên hệ")}</Link>
+          </nav>
+
+          <p className="mt-3 text-center text-xs text-white/70">
             {t("© {nam} Đại học Cần Thơ · CTU.SignBridge", { nam: new Date().getFullYear() })}
           </p>
         </div>

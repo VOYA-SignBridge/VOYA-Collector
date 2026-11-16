@@ -34,6 +34,8 @@ services:
       # /voya server: set VITE_API_URL=/voya so API calls become /voya/api/... and
       # survive the campus proxy (which only forwards /voya/*).
       VITE_API_URL: ${VITE_API_URL:-}
+      # Public contact email shown on the Contact page. Empty = the page says so.
+      VITE_CONTACT_EMAIL: ${VITE_CONTACT_EMAIL:-}
     restart: unless-stopped
     # This container's own nginx proxies /api to http://backend:8000 with a
     # literal hostname, so nginx resolves it at config-parse time and exits
